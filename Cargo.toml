@@ -12,8 +12,9 @@ default = ["extension-module"]
 extension-module = ["pyo3/extension-module"]
 
 [dependencies]
-pyo3 = { version = "0.21", features = ["abi3-py310"] }
-numpy = "0.20"
+pyo3  = { version = "0.21.2", features = ["extension-module", "abi3-py310"] }
+numpy = "0.21"
+ndarray = "0.15"
 wgpu = "0.19"
 pollster = "0.3"
 bytemuck = { version = "1", features = ["derive"] }

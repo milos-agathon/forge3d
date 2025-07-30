@@ -5,6 +5,7 @@ use once_cell::sync::OnceCell;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use numpy::{PyArray3, IntoPyArray};
+use ndarray::Array3;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
@@ -51,8 +52,8 @@ impl WgpuContext {
 
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
-                features: needed_features,
-                limits,
+                required_features: needed_features,
+                required_limits: limits,
                 label: Some("vulkan-forge-device"),
             },
             None,
@@ -188,8 +189,8 @@ fn read_texture_to_rgba(width: u32, height: u32, texture: &wgpu::Texture) -> Res
             buffer: &output,
             layout: wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(NonZeroU32::new(padded_bytes_per_row).unwrap()),
-                rows_per_image: Some(NonZeroU32::new(height).unwrap()),
+                bytes_per_row: Some(NonZeroU32::new(padded_bytes_per_row).unwrap().into()),
+                rows_per_image: Some(NonZeroU32::new(height).unwrap().into()),
             },
         },
         wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -207,7 +208,8 @@ fn read_texture_to_rgba(width: u32, height: u32, texture: &wgpu::Texture) -> Res
     let data = buffer_slice.get_mapped_range();
     let mut pixels = Vec::with_capacity((width * height * 4) as usize);
     for chunk in data.chunks(padded_bytes_per_row as usize) {
-        pixels.extend_from_slice(&chunk[:unpadded_bytes_per_row as usize]);
+        // Rust uses `..` for slicing (not `:`)
+        pixels.extend_from_slice(&chunk[..unpadded_bytes_per_row as usize]);
     }
     drop(data);
     output.unmap();
@@ -255,7 +257,7 @@ impl Renderer {
                 label: Some("triangle-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view, resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: self.clear[0], g: self.clear[1], b: self.clear[2], a: self.clear[3] }), store: true },
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: self.clear[0], g: self.clear[1], b: self.clear[2], a: self.clear[3] }), store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -269,8 +271,12 @@ impl Renderer {
         ctx.queue.submit(Some(encoder.finish()));
 
         let pixels = read_texture_to_rgba(self.width, self.height, &texture)?;
-        let arr = PyArray3::<u8>::from_shape_vec(py, (self.height as usize, self.width as usize, 4), pixels)
-            .map_err(|e| PyRuntimeError::new_err(format!("numpy shape error: {e}")))?;
+        // numpy 0.21: create via ndarray then convert
+        let arr = Array3::from_shape_vec(
+            (self.height as usize, self.width as usize, 4),
+            pixels
+        ).expect("failed to create ndarray")
+         .into_pyarray(py);
         Ok(arr)
     }
 
@@ -286,7 +292,7 @@ impl Renderer {
                 label: Some("triangle-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view, resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: self.clear[0], g: self.clear[1], b: self.clear[2], a: self.clear[3] }), store: true },
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: self.clear[0], g: self.clear[1], b: self.clear[2], a: self.clear[3] }), store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -302,13 +308,14 @@ impl Renderer {
         let pixels = read_texture_to_rgba(self.width, self.height, &texture)?;
         let img: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(self.width, self.height, pixels)
             .ok_or_else(|| VsError::Wgpu("Failed to construct image buffer".into()))?;
-        img.save(path)?;
+        use pyo3::exceptions::PyIOError;
+        img.save(path).map_err(|e| PyIOError::new_err(e.to_string()))?;
         Ok(())
     }
 }
 
 #[pymodule]
-fn _vulkan_forge(_py: Python, m: &PyModule) -> PyResult<()> {
+fn _vulkan_forge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Renderer>()?;
     Ok(())
 }
