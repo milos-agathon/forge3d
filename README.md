@@ -1,7 +1,7 @@
 <p align="center">
   <a href="#">
     <!-- Replace with your logo path or external URL -->
-    <img src="docs/assets/logo-placeholder.svg" alt="vulkan-forge logo" width="128" height="128">
+    <img src="docs/assets/logo.png" alt="vulkan-forge logo" width="128" height="128">
   </a>
 </p>
 
@@ -80,4 +80,4 @@ r.render_triangle_png("triangle.png")
 
 ## 📄 License
 
-MIT © Your Name
+MIT © Milos Popovic
