@@ -1,0 +1,19 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "vulkan-forge"
+version = "0.0.1"
+description = "Rust-first wgpu/WebGPU renderer with a thin Python API"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Your Name" }]
+
+[tool.maturin]
+python-source = "python"
+module-name = "vulkan_forge._vulkan_forge"
+bindings = "pyo3"
+features = ["extension-module"]
+strip = true
