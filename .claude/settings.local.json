@@ -8,7 +8,9 @@
       "Bash(git -c core.quotepath=off status --porcelain)",
       "Bash(git --no-pager -c core.quotepath=off diff --unified=3 -- \".claude/CLAUDE.md\")",
       "Bash(maturin develop:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(set PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1)",
+      "Bash(git --no-pager diff --unified=3 src/lib.rs)"
     ],
     "deny": []
   }
