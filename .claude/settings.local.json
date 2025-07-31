@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(mkdir:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(git --no-pager diff --unified=3 -- src/lib.rs)",
+      "Bash(git restore:*)",
+      "Bash(git -c core.quotepath=off status --porcelain)",
+      "Bash(git --no-pager -c core.quotepath=off diff --unified=3 -- \".claude/CLAUDE.md\")",
+      "Bash(maturin develop:*)",
+      "Bash(python:*)"
     ],
     "deny": []
   }

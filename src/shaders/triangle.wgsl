@@ -1,6 +1,6 @@
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
-    @location(0) color: vec3<f32>,
+    @location(0) @interpolate(linear) color: vec3<f32>,
 };
 
 @vertex

@@ -9,6 +9,10 @@ use ndarray::Array3;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
+// Determinism constants
+const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+const CLEAR_COLOR: wgpu::Color = wgpu::Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
+
 static WGPU_CTX: OnceCell<WgpuContext> = OnceCell::new();
 
 #[derive(Error, Debug)]
@@ -135,7 +139,7 @@ fn create_pipeline(format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
             entry_point: "fs_main",
             targets: &[Some(wgpu::ColorTargetState {
                 format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -233,7 +237,7 @@ impl Renderer {
             width,
             height,
             clear: [1.0, 1.0, 1.0, 1.0],
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: TEXTURE_FORMAT,
         })
     }
 
@@ -257,7 +261,7 @@ impl Renderer {
                 label: Some("triangle-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view, resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: self.clear[0], g: self.clear[1], b: self.clear[2], a: self.clear[3] }), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(CLEAR_COLOR), store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -292,7 +296,7 @@ impl Renderer {
                 label: Some("triangle-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view, resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: self.clear[0], g: self.clear[1], b: self.clear[2], a: self.clear[3] }), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(CLEAR_COLOR), store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
