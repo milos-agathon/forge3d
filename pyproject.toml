@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.5,<2"]
+requires = ["maturin>=1.9"]
 build-backend = "maturin"
 
 [project]
@@ -12,8 +12,8 @@ license = { text = "MIT" }
 authors = [{ name = "Your Name" }]
 
 [tool.maturin]
+bindings = "pyo3"
 python-source = "python"
 module-name = "vulkan_forge._vulkan_forge"
-bindings = "pyo3"
-features = ["extension-module"]
+features = []
 strip = true

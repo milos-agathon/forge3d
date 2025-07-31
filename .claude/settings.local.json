@@ -1,11 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1)",
-      "Bash(cargo:*)",
-      "Bash(maturin develop:*)",
-      "Bash(python:*)",
-      "Bash(pip install:*)"
+      "Bash(mkdir:*)",
+      "Bash(chmod:*)"
     ],
     "deny": []
   }
