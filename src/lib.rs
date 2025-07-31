@@ -234,8 +234,14 @@ pub struct Renderer {
 
 #[pymethods]
 impl Renderer {
+    // A1.5-BEGIN:new-docs
     #[new]
+    #[pyo3(text_signature = "(width, height)")]
+    /// Create a headless renderer with a fixed-size off-screen RGBA8 UNORM SRGB target.
+    ///
+    /// Deterministic pipeline: CCW+Back cull, blend=None, CLEAR_COLOR, no MSAA, fixed viewport.
     pub fn new(width: u32, height: u32) -> Self {
+    // A1.5-END:new-docs
         let ctx = WgpuContext::get();
         let pipeline = create_pipeline(&ctx.device, TEXTURE_FORMAT);
         let (vbuf, ibuf, icount) = triangle_geometry(&ctx.device);
@@ -255,13 +261,20 @@ impl Renderer {
             pipeline, vbuf, ibuf, icount,
         }
     }
+    // A1.5-END:new-docs
 
-    /// **Added**: matches python/examples/triangle.py
+    // A1.5-BEGIN:info-signature
+    #[pyo3(text_signature = "($self)")]
+    /// Return a short description of the renderer configuration (size and texture format).
     pub fn info(&self) -> PyResult<String> {
         Ok(format!("Renderer {}x{}, format={:?}", self.width, self.height, TEXTURE_FORMAT))
     }
+    // A1.5-END:info-signature
 
-    /// Returns a (H,W,4) uint8 numpy array of the triangle.
+    // A1.5-BEGIN:rgba-docs
+    #[pyo3(text_signature = "($self)")]
+    /// Render a single deterministic triangle off-screen and return a tightly-packed NumPy array
+    /// of shape (H, W, 4), dtype=uint8.
     pub fn render_triangle_rgba<'py>(&mut self, py: Python<'py>) -> PyResult<&'py PyArray3<u8>> {
         let ctx = WgpuContext::get();
         self.render_into_offscreen(ctx)?;
@@ -286,8 +299,11 @@ impl Renderer {
         ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(arr3.into_pyarray(py))
     }
+    // A1.5-END:rgba-docs
 
-    /// Renders and saves a PNG to the given path.
+    // A1.5-BEGIN:png-docs
+    #[pyo3(text_signature = "($self, path)")]
+    /// Render the same deterministic triangle and write it as a PNG file to `path`.
     pub fn render_triangle_png(&mut self, path: String) -> PyResult<()> {
         let ctx = WgpuContext::get();
         self.render_into_offscreen(ctx)?;
@@ -311,6 +327,7 @@ impl Renderer {
         img.save(path).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(())
     }
+    // A1.5-END:png-docs
 }
 
 impl Renderer {

@@ -51,12 +51,16 @@ maturin develop --release
 ## 🧪 Quick start
 
 ```python
-from vulkan_forge import Renderer
+from vulkan_forge import Renderer, render_triangle_rgba, render_triangle_png
 
-r = Renderer(width=512, height=512)
+# Convenience functions
+img = render_triangle_rgba(512, 512)   # (H,W,4) uint8
+render_triangle_png("triangle.png", 512, 512)
+
+# Or class API
+r = Renderer(512, 512)
 print(r.info())
-rgba = r.render_triangle_rgba()     # H x W x 4, uint8
-r.render_triangle_png("triangle.png")
+arr = r.render_triangle_rgba()
 ```
 
 ## ✨ Features (MVP)
