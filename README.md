@@ -87,6 +87,21 @@ Arguments are validated and raise `ValueError` with actionable messages if inval
 
 <!-- T01-END:api -->
 
+<!-- T01-BEGIN:add_terrain-doc -->
+### Terrain upload (T0.1)
+
+```python
+from vulkan_forge import Renderer
+import numpy as np
+
+Z = np.random.rand(128, 128).astype("float32")     # (H,W), C-contiguous
+r = Renderer(512, 512)
+r.add_terrain(Z, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
+r.render_triangle_png("terrain_overlay.png")       # temporary writer
+```
+
+<!-- T01-END:add_terrain-doc -->
+
 ## Tools (CLI)
 
 All tools live under `python/tools` and write JSON artifacts for CI.

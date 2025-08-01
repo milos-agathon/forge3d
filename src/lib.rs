@@ -8,6 +8,10 @@ use image::ImageBuffer;
 use once_cell::sync::OnceCell;
 use pyo3::prelude::*;
 use numpy::{PyArray3, IntoPyArray};
+// T01-BEGIN:add-terrain-imports
+use numpy::{PyArray2, PyReadonlyArray2};
+use numpy::PyUntypedArrayMethods;
+// T01-END:add-terrain-imports
 use ndarray::Array3;
 use wgpu::util::DeviceExt;
 use pyo3::types::{PyDict, PyList};
@@ -232,6 +236,9 @@ pub struct Renderer {
     vbuf: wgpu::Buffer,
     ibuf: wgpu::Buffer,
     icount: u32,
+    // T01-BEGIN:add-terrain-field
+    terrain: Option<TerrainData>,
+    // T01-END:add-terrain-field
 }
 
 #[pymethods]
@@ -243,7 +250,7 @@ impl Renderer {
     ///
     /// Deterministic pipeline: CCW+Back cull, blend=None, CLEAR_COLOR, no MSAA, fixed viewport.
     pub fn new(width: u32, height: u32) -> Self {
-    // A1.5-END:new-docs
+        // A1.5-END:new-docs
         let ctx = WgpuContext::get();
         let pipeline = create_pipeline(&ctx.device, TEXTURE_FORMAT);
         let (vbuf, ibuf, icount) = triangle_geometry(&ctx.device);
@@ -261,6 +268,7 @@ impl Renderer {
             color_tex, color_view,
             readback_buf, readback_size: 4,
             pipeline, vbuf, ibuf, icount,
+            terrain: None,
         }
     }
     // A1.5-END:new-docs
@@ -330,6 +338,90 @@ impl Renderer {
         Ok(())
     }
     // A1.5-END:png-docs
+
+    // T01-BEGIN:add-terrain-method
+    #[pyo3(text_signature = "($self, heightmap, spacing, exaggeration=1.0, *, colormap='viridis')")]
+    /// Upload a (H,W) heightmap and metadata to the renderer.
+    ///
+    /// Requirements:
+    /// - `heightmap`: NumPy array, dtype `float32` (preferred) or `float64`,
+    ///   shape `(H, W)`, C-contiguous (row-major).
+    /// - `spacing=(dx, dy)`: world units per texel (both > 0).
+    /// - `exaggeration`: vertical scale multiplier (> 0).
+    /// - `colormap`: name (stored only; mapping applied later).
+    pub fn add_terrain(
+        &mut self,
+        heightmap: &pyo3::PyAny,
+        spacing: (f32, f32),
+        exaggeration: f32,
+        colormap: String,
+    ) -> pyo3::PyResult<()> {
+        use pyo3::exceptions::PyRuntimeError;
+
+        if spacing.0 <= 0.0 || spacing.1 <= 0.0 {
+            return Err(PyRuntimeError::new_err("spacing components must be > 0"));
+        }
+        if exaggeration <= 0.0 {
+            return Err(PyRuntimeError::new_err("exaggeration must be > 0"));
+        }
+
+        // Try float32 first: downcast -> &PyArray2<f32> -> readonly
+        let as_f32: Result<(Vec<f32>, usize, usize), pyo3::PyErr> = (|| {
+            let arr32: &PyArray2<f32> = heightmap.downcast()?;
+            let ro32: PyReadonlyArray2<f32> = arr32.readonly();
+
+            if !ro32.is_contiguous() {
+                return Err(PyRuntimeError::new_err("heightmap must be C-contiguous (row-major)"));
+            }
+            let view = ro32.as_array();
+            let (h, w) = (view.shape()[0], view.shape()[1]);
+            let mut v = Vec::with_capacity(h * w);
+            for val in view.iter() {
+                v.push(*val * exaggeration);
+            }
+            Ok((v, w, h))
+        })();
+
+        // Or accept float64 and cast to f32
+        let (heights, width, height) = match as_f32 {
+            Ok(ok) => ok,
+            Err(_) => {
+                let arr64: &PyArray2<f64> = heightmap
+                    .downcast()
+                    .map_err(|_| PyRuntimeError::new_err(
+                        "heightmap must be a 2-D NumPy array of dtype float32 or float64"
+                    ))?;
+                let ro64: PyReadonlyArray2<f64> = arr64.readonly();
+
+                if !ro64.is_contiguous() {
+                    return Err(PyRuntimeError::new_err("heightmap must be C-contiguous (row-major)"));
+                }
+                let view = ro64.as_array();
+                let (h, w) = (view.shape()[0], view.shape()[1]);
+                let mut v = Vec::with_capacity(h * w);
+                for val in view.iter() {
+                    v.push((*val as f32) * exaggeration);
+                }
+                (v, w, h)
+            }
+        };
+
+        if width == 0 || height == 0 {
+            return Err(PyRuntimeError::new_err("heightmap cannot be empty"));
+        }
+
+        self.terrain = Some(TerrainData {
+            width: width as u32,
+            height: height as u32,
+            spacing,
+            exaggeration,
+            colormap,
+            heights,
+        });
+
+        Ok(())
+    }
+    // T01-END:add-terrain-method
 }
 
 impl Renderer {
@@ -506,6 +598,18 @@ fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
 // A2-BEGIN:terrain-moddecl
 #[cfg(feature = "terrain_spike")]
 mod terrain;
+// T01-BEGIN:add-terrain-types
+#[derive(Clone)]
+struct TerrainData {
+    width:  u32,
+    height: u32,
+    spacing: (f32, f32),
+    exaggeration: f32,
+    colormap: String,
+    /// Row-major, length = width*height, units = heightmap * exaggeration
+    heights: Vec<f32>,
+}
+// T01-END:add-terrain-types
 // A2-END:terrain-moddecl
 
 #[pymodule]
