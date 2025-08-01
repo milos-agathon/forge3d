@@ -7,9 +7,12 @@ edition = "2021"
 name = "vulkan_forge"
 crate-type = ["cdylib"]
 
+# A2-BEGIN:cargo-features
 [features]
 default = ["extension-module"]
 extension-module = ["pyo3/extension-module"]
+terrain_spike = []
+# A2-END:cargo-features
 
 [dependencies]
 pyo3  = { version = "0.21.2", features = ["extension-module", "abi3-py310"] }
@@ -19,6 +22,7 @@ wgpu = "0.19"
 pollster = "0.3"
 bytemuck = { version = "1", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+glam = "0.24"
 thiserror = "1"
 once_cell = "1"
 

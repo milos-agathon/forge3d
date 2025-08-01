@@ -503,9 +503,18 @@ fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
 // ---------- Python module ----------
 
 // IMPORTANT: the module name must be _vulkan_forge to satisfy PyInit__vulkan_forge
+// A2-BEGIN:terrain-moddecl
+#[cfg(feature = "terrain_spike")]
+mod terrain;
+// A2-END:terrain-moddecl
+
 #[pymodule]
 fn _vulkan_forge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Renderer>()?;
+    // A2-BEGIN:terrain-register
+    #[cfg(feature = "terrain_spike")]
+    { m.add_class::<terrain::TerrainSpike>()?; }
+    // A2-END:terrain-register
     // A1.9-BEGIN:diagnostics-register
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
