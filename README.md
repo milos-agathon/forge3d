@@ -27,8 +27,6 @@ python -m pip install -U pip maturin numpy
 #   bash/cmd  : export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 maturin develop --release
 
-
-```bash
 # 1) Create & activate a venv
 python -m venv .venv
 
