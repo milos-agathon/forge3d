@@ -10,6 +10,8 @@ use pyo3::prelude::*;
 use numpy::{PyArray3, IntoPyArray};
 use ndarray::Array3;
 use wgpu::util::DeviceExt;
+use pyo3::types::{PyDict, PyList};
+use pyo3::wrap_pyfunction;
 
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const CLEAR_COLOR: wgpu::Color = wgpu::Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
@@ -371,11 +373,141 @@ impl Renderer {
     }
 }
 
+/// Human-friendly strings for wgpu enums.
+fn backend_str(b: wgpu::Backend) -> &'static str {
+    match b {
+        wgpu::Backend::Vulkan => "VULKAN",
+        wgpu::Backend::Dx12 => "DX12",
+        wgpu::Backend::Metal => "METAL",
+        wgpu::Backend::Gl => "GL",
+        wgpu::Backend::BrowserWebGpu => "WEBGPU",
+        _ => "UNKNOWN",
+    }
+}
+fn devtype_str(t: wgpu::DeviceType) -> &'static str {
+    match t {
+        wgpu::DeviceType::Other => "Other",
+        wgpu::DeviceType::IntegratedGpu => "IntegratedGpu",
+        wgpu::DeviceType::DiscreteGpu => "DiscreteGpu",
+        wgpu::DeviceType::VirtualGpu => "VirtualGpu",
+        wgpu::DeviceType::Cpu => "Cpu",
+    }
+}
+
+/// Enumerate adapters/features/limits (best-effort).
+#[pyfunction]
+#[pyo3(text_signature = "()")]
+fn enumerate_adapters(py: Python<'_>) -> PyResult<PyObject> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::all(),
+        ..Default::default()
+    });
+
+    // Native path (wgpu 0.19): enumerate_adapters; fallback to single request_adapter if empty.
+    let mut adapters: Vec<wgpu::Adapter> = instance.enumerate_adapters(wgpu::Backends::all());
+    if adapters.is_empty() {
+        if let Some(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        })) {
+            adapters.push(adapter);
+        }
+    }
+
+    let out = PyList::empty_bound(py);
+    for ad in adapters {
+        let info = ad.get_info();
+        let d = PyDict::new_bound(py);
+        d.set_item("name", info.name).ok();
+        d.set_item("backend", backend_str(info.backend)).ok();
+        d.set_item("device_type", devtype_str(info.device_type)).ok();
+        d.set_item("vendor_id", info.vendor as u32).ok();
+        d.set_item("device_id", info.device as u32).ok();
+        d.set_item("features", format!("{:?}", ad.features())).ok();
+        d.set_item("limits", format!("{:?}", ad.limits())).ok();
+        out.append(d).ok();
+    }
+    Ok(out.into_any().unbind())
+}
+
+/// Probe a specific backend: try adapter/device creation and classify status.
+#[pyfunction]
+#[pyo3(text_signature = "(backend=None)")]
+fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
+    use std::time::Instant;
+    let b = backend.unwrap_or_else(|| "AUTO".to_string()).to_uppercase();
+
+    let backends = match b.as_str() {
+        "VULKAN" => wgpu::Backends::VULKAN,
+        "DX12"   => wgpu::Backends::DX12,
+        "METAL"  => wgpu::Backends::METAL,
+        "GL"     => wgpu::Backends::GL,
+        "AUTO" | _ => wgpu::Backends::all(),
+    };
+
+    let inst = wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..Default::default() });
+
+    let dict = PyDict::new_bound(py);
+    dict.set_item("backend_request", b.clone()).ok();
+
+    let t0 = Instant::now();
+    let adapter = pollster::block_on(inst.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    }));
+    let adapter = match adapter {
+        Some(a) => a,
+        None => {
+            dict.set_item("status", "unsupported").ok();
+            dict.set_item("message", "No suitable GPU adapter").ok();
+            dict.set_item("millis", t0.elapsed().as_secs_f64() * 1000.0).ok();
+            return Ok(dict.into_any().unbind());
+        }
+    };
+
+    let info = adapter.get_info();
+    dict.set_item("adapter_name", info.name.clone()).ok();
+    dict.set_item("backend", backend_str(info.backend)).ok();
+    dict.set_item("device_type", devtype_str(info.device_type)).ok();
+    dict.set_item("vendor_id", info.vendor as u32).ok();
+    dict.set_item("device_id", info.device as u32).ok();
+    dict.set_item("features", format!("{:?}", adapter.features())).ok();
+    dict.set_item("limits", format!("{:?}", adapter.limits())).ok();
+
+    let needed_features = wgpu::Features::empty();
+    let limits = wgpu::Limits::downlevel_defaults();
+    let (_device, _queue) = match pollster::block_on(adapter.request_device(
+        &wgpu::DeviceDescriptor{
+            required_features: needed_features,
+            required_limits: limits,
+            label: Some("diag-device"),
+        },
+        None,
+    )) {
+        Ok(pair) => pair,
+        Err(e) => {
+            dict.set_item("status", "error").ok();
+            dict.set_item("message", format!("request_device failed: {}", e)).ok();
+            dict.set_item("millis", t0.elapsed().as_secs_f64() * 1000.0).ok();
+            return Ok(dict.into_any().unbind());
+        }
+    };
+
+    dict.set_item("status", "ok").ok();
+    dict.set_item("millis", t0.elapsed().as_secs_f64() * 1000.0).ok();
+    Ok(dict.into_any().unbind())
+}
+
 // ---------- Python module ----------
 
 // IMPORTANT: the module name must be _vulkan_forge to satisfy PyInit__vulkan_forge
 #[pymodule]
 fn _vulkan_forge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Renderer>()?;
+    // A1.9-BEGIN:diagnostics-register
+    m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
+    m.add_function(wrap_pyfunction!(device_probe, m)?)?;
     Ok(())
 }
