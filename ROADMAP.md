@@ -269,9 +269,6 @@ Parallelizable items: **A1.7** (backend scripts) and **A1.8** (CI) can proceed w
 * [ ] Device report + helpful errors.
 * [ ] (Opt) Timing logs + thresholds.
 
-If you want, I can **drop the determinism harness + CI additions** straight into the **vulkan‑forge** repo ZIP we created so your team just runs `pytest` and pushes—say “go ahead” and I’ll generate an updated archive.
-
-
 **A2. Terrain pipeline spike** *(\~3–5 days)*
 
 * **Scope**
@@ -846,8 +843,6 @@ Parallelization tips:
 
 * Use the included GitHub Actions workflow.
 * **Exit criteria:** Wheels produced on Ubuntu, Windows, macOS (x64 & Apple Silicon if runner available). Post‑build import & render test passes.
-
-Great—here’s a **fine‑grained breakdown** for **Milestone A → A4. Wheel/CI spike** so you can get reliable, repeatable wheels and automated tests across OSes.
 
 > **Exit criteria (A4):**
 >
@@ -2182,7 +2177,7 @@ Great—here’s a **fine‑grained task plan** for the remaining phases, struct
 
 ---
 
-If you want, I can **update the repo** to include:
+I could **update the repo** to include:
 
 * The SSIM test harness and goldens skeleton (P5.4–P5.5).
 * The **turntable helper** and CLI (P5.7).
