@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "vulkan-forge"
-version = "0.0.2"
+version = "0.0.3"
 description = "Rust-first wgpu/WebGPU renderer with a thin Python API"
 readme = "README.md"
 requires-python = ">=3.10"

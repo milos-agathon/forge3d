@@ -1,87 +1,158 @@
-<p align="center">
-  <a href="#">
-    <!-- Replace with your logo path or external URL -->
-    <img src="docs/assets/logo.png" alt="vulkan-forge logo" width="128" height="128">
-  </a>
-</p>
+<!-- A1.11-BEGIN:readme -->
+# vulkan-forge
 
-<h1 align="center">vulkan‑forge</h1>
+Headless, deterministic triangle renderer built on **wgpu** with a **PyO3** Python API.  
+Status: pre-0.1 (research/prototyping). Latest release: **0.0.3**.
 
-<p align="center">
-  Rust‑first, cross‑platform <strong>wgpu/WebGPU</strong> renderer exposed to Python for fast, headless 3D rendering.
-  <br>
-  <em>Built in Rust, shipped as Python wheels.</em>
-</p>
+## Quickstart (from source)
 
-<p align="center">
-  <!-- Badges: replace USER/REPO with your org/repo slug -->
-  <a href="https://pypi.org/project/vulkan-forge/"><img alt="PyPI" src="https://img.shields.io/pypi/v/vulkan-forge"></a>
-  <a href="https://pypi.org/project/vulkan-forge/"><img alt="Python Versions" src="https://img.shields.io/pypi/pyversions/vulkan-forge"></a>
-  <a href="https://github.com/USER/REPO/actions"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/USER/REPO/wheels.yml?branch=main"></a>
-  <a href="https://pepy.tech/project/vulkan-forge"><img alt="Downloads" src="https://img.shields.io/pepy/dt/vulkan-forge"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg"></a>
-  <a href="#"><img alt="Platform" src="https://img.shields.io/badge/platform-win%20|%20macOS%20|%20linux-lightgrey"></a>
-  <a href="https://codecov.io/gh/USER/REPO"><img alt="codecov" src="https://codecov.io/gh/USER/REPO/branch/main/graph/badge.svg"></a>
-</p>
-
-<p align="center">
-  <a href="#-install">Install</a> •
-  <a href="#-quick-start">Quick start</a> •
-  <a href="#-features">Features</a> •
-  <a href="#-roadmap">Roadmap</a> •
-  <a href="#-contributing">Contributing</a> •
-  <a href="#-license">License</a>
-</p>
-
----
-
-> ⚠️ <strong>Status:</strong> Early prototype. APIs will change during the MVP phase.
-
-## 🚀 Install
+> Requires Rust (stable), Python 3.10–3.13, and a working GPU runtime.  
+> Python 3.13 with PyO3 0.21 needs `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1`.
 
 ```bash
-pip install vulkan-forge
-# or from source
-pip install maturin
-git clone https://github.com/USER/REPO.git
-cd REPO
+# 1) Create & activate a venv
+python -m venv .venv
+
+# PowerShell (Windows)
+.\.venv\Scripts\Activate.ps1
+# or Git Bash (Windows)
+source .venv/Scripts/activate
+# or Unix
+source .venv/bin/activate
+
+# 2) Build and install the extension in editable mode
+python -m pip install -U pip maturin numpy
+# If using Python 3.13:
+#   PowerShell: $Env:PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+#   bash/cmd  : export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+maturin develop --release
+
+
+```bash
+# 1) Create & activate a venv
+python -m venv .venv
+
+# PowerShell (Windows)
+.\.venv\Scripts\Activate.ps1
+# or Git Bash (Windows)
+source .venv/Scripts/activate
+# or Unix
+source .venv/bin/activate
+
+# 2) Build and install the extension in editable mode
+python -m pip install -U pip maturin numpy
+# If using Python 3.13:
+#   PowerShell: $Env:PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+#   bash/cmd  : export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 maturin develop --release
 ```
 
-## 🧪 Quick start
+Render a demo PNG:
+
+```bash
+cd python
+python -m examples.triangle
+# => writes ./triangle.png (gradient triangle on white background)
+```
+
+Or from Python:
 
 ```python
 from vulkan_forge import Renderer, render_triangle_rgba, render_triangle_png
 
-# Convenience functions
-img = render_triangle_rgba(512, 512)   # (H,W,4) uint8
-render_triangle_png("triangle.png", 512, 512)
-
-# Or class API
 r = Renderer(512, 512)
-print(r.info())
-arr = r.render_triangle_rgba()
+print(r.info())                      # e.g., "Renderer 512x512, format=Rgba8UnormSrgb"
+arr = render_triangle_rgba(256, 256) # (H,W,4) uint8 tightly packed
+render_triangle_png("triangle.png", 512, 512)
 ```
 
-## ✨ Features (MVP)
+> Legacy compatibility: `from vshade import Renderer` is a re-export of `vulkan_forge.Renderer`.
 
-- Headless, cross‑platform off‑screen rendering via `wgpu` (Vulkan/Metal/DX12).
-- Rust core for performance and a thin Python API.
-- Deterministic readback to NumPy RGBA images.
-- CI wheels for Windows, macOS, Linux (x86_64/arm64).
+## Tools (CLI)
 
-## 🗺️ Roadmap (short)
+All tools live under `python/tools` and write JSON artifacts for CI.
 
-- Terrain layer from NumPy DEMs (lighting + tonemap)
-- Geo vectors (polygons/lines/points) with tessellation
-- Simple camera & sun controls
-- Image tests (SSIM) across backends
+### Determinism harness
 
-## 🤝 Contributing
+Ensures repeated renders are byte-identical (raw RGBA).
 
-- Issues and PRs welcome. See `CONTRIBUTING.md` (to be added).
-- Code of Conduct: `CODE_OF_CONDUCT.md` (to be added).
+```bash
+python python/tools/determinism_harness.py --width 128 --height 128 --runs 5 --png --out-dir determinism_artifacts
+# Prints JSON; writes determinism_artifacts/determinism_report.json (+ triangle.png)
+```
 
-## 📄 License
+### Cross-backend runner
 
-MIT © Milos Popovic
+Spawns a fresh Python process per backend; validates within-backend determinism; optional cross-backend compare.
+
+```bash
+# Windows/macOS example
+python python/tools/backends_runner.py --runs 2 --png --out-dir backends_artifacts
+```
+
+### Device diagnostics
+
+Enumerates adapters and probes device creation per backend.
+
+```bash
+python python/tools/device_diagnostics.py --json diag_out/device_diagnostics.json --summary
+```
+
+### Performance sanity
+
+Times cold init and steady-state renders; optional budget/baseline enforcement.
+
+```bash
+# CI-safe (no enforcement)
+python python/tools/perf_sanity.py --width 96 --height 96 --runs 20 --warmups 3 --json perf_out/perf_report.json
+# Enforce budgets:
+#   VF_ENFORCE_PERF=1 python python/tools/perf_sanity.py --baseline perf_out/perf_report.json
+```
+
+## Testing
+
+```bash
+python -m pip install -U pytest
+# Build the extension first
+maturin develop --release
+pytest -q
+```
+
+Optional tests are gated by env:
+
+* `VF_TEST_BACKENDS=1` for cross-backend test
+* `VF_TEST_PERF=1` for performance test
+
+## CI
+
+Matrix workflow: `.github/workflows/ci.yml`
+
+* OS: Windows, Ubuntu, macOS × Python: 3.10–3.13
+* Runs pytest, determinism harness (artifacts), and cross-backend runner on Windows/macOS.
+
+## Troubleshooting
+
+* **ImportError: No module named `_vulkan_forge`**
+  Activate the same venv you used for `maturin develop`. Re-run:
+
+  ```bash
+  python -m pip install -U pip maturin
+  maturin develop --release
+  ```
+
+* **Python 3.13 build errors (PyO3 0.21)**
+  Set: `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1`
+
+* **No suitable GPU adapter / unsupported backend**
+  Try another backend or run the cross-backend runner to discover a working one.
+
+## Versioning
+
+* Current version: **0.0.3**
+* See `CHANGELOG.md` for details.
+
+## License
+
+MIT (see `LICENSE`).
+
+<!-- A1.11-END:readme -->
