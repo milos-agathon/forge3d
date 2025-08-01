@@ -17,7 +17,9 @@
       "Bash(git --no-pager diff --name-only)",
       "Bash(git --no-pager diff --unified=3 -- \"src/lib.rs\")",
       "Bash(git --no-pager diff --unified=3 -- \"task.xml\")",
-      "Bash(pip show:*)"
+      "Bash(pip show:*)",
+      "Bash(git --no-pager diff --unified=3 -- \"README.md\")",
+      "Bash(cat:*)"
     ],
     "deny": []
   }

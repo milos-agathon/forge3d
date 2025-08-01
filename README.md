@@ -68,6 +68,25 @@ render_triangle_png("triangle.png", 512, 512)
 
 > Legacy compatibility: `from vshade import Renderer` is a re-export of `vulkan_forge.Renderer`.
 
+<!-- T01-BEGIN:api -->
+## Public API (Python)
+
+```python
+from vulkan_forge import Renderer, render_triangle_rgba, render_triangle_png, make_terrain
+
+# Core triangle
+arr = render_triangle_rgba(256, 256)              # (H,W,4) uint8
+render_triangle_png("triangle.png", 256, 256)     # writes PNG
+
+# Optional terrain (requires cargo feature 'terrain_spike')
+# t = make_terrain(512, 384, grid=128)
+# t.render_png("terrain.png")
+```
+
+Arguments are validated and raise `ValueError` with actionable messages if invalid.
+
+<!-- T01-END:api -->
+
 ## Tools (CLI)
 
 All tools live under `python/tools` and write JSON artifacts for CI.
