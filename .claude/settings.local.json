@@ -19,7 +19,14 @@
       "Bash(git --no-pager diff --unified=3 -- \"task.xml\")",
       "Bash(pip show:*)",
       "Bash(git --no-pager diff --unified=3 -- \"README.md\")",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(git --no-pager diff --unified=3 -- python/vulkan_forge/__init__.py)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(git --no-pager diff --unified=3 -- README.md)",
+      "Bash(git add:*)",
+      "Bash(git --no-pager diff --cached -- python/vulkan_forge/__init__.py)",
+      "Bash(sed:*)"
     ],
     "deny": []
   }

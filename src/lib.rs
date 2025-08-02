@@ -422,6 +422,37 @@ impl Renderer {
         Ok(())
     }
     // T01-END:add-terrain-method
+
+    // T02-BEGIN:add-terrain-stats-methods
+    #[pyo3(text_signature = "($self)")]
+    pub fn terrain_stats(&self) -> pyo3::PyResult<(f32, f32, f32, f32)> {
+        use pyo3::exceptions::PyRuntimeError;
+        let terr = self.terrain.as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("no terrain uploaded; call add_terrain() first"))?;
+        let stats = dem_stats_from_slice(&terr.heights);
+        Ok((stats.min, stats.max, stats.mean, stats.std))
+    }
+
+    #[pyo3(text_signature = "($self, mode, range=None, eps=1e-8)")]
+    pub fn normalize_terrain(&mut self, mode: &str, range: Option<(f32, f32)>, eps: Option<f32>) -> pyo3::PyResult<()> {
+        use pyo3::exceptions::PyRuntimeError;
+
+        let terr = self.terrain.as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("no terrain uploaded; call add_terrain() first"))?;
+
+        let mode = match mode.to_lowercase().as_str() {
+            "minmax" => NormalizeMode::MinMax,
+            "zscore" => NormalizeMode::ZScore,
+            _ => return Err(PyRuntimeError::new_err("mode must be 'minmax' or 'zscore'")),
+        };
+        let eps = eps.unwrap_or(1e-8_f32);
+        let range = range.unwrap_or((0.0, 1.0));
+
+        let stats = dem_stats_from_slice(&terr.heights);
+        normalize_in_place(&mut terr.heights, mode, eps, range, &stats);
+        Ok(())
+    }
+    // T02-END:add-terrain-stats-methods
 }
 
 impl Renderer {
@@ -610,6 +641,85 @@ struct TerrainData {
     heights: Vec<f32>,
 }
 // T01-END:add-terrain-types
+
+// T02-BEGIN:add-dem-types
+#[derive(Debug, Clone)]
+struct DemStats {
+    min: f32,
+    max: f32,
+    mean: f32,
+    std: f32,
+}
+
+#[derive(Debug, Clone)]
+enum NormalizeMode {
+    MinMax,
+    ZScore,
+}
+
+impl NormalizeMode {
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s.to_lowercase().as_str() {
+            "minmax" => Ok(NormalizeMode::MinMax),
+            "zscore" => Ok(NormalizeMode::ZScore),
+            _ => Err(format!("Unknown normalization mode: {}", s)),
+        }
+    }
+}
+
+fn dem_stats_from_slice(heights: &[f32]) -> DemStats {
+    if heights.is_empty() {
+        return DemStats {
+            min: 0.0,
+            max: 0.0,
+            mean: 0.0,
+            std: 0.0,
+        };
+    }
+
+    let mut min = heights[0];
+    let mut max = heights[0];
+    let mut sum = 0.0;
+
+    for &h in heights {
+        if h < min { min = h; }
+        if h > max { max = h; }
+        sum += h;
+    }
+
+    let mean = sum / heights.len() as f32;
+    
+    let mut variance_sum = 0.0;
+    for &h in heights {
+        let diff = h - mean;
+        variance_sum += diff * diff;
+    }
+    
+    let variance = variance_sum / heights.len() as f32;
+    let std = variance.sqrt();
+
+    DemStats { min, max, mean, std }
+}
+
+fn normalize_in_place(heights: &mut [f32], mode: NormalizeMode, eps: f32, range: (f32, f32), stats: &DemStats) {
+    match mode {
+        NormalizeMode::MinMax => {
+            let (lo, hi) = range;
+            let denom = (stats.max - stats.min).abs().max(eps);
+            let scale = (hi - lo) / denom;
+            for v in heights.iter_mut() {
+                *v = (*v - stats.min) * scale + lo;
+            }
+        }
+        NormalizeMode::ZScore => {
+            let denom = stats.std.max(eps);
+            for v in heights.iter_mut() {
+                *v = (*v - stats.mean) / denom;
+            }
+        }
+    }
+}
+// T02-END:add-dem-types
 // A2-END:terrain-moddecl
 
 #[pymodule]

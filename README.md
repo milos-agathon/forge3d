@@ -185,6 +185,24 @@ Matrix workflow: `.github/workflows/ci.yml`
 * Current version: **0.0.3**
 * See `CHANGELOG.md` for details.
 
+<!-- T02-BEGIN:readme-dem -->
+### DEM statistics & normalization
+
+```python
+import numpy as np
+from vulkan_forge import dem_stats, dem_normalize, Renderer
+
+Z = np.random.rand(256,256).astype(np.float32) * 1000.0
+print("stats:", dem_stats(Z))
+Z01 = dem_normalize(Z, mode="minmax", out_range=(0.0,1.0))
+
+r = Renderer(800, 600)
+r.add_terrain(Z, spacing=(1.0,1.0), exaggeration=1.0, colormap="viridis")
+print("renderer stats:", r.terrain_stats())
+r.normalize_terrain("zscore")
+```
+<!-- T02-END:readme-dem -->
+
 ## License
 
 MIT (see `LICENSE`).

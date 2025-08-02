@@ -74,3 +74,38 @@ __all__ = ["Renderer", "render_triangle_rgba", "render_triangle_png", "make_terr
 if "TerrainSpike" in globals():
     __all__.append("TerrainSpike")
 # A1.5-END:vulkan_forge-shim
+
+# T02-BEGIN:dem-python-helpers
+import numpy as _np
+
+def dem_stats(heightmap):
+    a = _np.asarray(heightmap)
+    if a.ndim != 2 or a.dtype not in (_np.float32, _np.float64) or not a.flags['C_CONTIGUOUS']:
+        raise RuntimeError("heightmap must be 2-D float32/float64 and C-contiguous")
+    a = a.astype(_np.float32, copy=False)
+    mn = float(a.min()); mx = float(a.max())
+    mean = float(a.mean()); std = float(a.std(dtype=_np.float32))
+    return mn, mx, mean, std
+
+def dem_normalize(heightmap, *, mode="minmax", out_range=(0.0, 1.0), eps=1e-8, return_stats=False):
+    mn, mx, mean, std = dem_stats(heightmap)
+    a = _np.asarray(heightmap).astype(_np.float32, copy=False)
+    if mode == "minmax":
+        lo, hi = map(float, out_range)
+        scale = 0.0 if mx == mn else (hi - lo) / max(mx - mn, float(eps))
+        out = (a - mn) * scale + lo
+    elif mode == "zscore":
+        out = (a - mean) / max(std, float(eps))
+    else:
+        raise ValueError("mode must be 'minmax' or 'zscore'")
+    if return_stats:
+        return out, (mn, mx, mean, std)
+    return out
+# T02-END:dem-python-helpers
+
+# T02-BEGIN:dem-all
+try:
+    __all__ += ["dem_stats", "dem_normalize"]
+except NameError:
+    __all__ = ["dem_stats", "dem_normalize"]
+# T02-END:dem-all
