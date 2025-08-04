@@ -7,14 +7,9 @@ use bytemuck::{Pod, Zeroable};
 use image::ImageBuffer;
 use once_cell::sync::OnceCell;
 use pyo3::prelude::*;
-use numpy::{PyArray3, IntoPyArray};
-// T11-BEGIN:np-extra-imports
-use numpy::PyArray1;
-// T11-END:np-extra-imports
-// T01-BEGIN:add-terrain-imports
-use numpy::{PyArray2, PyReadonlyArray2};
-use numpy::PyUntypedArrayMethods;
-// T01-END:add-terrain-imports
+use pyo3::Bound;
+use numpy::{PyArray3, IntoPyArray, PyArray2, PyReadonlyArray2, PyArray1};
+use numpy::PyUntypedArrayMethods; // needed for contiguous checks
 use ndarray::Array3;
 use wgpu::util::DeviceExt;
 use pyo3::types::{PyDict, PyList};
@@ -137,7 +132,7 @@ fn create_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::
             entry_point: "fs_main",
             targets: &[Some(wgpu::ColorTargetState {
                 format,
-                blend: None, // A1.2 invariant
+                blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -189,7 +184,6 @@ fn copy_texture_to_rgba_unpadded(
         buffer: readback_buf,
         layout: wgpu::ImageDataLayout {
             offset: 0,
-            // Your wgpu build expects Option<u32> (not Option<NonZeroU32>): convert then wrap.
             bytes_per_row: Some(NonZeroU32::new(padded_bpr).unwrap().into()),
             rows_per_image: Some(NonZeroU32::new(height).unwrap().into()),
         },
@@ -200,8 +194,6 @@ fn copy_texture_to_rgba_unpadded(
     device.poll(wgpu::Maintain::Wait);
 
     let slice = readback_buf.slice(..);
-
-    // map_async with callback + poll (wgpu in your build)
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |res| { let _ = tx.send(res); });
     device.poll(wgpu::Maintain::Wait);
@@ -209,7 +201,6 @@ fn copy_texture_to_rgba_unpadded(
 
     let data = slice.get_mapped_range();
 
-    // Unpad each row into a tightly-packed RGBA output
     let mut out = vec![0u8; (row_bytes * height) as usize];
     let src_stride = padded_bpr as usize;
     let dst_stride = row_bytes as usize;
@@ -230,7 +221,6 @@ fn copy_texture_to_rgba_unpadded(
 pub struct Renderer {
     width: u32,
     height: u32,
-    // persistent GPU resources
     color_tex: wgpu::Texture,
     color_view: wgpu::TextureView,
     readback_buf: wgpu::Buffer,
@@ -239,26 +229,22 @@ pub struct Renderer {
     vbuf: wgpu::Buffer,
     ibuf: wgpu::Buffer,
     icount: u32,
-    // T01-BEGIN:add-terrain-field
     terrain: Option<TerrainData>,
-    // T01-END:add-terrain-field
+    height_tex: Option<wgpu::Texture>,
+    height_view: Option<wgpu::TextureView>,
+    height_sampler: Option<wgpu::Sampler>,
 }
 
 #[pymethods]
 impl Renderer {
-    // A1.5-BEGIN:new-docs
     #[new]
     #[pyo3(text_signature = "(width, height)")]
-    /// Create a headless renderer with a fixed-size off-screen RGBA8 UNORM SRGB target.
-    ///
-    /// Deterministic pipeline: CCW+Back cull, blend=None, CLEAR_COLOR, no MSAA, fixed viewport.
+    /// Create a headless renderer.
     pub fn new(width: u32, height: u32) -> Self {
-        // A1.5-END:new-docs
         let ctx = WgpuContext::get();
         let pipeline = create_pipeline(&ctx.device, TEXTURE_FORMAT);
         let (vbuf, ibuf, icount) = triangle_geometry(&ctx.device);
         let (color_tex, color_view) = create_offscreen(&ctx.device, width, height, TEXTURE_FORMAT);
-        // small buffer; will grow on demand
         let readback_buf = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback-buffer"),
             size: 4,
@@ -272,23 +258,19 @@ impl Renderer {
             readback_buf, readback_size: 4,
             pipeline, vbuf, ibuf, icount,
             terrain: None,
+            height_tex: None,
+            height_view: None,
+            height_sampler: None,
         }
     }
-    // A1.5-END:new-docs
 
-    // A1.5-BEGIN:info-signature
     #[pyo3(text_signature = "($self)")]
-    /// Return a short description of the renderer configuration (size and texture format).
     pub fn info(&self) -> PyResult<String> {
         Ok(format!("Renderer {}x{}, format={:?}", self.width, self.height, TEXTURE_FORMAT))
     }
-    // A1.5-END:info-signature
 
-    // A1.5-BEGIN:rgba-docs
     #[pyo3(text_signature = "($self)")]
-    /// Render a single deterministic triangle off-screen and return a tightly-packed NumPy array
-    /// of shape (H, W, 4), dtype=uint8.
-    pub fn render_triangle_rgba<'py>(&mut self, py: Python<'py>) -> PyResult<&'py PyArray3<u8>> {
+    pub fn render_triangle_rgba<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyArray3<u8>>> {
         let ctx = WgpuContext::get();
         self.render_into_offscreen(ctx)?;
 
@@ -306,17 +288,13 @@ impl Renderer {
         let pixels = copy_texture_to_rgba_unpadded(
             &ctx.device, &ctx.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
 
-        // ndarray -> numpy array (stable path across numpy versions)
         let arr3 = Array3::from_shape_vec(
             (self.height as usize, self.width as usize, 4), pixels
         ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(arr3.into_pyarray(py))
+        Ok(arr3.into_pyarray_bound(py))
     }
-    // A1.5-END:rgba-docs
 
-    // A1.5-BEGIN:png-docs
     #[pyo3(text_signature = "($self, path)")]
-    /// Render the same deterministic triangle and write it as a PNG file to `path`.
     pub fn render_triangle_png(&mut self, path: String) -> PyResult<()> {
         let ctx = WgpuContext::get();
         self.render_into_offscreen(ctx)?;
@@ -340,41 +318,28 @@ impl Renderer {
         img.save(path).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(())
     }
-    // A1.5-END:png-docs
 
-    // T01-BEGIN:add-terrain-method
     #[pyo3(text_signature = "($self, heightmap, spacing, exaggeration=1.0, *, colormap='viridis')")]
-    /// Upload a (H,W) heightmap and metadata to the renderer.
-    ///
-    /// Requirements:
-    /// - `heightmap`: NumPy array, dtype `float32` (preferred) or `float64`,
-    ///   shape `(H, W)`, C-contiguous (row-major).
-    /// - `spacing=(dx, dy)`: world units per texel (both > 0).
-    /// - `exaggeration`: vertical scale multiplier (> 0).
-    /// - `colormap`: name (stored only; mapping applied later).
     pub fn add_terrain(
         &mut self,
-        heightmap: &pyo3::PyAny,
+        heightmap: &PyAny,
         spacing: (f32, f32),
         exaggeration: f32,
         colormap: String,
     ) -> pyo3::PyResult<()> {
-        use pyo3::exceptions::PyRuntimeError;
-
         if spacing.0 <= 0.0 || spacing.1 <= 0.0 {
-            return Err(PyRuntimeError::new_err("spacing components must be > 0"));
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("spacing components must be > 0"));
         }
         if exaggeration <= 0.0 {
-            return Err(PyRuntimeError::new_err("exaggeration must be > 0"));
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("exaggeration must be > 0"));
         }
 
-        // Try float32 first: downcast -> &PyArray2<f32> -> readonly
         let as_f32: Result<(Vec<f32>, usize, usize), pyo3::PyErr> = (|| {
             let arr32: &PyArray2<f32> = heightmap.downcast()?;
             let ro32: PyReadonlyArray2<f32> = arr32.readonly();
 
-            if !ro32.is_contiguous() {
-                return Err(PyRuntimeError::new_err("heightmap must be C-contiguous (row-major)"));
+            if !ro32.is_c_contiguous() {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err("heightmap must be C-contiguous (row-major)"));
             }
             let view = ro32.as_array();
             let (h, w) = (view.shape()[0], view.shape()[1]);
@@ -385,19 +350,18 @@ impl Renderer {
             Ok((v, w, h))
         })();
 
-        // Or accept float64 and cast to f32
         let (heights, width, height) = match as_f32 {
             Ok(ok) => ok,
             Err(_) => {
                 let arr64: &PyArray2<f64> = heightmap
                     .downcast()
-                    .map_err(|_| PyRuntimeError::new_err(
+                    .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err(
                         "heightmap must be a 2-D NumPy array of dtype float32 or float64"
                     ))?;
                 let ro64: PyReadonlyArray2<f64> = arr64.readonly();
 
-                if !ro64.is_contiguous() {
-                    return Err(PyRuntimeError::new_err("heightmap must be C-contiguous (row-major)"));
+                if !ro64.is_c_contiguous() {
+                    return Err(pyo3::exceptions::PyRuntimeError::new_err("heightmap must be C-contiguous (row-major)"));
                 }
                 let view = ro64.as_array();
                 let (h, w) = (view.shape()[0], view.shape()[1]);
@@ -410,7 +374,7 @@ impl Renderer {
         };
 
         if width == 0 || height == 0 {
-            return Err(PyRuntimeError::new_err("heightmap cannot be empty"));
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("heightmap cannot be empty"));
         }
 
         self.terrain = Some(TerrainData {
@@ -424,29 +388,24 @@ impl Renderer {
 
         Ok(())
     }
-    // T01-END:add-terrain-method
 
-    // T02-BEGIN:add-terrain-stats-methods
     #[pyo3(text_signature = "($self)")]
     pub fn terrain_stats(&self) -> pyo3::PyResult<(f32, f32, f32, f32)> {
-        use pyo3::exceptions::PyRuntimeError;
         let terr = self.terrain.as_ref()
-            .ok_or_else(|| PyRuntimeError::new_err("no terrain uploaded; call add_terrain() first"))?;
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("no terrain uploaded; call add_terrain() first"))?;
         let stats = dem_stats_from_slice(&terr.heights);
         Ok((stats.min, stats.max, stats.mean, stats.std))
     }
 
     #[pyo3(text_signature = "($self, mode, range=None, eps=1e-8)")]
     pub fn normalize_terrain(&mut self, mode: &str, range: Option<(f32, f32)>, eps: Option<f32>) -> pyo3::PyResult<()> {
-        use pyo3::exceptions::PyRuntimeError;
-
         let terr = self.terrain.as_mut()
-            .ok_or_else(|| PyRuntimeError::new_err("no terrain uploaded; call add_terrain() first"))?;
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("no terrain uploaded; call add_terrain() first"))?;
 
         let mode = match mode.to_lowercase().as_str() {
             "minmax" => NormalizeMode::MinMax,
             "zscore" => NormalizeMode::ZScore,
-            _ => return Err(PyRuntimeError::new_err("mode must be 'minmax' or 'zscore'")),
+            _ => return Err(pyo3::exceptions::PyRuntimeError::new_err("mode must be 'minmax' or 'zscore'")),
         };
         let eps = eps.unwrap_or(1e-8_f32);
         let range = range.unwrap_or((0.0, 1.0));
@@ -455,12 +414,179 @@ impl Renderer {
         normalize_in_place(&mut terr.heights, mode, eps, range, &stats);
         Ok(())
     }
-    // T02-END:add-terrain-stats-methods
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn upload_height_r32f(&mut self) -> pyo3::PyResult<()> {
+        let ctx = WgpuContext::get();
+
+        let terr = self.terrain.as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("no terrain uploaded; call add_terrain() first"))?;
+
+        let width = terr.width;
+        let height = terr.height;
+        if width == 0 || height == 0 {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("terrain dimensions are zero"));
+        }
+
+        let tex = ctx.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain-height-r32f"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let samp = ctx.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain-height-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let data = bytemuck::cast_slice::<f32, u8>(&terr.heights);
+        ctx.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(NonZeroU32::new((width * 4) as u32).unwrap().into()),
+                rows_per_image: Some(NonZeroU32::new(height).unwrap().into()),
+            },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        ctx.device.poll(wgpu::Maintain::Wait);
+
+        self.height_tex = Some(tex);
+        self.height_view = Some(view);
+        self.height_sampler = Some(samp);
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, x, y, w, h)")]
+    pub fn debug_read_height_patch<'py>(&mut self, py: Python<'py>, x: u32, y: u32, w: u32, h: u32)
+        -> pyo3::PyResult<Bound<'py, PyArray2<f32>>> {
+        if w == 0 || h == 0 {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("patch dimensions must be > 0"));
+        }
+
+        if self.height_tex.is_none() {
+            let zeros = vec![0f32; (w * h) as usize];
+            let rows: Vec<Vec<f32>> = zeros
+                .chunks_exact(w as usize)
+                .map(|row| row.to_vec())
+                .collect();
+            let out = numpy::PyArray2::<f32>::from_vec2_bound(py, &rows)?;
+            return Ok(out);
+        }
+
+        let ctx = WgpuContext::get();
+        let tex = self.height_tex.as_ref().unwrap();
+        let tex_size = tex.size();
+        if x + w > tex_size.width {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "requested patch exceeds texture bounds in x: x+w ({}) > width ({})",
+                x + w, tex_size.width
+            )));
+        }
+        if y + h > tex_size.height {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "requested patch exceeds texture bounds in y: y+h ({}) > height ({})",
+                y + h, tex_size.height
+            )));
+        }
+
+        let row_bytes = (w * 4) as u32;
+        let padded_bpr = ((row_bytes + 255) / 256) * 256;
+        let buf_size = padded_bpr as u64 * h as u64;
+        let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("height-patch-readback"),
+            size: buf_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("height-patch-encoder"),
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &readback,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(NonZeroU32::new(padded_bpr).unwrap().into()),
+                    rows_per_image: Some(NonZeroU32::new(h).unwrap().into()),
+                },
+            },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+
+        ctx.queue.submit([encoder.finish()]);
+        ctx.device.poll(wgpu::Maintain::Wait);
+
+        let slice = readback.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| { let _ = tx.send(res); });
+        ctx.device.poll(wgpu::Maintain::Wait);
+        rx.recv().expect("map_async channel closed").expect("MapAsync failed");
+        let data = slice.get_mapped_range();
+
+        let mut out = vec![0u8; (row_bytes * h) as usize];
+        let src_stride = padded_bpr as usize;
+        let dst_stride = row_bytes as usize;
+        for j in 0..(h as usize) {
+            let s = j * src_stride;
+            let d = j * dst_stride;
+            out[d..d + dst_stride].copy_from_slice(&data[s..s + dst_stride]);
+        }
+        drop(data);
+        readback.unmap();
+
+        let floats: &[f32] = bytemuck::cast_slice(&out);
+        let rows: Vec<Vec<f32>> = floats
+            .chunks_exact(w as usize)
+            .map(|row| row.to_vec())
+            .collect();
+        let arr = numpy::PyArray2::<f32>::from_vec2_bound(py, &rows)?;
+        Ok(arr)
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn read_full_height_texture<'py>(&mut self, py: Python<'py>)
+        -> pyo3::PyResult<Bound<'py, PyArray2<f32>>> {
+        let terr = self.terrain.as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("no terrain uploaded; call add_terrain() first"))?;
+
+        if self.height_tex.is_none() {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("no height texture uploaded; call upload_height_r32f() first"));
+        }
+
+        let width = terr.width;
+        let height = terr.height;
+        self.debug_read_height_patch(py, 0, 0, width, height)
+    }
 }
 
 impl Renderer {
     fn render_into_offscreen(&mut self, ctx: &WgpuContext) -> PyResult<()> {
-        // Recreate offscreen if size/format changed
         let size = self.color_tex.size();
         if size.width != self.width || size.height != self.height || self.color_tex.format() != TEXTURE_FORMAT {
             let (tex, view) = create_offscreen(&ctx.device, self.width, self.height, TEXTURE_FORMAT);
@@ -499,7 +625,6 @@ impl Renderer {
     }
 }
 
-/// Human-friendly strings for wgpu enums.
 fn backend_str(b: wgpu::Backend) -> &'static str {
     match b {
         wgpu::Backend::Vulkan => "VULKAN",
@@ -520,7 +645,6 @@ fn devtype_str(t: wgpu::DeviceType) -> &'static str {
     }
 }
 
-/// Enumerate adapters/features/limits (best-effort).
 #[pyfunction]
 #[pyo3(text_signature = "()")]
 fn enumerate_adapters(py: Python<'_>) -> PyResult<PyObject> {
@@ -529,7 +653,6 @@ fn enumerate_adapters(py: Python<'_>) -> PyResult<PyObject> {
         ..Default::default()
     });
 
-    // Native path (wgpu 0.19): enumerate_adapters; fallback to single request_adapter if empty.
     let mut adapters: Vec<wgpu::Adapter> = instance.enumerate_adapters(wgpu::Backends::all());
     if adapters.is_empty() {
         if let Some(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -557,7 +680,6 @@ fn enumerate_adapters(py: Python<'_>) -> PyResult<PyObject> {
     Ok(out.into_any().unbind())
 }
 
-/// Probe a specific backend: try adapter/device creation and classify status.
 #[pyfunction]
 #[pyo3(text_signature = "(backend=None)")]
 fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
@@ -628,14 +750,10 @@ fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
 
 // ---------- Python module ----------
 
-// IMPORTANT: the module name must be _vulkan_forge to satisfy PyInit__vulkan_forge
-// A2-BEGIN:terrain-moddecl
 #[cfg(feature = "terrain_spike")]
 mod terrain;
-// T11-BEGIN:mod-grid
 mod grid;
-// T11-END:mod-grid
-// T01-BEGIN:add-terrain-types
+
 #[derive(Clone)]
 struct TerrainData {
     width:  u32,
@@ -646,9 +764,7 @@ struct TerrainData {
     /// Row-major, length = width*height, units = heightmap * exaggeration
     heights: Vec<f32>,
 }
-// T01-END:add-terrain-types
 
-// T02-BEGIN:add-dem-types
 #[derive(Debug, Clone)]
 struct DemStats {
     min: f32,
@@ -675,12 +791,7 @@ impl NormalizeMode {
 
 fn dem_stats_from_slice(heights: &[f32]) -> DemStats {
     if heights.is_empty() {
-        return DemStats {
-            min: 0.0,
-            max: 0.0,
-            mean: 0.0,
-            std: 0.0,
-        };
+        return DemStats { min: 0.0, max: 0.0, mean: 0.0, std: 0.0 };
     }
 
     let mut min = heights[0];
@@ -694,13 +805,13 @@ fn dem_stats_from_slice(heights: &[f32]) -> DemStats {
     }
 
     let mean = sum / heights.len() as f32;
-    
+
     let mut variance_sum = 0.0;
     for &h in heights {
         let diff = h - mean;
         variance_sum += diff * diff;
     }
-    
+
     let variance = variance_sum / heights.len() as f32;
     let std = variance.sqrt();
 
@@ -725,55 +836,23 @@ fn normalize_in_place(heights: &mut [f32], mode: NormalizeMode, eps: f32, range:
         }
     }
 }
-// T02-END:add-dem-types
-// A2-END:terrain-moddecl
 
-// T11-BEGIN:grid-pyfuncs
 #[pyfunction]
 #[pyo3(text_signature = "(nx, nz, spacing=(1.0,1.0), origin='center')")]
 fn grid_generate(py: Python<'_>, nx: u32, nz: u32, spacing: (f32, f32), origin: Option<String>)
-    -> pyo3::PyResult<(Bound<'_, PyArray2<f32>>, Bound<'_, PyArray2<f32>>, Bound<'_, PyArray1<u32>>)>
+    -> PyResult<(Bound<'_, PyArray2<f32>>, Bound<'_, PyArray2<f32>>, Bound<'_, PyArray1<u32>>)>
 {
-    use pyo3::exceptions::PyRuntimeError;
-    if nx < 2 || nz < 2 {
-        return Err(PyRuntimeError::new_err("nx and nz must be >= 2"));
-    }
-    let org = match origin.unwrap_or_else(|| "center".to_string()).to_lowercase().as_str() {
-        "center" => grid::GridOrigin::Center,
-        "min" | "mincorner" | "origin" => grid::GridOrigin::MinCorner,
-        _ => return Err(PyRuntimeError::new_err("origin must be 'center' or 'min'")),
-    };
-    let mesh = grid::generate_grid(nx, nz, spacing, org);
-
-    let n_verts = mesh.vertices.len();
-    let mut pos_data = Vec::<Vec<f32>>::with_capacity(n_verts);
-    let mut uv_data  = Vec::<Vec<f32>>::with_capacity(n_verts);
-    for v in &mesh.vertices {
-        pos_data.push(vec![v.pos[0], v.pos[1], v.pos[2]]);
-        uv_data.push(vec![v.uv[0], v.uv[1]]);
-    }
-
-    // shapes: positions [N,3], uvs [N,2], indices [M]
-    let pos_arr = PyArray2::from_vec2_bound(py, &pos_data)?;
-    let uv_arr  = PyArray2::from_vec2_bound(py, &uv_data)?;
-    let idx_arr = PyArray1::from_vec_bound(py, mesh.indices);
-
-    Ok((pos_arr, uv_arr, idx_arr))
+    grid::grid_generate(py, nx, nz, spacing, origin)
 }
-// T11-END:grid-pyfuncs
 
+#[allow(deprecated)]
 #[pymodule]
-fn _vulkan_forge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _vulkan_forge(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<Renderer>()?;
-    // A2-BEGIN:terrain-register
     #[cfg(feature = "terrain_spike")]
     { m.add_class::<terrain::TerrainSpike>()?; }
-    // A2-END:terrain-register
-    // A1.9-BEGIN:diagnostics-register
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
-    // T11-BEGIN:grid-register
     m.add_function(wrap_pyfunction!(grid_generate, m)?)?;
-    // T11-END:grid-register
     Ok(())
 }

@@ -28,7 +28,12 @@
       "Bash(git --no-pager diff --cached -- python/vulkan_forge/__init__.py)",
       "Bash(sed:*)",
       "Bash(unset CONDA_PREFIX)",
-      "Bash(pytest:*)"
+      "Bash(pytest:*)",
+      "Bash(set CONDA_PREFIX=)",
+      "Bash(cmd /c:*)",
+      "Bash(git --no-pager diff --no-index /dev/null tests/test_height_upload.py)",
+      "Bash(git --no-pager diff --unified=3 -- tests/test_height_upload.py)",
+      "Bash(cargo check:*)"
     ],
     "deny": []
   }
