@@ -8,6 +8,9 @@ use image::ImageBuffer;
 use once_cell::sync::OnceCell;
 use pyo3::prelude::*;
 use numpy::{PyArray3, IntoPyArray};
+// T11-BEGIN:np-extra-imports
+use numpy::PyArray1;
+// T11-END:np-extra-imports
 // T01-BEGIN:add-terrain-imports
 use numpy::{PyArray2, PyReadonlyArray2};
 use numpy::PyUntypedArrayMethods;
@@ -629,6 +632,9 @@ fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
 // A2-BEGIN:terrain-moddecl
 #[cfg(feature = "terrain_spike")]
 mod terrain;
+// T11-BEGIN:mod-grid
+mod grid;
+// T11-END:mod-grid
 // T01-BEGIN:add-terrain-types
 #[derive(Clone)]
 struct TerrainData {
@@ -722,6 +728,40 @@ fn normalize_in_place(heights: &mut [f32], mode: NormalizeMode, eps: f32, range:
 // T02-END:add-dem-types
 // A2-END:terrain-moddecl
 
+// T11-BEGIN:grid-pyfuncs
+#[pyfunction]
+#[pyo3(text_signature = "(nx, nz, spacing=(1.0,1.0), origin='center')")]
+fn grid_generate(py: Python<'_>, nx: u32, nz: u32, spacing: (f32, f32), origin: Option<String>)
+    -> pyo3::PyResult<(Bound<'_, PyArray2<f32>>, Bound<'_, PyArray2<f32>>, Bound<'_, PyArray1<u32>>)>
+{
+    use pyo3::exceptions::PyRuntimeError;
+    if nx < 2 || nz < 2 {
+        return Err(PyRuntimeError::new_err("nx and nz must be >= 2"));
+    }
+    let org = match origin.unwrap_or_else(|| "center".to_string()).to_lowercase().as_str() {
+        "center" => grid::GridOrigin::Center,
+        "min" | "mincorner" | "origin" => grid::GridOrigin::MinCorner,
+        _ => return Err(PyRuntimeError::new_err("origin must be 'center' or 'min'")),
+    };
+    let mesh = grid::generate_grid(nx, nz, spacing, org);
+
+    let n_verts = mesh.vertices.len();
+    let mut pos_data = Vec::<Vec<f32>>::with_capacity(n_verts);
+    let mut uv_data  = Vec::<Vec<f32>>::with_capacity(n_verts);
+    for v in &mesh.vertices {
+        pos_data.push(vec![v.pos[0], v.pos[1], v.pos[2]]);
+        uv_data.push(vec![v.uv[0], v.uv[1]]);
+    }
+
+    // shapes: positions [N,3], uvs [N,2], indices [M]
+    let pos_arr = PyArray2::from_vec2_bound(py, &pos_data)?;
+    let uv_arr  = PyArray2::from_vec2_bound(py, &uv_data)?;
+    let idx_arr = PyArray1::from_vec_bound(py, mesh.indices);
+
+    Ok((pos_arr, uv_arr, idx_arr))
+}
+// T11-END:grid-pyfuncs
+
 #[pymodule]
 fn _vulkan_forge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Renderer>()?;
@@ -732,5 +772,8 @@ fn _vulkan_forge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // A1.9-BEGIN:diagnostics-register
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
+    // T11-BEGIN:grid-register
+    m.add_function(wrap_pyfunction!(grid_generate, m)?)?;
+    // T11-END:grid-register
     Ok(())
 }

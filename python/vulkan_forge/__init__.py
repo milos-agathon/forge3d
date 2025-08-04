@@ -109,3 +109,17 @@ try:
 except NameError:
     __all__ = ["dem_stats", "dem_normalize"]
 # T02-END:dem-all
+
+# T11-BEGIN:grid-python-helpers
+def generate_grid(nx: int, nz: int, spacing=(1.0, 1.0), origin="center"):
+    """
+    Return (positions[N,3], uvs[N,2], indices[M]) for a regular grid on XZ.
+    positions are float32, uvs float32 in [0,1], indices uint32 (triangle list).
+    """
+    from ._vulkan_forge import grid_generate  # type: ignore
+    return grid_generate(int(nx), int(nz), tuple(map(float, spacing)), str(origin))
+try:
+    __all__ += ["generate_grid"]
+except NameError:
+    __all__ = ["generate_grid"]
+# T11-END:grid-python-helpers

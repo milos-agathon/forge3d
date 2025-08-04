@@ -26,7 +26,9 @@
       "Bash(git --no-pager diff --unified=3 -- README.md)",
       "Bash(git add:*)",
       "Bash(git --no-pager diff --cached -- python/vulkan_forge/__init__.py)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(unset CONDA_PREFIX)",
+      "Bash(pytest:*)"
     ],
     "deny": []
   }
