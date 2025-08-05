@@ -377,6 +377,17 @@ impl Renderer {
             return Err(pyo3::exceptions::PyRuntimeError::new_err("heightmap cannot be empty"));
         }
 
+        // Compute height range for colormap normalization
+        let h_min = heights.iter().fold(f32::INFINITY, |acc, &h| acc.min(h));
+        let h_max = heights.iter().fold(f32::NEG_INFINITY, |acc, &h| acc.max(h));
+        
+        // Validate colormap parameter
+        if !["viridis", "magma", "terrain"].contains(&colormap.as_str()) {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                format!("Unknown colormap '{}'. Supported: viridis, magma, terrain", colormap)
+            ));
+        }
+
         self.terrain = Some(TerrainData {
             width: width as u32,
             height: height as u32,
@@ -751,7 +762,7 @@ fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
 // ---------- Python module ----------
 
 #[cfg(feature = "terrain_spike")]
-mod terrain;
+pub mod terrain;
 mod grid;
 
 #[derive(Clone)]

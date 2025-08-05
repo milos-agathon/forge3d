@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "vulkan_forge"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 # A2-BEGIN:cargo-features
 [features]
