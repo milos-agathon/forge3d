@@ -230,6 +230,7 @@ pub struct Renderer {
     ibuf: wgpu::Buffer,
     icount: u32,
     terrain: Option<TerrainData>,
+    terrain_meta: renderer::TerrainMeta,
     height_tex: Option<wgpu::Texture>,
     height_view: Option<wgpu::TextureView>,
     height_sampler: Option<wgpu::Sampler>,
@@ -258,6 +259,7 @@ impl Renderer {
             readback_buf, readback_size: 4,
             pipeline, vbuf, ibuf, icount,
             terrain: None,
+            terrain_meta: renderer::TerrainMeta::default(),
             height_tex: None,
             height_view: None,
             height_sampler: None,
@@ -377,9 +379,10 @@ impl Renderer {
             return Err(pyo3::exceptions::PyRuntimeError::new_err("heightmap cannot be empty"));
         }
 
-        // Compute height range for colormap normalization
-        let h_min = heights.iter().fold(f32::INFINITY, |acc, &h| acc.min(h));
-        let h_max = heights.iter().fold(f32::NEG_INFINITY, |acc, &h| acc.max(h));
+        // Compute height range for colormap normalization using terrain_stats
+        // T02-BEGIN:invoke-dem-range
+        self.terrain_meta.compute_and_store_h_range(&heights);
+        // T02-END:invoke-dem-range
         
         // Validate colormap parameter
         if !["viridis", "magma", "terrain"].contains(&colormap.as_str()) {
@@ -407,6 +410,15 @@ impl Renderer {
         let stats = dem_stats_from_slice(&terr.heights);
         Ok((stats.min, stats.max, stats.mean, stats.std))
     }
+
+    /// Override the height normalization range used for color & lighting.
+    /// Raises `ValueError` if `min >= max`.
+    // T02-BEGIN:set-height-range-python
+    #[pyo3(text_signature = "($self, min, max)")]
+    pub fn set_height_range(&mut self, min: f32, max: f32) -> pyo3::PyResult<()> {
+        self.terrain_meta.set_height_range(min, max)
+    }
+    // T02-END:set-height-range-python
 
     #[pyo3(text_signature = "($self, mode, range=None, eps=1e-8)")]
     pub fn normalize_terrain(&mut self, mode: &str, range: Option<(f32, f32)>, eps: Option<f32>) -> pyo3::PyResult<()> {
@@ -764,6 +776,8 @@ fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
 #[cfg(feature = "terrain_spike")]
 pub mod terrain;
 mod grid;
+mod terrain_stats;
+mod renderer;
 
 #[derive(Clone)]
 struct TerrainData {

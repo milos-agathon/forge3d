@@ -35,7 +35,16 @@
       "Bash(git --no-pager diff --unified=3 -- tests/test_height_upload.py)",
       "Bash(cargo check:*)",
       "Bash(cargo test:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(grep:*)",
+      "Bash(true)",
+      "mcp__ide__executeCode",
+      "Bash(git --no-pager diff --unified=3 -- \"src/terrain_stats.rs\")",
+      "Bash(git --no-pager diff --no-index /dev/null src/terrain_stats.rs)",
+      "Bash(git --no-pager diff --no-index /dev/null src/renderer.rs)",
+      "Bash(git --no-pager diff --no-index /dev/null tests/test_dem_stats.py)",
+      "Bash(set \"CONDA_PREFIX=\")",
+      "Bash(git --no-pager diff --unified=3 -- src/renderer.rs)"
     ],
     "deny": []
   }

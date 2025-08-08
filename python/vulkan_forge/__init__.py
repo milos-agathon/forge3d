@@ -8,6 +8,11 @@ Public API:
 - render_triangle_png(path:str, width:int, height:int) -> None
 - Optional (feature 'terrain_spike'): TerrainSpike(width:int, height:int, grid:int=128).render_png(path)
 - __version__: str
+
+<!-- T02-BEGIN:doc -->
+`Renderer.set_height_range(min, max)` overrides the auto-computed `[h_min, h_max]`
+used to normalize heights into `[0, 1]` for colormap & lighting.
+<!-- T02-END:doc -->
 """
 from __future__ import annotations
 import importlib, importlib.util, sys

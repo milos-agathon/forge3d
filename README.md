@@ -66,6 +66,18 @@ render_triangle_png("triangle.png", 512, 512)
 
 > Legacy compatibility: `from vshade import Renderer` is a re-export of `vulkan_forge.Renderer`.
 
+<!-- T02-BEGIN:api -->
+### DEM normalization
+
+```python
+# Override auto min/max when outliers skew the range
+renderer.set_height_range(min_elev_m, max_elev_m)
+```
+
+Auto-computed range uses a robust 1–99 percentile clamp to ignore outliers.
+
+<!-- T02-END:api -->
+
 <!-- T01-BEGIN:api -->
 ## Public API (Python)
 
