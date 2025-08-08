@@ -2,7 +2,7 @@
 # vulkan-forge
 
 Headless, deterministic triangle renderer built on **wgpu** with a **PyO3** Python API.  
-Status: pre-0.1 (research/prototyping). Latest release: **0.0.4**.
+Status: pre-0.1 (research/prototyping). Latest release: **0.0.5**.
 
 ## Quickstart (from source)
 
@@ -79,6 +79,18 @@ Auto-computed range uses a robust 1–99 percentile clamp to ignore outliers.
 <!-- T02-END:api -->
 
 <!-- T01-BEGIN:api -->
+<!-- T22-BEGIN:api -->
+### Lighting & Tonemap
+
+```python
+renderer.set_sun(elevation_deg=35.0, azimuth_deg=120.0)
+renderer.set_exposure(1.1)  # > 0
+```
+
+Tonemapping uses **Reinhard** with **gamma 2.2** on linear RGB.
+
+<!-- T22-END:api -->
+
 ## Public API (Python)
 
 ```python

@@ -1,16 +1,17 @@
 // A2-BEGIN:terrain-module
 #![allow(dead_code)]
 
-use std::num::NonZeroU32;
 use pyo3::prelude::*;
+use std::num::NonZeroU32;
 use wgpu::util::DeviceExt;
 
-// Built-in colormap palettes (256 RGBA8 values each)
-const VIRIDIS_PALETTE: &[u8] = include_bytes!("../data/viridis_256.rgba");
-const MAGMA_PALETTE: &[u8] = include_bytes!("../data/magma_256.rgba");
-const TERRAIN_PALETTE: &[u8] = include_bytes!("../data/terrain_256.rgba");
+// T33-BEGIN:colormap-imports
+use crate::colormap::{resolve_bytes, SUPPORTED};
+// T33-END:colormap-imports
 
-#[derive(Clone, Copy)]
+// ---------- Colormaps ----------
+
+#[derive(Clone, Copy, Debug)]
 pub enum ColormapType {
     Viridis,
     Magma,
@@ -18,30 +19,27 @@ pub enum ColormapType {
 }
 
 impl ColormapType {
-    pub fn get_palette_data(&self) -> &'static [u8] {
-        match self {
-            ColormapType::Viridis => VIRIDIS_PALETTE,
-            ColormapType::Magma => MAGMA_PALETTE,
-            ColormapType::Terrain => TERRAIN_PALETTE,
-        }
-    }
-    
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "viridis" => Some(ColormapType::Viridis),
-            "magma" => Some(ColormapType::Magma),
-            "terrain" => Some(ColormapType::Terrain),
+            "viridis" => Some(Self::Viridis),
+            "magma" => Some(Self::Magma),
+            "terrain" => Some(Self::Terrain),
             _ => None,
         }
     }
-}
 
-// CPU reference for unit testing
-pub fn sample_colormap_cpu(colormap: ColormapType, normalized_height: f32) -> [u8; 4] {
-    let palette = colormap.get_palette_data();
-    let idx = (normalized_height.clamp(0.0, 1.0) * 255.0) as usize;
-    let offset = idx * 4;
-    [palette[offset], palette[offset + 1], palette[offset + 2], palette[offset + 3]]
+    /// Decode embedded 256×1 PNG to RGBA8
+    pub fn get_palette_data(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let name = match self {
+            Self::Viridis => "viridis",
+            Self::Magma => "magma",
+            Self::Terrain => "terrain",
+        };
+        let png = resolve_bytes(name).map_err(|_| "unknown colormap")?;
+        let img = image::load_from_memory(png)?;
+        let rgba = img.to_rgba8();
+        Ok(rgba.as_raw().clone())
+    }
 }
 
 pub struct ColormapLUT {
@@ -51,40 +49,49 @@ pub struct ColormapLUT {
 }
 
 impl ColormapLUT {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, colormap: ColormapType) -> Self {
-        let palette_data = colormap.get_palette_data();
-        
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("colormap_lut"),
-            size: wgpu::Extent3d { width: 256, height: 1, depth_or_array_layers: 1 },
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        which: ColormapType,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let palette = which.get_palette_data()?;
+        // 256×1 RGBA8
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("colormap-lut"),
+            size: wgpu::Extent3d {
+                width: 256,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        
         queue.write_texture(
             wgpu::ImageCopyTexture {
-                texture: &texture,
+                texture: &tex,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            palette_data,
+            &palette,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(256 * 4), // 256 RGBA8 pixels = 1024 bytes
-                rows_per_image: Some(1),
+                bytes_per_row: Some(NonZeroU32::new(256 * 4).unwrap().into()),
+                rows_per_image: Some(NonZeroU32::new(1).unwrap().into()),
             },
-            wgpu::Extent3d { width: 256, height: 1, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: 256,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
         );
-        
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("colormap_sampler"),
+            label: Some("colormap-lut-sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -93,38 +100,119 @@ impl ColormapLUT {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        
-        Self { texture, view, sampler }
+        Ok(Self { texture: tex, view, sampler })
     }
 }
 
-// Terrain uniforms structure with height normalization
+// ---------- Uniforms (std140-compatible, 176 bytes) ----------
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TerrainUniforms {
-    pub mvp: [[f32; 4]; 4], // 64 bytes - mat4x4
-    pub light: [f32; 4],    // 16 bytes - vec4 (xyz + padding)
-    pub h_min: f32,         // 4 bytes
-    pub h_max: f32,         // 4 bytes  
-    pub exaggeration: f32,  // 4 bytes
-    pub _padding: f32,      // 4 bytes - total 96 bytes (aligned)
+    pub view: [[f32; 4]; 4],           // 64 B
+    pub proj: [[f32; 4]; 4],           // 64 B
+    pub sun_exposure: [f32; 4],        // (sun_dir.xyz, exposure) -> 16 B
+    pub spacing_h_exag_pad: [f32; 4],  // (spacing, h_range, exaggeration, 0) -> 16 B
+    pub _pad_tail: [f32; 4],           // final 16 B lane to satisfy 176 total
 }
 
 impl TerrainUniforms {
-    pub fn new(mvp: glam::Mat4, light: glam::Vec3, h_min: f32, h_max: f32, exaggeration: f32) -> Self {
+    /// Note: `h_range = max - min` (pass a single range, not min/max separately)
+    pub fn new(
+        view: glam::Mat4,
+        proj: glam::Mat4,
+        sun_dir: glam::Vec3,
+        exposure: f32,
+        spacing: f32,
+        h_range: f32,
+        exaggeration: f32,
+    ) -> Self {
         Self {
-            mvp: mvp.to_cols_array_2d(),
-            light: [light.x, light.y, light.z, 0.0],
-            h_min,
-            h_max,
-            exaggeration,
-            _padding: 0.0,
+            view: view.to_cols_array_2d(),
+            proj: proj.to_cols_array_2d(),
+            sun_exposure: [sun_dir.x, sun_dir.y, sun_dir.z, exposure],
+            spacing_h_exag_pad: [spacing, h_range, exaggeration, 0.0],
+            _pad_tail: [0.0; 4],
+        }
+    }
+
+    pub fn from_mvp_legacy(
+        mvp: glam::Mat4,
+        light: glam::Vec3,
+        h_min: f32,
+        h_max: f32,
+        exaggeration: f32,
+    ) -> Self {
+        let view = glam::Mat4::IDENTITY;
+        let h_range = h_max - h_min;
+        Self::new(view, mvp, light, 1.0, 1.0, h_range, exaggeration)
+    }
+
+    pub fn for_rendering(
+        view_matrix: glam::Mat4,
+        proj_matrix: glam::Mat4,
+        sun_direction: glam::Vec3,
+        exposure: f32,
+        terrain_spacing: f32,
+        height_range: f32,
+        height_exaggeration: f32,
+    ) -> Self {
+        Self::new(
+            view_matrix,
+            proj_matrix,
+            sun_direction,
+            exposure,
+            terrain_spacing,
+            height_range,
+            height_exaggeration,
+        )
+    }
+}
+
+// T2.1 Global state
+#[derive(Debug, Clone)]
+pub struct Globals {
+    pub sun_dir: glam::Vec3,
+    pub exposure: f32,
+    pub spacing: f32,
+    pub h_min: f32,
+    pub h_max: f32,
+    pub exaggeration: f32,
+}
+
+impl Default for Globals {
+    fn default() -> Self {
+        Self {
+            sun_dir: glam::Vec3::new(0.5, 0.8, 0.6).normalize(),
+            exposure: 1.0,
+            spacing: 1.0,
+            // choose a sane range matching our analytic spike heights (~±0.5)
+            h_min: -0.5,
+            h_max: 0.5,
+            exaggeration: 1.0,
         }
     }
 }
 
+impl Globals {
+    pub fn to_uniforms(&self, view: glam::Mat4, proj: glam::Mat4) -> TerrainUniforms {
+        let h_range = self.h_max - self.h_min;
+        TerrainUniforms::new(
+            view,
+            proj,
+            self.sun_dir,
+            self.exposure,
+            self.spacing,
+            h_range,
+            self.exaggeration,
+        )
+    }
+}
+
+// ---------- Render spike object used by tests ----------
+
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
-const DEPTH_FORMAT:   wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 #[pyclass(module = "_vulkan_forge", name = "TerrainSpike")]
 pub struct TerrainSpike {
@@ -133,12 +221,13 @@ pub struct TerrainSpike {
     grid: u32,
 
     device: wgpu::Device,
-    queue:  wgpu::Queue,
+    queue: wgpu::Queue,
 
     pipeline: wgpu::RenderPipeline,
     vbuf: wgpu::Buffer,
     ibuf: wgpu::Buffer,
     nidx: u32,
+
     ubo: wgpu::Buffer,
     ubo_bind_group: wgpu::BindGroup,
     colormap_lut: ColormapLUT,
@@ -147,6 +236,8 @@ pub struct TerrainSpike {
     color_view: wgpu::TextureView,
     depth: wgpu::Texture,
     depth_view: wgpu::TextureView,
+
+    globals: Globals,
 }
 
 #[pymethods]
@@ -155,18 +246,17 @@ impl TerrainSpike {
     #[pyo3(text_signature = "(width, height, grid=128, colormap='viridis')")]
     pub fn new(width: u32, height: u32, grid: Option<u32>, colormap: Option<String>) -> PyResult<Self> {
         let grid = grid.unwrap_or(128).max(2);
-        let colormap_type = match colormap {
-            Some(ref s) => {
-                ColormapType::from_str(s).ok_or_else(|| {
-                    pyo3::exceptions::PyRuntimeError::new_err(
-                        format!("Unknown colormap '{}'. Supported: viridis, magma, terrain", s)
-                    )
-                })?
-            }
-            None => ColormapType::Viridis, // Default when not specified
+
+        let which = match colormap {
+            Some(ref s) => ColormapType::from_str(s).ok_or_else(|| {
+                pyo3::exceptions::PyRuntimeError::new_err(
+                    format!("Unknown colormap '{}'. Supported: {}", s, SUPPORTED.join(", "))
+                )
+            })?,
+            None => ColormapType::Viridis,
         };
 
-        // Instance + adapter + device
+        // Instance/adapter/device
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
@@ -226,7 +316,7 @@ impl TerrainSpike {
                     ty: wgpu::BindingType::Buffer{
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size: None, // wgpu will validate vs shader (expects 176)
                     },
                     count: None,
                 },
@@ -261,16 +351,14 @@ impl TerrainSpike {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: (4 * 3 + 4 * 3) as wgpu::BufferAddress, // pos(vec3) + normal(vec3)
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[
-                            wgpu::VertexAttribute { shader_location: 0, offset: 0,                     format: wgpu::VertexFormat::Float32x3 },
-                            wgpu::VertexAttribute { shader_location: 1, offset: (4 * 3) as u64,        format: wgpu::VertexFormat::Float32x3 },
-                        ],
-                    },
-                ],
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: (4 * 3 + 4 * 3) as wgpu::BufferAddress, // pos(vec3) + normal(vec3)
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute { shader_location: 0, offset: 0,                     format: wgpu::VertexFormat::Float32x3 },
+                        wgpu::VertexAttribute { shader_location: 1, offset: (4 * 3) as u64,        format: wgpu::VertexFormat::Float32x3 },
+                    ],
+                }],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -301,24 +389,28 @@ impl TerrainSpike {
 
         // Mesh + uniforms
         let (vbuf, ibuf, nidx) = build_grid_mesh(&device, grid);
-        let (mvp, light) = build_view_matrices(width, height);
-        let terrain_uniforms = TerrainUniforms::new(mvp, light, -1.0, 1.0, 1.0); // Default height range
+        let (view, proj, light) = build_view_matrices(width, height);
+
+        let globals = Globals::default();
+        // Use globals (with h_min/h_max) -> h_range is computed inside to_uniforms()
+        let uniforms = globals.to_uniforms(view, proj);
+
         let ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
-            label: Some("ubo"),
-            contents: bytemuck::cast_slice(&[terrain_uniforms]),
+            label: Some("terrain-ubo"),
+            contents: bytemuck::cast_slice(&[uniforms]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        
-        // Create colormap LUT texture
-        let colormap_lut = ColormapLUT::new(&device, &queue, colormap_type);
-        
+
+        let lut = ColormapLUT::new(&device, &queue, which)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
         let ubo_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
             label: Some("ubo-bdg"),
             layout: &ubo_layout,
             entries: &[
                 wgpu::BindGroupEntry{ binding: 0, resource: ubo.as_entire_binding() },
-                wgpu::BindGroupEntry{ binding: 1, resource: wgpu::BindingResource::TextureView(&colormap_lut.view) },
-                wgpu::BindGroupEntry{ binding: 2, resource: wgpu::BindingResource::Sampler(&colormap_lut.sampler) },
+                wgpu::BindGroupEntry{ binding: 1, resource: wgpu::BindingResource::TextureView(&lut.view) },
+                wgpu::BindGroupEntry{ binding: 2, resource: wgpu::BindingResource::Sampler(&lut.sampler) },
             ],
         });
 
@@ -328,15 +420,16 @@ impl TerrainSpike {
             pipeline,
             vbuf, ibuf, nidx,
             ubo, ubo_bind_group,
-            colormap_lut,
+            colormap_lut: lut,
             color, color_view,
             depth, depth_view,
+            globals,
         })
     }
 
     #[pyo3(text_signature = "($self, path)")]
     pub fn render_png(&mut self, path: String) -> PyResult<()> {
-        // Draw
+        // Encode pass
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("terrain-encoder") });
         {
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor{
@@ -345,7 +438,7 @@ impl TerrainSpike {
                     view: &self.color_view,
                     resolve_target: None,
                     ops: wgpu::Operations{
-                        load:  wgpu::LoadOp::Clear(wgpu::Color{ r: 1.0, g: 1.0, b: 1.0, a: 1.0 }),
+                        load:  wgpu::LoadOp::Clear(wgpu::Color{ r: 0.02, g: 0.02, b: 0.03, a: 1.0 }),
                         store: wgpu::StoreOp::Store,
                     }
                 })],
@@ -390,7 +483,6 @@ impl TerrainSpike {
                 buffer: &readback,
                 layout: wgpu::ImageDataLayout{
                     offset: 0,
-                    // wgpu 0.19 expects Option<u32> here; convert NonZeroU32 → u32 via .into()
                     bytes_per_row: Some(NonZeroU32::new(padded_bpr).unwrap().into()),
                     rows_per_image: Some(NonZeroU32::new(self.height).unwrap().into()),
                 }
@@ -399,7 +491,6 @@ impl TerrainSpike {
         );
         self.queue.submit(Some(encoder.finish()));
 
-        // Map & unpad
         let slice = readback.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_|{});
         self.device.poll(wgpu::Maintain::Wait);
@@ -416,14 +507,13 @@ impl TerrainSpike {
 
         let img = image::RgbaImage::from_raw(self.width, self.height, pixels)
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Invalid image buffer"))?;
-        img.save(path).map_err(|e|
-            pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
-        )?;
+        img.save(path).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(())
     }
 }
 
-// Build a simple XZ grid with analytic height and CPU normals.
+// ---------- Geometry (analytic spike) ----------
+
 fn build_grid_mesh(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, wgpu::Buffer, u32) {
     let n = n as usize;
     let w = n;
@@ -433,7 +523,6 @@ fn build_grid_mesh(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, wgpu::Buffer
     let step_x = (2.0 * scale) / (w as f32 - 1.0);
     let step_z = (2.0 * scale) / (h as f32 - 1.0);
 
-    // Height function (removed unnecessary outer parentheses)
     let f = |x: f32, z: f32| -> f32 {
         (x * 1.3).sin() * 0.25 + (z * 1.1).cos() * 0.25
     };
@@ -504,8 +593,8 @@ fn build_grid_mesh(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, wgpu::Buffer
     (vbuf, ibuf, idx.len() as u32)
 }
 
-// MVP + light direction (separated for new uniform structure)
-fn build_view_matrices(width: u32, height: u32) -> (glam::Mat4, glam::Vec3) {
+// MVP + light
+fn build_view_matrices(width: u32, height: u32) -> (glam::Mat4, glam::Mat4, glam::Vec3) {
     let aspect = width as f32 / height as f32;
     let proj = glam::Mat4::perspective_rh_gl(45f32.to_radians(), aspect, 0.1, 100.0);
     let view = glam::Mat4::look_at_rh(
@@ -513,11 +602,7 @@ fn build_view_matrices(width: u32, height: u32) -> (glam::Mat4, glam::Vec3) {
         glam::Vec3::ZERO,
         glam::Vec3::Y,
     );
-    let model = glam::Mat4::IDENTITY;
-    let mvp = proj * view * model;
-
     let light = glam::Vec3::new(0.5, 1.0, 0.3).normalize();
-    
-    (mvp, light)
+    (view, proj, light)
 }
 // A2-END:terrain-module

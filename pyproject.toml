@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "vulkan-forge"
-version = "0.0.4"
+version = "0.0.5"
 description = "Rust-first wgpu/WebGPU renderer with a thin Python API"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,5 +15,5 @@ authors = [{ name = "Your Name" }]
 bindings = "pyo3"
 python-source = "python"
 module-name = "vulkan_forge._vulkan_forge"
-features = []
+features = ["terrain_spike"]
 strip = true

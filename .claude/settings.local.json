@@ -44,7 +44,19 @@
       "Bash(git --no-pager diff --no-index /dev/null src/renderer.rs)",
       "Bash(git --no-pager diff --no-index /dev/null tests/test_dem_stats.py)",
       "Bash(set \"CONDA_PREFIX=\")",
-      "Bash(git --no-pager diff --unified=3 -- src/renderer.rs)"
+      "Bash(git --no-pager diff --unified=3 -- src/renderer.rs)",
+      "Bash(unset CONDA_DEFAULT_ENV)",
+      "Bash(git --no-pager diff --unified=3 -- \"pyproject.toml\")",
+      "Bash(git --no-pager diff --unified=3 -- \"src/shaders/terrain.wgsl\")",
+      "Bash(git --no-pager diff --unified=3 -- \"src/terrain.rs\")",
+      "Bash(git --no-pager diff --no-index /dev/null src/camera.rs)",
+      "Bash(git --no-pager diff --no-index /dev/null tests/test_tonemap.py)",
+      "Bash(dir:*)",
+      "Bash(if [ -n \"$VIRTUAL_ENV:-\" ])",
+      "Bash([ -n \"$CONDA_PREFIX:-\" ])",
+      "Bash(then echo \"Both VIRTUAL_ENV and CONDA_PREFIX set; unsetting CONDA_* for this build.\")",
+      "Bash(unset:*)",
+      "Bash(fi)"
     ],
     "deny": []
   }

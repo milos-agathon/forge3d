@@ -13,6 +13,11 @@ Public API:
 `Renderer.set_height_range(min, max)` overrides the auto-computed `[h_min, h_max]`
 used to normalize heights into `[0, 1]` for colormap & lighting.
 <!-- T02-END:doc -->
+
+<!-- T22-BEGIN:doc -->
+`Renderer.set_sun(elevation_deg, azimuth_deg)` sets the light direction (degrees).
+`Renderer.set_exposure(value)` controls tonemapping exposure (> 0).
+<!-- T22-END:doc -->
 """
 from __future__ import annotations
 import importlib, importlib.util, sys

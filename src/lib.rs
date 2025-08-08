@@ -234,6 +234,12 @@ pub struct Renderer {
     height_tex: Option<wgpu::Texture>,
     height_view: Option<wgpu::TextureView>,
     height_sampler: Option<wgpu::Sampler>,
+    // T22-BEGIN:sun-and-exposure
+    #[cfg(feature = "terrain_spike")]
+    globals: terrain::Globals,
+    #[cfg(feature = "terrain_spike")]
+    globals_dirty: bool,
+    // T22-END:sun-and-exposure
 }
 
 #[pymethods]
@@ -263,6 +269,12 @@ impl Renderer {
             height_tex: None,
             height_view: None,
             height_sampler: None,
+            // T22-BEGIN:sun-and-exposure
+            #[cfg(feature = "terrain_spike")]
+            globals: terrain::Globals::default(),
+            #[cfg(feature = "terrain_spike")]
+            globals_dirty: true,
+            // T22-END:sun-and-exposure
         }
     }
 
@@ -384,12 +396,17 @@ impl Renderer {
         self.terrain_meta.compute_and_store_h_range(&heights);
         // T02-END:invoke-dem-range
         
-        // Validate colormap parameter
-        if !["viridis", "magma", "terrain"].contains(&colormap.as_str()) {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err(
-                format!("Unknown colormap '{}'. Supported: viridis, magma, terrain", colormap)
-            ));
+        // Validate colormap parameter via central SUPPORTED list
+        // T33-BEGIN:colormap-validation
+        {
+            use crate::colormap::SUPPORTED;
+            if !SUPPORTED.contains(&colormap.as_str()) {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    format!("Unknown colormap '{}'. Supported: {}", colormap, SUPPORTED.join(", "))
+                ));
+            }
         }
+        // T33-END:colormap-validation
 
         self.terrain = Some(TerrainData {
             width: width as u32,
@@ -419,6 +436,43 @@ impl Renderer {
         self.terrain_meta.set_height_range(min, max)
     }
     // T02-END:set-height-range-python
+
+    // T22-BEGIN:sun-and-exposure
+    #[cfg(feature = "terrain_spike")]
+    /// Set sun by spherical angles (degrees).
+    /// Basis: Y-up, right-handed; azimuth=0° along +X (CCW toward +Z), elevation=0° on horizon.
+    fn set_sun_dir_spherical(&mut self, elevation_deg: f32, azimuth_deg: f32) {
+        #[inline] fn deg(x: f32) -> f32 { x * std::f32::consts::PI / 180.0 }
+        let el = deg(elevation_deg);
+        let az = deg(azimuth_deg);
+        let (se, ce) = (el.sin(), el.cos());
+        let (sa, ca) = (az.sin(), az.cos());
+        let dir = glam::Vec3::new(ce * ca, se, ce * sa).normalize_or_zero();
+        self.globals.sun_dir = dir;
+        self.globals_dirty = true;
+    }
+
+    #[cfg(feature = "terrain_spike")]
+    #[pyo3(text_signature = "($self, elevation_deg, azimuth_deg)")]
+    fn set_sun(&mut self, elevation_deg: f32, azimuth_deg: f32) -> PyResult<()> {
+        if !elevation_deg.is_finite() || !azimuth_deg.is_finite() {
+            return Err(pyo3::exceptions::PyValueError::new_err("angles must be finite"));
+        }
+        self.set_sun_dir_spherical(elevation_deg, azimuth_deg);
+        Ok(())
+    }
+
+    #[cfg(feature = "terrain_spike")]
+    #[pyo3(text_signature = "($self, exposure)")]
+    fn set_exposure(&mut self, exposure: f32) -> PyResult<()> {
+        if !exposure.is_finite() || exposure <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err("exposure must be > 0"));
+        }
+        self.globals.exposure = exposure;
+        self.globals_dirty = true;
+        Ok(())
+    }
+    // T22-END:sun-and-exposure
 
     #[pyo3(text_signature = "($self, mode, range=None, eps=1e-8)")]
     pub fn normalize_terrain(&mut self, mode: &str, range: Option<(f32, f32)>, eps: Option<f32>) -> pyo3::PyResult<()> {
@@ -775,6 +829,16 @@ fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
 
 #[cfg(feature = "terrain_spike")]
 pub mod terrain;
+// T33-BEGIN:colormap-registry
+pub mod colormap;
+// T33-END:colormap-registry
+pub mod camera;
+
+// T2.1 Infrastructure re-exports for easy access
+#[cfg(feature = "terrain_spike")]
+pub use terrain::{TerrainUniforms, Globals};
+// (re-exporting camera_utils/verify_t21_infrastructure is optional; omitted to avoid cfg/name drift)
+
 mod grid;
 mod terrain_stats;
 mod renderer;
