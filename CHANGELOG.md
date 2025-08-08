@@ -1,5 +1,36 @@
 # Changelog
 
+## \[0.0.5] - 2025-08-08
+
+### Added
+
+* **T33 – Colormap LUT & assets:** Embedded 256×1 PNG LUTs (`viridis`, `magma`, `terrain`) and a central registry `colormap.rs` exposing `SUPPORTED` and `resolve_bytes()`. LUTs are sampled in the fragment shader for height-mapped color.
+* **A2 – Terrain spike renderer:** `TerrainSpike(width, height, grid=128, colormap='viridis')` headless renderer with off-screen target and `render_png(path)` for test coverage.
+* **T2.2 – Sun direction & tonemap:** Uniforms now carry `sun_dir` and `exposure`; shader computes diffuse `N·L` and applies Reinhard tonemap for perceptually non-flat output. Python helpers `set_sun(elevation_deg, azimuth_deg)` and `set_exposure(exposure)` (gated by `terrain_spike` feature).
+* **T1.1 – Grid index/vertex generator:** CPU grid mesh (positions + normals) for the spike terrain; Python wrapper `grid_generate(nx, nz, spacing=(dx,dy), origin='center')` returning NumPy arrays.
+
+### Changed
+
+* **Uniform layout:** `TerrainUniforms` repacked to std140-compatible **176 bytes**:
+  `view(64) + proj(64) + sun_exposure(16) + spacing_h_exag_pad(16) + _pad_tail(16)`.
+  Matches WGSL reflection and avoids validation errors.
+* **Shader pipeline:** `terrain.wgsl` updated to consume the new uniform layout, sample the LUT, apply diffuse lighting, and tonemap; bindings: `@group(0) @binding(0)=UBO`, `1=LUT texture_2d`, `2=Sampler`.
+* **Colormap selection:** Strict, case-sensitive names validated against `SUPPORTED`; shared error text across Rust/Python to keep tests deterministic.
+
+### Fixed
+
+* **wgpu validation panic** “buffer size 164, shader expects 176”: corrected by the new UBO layout.
+* **WGSL parse error** (“expected ',', found ';'”): struct fields now comma-separated; shader module creation no longer fails.
+* **wgpu 0.19 API mismatch**: `ImageDataLayout.{bytes_per_row,rows_per_image}` now `Option<u32>`—converted `NonZeroU32` via `.into()` at all call sites.
+* **Colormap ‘magma’ rejected**: registry and asset mapping added; constructor accepts `"magma"`.
+* **Uniform PNG output (\~710B)**: shader now maps height→LUT and lights scene; PNG sizes comfortably exceed the test threshold.
+
+### Technical Notes
+
+* Off-screen color target `Rgba8UnormSrgb` with 256-byte row alignment for copies; readback performs CPU unpadding.
+* Validation layers remain enabled in Debug; any device/shader error is a test failure.
+* Paths kept zero-copy for NumPy interop; no unnecessary heap churn during readbacks.
+
 ## [0.0.4] - 2025-08-05
 ### Added
 - **T0.1 – Public API & validation:** `Renderer.add_terrain(heightmap, spacing, exaggeration, colormap)` with robust NumPy array validation; accepts `float32`/`float64` with shape `(H, W)` and C‑contiguous requirement; clear `PyRuntimeError` for invalid inputs.
