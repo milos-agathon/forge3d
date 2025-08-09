@@ -2177,12 +2177,7 @@ Great—here’s a **fine‑grained task plan** for the remaining phases, struct
 
 ---
 
-I could **update the repo** to include:
 
-* The SSIM test harness and goldens skeleton (P5.4–P5.5).
-* The **turntable helper** and CLI (P5.7).
-* The **environment report** + `prefer_software` flag (W6.4–W6.5).
-  Say **“apply Week‑5/6 scaffolding”** and I’ll generate an updated ZIP ready for your team.
 
 ---
 
@@ -2235,48 +2230,3 @@ r.render_png("frame.png")
 (For MVP, vectors can accept either packed arrays or a minimal Python-side adapter that extracts coords from GeoPandas/Shapely and passes flat arrays into Rust.)
 
 ---
-
-## 4) Technical choices & justifications
-
-* **Rust/wgpu core** gives us predictable perf, clean lifetimes, and single place to manage device features/limits.
-* **WGSL** shaders: native for `wgpu`; easier cross‑platform than GLSL→SPIR‑V toolchains.
-* **NumPy interop** via `numpy` crate: directly map `PyArray` to Rust slices without extra copies (host side).
-* **ABI3 wheels** (`pyo3` with `abi3-py310`) reduce wheel count and simplify distribution.
-
----
-
-## 5) Testing, determinism, and CI
-
-* **Unit tests (Rust):** buffer packing, LOD selection, tessellation winding (holes).
-* **Golden image tests (Python):** For each demo, render → compare SSIM/PSNR with tolerances per backend.
-* **CI:** The included workflow builds wheels and runs a small import+render test. Add matrix jobs that set `WGPU_BACKEND=metal/vulkan/dx12` as sanity checks.
-
----
-
-## 6) Risks & mitigations (Option B‑specific)
-
-* **wgpu version churn:** Pin a minor version; encapsulate device/adapter selection in `context.rs`.
-* **Row‑padding bugs:** Already handled in the starter. Keep a helper to unpad rows.
-* **Large readbacks:** Use a persistent readback buffer sized to max frame, reuse per frame; batch copy commands.
-* **Tessellation robustness:** Start with `earcutr` for polygons; clamp vertex counts; add simplification prepass for pathological inputs.
-
----
-
-## 7) Your immediate to‑dos (next 3–5 days)
-
-1. **Clone/unzip the starter** and confirm local build:
-
-   * `maturin develop --release`
-   * `python -m examples.triangle`
-2. **Decide minimum supported Python/OS matrix** (I suggest: 3.10–3.12; Win10+, Ubuntu 22.04+, macOS 13+).
-3. **Add device diagnostics** (`report_device()` in Rust emitting adapter name, limits, features).
-4. **Start A2 (Terrain spike):**
-
-   * Add `terrain.rs` with grid generation + WGSL shading.
-   * Expose `add_terrain` and `render_rgba` in `lib.rs`.
-5. **Start A3 (Geo spike):**
-
-   * Decide on polygon data format crossing FFI (flat `f32` XY arrays + ring offsets is robust).
-   * Implement `add_polygons_raw(coords, ring_offsets, feature_offsets, rgba)` in Rust; provide a small Python helper to convert from GeoPandas.
-
-If you’d like, I can extend the repo right away with the **terrain spike scaffolding** (Rust module, WGSL stub, Python signature) so your team can fill in the shader and grid builder—just say the word and I’ll generate a second ZIP with that pre‑wired.
