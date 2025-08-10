@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(python:*)",
+      "Bash(maturin develop:*)",
+      "Bash(set CONDA_PREFIX=)",
+      "Bash(set CONDA_DEFAULT_ENV=)",
+      "Bash(set CONDA_PYTHON_EXE=)",
+      "Bash(powershell:*)",
+      "Bash(cargo test:*)",
+      "Bash(git add:*)",
+      "Bash(git --no-pager diff --unified=3 -- README.md)",
+      "Bash(git --no-pager diff --unified=3 -- src/terrain.rs)",
+      "Bash(git --no-pager diff --unified=3 -- src/terrain/mod.rs)",
+      "Bash(git --no-pager diff --cached -- src/terrain/mod.rs)",
+      "Bash(git --no-pager diff --cached -- src/terrain/mesh.rs)",
+      "Bash($env:CONDA_PREFIX = \"\")",
+      "Bash(unset CONDA_PREFIX)",
+      "Bash(set PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1)",
+      "Bash(set VIRTUAL_ENV=)",
+      "Bash(cmd /C \"set VIRTUAL_ENV= & set PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 & maturin develop --release\")",
+      "Bash(echo $VIRTUAL_ENV)",
+      "Bash(echo $CONDA_PREFIX)",
+      "Bash(unset VIRTUAL_ENV)",
+      "Bash(export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1)",
+      "Bash(pytest:*)",
+      "Bash(git --no-pager diff --unified=3 -- src/lib.rs)",
+      "Bash(git --no-pager diff --unified=3 -- src/terrain/mesh.rs)",
+      "Bash(git --no-pager diff --unified=3 -- python/vulkan_forge/__init__.py)",
+      "Bash(git --no-pager diff --unified=3 HEAD~1..HEAD -- src/terrain/mod.rs)",
+      "Bash(echo:*)",
+      "Bash(cat:*)"
+    ],
+    "deny": []
+  }
+}

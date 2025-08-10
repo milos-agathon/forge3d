@@ -26,23 +26,6 @@ python -m pip install -U pip maturin numpy
 #   PowerShell: $Env:PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 #   bash/cmd  : export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 maturin develop --release
-
-# 1) Create & activate a venv
-python -m venv .venv
-
-# PowerShell (Windows)
-.\.venv\Scripts\Activate.ps1
-# or Git Bash (Windows)
-source .venv/Scripts/activate
-# or Unix
-source .venv/bin/activate
-
-# 2) Build and install the extension in editable mode
-python -m pip install -U pip maturin numpy
-# If using Python 3.13:
-#   PowerShell: $Env:PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
-#   bash/cmd  : export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
-maturin develop --release
 ```
 
 Render a demo PNG:
@@ -90,6 +73,46 @@ renderer.set_exposure(1.1)  # > 0
 Tonemapping uses **Reinhard** with **gamma 2.2** on linear RGB.
 
 <!-- T22-END:api -->
+
+<!-- T11-BEGIN:mesh-notes -->
+### Grid generator (T1.1)
+
+```python
+from vulkan_forge import grid_generate
+import numpy as np
+
+# Generate 4x3 grid with spacing (2.0, 1.0)
+xy, uv, indices = grid_generate(nx=4, nz=3, spacing=(2.0, 1.0), origin="center")
+# Returns:
+# - xy: (12, 2) float32 array of world XY positions  
+# - uv: (12, 2) float32 array of texture coordinates [0,1]
+# - indices: (36,) uint32 array of triangle indices (CCW winding)
+
+print(f"Grid vertices: {xy.shape} {xy.dtype}")       # (12, 2) float32
+print(f"UV coords: {uv.shape} {uv.dtype}")          # (12, 2) float32  
+print(f"Triangle indices: {indices.shape} {indices.dtype}")  # (36,) uint32
+
+# Create heightmap and render terrain
+heightmap = np.random.rand(128, 128).astype(np.float32) * 100.0
+from vulkan_forge import Renderer
+r = Renderer(512, 384)
+r.add_terrain(heightmap, spacing=(1.0, 1.0), exaggeration=2.0, colormap="terrain")
+r.render_triangle_png("my_terrain.png")
+```
+
+**Validation errors:**
+
+The `grid_generate` function validates all parameters and raises `ValueError` with specific messages:
+
+- `"nx must be >= 2 (got: {nx})"` - Grid dimensions too small
+- `"nz must be >= 2 (got: {nz})"` - Grid dimensions too small  
+- `"spacing values must be > 0 (got: {spacing})"` - Invalid spacing
+- `"origin must be 'center' (got: '{origin}')"` - Unsupported origin mode
+- `"spacing must be a 2-tuple (got: {type(spacing).__name__})"` - Wrong spacing type
+
+- Grid is centered at origin in world XY (Z comes from height texture)
+- UVs cover `[0,1]×[0,1]`; indices are CCW triangles; always uint32 dtype
+<!-- T11-END:mesh-notes -->
 
 ## Public API (Python)
 

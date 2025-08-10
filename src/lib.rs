@@ -827,7 +827,6 @@ fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
 
 // ---------- Python module ----------
 
-#[cfg(feature = "terrain_spike")]
 pub mod terrain;
 // T33-BEGIN:colormap-registry
 pub mod colormap;
@@ -839,7 +838,7 @@ pub mod camera;
 pub use terrain::{TerrainUniforms, Globals};
 // (re-exporting camera_utils/verify_t21_infrastructure is optional; omitted to avoid cfg/name drift)
 
-mod grid;
+// mod grid; // T11: disabled - grid_generate moved to terrain::mesh
 mod terrain_stats;
 mod renderer;
 
@@ -931,7 +930,7 @@ fn normalize_in_place(heights: &mut [f32], mode: NormalizeMode, eps: f32, range:
 fn grid_generate(py: Python<'_>, nx: u32, nz: u32, spacing: (f32, f32), origin: Option<String>)
     -> PyResult<(Bound<'_, PyArray2<f32>>, Bound<'_, PyArray2<f32>>, Bound<'_, PyArray1<u32>>)>
 {
-    grid::grid_generate(py, nx, nz, spacing, origin)
+    terrain::mesh::grid_generate(py, nx, nz, spacing, origin)
 }
 
 #[allow(deprecated)]

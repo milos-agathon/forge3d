@@ -140,3 +140,65 @@ mod tests {
     }
 }
 // T11-END:grid-mesh
+
+// T11-BEGIN:pyo3-wrapper
+use pyo3::prelude::*;
+use pyo3::Bound;
+use numpy::{PyArray2, PyArray1};
+
+#[pyfunction]
+#[pyo3(text_signature = "(nx, nz, spacing=(1.0,1.0), origin='center')")]
+/// Generate a regular grid mesh for heightmaps.
+/// 
+/// Returns:
+/// - XY positions: (nx*nz, 2) float32 array
+/// - UV coordinates: (nx*nz, 2) float32 array  
+/// - Triangle indices: (M,) uint32 array (CCW winding)
+pub fn grid_generate(py: Python<'_>, nx: u32, nz: u32, spacing: (f32, f32), origin: Option<String>)
+    -> PyResult<(Bound<'_, PyArray2<f32>>, Bound<'_, PyArray2<f32>>, Bound<'_, PyArray1<u32>>)>
+{
+    // Validation
+    if nx < 2 || nz < 2 {
+        return Err(pyo3::exceptions::PyValueError::new_err("nx and nz must be >= 2"));
+    }
+    
+    let (dx, dy) = spacing;
+    if !dx.is_finite() || !dy.is_finite() || dx <= 0.0 || dy <= 0.0 {
+        return Err(pyo3::exceptions::PyValueError::new_err("spacing components must be finite and > 0"));
+    }
+    
+    let origin_str = origin.unwrap_or_else(|| "center".to_string());
+    if origin_str != "center" {
+        return Err(pyo3::exceptions::PyValueError::new_err("origin must be 'center'"));
+    }
+    
+    // Generate grid using the existing function but with converted parameters
+    let w = nx as usize;
+    let h = nz as usize;
+    let mesh = make_grid(w, h, dx, dy);
+    
+    // Convert vertices to separate XY and UV arrays
+    let n_verts = mesh.vertices.len();
+    let mut xy_flat = Vec::with_capacity(n_verts * 2);
+    let mut uv_flat = Vec::with_capacity(n_verts * 2);
+    
+    for vertex in &mesh.vertices {
+        xy_flat.extend_from_slice(&vertex.position); // [x, y]
+        uv_flat.extend_from_slice(&vertex.uv);       // [u, v]
+    }
+    
+    // Create numpy arrays using zero-copy where possible
+    let xy_array = numpy::PyArray2::from_vec2_bound(py, &xy_flat.chunks_exact(2).map(|chunk| chunk.to_vec()).collect::<Vec<_>>())?;
+    let uv_array = numpy::PyArray2::from_vec2_bound(py, &uv_flat.chunks_exact(2).map(|chunk| chunk.to_vec()).collect::<Vec<_>>())?;
+    
+    // Convert indices to u32 if needed
+    let indices_u32: Vec<u32> = match mesh.indices {
+        Indices::U16(ref indices_u16) => indices_u16.iter().map(|&x| x as u32).collect(),
+        Indices::U32(ref indices_u32) => indices_u32.clone(),
+    };
+    
+    let idx_array = numpy::PyArray1::from_vec_bound(py, indices_u32);
+    
+    Ok((xy_array, uv_array, idx_array))
+}
+// T11-END:pyo3-wrapper

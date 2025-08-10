@@ -121,15 +121,48 @@ except NameError:
 # T02-END:dem-all
 
 # T11-BEGIN:grid-python-helpers
-def generate_grid(nx: int, nz: int, spacing=(1.0, 1.0), origin="center"):
+def grid_generate(nx: int, nz: int, spacing=(1.0, 1.0), origin="center"):
     """
-    Return (positions[N,3], uvs[N,2], indices[M]) for a regular grid on XZ.
-    positions are float32, uvs float32 in [0,1], indices uint32 (triangle list).
+    Generate regular grid mesh for heightmaps.
+    
+    Args:
+        nx, nz: Grid dimensions (vertices), must be >= 2
+        spacing: (dx, dy) world-space spacing, must be > 0
+        origin: Must be "center" (grid centered at origin)
+    
+    Returns:
+        tuple: (XY, UV, indices)
+        - XY: (nx*nz, 2) float32 array of world positions
+        - UV: (nx*nz, 2) float32 array of texture coordinates [0,1]
+        - indices: (M,) uint32 array of triangle indices (CCW winding)
     """
-    from ._vulkan_forge import grid_generate  # type: ignore
-    return grid_generate(int(nx), int(nz), tuple(map(float, spacing)), str(origin))
+    from ._vulkan_forge import grid_generate as _grid_generate  # type: ignore
+    return _grid_generate(int(nx), int(nz), tuple(map(float, spacing)), str(origin))
+
+# Legacy alias for T11 compatibility
+generate_grid = grid_generate
+
 try:
-    __all__ += ["generate_grid"]
+    __all__ += ["grid_generate", "generate_grid"]
 except NameError:
-    __all__ = ["generate_grid"]
+    __all__ = ["grid_generate", "generate_grid"]
 # T11-END:grid-python-helpers
+
+# Type annotations for editors/mypy - these are added to help type checkers
+# but don't override the runtime behavior since the real functions are defined above.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Tuple
+    import numpy.typing as npt
+    
+    # Type annotation for grid_generate (runtime implementation defined above)
+    def grid_generate(
+        nx: int, 
+        nz: int, 
+        spacing: Tuple[float, float] = (1.0, 1.0), 
+        origin: str = "center"
+    ) -> Tuple[npt.NDArray[npt.Float32], npt.NDArray[npt.Float32], npt.NDArray[npt.UInt32]]:
+        ...
+    
+    generate_grid = grid_generate
