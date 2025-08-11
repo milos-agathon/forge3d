@@ -31,7 +31,9 @@
       "Bash(git --no-pager diff --unified=3 -- python/vulkan_forge/__init__.py)",
       "Bash(git --no-pager diff --unified=3 HEAD~1..HEAD -- src/terrain/mod.rs)",
       "Bash(echo:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo build:*)"
     ],
     "deny": []
   }

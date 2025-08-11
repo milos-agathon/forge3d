@@ -527,7 +527,26 @@ impl Renderer {
             ..Default::default()
         });
 
-        let data = bytemuck::cast_slice::<f32, u8>(&terr.heights);
+        // Build temporary padded upload buffer for 256-byte row alignment
+        let row_bytes = width * 4;
+        let padded_bpr = ((row_bytes + 255) / 256) * 256;
+        
+        // Create padded buffer
+        let padded_data = {
+            let mut data = vec![0u8; (padded_bpr * height) as usize];
+            let input_data = bytemuck::cast_slice::<f32, u8>(&terr.heights);
+            
+            for y in 0..height {
+                let src_offset = (y * row_bytes) as usize;
+                let dst_offset = (y * padded_bpr) as usize;
+                let src_end = src_offset + row_bytes as usize;
+                let dst_end = dst_offset + row_bytes as usize;
+                
+                data[dst_offset..dst_end].copy_from_slice(&input_data[src_offset..src_end]);
+            }
+            data
+        };
+
         ctx.queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &tex,
@@ -535,10 +554,10 @@ impl Renderer {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            data,
+            &padded_data,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(NonZeroU32::new((width * 4) as u32).unwrap().into()),
+                bytes_per_row: Some(NonZeroU32::new(padded_bpr).unwrap().into()),
                 rows_per_image: Some(NonZeroU32::new(height).unwrap().into()),
             },
             wgpu::Extent3d { width, height, depth_or_array_layers: 1 },

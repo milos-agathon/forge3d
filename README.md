@@ -145,6 +145,22 @@ r.add_terrain(Z, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
 r.render_triangle_png("terrain_overlay.png")       # temporary writer
 ```
 
+### Height texture upload (T1.2)
+
+```python
+from vulkan_forge import Renderer
+import numpy as np
+
+# Upload heightmap to GPU as R32Float texture with linear clamp sampler
+Z = np.random.rand(128, 128).astype("float32")
+r = Renderer(512, 512)
+r.add_terrain(Z, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
+r.upload_height_r32f()                             # Create GPU texture
+readback = r.read_full_height_texture()            # Roundtrip validation
+```
+
+Height texture is created as R32Float with usages `TEXTURE_BINDING | COPY_DST | COPY_SRC` and linear clamp sampler (Nearest/Nearest/Nearest). 256-byte row alignment is handled internally during transfer for robust upload of arbitrary (W,H) float heightmaps.
+
 <!-- T01-END:add_terrain-doc -->
 
 ## Tools (CLI)
