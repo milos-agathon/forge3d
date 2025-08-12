@@ -11,41 +11,10 @@ use std::num::NonZeroU32;
 use wgpu::util::DeviceExt;
 
 // T33-BEGIN:colormap-imports
-use crate::colormap::{resolve_bytes, SUPPORTED, ColormapType, map_name_to_type};
+use crate::colormap::{ColormapType, map_name_to_type, decode_png_rgba8, to_linear_u8_rgba, SUPPORTED};
 // T33-END:colormap-imports
 
 // ---------- Colormaps ----------
-
-/// Helper function to get palette data from colormap type
-fn get_palette_data_for_type(colormap_type: ColormapType) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let name = match colormap_type {
-        ColormapType::Viridis => "viridis",
-        ColormapType::Magma => "magma",
-        ColormapType::Terrain => "terrain",
-    };
-    let png = resolve_bytes(name).map_err(|_| "unknown colormap")?;
-    let img = image::load_from_memory(png)?;
-    let rgba = img.to_rgba8();
-    Ok(rgba.as_raw().clone())
-}
-
-/// Convert sRGB bytes to linear for UNORM fallback
-fn srgb_to_linear_byte(b: u8) -> u8 {
-    let c = (b as f32) / 255.0;
-    let l = if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
-    (l.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
-}
-
-/// Convert sRGB palette to linear (in-place) for UNORM fallback
-fn convert_palette_srgb_to_linear(palette: &mut [u8]) {
-    // Process RGBA data, convert RGB channels only (skip alpha)
-    for chunk in palette.chunks_exact_mut(4) {
-        chunk[0] = srgb_to_linear_byte(chunk[0]); // R
-        chunk[1] = srgb_to_linear_byte(chunk[1]); // G 
-        chunk[2] = srgb_to_linear_byte(chunk[2]); // B
-        // Skip alpha channel[3]
-    }
-}
 
 pub struct ColormapLUT {
     pub texture: wgpu::Texture,
@@ -58,21 +27,33 @@ impl ColormapLUT {
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        adapter: &wgpu::Adapter,
         which: ColormapType,
-        prefer_srgb: bool,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut palette = get_palette_data_for_type(which)?;
-        
-        let (format, needs_linearization) = if prefer_srgb {
-            (wgpu::TextureFormat::Rgba8UnormSrgb, false)
-        } else {
-            (wgpu::TextureFormat::Rgba8Unorm, true)
+    ) -> Result<(Self, &'static str), Box<dyn std::error::Error>> {
+        let name = match which {
+            ColormapType::Viridis => "viridis",
+            ColormapType::Magma => "magma",
+            ColormapType::Terrain => "terrain",
         };
         
-        // Convert palette from sRGB to linear if using UNORM fallback
-        if needs_linearization {
-            convert_palette_srgb_to_linear(&mut palette);
-        }
+        // R2a: Runtime format selection
+        let force_unorm = std::env::var_os("VF_FORCE_LUT_UNORM").is_some();
+        let srgb_ok = adapter.get_texture_format_features(wgpu::TextureFormat::Rgba8UnormSrgb)
+                           .allowed_usages.contains(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
+        let use_srgb = !force_unorm && srgb_ok;
+        
+        let (format, format_name, palette) = if use_srgb {
+            // Use sRGB format with PNG bytes as-is
+            let palette = decode_png_rgba8(name)
+                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+            (wgpu::TextureFormat::Rgba8UnormSrgb, "Rgba8UnormSrgb", palette)
+        } else {
+            // Use UNORM format with CPU-linearized bytes
+            let srgb_palette = decode_png_rgba8(name)
+                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+            let palette = to_linear_u8_rgba(&srgb_palette);
+            (wgpu::TextureFormat::Rgba8Unorm, "Rgba8Unorm", palette)
+        };
         
         // 256×1 RGBA8
         let tex = device.create_texture(&wgpu::TextureDescriptor {
@@ -119,7 +100,7 @@ impl ColormapLUT {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        Ok(Self { texture: tex, view, sampler, format })
+        Ok((Self { texture: tex, view, sampler, format }, format_name))
     }
 }
 
@@ -250,6 +231,7 @@ pub struct TerrainSpike {
     ubo: wgpu::Buffer,
     ubo_bind_group: wgpu::BindGroup,
     colormap_lut: ColormapLUT,
+    lut_format: &'static str,
 
     color: wgpu::Texture,
     color_view: wgpu::TextureView,
@@ -300,15 +282,6 @@ impl TerrainSpike {
             None,
         )).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
-        // R2: Check device texture format support
-        let mut prefer_srgb = adapter.get_texture_format_features(wgpu::TextureFormat::Rgba8UnormSrgb)
-            .allowed_usages
-            .contains(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
-        
-        // Honor env toggle for CI
-        if std::env::var("VF_FORCE_LUT_UNORM") == Ok("1".into()) {
-            prefer_srgb = false;
-        }
 
         // Offscreen color + depth
         let color = device.create_texture(&wgpu::TextureDescriptor {
@@ -437,7 +410,7 @@ impl TerrainSpike {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let lut = ColormapLUT::new(&device, &queue, which, prefer_srgb)
+        let (lut, lut_format) = ColormapLUT::new(&device, &queue, &adapter, which)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
         let ubo_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
@@ -457,6 +430,7 @@ impl TerrainSpike {
             vbuf, ibuf, nidx,
             ubo, ubo_bind_group,
             colormap_lut: lut,
+            lut_format,
             color, color_view,
             depth, depth_view,
             globals,
@@ -545,6 +519,11 @@ impl TerrainSpike {
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Invalid image buffer"))?;
         img.save(path).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn debug_lut_format(&self) -> &'static str {
+        self.lut_format
     }
 }
 

@@ -138,6 +138,28 @@ def test_colormap_supported_unconditional():
 
 
 @pytest.mark.skipif(not TERRAIN_SPIKE_AVAILABLE, reason="terrain_spike feature not enabled")
+def test_terrain_spike_format_selection():
+    """Test that TerrainSpike selects the correct format based on environment."""
+    import os
+    
+    # Test default case: should use sRGB or UNORM format (adapter-dependent)
+    terrain = TerrainSpike(128, 128, grid=32, colormap="viridis")
+    assert terrain.debug_lut_format() in ("Rgba8UnormSrgb", "Rgba8Unorm")
+    
+    # Test with env var: should use UNORM format
+    old_val = os.environ.get('VF_FORCE_LUT_UNORM')
+    try:
+        os.environ['VF_FORCE_LUT_UNORM'] = '1'
+        terrain_unorm = TerrainSpike(128, 128, grid=32, colormap="viridis")
+        assert terrain_unorm.debug_lut_format() == "Rgba8Unorm"
+    finally:
+        if old_val is None:
+            os.environ.pop('VF_FORCE_LUT_UNORM', None)
+        else:
+            os.environ['VF_FORCE_LUT_UNORM'] = old_val
+
+
+@pytest.mark.skipif(not TERRAIN_SPIKE_AVAILABLE, reason="terrain_spike feature not enabled")
 def test_terrain_spike_with_unorm_fallback():
     """Smoke test for TerrainSpike with UNORM fallback when env var is set."""
     import os

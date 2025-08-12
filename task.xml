@@ -1,0 +1,68 @@
+<Task name="T1.3-Final polish: un-gate export + deflake test">
+  <Summary>
+    Make the Rust export of colormap_supported() unconditional and
+    deflake the LUT format test to handle adapter differences.
+  </Summary>
+
+  <Edits>
+
+    <!-- 1) Un-gate the Rust export -->
+    <File path="src/lib.rs" intent="Unconditionally export colormap_supported()">
+      <Instructions>
+        In the #[pymodule] fn _vulkan_forge(...):
+        - Ensure these lines are present:
+            m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
+            m.add_function(wrap_pyfunction!(device_probe, m)?)?;
+            m.add_function(wrap_pyfunction!(grid_generate, m)?)?;
+        - Add this UNCONDITIONALLY (remove any #[cfg(feature = "terrain_spike")] around it):
+            m.add_function(wrap_pyfunction!(colormap::colormap_supported, m)?)?;
+        - Keep TerrainSpike class export gated as before.
+      </Instructions>
+      <Example>
+<![CDATA[
+#[pymodule]
+fn _vulkan_forge(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+    m.add_class::<Renderer>()?;
+    #[cfg(feature = "terrain_spike")]
+    { m.add_class::<terrain::TerrainSpike>()?; }
+
+    m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
+    m.add_function(wrap_pyfunction!(device_probe, m)?)?;
+    m.add_function(wrap_pyfunction!(grid_generate, m)?)?;
+
+    // Unconditional discovery API export
+    m.add_function(wrap_pyfunction!(colormap::colormap_supported, m)?)?;
+    Ok(())
+}
+]]>
+      </Example>
+    </File>
+
+    <!-- 2) Deflake: accept either default LUT format without env override -->
+    <File path="tests/test_colormap.py" intent="Accept SRGB or UNORM by default; still enforce env override">
+      <Instructions>
+        - In the test that constructs TerrainSpike() without VF_FORCE_LUT_UNORM set,
+          change the assertion from strict equality with "Rgba8UnormSrgb"
+          to a membership check in ("Rgba8UnormSrgb", "Rgba8Unorm").
+        - Keep (or add) a separate assertion that when VF_FORCE_LUT_UNORM=1 is set,
+          debug_lut_format() == "Rgba8Unorm".
+      </Instructions>
+      <Replace>
+        <Pattern><![CDATA[
+terrain\s*=\s*TerrainSpike\(.*\)\s*\nassert\s+terrain\.debug_lut_format\(\)\s*==\s*"Rgba8UnormSrgb"
+]]></Pattern>
+        <With><![CDATA[
+terrain = TerrainSpike(128, 128, grid=32, colormap="viridis")
+assert terrain.debug_lut_format() in ("Rgba8UnormSrgb", "Rgba8Unorm")
+]]></With>
+      </Replace>
+    </File>
+
+  </Edits>
+
+  <Validation>
+    <Check>Build default features and run pytest: all tests should pass.</Check>
+    <Check>With VF_FORCE_LUT_UNORM=1, TerrainSpike(...).debug_lut_format() must be "Rgba8Unorm".</Check>
+    <Check>From Python, `from vulkan_forge import colormap_supported; colormap_supported()` works regardless of features.</Check>
+  </Validation>
+</Task>
