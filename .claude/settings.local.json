@@ -33,7 +33,12 @@
       "Bash(echo:*)",
       "Bash(cat:*)",
       "Bash(cargo check:*)",
-      "Bash(cargo build:*)"
+      "Bash(cargo build:*)",
+      "Bash(copy:*)",
+      "Bash(cp:*)",
+      "Bash(rm:*)",
+      "Bash(set VF_FORCE_LUT_UNORM=1)",
+      "Bash(cargo search:*)"
     ],
     "deny": []
   }

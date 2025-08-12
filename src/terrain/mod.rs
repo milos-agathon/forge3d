@@ -11,39 +11,39 @@ use std::num::NonZeroU32;
 use wgpu::util::DeviceExt;
 
 // T33-BEGIN:colormap-imports
-use crate::colormap::{resolve_bytes, SUPPORTED};
+use crate::colormap::{resolve_bytes, SUPPORTED, ColormapType, map_name_to_type};
 // T33-END:colormap-imports
 
 // ---------- Colormaps ----------
 
-#[derive(Clone, Copy, Debug)]
-pub enum ColormapType {
-    Viridis,
-    Magma,
-    Terrain,
+/// Helper function to get palette data from colormap type
+fn get_palette_data_for_type(colormap_type: ColormapType) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let name = match colormap_type {
+        ColormapType::Viridis => "viridis",
+        ColormapType::Magma => "magma",
+        ColormapType::Terrain => "terrain",
+    };
+    let png = resolve_bytes(name).map_err(|_| "unknown colormap")?;
+    let img = image::load_from_memory(png)?;
+    let rgba = img.to_rgba8();
+    Ok(rgba.as_raw().clone())
 }
 
-impl ColormapType {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "viridis" => Some(Self::Viridis),
-            "magma" => Some(Self::Magma),
-            "terrain" => Some(Self::Terrain),
-            _ => None,
-        }
-    }
+/// Convert sRGB bytes to linear for UNORM fallback
+fn srgb_to_linear_byte(b: u8) -> u8 {
+    let c = (b as f32) / 255.0;
+    let l = if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+    (l.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+}
 
-    /// Decode embedded 256×1 PNG to RGBA8
-    pub fn get_palette_data(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let name = match self {
-            Self::Viridis => "viridis",
-            Self::Magma => "magma",
-            Self::Terrain => "terrain",
-        };
-        let png = resolve_bytes(name).map_err(|_| "unknown colormap")?;
-        let img = image::load_from_memory(png)?;
-        let rgba = img.to_rgba8();
-        Ok(rgba.as_raw().clone())
+/// Convert sRGB palette to linear (in-place) for UNORM fallback
+fn convert_palette_srgb_to_linear(palette: &mut [u8]) {
+    // Process RGBA data, convert RGB channels only (skip alpha)
+    for chunk in palette.chunks_exact_mut(4) {
+        chunk[0] = srgb_to_linear_byte(chunk[0]); // R
+        chunk[1] = srgb_to_linear_byte(chunk[1]); // G 
+        chunk[2] = srgb_to_linear_byte(chunk[2]); // B
+        // Skip alpha channel[3]
     }
 }
 
@@ -51,6 +51,7 @@ pub struct ColormapLUT {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
+    pub format: wgpu::TextureFormat,
 }
 
 impl ColormapLUT {
@@ -58,8 +59,21 @@ impl ColormapLUT {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         which: ColormapType,
+        prefer_srgb: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let palette = which.get_palette_data()?;
+        let mut palette = get_palette_data_for_type(which)?;
+        
+        let (format, needs_linearization) = if prefer_srgb {
+            (wgpu::TextureFormat::Rgba8UnormSrgb, false)
+        } else {
+            (wgpu::TextureFormat::Rgba8Unorm, true)
+        };
+        
+        // Convert palette from sRGB to linear if using UNORM fallback
+        if needs_linearization {
+            convert_palette_srgb_to_linear(&mut palette);
+        }
+        
         // 256×1 RGBA8
         let tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("colormap-lut"),
@@ -71,7 +85,7 @@ impl ColormapLUT {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -105,7 +119,7 @@ impl ColormapLUT {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        Ok(Self { texture: tex, view, sampler })
+        Ok(Self { texture: tex, view, sampler, format })
     }
 }
 
@@ -252,14 +266,19 @@ impl TerrainSpike {
     pub fn new(width: u32, height: u32, grid: Option<u32>, colormap: Option<String>) -> PyResult<Self> {
         let grid = grid.unwrap_or(128).max(2);
 
-        let which = match colormap {
-            Some(ref s) => ColormapType::from_str(s).ok_or_else(|| {
-                pyo3::exceptions::PyRuntimeError::new_err(
-                    format!("Unknown colormap '{}'. Supported: {}", s, SUPPORTED.join(", "))
-                )
-            })?,
-            None => ColormapType::Viridis,
-        };
+        let colormap_name = colormap.as_deref().unwrap_or("viridis");
+        
+        // Validate colormap against central SUPPORTED list
+        if !SUPPORTED.contains(&colormap_name) {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                format!("Unknown colormap '{}'. Supported: {}", colormap_name, SUPPORTED.join(", "))
+            ));
+        }
+        
+        let which = map_name_to_type(colormap_name)
+            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err(
+                format!("Unknown colormap '{}'. Supported: {}", colormap_name, SUPPORTED.join(", "))
+            ))?;
 
         // Instance/adapter/device
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -280,6 +299,16 @@ impl TerrainSpike {
             },
             None,
         )).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+        // R2: Check device texture format support
+        let mut prefer_srgb = adapter.get_texture_format_features(wgpu::TextureFormat::Rgba8UnormSrgb)
+            .allowed_usages
+            .contains(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
+        
+        // Honor env toggle for CI
+        if std::env::var("VF_FORCE_LUT_UNORM") == Ok("1".into()) {
+            prefer_srgb = false;
+        }
 
         // Offscreen color + depth
         let color = device.create_texture(&wgpu::TextureDescriptor {
@@ -396,7 +425,9 @@ impl TerrainSpike {
         let (vbuf, ibuf, nidx) = build_grid_mesh(&device, grid);
         let (view, proj, light) = build_view_matrices(width, height);
 
-        let globals = Globals::default();
+        let mut globals = Globals::default();
+        // R4: Seed globals.sun_dir from computed light
+        globals.sun_dir = light;
         // Use globals (with h_min/h_max) -> h_range is computed inside to_uniforms()
         let uniforms = globals.to_uniforms(view, proj);
 
@@ -406,7 +437,7 @@ impl TerrainSpike {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let lut = ColormapLUT::new(&device, &queue, which)
+        let lut = ColormapLUT::new(&device, &queue, which, prefer_srgb)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
         let ubo_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{

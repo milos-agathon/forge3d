@@ -79,8 +79,14 @@ except Exception:
     except Exception:
         __version__ = "0.0.0.dev0"
 
+# R3: Add colormap_supported passthrough
+try:
+    colormap_supported = _ext.colormap_supported
+except AttributeError:
+    def colormap_supported(): return ["viridis","magma","terrain"]
+
 # Public export list
-__all__ = ["Renderer", "render_triangle_rgba", "render_triangle_png", "make_terrain", "__version__"]
+__all__ = ["Renderer", "render_triangle_rgba", "render_triangle_png", "make_terrain", "colormap_supported", "__version__"]
 if "TerrainSpike" in globals():
     __all__.append("TerrainSpike")
 # A1.5-END:vulkan_forge-shim

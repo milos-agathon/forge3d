@@ -961,5 +961,6 @@ fn _vulkan_forge(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
     m.add_function(wrap_pyfunction!(grid_generate, m)?)?;
+    m.add_function(wrap_pyfunction!(colormap::colormap_supported, m)?)?;
     Ok(())
 }

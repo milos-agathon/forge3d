@@ -161,6 +161,37 @@ readback = r.read_full_height_texture()            # Roundtrip validation
 
 Height texture is created as R32Float with usages `TEXTURE_BINDING | COPY_DST | COPY_SRC` and linear clamp sampler (Nearest/Nearest/Nearest). 256-byte row alignment is handled internally during transfer for robust upload of arbitrary (W,H) float heightmaps.
 
+### Colormap LUT system (T1.3)
+
+```python
+from vulkan_forge import TerrainSpike, colormap_supported
+
+# Discover available colormaps
+print(colormap_supported())  # ["viridis","magma","terrain"]
+
+# Create terrain renderer with specific colormap  
+terrain = TerrainSpike(512, 384, grid=64, colormap="viridis")
+terrain.render_png("output.png")
+
+# Supported colormap names (case-sensitive)
+terrain_magma = TerrainSpike(512, 384, grid=64, colormap="magma")
+terrain_terrain = TerrainSpike(512, 384, grid=64, colormap="terrain")
+
+# Default to viridis if not specified
+terrain_default = TerrainSpike(512, 384, grid=64)  # Uses "viridis"
+```
+
+The colormap system uses 256×1 RGBA8 lookup textures (LUT) with embedded PNG assets and a central registry. Each LUT is sampled in the fragment shader to map normalized height values to colors. The supported colormap names are maintained in a central `SUPPORTED` list for consistent validation.
+
+**Features:**
+- Central `crate::colormap` registry with embedded 256×1 PNG assets
+- GPU LUT texture (RGBA8UnormSrgb preferred) with linear clamp sampler  
+- Proper `bytes_per_row` and `rows_per_image` handling for texture upload
+- TerrainSpike integration with bind group layout: 0=UBO, 1=colormap texture, 2=sampler
+- WGSL shader sampling with minimal lighting and colormap application
+- Strict case-sensitive validation against central SUPPORTED list
+- Debug toggle `VF_FORCE_LUT_UNORM=1` forces UNORM fallback for CI coverage
+
 <!-- T01-END:add_terrain-doc -->
 
 ## Tools (CLI)

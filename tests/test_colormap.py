@@ -126,6 +126,51 @@ def test_main_renderer_colormap_integration():
         renderer.add_terrain(heightmap, spacing, exaggeration, "invalid_colormap")
 
 
+def test_colormap_supported_exposes_names():
+    """Test that colormap_supported returns expected list of colormap names."""
+    from vulkan_forge import colormap_supported
+    assert colormap_supported() == ["viridis","magma","terrain"]
+
+
+def test_colormap_supported_unconditional():
+    import vulkan_forge as vf
+    assert vf.colormap_supported() == ["viridis","magma","terrain"]
+
+
+@pytest.mark.skipif(not TERRAIN_SPIKE_AVAILABLE, reason="terrain_spike feature not enabled")
+def test_terrain_spike_with_unorm_fallback():
+    """Smoke test for TerrainSpike with UNORM fallback when env var is set."""
+    import os
+    import tempfile
+    
+    # Set environment variable to force UNORM fallback
+    old_val = os.environ.get('VF_FORCE_LUT_UNORM')
+    try:
+        os.environ['VF_FORCE_LUT_UNORM'] = '1'
+        
+        # This should work without shader changes
+        terrain = TerrainSpike(128, 128, grid=32, colormap="viridis")
+        
+        # Smoke test - just verify it can render
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = tmp.name
+            
+        try:
+            terrain.render_png(tmp_path)
+            assert os.path.exists(tmp_path)
+            assert os.path.getsize(tmp_path) > 1000  # Should be a reasonable PNG size
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+                
+    finally:
+        # Restore environment variable
+        if old_val is None:
+            os.environ.pop('VF_FORCE_LUT_UNORM', None)
+        else:
+            os.environ['VF_FORCE_LUT_UNORM'] = old_val
+
+
 if __name__ == "__main__":
     # Run tests directly if executed as script
     pytest.main([__file__, "-v"])
