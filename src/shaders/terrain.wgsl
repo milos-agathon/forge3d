@@ -24,9 +24,9 @@ struct VSIn {
 }
 
 struct VSOut {
-  @builtin(position) position : vec4<f32>, // clip-space position
-  @location(0) world_pos : vec3<f32>,      // world-space (for lighting/colormap later)
-  @location(1) world_nrm : vec3<f32>,      // world-space normal (corrected for non-uniform scale)
+  @builtin(position) position : vec4<f32>, // clip-space position  
+  @location(0) uv : vec2<f32>,             // texture coordinates for height sampling
+  @location(1) world_pos : vec3<f32>,      // world-space (for lighting/colormap later)
   @location(2) height    : f32,            // world-space height (y) — handy for color mapping
 }
 
@@ -57,28 +57,68 @@ fn vs_main(in: VSIn) -> VSOut {
   let view_pos = ubo.view * vec4<f32>(world, 1.0);
   let clip     = ubo.proj * view_pos;
 
+  // Generate UV coordinates from model position (assuming model spans [0,1] range)
+  let uv = vec2<f32>(in.pos.x, in.pos.z);
+
   var out: VSOut;
   out.position  = clip;
+  out.uv        = uv;
   out.world_pos = world;
-  out.world_nrm = correct_normal_for_scale(in.nrm, spacing, exag);
   out.height    = world.y;
   return out;
 }
 
-// Minimal fragment stage for T3.1 to keep pipeline compiling.
-// Renders a simple lambert-ish grayscale using sun_dir⋅normal.
-// T3.2+ will replace this with proper colormap + lighting.
-struct FSOut { @location(0) color : vec4<f32>, }
+// T32-BEGIN:fs
+// Terrain fragment shader — linear lighting + Reinhard tonemap to sRGB target.
+// Contract (from T2.x): `@group(0) @binding(0) var<uniform> globals : Globals;`
+// Bindings (terrain path): group(1)=height R32F + sampler, group(2)=LUT RGBA8UnormSrgb + sampler.
+
+// External declarations expected (do NOT redeclare `struct Globals` here).
+@group(1) @binding(0) var heightTex  : texture_2d<f32>;
+@group(1) @binding(1) var heightSamp : sampler;
+@group(2) @binding(0) var lutTex     : texture_2d<f32>;
+@group(2) @binding(1) var lutSamp    : sampler;
+
+fn vf_reinhard(x: vec3<f32>) -> vec3<f32> { return x / (vec3<f32>(1.0) + x); }
+fn safe_normalize(v: vec3<f32>) -> vec3<f32> { let m = max(length(v), 1e-8); return v / m; }
 
 @fragment
-fn fs_main(in: VSOut) -> FSOut {
-  let sun_dir = normalize(ubo.sun_exposure.xyz);
-  let ndotl   = max(dot(normalize(in.world_nrm), sun_dir), 0.0);
-  let exposure = ubo.sun_exposure.w;
+fn fs_main(
+  @location(0) uv : vec2<f32>
+) -> @location(0) vec4<f32> {
+  // Texture size → robust UV step (avoid div-by-zero at tiny dims)
+  let dims = vec2<f32>(textureDimensions(heightTex));
+  let duv  = 1.0 / max(dims - vec2<f32>(1.0), vec2<f32>(1.0));
 
-  // Simple shaded grayscale; no colormap sampling yet (reserved for T3.2).
-  let shade = pow(ndotl, 0.8) * exposure;
-  var out: FSOut;
-  out.color = vec4<f32>(shade, shade, shade, 1.0);
-  return out;
+  // Heights with forward differences (per roadmap)
+  let h  : f32 = textureSampleLevel(heightTex, heightSamp, uv, 0.0).r;
+  let hx : f32 = textureSampleLevel(heightTex, heightSamp, uv + vec2<f32>(duv.x, 0.0), 0.0).r;
+  let hy : f32 = textureSampleLevel(heightTex, heightSamp, uv + vec2<f32>(0.0, duv.y), 0.0).r;
+
+  // Numeric guards from Globals
+  let dx = max(globals.spacing.x, 1e-8);
+  let dy = max(globals.spacing.y, 1e-8);
+  let ex = max(globals.exaggeration, 1e-8);
+
+  // Tangents in world units and normal
+  let dpx = vec3<f32>(dx, 0.0, (hx - h) * ex);
+  let dpy = vec3<f32>(0.0, dy, (hy - h) * ex);
+  let n   = safe_normalize(cross(dpy, dpx));  // right-handed; +Y up
+
+  // Lighting (linear)
+  let L        = safe_normalize(globals.sun_dir);
+  let lambert  = max(dot(n, L), 0.0);
+  let ambient  = 0.12;
+  let exposure = max(globals.exposure, 0.0);
+
+  // Height normalization → LUT (linear sample from sRGB LUT texture)
+  let denom = max(globals.h_range.y - globals.h_range.x, 1e-6);
+  let t     = clamp((h - globals.h_range.x) / denom, 0.0, 1.0);
+  let albedo = textureSampleLevel(lutTex, lutSamp, vec2<f32>(t, 0.5), 0.0).rgb;
+
+  // Tone map in linear; write to sRGB target (hardware encodes)
+  let lit    = albedo * (ambient + lambert) * exposure;
+  let mapped = vf_reinhard(lit);
+  return vec4<f32>(mapped, 1.0);
 }
+// T32-END:fs

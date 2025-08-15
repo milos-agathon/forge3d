@@ -1,104 +1,138 @@
-<code_task>
-  <title>Ensure camera tests are in tests/test_camera.py and verify pytest discovery</title>
-  <context>
-    The camera test suite is already complete and passing. This task must be a no-op if the file
-    already lives at tests/test_camera.py. Only move the file if it exists at the repo root
-    (./test_camera.py) and tests/test_camera.py is missing. Do not modify file contents.
-  </context>
+<Task name="T3.2 — Terrain FS verification sweep (no-op unless drift found), idempotent, show-diffs">
 
-  <constraints>
-    <item>Idempotent: running this task multiple times must not create duplicates or modify contents.</item>
-    <item>Do not change any code other than creating the tests/ folder (if missing) and relocating the file.</item>
-    <item>Do not reformat or rewrite tests/test_camera.py.</item>
-    <item>Do not alter tooling configs unless absolutely required (it shouldn’t be).</item>
-  </constraints>
+  <Policy>
+    - **Phase A is READ-ONLY.** Abort if any write occurs during Phase A.
+    - **Phase B** may edit **one file only** and **only inside markers**:
+      1) `src/shaders/terrain.wgsl` — within `// T32-BEGIN:fs … // T32-END:fs`.
+    - Do **not** touch pipeline wiring, FFI, Python/C++/Rust, README, or tests in this task (they were confirmed correct).
+    - Changes must be **idempotent**. Validation layers stay clean. `python -c "import vulkan_forge"` remains a no-op import.
+  </Policy>
 
-  <plan>
-    <step id="detect">
-      <shell>
-        <![CDATA[
-set -euo pipefail
-ROOT_FILE="test_camera.py"
-TESTS_DIR="tests"
-DEST_FILE="${TESTS_DIR}/test_camera.py"
+  <Context>
+    The last run claims the fragment shader now:
+    - Uses `var<uniform> globals : Globals` (contract-aligned).
+    - Consumes **only** `@location(0) uv` (minimal interface, no `VSOut`/unused inputs).
+    - Has numeric guards for `dx`, `dy`, `exaggeration`, and height-range denominator.
+    - Performs lighting **in linear** and writes to an **sRGB** target after **Reinhard** tonemap (no manual gamma).
+    This task double-checks those facts and **only** patches the T32 block if any drift/regressions are detected.
+  </Context>
 
-# Report current state
-echo "HAS_ROOT_FILE=$([ -f "$ROOT_FILE" ] && echo yes || echo no)"
-echo "HAS_DEST_FILE=$([ -f "$DEST_FILE" ] && echo yes || echo no)"
-        ]]>
-      </shell>
-    </step>
+  <!-- ===================== PHASE A — DISCOVERY (READ-ONLY) ===================== -->
 
-    <step id="relocate_if_needed" condition="HAS_ROOT_FILE==yes && HAS_DEST_FILE==no">
-      <shell>
-        <![CDATA[
-set -euo pipefail
-mkdir -p tests
-git mv -k test_camera.py tests/test_camera.py 2>/dev/null || mv -f test_camera.py tests/test_camera.py
-        ]]>
-      </shell>
-    </step>
+  <Requests>
+    <Request id="A1" description="Snapshot T32 FS block and sanity-check contract adherence">
+      <Action>
+        - nl -ba src/shaders/terrain.wgsl | sed -n '1,260p' || true
+        - grep -n "T32-.*fs" src/shaders/terrain.wgsl || true
+        - grep -n "var<uniform>.*globals" src/shaders/terrain.wgsl || true
+        - grep -n "struct Globals" src/shaders/terrain.wgsl || true
+        - grep -n -E "@location\\(1\\).*world_pos|@builtin\\(position\\)|struct VSOut" src/shaders/terrain.wgsl || true
+        - grep -n -E "ubo\\.|spacing_h_exag_pad" src/shaders/terrain.wgsl || true
+        - grep -n -E "max\\(globals\\.spacing\\.[xy], *1e-8\\)" src/shaders/terrain.wgsl || true
+        - grep -n -E "max\\(globals\\.exaggeration, *1e-8\\)" src/shaders/terrain.wgsl || true
+        - grep -n -E "max\\(globals\\.h_range\\.y - globals\\.h_range\\.x, *1e-6\\)" src/shaders/terrain.wgsl || true
+        - grep -n -E "textureSample(Level|Grad)" src/shaders/terrain.wgsl || true
+        - grep -n -E "cross\\(dpy, *dpx\\)" src/shaders/terrain.wgsl || true
+        - grep -n -E "vf_reinhard|return +vec4<" src/shaders/terrain.wgsl || true
+      </Action>
+    </Request>
+  </Requests>
 
-    <step id="assert_location">
-      <shell>
-        <![CDATA[
-set -euo pipefail
-if [ ! -f "tests/test_camera.py" ]; then
-  echo "ERROR: tests/test_camera.py not found after relocation check." >&2
-  exit 1
+  <!-- =================== PHASE B — IMPLEMENTATION (IDEMPOTENT) =================== -->
+
+  <Edits>
+    <!-- Only apply this replacement if Phase A detects any of:
+         - use of `ubo.` or `spacing_h_exag_pad`
+         - local `struct VSOut` OR unused param inputs (`world_pos`, `position`)
+         - missing numeric guards (spacing/exaggeration/height-range)
+         - missing reinhard/linear->sRGB policy
+         Otherwise make **no edits**. -->
+    <File path="src/shaders/terrain.wgsl" intent="Normalize T32 FS to contract; edit ONLY within T32 markers if drift detected">
+      <ReplaceWithinMarkers start="// T32-BEGIN:fs" end="// T32-END:fs">
+<![CDATA[
+// T32-BEGIN:fs
+// Terrain fragment shader — linear lighting + Reinhard tonemap to sRGB target.
+// Contract: `@group(0) @binding(0) var<uniform> globals : Globals;`
+// Bindings: group(1)=height R32F + sampler, group(2)=LUT RGBA8UnormSrgb + sampler.
+// NOTE: Do NOT redeclare `struct Globals` here.
+
+@group(1) @binding(0) var heightTex  : texture\_2d<f32>;
+@group(1) @binding(1) var heightSamp : sampler;
+@group(2) @binding(0) var lutTex     : texture\_2d<f32>;
+@group(2) @binding(1) var lutSamp    : sampler;
+
+fn vf\_reinhard(x: vec3<f32>) -> vec3<f32> { return x / (vec3<f32>(1.0) + x); }
+fn safe\_normalize(v: vec3<f32>) -> vec3<f32> { let m = max(length(v), 1e-8); return v / m; }
+
+@fragment
+fn fs\_main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
+// Robust UV step from texture dims (avoid div-by-zero)
+let dims = vec2<f32>(textureDimensions(heightTex));
+let duv  = 1.0 / max(dims - vec2<f32>(1.0), vec2<f32>(1.0));
+
+// Heights with forward differences
+let h  : f32 = textureSampleLevel(heightTex, heightSamp, uv, 0.0).r;
+let hx : f32 = textureSampleLevel(heightTex, heightSamp, uv + vec2<f32>(duv.x, 0.0), 0.0).r;
+let hy : f32 = textureSampleLevel(heightTex, heightSamp, uv + vec2<f32>(0.0, duv.y), 0.0).r;
+
+// Numeric guards
+let dx = max(globals.spacing.x, 1e-8);
+let dy = max(globals.spacing.y, 1e-8);
+let ex = max(globals.exaggeration, 1e-8);
+
+// Tangents and normal (right-handed; +Y up)
+let dpx = vec3<f32>(dx, 0.0, (hx - h) \* ex);
+let dpy = vec3<f32>(0.0, dy, (hy - h) \* ex);
+let n   = safe\_normalize(cross(dpy, dpx));  // orientation as agreed
+
+// Lighting (linear)
+let L        = safe\_normalize(globals.sun\_dir);
+let lambert  = max(dot(n, L), 0.0);
+let ambient  = 0.12;
+let exposure = max(globals.exposure, 0.0);
+
+// Height normalization → LUT (linear sample from sRGB LUT view)
+let denom = max(globals.h\_range.y - globals.h\_range.x, 1e-6);
+let t     = clamp((h - globals.h\_range.x) / denom, 0.0, 1.0);
+let albedo = textureSampleLevel(lutTex, lutSamp, vec2<f32>(t, 0.5), 0.0).rgb;
+
+// Tone map in linear; write to sRGB target (hardware encodes gamma)
+let lit    = albedo \* (ambient + lambert) \* exposure;
+let mapped = vf\_reinhard(lit);
+return vec4<f32>(mapped, 1.0);
+}
+// T32-END\:fs
+]]> </ReplaceWithinMarkers> </File> </Edits>
+
+  <!-- ====================== PHASE C — BUILD & ACCEPTANCE ====================== -->
+
+  <Commands shell="bash">
+    <Run>python -m pip install -U pip maturin pytest numpy pillow</Run>
+    <Run>maturin develop --release</Run>
+    <Run>pytest -q || true</Run>
+
+```bash
+# Idempotency proof
+git status --porcelain || true
+CHANGED=$(git status --porcelain | awk '{print $2}')
+if [ -n "$CHANGED" ]; then
+  for f in $CHANGED; do
+    echo "### DIFF: $f"
+    git --no-pager diff --unified=3 -- "$f"
+    echo
+  done
+else
+  echo "No changes required"
 fi
-        ]]>
-      </shell>
-    </step>
+```
 
-    <step id="run_pytest_quick">
-      <shell>
-        <![CDATA[
-set -euo pipefail
-# Run full discovery quietly; do not fail the whole task on skipped TerrainSpike tests.
-pytest -q || exit_code=$?
-# If pytest returns 0, great; if it fails, still collect details below.
-        ]]>
-      </shell>
-    </step>
+  </Commands>
 
-    <step id="run_camera_subset">
-      <shell>
-        <![CDATA[
-set -euo pipefail
-# Ensure the 20 camera tests are discovered and runnable
-pytest -q -k "camera or TerrainSpikeIntegration or default_proj_is_wgpu" --maxfail=1
-        ]]>
-      </shell>
-    </step>
-
-    <step id="report_counts">
-      <shell>
-        <![CDATA[
-set -euo pipefail
-# Two structured runs to capture counts
-TOTAL_LINE="$(pytest -q 2>&1 | tail -n 1 || true)"
-CAM_LINE="$(pytest -q -k 'camera or TerrainSpikeIntegration or default_proj_is_wgpu' 2>&1 | tail -n 1 || true)"
-
-printf '{"summary":{"total_line":"%s","camera_line":"%s"}}\n' "$TOTAL_LINE" "$CAM_LINE"
-        ]]>
-      </shell>
-    </step>
-  </plan>
-
-  <acceptance_criteria>
-    <item>tests/test_camera.py exists; there is no duplicate test_camera.py at repo root.</item>
-    <item>Running <code>pytest -q</code> succeeds (skips for optional GPU parts are fine).</item>
-    <item>Running <code>pytest -q -k "camera or TerrainSpikeIntegration or default_proj_is_wgpu"</code> executes the camera suite (expected ~20 tests), all passing.</item>
-    <item>No other files were modified.</item>
-  </acceptance_criteria>
-
-  <deliverables>
-    <item>File path correctness (tests/test_camera.py).</item>
-    <item>Console output lines summarizing pytest results for full suite and camera subset (printed as JSON in the final step).</item>
-  </deliverables>
-
-  <commit_message>
-    chore(tests): ensure camera tests live under tests/ and verify pytest discovery
-  </commit_message>
-</code_task>
+  <Acceptance>
+    <Criterion>Inside **T32** the FS consumes **only** `@location(0) uv`; no `VSOut`, no `world_pos`, no `@builtin(position)`.</Criterion>
+    <Criterion>The FS references **`globals : Globals`** and **does not redeclare** `struct Globals` in the T32 block.</Criterion>
+    <Criterion>Numeric guards exist for `dx`, `dy`, `exaggeration`, and height-range denominator; normal uses `cross(dpy, dpx)`.</Criterion>
+    <Criterion>Lighting is performed in **linear**; **Reinhard** tonemap; returns to an **sRGB** target without manual gamma.</Criterion>
+    <Criterion>No files other than `src/shaders/terrain.wgsl` are modified; build succeeds; tests remain as they were; import is a no-op.</Criterion>
+  </Acceptance>
+</Task>

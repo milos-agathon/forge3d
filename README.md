@@ -70,8 +70,7 @@ renderer.set_sun(elevation_deg=35.0, azimuth_deg=120.0)
 renderer.set_exposure(1.1)  # > 0
 ```
 
-Tonemapping uses **Reinhard** with **gamma 2.2** on linear RGB.
-
+**Policy:** Do lighting in **linear**. If the render target is **sRGB** (e.g., `Rgba8UnormSrgb`), **do not** apply manual gamma—hardware performs the sRGB encode. A simple **Reinhard** tonemap is applied in linear. Use manual gamma only when writing to a **linear** target.
 <!-- T22-END:api -->
 
 <!-- T11-BEGIN:mesh-notes -->
@@ -113,6 +112,18 @@ The `grid_generate` function validates all parameters and raises `ValueError` wi
 - Grid is centered at origin in world XY (Z comes from height texture)
 - UVs cover `[0,1]×[0,1]`; indices are CCW triangles; always uint32 dtype
 <!-- T11-END:mesh-notes -->
+
+<!-- T32-BEGIN:lighting -->
+### Terrain lighting (WGSL, fragment)
+
+- Normals from **forward differences** of the R32F height texture with `spacing=(dx,dy)` and `exaggeration` (see **Globals**), then **Lambert + small ambient**, color via 256×1 LUT with height normalization `[h_min,h_max]`.
+- **Linear workflow**: lighting and tonemap in linear; write to **`Rgba8UnormSrgb`** so the hardware performs sRGB encoding (avoid double-gamma).
+
+**Binding expectation (terrain path):**
+- `@group(0)`: `Globals` uniform buffer
+- `@group(1)`: height texture (R32F) + sampler
+- `@group(2)`: LUT texture (RGBA8UnormSrgb) + sampler
+<!-- T32-END:lighting -->
 
 ## Public API (Python)
 
@@ -185,9 +196,10 @@ The colormap system uses 256×1 RGBA8 lookup textures (LUT) with embedded PNG as
 
 **Features:**
 - Central `crate::colormap` registry with embedded 256×1 PNG assets
-- GPU LUT texture (RGBA8UnormSrgb preferred) with linear clamp sampler  
+- GPU LUT texture (**RGBA8UnormSrgb** preferred) with linear clamp sampler  
 - Proper `bytes_per_row` and `rows_per_image` handling for texture upload
-- TerrainSpike integration with bind group layout: 0=UBO, 1=colormap texture, 2=sampler
+- **Terrain FS bind groups (matches T3.2/T32):**  
+  **group(0)** = `Globals` UBO, **group(1)** = *height* `R32F` texture **+ sampler**, **group(2)** = *LUT* `RGBA8UnormSrgb` **+ sampler**
 - WGSL shader sampling with minimal lighting and colormap application
 - Strict case-sensitive validation against central SUPPORTED list
 - Debug toggle `VF_FORCE_LUT_UNORM=1` forces UNORM fallback for CI coverage
@@ -320,6 +332,9 @@ Optional tests are gated by env:
 
 * `VF_TEST_BACKENDS=1` for cross-backend test
 * `VF_TEST_PERF=1` for performance test
+
+**Terrain FS tests:**  
+Set `VF_ENABLE_TERRAIN_TESTS=1` to enable the east↔west directional-lighting flip test once the terrain pipeline is wired in **T3.3**. By default this test is skipped in CI.
 
 ## CI
 

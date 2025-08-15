@@ -44,7 +44,19 @@
       "Bash(if [ ! -f \"tests/test_camera.py\" ])",
       "Bash(then)",
       "Bash(exit 1)",
-      "Bash(fi)"
+      "Bash(fi)",
+      "Bash(true)",
+      "Bash(git --no-pager diff --unified=3 -- src/shaders/terrain.wgsl)",
+      "Bash(git --no-pager diff --unified=3 -- tests/test_terrain_fs.py)",
+      "Bash(git --no-pager diff --unified=3 -- python/examples/terrain_normals_flip.py)",
+      "Bash(grep:*)",
+      "Bash(cmd /C \"set VIRTUAL_ENV= & set CONDA_PREFIX= & maturin develop --release\")",
+      "Bash(cargo clean:*)",
+      "Bash(export VIRTUAL_ENV=\"\")",
+      "Bash(export CONDA_PREFIX=\"\")",
+      "Bash(sed:*)",
+      "Bash(git --no-pager diff --unified=3 -- .claude/settings.local.json)",
+      "Bash(git --no-pager diff --unified=3 -- task.xml)"
     ],
     "deny": []
   }
