@@ -9,6 +9,11 @@ Public API:
 - Optional (feature 'terrain_spike'): TerrainSpike(width:int, height:int, grid:int=128).render_png(path)
 - __version__: str
 
+Camera math functions (T2.1):
+- camera_look_at(eye, target, up) -> np.ndarray[(4,4), float32]: View matrix using RH, Y-up, -Z forward
+- camera_perspective(fovy_deg, aspect, znear, zfar, clip_space='wgpu') -> np.ndarray[(4,4), float32]: Projection matrix
+- camera_view_proj(eye, target, up, fovy_deg, aspect, znear, zfar, clip_space='wgpu') -> np.ndarray[(4,4), float32]: Combined view-projection
+
 <!-- T02-BEGIN:doc -->
 `Renderer.set_height_range(min, max)` overrides the auto-computed `[h_min, h_max]`
 used to normalize heights into `[0, 1]` for colormap & lighting.
@@ -85,8 +90,26 @@ try:
 except AttributeError:
     def colormap_supported(): return ["viridis","magma","terrain"]
 
+# T2.1: Camera math functions
+try:
+    camera_look_at = _ext.camera_look_at
+    camera_perspective = _ext.camera_perspective
+    camera_view_proj = _ext.camera_view_proj
+except AttributeError:
+    # Fallback stubs if camera functions not available
+    def camera_look_at(*args, **kwargs):
+        raise RuntimeError("camera_look_at not available; build with T2.1 camera support")
+    def camera_perspective(*args, **kwargs):
+        raise RuntimeError("camera_perspective not available; build with T2.1 camera support")
+    def camera_view_proj(*args, **kwargs):
+        raise RuntimeError("camera_view_proj not available; build with T2.1 camera support")
+
 # Public export list
-__all__ = ["Renderer", "render_triangle_rgba", "render_triangle_png", "make_terrain", "colormap_supported", "__version__"]
+__all__ = [
+    "Renderer", "render_triangle_rgba", "render_triangle_png", "make_terrain", 
+    "colormap_supported", "camera_look_at", "camera_perspective", "camera_view_proj", 
+    "__version__"
+]
 if "TerrainSpike" in globals():
     __all__.append("TerrainSpike")
 # A1.5-END:vulkan_forge-shim

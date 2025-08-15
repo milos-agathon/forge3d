@@ -962,5 +962,8 @@ fn _vulkan_forge(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
     m.add_function(wrap_pyfunction!(grid_generate, m)?)?;
     m.add_function(wrap_pyfunction!(colormap::colormap_supported, m)?)?;
+    m.add_function(wrap_pyfunction!(camera::camera_look_at, m)?)?;
+    m.add_function(wrap_pyfunction!(camera::camera_perspective, m)?)?;
+    m.add_function(wrap_pyfunction!(camera::camera_view_proj, m)?)?;
     Ok(())
 }

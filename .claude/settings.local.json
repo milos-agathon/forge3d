@@ -38,7 +38,13 @@
       "Bash(cp:*)",
       "Bash(rm:*)",
       "Bash(set VF_FORCE_LUT_UNORM=1)",
-      "Bash(cargo search:*)"
+      "Bash(cargo search:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(set -euo pipefail)",
+      "Bash(if [ ! -f \"tests/test_camera.py\" ])",
+      "Bash(then)",
+      "Bash(exit 1)",
+      "Bash(fi)"
     ],
     "deny": []
   }

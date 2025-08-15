@@ -106,7 +106,7 @@ impl ColormapLUT {
 
 // ---------- Uniforms (std140-compatible, 176 bytes) ----------
 
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TerrainUniforms {
     pub view: [[f32; 4]; 4],           // 64 B
@@ -239,6 +239,7 @@ pub struct TerrainSpike {
     depth_view: wgpu::TextureView,
 
     globals: Globals,
+    last_uniforms: TerrainUniforms,
 }
 
 #[pymethods]
@@ -434,6 +435,7 @@ impl TerrainSpike {
             color, color_view,
             depth, depth_view,
             globals,
+            last_uniforms: uniforms,
         })
     }
 
@@ -525,6 +527,56 @@ impl TerrainSpike {
     pub fn debug_lut_format(&self) -> &'static str {
         self.lut_format
     }
+
+    #[pyo3(text_signature = "($self, eye, target, up, fovy_deg, znear, zfar)")]
+    pub fn set_camera_look_at(
+        &mut self,
+        eye: (f32, f32, f32),
+        target: (f32, f32, f32),
+        up: (f32, f32, f32),
+        fovy_deg: f32,
+        znear: f32,
+        zfar: f32,
+    ) -> PyResult<()> {
+        use crate::camera;
+        
+        // Compute aspect ratio from current framebuffer dimensions
+        let aspect = self.width as f32 / self.height as f32;
+        
+        // Validate parameters using camera module validators
+        let eye_vec = glam::Vec3::new(eye.0, eye.1, eye.2);
+        let target_vec = glam::Vec3::new(target.0, target.1, target.2);
+        let up_vec = glam::Vec3::new(up.0, up.1, up.2);
+        
+        camera::validate_camera_params(eye_vec, target_vec, up_vec, fovy_deg, znear, zfar)?;
+        
+        // Compute view and projection matrices
+        let view = glam::Mat4::look_at_rh(eye_vec, target_vec, up_vec);
+        let fovy_rad = fovy_deg.to_radians();
+        let proj = camera::perspective_wgpu(fovy_rad, aspect, znear, zfar);
+        
+        // Build new uniforms using existing globals
+        let uniforms = self.globals.to_uniforms(view, proj);
+        
+        // Write to UBO
+        self.queue.write_buffer(&self.ubo, 0, bytemuck::bytes_of(&uniforms));
+        
+        // Store for debugging
+        self.last_uniforms = uniforms;
+        
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn debug_uniforms_f32<'py>(
+        &self,
+        py: pyo3::Python<'py>,
+    ) -> pyo3::PyResult<pyo3::Bound<'py, numpy::PyArray1<f32>>> {
+        // Convert TerrainUniforms (176 bytes) to 44 floats
+        let bytes = bytemuck::bytes_of(&self.last_uniforms);
+        let float_slice: &[f32] = bytemuck::cast_slice(bytes);
+        Ok(numpy::PyArray1::from_vec_bound(py, float_slice.to_vec()))
+    }
 }
 
 // ---------- Geometry (analytic spike) ----------
@@ -611,7 +663,7 @@ fn build_grid_mesh(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, wgpu::Buffer
 // MVP + light
 fn build_view_matrices(width: u32, height: u32) -> (glam::Mat4, glam::Mat4, glam::Vec3) {
     let aspect = width as f32 / height as f32;
-    let proj = glam::Mat4::perspective_rh_gl(45f32.to_radians(), aspect, 0.1, 100.0);
+    let proj = crate::camera::perspective_wgpu(45f32.to_radians(), aspect, 0.1, 100.0);
     let view = glam::Mat4::look_at_rh(
         glam::Vec3::new(3.0, 2.0, 3.0),
         glam::Vec3::ZERO,
@@ -620,4 +672,47 @@ fn build_view_matrices(width: u32, height: u32) -> (glam::Mat4, glam::Mat4, glam
     let light = glam::Vec3::new(0.5, 1.0, 0.3).normalize();
     (view, proj, light)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem::{size_of, align_of};
+
+    #[test]
+    fn test_terrain_uniforms_layout() {
+        // Verify TerrainUniforms struct is exactly 176 bytes as expected by WGSL shader
+        assert_eq!(size_of::<TerrainUniforms>(), 176, 
+            "TerrainUniforms size must be 176 bytes to match WGSL binding");
+        
+        // Verify 16-byte alignment for std140 compatibility
+        assert_eq!(align_of::<TerrainUniforms>(), 16,
+            "TerrainUniforms must be 16-byte aligned for std140 compatibility");
+    }
+
+    #[test]
+    fn test_default_proj_is_wgpu_clip() {
+        // Verify that build_view_matrices uses WGPU clip space projection
+        let (w, h) = (512, 384);
+        let aspect = w as f32 / h as f32;
+        let fovy_deg = 45.0_f32;
+        let fovy_rad = fovy_deg.to_radians();
+        let (znear, zfar) = (0.1, 100.0);
+
+        let (_, proj, _) = build_view_matrices(w, h);
+        let expected = crate::camera::perspective_wgpu(fovy_rad, aspect, znear, zfar);
+
+        // Assert all 16 elements are approximately equal
+        let proj_array = proj.to_cols_array();
+        let expected_array = expected.to_cols_array();
+        
+        for (i, (&actual, &expected)) in proj_array.iter().zip(expected_array.iter()).enumerate() {
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "Element {} differs: actual={}, expected={}, diff={}",
+                i, actual, expected, (actual - expected).abs()
+            );
+        }
+    }
+}
+
 // A2-END:terrain-module
