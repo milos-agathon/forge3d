@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.0.6] - 2025-08-15
+### Workstream T1 — CPU Mesh & GPU Resources
+**Status:** Complete
+
+### Added
+- **CPU grid mesh generator**
+  - New `terrain::mesh::{make_grid, GridMesh, GridVertex, Indices}` with CCW winding and centered origin.
+  - Python API `_vulkan_forge.grid_generate(nx, nz, spacing, origin)` returning NumPy arrays:
+    - `XY: (N,2) float32`, `UV: (N,2) float32`, `indices: (M,) uint32`.
+  - Validation of shapes/dtypes; zero-copy where possible.
+- **Height texture upload (R32Float)**
+  - `Renderer.upload_height_r32f()` with proper 256-byte `bytes_per_row` padding.
+  - Debug helpers: `debug_read_height_patch()` and `read_full_height_texture()`.
+- **Colormap LUT system**
+  - Central registry `src/colormap/mod.rs` with embedded 256×1 PNG assets: `viridis`, `magma`, `terrain`.
+  - Unconditional Python/Rust discovery: `colormap_supported()`.
+  - Runtime texture format selection:
+    - Prefer `Rgba8UnormSrgb`; fallback to `Rgba8Unorm` with CPU sRGB→linear conversion.
+    - Env toggle `VF_FORCE_LUT_UNORM=1` to exercise fallback path.
+  - `TerrainSpike` integration (feature-gated): bind group layout `(0=UBO, 1=texture, 2=sampler)`, linear-filtered LUT sampling.
+  - `TerrainSpike.debug_lut_format()` for inspection.
+- **Docs & API polish**
+  - Expanded README sections (T11, T1.2, T1.3).
+  - Rich docstrings in `python/vulkan_forge/__init__.py`.
+
+### Changed
+- Removed stale `grid` module; Python keeps a `generate_grid` alias to the new `grid_generate` for compatibility.
+- `TerrainSpike` now seeds lighting from the computed light vector.
+- WGSL shader cleaned up and aligned with binding layout.
+
+### Fixed
+- WGSL parsing errors (commas vs semicolons) and linear-space lighting correctness.
+
+### Tests
+- `tests/test_grid_generate.py`: shapes, dtypes, UV corners, CCW winding, u16/u32 index switch, large grids.
+- `tests/test_colormap.py`: registry/discovery, format fallback (including `VF_FORCE_LUT_UNORM`), shader sanity.
+
+### Compatibility
+- No breaking Python API changes; `TerrainSpike` remains feature-gated.
+- Rust callers should migrate imports from `crate::grid` → `crate::terrain::mesh`.
+  - Python alias preserves old name: `generate_grid = grid_generate`.
+
+
 ## \[0.0.5] - 2025-08-08
 
 ### Added
