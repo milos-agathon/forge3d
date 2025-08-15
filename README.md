@@ -2,7 +2,7 @@
 # vulkan-forge
 
 Headless, deterministic triangle renderer built on **wgpu** with a **PyO3** Python API.  
-Status: pre-0.1 (research/prototyping). Latest release: **0.0.6**.
+Status: pre-0.1 (research/prototyping). Latest release: **0.0.7**.
 
 ## Quickstart (from source)
 

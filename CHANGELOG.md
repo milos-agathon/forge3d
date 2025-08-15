@@ -1,4 +1,31 @@
 # Changelog
+All notable changes to this project will be documented in this file.
+
+## [0.0.7] — 2025-08-15
+### Added
+- Completed **Workstream T2 — Uniforms, Camera, and Lighting**.
+- New Rust module `src/camera.rs` with:
+  - `camera_look_at()`, `camera_perspective(clip_space={'wgpu','gl'})`, `camera_view_proj()` exposed to Python (PyO3).
+  - Precise parameter validation and exact error messages.
+  - NumPy-friendly outputs: C-contiguous, `float32`, shape `(4,4)`.
+- Terrain uniforms:
+  - `TerrainUniforms` struct (std140-compatible, **176 bytes**, 16-byte aligned).
+  - `Globals` container and `TerrainSpike::debug_uniforms_f32()` to inspect 44-float UBO layout.
+- Terrain camera integration:
+  - `TerrainSpike::set_camera_look_at(...)` computes aspect from framebuffer and updates UBO.
+  - Default projection switched to **WGPU clip space** via `camera::perspective_wgpu()`.
+
+### Changed
+- `build_view_matrices()` now uses WGPU depth range [0,1] (was GL [-1,1]).
+- GL→WGPU depth conversion refactored to `gl_to_wgpu()` helper.
+
+### Tests
+- Rust: unit test guarantees `TerrainUniforms` size and alignment.
+- Rust: unit test verifies default projection is WGPU clip space.
+- Python: `tests/test_camera.py` (~20 tests) covering camera math, validation, and TerrainSpike integration.
+
+### Docs
+- README updated to document WGPU clip-space default and camera API examples.
 
 ## [0.0.6] - 2025-08-15
 ### Workstream T1 — CPU Mesh & GPU Resources
