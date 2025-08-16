@@ -2230,3 +2230,9 @@ r.render_png("frame.png")
 (For MVP, vectors can accept either packed arrays or a minimal Python-side adapter that extracts coords from GeoPandas/Shapely and passes flat arrays into Rust.)
 
 ---
+
+
+<!-- T41-BEGIN:roadmap-check -->
+- [x] T3 — Terrain Shaders & Pipeline
+- [x] T4.1 — Scene integration (minimal)
+<!-- T41-END:roadmap-check -->

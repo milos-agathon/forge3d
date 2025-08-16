@@ -854,6 +854,9 @@ pub use terrain::pipeline::TerrainPipeline;
 pub mod colormap;
 // T33-END:colormap-registry
 pub mod camera;
+// T41-BEGIN:scene-export
+pub mod scene;
+// T41-END:scene-export
 
 // T2.1 Infrastructure re-exports for easy access
 #[cfg(feature = "terrain_spike")]
@@ -961,6 +964,7 @@ fn _vulkan_forge(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<Renderer>()?;
     #[cfg(feature = "terrain_spike")]
     { m.add_class::<terrain::TerrainSpike>()?; }
+    m.add_class::<scene::Scene>()?;
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
     m.add_function(wrap_pyfunction!(grid_generate, m)?)?;

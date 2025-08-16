@@ -1,139 +1,59 @@
 <task>
-  <title>Fix pytest failures by making terrain render non-trivial (increase PNG size & keep T3 bindings)</title>
-  <goal>
-    Update the WGSL so the terrain image is meaningfully varied even when the height texture is the 1×1 dummy.
-    This eliminates the small, highly-compressible solid-color output (≈3.3KB) and satisfies the test that
-    the rendered PNG be &gt; 4096 bytes, while keeping the existing T3 pipeline/bindings unchanged.
-  </goal>
+  <title>T4.1 Scene — polish alignment math & remove unused import (NFC)</title>
 
   <context>
-    <facts>
-      <fact>Tests construct <code>TerrainSpike(320, 240, grid=64, colormap="viridis")</code> and then call <code>render_png</code>. The file-size smoke test expects &gt; 4096 bytes.</fact>
-      <fact>Current WGSL samples a 1×1 R32F height texture (all zeros) → color becomes nearly uniform after LUT, so PNG compresses to ~3.3KB and the assertion fails.</fact>
-      <fact>We must not change Rust pipeline state, layouts, or vertex formats. Only shader logic should change.</fact>
-      <fact>We already expose position.xy and uv to the vertex shader; we can synthesize a procedural height from those to guarantee variation.</fact>
-    </facts>
-    <non_goals>
-      <non_goal>No changes to Rust (bind groups, pipeline descriptors, or render pass).</non_goal>
-      <non_goal>No depth buffer or multi-sampling changes.</non_goal>
-    </non_goals>
+    <summary>
+      Your latest Scene implementation passes tests and correctly fixes the 256-byte row alignment for R32F uploads. To make the code future-proof and a bit cleaner, let’s (1) replace hard-coded 256 math with the official WebGPU constant <code>wgpu::COPY_BYTES_PER_ROW_ALIGNMENT</code> in both places, and (2) drop an unused import. These are no-functional-change (NFC) edits that keep behavior identical while improving clarity and portability.
+    </summary>
   </context>
 
-  <constraints>
-    <constraint>Preserve bind groups and entry points: <code>@group(0)</code> Globals UBO, <code>@group(1)</code> height tex + NonFiltering sampler, <code>@group(2)</code> LUT + Filtering sampler; <code>vs_main</code>/<code>fs_main</code> unchanged names.</constraint>
-    <constraint>Keep UBO field names and sizes compatible with the 176-byte layout expected by Rust.</constraint>
-    <constraint>Idempotent edit (running twice yields no diff).</constraint>
-  </constraints>
+  <objectives>
+    <objective>Use <code>wgpu::COPY_BYTES_PER_ROW_ALIGNMENT</code> instead of literal 256 in both R32F upload paths.</objective>
+    <objective>Remove the unused <code>use numpy::PyUntypedArrayMethods;</code> import from <code>src/scene/mod.rs</code>.</objective>
+  </objectives>
 
   <edits>
-    <edit file="src/terrain/shaders/terrain.wgsl" create_if_missing="true" replace="all">
-      <![CDATA[
-// T3.3 Terrain shader — compatible with Rust pipeline bind group layouts.
-// Layout: 0=Globals UBO, 1=height R32Float + NonFiltering sampler, 2=LUT RGBA8 + Filtering sampler.
-// This version adds a deterministic analytic height fallback to avoid uniform output with a 1×1 dummy height.
-
-// ---------- Globals UBO (176 bytes total, must match Rust) ----------
-struct Globals {
-  view : mat4x4<f32>,          // 64 B
-  proj : mat4x4<f32>,          // 64 B
-  sun_exposure : vec4<f32>,    // xyz = sun_dir, w = exposure
-  // packs (spacing, h_range, exaggeration, 0) for source-compat with globals.spacing.x, .y, .z
-  spacing : vec4<f32>,
-  _pad_tail : vec4<f32>,       // pad to 176 B
-};
-
-@group(0) @binding(0) var<uniform> globals : Globals;
-
-// ---------- Textures & samplers ----------
-@group(1) @binding(0) var height_tex  : texture_2d<f32>;  // R32Float, non-filterable
-@group(1) @binding(1) var height_samp : sampler;          // NonFiltering at pipeline level
-
-@group(2) @binding(0) var lut_tex  : texture_2d<f32>;     // RGBA8 (sRGB/UNORM), filterable
-@group(2) @binding(1) var lut_samp : sampler;
-
-// ---------- IO ----------
-struct VsIn {
-  // position.xy in plane
-  @location(0) pos_xy : vec2<f32>,
-  @location(1) uv     : vec2<f32>,
-};
-
-struct VsOut {
-  @builtin(position) clip_pos : vec4<f32>,
-  @location(0) uv             : vec2<f32>,
-  @location(1) height         : f32,
-  @location(2) xz             : vec2<f32>,   // pass plane x/z to fragment for shading
-};
-
-// Analytic fallback height that varies across the grid. Amplitude ≈ ±0.5 (matches Globals defaults).
-fn analytic_height(x: f32, z: f32) -> f32 {
-  return sin(x * 1.3) * 0.25 + cos(z * 1.1) * 0.25;
-}
-
-// ---------- Vertex ----------
-@vertex
-fn vs_main(in: VsIn) -> VsOut {
-  let spacing      = max(globals.spacing.x, 1e-8);
-  let exaggeration = globals.spacing.z;
-
-  // Sample height with a NonFiltering sampler; level 0 to avoid filtering.
-  let h_tex = textureSampleLevel(height_tex, height_samp, in.uv, 0.0).r;
-
-  // Deterministic analytic fallback guarantees variation even if height_tex is 1x1.
-  let h_ana = analytic_height(in.pos_xy.x, in.pos_xy.y);
-
-  let h = h_tex + h_ana;
-
-  // Build world position (XY are plane coords, Y is height).
-  let world = vec3<f32>(in.pos_xy.x * spacing, h * exaggeration, in.pos_xy.y * spacing);
-
-  var out : VsOut;
-  out.clip_pos = globals.proj * (globals.view * vec4<f32>(world, 1.0));
-  out.uv       = in.uv;
-  out.height   = h;
-  out.xz       = in.pos_xy;
-  return out;
-}
-
-// ---------- Fragment ----------
-@fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-  // Map height into [0,1] using h_range stored in spacing.y (avoid div by 0).
-  let h_range = max(globals.spacing.y, 1e-8);
-  let t = clamp(0.5 + in.height / (2.0 * h_range), 0.0, 1.0);
-
-  // 256x1 LUT: sample along X at row center (v=0.5).
-  let lut_color = textureSampleLevel(lut_tex, lut_samp, vec2<f32>(t, 0.5), 0.0);
-
-  // Simple Lambert term from analytic slope (adds spatial variation even with flat height_tex).
-  let dhdx = 1.3 * cos(in.xz.x * 1.3) * 0.25;
-  let dhdz = -1.1 * sin(in.xz.y * 1.1) * 0.25;
-  let n = normalize(vec3<f32>(-dhdx, 1.0, -dhdz));
-
-  let L = normalize(globals.sun_exposure.xyz);
-  let lambert = clamp(dot(n, L), 0.0, 1.0);
-  let exposure = globals.sun_exposure.w;
-
-  // Mix in a small ambient floor to avoid large flat regions in the PNG.
-  let shade = mix(0.15, 1.0, lambert);
-
-  return vec4<f32>(lut_color.rgb * exposure * shade, 1.0);
-}
-      ]]>
-    </edit>
+    <patch file="src/scene/mod.rs" lang="diff"><![CDATA[
+*** a/src/scene/mod.rs
+--- b/src/scene/mod.rs
+@@
+-#![allow(dead_code)]
+-use pyo3::prelude::*;
+-use wgpu::util::DeviceExt;
+-use numpy::PyUntypedArrayMethods;
++#![allow(dead_code)]
++use pyo3::prelude::*;
++use wgpu::util::DeviceExt;
+@@
+-            // Row padding to 256 bytes as required by wgpu for height>1.
+-            let row_bytes = w * 4;
+-            let padded_bpr = ((row_bytes + 255) / 256) * 256;
++            // Row padding to WebGPU's required alignment for height>1.
++            let row_bytes = w * 4;
++            let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
++            let padded_bpr = ((row_bytes + align - 1) / align) * align;
+@@
+-        // WebGPU requires bytes_per_row to be 256-byte aligned when height > 1.
++        // WebGPU requires bytes_per_row to be COPY_BYTES_PER_ROW_ALIGNMENT aligned when height > 1.
+         // Build a temporary padded buffer: each row (w*4 bytes) is copied into a padded stride.
+-        let row_bytes = w * 4;
+-        let padded_bpr = ((row_bytes + 255) / 256) * 256;
++        let row_bytes = w * 4;
++        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
++        let padded_bpr = ((row_bytes + align - 1) / align) * align;
+*** End Patch
+]]></patch>
   </edits>
 
   <validation>
-    <step>Build the crate (same flags as CI) to ensure WGSL compiles.</step>
-    <step>Run <code>pytest -q</code>.</step>
-    <expectations>
-      <expectation><code>tests/test_t31_integration.py::test_t31_render_png_smoke</code> passes (PNG &gt; 4096 bytes).</expectation>
-      <expectation>No shader creation/validation errors; all T3 tests pass.</expectation>
-      <expectation>No diffs in Rust sources or pipeline configuration.</expectation>
-    </expectations>
+    <steps>
+      <step>Build: <code>maturin develop --release</code></step>
+      <step>Run tests: <code>pytest -q</code></step>
+      <expectation>All tests remain green; no behavior changes; no warnings about unused imports from <code>scene/mod.rs</code>.</expectation>
+    </steps>
   </validation>
 
-  <notes>
-    <note>This keeps the existing bind group layout and entry points intact. Only shader math changed to ensure visually non-uniform output under the dummy height texture used in tests.</note>
-  </notes>
+  <deliverables>
+    <commit_message>T4.1 Scene (NFC): use COPY_BYTES_PER_ROW_ALIGNMENT instead of literal 256; remove unused numpy import.</commit_message>
+  </deliverables>
 </task>

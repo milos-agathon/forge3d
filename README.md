@@ -85,6 +85,25 @@ export VF_FORCE_LUT_UNORM=1
 
 **Supported colormaps:** `viridis`, `magma`, `terrain`.
 
+<!-- T41-BEGIN:scene-doc -->
+### T4.1 — Scene integration
+
+A minimal scene wrapper is now available:
+
+```python
+import numpy as np
+import _vulkan_forge as vf
+
+scn = vf.Scene(320, 240, grid=128, colormap="viridis")
+scn.set_camera_look_at(eye=(3,2,3), target=(0,0,0), up=(0,1,0), fovy_deg=45, znear=0.1, zfar=100)
+# Optional: provide your own heightmap (float32 HxW)
+# scn.set_height_from_r32f(np.random.rand(128,128).astype('float32') * 0.5 - 0.25)
+scn.render_png("scene.png")
+```
+
+The Scene reuses the T3 terrain pipeline and keeps all bind groups cached.
+<!-- T41-END:scene-doc -->
+
 <!-- T02-BEGIN:api -->
 ### DEM normalization
 

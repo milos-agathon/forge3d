@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
+## 0.0.9 — T4.1 Scene integration
+- Added `scene` module with `Scene` Py API (camera, height upload, render to PNG).
+- Reused T3 terrain pipeline and kept bind groups cached.
+- Docs: README usage snippet; ROADMAP updated.
+
 ## [0.0.8] — 2025-08-16
 ### Added
 - **Workstream T3 — Terrain Shaders & Pipeline.**
