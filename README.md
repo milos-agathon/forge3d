@@ -2,7 +2,18 @@
 # vulkan-forge
 
 Headless, deterministic triangle renderer built on **wgpu** with a **PyO3** Python API.  
-Status: pre-0.1 (research/prototyping). Latest release: **0.0.7**.
+Status: pre-0.1 (research/prototyping). Latest release: **0.0.8**.
+
+## What's new in v0.0.8 — Workstream T3: Terrain Shaders & Pipeline
+
+- New `TerrainPipeline` (`src/terrain/pipeline.rs`) with three bind groups:
+  1) **Globals UBO**, 2) **Height** `R32Float` + **NonFiltering** sampler, 3) **Colormap LUT** + Filtering sampler.
+- sRGB color target by default (`Rgba8UnormSrgb`); force UNORM with `VF_FORCE_LUT_UNORM=1`.
+- Python-facing **TerrainSpike** for offscreen terrain rendering (no depth), PNG readback.
+- Exact `[x, z, u, v]` grid vertex layout and local rationale for R32Float non-filtering sampler.
+- Tests for uniform layout (176 bytes) and WGPU clip-space projection.
+
+> See full details in **CHANGELOG.md** under `0.0.8`.
 
 ## Quickstart (from source)
 
@@ -48,6 +59,31 @@ render_triangle_png("triangle.png", 512, 512)
 ```
 
 > Legacy compatibility: `from vshade import Renderer` is a re-export of `vulkan_forge.Renderer`.
+
+### TerrainSpike example
+
+```python
+from _vulkan_forge import TerrainSpike
+
+ts = TerrainSpike(800, 600, grid=128, colormap="viridis")
+ts.set_camera_look_at(
+    eye=(3.0, 2.0, 3.0),
+    target=(0.0, 0.0, 0.0),
+    up=(0.0, 1.0, 0.0),
+    fovy_deg=45.0,
+    znear=0.1,
+    zfar=100.0,
+)
+ts.render_png("terrain.png")
+print("LUT format:", ts.debug_lut_format())
+```
+
+**Environment override:** to force UNORM LUT upload (CPU linearized), set:
+```bash
+export VF_FORCE_LUT_UNORM=1
+```
+
+**Supported colormaps:** `viridis`, `magma`, `terrain`.
 
 <!-- T02-BEGIN:api -->
 ### DEM normalization
@@ -198,8 +234,8 @@ The colormap system uses 256×1 RGBA8 lookup textures (LUT) with embedded PNG as
 - Central `crate::colormap` registry with embedded 256×1 PNG assets
 - GPU LUT texture (**RGBA8UnormSrgb** preferred) with linear clamp sampler  
 - Proper `bytes_per_row` and `rows_per_image` handling for texture upload
-- **Terrain FS bind groups (matches T3.2/T32):**  
-  **group(0)** = `Globals` UBO, **group(1)** = *height* `R32F` texture **+ sampler**, **group(2)** = *LUT* `RGBA8UnormSrgb` **+ sampler**
+**Terrain FS bind groups (T3.2/T3.3):**  
+**group(0)** = `Globals` UBO, **group(1)** = *height* `R32F` **+ sampler**, **group(2)** = *LUT* `RGBA8UnormSrgb` **+ sampler**.
 - WGSL shader sampling with minimal lighting and colormap application
 - Strict case-sensitive validation against central SUPPORTED list
 - Debug toggle `VF_FORCE_LUT_UNORM=1` forces UNORM fallback for CI coverage
@@ -359,9 +395,12 @@ Matrix workflow: `.github/workflows/ci.yml`
 * **No suitable GPU adapter / unsupported backend**
   Try another backend or run the cross-backend runner to discover a working one.
 
+## Changelog
+See **CHANGELOG.md** for a detailed list of changes. Latest release: **v0.0.8**.
+
 ## Versioning
 
-* Current version: **0.0.3**
+* Current version: **0.0.8**
 * See `CHANGELOG.md` for details.
 
 <!-- T02-BEGIN:readme-dem -->

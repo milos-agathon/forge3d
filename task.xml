@@ -1,138 +1,216 @@
-<Task name="T3.2 — Terrain FS verification sweep (no-op unless drift found), idempotent, show-diffs">
-
+<Task name="Release v0.0.8 — Workstream T3: Terrain Shaders & Pipeline">
   <Policy>
-    - **Phase A is READ-ONLY.** Abort if any write occurs during Phase A.
-    - **Phase B** may edit **one file only** and **only inside markers**:
-      1) `src/shaders/terrain.wgsl` — within `// T32-BEGIN:fs … // T32-END:fs`.
-    - Do **not** touch pipeline wiring, FFI, Python/C++/Rust, README, or tests in this task (they were confirmed correct).
-    - Changes must be **idempotent**. Validation layers stay clean. `python -c "import vulkan_forge"` remains a no-op import.
+    - Scope: bump project version to **0.0.8** and document Workstream **T3 — Terrain Shaders & Pipeline** in **CHANGELOG.md** and **README.md**.
+    - Keep diffs minimal and idempotent. Preserve existing formatting and headings.
+    - Use regex-safe upserts; do not duplicate sections if they already mention **0.0.8**.
+    - If a file doesn’t exist (e.g., CHANGELOG.md), create it.
   </Policy>
 
   <Context>
-    The last run claims the fragment shader now:
-    - Uses `var<uniform> globals : Globals` (contract-aligned).
-    - Consumes **only** `@location(0) uv` (minimal interface, no `VSOut`/unused inputs).
-    - Has numeric guards for `dx`, `dy`, `exaggeration`, and height-range denominator.
-    - Performs lighting **in linear** and writes to an **sRGB** target after **Reinhard** tonemap (no manual gamma).
-    This task double-checks those facts and **only** patches the T32 block if any drift/regressions are detected.
+    Highlights from T3 implemented in the codebase:
+    - New `src/terrain/pipeline.rs` defining `TerrainPipeline` with 3 bind group layouts (globals UBO, height R32Float + NonFiltering sampler, LUT + Filtering sampler) and an sRGB color target.
+    - `src/terrain/mod.rs`:
+      - `ColormapLUT` with runtime format selection (`Rgba8UnormSrgb` by default; `VF_FORCE_LUT_UNORM` to force `Rgba8Unorm`).
+      - `TerrainSpike` Python-facing spike that caches pipeline + bind groups; uses no depth in render pass; readback to PNG.
+      - Exact single-line docstring for `build_grid_xyuv` clarifying `[x, z, u, v]` layout.
+      - Local comment documenting why height maps use **NonFiltering (nearest)** for `R32Float`.
+      - Debug helpers: `debug_lut_format`, `set_camera_look_at`, `debug_uniforms_f32`.
+    - Tests verifying uniform layout (176 bytes) and WGPU clip-space projection.
   </Context>
 
-  <!-- ===================== PHASE A — DISCOVERY (READ-ONLY) ===================== -->
-
-  <Requests>
-    <Request id="A1" description="Snapshot T32 FS block and sanity-check contract adherence">
-      <Action>
-        - nl -ba src/shaders/terrain.wgsl | sed -n '1,260p' || true
-        - grep -n "T32-.*fs" src/shaders/terrain.wgsl || true
-        - grep -n "var<uniform>.*globals" src/shaders/terrain.wgsl || true
-        - grep -n "struct Globals" src/shaders/terrain.wgsl || true
-        - grep -n -E "@location\\(1\\).*world_pos|@builtin\\(position\\)|struct VSOut" src/shaders/terrain.wgsl || true
-        - grep -n -E "ubo\\.|spacing_h_exag_pad" src/shaders/terrain.wgsl || true
-        - grep -n -E "max\\(globals\\.spacing\\.[xy], *1e-8\\)" src/shaders/terrain.wgsl || true
-        - grep -n -E "max\\(globals\\.exaggeration, *1e-8\\)" src/shaders/terrain.wgsl || true
-        - grep -n -E "max\\(globals\\.h_range\\.y - globals\\.h_range\\.x, *1e-6\\)" src/shaders/terrain.wgsl || true
-        - grep -n -E "textureSample(Level|Grad)" src/shaders/terrain.wgsl || true
-        - grep -n -E "cross\\(dpy, *dpx\\)" src/shaders/terrain.wgsl || true
-        - grep -n -E "vf_reinhard|return +vec4<" src/shaders/terrain.wgsl || true
-      </Action>
-    </Request>
-  </Requests>
-
-  <!-- =================== PHASE B — IMPLEMENTATION (IDEMPOTENT) =================== -->
-
   <Edits>
-    <!-- Only apply this replacement if Phase A detects any of:
-         - use of `ubo.` or `spacing_h_exag_pad`
-         - local `struct VSOut` OR unused param inputs (`world_pos`, `position`)
-         - missing numeric guards (spacing/exaggeration/height-range)
-         - missing reinhard/linear->sRGB policy
-         Otherwise make **no edits**. -->
-    <File path="src/shaders/terrain.wgsl" intent="Normalize T32 FS to contract; edit ONLY within T32 markers if drift detected">
-      <ReplaceWithinMarkers start="// T32-BEGIN:fs" end="// T32-END:fs">
-<![CDATA[
-// T32-BEGIN:fs
-// Terrain fragment shader — linear lighting + Reinhard tonemap to sRGB target.
-// Contract: `@group(0) @binding(0) var<uniform> globals : Globals;`
-// Bindings: group(1)=height R32F + sampler, group(2)=LUT RGBA8UnormSrgb + sampler.
-// NOTE: Do NOT redeclare `struct Globals` here.
 
-@group(1) @binding(0) var heightTex  : texture\_2d<f32>;
-@group(1) @binding(1) var heightSamp : sampler;
-@group(2) @binding(0) var lutTex     : texture\_2d<f32>;
-@group(2) @binding(1) var lutSamp    : sampler;
-
-fn vf\_reinhard(x: vec3<f32>) -> vec3<f32> { return x / (vec3<f32>(1.0) + x); }
-fn safe\_normalize(v: vec3<f32>) -> vec3<f32> { let m = max(length(v), 1e-8); return v / m; }
-
-@fragment
-fn fs\_main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
-// Robust UV step from texture dims (avoid div-by-zero)
-let dims = vec2<f32>(textureDimensions(heightTex));
-let duv  = 1.0 / max(dims - vec2<f32>(1.0), vec2<f32>(1.0));
-
-// Heights with forward differences
-let h  : f32 = textureSampleLevel(heightTex, heightSamp, uv, 0.0).r;
-let hx : f32 = textureSampleLevel(heightTex, heightSamp, uv + vec2<f32>(duv.x, 0.0), 0.0).r;
-let hy : f32 = textureSampleLevel(heightTex, heightSamp, uv + vec2<f32>(0.0, duv.y), 0.0).r;
-
-// Numeric guards
-let dx = max(globals.spacing.x, 1e-8);
-let dy = max(globals.spacing.y, 1e-8);
-let ex = max(globals.exaggeration, 1e-8);
-
-// Tangents and normal (right-handed; +Y up)
-let dpx = vec3<f32>(dx, 0.0, (hx - h) \* ex);
-let dpy = vec3<f32>(0.0, dy, (hy - h) \* ex);
-let n   = safe\_normalize(cross(dpy, dpx));  // orientation as agreed
-
-// Lighting (linear)
-let L        = safe\_normalize(globals.sun\_dir);
-let lambert  = max(dot(n, L), 0.0);
-let ambient  = 0.12;
-let exposure = max(globals.exposure, 0.0);
-
-// Height normalization → LUT (linear sample from sRGB LUT view)
-let denom = max(globals.h\_range.y - globals.h\_range.x, 1e-6);
-let t     = clamp((h - globals.h\_range.x) / denom, 0.0, 1.0);
-let albedo = textureSampleLevel(lutTex, lutSamp, vec2<f32>(t, 0.5), 0.0).rgb;
-
-// Tone map in linear; write to sRGB target (hardware encodes gamma)
-let lit    = albedo \* (ambient + lambert) \* exposure;
-let mapped = vf\_reinhard(lit);
-return vec4<f32>(mapped, 1.0);
-}
-// T32-END\:fs
-]]> </ReplaceWithinMarkers> </File> </Edits>
-
-  <!-- ====================== PHASE C — BUILD & ACCEPTANCE ====================== -->
-
-  <Commands shell="bash">
-    <Run>python -m pip install -U pip maturin pytest numpy pillow</Run>
-    <Run>maturin develop --release</Run>
-    <Run>pytest -q || true</Run>
-
-```bash
-# Idempotency proof
-git status --porcelain || true
-CHANGED=$(git status --porcelain | awk '{print $2}')
-if [ -n "$CHANGED" ]; then
-  for f in $CHANGED; do
-    echo "### DIFF: $f"
-    git --no-pager diff --unified=3 -- "$f"
-    echo
-  done
-else
-  echo "No changes required"
-fi
+```
+<!-- 1) Cargo.toml: bump version to 0.0.8 (idempotent) -->
+<File path="Cargo.toml" intent="Bump crate version to 0.0.8" create_if_missing="false">
+  <Upsert>
 ```
 
+<![CDATA[
+# only change the first version key under [package]
+s#(?ms)^\[package\]\s+(?:.*\n)*?version\s*=\s*"\d+\.\d+\.\d+"#\0#; s####
+]]>
+
+```
+  </Upsert>
+  <Upsert>
+```
+
+<![CDATA[
+s#^(version\s*=\s*")\d+\.\d+\.\d+"#\10.0.8"#m
+]]>
+
+```
+  </Upsert>
+</File>
+
+<!-- 2) Optional Python version exposure if present -->
+<File path="python/_vulkan_forge/__init__.py" intent="Set __version__ to 0.0.8 if file exists" create_if_missing="false" only_if_exists="true">
+  <Upsert>
+```
+
+<![CDATA[
+s#^__version__\s*=\s*["']\d+\.\d+\.\d+["']#__version__ = "0.0.8"#m
+]]>
+
+```
+  </Upsert>
+  <Insert anchor="^$" position="end" only_if_not_exists="^__version__\s*=\s*['\"]0\.0\.8['\"]$">
+```
+
+<![CDATA[
+__version__ = "0.0.8"
+]]>
+
+```
+  </Insert>
+</File>
+
+<!-- 3) CHANGELOG.md: add 0.0.8 section (create if missing). Use Keep a Changelog style. -->
+<File path="CHANGELOG.md" intent="Add v0.0.8 release notes for Workstream T3" create_if_missing="true">
+  <Insert anchor="^# Changelog" position="before" only_if_not_exists="^# Changelog">
+```
+
+<![CDATA[
+# Changelog
+All notable changes to this project will be documented in this file.
+
+This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
+]]>
+
+```
+  </Insert>
+
+  <Insert anchor="^## \[0\.0\.8\]" position="before" only_if_not_exists="^## \[0\.0\.8\]">
+```
+
+<![CDATA[
+## [0.0.8] — 2025-08-16
+### Added
+- **Workstream T3 — Terrain Shaders & Pipeline.**
+- `TerrainPipeline` in `src/terrain/pipeline.rs` with:
+  - Bind group layouts: (0) Globals UBO, (1) height **R32Float** + **NonFiltering** sampler, (2) LUT texture + Filtering sampler.
+  - Vertex layout: `position.xy` and `uv` as two `Float32x2` attributes.
+  - sRGB color target (recommended): `Rgba8UnormSrgb`.
+- Python-facing spike `TerrainSpike` for offscreen rendering and PNG output.
+- `ColormapLUT` supporting runtime format selection; defaults to sRGB, can force UNORM via `VF_FORCE_LUT_UNORM`.
+
+### Changed
+- Cached pipeline and bind groups now used in the render pass (no runtime re-creation).
+- Documentation updates:
+  - Exact single-line docstring for `build_grid_xyuv` clarifying `[x, z, u, v]` layout.
+  - Local comment explaining **NonFiltering (nearest)** requirement for `R32Float` height textures.
+
+### Fixed
+- Verified uniform block layout (176 bytes, std140-compatible) and WGPU clip-space projection via tests.
+
+]]>
+
+```
+  </Insert>
+</File>
+
+<!-- 4) README.md: add What's New + quickstart for TerrainSpike and env var note -->
+<File path="README.md" intent="Document v0.0.8 and Workstream T3 in README" create_if_missing="false">
+  <!-- Version badge / heading nudge (idempotent) -->
+  <Upsert>
+```
+
+<![CDATA[
+s#(\#\s*vulkan-forge(?:.*\n)*)#\1#g
+]]>
+
+```
+  </Upsert>
+
+  <!-- What's New section -->
+  <Insert anchor="^## What's new in v0\.0\.8" position="before" only_if_not_exists="^## What's new in v0\.0\.8">
+```
+
+<![CDATA[
+## What's new in v0.0.8 — Workstream T3: Terrain Shaders & Pipeline
+
+- New `TerrainPipeline` (`src/terrain/pipeline.rs`) with three bind groups:
+  1) **Globals UBO**, 2) **Height** `R32Float` + **NonFiltering** sampler, 3) **Colormap LUT** + Filtering sampler.
+- sRGB color target by default (`Rgba8UnormSrgb`); force UNORM with `VF_FORCE_LUT_UNORM=1`.
+- Python-facing **TerrainSpike** for offscreen terrain rendering (no depth), PNG readback.
+- Exact `[x, z, u, v]` grid vertex layout and local rationale for R32Float non-filtering sampler.
+- Tests for uniform layout (176 bytes) and WGPU clip-space projection.
+
+> See full details in **CHANGELOG.md** under `0.0.8`.
+]]>
+
+```
+  </Insert>
+
+  <!-- Quickstart usage snippet -->
+  <Insert anchor="^## Quickstart" position="after" only_if_not_exists="^### TerrainSpike example">
+```
+
+<![CDATA[
+### TerrainSpike example
+
+```python
+from _vulkan_forge import TerrainSpike
+
+ts = TerrainSpike(800, 600, grid=128, colormap="viridis")
+ts.set_camera_look_at(
+    eye=(3.0, 2.0, 3.0),
+    target=(0.0, 0.0, 0.0),
+    up=(0.0, 1.0, 0.0),
+    fovy_deg=45.0,
+    znear=0.1,
+    zfar=100.0,
+)
+ts.render_png("terrain.png")
+print("LUT format:", ts.debug_lut_format())
+```
+
+**Environment override:** to force UNORM LUT upload (CPU linearized), set:
+```bash
+export VF_FORCE_LUT_UNORM=1
+```
+
+**Supported colormaps:** `viridis`, `magma`, `terrain`.
+```
+]]>
+
+```
+  </Insert>
+
+  <!-- Link to changelog for discoverability -->
+  <Insert anchor="^## Changelog" position="before" only_if_not_exists="^## Changelog">
+```
+
+<![CDATA[
+## Changelog
+See **CHANGELOG.md** for a detailed list of changes. Latest release: **v0.0.8**.
+]]>
+
+```
+  </Insert>
+</File>
+```
+
+  </Edits>
+
+  <Commands shell="bash">
+    <Run>set -euo pipefail</Run>
+    <!-- Sanity checks -->
+    <Run>rg -n '^\[package\]' Cargo.toml && rg -n '^version\s*=\s*".*"' Cargo.toml || true</Run>
+    <Run>rg -n '^## \[0\.0\.8\]' CHANGELOG.md || true</Run>
+    <Run>rg -n '^## What'\''s new in v0\.0\.8' README.md || true</Run>
+    <Run>rg -n 'VF_FORCE_LUT_UNORM' README.md || true</Run>
+    <Run>rg -n 'TerrainSpike' README.md || true</Run>
+    <!-- Show pending changes -->
+    <Run>git status --porcelain || true</Run>
+    <Run>CHANGED=$(git status --porcelain | awk '{print $2}'); if [ -n "$CHANGED" ]; then for f in $CHANGED; do echo "### DIFF: $f"; git --no-pager diff --unified=3 -- $f; done; fi || true</Run>
   </Commands>
 
   <Acceptance>
-    <Criterion>Inside **T32** the FS consumes **only** `@location(0) uv`; no `VSOut`, no `world_pos`, no `@builtin(position)`.</Criterion>
-    <Criterion>The FS references **`globals : Globals`** and **does not redeclare** `struct Globals` in the T32 block.</Criterion>
-    <Criterion>Numeric guards exist for `dx`, `dy`, `exaggeration`, and height-range denominator; normal uses `cross(dpy, dpx)`.</Criterion>
-    <Criterion>Lighting is performed in **linear**; **Reinhard** tonemap; returns to an **sRGB** target without manual gamma.</Criterion>
-    <Criterion>No files other than `src/shaders/terrain.wgsl` are modified; build succeeds; tests remain as they were; import is a no-op.</Criterion>
+    <Criterion>`Cargo.toml` package `version` is `0.0.8`.</Criterion>
+    <Criterion>`CHANGELOG.md` contains a `## [0.0.8] — 2025-08-16` section with **Added/Changed/Fixed** bullets describing T3.</Criterion>
+    <Criterion>`README.md` has a “What’s new in v0.0.8 — Workstream T3” section, a **TerrainSpike** usage example, and mentions `VF_FORCE_LUT_UNORM` and supported colormaps.</Criterion>
+    <Criterion>Edits are idempotent (re-running produces no further diffs).</Criterion>
   </Acceptance>
 </Task>

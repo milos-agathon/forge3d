@@ -6,6 +6,11 @@ pub mod mesh;
 pub use mesh::{GridMesh, GridVertex, Indices, make_grid};
 // T11-END:terrain-mesh-mod
 
+// T33-BEGIN:terrain-mod
+pub mod pipeline;
+pub use pipeline::TerrainPipeline;
+// T33-END:terrain-mod
+
 use pyo3::prelude::*;
 use std::num::NonZeroU32;
 use wgpu::util::DeviceExt;
@@ -212,7 +217,6 @@ impl Globals {
 // ---------- Render spike object used by tests ----------
 
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
-const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 #[pyclass(module = "_vulkan_forge", name = "TerrainSpike")]
 pub struct TerrainSpike {
@@ -223,23 +227,29 @@ pub struct TerrainSpike {
     device: wgpu::Device,
     queue: wgpu::Queue,
 
-    pipeline: wgpu::RenderPipeline,
+    // T33-BEGIN:tp-and-bgs
+    tp: crate::terrain::pipeline::TerrainPipeline,
+    bg0_globals: wgpu::BindGroup,
+    bg1_height: wgpu::BindGroup,
+    bg2_lut: wgpu::BindGroup,
+    // T33-END:tp-and-bgs
     vbuf: wgpu::Buffer,
     ibuf: wgpu::Buffer,
     nidx: u32,
 
     ubo: wgpu::Buffer,
-    ubo_bind_group: wgpu::BindGroup,
     colormap_lut: ColormapLUT,
     lut_format: &'static str,
 
     color: wgpu::Texture,
     color_view: wgpu::TextureView,
-    depth: wgpu::Texture,
-    depth_view: wgpu::TextureView,
 
     globals: Globals,
     last_uniforms: TerrainUniforms,
+    
+    // T33: optional height texture state
+    height_view: Option<wgpu::TextureView>,
+    height_sampler: Option<wgpu::Sampler>,
 }
 
 #[pymethods]
@@ -297,106 +307,19 @@ impl TerrainSpike {
         });
         let color_view = color.create_view(&Default::default());
 
-        let depth = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain-depth"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let depth_view = depth.create_view(&Default::default());
+        // Shader + pipeline - using T33 shared pipeline
 
-        // Shader + pipeline
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("terrain.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/terrain.wgsl").into()),
-        });
+        // T33-BEGIN:remove-local-ubo-layout
+        // Removed local, conflated layout; using shared tp.{bgl_globals,bgl_height,bgl_lut}
+        // T33-END:remove-local-ubo-layout
 
-        let ubo_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{
-            label: Some("ubo-layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry{
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer{
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None, // wgpu will validate vs shader (expects 176)
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry{
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture{
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry{
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
-            label: Some("terrain-pipeline-layout"),
-            bind_group_layouts: &[&ubo_layout],
-            push_constant_ranges: &[],
-        });
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("terrain-pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: (4 * 3 + 4 * 3) as wgpu::BufferAddress, // pos(vec3) + normal(vec3)
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute { shader_location: 0, offset: 0,                     format: wgpu::VertexFormat::Float32x3 },
-                        wgpu::VertexAttribute { shader_location: 1, offset: (4 * 3) as u64,        format: wgpu::VertexFormat::Float32x3 },
-                    ],
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: TEXTURE_FORMAT,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: Some(wgpu::Face::Back),
-                front_face: wgpu::FrontFace::Ccw,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
+        // T33-BEGIN:terrainspike-use-t33
+        // Use shared T33 pipeline
+        let tp = crate::terrain::pipeline::TerrainPipeline::create(&device, TEXTURE_FORMAT);
+        // T33-END:terrainspike-use-t33
 
         // Mesh + uniforms
-        let (vbuf, ibuf, nidx) = build_grid_mesh(&device, grid);
+        let (vbuf, ibuf, nidx) = build_grid_xyuv(&device, grid);
         let (view, proj, light) = build_view_matrices(width, height);
 
         let mut globals = Globals::default();
@@ -414,28 +337,72 @@ impl TerrainSpike {
         let (lut, lut_format) = ColormapLUT::new(&device, &queue, &adapter, which)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
-        let ubo_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
-            label: Some("ubo-bdg"),
-            layout: &ubo_layout,
-            entries: &[
-                wgpu::BindGroupEntry{ binding: 0, resource: ubo.as_entire_binding() },
-                wgpu::BindGroupEntry{ binding: 1, resource: wgpu::BindingResource::TextureView(&lut.view) },
-                wgpu::BindGroupEntry{ binding: 2, resource: wgpu::BindingResource::Sampler(&lut.sampler) },
-            ],
-        });
+        // T33-BEGIN:bg1-height-dummy
+        // Provide a tiny dummy height if the spike has none yet (keeps validation clean)
+        let (hview, hsamp) = {
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("dummy-height-r32f"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            queue.write_texture(
+                wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                bytemuck::bytes_of(&0.0f32),
+                wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(std::num::NonZeroU32::new(4).unwrap().into()), rows_per_image: Some(std::num::NonZeroU32::new(1).unwrap().into()) },
+                wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            );
+            let view = tex.create_view(&Default::default());
+            // T33-BEGIN:height-sampler-doc
+            // NOTE on height sampling:
+            // The height texture is R32Float and bound with:
+            //   - sample_type = Float { filterable: false }
+            //   - sampler     = SamplerBindingType::NonFiltering
+            // Many backends disallow linear filtering on 32-bit float textures,
+            // so we must use a *non-filtering* sampler (nearest). The sampler
+            // descriptor uses NEAREST modes, matching the NonFiltering binding.
+            // T33-END:height-sampler-doc
+            let samp = device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("dummy-height-sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            });
+            (view, samp)
+        };
+        // T33-END:bg1-height-dummy
+
+        // T33-BEGIN:bg-build-and-cache
+        // Build bind groups once from the created pipeline layouts
+        let bg0_globals = tp.make_bg_globals(&device, &ubo);
+        let bg1_height  = tp.make_bg_height(&device, &hview, &hsamp);
+        let bg2_lut     = tp.make_bg_lut(&device, &lut.view, &lut.sampler);
+        // T33-END:bg-build-and-cache
 
         Ok(Self{
             width, height, grid,
             device, queue,
-            pipeline,
+            // T33-BEGIN:store-tp-and-bgs
+            tp,
+            bg0_globals,
+            bg1_height,
+            bg2_lut,
+            // T33-END:store-tp-and-bgs
             vbuf, ibuf, nidx,
-            ubo, ubo_bind_group,
+            ubo,
             colormap_lut: lut,
             lut_format,
             color, color_view,
-            depth, depth_view,
             globals,
             last_uniforms: uniforms,
+            height_view: Some(hview),
+            height_sampler: Some(hsamp),
         })
     }
 
@@ -454,15 +421,15 @@ impl TerrainSpike {
                         store: wgpu::StoreOp::Store,
                     }
                 })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment{
-                    view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations{ load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
-                    stencil_ops: None,
-                }),
+                depth_stencil_attachment: None,
                 ..Default::default()
             });
-            rp.set_pipeline(&self.pipeline);
-            rp.set_bind_group(0, &self.ubo_bind_group, &[]);
+            rp.set_pipeline(&self.tp.pipeline);
+            // T33-BEGIN:set-bgs-0-1-2
+            rp.set_bind_group(0, &self.bg0_globals, &[]);
+            rp.set_bind_group(1, &self.bg1_height, &[]);
+            rp.set_bind_group(2, &self.bg2_lut, &[]);
+            // T33-END:set-bgs-0-1-2
             rp.set_vertex_buffer(0, self.vbuf.slice(..));
             rp.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint32);
             rp.draw_indexed(0..self.nidx, 0, 0..1);
@@ -580,6 +547,56 @@ impl TerrainSpike {
 }
 
 // ---------- Geometry (analytic spike) ----------
+
+// T33-BEGIN:build-grid-xyuv
+/// Minimal grid that matches T3.1/T3.3 vertex layout: interleaved [x, z, u, v] (Float32x4) => 16-byte stride.
+fn build_grid_xyuv(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, wgpu::Buffer, u32) {
+    let n = n.max(2) as usize;
+    let (w, h) = (n, n);
+
+    // Domain: [-1.5, +1.5] in X and Z; we feed (x,z) into position.xy.
+    let scale = 1.5f32;
+    let step_x = (2.0 * scale) / (w as f32 - 1.0);
+    let step_z = (2.0 * scale) / (h as f32 - 1.0);
+
+    // Interleaved verts: [x, z, u, v]
+    let mut verts = Vec::<f32>::with_capacity(w * h * 4);
+    for j in 0..h {
+        for i in 0..w {
+            let x = -scale + i as f32 * step_x;
+            let z = -scale + j as f32 * step_z;
+            let u = i as f32 / (w as f32 - 1.0);
+            let v = j as f32 / (h as f32 - 1.0);
+            verts.extend_from_slice(&[x, z, u, v]);
+        }
+    }
+
+    // Indexed triangles (CCW)
+    let mut idx = Vec::<u32>::with_capacity((w - 1) * (h - 1) * 6);
+    for j in 0..h - 1 {
+        for i in 0..w - 1 {
+            let a = (j * w + i) as u32;
+            let b = (j * w + i + 1) as u32;
+            let c = ((j + 1) * w + i) as u32;
+            let d = ((j + 1) * w + i + 1) as u32;
+            idx.extend_from_slice(&[a, c, b, b, c, d]);
+        }
+    }
+
+    use wgpu::util::DeviceExt;
+    let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("terrain-xyuv-vbuf"),
+        contents: bytemuck::cast_slice(&verts),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let ibuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("terrain-xyuv-ibuf"),
+        contents: bytemuck::cast_slice(&idx),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    (vbuf, ibuf, idx.len() as u32)
+}
+// T33-END:build-grid-xyuv
 
 fn build_grid_mesh(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, wgpu::Buffer, u32) {
     let n = n as usize;

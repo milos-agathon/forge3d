@@ -1,6 +1,27 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
+
+## [0.0.8] — 2025-08-16
+### Added
+- **Workstream T3 — Terrain Shaders & Pipeline.**
+- `TerrainPipeline` in `src/terrain/pipeline.rs` with:
+  - Bind group layouts: (0) Globals UBO, (1) height **R32Float** + **NonFiltering** sampler, (2) LUT texture + Filtering sampler.
+  - Vertex layout: `position.xy` and `uv` as two `Float32x2` attributes.
+  - sRGB color target (recommended): `Rgba8UnormSrgb`.
+- Python-facing spike `TerrainSpike` for offscreen rendering and PNG output.
+- `ColormapLUT` supporting runtime format selection; defaults to sRGB, can force UNORM via `VF_FORCE_LUT_UNORM`.
+
+### Changed
+- Cached pipeline and bind groups now used in the render pass (no runtime re-creation).
+- Documentation updates:
+  - Exact single-line docstring for `build_grid_xyuv` clarifying `[x, z, u, v]` layout.
+  - Local comment explaining **NonFiltering (nearest)** requirement for `R32Float` height textures.
+
+### Fixed
+- Verified uniform block layout (176 bytes, std140-compatible) and WGPU clip-space projection via tests.
+
 ## [0.0.7] — 2025-08-15
 ### Added
 - Completed **Workstream T2 — Uniforms, Camera, and Lighting**.

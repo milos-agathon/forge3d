@@ -56,7 +56,12 @@
       "Bash(export CONDA_PREFIX=\"\")",
       "Bash(sed:*)",
       "Bash(git --no-pager diff --unified=3 -- .claude/settings.local.json)",
-      "Bash(git --no-pager diff --unified=3 -- task.xml)"
+      "Bash(git --no-pager diff --unified=3 -- task.xml)",
+      "Bash(rg:*)",
+      "Bash(git --no-pager diff --unified=3 -- src/terrain/pipeline.rs)",
+      "Bash(git --no-pager diff --unified=3 --staged -- src/terrain/pipeline.rs)",
+      "Bash(git --no-pager diff --unified=3 -- Cargo.toml)",
+      "Bash(git --no-pager diff --unified=3 -- CHANGELOG.md)"
     ],
     "deny": []
   }

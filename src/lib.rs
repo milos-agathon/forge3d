@@ -846,7 +846,10 @@ fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
 
 // ---------- Python module ----------
 
+// T33-BEGIN:lib-terrain-mod
 pub mod terrain;
+pub use terrain::pipeline::TerrainPipeline;
+// T33-END:lib-terrain-mod
 // T33-BEGIN:colormap-registry
 pub mod colormap;
 // T33-END:colormap-registry
