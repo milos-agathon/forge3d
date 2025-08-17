@@ -4,61 +4,23 @@
 use std::num::NonZeroU32;
 
 use bytemuck::{Pod, Zeroable};
-use image::ImageBuffer;
-use once_cell::sync::OnceCell;
+use image::{ImageBuffer, GenericImageView};
 use pyo3::prelude::*;
 use pyo3::Bound;
-use numpy::{PyArray3, IntoPyArray, PyArray2, PyReadonlyArray2, PyArray1};
+use numpy::{PyArray3, IntoPyArray, PyArray2, PyReadonlyArray2, PyArray1, PyReadonlyArray3};
 use numpy::PyUntypedArrayMethods; // needed for contiguous checks
 use ndarray::Array3;
 use wgpu::util::DeviceExt;
 use pyo3::types::{PyDict, PyList};
 use pyo3::wrap_pyfunction;
+use std::path::PathBuf;
 
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const CLEAR_COLOR: wgpu::Color = wgpu::Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
 
-// ---------- WGPU device/queue singleton ----------
-
-static WGPU_CTX: OnceCell<WgpuContext> = OnceCell::new();
-
-struct WgpuContext {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-}
-
-impl WgpuContext {
-    fn get() -> &'static Self {
-        WGPU_CTX.get_or_init(|| {
-            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-                backends: wgpu::Backends::all(),
-                ..Default::default()
-            });
-
-            let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            }))
-            .expect("No suitable GPU adapter");
-
-            let needed_features = wgpu::Features::empty();
-            let limits = wgpu::Limits::downlevel_defaults();
-
-            let (device, queue) = pollster::block_on(adapter.request_device(
-                &wgpu::DeviceDescriptor {
-                    required_features: needed_features,
-                    required_limits: limits,
-                    label: Some("vulkan-forge-device"),
-                },
-                None,
-            ))
-            .expect("request_device failed");
-
-            Self { device, queue }
-        })
-    }
-}
+// Import shared GPU context
+mod gpu;
+use crate::gpu::{ctx, align_copy_bpr};
 
 // ---------- Geometry & pipeline ----------
 
@@ -157,7 +119,6 @@ fn create_offscreen(device: &wgpu::Device, width: u32, height: u32, format: wgpu
     (texture, view)
 }
 
-fn align256(n: u32) -> u32 { ((n + 255) / 256) * 256 }
 
 fn copy_texture_to_rgba_unpadded(
     device: &wgpu::Device,
@@ -168,7 +129,7 @@ fn copy_texture_to_rgba_unpadded(
     height: u32,
 ) -> Vec<u8> {
     let row_bytes = width * 4;
-    let padded_bpr = align256(row_bytes);
+    let padded_bpr = align_copy_bpr(row_bytes);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("copy-encoder"),
@@ -248,11 +209,11 @@ impl Renderer {
     #[pyo3(text_signature = "(width, height)")]
     /// Create a headless renderer.
     pub fn new(width: u32, height: u32) -> Self {
-        let ctx = WgpuContext::get();
-        let pipeline = create_pipeline(&ctx.device, TEXTURE_FORMAT);
-        let (vbuf, ibuf, icount) = triangle_geometry(&ctx.device);
-        let (color_tex, color_view) = create_offscreen(&ctx.device, width, height, TEXTURE_FORMAT);
-        let readback_buf = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        let g = ctx();
+        let pipeline = create_pipeline(&g.device, TEXTURE_FORMAT);
+        let (vbuf, ibuf, icount) = triangle_geometry(&g.device);
+        let (color_tex, color_view) = create_offscreen(&g.device, width, height, TEXTURE_FORMAT);
+        let readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback-buffer"),
             size: 4,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
@@ -285,12 +246,12 @@ impl Renderer {
 
     #[pyo3(text_signature = "($self)")]
     pub fn render_triangle_rgba<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyArray3<u8>>> {
-        let ctx = WgpuContext::get();
-        self.render_into_offscreen(ctx)?;
+        let g = ctx();
+        self.render_into_offscreen(g)?;
 
-        let need = (align256(self.width * 4) as u64) * (self.height as u64);
+        let need = (align_copy_bpr(self.width * 4) as u64) * (self.height as u64);
         if need > self.readback_size {
-            self.readback_buf = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
@@ -300,7 +261,7 @@ impl Renderer {
         }
 
         let pixels = copy_texture_to_rgba_unpadded(
-            &ctx.device, &ctx.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
+            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
 
         let arr3 = Array3::from_shape_vec(
             (self.height as usize, self.width as usize, 4), pixels
@@ -308,14 +269,20 @@ impl Renderer {
         Ok(arr3.into_pyarray_bound(py))
     }
 
+    /// Render the demo triangle to a PNG on disk.
+    ///
+    /// Parameters
+    /// ----------
+    /// path : str | os.PathLike
+    ///     Destination file path for the PNG image.
     #[pyo3(text_signature = "($self, path)")]
-    pub fn render_triangle_png(&mut self, path: String) -> PyResult<()> {
-        let ctx = WgpuContext::get();
-        self.render_into_offscreen(ctx)?;
+    pub fn render_triangle_png(&mut self, path: PathBuf) -> PyResult<()> {
+        let g = ctx();
+        self.render_into_offscreen(g)?;
 
-        let need = (align256(self.width * 4) as u64) * (self.height as u64);
+        let need = (align_copy_bpr(self.width * 4) as u64) * (self.height as u64);
         if need > self.readback_size {
-            self.readback_buf = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
@@ -325,11 +292,11 @@ impl Renderer {
         }
 
         let pixels = copy_texture_to_rgba_unpadded(
-            &ctx.device, &ctx.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
+            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
 
         let img: ImageBuffer<image::Rgba<u8>, _> = ImageBuffer::from_raw(self.width, self.height, pixels)
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("ImageBuffer::from_raw failed"))?;
-        img.save(path).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        img.save(&path).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(())
     }
 
@@ -494,7 +461,7 @@ impl Renderer {
 
     #[pyo3(text_signature = "($self)")]
     pub fn upload_height_r32f(&mut self) -> pyo3::PyResult<()> {
-        let ctx = WgpuContext::get();
+        let g = ctx();
 
         let terr = self.terrain.as_ref()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("no terrain uploaded; call add_terrain() first"))?;
@@ -505,7 +472,7 @@ impl Renderer {
             return Err(pyo3::exceptions::PyRuntimeError::new_err("terrain dimensions are zero"));
         }
 
-        let tex = ctx.device.create_texture(&wgpu::TextureDescriptor {
+        let tex = g.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("terrain-height-r32f"),
             size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
             mip_level_count: 1,
@@ -516,7 +483,7 @@ impl Renderer {
             view_formats: &[],
         });
         let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-        let samp = ctx.device.create_sampler(&wgpu::SamplerDescriptor {
+        let samp = g.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("terrain-height-sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -529,7 +496,7 @@ impl Renderer {
 
         // Build temporary padded upload buffer for 256-byte row alignment
         let row_bytes = width * 4;
-        let padded_bpr = ((row_bytes + 255) / 256) * 256;
+        let padded_bpr = align_copy_bpr(row_bytes);
         
         // Create padded buffer
         let padded_data = {
@@ -547,7 +514,7 @@ impl Renderer {
             data
         };
 
-        ctx.queue.write_texture(
+        g.queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &tex,
                 mip_level: 0,
@@ -562,7 +529,7 @@ impl Renderer {
             },
             wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
         );
-        ctx.device.poll(wgpu::Maintain::Wait);
+        g.device.poll(wgpu::Maintain::Wait);
 
         self.height_tex = Some(tex);
         self.height_view = Some(view);
@@ -587,7 +554,7 @@ impl Renderer {
             return Ok(out);
         }
 
-        let ctx = WgpuContext::get();
+        let g = ctx();
         let tex = self.height_tex.as_ref().unwrap();
         let tex_size = tex.size();
         if x + w > tex_size.width {
@@ -604,16 +571,16 @@ impl Renderer {
         }
 
         let row_bytes = (w * 4) as u32;
-        let padded_bpr = ((row_bytes + 255) / 256) * 256;
+        let padded_bpr = align_copy_bpr(row_bytes);
         let buf_size = padded_bpr as u64 * h as u64;
-        let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        let readback = g.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("height-patch-readback"),
             size: buf_size,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
 
-        let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut encoder = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("height-patch-encoder"),
         });
 
@@ -635,13 +602,13 @@ impl Renderer {
             wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         );
 
-        ctx.queue.submit([encoder.finish()]);
-        ctx.device.poll(wgpu::Maintain::Wait);
+        g.queue.submit([encoder.finish()]);
+        g.device.poll(wgpu::Maintain::Wait);
 
         let slice = readback.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |res| { let _ = tx.send(res); });
-        ctx.device.poll(wgpu::Maintain::Wait);
+        g.device.poll(wgpu::Maintain::Wait);
         rx.recv().expect("map_async channel closed").expect("MapAsync failed");
         let data = slice.get_mapped_range();
 
@@ -682,15 +649,15 @@ impl Renderer {
 }
 
 impl Renderer {
-    fn render_into_offscreen(&mut self, ctx: &WgpuContext) -> PyResult<()> {
+    fn render_into_offscreen(&mut self, g: &crate::gpu::GpuContext) -> PyResult<()> {
         let size = self.color_tex.size();
         if size.width != self.width || size.height != self.height || self.color_tex.format() != TEXTURE_FORMAT {
-            let (tex, view) = create_offscreen(&ctx.device, self.width, self.height, TEXTURE_FORMAT);
+            let (tex, view) = create_offscreen(&g.device, self.width, self.height, TEXTURE_FORMAT);
             self.color_tex = tex;
             self.color_view = view;
         }
 
-        let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut encoder = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("render-encoder"),
         });
         {
@@ -716,7 +683,7 @@ impl Renderer {
             rpass.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint16);
             rpass.draw_indexed(0..self.icount, 0, 0..1);
         }
-        ctx.queue.submit([encoder.finish()]);
+        g.queue.submit([encoder.finish()]);
         Ok(())
     }
 }
@@ -951,6 +918,96 @@ fn normalize_in_place(heights: &mut [f32], mode: NormalizeMode, eps: f32, range:
 }
 
 #[pyfunction]
+/// Load a PNG from disk and return a NumPy array of shape (H, W, 4), dtype=uint8 (RGBA).
+///
+/// Parameters
+/// ----------
+/// path : str | os.PathLike
+///     Path to a PNG file.
+///
+/// Returns
+/// -------
+/// np.ndarray
+///     (H, W, 4) uint8 array with raw sRGB bytes; alpha is 255 if image had no alpha.
+#[pyo3(text_signature = "(path)")]
+fn png_to_numpy(py: Python<'_>, path: PathBuf) -> PyResult<Bound<'_, PyArray3<u8>>> {
+    let img = image::open(&path)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("failed to open PNG: {e}")))?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    let vec = rgba.into_raw(); // RGBA row-major
+    let arr3 = Array3::from_shape_vec((h as usize, w as usize, 4), vec)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    Ok(arr3.into_pyarray_bound(py))
+}
+
+#[pyfunction]
+/// Save a NumPy array to PNG. Supports uint8 shapes:
+///   * (H, W, 4): RGBA saved losslessly
+///   * (H, W, 3): RGB saved as opaque PNG (implicit alpha=255 on load)
+///   * (H, W):    Grayscale saved as 8-bit gray
+///
+/// Arrays must be C-contiguous; Fortran-order will raise a clear error.
+///
+/// Parameters
+/// ----------
+/// path : str | os.PathLike
+/// array : np.ndarray
+#[pyo3(text_signature = "(path, array)")]
+fn numpy_to_png(_py: Python<'_>, path: PathBuf, array: &PyAny) -> PyResult<()> {
+    // Accept uint8 C-contiguous arrays of shape (H,W), (H,W,3), or (H,W,4).
+    use numpy::{PyReadonlyArray2, PyReadonlyArray3};
+    // Handle 3-D arrays in one pass, then branch on channel count to avoid unreachable code.
+    if let Ok(arr3) = array.downcast::<PyArray3<u8>>() {
+        let ro: PyReadonlyArray3<u8> = arr3.readonly();
+        if !ro.is_c_contiguous() {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("array must be C-contiguous"));
+        }
+        let shape = ro.shape();
+        if shape.len() != 3 {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("expected 3-D array of shape (H,W,3) or (H,W,4)"));
+        }
+        let (h, w, c) = (shape[0], shape[1], shape[2]);
+        let v = ro.as_slice().map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("array not contiguous"))?;
+        match c {
+            4 => {
+                let img = image::RgbaImage::from_raw(w as u32, h as u32, v.to_vec())
+                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("invalid RGBA buffer"))?;
+                img.save(&path).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                return Ok(());
+            }
+            3 => {
+                let img = image::RgbImage::from_raw(w as u32, h as u32, v.to_vec())
+                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("invalid RGB buffer"))?;
+                img.save(&path).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                return Ok(());
+            }
+            _ => {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err("expected last dimension to be 3 (RGB) or 4 (RGBA)"));
+            }
+        }
+    }
+    // Try (H,W) u8 grayscale
+    if let Ok(arr2) = array.downcast::<PyArray2<u8>>() {
+        let ro: PyReadonlyArray2<u8> = arr2.readonly();
+        if !ro.is_c_contiguous() {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("array must be C-contiguous"));
+        }
+        let shape = ro.shape();
+        if shape.len() != 2 {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("expected 2-D array of shape (H,W) for grayscale"));
+        }
+        let (h, w) = (shape[0], shape[1]);
+        let v = ro.as_slice().map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("array not contiguous"))?;
+        let img = image::GrayImage::from_raw(w as u32, h as u32, v.to_vec())
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("invalid Gray buffer"))?;
+        img.save(&path).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        return Ok(());
+    }
+    Err(pyo3::exceptions::PyRuntimeError::new_err("unsupported array; expected uint8 (H,W), (H,W,3) or (H,W,4)"))
+}
+
+#[pyfunction]
 #[pyo3(text_signature = "(nx, nz, spacing=(1.0,1.0), origin='center')")]
 fn grid_generate(py: Python<'_>, nx: u32, nz: u32, spacing: (f32, f32), origin: Option<String>)
     -> PyResult<(Bound<'_, PyArray2<f32>>, Bound<'_, PyArray2<f32>>, Bound<'_, PyArray1<u32>>)>
@@ -968,9 +1025,13 @@ fn _vulkan_forge(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
     m.add_function(wrap_pyfunction!(grid_generate, m)?)?;
+    m.add_function(wrap_pyfunction!(png_to_numpy, m)?)?;
+    m.add_function(wrap_pyfunction!(numpy_to_png, m)?)?;
     m.add_function(wrap_pyfunction!(colormap::colormap_supported, m)?)?;
     m.add_function(wrap_pyfunction!(camera::camera_look_at, m)?)?;
     m.add_function(wrap_pyfunction!(camera::camera_perspective, m)?)?;
     m.add_function(wrap_pyfunction!(camera::camera_view_proj, m)?)?;
+    // Export package version for Python: vulkan_forge._vulkan_forge.__version__
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

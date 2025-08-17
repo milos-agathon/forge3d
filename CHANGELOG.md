@@ -6,6 +6,12 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## 0.0.9 — T4.1 Scene integration
 - Added `scene` module with `Scene` Py API (camera, height upload, render to PNG).
 - Reused T3 terrain pipeline and kept bind groups cached.
+- **T4.2 PNG & NumPy round-trip ✅**
+  - Added `png_to_numpy`, `numpy_to_png`
+  - Added `Scene.render_rgba()`
+  - Added tests for round-trip and parity with `render_png`
+  - T4.2: Fixed `numpy_to_png` to properly accept uint8 arrays of shape **(H,W,3)** (RGB) in addition to (H,W,4) and (H,W).
+  - Tests: Added RGB/Gray PNG↔NumPy round-trip coverage.
 - Docs: README usage snippet; ROADMAP updated.
 
 ## [0.0.8] — 2025-08-16

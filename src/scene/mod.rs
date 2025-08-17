@@ -2,7 +2,8 @@
 #![allow(dead_code)]
 use pyo3::prelude::*;
 use wgpu::util::DeviceExt;
-use numpy::PyUntypedArrayMethods;
+use numpy::IntoPyArray;
+use std::path::PathBuf;
 
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
@@ -27,8 +28,6 @@ pub struct Scene {
     height: u32,
     grid: u32,
 
-    device: wgpu::Device,
-    queue: wgpu::Queue,
 
     tp: crate::terrain::pipeline::TerrainPipeline,
     bg0_globals: wgpu::BindGroup,
@@ -59,18 +58,11 @@ impl Scene {
     #[pyo3(text_signature="(width, height, grid=128, colormap='viridis')")]
     pub fn new(width: u32, height: u32, grid: Option<u32>, colormap: Option<String>) -> PyResult<Self> {
         let grid = grid.unwrap_or(128).max(2);
-        // Device
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends: wgpu::Backends::all(), ..Default::default() });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: None, force_fallback_adapter: false,
-        })).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("No suitable GPU adapter"))?;
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor { label: Some("scene-device"), required_features: wgpu::Features::empty(), required_limits: wgpu::Limits::downlevel_defaults() }, None
-        )).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        // Use shared GPU context
+        let g = crate::gpu::ctx();
 
         // Target
-        let color = device.create_texture(&wgpu::TextureDescriptor{
+        let color = g.device.create_texture(&wgpu::TextureDescriptor{
             label: Some("scene-color"),
             size: wgpu::Extent3d{ width, height, depth_or_array_layers: 1 },
             mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
@@ -79,7 +71,7 @@ impl Scene {
         let color_view = color.create_view(&Default::default());
 
         // Pipeline
-        let tp = crate::terrain::pipeline::TerrainPipeline::create(&device, TEXTURE_FORMAT);
+        let tp = crate::terrain::pipeline::TerrainPipeline::create(&g.device, TEXTURE_FORMAT);
 
         // Mesh
         let (vbuf, ibuf, nidx) = {
@@ -110,8 +102,8 @@ impl Scene {
                     idx.extend_from_slice(&[a,c,b, b,c,d]);
                 }
             }
-            let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{ label: Some("scene-xyuv-vbuf"), contents: bytemuck::cast_slice(&verts), usage: wgpu::BufferUsages::VERTEX });
-            let ibuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{ label: Some("scene-xyuv-ibuf"), contents: bytemuck::cast_slice(&idx), usage: wgpu::BufferUsages::INDEX });
+            let vbuf = g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{ label: Some("scene-xyuv-vbuf"), contents: bytemuck::cast_slice(&verts), usage: wgpu::BufferUsages::VERTEX });
+            let ibuf = g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{ label: Some("scene-xyuv-ibuf"), contents: bytemuck::cast_slice(&idx), usage: wgpu::BufferUsages::INDEX });
             (vbuf, ibuf, idx.len() as u32)
         };
 
@@ -120,7 +112,7 @@ impl Scene {
         // set correct aspect
         scene.proj = crate::camera::perspective_wgpu(45f32.to_radians(), width as f32 / height as f32, 0.1, 100.0);
         let uniforms = scene.globals.to_uniforms(scene.view, scene.proj);
-        let ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+        let ubo = g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("scene-ubo"), contents: bytemuck::cast_slice(&[uniforms]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -134,7 +126,7 @@ impl Scene {
         }
         let which = crate::colormap::map_name_to_type(cmap_name)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        let (lut, lut_format) = crate::terrain::ColormapLUT::new(&device, &queue, &adapter, which)
+        let (lut, lut_format) = crate::terrain::ColormapLUT::new(&g.device, &g.queue, &g.adapter, which)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
         // Dummy height (non-trivial): upload a tiny 2×2 gradient with proper 256-byte row padding.
@@ -142,7 +134,7 @@ impl Scene {
         let (hview, hsamp) = {
             let w = 2u32;
             let h = 2u32;
-            let tex = device.create_texture(&wgpu::TextureDescriptor{
+            let tex = g.device.create_texture(&wgpu::TextureDescriptor{
                 label: Some("scene-dummy-height"),
                 size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
                 mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
@@ -152,8 +144,7 @@ impl Scene {
             });
             // Row padding to WebGPU's required alignment for height>1.
             let row_bytes = w * 4;
-            let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-            let padded_bpr = ((row_bytes + align - 1) / align) * align;
+            let padded_bpr = crate::gpu::align_copy_bpr(row_bytes);
             let src_vals: [f32; 4] = [0.00, 0.25, 0.50, 0.75]; // row-major: [[0.00, 0.25],[0.50, 0.75]]
             let src_bytes: &[u8] = bytemuck::cast_slice(&src_vals);
             let mut padded = vec![0u8; (padded_bpr * h) as usize];
@@ -162,7 +153,7 @@ impl Scene {
                 let d = y * padded_bpr as usize;
                 padded[d .. d + row_bytes as usize].copy_from_slice(&src_bytes[s .. s + row_bytes as usize]);
             }
-            queue.write_texture(
+            g.queue.write_texture(
                 wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
                 &padded,
                 wgpu::ImageDataLayout {
@@ -175,7 +166,7 @@ impl Scene {
             let view = tex.create_view(&Default::default());
             // NOTE: Height is R32Float → must bind with a NonFiltering sampler. Many backends forbid
             // linear filtering on 32-bit float textures. Use NEAREST to satisfy NonFiltering binding.
-            let samp = device.create_sampler(&wgpu::SamplerDescriptor {
+            let samp = g.device.create_sampler(&wgpu::SamplerDescriptor {
                 label: Some("scene-height-sampler"),
                 address_mode_u: wgpu::AddressMode::ClampToEdge,
                 address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -189,13 +180,12 @@ impl Scene {
         };
 
         // Bind groups (cached)
-        let bg0_globals = tp.make_bg_globals(&device, &ubo);
-        let bg1_height  = tp.make_bg_height(&device, &hview, &hsamp);
-        let bg2_lut     = tp.make_bg_lut(&device, &lut.view, &lut.sampler);
+        let bg0_globals = tp.make_bg_globals(&g.device, &ubo);
+        let bg1_height  = tp.make_bg_height(&g.device, &hview, &hsamp);
+        let bg2_lut     = tp.make_bg_lut(&g.device, &lut.view, &lut.sampler);
 
         Ok(Self{
             width, height, grid,
-            device, queue,
             tp, bg0_globals, bg1_height, bg2_lut,
             vbuf, ibuf, nidx,
             ubo, colormap: lut, lut_format,
@@ -218,7 +208,8 @@ impl Scene {
         self.scene.view = glam::Mat4::look_at_rh(eye_v, target_v, up_v);
         self.scene.proj = camera::perspective_wgpu(fovy_deg.to_radians(), aspect, znear, zfar);
         let uniforms = self.scene.globals.to_uniforms(self.scene.view, self.scene.proj);
-        self.queue.write_buffer(&self.ubo, 0, bytemuck::bytes_of(&uniforms));
+        let g = crate::gpu::ctx();
+        g.queue.write_buffer(&self.ubo, 0, bytemuck::bytes_of(&uniforms));
         self.last_uniforms = uniforms;
         Ok(())
     }
@@ -230,7 +221,8 @@ impl Scene {
         let (h, w) = (arr.shape()[0] as u32, arr.shape()[1] as u32);
         let data = arr.as_slice().map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("height must be C-contiguous float32[H,W]"))?;
 
-        let tex = self.device.create_texture(&wgpu::TextureDescriptor{
+        let g = crate::gpu::ctx();
+        let tex = g.device.create_texture(&wgpu::TextureDescriptor{
             label: Some("scene-height-r32f"),
             size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
             mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
@@ -240,8 +232,7 @@ impl Scene {
         // WebGPU requires bytes_per_row to be COPY_BYTES_PER_ROW_ALIGNMENT aligned when height > 1.
         // Build a temporary padded buffer: each row (w*4 bytes) is copied into a padded stride.
         let row_bytes = w * 4;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_bpr = ((row_bytes + align - 1) / align) * align;
+        let padded_bpr = crate::gpu::align_copy_bpr(row_bytes);
         let src_bytes: &[u8] = bytemuck::cast_slice::<f32, u8>(data);
         let mut padded = vec![0u8; (padded_bpr * h) as usize];
         for y in 0..(h as usize) {
@@ -249,7 +240,7 @@ impl Scene {
             let d = y * padded_bpr as usize;
             padded[d .. d + row_bytes as usize].copy_from_slice(&src_bytes[s .. s + row_bytes as usize]);
         }
-        self.queue.write_texture(
+        g.queue.write_texture(
             wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             &padded,
             wgpu::ImageDataLayout {
@@ -260,7 +251,7 @@ impl Scene {
             wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 }
         );
         let view = tex.create_view(&Default::default());
-        let samp = self.device.create_sampler(&wgpu::SamplerDescriptor{
+        let samp = g.device.create_sampler(&wgpu::SamplerDescriptor{
             label: Some("scene-height-sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge, address_mode_v: wgpu::AddressMode::ClampToEdge, address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest, min_filter: wgpu::FilterMode::Nearest, mipmap_filter: wgpu::FilterMode::Nearest,
@@ -270,14 +261,26 @@ impl Scene {
         self.height_sampler = Some(samp);
 
         // Rebuild only BG1 using cached layout
-        let bg1 = self.tp.make_bg_height(&self.device, self.height_view.as_ref().unwrap(), self.height_sampler.as_ref().unwrap());
+        let bg1 = self.tp.make_bg_height(&g.device, self.height_view.as_ref().unwrap(), self.height_sampler.as_ref().unwrap());
         self.bg1_height = bg1;
         Ok(())
     }
 
+    /// Render the current frame to a PNG on disk.
+    ///
+    /// Parameters
+    /// ----------
+    /// path : str | os.PathLike
+    ///     Destination file path for the PNG image.
+    ///
+    /// Notes
+    /// -----
+    /// The written PNG's raw RGBA bytes will match those returned by
+    /// `Scene.render_rgba()` on the same frame (row-major, C-contiguous).
     #[pyo3(text_signature="($self, path)")]
-    pub fn render_png(&mut self, path: String) -> PyResult<()> {
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("scene-encoder") });
+    pub fn render_png(&mut self, path: PathBuf) -> PyResult<()> {
+        let g = crate::gpu::ctx();
+        let mut encoder = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("scene-encoder") });
         {
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor{
                 label: Some("scene-rp"),
@@ -295,18 +298,17 @@ impl Scene {
             rp.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint32);
             rp.draw_indexed(0..self.nidx, 0, 0..1);
         }
-        self.queue.submit(Some(encoder.finish()));
+        g.queue.submit(Some(encoder.finish()));
 
         // Readback -> PNG (same as TerrainSpike)
         let bpp = 4u32;
         let unpadded = self.width * bpp;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded = ((unpadded + align - 1) / align) * align;
+        let padded = crate::gpu::align_copy_bpr(unpadded);
         let size = (padded * self.height) as wgpu::BufferAddress;
-        let readback = self.device.create_buffer(&wgpu::BufferDescriptor{
+        let readback = g.device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("scene-readback"), size, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false
         });
-        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("copy-encoder") });
+        let mut enc = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("copy-encoder") });
         enc.copy_texture_to_buffer(
             wgpu::ImageCopyTexture{ texture:&self.color, mip_level:0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             wgpu::ImageCopyBuffer{ buffer:&readback, layout: wgpu::ImageDataLayout{
@@ -314,11 +316,11 @@ impl Scene {
             }},
             wgpu::Extent3d{ width:self.width, height:self.height, depth_or_array_layers:1 }
         );
-        self.queue.submit(Some(enc.finish()));
+        g.queue.submit(Some(enc.finish()));
 
         let slice = readback.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_|{});
-        self.device.poll(wgpu::Maintain::Wait);
+        g.device.poll(wgpu::Maintain::Wait);
         let data = slice.get_mapped_range();
         let mut pixels = Vec::with_capacity((unpadded * self.height) as usize);
         for row in 0..self.height {
@@ -330,8 +332,83 @@ impl Scene {
         readback.unmap();
         let img = image::RgbaImage::from_raw(self.width, self.height, pixels)
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Invalid image buffer"))?;
-        img.save(path).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        img.save(&path).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(())
+    }
+
+    /// Render the current frame into a NumPy array with shape (H, W, 4), dtype=uint8.
+    ///
+    /// Returns
+    /// -------
+    /// np.ndarray
+    ///     C-contiguous (row-major) RGBA byte buffer whose pixels are byte-for-byte
+    ///     identical to the PNG produced by `render_png()` for the same frame.
+    #[pyo3(text_signature="($self)")]
+    pub fn render_rgba<'py>(&mut self, py: pyo3::Python<'py>) -> pyo3::PyResult<pyo3::Bound<'py, numpy::PyArray3<u8>>> {
+        // Encode a frame exactly like render_png(), then return (H,W,4) u8
+        let g = crate::gpu::ctx();
+        let mut encoder = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("scene-encoder-rgba") });
+        {
+            let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor{
+                label: Some("scene-rp-rgba"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment{
+                    view: &self.color_view, resolve_target: None,
+                    ops: wgpu::Operations{ load: wgpu::LoadOp::Clear(wgpu::Color{ r:0.02, g:0.02, b:0.03, a:1.0 }), store: wgpu::StoreOp::Store }
+                })],
+                depth_stencil_attachment: None, ..Default::default()
+            });
+            rp.set_pipeline(&self.tp.pipeline);
+            rp.set_bind_group(0, &self.bg0_globals, &[]);
+            rp.set_bind_group(1, &self.bg1_height, &[]);
+            rp.set_bind_group(2, &self.bg2_lut, &[]);
+            rp.set_vertex_buffer(0, self.vbuf.slice(..));
+            rp.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint32);
+            rp.draw_indexed(0..self.nidx, 0, 0..1);
+        }
+        g.queue.submit(Some(encoder.finish()));
+
+        // Readback -> unpadded RGBA bytes
+        let bpp = 4u32;
+        let unpadded = self.width * bpp;
+        let padded = crate::gpu::align_copy_bpr(unpadded);
+        let size = (padded * self.height) as wgpu::BufferAddress;
+
+        let readback = g.device.create_buffer(&wgpu::BufferDescriptor{
+            label: Some("scene-readback-rgba"),
+            size, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false
+        });
+
+        let mut enc = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("copy-encoder-rgba") });
+        enc.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture{ texture:&self.color, mip_level:0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::ImageCopyBuffer{ buffer:&readback, layout: wgpu::ImageDataLayout{
+                offset:0, bytes_per_row: Some(std::num::NonZeroU32::new(padded).unwrap().into()),
+                rows_per_image: Some(std::num::NonZeroU32::new(self.height).unwrap().into())
+            }},
+            wgpu::Extent3d{ width:self.width, height:self.height, depth_or_array_layers:1 }
+        );
+        g.queue.submit(Some(enc.finish()));
+
+        let slice = readback.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_|{});
+        g.device.poll(wgpu::Maintain::Wait);
+        let data = slice.get_mapped_range();
+
+        let mut pixels = Vec::with_capacity((unpadded * self.height) as usize);
+        for row in 0..self.height {
+            let s = (row * padded) as usize;
+            let e = s + unpadded as usize;
+            pixels.extend_from_slice(&data[s..e]);
+        }
+        drop(data);
+        readback.unmap();
+
+        // Convert to NumPy (H,W,4) u8
+        let arr = ndarray::Array3::from_shape_vec(
+            (self.height as usize, self.width as usize, 4),
+            pixels
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(arr.into_pyarray_bound(py))
     }
 
     #[pyo3(text_signature="($self)")]

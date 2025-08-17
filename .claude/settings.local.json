@@ -61,8 +61,15 @@
       "Bash(git --no-pager diff --unified=3 -- src/terrain/pipeline.rs)",
       "Bash(git --no-pager diff --unified=3 --staged -- src/terrain/pipeline.rs)",
       "Bash(git --no-pager diff --unified=3 -- Cargo.toml)",
-      "Bash(git --no-pager diff --unified=3 -- CHANGELOG.md)"
+      "Bash(git --no-pager diff --unified=3 -- CHANGELOG.md)",
+      "Bash(touch:*)"
     ],
     "deny": []
-  }
+  },
+
+  "env": {
+    "MAX_THINKING_TOKENS": "32000"
+  } 
+
+
 }

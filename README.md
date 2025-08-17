@@ -2,7 +2,7 @@
 # vulkan-forge
 
 Headless, deterministic triangle renderer built on **wgpu** with a **PyO3** Python API.  
-Status: pre-0.1 (research/prototyping). Latest release: **0.0.8**.
+Status: pre-0.1 (research/prototyping). Latest release: **0.0.9**.
 
 ## What's new in v0.0.8 — Workstream T3: Terrain Shaders & Pipeline
 
@@ -13,7 +13,7 @@ Status: pre-0.1 (research/prototyping). Latest release: **0.0.8**.
 - Exact `[x, z, u, v]` grid vertex layout and local rationale for R32Float non-filtering sampler.
 - Tests for uniform layout (176 bytes) and WGPU clip-space projection.
 
-> See full details in **CHANGELOG.md** under `0.0.8`.
+> See full details in **CHANGELOG.md** under `0.0.9`.
 
 ## Quickstart (from source)
 
@@ -103,6 +103,18 @@ scn.render_png("scene.png")
 
 The Scene reuses the T3 terrain pipeline and keeps all bind groups cached.
 <!-- T41-END:scene-doc -->
+
+### T4.2 — PNG & NumPy round-trip
+
+New helpers:
+- `vf.png_to_numpy(path) -> np.ndarray[(H,W,4), uint8]` — loads PNG as RGBA without color transforms.
+- `numpy_to_png(path, arr)`: accepts C-contiguous uint8 arrays:
+  * (H,W,4) RGBA — saved losslessly
+  * (H,W,3) RGB — saved as opaque PNG (alpha=255)
+  * (H,W)   Gray — saved as grayscale; loads back as RGBA with R=G=B=gray, A=255
+- `vf.Scene.render_rgba() -> np.ndarray[(H,W,4), uint8]` — returns the exact RGBA bytes that `render_png` writes.
+
+These functions preserve raw sRGB bytes and require C-contiguous arrays. See `tests/test_t42_png_numpy*.py`.
 
 <!-- T02-BEGIN:api -->
 ### DEM normalization
@@ -415,11 +427,11 @@ Matrix workflow: `.github/workflows/ci.yml`
   Try another backend or run the cross-backend runner to discover a working one.
 
 ## Changelog
-See **CHANGELOG.md** for a detailed list of changes. Latest release: **v0.0.8**.
+See **CHANGELOG.md** for a detailed list of changes. Latest release: **v0.0.9**.
 
 ## Versioning
 
-* Current version: **0.0.8**
+* Current version: **0.0.9**
 * See `CHANGELOG.md` for details.
 
 <!-- T02-BEGIN:readme-dem -->

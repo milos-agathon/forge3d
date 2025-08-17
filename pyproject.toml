@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "vulkan-forge"
-version = "0.0.8"
+version = "0.0.9"
 description = "Rust-first wgpu/WebGPU renderer with a thin Python API"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,3 +17,6 @@ python-source = "python"
 module-name = "vulkan_forge._vulkan_forge"
 features = ["terrain_spike"]
 strip = true
+
+[tool.setuptools.package-data]
+"vulkan_forge" = ["py.typed", "__init__.pyi"]
