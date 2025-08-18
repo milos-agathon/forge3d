@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "AI Review & Fix (apps, no API)",
+      "type": "shell",
+      // Default for macOS/Linux
+      "command": "python3",
+      "args": ["scripts/ai_orchestrator.py"],
+      "windows": {
+        // Use the Windows Python launcher
+        "command": "py",
+        "args": ["-3", "scripts\\ai_orchestrator.py"]
+      },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "options": {
+        "env": {
+          "DEFAULT_BRANCH": "main",
+          "AI_RUN_TESTS": "1",
+          "AI_PYTEST_ARGS": "-q -m not gpu",
+          "AI_PYTEST_TIMEOUT": "900"
+        }
+      }
+    }
+  ]
+}

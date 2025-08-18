@@ -1,0 +1,213 @@
+name: CI • PyTest Gate & Wheel Smoke
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same branch/PR
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Keep GPU-heavy tests off in CI unless you wire up runners with adapters.
+  PYTEST_ARGS: -q -m "not gpu" --maxfail=1 --disable-warnings --junitxml=pytest-results.xml --durations=20
+  # Set a sensible cap to avoid hung jobs.
+  PYTEST_TIMEOUT: 900
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tests-linux:
+    name: Linux • Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Set up Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install build/test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin pytest pytest-cov psutil
+
+      - name: Build & develop-install (PyO3)
+        run: |
+          maturin develop --release --locked
+          python -c "import vulkan_forge; print('import ok • version=', getattr(vulkan_forge, '__version__', 'unknown'))"
+
+      - name: Run tests
+        id: pytest
+        env:
+          PYTEST_ADDOPTS: ""
+        run: |
+          echo "Running: pytest ${PYTEST_ARGS}"
+          python -m pytest ${PYTEST_ARGS}
+        timeout-minutes: 20
+
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results-${{ matrix.python-version }}-linux
+          path: pytest-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Summarize to Checks
+        if: always()
+        run: |
+          echo "### PyTest summary (${{ matrix.python-version }} on Linux)" >> $GITHUB_STEP_SUMMARY
+          if [ -f pytest-results.xml ]; then
+            FAILS=$(grep -o 'failures="[0-9]*"' pytest-results.xml | sed 's/[^0-9]//g' || echo 0)
+            ERRORS=$(grep -o 'errors="[0-9]*"' pytest-results.xml | sed 's/[^0-9]//g' || echo 0)
+            SKIPS=$(grep -o 'skipped="[0-9]*"' pytest-results.xml | sed 's/[^0-9]//g' || echo 0)
+            echo "- Failures: ${FAILS:-0}" >> $GITHUB_STEP_SUMMARY
+            echo "- Errors:   ${ERRORS:-0}"  >> $GITHUB_STEP_SUMMARY
+            echo "- Skipped:  ${SKIPS:-0}"   >> $GITHUB_STEP_SUMMARY
+          else
+            echo "_No JUnit file produced._" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Optional cross-OS smoke jobs (uncomment when ready)
+  # tests-macos:
+  #   name: macOS • Python 3.11
+  #   runs-on: macos-latest
+  #   timeout-minutes: 30
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with: { python-version: '3.11', cache: 'pip' }
+  #     - uses: dtolnay/rust-toolchain@stable
+  #     - name: Cache Cargo
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: |
+  #           ~/.cargo/registry
+  #           ~/.cargo/git
+  #           target
+  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+  #     - name: Install deps & build
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install maturin pytest psutil
+  #         maturin develop --release --locked
+  #         python -c "import vulkan_forge"
+  #     - name: pytest (not gpu)
+  #       run: python -m pytest -q -m "not gpu" --maxfail=1 --disable-warnings --junitxml=pytest-results.xml
+  #     - uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with: { name: pytest-results-macos, path: pytest-results.xml, if-no-files-found: ignore }
+
+  # tests-windows:
+  #   name: Windows • Python 3.11
+  #   runs-on: windows-latest
+  #   timeout-minutes: 30
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with: { python-version: '3.11', cache: 'pip' }
+  #     - uses: dtolnay/rust-toolchain@stable
+  #     - name: Cache Cargo
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: |
+  #           ~\.cargo\registry
+  #           ~\.cargo\git
+  #           target
+  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+  #     - name: Install deps & build
+  #       shell: bash
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install maturin pytest psutil
+  #         maturin develop --release --locked
+  #         python - <<'PY'
+  #         import vulkan_forge; print("import ok")
+  #         PY
+  #     - name: pytest (not gpu)
+  #       shell: bash
+  #       run: python -m pytest -q -m "not gpu" --maxfail=1 --disable-warnings --junitxml=pytest-results.xml
+  #     - uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with: { name: pytest-results-windows, path: pytest-results.xml, if-no-files-found: ignore }
+
+  wheel-smoke:
+    name: Wheel smoke (Linux • py311)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Set up Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: wheel-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            wheel-${{ runner.os }}-cargo-
+
+      - name: Build wheel (abi3) with maturin
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin
+          maturin build --release --locked -o dist
+        env:
+          # Add extra env knobs as needed for vendored Vulkan/Metal/DX12 headers, etc.
+          RUSTFLAGS: ""
+
+      - name: Install built wheel & smoke import
+        run: |
+          pip install dist/*.whl
+          python -c "import vulkan_forge; print('wheel import ok • version=', getattr(vulkan_forge, '__version__','unknown'))"
+
+      - name: Upload dist artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-wheels
+          path: dist/*
+          retention-days: 7

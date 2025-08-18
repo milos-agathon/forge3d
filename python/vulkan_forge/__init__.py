@@ -93,10 +93,12 @@ def grid_generate(nx: int, nz: int, spacing=(1.0, 1.0), origin: str = "center"):
     except Exception as e:
         raise TypeError("spacing must be a (dx, dy) pair of numbers") from e
     if dx <= 0.0 or dy <= 0.0:
-        raise ValueError("spacing values must be > 0")
+        raise ValueError("spacing components must be finite and > 0")
     if origin not in ("center", "corner"):
         raise ValueError("origin must be 'center' or 'corner'")
     # Use the module reference we already have
+    import importlib
+    _ext = importlib.import_module("vulkan_forge._vulkan_forge")
     return _ext.grid_generate(nx, nz, (dx, dy), origin)
 # T42-END:grid_generate
 

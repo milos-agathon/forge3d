@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if git log -1 --pretty=%B | grep -qi '\[no-ai\]'; then exit 0; fi
+if [ -f ".ai/disable" ]; then echo "[ai] .ai/disable present; skipping"; exit 0; fi
+
+# Use Windows launcher if available; otherwise fall back
+if command -v py >/dev/null 2>&1; then
+  py -3 scripts/ai_orchestrator.py || { echo "[ai] stopping push"; exit 1; }
+else
+  python scripts/ai_orchestrator.py   || { echo "[ai] stopping push"; exit 1; }
+fi
+
+# Run local orchestrator; block push if it returns non-zero (e.g., tests fail)
+python scripts/ai_orchestrator.py || {
+  echo "[ai] Stopping push so you can review/apply fixes."
+  exit 1
+}
