@@ -1,43 +1,216 @@
 <task>
-  <id>T4.2-buildfix-shape-trait</id>
-  <summary>Fix Rust build error E0599 in src/scene/mod.rs by restoring the numpy trait import that provides .shape().</summary>
+  <id>T5.1-synthetic-dem-tests</id>
+  <summary>Add comprehensive Synthetic DEM tests (per ROADMAP.md T5.1) to validate heightmap upload, normalization, stats, and GPU readback—including tricky row-alignment cases.</summary>
 
-  <problem>
+  <motivation>
     <![CDATA[
-    cargo/maturin build fails with:
-      error[E0599]: no method named `shape` found for struct `PyReadonlyArray<'_, f32, Dim<[usize; 2]>>`
-    Root cause: the trait providing `.shape()` (numpy::PyUntypedArrayMethods) was removed from src/scene/mod.rs imports.
+    We now have a solid rendering and packaging surface. Next, we need rigorous tests around DEM (Digital Elevation Model) handling to lock in behavior:
+      • Correct stats (min/max/mean/std) for well-known synthetic surfaces
+      • Robust normalization (minmax & zscore) including flat-field eps handling
+      • Exact GPU round-trips for r32f upload/readback across padded bytes-per-row cases
+      • API validation for bad inputs (non-contiguous, empty arrays, bad colormap)
+    These tests should gracefully skip on systems without a usable GPU.
     ]]>
-  </problem>
+  </motivation>
 
   <acceptance_criteria>
-    <item>cargo build --release (and maturin build) succeeds on all targets</item>
-    <item>No new warnings about unused imports in src/scene/mod.rs</item>
-    <item>All existing tests (pytest) remain green</item>
+    <item>New test module tests/test_t51_synth_dem.py is added and runs under pytest.</item>
+    <item>Tests use vulkan_forge.device_probe() to skip if GPU is unavailable (no hard failures on CPU-only CI).</item>
+    <item>For synthetic planes/ramps/gaussians: terrain_stats() matches expected values within tight tolerances.</item>
+    <item>normalize_terrain('minmax') yields min≈0, max≈1; normalize_terrain('zscore') yields mean≈0, std≈1.</item>
+    <item>upload_height_r32f() + read_full_height_texture() returns exact (bitwise) parity with CPU heights for varied (H,W), including widths that force padding (e.g., 63, 257).</item>
+    <item>Bad inputs raise the documented errors (non C-contiguous, empty arrays, unknown colormap, invalid height range).</item>
+    <item>Scene.set_height_from_r32f() accepts (H,W) float32 and render_rgba() returns shape (H,W,4) uint8 without error.</item>
   </acceptance_criteria>
 
   <edits>
-    <edit file="src/scene/mod.rs" mode="patch">
-      <search><![CDATA[use numpy::IntoPyArray;]]></search>
-      <replace><![CDATA[use numpy::{IntoPyArray, PyUntypedArrayMethods};]]></replace>
-    </edit>
+    <create file="tests/test_t51_synth_dem.py">
+      <![CDATA[
+import math
+import numpy as np
+import pytest
 
-    <!-- Safety net in case the import line format changes in the future -->
-    <edit file="src/scene/mod.rs" mode="ensure_present">
-      <ensure_import><![CDATA[use numpy::PyUntypedArrayMethods;]]></ensure_import>
-    </edit>
+import vulkan_forge as vf
+
+
+def _gpu_or_skip():
+    info = vf.device_probe()
+    if not isinstance(info, dict) or info.get("status") != "ok":
+        msg = info.get("message", "No suitable GPU adapter") if isinstance(info, dict) else "Unknown device status"
+        pytest.skip(f"Skipping GPU-dependent tests: {msg}")
+
+
+def plane(h, w, value=1.0, dtype=np.float32):
+    return np.full((h, w), value, dtype=dtype)
+
+
+def ramp_x(h, w, dtype=np.float32):
+    # 0..1 along X, constant along Y
+    return np.tile(np.linspace(0.0, 1.0, w, dtype=dtype)[None, :], (h, 1))
+
+
+def ramp_y(h, w, dtype=np.float32):
+    # 0..1 along Y, constant along X
+    return np.tile(np.linspace(0.0, 1.0, h, dtype=dtype)[:, None], (1, w)).astype(dtype)
+
+
+def gaussian2d(h, w, sigma_ratio=0.25, dtype=np.float32):
+    # Centered Gaussian peak; sigma scaled by min(h,w)
+    y = np.arange(h, dtype=dtype) - (h - 1) / 2.0
+    x = np.arange(w, dtype=dtype) - (w - 1) / 2.0
+    X, Y = np.meshgrid(x, y, indexing="xy")
+    sigma = dtype(min(h, w) * sigma_ratio)
+    g = np.exp(-0.5 * (X**2 + Y**2) / (sigma * sigma))
+    return g.astype(dtype)
+
+
+@pytest.mark.parametrize("h,w,val", [(8, 11, 42.0), (3, 2, 0.0)])
+def test_plane_stats_and_minmax_flat_epsilon(h, w, val):
+    _gpu_or_skip()
+    r = vf.Renderer(16, 16)
+    dem = plane(h, w, val)
+    r.add_terrain(dem, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
+
+    mn, mx, mean, std = r.terrain_stats()
+    assert abs(mn - val) < 1e-6
+    assert abs(mx - val) < 1e-6
+    assert abs(mean - val) < 1e-6
+    assert abs(std - 0.0) < 1e-7
+
+    # MinMax on a flat field should produce all zeros due to eps handling
+    r.normalize_terrain("minmax", range=(0.0, 1.0))
+    mn2, mx2, mean2, std2 = r.terrain_stats()
+    assert abs(mn2 - 0.0) < 1e-7
+    assert abs(mx2 - 0.0) < 1e-7
+    assert abs(mean2 - 0.0) < 1e-7
+    assert abs(std2 - 0.0) < 1e-7
+
+    # Upload & full readback should match exactly (R32Float)
+    r.upload_height_r32f()
+    tex = r.read_full_height_texture()
+    assert tex.shape == (h, w)
+    # After minmax of flat: exact zeros
+    assert np.all(tex == 0.0)
+
+
+@pytest.mark.parametrize("h,w", [(9, 10), (16, 5), (32, 33)])
+def test_ramp_x_stats_and_zscore(h, w):
+    _gpu_or_skip()
+    r = vf.Renderer(32, 32)
+    dem = ramp_x(h, w)
+    r.add_terrain(dem, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
+
+    # Expected stats from numpy for discrete ramp grid
+    exp_mean = float(dem.mean())
+    exp_std = float(dem.std())
+    mn, mx, mean, std = r.terrain_stats()
+    assert abs(mn - 0.0) < 1e-7
+    assert abs(mx - 1.0) < 1e-7
+    assert abs(mean - exp_mean) < 1e-6
+    assert abs(std - exp_std) < 1e-6
+
+    r.normalize_terrain("zscore", eps=1e-8)
+    mn2, mx2, mean2, std2 = r.terrain_stats()
+    assert abs(mean2 - 0.0) < 2e-6
+    assert abs(std2 - 1.0) < 2e-6
+
+    r.upload_height_r32f()
+    tex = r.read_full_height_texture()
+    assert tex.shape == (h, w)
+    # z-score => mean ≈ 0, std ≈ 1
+    assert abs(float(tex.mean()) - 0.0) < 2e-6
+    assert abs(float(tex.std()) - 1.0) < 2e-6
+
+
+@pytest.mark.parametrize("h,w", [(19, 21), (32, 32)])
+def test_gaussian_minmax_peak_near_one(h, w):
+    _gpu_or_skip()
+    r = vf.Renderer(64, 64)
+    dem = gaussian2d(h, w)
+    r.add_terrain(dem, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
+
+    r.normalize_terrain("minmax", range=(0.0, 1.0))
+    r.upload_height_r32f()
+    tex = r.read_full_height_texture()
+    center = (h - 1) // 2, (w - 1) // 2
+    assert tex.shape == (h, w)
+    # Peak should be near 1; edges near 0
+    assert tex[center] > 0.98
+    edge_samples = [tex[0, 0], tex[0, -1], tex[-1, 0], tex[-1, -1]]
+    assert all(es < 0.05 for es in edge_samples)
+
+
+@pytest.mark.parametrize("h,w", [(2, 63), (7, 63), (7, 257), (1, 257), (2, 3)])
+def test_upload_readback_padding_exact_parity(h, w):
+    """
+    Exercise COPY_BYTES_PER_ROW_ALIGNMENT via widths that require padding.
+    Expect exact parity after upload/readback (R32Float).
+    """
+    _gpu_or_skip()
+    r = vf.Renderer(8, 8)
+    rng = np.random.default_rng(0)
+    dem = rng.uniform(low=-123.0, high=456.0, size=(h, w)).astype(np.float32)
+    r.add_terrain(dem, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
+    r.upload_height_r32f()
+    tex = r.read_full_height_texture()
+    assert tex.shape == (h, w)
+    # Bitwise exact for 32-bit floats
+    assert tex.dtype == np.float32
+    assert np.array_equal(tex.view(np.uint32), dem.view(np.uint32))
+
+
+def test_add_terrain_validation_errors():
+    _gpu_or_skip()
+    r = vf.Renderer(16, 16)
+
+    # Fortran order should be rejected (not C-contiguous)
+    f_arr = np.asfortranarray(np.ones((4, 5), dtype=np.float32))
+    with pytest.raises(RuntimeError) as ei1:
+        r.add_terrain(f_arr, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
+    assert "C-contiguous" in str(ei1.value)
+
+    # Empty arrays should be rejected
+    empty = np.empty((0, 5), dtype=np.float32)
+    with pytest.raises(RuntimeError) as ei2:
+        r.add_terrain(empty, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
+    assert "cannot be empty" in str(ei2.value)
+
+    # Unknown colormap should be rejected
+    arr = np.ones((3, 3), dtype=np.float32)
+    with pytest.raises(RuntimeError) as ei3:
+        r.add_terrain(arr, spacing=(1.0, 1.0), exaggeration=1.0, colormap="definitely_not_a_cmap")
+    assert "Unknown colormap" in str(ei3.value)
+
+    # Invalid height range (min >= max)
+    r.add_terrain(arr, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
+    with pytest.raises(ValueError):
+        r.set_height_range(1.0, 1.0)
+
+
+def test_scene_accepts_height_and_renders_rgba_shape():
+    _gpu_or_skip()
+    # Small scene to keep things light; height map 5x7
+    sc = vf.Scene(64, 64, grid=8, colormap="viridis")
+    dem = ramp_y(5, 7)  # float32, C-contiguous
+    sc.set_height_from_r32f(dem)
+    rgba = sc.render_rgba()
+    assert rgba.dtype == np.uint8
+    assert rgba.shape == (64, 64, 4)
+      ]]>
+    </create>
   </edits>
 
   <validation>
-    <step>rustfmt the modified file(s)</step>
-    <step>cargo check</step>
-    <step>cargo build --release</step>
-    <step>maturin build --release -F terrain_spike</step>
-    <step>pytest -q</step>
+    <step>pytest -q -k "t51 or synth or gaussian or ramp or padding"  # runs the new test module</step>
+    <step>Ensure GPU-less runners skip these tests via device_probe() without causing failures.</step>
   </validation>
 
   <notes>
-    Adding the trait import is required for calling `.shape()` on `PyReadonlyArray*` in numpy 0.21.
-    The import is used (two calls to `arr.shape()` in `set_height_from_r32f`), so it will not trigger an unused import warning.
+    <![CDATA[
+    • These tests rely only on the public Python API (Renderer, Scene, device_probe) and avoid touching private internals.
+    • The padding parity test explicitly targets widths that trigger COPY_BYTES_PER_ROW_ALIGNMENT padding.
+    • Gaussian and ramp tests compute expectations from NumPy to avoid analytical off-by-one pitfalls on discrete grids.
+    • If ROADMAP.md mentions additional synthetic shapes, you can extend helpers (e.g., cone, ripples) and add parallel assertions following the same patterns.
+    ]]>
   </notes>
 </task>
