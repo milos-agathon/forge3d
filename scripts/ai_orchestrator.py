@@ -32,8 +32,17 @@ AI_PROVENANCE_MODE = os.getenv("AI_PROVENANCE_MODE", "hash")  # or "full"
 AI_COMMIT_RUN_DIR = os.getenv("AI_COMMIT_RUN_DIR", "0") == "1"
 
 # ---------- small utils ----------
-def run(cmd, check=True, **kw): return subprocess.run(cmd, text=True, capture_output=True, check=check, **kw)
-def git(*args, check=True): return run(["git", *args], check=check).stdout
+def run(cmd, check=True, **kw):
+    # Windows-safe: force UTF-8 and replace undecodable bytes
+    kw.setdefault("text", True)
+    kw.setdefault("capture_output", True)
+    kw.setdefault("encoding", "utf-8")
+    kw.setdefault("errors", "replace")
+    return subprocess.run(cmd, check=check, **kw)
+
+def git(*args, check=True):
+    """Run a git command and return stdout text."""
+    return run(["git", *args], check=check).stdout
 
 def copy_to_clipboard(txt: str):
     sysname = platform.system()

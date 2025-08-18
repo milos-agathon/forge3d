@@ -26,8 +26,18 @@ AI_RUN_TESTS     = os.getenv("AI_RUN_TESTS", "1") == "1"
 AI_PYTEST_ARGS   = os.getenv("AI_PYTEST_ARGS", "-q -m not gpu")
 AI_PYTEST_TIMEOUT= int(os.getenv("AI_PYTEST_TIMEOUT", "900"))
 
-def run(cmd, check=True, **kw): return subprocess.run(cmd, text=True, capture_output=True, check=check, **kw)
-def git(*a, check=True): return run(["git", *a], check=check).stdout
+# ---------- small utils ----------
+def run(cmd, check=True, **kw):
+    # Windows-safe: force UTF-8 and replace undecodable bytes
+    kw.setdefault("text", True)
+    kw.setdefault("capture_output", True)
+    kw.setdefault("encoding", "utf-8")
+    kw.setdefault("errors", "replace")
+    return subprocess.run(cmd, check=check, **kw)
+
+def git(*args, check=True):
+    """Run a git command and return stdout text."""
+    return run(["git", *args], check=check).stdout
 
 def copy_clip(s: str):
     sysname = platform.system()
