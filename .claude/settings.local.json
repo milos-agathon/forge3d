@@ -1,4 +1,7 @@
 {
+  "env": {
+    "MAX_THINKING_TOKENS": "32000"
+  },
   "permissions": {
     "allow": [
       "Bash(mkdir:*)",
@@ -64,10 +67,9 @@
       "Bash(git --no-pager diff --unified=3 -- CHANGELOG.md)",
       "Bash(touch:*)"
     ],
-    "deny": []
-  },
-
-  "env": {
-    "MAX_THINKING_TOKENS": "32000"
-  } 
+    "deny": [],
+    "additionalDirectories": [
+      "C:\\d C:\\Users\\milos"
+    ]
+  }
 }

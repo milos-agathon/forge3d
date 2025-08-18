@@ -126,21 +126,34 @@ def main():
         xml = fh.read()
 
     # Replace placeholders or existing blocks
-    def inject(tag, content):
-        cdata = f"<![CDATA[{content}]]>"
-        if re.search(fr"<{tag}>.*?</{tag}>", xml, flags=re.S):
-            return re.sub(fr"(?s)<{tag}>.*?</{tag}>", f"<{tag}>{cdata}</{tag}>", xml)
-        elif re.search(fr"<{tag}><!\[CDATA\[.*?\]\]></{tag}>", xml, flags=re.S):
-            return re.sub(fr"(?s)<{tag}><!\[CDATA\[.*?\]\]></{tag}>", f"<{tag}>{cdata}</{tag}>", xml)
-        else:
-            # If tag missing, append under <inputs>
-            return re.sub(r"(?s)</inputs>", f"  <{tag}>{cdata}</{tag}>\n  </inputs>", xml)
+    # --- Safe CDATA + regex replacement helpers ---
+    def _as_cdata(text: str) -> str:
+        # Split accidental CDATA terminators to keep XML valid
+        return "<![CDATA[" + text.replace("]]>", "]]]]><![CDATA[>") + "]]>"
 
+    def inject(tag: str, content: str, xml_text: str) -> str:
+        """
+        Replace (or insert) <tag>...</tag> with CDATA-wrapped payload.
+        Use a function replacement so backslashes in content aren't parsed by re.sub.
+        """
+        cdata = _as_cdata(content)
+        pattern = re.compile(rf"<{tag}>\s*(?:<!\[CDATA\[.*?\]\]>)?\s*</{tag}>",
+                             re.DOTALL | re.IGNORECASE)
+        if pattern.search(xml_text):
+            return pattern.sub(lambda m: f"<{tag}>{cdata}</{tag}>", xml_text, count=1)
+        # Insert just before </inputs>
+        closing_inputs = re.compile(r"</inputs>", re.IGNORECASE)
+        if closing_inputs.search(xml_text):
+            return closing_inputs.sub(lambda m: f"  <{tag}>{cdata}</{tag}>\n</inputs>", xml_text, count=1)
+        # Fallback: append at end
+        return xml_text.rstrip() + f"\n  <{tag}>{cdata}</{tag}>\n"
+
+    # Fill placeholders if present
     xml = xml.replace("{{DIFF}}", diff)
     xml = xml.replace("{{REVIEWER1_JSON}}", reviewer1_json)
-    # If ChatGPT left placeholders but tags already present, ensure content is injected
-    xml = inject("diff", diff)
-    xml = inject("reviewer1_json", reviewer1_json)
+    # Ensure tags inside <inputs> are actually populated
+    xml = inject("diff", diff, xml)
+    xml = inject("reviewer1_json", reviewer1_json, xml)
 
     # Write a temp copy for this run (do not overwrite your canonical task.xml)
     with tempfile.NamedTemporaryFile("w", delete=False, suffix=".xml") as tf:
