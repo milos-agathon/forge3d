@@ -102,8 +102,25 @@ def grid_generate(nx: int, nz: int, spacing=(1.0, 1.0), origin: str = "center"):
     return _ext.grid_generate(nx, nz, (dx, dy), origin)
 # T42-END:grid_generate
 
-# Add near the other curated exports
-from .bench import run_benchmark as _vf_run_benchmark  # safe import; pure Python
+# T52-BEGIN:bench-export
+# Import lazily and safely so packaging/import errors don't break base module import
+try:
+    from .bench import run_benchmark as _vf_run_benchmark
+except Exception as _e:  # pragma: no cover
+    def _vf_run_benchmark(*_args, **_kwargs):
+        raise RuntimeError("vulkan_forge.bench unavailable: " + str(_e))
+
+# Ensure curated __all__ includes 'run_benchmark' without leaking internals
+try:
+    __all__  # type: ignore[name-defined]
+except NameError:
+    __all__ = []
+if "run_benchmark" not in __all__:
+    __all__.append("run_benchmark")
+
+# Public alias
+run_benchmark = _vf_run_benchmark
+# T52-END:bench-export
 
 # T42-BEGIN:__all__
 # Curated public surface (dynamic inclusion of feature-gated TerrainSpike below)
@@ -129,9 +146,6 @@ try:
     __all__.append("TerrainSpike")
 except Exception:
     pass
-
-# Re-export benchmark symbol
-run_benchmark = _vf_run_benchmark
 
 # Clean up private symbols from namespace to prevent leakage
 del _ext, importlib

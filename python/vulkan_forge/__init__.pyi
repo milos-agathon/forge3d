@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterable, Tuple, Optional, Sequence, Any, overload, Union
+from typing import Iterable, Tuple, Optional, Sequence, Any, overload, Union, Dict, Literal
 import os
 import numpy as np
 
@@ -80,4 +80,14 @@ class BenchmarkResult(TypedDict):
     throughput: _Throughput
     env: _Env
 
-def run_benchmark(op: str, width: int, height: int, *, iterations: int = ..., warmup: int = ..., grid: int = ..., colormap: str = ..., seed: int = ...) -> BenchmarkResult: ...
+def run_benchmark(
+    op: Literal["renderer_rgba","renderer_png","scene_rgba","numpy_to_png","png_to_numpy"],
+    width: int,
+    height: int,
+    *,
+    iterations: int = ...,
+    warmup: int = ...,
+    grid: int = ...,
+    colormap: str = ...,
+    seed: int = ...,
+) -> Dict[str, Any]: ...

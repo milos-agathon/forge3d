@@ -65,7 +65,11 @@
       "Bash(git --no-pager diff --unified=3 --staged -- src/terrain/pipeline.rs)",
       "Bash(git --no-pager diff --unified=3 -- Cargo.toml)",
       "Bash(git --no-pager diff --unified=3 -- CHANGELOG.md)",
-      "Bash(touch:*)"
+      "Bash(touch:*)",
+      "Bash(vf-bench:*)",
+      "Bash(test:*)",
+      "Bash(git --no-pager diff --unified=3 -- \"python/vulkan_forge/__init__.py\")",
+      "Bash(git --no-pager diff --unified=3 -- \"python/vulkan_forge/__init__.pyi\")"
     ],
     "deny": [],
     "additionalDirectories": [

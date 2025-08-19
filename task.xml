@@ -1,387 +1,120 @@
-<task>
-  <id>T5.2-timing-harness</id>
-  <summary>Add a timing/benchmark harness (per ROADMAP.md T5.2) with a Python-facing API and CLI to measure key paths (Renderer/Scene render, PNG↔NumPy), report robust stats, and provide GPU-aware skipping in tests.</summary>
+<Task id="T52-postpass" owner="Claude" goal="Fix build trait import and finalize timing harness export/CLI/stubs without changing public API semantics">
+  <Context>
+    Implemented T5.2 timing harness (python/vulkan_forge/bench.py) with Python API (run_benchmark), CLI (vf-bench), and tests.
+    Fix a compile error in src/scene/mod.rs by restoring the trait import that provides `.shape()`.
+    Ensure the curated packaging surface re-exports run_benchmark, updates type stubs, and keeps CLI mapping idempotent.
+  </Context>
 
-  <motivation>
-    <![CDATA[
-    We need a lightweight, reproducible way to time core operations across different machines/GPUs without flaky assertions on absolute performance. The harness should:
-      • Warm up, run N iterations, collect per-iteration wall-clock timings
-      • Produce summary stats (min/median/mean/p95/max/std), FPS and MPix/s
-      • Include environment metadata (adapter name/backend/device type via device_probe)
-      • Expose both a Python API and a CLI (console_script) for easy use
-      • Contain smoke tests that validate structure and basic behavior, skipping GPU parts when unavailable
-    ]]>
-  </motivation>
+  <Edits>
 
-  <acceptance_criteria>
-    <item>A new module python/vulkan_forge/bench.py exposes run_benchmark(op, width, height, iterations=100, warmup=10, ...)->dict with documented ops: renderer_rgba, renderer_png, scene_rgba, numpy_to_png, png_to_numpy.</item>
-    <item>run_benchmark returns a dict including: op, width, height, pixels, iterations, warmup, stats{min_ms,p50_ms,mean_ms,p95_ms,max_ms,std_ms}, throughput{fps, mpix_per_s}, and env{status, adapter_name, backend, device_type} from device_probe().</item>
-    <item>A CLI entry point vf-bench prints a human-readable table and can emit JSON via --json path. CLI accepts width/height/iterations/warmup/op.</item>
-    <item>__init__.py re-exports run_benchmark and adds it to the curated __all__ without leaking _vulkan_forge.</item>
-    <item>Type stubs updated to include run_benchmark in __init__.pyi.</item>
-    <item>New tests in tests/test_t52_timing_harness.py: (a) GPU-dependent smoke for renderer_rgba and scene_rgba that skip when GPU unsupported; (b) CPU-only smoke for numpy_to_png/png_to_numpy. Tests only validate structure/ranges, not absolute timings.</item>
-    <item>All tests pass (GPU tests skip cleanly when no adapter). No public API regressions.</item>
-  </acceptance_criteria>
+    <!-- 1) Rust compile fix: bring trait providing `.shape()` into scope -->
+    <File path="src/scene/mod.rs" intent="Add missing numpy trait import (idempotent)">
+      <RegexReplace pattern="(?m)^use numpy::IntoPyArray;\s*$" multiple="false"><![CDATA[use numpy::IntoPyArray;
+use numpy::PyUntypedArrayMethods;  // needed for .shape() on Py(Readonly)Array
+]]></RegexReplace>
+      <!-- If the previous line layout differs, also ensure the trait exists once -->
+      <AppendIfMissing needle="use numpy::PyUntypedArrayMethods;">
+<![CDATA[use numpy::PyUntypedArrayMethods;  // needed for .shape() on Py(Readonly)Array
+]]>
+      </AppendIfMissing>
+    </File>
 
-  <edits>
-    <create file="python/vulkan_forge/bench.py">
-      <![CDATA[
-import argparse
-import json
-import math
-import os
-import statistics
-import tempfile
-import time
-from pathlib import Path
-from typing import Dict, List, Tuple
-
-import numpy as np
-import vulkan_forge as vf
-
-
-def _percentiles(ms: List[float]) -> Tuple[float, float, float]:
-    if not ms:
-        return (0.0, 0.0, 0.0)
-    a = np.asarray(ms, dtype=np.float64)
-    # Median (p50) and p95 via numpy for stability across platforms
-    p50 = float(np.percentile(a, 50))
-    p95 = float(np.percentile(a, 95))
-    return (p50, p95, float(a.max()))
-
-
-def _env_info() -> Dict[str, str]:
-    info = vf.device_probe()
-    if not isinstance(info, dict):
-        return {"status": "unknown"}
-    out = {k: info.get(k) for k in ("status", "adapter_name", "backend", "device_type")}
-    return out
-
-
-def _bench_loop(fn, *, iterations: int, warmup: int) -> List[float]:
-    # Warmup
-    for _ in range(max(0, warmup)):
-        fn()
-
-    # Timed runs
-    times_s: List[float] = []
-    for _ in range(max(1, iterations)):
-        t0 = time.perf_counter()
-        fn()
-        t1 = time.perf_counter()
-        times_s.append(t1 - t0)
-    return [t * 1000.0 for t in times_s]  # ms
-
-
-def _op_renderer_rgba(width: int, height: int):
-    r = vf.Renderer(width, height)
-    def step():
-        _ = r.render_triangle_rgba()
-    return step
-
-
-def _op_renderer_png(width: int, height: int):
-    r = vf.Renderer(width, height)
-    tmpdir = Path(tempfile.mkdtemp(prefix="vf_bench_"))
-    def step():
-        p = tmpdir / f"frame_{time.time_ns()}.png"
-        r.render_triangle_png(str(p))
-        try:
-            p.unlink(missing_ok=True)
-        except Exception:
-            pass
-    return step
-
-
-def _op_scene_rgba(width: int, height: int, *, grid: int = 16, colormap: str = "viridis"):
-    sc = vf.Scene(width, height, grid=grid, colormap=colormap)
-    def step():
-        _ = sc.render_rgba()
-    return step
-
-
-def _op_numpy_to_png(width: int, height: int, *, seed: int = 0):
-    rng = np.random.default_rng(seed)
-    arr = (rng.random((height, width, 4)) * 255).astype(np.uint8)
-
-    tmpdir = Path(tempfile.mkdtemp(prefix="vf_bench_png_"))
-    def step():
-        p = tmpdir / f"img_{time.time_ns()}.png"
-        vf.numpy_to_png(str(p), arr)
-        try:
-            p.unlink(missing_ok=True)
-        except Exception:
-            pass
-    return step
-
-
-def _op_png_to_numpy(width: int, height: int, *, seed: int = 0):
-    # Pre-create a PNG once, then measure load path only
-    rng = np.random.default_rng(seed)
-    arr = (rng.random((height, width, 4)) * 255).astype(np.uint8)
-    tmpdir = Path(tempfile.mkdtemp(prefix="vf_bench_pngin_"))
-    src = tmpdir / "src.png"
-    vf.numpy_to_png(str(src), arr)
-
-    def step():
-        _ = vf.png_to_numpy(str(src))
-    return step
-
-
-def run_benchmark(
-    op: str,
-    width: int,
-    height: int,
-    *,
-    iterations: int = 100,
-    warmup: int = 10,
-    grid: int = 16,
-    colormap: str = "viridis",
-    seed: int = 0,
-) -> Dict:
-    """
-    Run a timing benchmark for a given operation.
-
-    Parameters
-    ----------
-    op : {'renderer_rgba','renderer_png','scene_rgba','numpy_to_png','png_to_numpy'}
-    width, height : int
-        Resolution (for render ops) or array dimensions (for PNG ops).
-    iterations : int, default 100
-    warmup : int, default 10
-    grid : int, default 16
-        Grid resolution for Scene (ignored for other ops).
-    colormap : str, default 'viridis'
-        Colormap for Scene (ignored for other ops).
-    seed : int, default 0
-        RNG seed for PNG path workloads.
-
-    Returns
-    -------
-    dict
-        {
-          'op': str, 'width': int, 'height': int, 'pixels': int,
-          'iterations': int, 'warmup': int,
-          'stats': {'min_ms','p50_ms','mean_ms','p95_ms','max_ms','std_ms'},
-          'throughput': {'fps','mpix_per_s'},
-          'env': {'status','adapter_name','backend','device_type'}
-        }
-    """
-    op = op.lower().strip()
-    env = _env_info()
-
-    # GPU-dependent ops should be skipped/guarded by caller if env['status'] != 'ok'
-    if op == "renderer_rgba":
-        step = _op_renderer_rgba(width, height)
-    elif op == "renderer_png":
-        step = _op_renderer_png(width, height)
-    elif op == "scene_rgba":
-        step = _op_scene_rgba(width, height, grid=grid, colormap=colormap)
-    elif op == "numpy_to_png":
-        step = _op_numpy_to_png(width, height, seed=seed)
-    elif op == "png_to_numpy":
-        step = _op_png_to_numpy(width, height, seed=seed)
-    else:
-        raise ValueError("unknown op; expected one of: renderer_rgba, renderer_png, scene_rgba, numpy_to_png, png_to_numpy")
-
-    ms = _bench_loop(step, iterations=iterations, warmup=warmup)
-
-    mean_ms = float(statistics.fmean(ms)) if ms else 0.0
-    std_ms = float(statistics.pstdev(ms)) if len(ms) > 1 else 0.0
-    p50_ms, p95_ms, max_ms = _percentiles(ms)
-    min_ms = min(ms) if ms else 0.0
-    fps = 1000.0 / mean_ms if mean_ms > 0 else 0.0
-    mpix_per_s = (width * height / 1e6) * fps
-
-    return {
-        "op": op,
-        "width": int(width),
-        "height": int(height),
-        "pixels": int(width * height),
-        "iterations": int(iterations),
-        "warmup": int(warmup),
-        "stats": {
-            "min_ms": float(min_ms),
-            "p50_ms": float(p50_ms),
-            "mean_ms": float(mean_ms),
-            "p95_ms": float(p95_ms),
-            "max_ms": float(max_ms),
-            "std_ms": float(std_ms),
-        },
-        "throughput": {
-            "fps": float(fps),
-            "mpix_per_s": float(mpix_per_s),
-        },
-        "env": env,
-    }
-
-
-def _print_table(result: Dict):
-    def f(x): return f"{x:.3f}"
-    s = result["stats"]
-    t = result["throughput"]
-    env = result.get("env", {})
-    lines = [
-        f"op={result['op']} | {result['width']}x{result['height']} px ({result['pixels']/1e6:.2f} MPix)",
-        f"iters={result['iterations']} warmup={result['warmup']}",
-        f"min/median/mean/p95/max/std (ms): {f(s['min_ms'])} / {f(s['p50_ms'])} / {f(s['mean_ms'])} / {f(s['p95_ms'])} / {f(s['max_ms'])} / {f(s['std_ms'])}",
-        f"throughput: {f(t['fps'])} FPS, {f(t['mpix_per_s'])} MPix/s",
-        f"env: status={env.get('status')} adapter={env.get('adapter_name')} backend={env.get('backend')} type={env.get('device_type')}",
-    ]
-    print("\n".join(lines))
-
-
-def main(argv=None):
-    p = argparse.ArgumentParser(description="vulkan_forge timing harness")
-    p.add_argument("--op", required=True,
-                   choices=["renderer_rgba", "renderer_png", "scene_rgba", "numpy_to_png", "png_to_numpy"])
-    p.add_argument("--width", type=int, required=True)
-    p.add_argument("--height", type=int, required=True)
-    p.add_argument("--iterations", type=int, default=100)
-    p.add_argument("--warmup", type=int, default=10)
-    p.add_argument("--grid", type=int, default=16)
-    p.add_argument("--colormap", type=str, default="viridis")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--json", type=str, default=None, help="Write JSON result to this path")
-    args = p.parse_args(argv)
-
-    res = run_benchmark(
-        args.op, args.width, args.height,
-        iterations=args.iterations, warmup=args.warmup,
-        grid=args.grid, colormap=args.colormap, seed=args.seed,
-    )
-    _print_table(res)
-    if args.json:
-        Path(args.json).write_text(json.dumps(res, indent=2))
-      ]]>
-    </create>
-
-    <update file="python/vulkan_forge/__init__.py">
-      <![CDATA[
-# --- Add near the other curated exports ---
-from .bench import run_benchmark as _vf_run_benchmark  # safe import; pure Python
-
-# Ensure it's in the curated surface
+    <!-- 2) Python packaging: re-export run_benchmark safely without leaking internals -->
+    <File path="python/vulkan_forge/__init__.py" intent="Idempotent bench export and __all__ update">
+      <Upsert>
+<![CDATA[
+# T52-BEGIN:bench-export
+# Import lazily and safely so packaging/import errors don't break base module import
 try:
-    __all__ = list(__all__)  # in case it's a tuple
+    from .bench import run_benchmark as _vf_run_benchmark
+except Exception as _e:  # pragma: no cover
+    def _vf_run_benchmark(*_args, **_kwargs):
+        raise RuntimeError("vulkan_forge.bench unavailable: " + str(_e))
+
+# Ensure curated __all__ includes 'run_benchmark' without leaking internals
+try:
+    __all__  # type: ignore[name-defined]
 except NameError:
     __all__ = []
 if "run_benchmark" not in __all__:
     __all__.append("run_benchmark")
 
-# Re-export symbol
+# Public alias
 run_benchmark = _vf_run_benchmark
-      ]]>
-    </update>
+# T52-END:bench-export
+]]>
+      </Upsert>
+    </File>
 
-    <update file="python/vulkan_forge/__init__.pyi">
-      <![CDATA[
-# --- Add the timing API stub at top-level ---
-from typing import Dict, TypedDict
+    <!-- 3) Type stubs: add run_benchmark to the package .pyi (idempotent) -->
+    <File path="python/vulkan_forge/__init__.pyi" intent="Expose bench signature in stubs (idempotent)">
+      <AppendIfMissing needle="def run_benchmark(">
+<![CDATA[
+from typing import Any, Dict, Literal
 
-class _Stats(TypedDict):
-    min_ms: float
-    p50_ms: float
-    mean_ms: float
-    p95_ms: float
-    max_ms: float
-    std_ms: float
+def run_benchmark(
+    op: Literal["renderer_rgba","renderer_png","scene_rgba","numpy_to_png","png_to_numpy"],
+    width: int,
+    height: int,
+    *,
+    iterations: int = ...,
+    warmup: int = ...,
+    grid: int = ...,
+    colormap: str = ...,
+    seed: int = ...,
+) -> Dict[str, Any]: ...
+]]>
+      </AppendIfMissing>
+    </File>
 
-class _Throughput(TypedDict):
-    fps: float
-    mpix_per_s: float
-
-class _Env(TypedDict, total=False):
-    status: str
-    adapter_name: str
-    backend: str
-    device_type: str
-
-class BenchmarkResult(TypedDict):
-    op: str
-    width: int
-    height: int
-    pixels: int
-    iterations: int
-    warmup: int
-    stats: _Stats
-    throughput: _Throughput
-    env: _Env
-
-def run_benchmark(op: str, width: int, height: int, *, iterations: int = ..., warmup: int = ..., grid: int = ..., colormap: str = ..., seed: int = ...) -> BenchmarkResult: ...
-      ]]>
-    </update>
-
-    <update file="pyproject.toml">
-      <![CDATA[
-# --- Add a console_script entry point for CLI ---
+    <!-- 4) CLI wiring: ensure console script exists and is correct -->
+    <File path="pyproject.toml" intent="Make sure vf-bench console script is present (idempotent)">
+      <AppendIfMissing needle="[project.scripts]">
+<![CDATA[
 [project.scripts]
 vf-bench = "vulkan_forge.bench:main"
-      ]]>
-    </update>
+]]>
+      </AppendIfMissing>
+      <RegexReplace pattern="(?m)^\[project\.scripts\]\s*(?:\r?\n)(?:.*\r?\n)*?(?=(?:\[\w)|\Z)" multiple="false"><![CDATA[
+[project.scripts]
+vf-bench = "vulkan_forge.bench:main"
+]]></RegexReplace>
+    </File>
 
-    <create file="tests/test_t52_timing_harness.py">
-      <![CDATA[
-import json
-import math
-import sys
-import pytest
+  </Edits>
 
-import vulkan_forge as vf
+  <Commands shell="bash">
+    <Run>python -m pip install -U pip maturin pytest numpy</Run>
+    <Run>maturin develop --release</Run>
+    <Run>pytest -q -k test_t52_timing_harness || true</Run>
+    <Run>pytest -q</Run>
+    <Run>python -c "import vulkan_forge as vf, json; print('has_run_benchmark', callable(getattr(vf, 'run_benchmark', None)))"</Run>
+    <Run>vf-bench --op numpy_to_png --width 16 --height 16 --iterations 3 --warmup 1 --json bench_smoke.json</Run>
+    <Run>test -f bench_smoke.json && python -c "import json; d=json.load(open('bench_smoke.json')); print(sorted(d['stats'].keys()), sorted(d['throughput'].keys()))"</Run>
 
+    <Run>
+<![CDATA[
+# Show changed files and diffs
+git status --porcelain || true
+CHANGED=$(git status --porcelain | awk '{print $2}')
+if [ -n "$CHANGED" ]; then
+  for f in $CHANGED; do
+    echo "### DIFF: $f"
+    git --no-pager diff --unified=3 -- "$f" | sed -n '1,200p'
+    echo
+  done
+else
+  echo "No changes required"
+fi
+]]>
+    </Run>
+  </Commands>
 
-def _gpu_ok():
-    info = vf.device_probe()
-    return isinstance(info, dict) and info.get("status") == "ok"
-
-
-def _check_schema(res: dict):
-    for k in ("op", "width", "height", "pixels", "iterations", "warmup", "stats", "throughput", "env"):
-        assert k in res
-    s = res["stats"]
-    t = res["throughput"]
-    for k in ("min_ms", "p50_ms", "mean_ms", "p95_ms", "max_ms", "std_ms"):
-        assert k in s and s[k] >= 0.0
-    for k in ("fps", "mpix_per_s"):
-        assert k in t and t[k] >= 0.0
-    assert res["width"] > 0 and res["height"] > 0
-
-
-@pytest.mark.parametrize("op", ["numpy_to_png", "png_to_numpy"])
-def test_cpu_only_png_bench_smoke(op):
-    res = vf.run_benchmark(op, 64, 64, iterations=3, warmup=1, seed=1)
-    _check_schema(res)
-    assert res["op"] == op
-
-
-@pytest.mark.skipif(not _gpu_ok(), reason="No suitable GPU adapter")
-@pytest.mark.parametrize("op", ["renderer_rgba", "scene_rgba"])
-def test_gpu_bench_smoke(op):
-    res = vf.run_benchmark(op, 64, 64, iterations=3, warmup=1)
-    _check_schema(res)
-    assert res["op"] == op
-
-
-@pytest.mark.skipif(not _gpu_ok(), reason="No suitable GPU adapter")
-def test_renderer_png_bench_smoke():
-    res = vf.run_benchmark("renderer_png", 64, 64, iterations=2, warmup=1)
-    _check_schema(res)
-      ]]>
-    </create>
-  </edits>
-
-  <validation>
-    <step>pytest -q -k "t52 or timing or bench"  # CPU-only tests always run; GPU tests skip if no adapter</step>
-    <step>python -m vulkan_forge.bench --op renderer_rgba --width 256 --height 256 --iterations 20 --warmup 5  (should print a stats table; skip if GPU unavailable)</step>
-    <step>vf-bench --op numpy_to_png --width 256 --height 256 --iterations 50 --warmup 5 --json bench.json (should create bench.json with the expected schema)</step>
-  </validation>
-
-  <notes>
-    <![CDATA[
-    • We report wall-clock (CPU) timings around each call (submit+wait for GPU-backed ops). GPU timestamp-query support can be added later as an optional enhancement; this harness is designed so a 'gpu_ms' field can be appended without breaking schema.
-    • The CLI avoids extra deps (argparse only). File I/O timing is intentionally included for PNG ops.
-    • Tests verify schema and non-negative values only to remain stable across machines.
-    • __all__ remains curated; we only add run_benchmark (no leakage of private modules).
-    ]]>
-  </notes>
-</task>
+  <Acceptance>
+    <Criterion>Cargo/maturin build succeeds (no E0599); the numpy trait import is present in src/scene/mod.rs.</Criterion>
+    <Criterion>`vulkan_forge.run_benchmark` is importable and listed in `vulkan_forge.__all__` without exposing `_vulkan_forge`.</Criterion>
+    <Criterion>`vf-bench` runs and produces JSON with keys `stats.min_ms/p50_ms/mean_ms/p95_ms/max_ms/std_ms` and `throughput.fps/mpix_per_s`.</Criterion>
+    <Criterion>All tests (including test_t52_timing_harness.py) pass.</Criterion>
+    <Criterion>Edits are idempotent and limited to the files above.</Criterion>
+  </Acceptance>
+</Task>
