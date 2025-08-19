@@ -3,6 +3,22 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
+## [0.1.0] - 2025-08-19
+
+### Added
+
+* Expanded README to cover all implemented ROADMAP items (T2.x, T3.x, T4.2, T5.1, T5.2).
+* New examples: grid generation and terrain normalization/height-range.
+* Documented timing harness API & CLI with usage guidance.
+
+### Changed
+
+* Version bumped to `0.1.0` (Cargo & Python). `__version__` now reports `0.1.0`.
+
+### Fixed
+
+* Clarified PathLike support and C-contiguity requirements.
+
 ## 0.0.9 — T4.1 Scene integration
 - Added `scene` module with `Scene` Py API (camera, height upload, render to PNG).
 - Reused T3 terrain pipeline and kept bind groups cached.

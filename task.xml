@@ -1,120 +1,325 @@
-<Task id="T52-postpass" owner="Claude" goal="Fix build trait import and finalize timing harness export/CLI/stubs without changing public API semantics">
-  <Context>
-    Implemented T5.2 timing harness (python/vulkan_forge/bench.py) with Python API (run_benchmark), CLI (vf-bench), and tests.
-    Fix a compile error in src/scene/mod.rs by restoring the trait import that provides `.shape()`.
-    Ensure the curated packaging surface re-exports run_benchmark, updates type stubs, and keeps CLI mapping idempotent.
-  </Context>
+<task id="T53-readme-examples-expanded" owner="assistant">
+  <summary>
+    Expand the README so it documents <b>everything covered in the ROADMAP so far</b> (not just the last task), while keeping the version bump to <b>0.1.0</b> intact. Add missing examples where useful, and lightweight tests that smoke-run the new examples (GPU-aware skipping). No API changes—docs and examples only.
+  </summary>
 
-  <Edits>
+\<ground\_rules> <rule>Do not change public APIs or behavior beyond docs, examples, and version text.</rule> <rule>Preserve curated exports, typing stubs, <code>py.typed</code>, and the CLI <code>vf-bench</code>.</rule> <rule>Keep <code>**version**</code> sourced from <code>env!("CARGO\_PKG\_VERSION")</code> and reporting <code>0.1.0</code>.</rule> <rule>GPU-dependent examples/tests must skip gracefully if no compatible adapter is found.</rule> <rule>Follow the existing README tone and formatting; extend, don’t rewrite.</rule>
+\</ground\_rules>
 
-    <!-- 1) Rust compile fix: bring trait providing `.shape()` into scope -->
-    <File path="src/scene/mod.rs" intent="Add missing numpy trait import (idempotent)">
-      <RegexReplace pattern="(?m)^use numpy::IntoPyArray;\s*$" multiple="false"><![CDATA[use numpy::IntoPyArray;
-use numpy::PyUntypedArrayMethods;  // needed for .shape() on Py(Readonly)Array
-]]></RegexReplace>
-      <!-- If the previous line layout differs, also ensure the trait exists once -->
-      <AppendIfMissing needle="use numpy::PyUntypedArrayMethods;">
-<![CDATA[use numpy::PyUntypedArrayMethods;  // needed for .shape() on Py(Readonly)Array
-]]>
-      </AppendIfMissing>
-    </File>
+\<acceptance\_criteria> <item><code>README.md</code> now has a “Features by ROADMAP” section mapping tasks → capabilities (T2.x infra exports; T3.x grid/scene prep; T4.2 packaging & GPU context + PathLike + version + typing; T5.1 synthetic DEM tests; T5.2 timing harness), with links to each relevant usage section.</item> <item><code>README.md</code> includes or expands: Installation; Platform requirements; PNG↔NumPy (shapes/dtypes/contiguity + PathLike); Curated Python API surface; Renderer triangle; Scene terrain (height upload, camera, PNG vs NumPy parity); Terrain utilities (stats, set\_height\_range, normalize\_terrain, upload/debug readback); Colormaps (supported + validation); Mesh/grid (<code>grid\_generate</code>); Camera helpers (<code>camera\_look\_at/perspective/view\_proj</code>); Diagnostics; Timing harness (API + CLI); Synthetic DEMs (T5.1) with “how to run tests”; Dev workflow (build/test/lint); Troubleshooting (wgpu backends/env vars); Versioning & changelog.</item> <item>New examples created where missing (grid, normalization/height-range). All examples runnable; GPU ones guarded.</item> <item>New/updated tests smoke-run the new examples with GPU-aware skipping. No perf assertions.</item> <item>CHANGELOG 0.1.0 entry mentions the expanded README and added examples; dates filled in.</item> <item>Build succeeds; all tests pass/skip appropriately.</item>
+\</acceptance\_criteria>
 
-    <!-- 2) Python packaging: re-export run_benchmark safely without leaking internals -->
-    <File path="python/vulkan_forge/__init__.py" intent="Idempotent bench export and __all__ update">
-      <Upsert>
-<![CDATA[
-# T52-BEGIN:bench-export
-# Import lazily and safely so packaging/import errors don't break base module import
+  <changes>
+    <file path="README.md" change="edit-or-create">
+      <content><![CDATA[
+# vulkan_forge
+
+Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
+
+## Installation
+
+```bash
+# from source
+pip install -U maturin
+maturin develop --release
+# or via wheel (if provided)
+# pip install vulkan_forge
+```
+
+## Platform requirements
+
+Runs anywhere wgpu supports: Vulkan / Metal / DX12 / GL (and Browser WebGPU for diagnostics). A discrete or integrated GPU is recommended. Examples/tests that need a GPU will skip if no compatible adapter is found.
+
+## Features by ROADMAP (what’s implemented so far)
+
+* **T2.x Infrastructure & exports**
+
+  * Curated Python surface with stable wrappers and `__version__` re-export.
+* **T3.x Geometry & scene prep**
+
+  * Grid generation primitives used by terrain rendering.
+* **T4.2 Packaging & Core Unification**
+
+  * Shared GPU context (`gpu.rs`) and alignment helper (`align_copy_bpr()`).
+  * Uniform PathLike support for PNG I/O and render-to-PNG.
+  * Docstrings clarifying PNG↔NumPy parity & contiguity.
+  * Typing stubs + `py.typed`.
+* **T5.1 Synthetic DEM tests**
+
+  * Deterministic height fields for validation; GPU-aware test strategy.
+* **T5.2 Timing harness**
+
+  * API: `run_benchmark(...)`
+  * CLI: `vf-bench` for reproducible measurements (no perf pass/fail).
+
+Each item below links back to these features.
+
+## Quickstart: PNG ↔ NumPy
+
+```python
+from pathlib import Path
+import numpy as np
+import vulkan_forge as vf
+
+# RGB -> PNG (PathLike supported)
+rgb = (np.linspace(0,255,64, dtype=np.uint8)[None, :, None] * np.ones((64,1,3), np.uint8)).copy(order="C")
+vf.numpy_to_png(Path("out_rgb.png"), rgb)
+
+# PNG -> RGBA ndarray (H, W, 4) uint8, C-contiguous
+arr = vf.png_to_numpy("out_rgb.png")
+assert arr.shape == (64, 64, 4)
+```
+
+**Notes**
+
+* Accepts `(H,W,4)` RGBA, `(H,W,3)` RGB, or `(H,W)` grayscale, dtype=uint8, **C-contiguous**.
+* PathLike is supported anywhere a path is accepted.
+
+## Curated Python API (top-level)
+
+* I/O: `png_to_numpy(path)`, `numpy_to_png(path, array)`
+* Rendering: `Renderer(width, height)` → `render_triangle_png(path)`, `render_triangle_rgba()`
+* Scene: `Scene(width, height, grid=..., colormap='viridis')`:
+
+  * `set_height_from_r32f(height_float32_HxW)`
+  * `set_camera_look_at(eye, target, up, fovy_deg, znear, zfar)`
+  * `render_png(path)`, `render_rgba()`
+* Terrain utils: `terrain_stats()`, `set_height_range(min, max)`, `normalize_terrain(mode, range=None, eps=1e-8)`,
+  `upload_height_r32f()`, `debug_read_height_patch(x,y,w,h)`, `read_full_height_texture()`
+* Colormaps: `colormap_supported()`
+* Mesh: `grid_generate(nx, nz, spacing=(sx,sz), origin='center')`
+* Camera helpers: `camera_look_at(...)`, `camera_perspective(...)`, `camera_view_proj(...)`
+* Diagnostics: `enumerate_adapters()`, `device_probe(backend=None)`
+* Timing: `run_benchmark(operation, width, height, iters, ...)` and CLI `vf-bench`
+* Introspection: `__version__` (sourced from the Rust crate)
+
+## Renderer: triangle demo
+
+```python
+from pathlib import Path
+import vulkan_forge as vf
+
+r = vf.Renderer(256, 256)
+r.render_triangle_png(Path("triangle.png"))     # file
+tri = r.render_triangle_rgba()                  # np.ndarray (H,W,4) uint8
+```
+
+## Scene: terrain workflow (PNG/NumPy parity)
+
+```python
+import numpy as np
+from pathlib import Path
+import vulkan_forge as vf
+
+H, W = 64, 64
+# simple synthetic slope for demo
+h32 = (np.linspace(0,1,W, dtype=np.float32)[None,:] * np.ones((H,1), np.float32)).copy(order="C")
+
+s = vf.Scene(256, 256, grid=128, colormap="viridis")
+s.set_height_from_r32f(h32)
+s.set_camera_look_at((3,2,3), (0,0,0), (0,1,0), fovy_deg=45, znear=0.1, zfar=100.0)
+s.render_png(Path("terrain.png"))
+rgba = s.render_rgba()  # byte-for-byte pixel parity with the PNG write
+```
+
+## Terrain utilities
+
+```python
+mn, mx, mean, std = s.terrain_stats()
+s.set_height_range(mn, mx)                # override normalization
+s.normalize_terrain("minmax", (0.0, 1.0)) # or zscore
+s.upload_height_r32f()                    # send to GPU
+patch = s.debug_read_height_patch(0, 0, 16, 16)
+full = s.read_full_height_texture()
+```
+
+## Colormaps
+
+```python
+from vulkan_forge import colormap_supported
+print(colormap_supported())  # list of valid names
+```
+
+## Mesh & grid
+
+```python
+xy, uv, indices = vf.grid_generate(64, 64, spacing=(1.0, 1.0), origin="center")
+```
+
+## Camera helpers
+
+```python
+vp = vf.camera_view_proj(
+    eye=(3,2,3), target=(0,0,0), up=(0,1,0), fovy_deg=45.0, aspect=1.0, znear=0.1, zfar=100.0
+)
+```
+
+## Diagnostics
+
+```python
+import vulkan_forge as vf
+print(vf.enumerate_adapters())
+print(vf.device_probe())  # {'status': 'ok', ...} or diagnostic info
+```
+
+## Timing harness (T5.2)
+
+Python:
+
+```python
+from vulkan_forge import run_benchmark
+res = run_benchmark(operation="renderer_rgba", width=512, height=512, iters=50)
+print(res["stats"], res["throughput"])
+```
+
+CLI:
+
+```bash
+vf-bench --op renderer_rgba --w 512 --h 512 --iters 50 --json bench.json
+```
+
+## Synthetic DEMs & tests (T5.1)
+
+* The test suite includes **deterministic synthetic height fields** (planes, ramps, sinusoidal) to validate terrain processing and image parity.
+* Tests are **GPU-aware** and will skip if no compatible adapter is present.
+* Run all tests:
+
+  ```bash
+  pytest -q
+  ```
+
+## Development
+
+```bash
+# build
+maturin develop --release
+
+# run tests
+pytest -q
+```
+
+## Troubleshooting
+
+* Ensure a supported backend is available (Vulkan/Metal/DX12/GL).
+* You can constrain backends via environment variables (e.g., `WGPU_BACKENDS=VULKAN`) if needed.
+* Arrays for PNG write and terrain upload must be **C-contiguous**.
+
+## Versioning
+
+`vulkan_forge.__version__` mirrors the Rust crate version (`env!("CARGO_PKG_VERSION")`), now **0.1.0**.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+]]></content> </file>
+
+```
+<file path="examples/grid_generate_demo.py" change="create">
+  <content><![CDATA[
+```
+
+import vulkan\_forge as vf
+
+def main():
+xy, uv, idx = vf.grid\_generate(32, 32, spacing=(1.0, 1.0), origin="center")
+print("grid:", xy.shape, uv.shape, idx.shape)
+
+if **name** == "**main**":
+main()
+]]></content> </file>
+
+```
+<file path="examples/terrain_normalize_demo.py" change="create">
+  <content><![CDATA[
+```
+
+import numpy as np
+import vulkan\_forge as vf
+
+def main():
+H, W = 32, 32
+h32 = (np.linspace(0,1,W, dtype=np.float32)\[None,:] \* np.ones((H,1), np.float32)).copy(order="C")
+s = vf.Scene(128, 128, grid=64, colormap="viridis")
+s.set\_height\_from\_r32f(h32)
+s.normalize\_terrain("zscore")
+mn, mx, \*\_ = s.terrain\_stats()
+s.set\_height\_range(mn, mx)
+print("stats:", mn, mx)
+
+if **name** == "**main**":
+main()
+]]></content> </file>
+
+```
+<file path="tests/test_readme_examples.py" change="edit-or-create">
+  <content><![CDATA[
+```
+
+import sys, subprocess, pytest
+
+def \_has\_gpu():
 try:
-    from .bench import run_benchmark as _vf_run_benchmark
-except Exception as _e:  # pragma: no cover
-    def _vf_run_benchmark(*_args, **_kwargs):
-        raise RuntimeError("vulkan_forge.bench unavailable: " + str(_e))
+import vulkan\_forge as vf
+info = vf.device\_probe()
+return isinstance(info, dict) and info.get("status") in ("ok","error","unsupported")
+except Exception:
+return False
 
-# Ensure curated __all__ includes 'run_benchmark' without leaking internals
-try:
-    __all__  # type: ignore[name-defined]
-except NameError:
-    __all__ = []
-if "run_benchmark" not in __all__:
-    __all__.append("run_benchmark")
+@pytest.mark.skipif(not \_has\_gpu(), reason="No compatible GPU / wgpu backend available")
+@pytest.mark.parametrize("script", \[
+"examples/triangle\_png.py",
+"examples/scene\_terrain\_demo.py",
+"examples/terrain\_normalize\_demo.py",
+])
+def test\_gpu\_examples\_run(script):
+subprocess.check\_call(\[sys.executable, script])
 
-# Public alias
-run_benchmark = _vf_run_benchmark
-# T52-END:bench-export
-]]>
-      </Upsert>
-    </File>
+def test\_cpu\_examples\_run():
+subprocess.check\_call(\[sys.executable, "examples/png\_numpy\_roundtrip.py"])
 
-    <!-- 3) Type stubs: add run_benchmark to the package .pyi (idempotent) -->
-    <File path="python/vulkan_forge/__init__.pyi" intent="Expose bench signature in stubs (idempotent)">
-      <AppendIfMissing needle="def run_benchmark(">
-<![CDATA[
-from typing import Any, Dict, Literal
+def test\_diagnostics\_runs():
+subprocess.check\_call(\[sys.executable, "examples/diagnostics.py"])
 
-def run_benchmark(
-    op: Literal["renderer_rgba","renderer_png","scene_rgba","numpy_to_png","png_to_numpy"],
-    width: int,
-    height: int,
-    *,
-    iterations: int = ...,
-    warmup: int = ...,
-    grid: int = ...,
-    colormap: str = ...,
-    seed: int = ...,
-) -> Dict[str, Any]: ...
-]]>
-      </AppendIfMissing>
-    </File>
+def test\_grid\_generate\_runs():
+subprocess.check\_call(\[sys.executable, "examples/grid\_generate\_demo.py"])
 
-    <!-- 4) CLI wiring: ensure console script exists and is correct -->
-    <File path="pyproject.toml" intent="Make sure vf-bench console script is present (idempotent)">
-      <AppendIfMissing needle="[project.scripts]">
-<![CDATA[
-[project.scripts]
-vf-bench = "vulkan_forge.bench:main"
-]]>
-      </AppendIfMissing>
-      <RegexReplace pattern="(?m)^\[project\.scripts\]\s*(?:\r?\n)(?:.*\r?\n)*?(?=(?:\[\w)|\Z)" multiple="false"><![CDATA[
-[project.scripts]
-vf-bench = "vulkan_forge.bench:main"
-]]></RegexReplace>
-    </File>
+def test\_bench\_runs():
+subprocess.check\_call(\[sys.executable, "examples/run\_bench.py"])
+]]></content> </file>
 
-  </Edits>
+```
+<file path="CHANGELOG.md" change="edit-or-create">
+  <content><![CDATA[
+```
 
-  <Commands shell="bash">
-    <Run>python -m pip install -U pip maturin pytest numpy</Run>
-    <Run>maturin develop --release</Run>
-    <Run>pytest -q -k test_t52_timing_harness || true</Run>
-    <Run>pytest -q</Run>
-    <Run>python -c "import vulkan_forge as vf, json; print('has_run_benchmark', callable(getattr(vf, 'run_benchmark', None)))"</Run>
-    <Run>vf-bench --op numpy_to_png --width 16 --height 16 --iterations 3 --warmup 1 --json bench_smoke.json</Run>
-    <Run>test -f bench_smoke.json && python -c "import json; d=json.load(open('bench_smoke.json')); print(sorted(d['stats'].keys()), sorted(d['throughput'].keys()))"</Run>
+# Changelog
 
-    <Run>
-<![CDATA[
-# Show changed files and diffs
-git status --porcelain || true
-CHANGED=$(git status --porcelain | awk '{print $2}')
-if [ -n "$CHANGED" ]; then
-  for f in $CHANGED; do
-    echo "### DIFF: $f"
-    git --no-pager diff --unified=3 -- "$f" | sed -n '1,200p'
-    echo
-  done
-else
-  echo "No changes required"
-fi
-]]>
-    </Run>
-  </Commands>
+All notable changes to this project will be documented in this file.
 
-  <Acceptance>
-    <Criterion>Cargo/maturin build succeeds (no E0599); the numpy trait import is present in src/scene/mod.rs.</Criterion>
-    <Criterion>`vulkan_forge.run_benchmark` is importable and listed in `vulkan_forge.__all__` without exposing `_vulkan_forge`.</Criterion>
-    <Criterion>`vf-bench` runs and produces JSON with keys `stats.min_ms/p50_ms/mean_ms/p95_ms/max_ms/std_ms` and `throughput.fps/mpix_per_s`.</Criterion>
-    <Criterion>All tests (including test_t52_timing_harness.py) pass.</Criterion>
-    <Criterion>Edits are idempotent and limited to the files above.</Criterion>
-  </Acceptance>
-</Task>
+## \[0.1.0] - YYYY-MM-DD
+
+### Added
+
+* Expanded README to cover all implemented ROADMAP items (T2.x, T3.x, T4.2, T5.1, T5.2).
+* New examples: grid generation and terrain normalization/height-range.
+* Documented timing harness API & CLI with usage guidance.
+
+### Changed
+
+* Version bumped to `0.1.0` (Cargo & Python). `__version__` now reports `0.1.0`.
+
+### Fixed
+
+* Clarified PathLike support and C-contiguity requirements.
+  ]]></content> </file> </changes>
+
+  \<post\_changes\_checks> <check>Build: <code>maturin develop --release</code> completes without errors.</check> <check>Tests: <code>pytest -q</code> passes; GPU tests skip cleanly if needed.</check> <check>Manual: run each example once to ensure outputs/messages are correct.</check> <check>README anchors and code blocks correspond to actual example files.</check>
+  \</post\_changes\_checks>
+
+  <deliverables>
+    <item>Expanded README with full ROADMAP coverage and links.</item>
+    <item>Two new examples (+ tests) for grid generation and terrain normalization.</item>
+    <item>Updated CHANGELOG 0.1.0 entry reflecting the docs expansion.</item>
+  </deliverables>
+
+</task>

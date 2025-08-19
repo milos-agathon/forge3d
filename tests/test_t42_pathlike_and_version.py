@@ -18,4 +18,4 @@ def test_renderer_render_triangle_png_accepts_pathlike(tmp_path):
 
 def test_version_export():
     assert hasattr(vf, "__version__")
-    assert vf.__version__ == "0.0.9"
+    assert vf.__version__ == "0.1.0"
