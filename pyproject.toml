@@ -11,6 +11,10 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Your Name" }]
 
+# Add a console_script entry point for CLI
+[project.scripts]
+vf-bench = "vulkan_forge.bench:main"
+
 [tool.maturin]
 bindings = "pyo3"
 python-source = "python"

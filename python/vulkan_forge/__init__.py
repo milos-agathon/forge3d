@@ -102,6 +102,9 @@ def grid_generate(nx: int, nz: int, spacing=(1.0, 1.0), origin: str = "center"):
     return _ext.grid_generate(nx, nz, (dx, dy), origin)
 # T42-END:grid_generate
 
+# Add near the other curated exports
+from .bench import run_benchmark as _vf_run_benchmark  # safe import; pure Python
+
 # T42-BEGIN:__all__
 # Curated public surface (dynamic inclusion of feature-gated TerrainSpike below)
 __all__ = [
@@ -116,6 +119,7 @@ __all__ = [
     "dem_normalize",
     "enumerate_adapters",
     "device_probe",
+    "run_benchmark",
     "__version__",
 ]
 
@@ -125,6 +129,9 @@ try:
     __all__.append("TerrainSpike")
 except Exception:
     pass
+
+# Re-export benchmark symbol
+run_benchmark = _vf_run_benchmark
 
 # Clean up private symbols from namespace to prevent leakage
 del _ext, importlib

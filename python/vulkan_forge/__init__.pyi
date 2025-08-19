@@ -47,3 +47,37 @@ def dem_normalize(heightmap: np.ndarray, *, mode: str = ..., out_range: Tuple[fl
 
 def enumerate_adapters() -> list[dict[str, Any]]: ...
 def device_probe(backend: Optional[str] = ...) -> dict[str, Any]: ...
+
+# Add the timing API stub at top-level
+from typing import Dict, TypedDict
+
+class _Stats(TypedDict):
+    min_ms: float
+    p50_ms: float
+    mean_ms: float
+    p95_ms: float
+    max_ms: float
+    std_ms: float
+
+class _Throughput(TypedDict):
+    fps: float
+    mpix_per_s: float
+
+class _Env(TypedDict, total=False):
+    status: str
+    adapter_name: str
+    backend: str
+    device_type: str
+
+class BenchmarkResult(TypedDict):
+    op: str
+    width: int
+    height: int
+    pixels: int
+    iterations: int
+    warmup: int
+    stats: _Stats
+    throughput: _Throughput
+    env: _Env
+
+def run_benchmark(op: str, width: int, height: int, *, iterations: int = ..., warmup: int = ..., grid: int = ..., colormap: str = ..., seed: int = ...) -> BenchmarkResult: ...
