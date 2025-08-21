@@ -1,7 +1,7 @@
 # A1.10-BEGIN:perf-sanity
 #!/usr/bin/env python3
 """
-Performance sanity harness for vulkan-forge.
+Performance sanity harness for forge3d.
 
 Measures:
   - init_ms: Renderer(...) + first render (cold)
@@ -22,9 +22,9 @@ import argparse, csv, json, math, os, statistics as stats, sys, time
 from typing import List, Dict, Any
 
 try:
-    from vulkan_forge import Renderer
+    from forge3d import Renderer
 except Exception as e:
-    raise SystemExit(f"Failed to import vulkan_forge.Renderer: {e}")
+    raise SystemExit(f"Failed to import forge3d.Renderer: {e}")
 
 def percentile(values: List[float], p: float) -> float:
     if not values: return float("nan")

@@ -1,7 +1,7 @@
 from pathlib import Path
 import numpy as np
 from PIL import Image
-from vulkan_forge import Renderer
+from forge3d import Renderer
 
 def main():
     r = Renderer(width=512, height=512)

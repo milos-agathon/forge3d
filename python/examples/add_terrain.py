@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np
-from vulkan_forge import Renderer
+from forge3d import Renderer
 
 H, W = 256, 256
 x = np.linspace(-3, 3, W, dtype=np.float32)

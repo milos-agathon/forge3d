@@ -64,7 +64,7 @@ jobs:
       - name: Build & develop-install (PyO3)
         run: |
           maturin develop --release --locked
-          python -c "import vulkan_forge; print('import ok • version=', getattr(vulkan_forge, '__version__', 'unknown'))"
+          python -c "import forge3d; print('import ok • version=', getattr(forge3d, '__version__', 'unknown'))"
 
       - name: Run tests
         id: pytest
@@ -122,7 +122,7 @@ jobs:
   #         python -m pip install --upgrade pip
   #         pip install maturin pytest psutil
   #         maturin develop --release --locked
-  #         python -c "import vulkan_forge"
+  #         python -c "import forge3d"
   #     - name: pytest (not gpu)
   #       run: python -m pytest -q -m "not gpu" --maxfail=1 --disable-warnings --junitxml=pytest-results.xml
   #     - uses: actions/upload-artifact@v4
@@ -153,7 +153,7 @@ jobs:
   #         pip install maturin pytest psutil
   #         maturin develop --release --locked
   #         python - <<'PY'
-  #         import vulkan_forge; print("import ok")
+  #         import forge3d; print("import ok")
   #         PY
   #     - name: pytest (not gpu)
   #       shell: bash
@@ -202,7 +202,7 @@ jobs:
       - name: Install built wheel & smoke import
         run: |
           pip install dist/*.whl
-          python -c "import vulkan_forge; print('wheel import ok • version=', getattr(vulkan_forge, '__version__','unknown'))"
+          python -c "import forge3d; print('wheel import ok • version=', getattr(forge3d, '__version__','unknown'))"
 
       - name: Upload dist artifacts
         if: always()

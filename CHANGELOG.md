@@ -82,7 +82,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ### Added
 - **CPU grid mesh generator**
   - New `terrain::mesh::{make_grid, GridMesh, GridVertex, Indices}` with CCW winding and centered origin.
-  - Python API `_vulkan_forge.grid_generate(nx, nz, spacing, origin)` returning NumPy arrays:
+  - Python API `_forge3d.grid_generate(nx, nz, spacing, origin)` returning NumPy arrays:
     - `XY: (N,2) float32`, `UV: (N,2) float32`, `indices: (M,) uint32`.
   - Validation of shapes/dtypes; zero-copy where possible.
 - **Height texture upload (R32Float)**
@@ -98,7 +98,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
   - `TerrainSpike.debug_lut_format()` for inspection.
 - **Docs & API polish**
   - Expanded README sections (T11, T1.2, T1.3).
-  - Rich docstrings in `python/vulkan_forge/__init__.py`.
+  - Rich docstrings in `python/forge3d/__init__.py`.
 
 ### Changed
 - Removed stale `grid` module; Python keeps a `generate_grid` alias to the new `grid_generate` for compatibility.
@@ -187,7 +187,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## [0.0.2] - 2025-07-31
 ### Added
 - **A1.4 – Off-screen target & readback**: persistent RGBA8 UNORM SRGB color target (`RENDER_ATTACHMENT | COPY_SRC`) and persistent readback buffer with 256-byte row alignment + CPU unpadding.
-- **A1.5 – Python API surface**: public package `vulkan_forge` with:
+- **A1.5 – Python API surface**: public package `forge3d` with:
   - `Renderer(width, height)`
   - `render_triangle_rgba(width, height) -> (H,W,4) uint8`
   - `render_triangle_png(path, width, height) -> None`
@@ -196,10 +196,10 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ### Changed
 - PyO3 text signatures and docstrings for `__init__`, `render_triangle_rgba`, `render_triangle_png`, and `info`.
-- Robust import in `vulkan_forge/__init__.py` (supports top-level or package-internal `_vulkan_forge`).
+- Robust import in `forge3d/__init__.py` (supports top-level or package-internal `_forge3d`).
 
 ### Fixed
-- Import symbol mismatch by standardizing the module to `#[pymodule] fn _vulkan_forge(...)`.
+- Import symbol mismatch by standardizing the module to `#[pymodule] fn _forge3d(...)`.
 - Deterministic pipeline preserved (blend=None, CLEAR_COLOR, CCW + back-cull, fixed viewport/scissor).
 
 ### Notes

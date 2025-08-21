@@ -2,7 +2,7 @@
 """Generate built-in colormap palette data for Rust inclusion."""
 
 import numpy as np
-import matplotlib.pyplot as plt
+import forge3d as plt
 from matplotlib import cm
 
 def generate_palette(colormap_name: str, filename: str):

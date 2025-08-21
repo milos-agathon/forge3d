@@ -1,6 +1,6 @@
 # Re-export specific items from the compiled extension.
 import importlib
-_ext = importlib.import_module("vulkan_forge._vulkan_forge")
+_ext = importlib.import_module("forge3d._forge3d")
 Renderer = _ext.Renderer
 Scene = _ext.Scene
 png_to_numpy = _ext.png_to_numpy
@@ -98,7 +98,7 @@ def grid_generate(nx: int, nz: int, spacing=(1.0, 1.0), origin: str = "center"):
         raise ValueError("origin must be 'center' or 'corner'")
     # Use the module reference we already have
     import importlib
-    _ext = importlib.import_module("vulkan_forge._vulkan_forge")
+    _ext = importlib.import_module("forge3d._forge3d")
     return _ext.grid_generate(nx, nz, (dx, dy), origin)
 # T42-END:grid_generate
 
@@ -108,7 +108,7 @@ try:
     from .bench import run_benchmark as _vf_run_benchmark
 except Exception as _e:  # pragma: no cover
     def _vf_run_benchmark(*_args, **_kwargs):
-        raise RuntimeError("vulkan_forge.bench unavailable: " + str(_e))
+        raise RuntimeError("forge3d.bench unavailable: " + str(_e))
 
 # Ensure curated __all__ includes 'run_benchmark' without leaking internals
 try:

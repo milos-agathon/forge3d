@@ -1,11 +1,11 @@
 # T02-BEGIN:tests
 import numpy as np
 import pytest
-import vulkan_forge as vf
+import forge3d as f3d
 
-@pytest.mark.skipif(not hasattr(vf.Renderer, "add_terrain"), reason="T0.1 not merged")
+@pytest.mark.skipif(not hasattr(f3d.Renderer, "add_terrain"), reason="T0.1 not merged")
 def test_height_stats_and_override():
-    r = vf.Renderer(32, 32)
+    r = f3d.Renderer(32, 32)
     h = np.linspace(-10.0, 50.0, 32*32, dtype=np.float32).reshape(32, 32)
     r.add_terrain(h, (1.0, 1.0), 1.0, "viridis")
     # Override OK

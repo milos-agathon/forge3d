@@ -1,9 +1,9 @@
 # T32-BEGIN:example
 import numpy as np
 from PIL import Image
-import vulkan_forge as vf
+import forge3d as f3d
 
-r = vf.Renderer(256, 256)
+r = f3d.Renderer(256, 256)
 yy, xx = np.mgrid[0:256, 0:256]
 cx, cy = 127.5, 127.5
 r2 = ((xx - cx)**2 + (yy - cy)**2) / (256.0**2)

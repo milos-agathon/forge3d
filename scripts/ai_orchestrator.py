@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Local no-API multi-agent orchestrator for vulkan-forge
+Local no-API multi-agent orchestrator for forge3d
 Adds full provenance (Run-ID, prompt/output hashes), optional repo ledger,
 pytest gate, and UNCERTAIN handling.
 
@@ -127,7 +127,7 @@ def now_iso() -> str: return time.strftime("%Y-%m-%dT%H-%M-%SZ", time.gmtime())
 
 # ---------- Agent prompts ----------
 GEMINI_PROMPT_TEMPLATE = """# ROLE
-You are a senior engineer reviewing a Rust-first, cross-platform wgpu/WebGPU renderer exposed to Python for fast, headless 3D rendering (project: vulkan-forge). Built in Rust, shipped as Python wheels. You know Claude Code, Vulkan 1.2, WebGPU, RAII, Rust, Python ≥3.8, CMake ≥3.24, VMA, and Sphinx. Your job is a *code review only* (no code edits).
+You are a senior engineer reviewing a Rust-first, cross-platform wgpu/WebGPU renderer exposed to Python for fast, headless 3D rendering (project: forge3d). Built in Rust, shipped as Python wheels. You know Claude Code, Vulkan 1.2, WebGPU, RAII, Rust, Python ≥3.8, CMake ≥3.24, VMA, and Sphinx. Your job is a *code review only* (no code edits).
 # TECH
 • Vulkan 1.2 only — no mesh/ray-trace
 • Platforms: win_amd64 · linux_x86_64 · macos_universal2
@@ -140,7 +140,7 @@ You are a senior engineer reviewing a Rust-first, cross-platform wgpu/WebGPU ren
 # VALIDATION
 • Validation layers ON in Debug; any VUID = test fail
 • Zero leaks (VMA stats & ASan)
-• `python -c "import vulkan_forge"` must do nothing except import.
+• `python -c "import forge3d"` must do nothing except import.
 # UNCERTAIN RULE
 If any claim can’t be traced to spec or repo content here, respond **UNCERTAIN** and request the specific source.
 # TASK
@@ -171,7 +171,7 @@ STRICT JSON only.
 """
 
 CHATGPT_PROMPT_TEMPLATE = """# ROLE
-You are a senior engineer performing a second-pass review for vulkan-forge. Tighten, dedupe, and complete Reviewer #1; JSON only.
+You are a senior engineer performing a second-pass review for forge3d. Tighten, dedupe, and complete Reviewer #1; JSON only.
 # TECH/STYLE/VALIDATION/UNCERTAIN
 Same as Reviewer #1. Mark **UNCERTAIN** with exact file/line needed.
 # TASK
@@ -205,12 +205,12 @@ STRICT JSON only.
 """
 
 CLAUDE_PROMPT_TEMPLATE = """# ROLE
-You implement the second-pass review for vulkan-forge. Produce a single unified diff; no prose.
+You implement the second-pass review for forge3d. Produce a single unified diff; no prose.
 # CONSTRAINTS
 Vulkan 1.2; win_amd64/linux_x86_64/macos_universal2; ≤512MiB host-visible; CMake→pybind11→VMA; Rust; WebGPU; PEP8/Black; clang-format; Doxygen/NumPy-style; CHECK_VK_RESULT; validation layers ON; no FFI panics; consistent error taxonomy→PyErr.
 If unverifiable, add inline `// TODO(UNCERTAIN: …)` minimal changes.
 # ACCEPTANCE (must meet)
-python/: py.allow_threads; strict boundary checks with clear “expected vs got”; Bound<'py,..> returns; PNG helpers; version coherence; abi3+manylinux2014; tests & markers; `import vulkan_forge` is side-effect-free.
+python/: py.allow_threads; strict boundary checks with clear “expected vs got”; Bound<'py,..> returns; PNG helpers; version coherence; abi3+manylinux2014; tests & markers; `import forge3d` is side-effect-free.
 src/: single OnceCell context; 256B alignment uploads+readbacks (helpers provided); non-filtering R32F; RenderError + to_py_err(); labels; GL↔WGPU remap; robust WGSL normals.
 # INPUTS
 A) PR diff:

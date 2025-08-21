@@ -1017,7 +1017,7 @@ fn grid_generate(py: Python<'_>, nx: u32, nz: u32, spacing: (f32, f32), origin: 
 
 #[allow(deprecated)]
 #[pymodule]
-fn _vulkan_forge(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn _forge3d(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<Renderer>()?;
     #[cfg(feature = "terrain_spike")]
     { m.add_class::<terrain::TerrainSpike>()?; }
@@ -1031,7 +1031,7 @@ fn _vulkan_forge(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(camera::camera_look_at, m)?)?;
     m.add_function(wrap_pyfunction!(camera::camera_perspective, m)?)?;
     m.add_function(wrap_pyfunction!(camera::camera_view_proj, m)?)?;
-    // Export package version for Python: vulkan_forge._vulkan_forge.__version__
+    // Export package version for Python: forge3d._forge3d.__version__
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

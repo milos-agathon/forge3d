@@ -1,8 +1,8 @@
 from pathlib import Path
-import vulkan_forge as vf
+import forge3d as f3d
 
 def main():
-    r = vf.Renderer(256,256)
+    r = f3d.Renderer(256,256)
     r.render_triangle_png(Path("ex_triangle.png"))
     print("triangle.png written")
 

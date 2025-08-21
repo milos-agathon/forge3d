@@ -31,7 +31,7 @@
       "Bash(pytest:*)",
       "Bash(git --no-pager diff --unified=3 -- src/lib.rs)",
       "Bash(git --no-pager diff --unified=3 -- src/terrain/mesh.rs)",
-      "Bash(git --no-pager diff --unified=3 -- python/vulkan_forge/__init__.py)",
+      "Bash(git --no-pager diff --unified=3 -- python/forge3d/__init__.py)",
       "Bash(git --no-pager diff --unified=3 HEAD~1..HEAD -- src/terrain/mod.rs)",
       "Bash(echo:*)",
       "Bash(cat:*)",
@@ -68,8 +68,10 @@
       "Bash(touch:*)",
       "Bash(vf-bench:*)",
       "Bash(test:*)",
-      "Bash(git --no-pager diff --unified=3 -- \"python/vulkan_forge/__init__.py\")",
-      "Bash(git --no-pager diff --unified=3 -- \"python/vulkan_forge/__init__.pyi\")"
+      "Bash(git --no-pager diff --unified=3 -- \"python/forge3d/__init__.py\")",
+      "Bash(git --no-pager diff --unified=3 -- \"python/forge3d/__init__.pyi\")",
+      "Bash(git checkout:*)",
+      "Bash(pip install:*)"
     ],
     "deny": [],
     "additionalDirectories": [

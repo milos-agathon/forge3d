@@ -1,325 +1,197 @@
-<task id="T53-readme-examples-expanded" owner="assistant">
-  <summary>
-    Expand the README so it documents <b>everything covered in the ROADMAP so far</b> (not just the last task), while keeping the version bump to <b>0.1.0</b> intact. Add missing examples where useful, and lightweight tests that smoke-run the new examples (GPU-aware skipping). No API changes—docs and examples only.
-  </summary>
+You are Claude Code acting in **Safe Refactor Mode**.
 
-\<ground\_rules> <rule>Do not change public APIs or behavior beyond docs, examples, and version text.</rule> <rule>Preserve curated exports, typing stubs, <code>py.typed</code>, and the CLI <code>vf-bench</code>.</rule> <rule>Keep <code>**version**</code> sourced from <code>env!("CARGO\_PKG\_VERSION")</code> and reporting <code>0.1.0</code>.</rule> <rule>GPU-dependent examples/tests must skip gracefully if no compatible adapter is found.</rule> <rule>Follow the existing README tone and formatting; extend, don’t rewrite.</rule>
-\</ground\_rules>
+OBJECTIVE
+Rename the package across the entire repo:
+- Textual/package name: **vulkan-forge → forge3d**
+- Python module/crate name where applicable: **vulkan_forge → forge3d**
+- Python import alias (only when aliasing the package): **vf → f3d**
 
-\<acceptance\_criteria> <item><code>README.md</code> now has a “Features by ROADMAP” section mapping tasks → capabilities (T2.x infra exports; T3.x grid/scene prep; T4.2 packaging & GPU context + PathLike + version + typing; T5.1 synthetic DEM tests; T5.2 timing harness), with links to each relevant usage section.</item> <item><code>README.md</code> includes or expands: Installation; Platform requirements; PNG↔NumPy (shapes/dtypes/contiguity + PathLike); Curated Python API surface; Renderer triangle; Scene terrain (height upload, camera, PNG vs NumPy parity); Terrain utilities (stats, set\_height\_range, normalize\_terrain, upload/debug readback); Colormaps (supported + validation); Mesh/grid (<code>grid\_generate</code>); Camera helpers (<code>camera\_look\_at/perspective/view\_proj</code>); Diagnostics; Timing harness (API + CLI); Synthetic DEMs (T5.1) with “how to run tests”; Dev workflow (build/test/lint); Troubleshooting (wgpu backends/env vars); Versioning & changelog.</item> <item>New examples created where missing (grid, normalization/height-range). All examples runnable; GPU ones guarded.</item> <item>New/updated tests smoke-run the new examples with GPU-aware skipping. No perf assertions.</item> <item>CHANGELOG 0.1.0 entry mentions the expanded README and added examples; dates filled in.</item> <item>Build succeeds; all tests pass/skip appropriately.</item>
-\</acceptance\_criteria>
+SCOPE & CONSTRAINTS
+- Update code, build files, docs, CI, examples, and packaging metadata.
+- Be **scope-aware** for Python: only rename `vf` to `f3d` when `vf` is the alias bound to (or derived from) the package import; do not touch unrelated `vf` variables.
+- Avoid changing third-party references or binary files. Exclude: `.git/`, `dist/`, `build/`, `.venv/`, `venv/`, `node_modules/`, `__pycache__/`, `*.png`, `*.jpg`, `*.pdf`, `*.whl`, `*.zip`, `*.tar.gz`.
+- Preserve formatting and comments.
 
-  <changes>
-    <file path="README.md" change="edit-or-create">
-      <content><![CDATA[
-# vulkan_forge
+PLAN
+1) Create a working branch and inventory all occurrences.
+2) Perform structured renames in metadata/build files.
+3) Rename Python import module and alias via an **AST-based** transformer (libcst).
+4) Rename Rust/PyO3 or pybind11 module names and build targets.
+5) Update docs/README/examples and CI.
+6) Run tests/linters, then commit with a clear message and summary.
 
-Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
+DETAILS
 
-## Installation
+A) INVENTORY (dry run)
+- Run ripgrep to list occurrences (case-sensitive and insensitive) and show counts:
+
+```
+
+rg -n --stats --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node\_modules' -g '!**pycache**' -g '!*.png' -g '!*.jpg' -g '!*.pdf' -g '!*.whl' -g '!*.zip' -g '!*.tar.gz'&#x20;
+-e '\bvulkan\[-\_ ]forge\b' -e '\bVulkan\[-\_ ]Forge\b' -e '\bVULKAN\[\_ ]FORGE\b' -e '\bvulkan\_forge\b' -e '\bforge3d\b' -e '\bimport +vulkan\_forge\b' -e '\bfrom +vulkan\_forge\b' -e '\bas +vf\b'
+
+````
+
+B) GIT SAFETY
+- `git checkout -b chore/rename-forge3d`
+- After changes, commit logically: metadata, code, docs.
+
+C) METADATA / BUILD FILES (textual, not AST)
+Update where present:
+- `pyproject.toml`, `setup.cfg`, `setup.py`:
+- project name → `forge3d`
+- module/package import name → `forge3d`
+- console scripts, entry points, package data, classifiers referencing old name
+- `Cargo.toml` (if PyO3/Rust exists):
+- `[package] name = "forge3d"` (was `vulkan-forge`)
+- `[lib] name = "forge3d"` (was `vulkan_forge`)
+- `CMakeLists.txt`, `Find*.cmake`, target names:
+- `vulkan-forge` targets/vars → `forge3d`
+- Docs/CI:
+- README, docs, examples, badges, install snippets (`pip install forge3d`)
+- GitHub Actions / CI scripts referencing old wheel/package name
+
+D) PYTHON CODE REWRITE (AST, scope aware)
+- For every `*.py`, perform:
+1. Rename **module** references from `vulkan_forge` → `forge3d` in import statements.
+2. If the import **aliases** the package as `vf`, rename the alias to `f3d` and **rename all bound references** to that alias in the module scope only.
+3. Do **not** rename `vf` if:
+   - It is not importing `vulkan_forge` / `forge3d`
+   - It’s defined later as a variable/function/arg
+- Handle patterns:
+- `import vulkan_forge as vf` → `import forge3d as f3d`
+- `from vulkan_forge import api as vf` → `from forge3d import api as f3d`
+- `import vulkan_forge` → `import forge3d`
+- `from vulkan_forge import X, Y` → `from forge3d import X, Y`
+- Then rename **uses** of `vf.*` / `vf(...)` / `vf` identifier to `f3d` where `vf` is the alias bound to that import.
+
+Create and run this libcst script from repo root:
 
 ```bash
-# from source
-pip install -U maturin
-maturin develop --release
-# or via wheel (if provided)
-# pip install vulkan_forge
-```
+python - <<'PY'
+import sys, pathlib, json
+from typing import Optional, Set
+import libcst as cst
+import libcst.matchers as m
+
+ROOT = pathlib.Path(".")
+PY_FILES = [p for p in ROOT.rglob("*.py") if all(part not in p.parts for part in (".git","dist","build",".venv","venv","node_modules","__pycache__"))]
+
+OLD_MOD = "vulkan_forge"
+NEW_MOD = "forge3d"
+OLD_ALIAS = "vf"
+NEW_ALIAS = "f3d"
+
+class ImportAliasTransformer(cst.CSTTransformer):
+  def __init__(self):
+      # Track whether this module binds OLD_ALIAS from OLD_MOD/NEW_MOD
+      self.binds_old_alias = False
+      self.bound_name: Optional[str] = None
+
+  def leave_Import(self, original_node: cst.Import, updated_node: cst.Import) -> cst.Import:
+      names = []
+      for name in updated_node.names:
+          if m.matches(name, m.ImportAlias(name=m.Attribute() | m.Name(OLD_MOD))):
+              # import vulkan_forge [as ...]
+              base = name
+              new_name = cst.ImportAlias(name=cst.Name(NEW_MOD), asname=base.asname)
+              if base.asname and base.asname.name.value == OLD_ALIAS:
+                  new_name = new_name.with_changes(asname=cst.AsName(cst.Name(NEW_ALIAS)))
+                  self.binds_old_alias = True
+                  self.bound_name = OLD_ALIAS
+              names.append(new_name)
+          else:
+              names.append(name)
+      return updated_node.with_changes(names=names)
+
+  def leave_ImportFrom(self, original_node: cst.ImportFrom, updated_node: cst.ImportFrom) -> cst.ImportFrom:
+      # from vulkan_forge[.sub] import ...
+      if original_node.module and m.matches(original_node.module, m.Name(OLD_MOD)):
+          mod = cst.Name(NEW_MOD)
+      elif original_node.module and m.matches(original_node.module, m.Attribute(
+          value=m.Name(OLD_MOD)
+      )):
+          # from vulkan_forge.something import ...
+          # Convert only the root
+          attr = original_node.module
+          while isinstance(attr, cst.Attribute) and isinstance(attr.value, cst.Attribute):
+              attr = attr.value
+          if isinstance(original_node.module, cst.Attribute) and isinstance(original_node.module.value, cst.Name) and original_node.module.value.value == OLD_MOD:
+              mod = cst.Attribute(value=cst.Name(NEW_MOD), attr=original_node.module.attr)
+          else:
+              mod = updated_node.module
+      else:
+          mod = updated_node.module
+
+      # detect "as vf" on the imported names; if present, rename alias to f3d
+      names = updated_node.names
+      if isinstance(names, list):
+          new_names = []
+          for n in names:
+              if isinstance(n, cst.ImportAlias) and n.asname and n.asname.name.value == OLD_ALIAS:
+                  new_names.append(n.with_changes(asname=cst.AsName(cst.Name(NEW_ALIAS))))
+                  self.binds_old_alias = True
+                  self.bound_name = OLD_ALIAS
+              else:
+                  new_names.append(n)
+          names = new_names
+
+      return updated_node.with_changes(module=mod, names=names)
+
+  def leave_Name(self, original_node: cst.Name, updated_node: cst.Name) -> cst.CSTNode:
+      # If alias was bound in this module, rewrite references
+      if self.binds_old_alias and original_node.value == OLD_ALIAS:
+          return updated_node.with_changes(value=NEW_ALIAS)
+      return updated_node
+
+changed = 0
+for path in PY_FILES:
+  src = path.read_text(encoding="utf-8")
+  try:
+      mod = cst.parse_module(src)
+  except Exception:
+      continue
+  xform = ImportAliasTransformer()
+  new = mod.visit(xform)
+  if new.code != src:
+      path.write_text(new.code, encoding="utf-8")
+      changed += 1
+
+print(json.dumps({"python_files_rewritten": changed}, indent=2))
+PY
+````
+
+E) C/C++/Rust BINDING POINTS
+
+* **PyO3**: rename `#[pymodule] fn vulkan_forge(...)` → `#[pymodule] fn forge3d(...)`
+* **pybind11**: rename `PYBIND11_MODULE(vulkan_forge, m)` → `PYBIND11_MODULE(forge3d, m)`
+* Ensure the produced extension module filename matches `forge3d` (update build config accordingly).
+
+F) DOCS / EXAMPLES
+
+* Update README/docs snippets: `import forge3d as f3d`; update any `vf.` usage to `f3d.` where tied to the import alias.
 
-## Platform requirements
+G) CI / PACKAGING
 
-Runs anywhere wgpu supports: Vulkan / Metal / DX12 / GL (and Browser WebGPU for diagnostics). A discrete or integrated GPU is recommended. Examples/tests that need a GPU will skip if no compatible adapter is found.
+* Update wheel build metadata (project name, tags), sdist settings, manylinux/macos/windows jobs, and upload targets.
+* If publishing, update `project.urls`, badges, and package index references.
 
-## Features by ROADMAP (what’s implemented so far)
+H) ACCEPTANCE CRITERIA (run these checks)
 
-* **T2.x Infrastructure & exports**
+1. `rg -n '\bvulkan[-_ ]forge\b|\bvulkan_forge\b'` → **no matches** (excluding changelogs).
+2. `rg -n '\bimport +vulkan_forge\b|\bfrom +vulkan_forge\b'` → **no matches**.
+3. `rg -n '\bas +vf\b'` where tied to package imports → **no matches**.
+4. In a fresh venv: `python -c "import forge3d as f3d; print(hasattr(f3d,'__doc__'))"` returns `True`.
+5. All tests/linters pass: `pytest -q` (if present), `ruff --quiet .` or `flake8`, and any `mypy` config.
+6. Build succeeds: sdist + wheel produce `forge3d` extension/module.
 
-  * Curated Python surface with stable wrappers and `__version__` re-export.
-* **T3.x Geometry & scene prep**
+I) COMMIT
 
-  * Grid generation primitives used by terrain rendering.
-* **T4.2 Packaging & Core Unification**
+* Commit in logical steps with messages like:
 
-  * Shared GPU context (`gpu.rs`) and alignment helper (`align_copy_bpr()`).
-  * Uniform PathLike support for PNG I/O and render-to-PNG.
-  * Docstrings clarifying PNG↔NumPy parity & contiguity.
-  * Typing stubs + `py.typed`.
-* **T5.1 Synthetic DEM tests**
+  * `chore(rename): package vulkan-forge → forge3d (metadata/build/docs)`
+  * `refactor(python): alias vf → f3d via AST; rename module vulkan_forge → forge3d`
+  * `ci(packaging): update wheels and publishing targets to forge3d`
+* At the end, post a brief summary of files changed and counts of rewritten Python files from the script output.
 
-  * Deterministic height fields for validation; GPU-aware test strategy.
-* **T5.2 Timing harness**
-
-  * API: `run_benchmark(...)`
-  * CLI: `vf-bench` for reproducible measurements (no perf pass/fail).
-
-Each item below links back to these features.
-
-## Quickstart: PNG ↔ NumPy
-
-```python
-from pathlib import Path
-import numpy as np
-import vulkan_forge as vf
-
-# RGB -> PNG (PathLike supported)
-rgb = (np.linspace(0,255,64, dtype=np.uint8)[None, :, None] * np.ones((64,1,3), np.uint8)).copy(order="C")
-vf.numpy_to_png(Path("out_rgb.png"), rgb)
-
-# PNG -> RGBA ndarray (H, W, 4) uint8, C-contiguous
-arr = vf.png_to_numpy("out_rgb.png")
-assert arr.shape == (64, 64, 4)
-```
-
-**Notes**
-
-* Accepts `(H,W,4)` RGBA, `(H,W,3)` RGB, or `(H,W)` grayscale, dtype=uint8, **C-contiguous**.
-* PathLike is supported anywhere a path is accepted.
-
-## Curated Python API (top-level)
-
-* I/O: `png_to_numpy(path)`, `numpy_to_png(path, array)`
-* Rendering: `Renderer(width, height)` → `render_triangle_png(path)`, `render_triangle_rgba()`
-* Scene: `Scene(width, height, grid=..., colormap='viridis')`:
-
-  * `set_height_from_r32f(height_float32_HxW)`
-  * `set_camera_look_at(eye, target, up, fovy_deg, znear, zfar)`
-  * `render_png(path)`, `render_rgba()`
-* Terrain utils: `terrain_stats()`, `set_height_range(min, max)`, `normalize_terrain(mode, range=None, eps=1e-8)`,
-  `upload_height_r32f()`, `debug_read_height_patch(x,y,w,h)`, `read_full_height_texture()`
-* Colormaps: `colormap_supported()`
-* Mesh: `grid_generate(nx, nz, spacing=(sx,sz), origin='center')`
-* Camera helpers: `camera_look_at(...)`, `camera_perspective(...)`, `camera_view_proj(...)`
-* Diagnostics: `enumerate_adapters()`, `device_probe(backend=None)`
-* Timing: `run_benchmark(operation, width, height, iters, ...)` and CLI `vf-bench`
-* Introspection: `__version__` (sourced from the Rust crate)
-
-## Renderer: triangle demo
-
-```python
-from pathlib import Path
-import vulkan_forge as vf
-
-r = vf.Renderer(256, 256)
-r.render_triangle_png(Path("triangle.png"))     # file
-tri = r.render_triangle_rgba()                  # np.ndarray (H,W,4) uint8
-```
-
-## Scene: terrain workflow (PNG/NumPy parity)
-
-```python
-import numpy as np
-from pathlib import Path
-import vulkan_forge as vf
-
-H, W = 64, 64
-# simple synthetic slope for demo
-h32 = (np.linspace(0,1,W, dtype=np.float32)[None,:] * np.ones((H,1), np.float32)).copy(order="C")
-
-s = vf.Scene(256, 256, grid=128, colormap="viridis")
-s.set_height_from_r32f(h32)
-s.set_camera_look_at((3,2,3), (0,0,0), (0,1,0), fovy_deg=45, znear=0.1, zfar=100.0)
-s.render_png(Path("terrain.png"))
-rgba = s.render_rgba()  # byte-for-byte pixel parity with the PNG write
-```
-
-## Terrain utilities
-
-```python
-mn, mx, mean, std = s.terrain_stats()
-s.set_height_range(mn, mx)                # override normalization
-s.normalize_terrain("minmax", (0.0, 1.0)) # or zscore
-s.upload_height_r32f()                    # send to GPU
-patch = s.debug_read_height_patch(0, 0, 16, 16)
-full = s.read_full_height_texture()
-```
-
-## Colormaps
-
-```python
-from vulkan_forge import colormap_supported
-print(colormap_supported())  # list of valid names
-```
-
-## Mesh & grid
-
-```python
-xy, uv, indices = vf.grid_generate(64, 64, spacing=(1.0, 1.0), origin="center")
-```
-
-## Camera helpers
-
-```python
-vp = vf.camera_view_proj(
-    eye=(3,2,3), target=(0,0,0), up=(0,1,0), fovy_deg=45.0, aspect=1.0, znear=0.1, zfar=100.0
-)
-```
-
-## Diagnostics
-
-```python
-import vulkan_forge as vf
-print(vf.enumerate_adapters())
-print(vf.device_probe())  # {'status': 'ok', ...} or diagnostic info
-```
-
-## Timing harness (T5.2)
-
-Python:
-
-```python
-from vulkan_forge import run_benchmark
-res = run_benchmark(operation="renderer_rgba", width=512, height=512, iters=50)
-print(res["stats"], res["throughput"])
-```
-
-CLI:
-
-```bash
-vf-bench --op renderer_rgba --w 512 --h 512 --iters 50 --json bench.json
-```
-
-## Synthetic DEMs & tests (T5.1)
-
-* The test suite includes **deterministic synthetic height fields** (planes, ramps, sinusoidal) to validate terrain processing and image parity.
-* Tests are **GPU-aware** and will skip if no compatible adapter is present.
-* Run all tests:
-
-  ```bash
-  pytest -q
-  ```
-
-## Development
-
-```bash
-# build
-maturin develop --release
-
-# run tests
-pytest -q
-```
-
-## Troubleshooting
-
-* Ensure a supported backend is available (Vulkan/Metal/DX12/GL).
-* You can constrain backends via environment variables (e.g., `WGPU_BACKENDS=VULKAN`) if needed.
-* Arrays for PNG write and terrain upload must be **C-contiguous**.
-
-## Versioning
-
-`vulkan_forge.__version__` mirrors the Rust crate version (`env!("CARGO_PKG_VERSION")`), now **0.1.0**.
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md).
-]]></content> </file>
-
-```
-<file path="examples/grid_generate_demo.py" change="create">
-  <content><![CDATA[
-```
-
-import vulkan\_forge as vf
-
-def main():
-xy, uv, idx = vf.grid\_generate(32, 32, spacing=(1.0, 1.0), origin="center")
-print("grid:", xy.shape, uv.shape, idx.shape)
-
-if **name** == "**main**":
-main()
-]]></content> </file>
-
-```
-<file path="examples/terrain_normalize_demo.py" change="create">
-  <content><![CDATA[
-```
-
-import numpy as np
-import vulkan\_forge as vf
-
-def main():
-H, W = 32, 32
-h32 = (np.linspace(0,1,W, dtype=np.float32)\[None,:] \* np.ones((H,1), np.float32)).copy(order="C")
-s = vf.Scene(128, 128, grid=64, colormap="viridis")
-s.set\_height\_from\_r32f(h32)
-s.normalize\_terrain("zscore")
-mn, mx, \*\_ = s.terrain\_stats()
-s.set\_height\_range(mn, mx)
-print("stats:", mn, mx)
-
-if **name** == "**main**":
-main()
-]]></content> </file>
-
-```
-<file path="tests/test_readme_examples.py" change="edit-or-create">
-  <content><![CDATA[
-```
-
-import sys, subprocess, pytest
-
-def \_has\_gpu():
-try:
-import vulkan\_forge as vf
-info = vf.device\_probe()
-return isinstance(info, dict) and info.get("status") in ("ok","error","unsupported")
-except Exception:
-return False
-
-@pytest.mark.skipif(not \_has\_gpu(), reason="No compatible GPU / wgpu backend available")
-@pytest.mark.parametrize("script", \[
-"examples/triangle\_png.py",
-"examples/scene\_terrain\_demo.py",
-"examples/terrain\_normalize\_demo.py",
-])
-def test\_gpu\_examples\_run(script):
-subprocess.check\_call(\[sys.executable, script])
-
-def test\_cpu\_examples\_run():
-subprocess.check\_call(\[sys.executable, "examples/png\_numpy\_roundtrip.py"])
-
-def test\_diagnostics\_runs():
-subprocess.check\_call(\[sys.executable, "examples/diagnostics.py"])
-
-def test\_grid\_generate\_runs():
-subprocess.check\_call(\[sys.executable, "examples/grid\_generate\_demo.py"])
-
-def test\_bench\_runs():
-subprocess.check\_call(\[sys.executable, "examples/run\_bench.py"])
-]]></content> </file>
-
-```
-<file path="CHANGELOG.md" change="edit-or-create">
-  <content><![CDATA[
-```
-
-# Changelog
-
-All notable changes to this project will be documented in this file.
-
-## \[0.1.0] - YYYY-MM-DD
-
-### Added
-
-* Expanded README to cover all implemented ROADMAP items (T2.x, T3.x, T4.2, T5.1, T5.2).
-* New examples: grid generation and terrain normalization/height-range.
-* Documented timing harness API & CLI with usage guidance.
-
-### Changed
-
-* Version bumped to `0.1.0` (Cargo & Python). `__version__` now reports `0.1.0`.
-
-### Fixed
-
-* Clarified PathLike support and C-contiguity requirements.
-  ]]></content> </file> </changes>
-
-  \<post\_changes\_checks> <check>Build: <code>maturin develop --release</code> completes without errors.</check> <check>Tests: <code>pytest -q</code> passes; GPU tests skip cleanly if needed.</check> <check>Manual: run each example once to ensure outputs/messages are correct.</check> <check>README anchors and code blocks correspond to actual example files.</check>
-  \</post\_changes\_checks>
-
-  <deliverables>
-    <item>Expanded README with full ROADMAP coverage and links.</item>
-    <item>Two new examples (+ tests) for grid generation and terrain normalization.</item>
-    <item>Updated CHANGELOG 0.1.0 entry reflecting the docs expansion.</item>
-  </deliverables>
-
-</task>
+BEGIN.

@@ -7,11 +7,11 @@ import sys
 import os
 
 # Always import Renderer (always available)
-from vulkan_forge import Renderer
+from forge3d import Renderer
 
 # Conditionally import TerrainSpike (feature-dependent)
 try:
-    from vulkan_forge import TerrainSpike
+    from forge3d import TerrainSpike
     TERRAIN_SPIKE_AVAILABLE = True
 except ImportError:
     TERRAIN_SPIKE_AVAILABLE = False
@@ -97,7 +97,7 @@ def test_terrain_spike_not_available():
     """Test graceful handling when terrain_spike feature is not enabled."""
     # When terrain_spike is not available, the TerrainSpike class should not be importable
     with pytest.raises((ImportError, AttributeError)):
-        from vulkan_forge import TerrainSpike
+        from forge3d import TerrainSpike
 
 
 def test_main_renderer_colormap_integration():
@@ -128,13 +128,13 @@ def test_main_renderer_colormap_integration():
 
 def test_colormap_supported_exposes_names():
     """Test that colormap_supported returns expected list of colormap names."""
-    from vulkan_forge import colormap_supported
+    from forge3d import colormap_supported
     assert colormap_supported() == ["viridis","magma","terrain"]
 
 
 def test_colormap_supported_unconditional():
-    import vulkan_forge as vf
-    assert vf.colormap_supported() == ["viridis","magma","terrain"]
+    import forge3d as f3d
+    assert f3d.colormap_supported() == ["viridis","magma","terrain"]
 
 
 @pytest.mark.skipif(not TERRAIN_SPIKE_AVAILABLE, reason="terrain_spike feature not enabled")

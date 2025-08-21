@@ -2,8 +2,8 @@ import sys, subprocess, pytest
 
 def _has_gpu():
     try:
-        import vulkan_forge as vf
-        info = vf.device_probe()
+        import forge3d as f3d
+        info = f3d.device_probe()
         return isinstance(info, dict) and info.get("status") in ("ok","error","unsupported")
     except Exception:
         return False

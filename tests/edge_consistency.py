@@ -1,5 +1,5 @@
 import numpy as np
-from vulkan_forge import Renderer
+from forge3d import Renderer
 
 def count_covered(px: np.ndarray) -> int:
     # px: HxWx4 uint8; clear is white per A1.2

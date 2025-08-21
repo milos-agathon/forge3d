@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
-import vulkan_forge as vf
+import forge3d as f3d
 
 
 def _percentiles(ms: List[float]) -> Tuple[float, float, float]:
@@ -23,7 +23,7 @@ def _percentiles(ms: List[float]) -> Tuple[float, float, float]:
 
 
 def _env_info() -> Dict[str, str]:
-    info = vf.device_probe()
+    info = f3d.device_probe()
     if not isinstance(info, dict):
         return {"status": "unknown"}
     out = {k: info.get(k) for k in ("status", "adapter_name", "backend", "device_type")}
@@ -46,14 +46,14 @@ def _bench_loop(fn, *, iterations: int, warmup: int) -> List[float]:
 
 
 def _op_renderer_rgba(width: int, height: int):
-    r = vf.Renderer(width, height)
+    r = f3d.Renderer(width, height)
     def step():
         _ = r.render_triangle_rgba()
     return step
 
 
 def _op_renderer_png(width: int, height: int):
-    r = vf.Renderer(width, height)
+    r = f3d.Renderer(width, height)
     tmpdir = Path(tempfile.mkdtemp(prefix="vf_bench_"))
     def step():
         p = tmpdir / f"frame_{time.time_ns()}.png"
@@ -66,7 +66,7 @@ def _op_renderer_png(width: int, height: int):
 
 
 def _op_scene_rgba(width: int, height: int, *, grid: int = 16, colormap: str = "viridis"):
-    sc = vf.Scene(width, height, grid=grid, colormap=colormap)
+    sc = f3d.Scene(width, height, grid=grid, colormap=colormap)
     def step():
         _ = sc.render_rgba()
     return step
@@ -79,7 +79,7 @@ def _op_numpy_to_png(width: int, height: int, *, seed: int = 0):
     tmpdir = Path(tempfile.mkdtemp(prefix="vf_bench_png_"))
     def step():
         p = tmpdir / f"img_{time.time_ns()}.png"
-        vf.numpy_to_png(str(p), arr)
+        f3d.numpy_to_png(str(p), arr)
         try:
             p.unlink(missing_ok=True)
         except Exception:
@@ -93,10 +93,10 @@ def _op_png_to_numpy(width: int, height: int, *, seed: int = 0):
     arr = (rng.random((height, width, 4)) * 255).astype(np.uint8)
     tmpdir = Path(tempfile.mkdtemp(prefix="vf_bench_pngin_"))
     src = tmpdir / "src.png"
-    vf.numpy_to_png(str(src), arr)
+    f3d.numpy_to_png(str(src), arr)
 
     def step():
-        _ = vf.png_to_numpy(str(src))
+        _ = f3d.png_to_numpy(str(src))
     return step
 
 
@@ -204,7 +204,7 @@ def _print_table(result: Dict):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description="vulkan_forge timing harness")
+    p = argparse.ArgumentParser(description="forge3d timing harness")
     p.add_argument("--op", required=True,
                    choices=["renderer_rgba", "renderer_png", "scene_rgba", "numpy_to_png", "png_to_numpy"])
     p.add_argument("--width", type=int, required=True)

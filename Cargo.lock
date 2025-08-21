@@ -283,6 +283,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
+name = "forge3d"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam",
+ "image",
+ "ndarray",
+ "numpy",
+ "once_cell",
+ "pollster",
+ "pyo3",
+ "thiserror",
+ "wgpu",
+]
+
+[[package]]
 name = "gl_generator"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1012,22 +1028,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vulkan_forge"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "glam",
- "image",
- "ndarray",
- "numpy",
- "once_cell",
- "pollster",
- "pyo3",
- "thiserror",
- "wgpu",
-]
 
 [[package]]
 name = "wasm-bindgen"

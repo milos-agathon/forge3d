@@ -165,7 +165,7 @@ def main():
     # 2) Reviewer #1 via Gemini (optional)
     reviewer1_json = "{}"
     if AI_GET_REVIEW1:
-        prompt = ("You are Reviewer #1 for vulkan-forge. Return STRICT JSON with "
+        prompt = ("You are Reviewer #1 for forge3d. Return STRICT JSON with "
                   '{"general_feedback":"…","line_comments":[{"path":"…","comment":"…"}],'
                   '"risk_checklist":{"gil_release":true,"numpy_boundary":true,"abi3_packaging":true,'
                   '"padded_alignment_256":true,"single_gpu_context":true,"error_taxonomy":true,"docs_sync":true},'

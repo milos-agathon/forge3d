@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 try:
-    from vulkan_forge import TerrainSpike  # available only with --features terrain_spike
+    from forge3d import TerrainSpike  # available only with --features terrain_spike
 except Exception as e:
     raise SystemExit("TerrainSpike not available. Rebuild with --features terrain_spike") from e
 

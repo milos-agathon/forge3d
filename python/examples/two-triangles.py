@@ -1,5 +1,5 @@
 import hashlib
-from vulkan_forge import Renderer
+from forge3d import Renderer
 
 def render_bytes():
     r = Renderer(256,256)

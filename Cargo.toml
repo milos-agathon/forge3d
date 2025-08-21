@@ -1,10 +1,10 @@
 [package]
-name = "vulkan_forge"
+name = "forge3d"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "vulkan_forge"
+name = "forge3d"
 crate-type = ["cdylib", "rlib"]
 
 # A2-BEGIN:cargo-features

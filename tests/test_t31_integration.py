@@ -3,16 +3,16 @@ import numpy as np
 import pytest
 
 try:
-    import vulkan_forge._vulkan_forge as vf
+    import forge3d as f3d
 except ImportError:
     try:
-        import _vulkan_forge as vf
+        import _forge3d as f3d
     except ImportError:
-        pytest.skip("vulkan_forge module not available", allow_module_level=True)
+        pytest.skip("forge3d module not available", allow_module_level=True)
 
 def test_t31_uniform_lanes_layout():
     # Small offscreen to exercise pipeline creation
-    spike = vf.TerrainSpike(256, 192, grid=64, colormap="viridis")
+    spike = f3d.TerrainSpike(256, 192, grid=64, colormap="viridis")
     # The constructor seeds uniforms; fetch raw 44-float view/proj + vec4 lanes
     u = spike.debug_uniforms_f32()
     assert isinstance(u, np.ndarray) and u.dtype == np.float32 and u.shape == (44,)
@@ -28,7 +28,7 @@ def test_t31_uniform_lanes_layout():
     assert abs(zero)        < 1e-6
 
 def test_t31_render_png_smoke(tmp_path):
-    spike = vf.TerrainSpike(320, 240, grid=64, colormap="viridis")
+    spike = f3d.TerrainSpike(320, 240, grid=64, colormap="viridis")
     out = tmp_path / "terrain_smoke.png"
     spike.render_png(str(out))
     # File should exist and be non-trivial in size

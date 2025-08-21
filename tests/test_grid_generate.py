@@ -3,7 +3,7 @@ Tests for grid_generate function.
 """
 import pytest
 import numpy as np
-from vulkan_forge import grid_generate
+from forge3d import grid_generate
 
 
 def test_grid_generate_basic():

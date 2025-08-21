@@ -1,7 +1,7 @@
 # A1.6-BEGIN:determinism-harness
 #!/usr/bin/env python3
 """
-Determinism harness for vulkan-forge.
+Determinism harness for forge3d.
 
 - Renders the triangle N times and asserts identical raw RGBA bytes each run.
 - Optionally runs in multiple processes to shake out shared-state issues.
@@ -12,9 +12,9 @@ import argparse, hashlib, json, os, sys, time
 from dataclasses import dataclass, asdict
 
 try:
-    from vulkan_forge import Renderer
+    from forge3d import Renderer
 except Exception as e:
-    raise SystemExit(f"Failed to import vulkan_forge.Renderer: {e}")
+    raise SystemExit(f"Failed to import forge3d.Renderer: {e}")
 
 @dataclass
 class RunResult:

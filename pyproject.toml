@@ -3,7 +3,7 @@ requires = ["maturin>=1.9"]
 build-backend = "maturin"
 
 [project]
-name = "vulkan-forge"
+name = "forge3d"
 version = "0.1.0"
 description = "Rust-first wgpu/WebGPU renderer with a thin Python API"
 readme = "README.md"
@@ -13,14 +13,14 @@ authors = [{ name = "Your Name" }]
 
 # Add a console_script entry point for CLI
 [project.scripts]
-vf-bench = "vulkan_forge.bench:main"
+f3d-bench = "forge3d.bench:main"
 
 [tool.maturin]
 bindings = "pyo3"
 python-source = "python"
-module-name = "vulkan_forge._vulkan_forge"
+module-name = "forge3d._forge3d"
 features = ["terrain_spike"]
 strip = true
 
 [tool.setuptools.package-data]
-"vulkan_forge" = ["py.typed", "__init__.pyi"]
+"forge3d" = ["py.typed", "__init__.pyi"]
