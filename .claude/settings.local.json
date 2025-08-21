@@ -71,7 +71,8 @@
       "Bash(git --no-pager diff --unified=3 -- \"python/forge3d/__init__.py\")",
       "Bash(git --no-pager diff --unified=3 -- \"python/forge3d/__init__.pyi\")",
       "Bash(git checkout:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "additionalDirectories": [

@@ -1,197 +1,85 @@
-You are Claude Code acting in **Safe Refactor Mode**.
+You are Claude Code operating in **Safe Edit Mode**.
 
 OBJECTIVE
-Rename the package across the entire repo:
-- Textual/package name: **vulkan-forge → forge3d**
-- Python module/crate name where applicable: **vulkan_forge → forge3d**
-- Python import alias (only when aliasing the package): **vf → f3d**
+Reformat the repository’s README so the header displays a **2000×2000 logo asset** at the top (visually sized down for GitHub), while preserving all other README content and structure.
 
-SCOPE & CONSTRAINTS
-- Update code, build files, docs, CI, examples, and packaging metadata.
-- Be **scope-aware** for Python: only rename `vf` to `f3d` when `vf` is the alias bound to (or derived from) the package import; do not touch unrelated `vf` variables.
-- Avoid changing third-party references or binary files. Exclude: `.git/`, `dist/`, `build/`, `.venv/`, `venv/`, `node_modules/`, `__pycache__/`, `*.png`, `*.jpg`, `*.pdf`, `*.whl`, `*.zip`, `*.tar.gz`.
-- Preserve formatting and comments.
+REQUIREMENTS
+- Use a high-res raster asset: `assets/logo-2000.png` (2000×2000). If a dark-mode variant exists, use `assets/logo-2000-dark.png` too.
+- If the exact asset(s) don’t exist, create an `assets/` folder and add a **temporary placeholder** 2000×2000 PNG with “LOGO” text (clearly marked to be replaced), then wire it up. Do not fetch network resources.
+- Insert the logo at the very top of `README.md`, centered, with a link to the repo root.
+- Keep the **display size** reasonable (e.g., width 192–256 px) but keep the **source file 2000×2000** for crispness.
+- Preserve all existing badges, titles, and TOC. Do not change other content besides adding the header block and adjusting spacing if needed.
+- Prefer `<picture>` for light/dark theme switching; fall back to a single `<img>` if only one asset is available.
+- Add meaningful `alt` text and set `decoding="async"`, `loading="eager"`.
 
 PLAN
-1) Create a working branch and inventory all occurrences.
-2) Perform structured renames in metadata/build files.
-3) Rename Python import module and alias via an **AST-based** transformer (libcst).
-4) Rename Rust/PyO3 or pybind11 module names and build targets.
-5) Update docs/README/examples and CI.
-6) Run tests/linters, then commit with a clear message and summary.
+1) Create `assets/` if missing. If no 2000×2000 logo exists, add `assets/logo-2000.png` placeholder (2000×2000) and, optionally, `assets/logo-2000-dark.png`.
+2) Insert a centered header block at the very top of `README.md`:
+   - Use `<div align="center">...</div>` to center on GitHub.
+   - Use `<picture>` with `prefers-color-scheme` sources if both light/dark assets exist.
+   - Make the image clickable to the repo root (`./`).
+   - Keep a compact vertical rhythm (one blank line after the block).
+3) Leave everything else untouched, including badges and headings order. If badges exist at line 1, place the logo **above** them; don’t re-order badges.
+4) Validate relative paths.
 
-DETAILS
+HEADER SNIPPETS (choose first if both light/dark exist; otherwise use fallback)
 
-A) INVENTORY (dry run)
-- Run ripgrep to list occurrences (case-sensitive and insensitive) and show counts:
+A) Light+Dark (preferred):
+```html
+<div align="center">
+  <a href="./">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/logo-2000-dark.png">
+      <img src="assets/logo-2000.png"
+           alt="forge3d logo"
+           width="224"
+           height="224"
+           decoding="async"
+           loading="eager">
+    </picture>
+  </a>
+</div>
+````
 
+B) Single asset fallback:
+
+```html
+<div align="center">
+  <a href="./">
+    <img src="assets/logo-2000.png"
+         alt="forge3d logo"
+         width="224"
+         height="224"
+         decoding="async"
+         loading="eager">
+  </a>
+</div>
 ```
 
-rg -n --stats --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node\_modules' -g '!**pycache**' -g '!*.png' -g '!*.jpg' -g '!*.pdf' -g '!*.whl' -g '!*.zip' -g '!*.tar.gz'&#x20;
--e '\bvulkan\[-\_ ]forge\b' -e '\bVulkan\[-\_ ]Forge\b' -e '\bVULKAN\[\_ ]FORGE\b' -e '\bvulkan\_forge\b' -e '\bforge3d\b' -e '\bimport +vulkan\_forge\b' -e '\bfrom +vulkan\_forge\b' -e '\bas +vf\b'
+PLACEHOLDER (only if no logo image exists yet)
 
-````
+* Create a 2000×2000 PNG placeholder named `assets/logo-2000.png`. Include neutral background and centered “LOGO” text so it’s obvious it’s a temporary asset. Also create `assets/README.md` with a one-liner: “Replace `logo-2000.png` (and optional `logo-2000-dark.png`) with your final 2000×2000 logo(s).”
 
-B) GIT SAFETY
-- `git checkout -b chore/rename-forge3d`
-- After changes, commit logically: metadata, code, docs.
+ACCEPTANCE CRITERIA
 
-C) METADATA / BUILD FILES (textual, not AST)
-Update where present:
-- `pyproject.toml`, `setup.cfg`, `setup.py`:
-- project name → `forge3d`
-- module/package import name → `forge3d`
-- console scripts, entry points, package data, classifiers referencing old name
-- `Cargo.toml` (if PyO3/Rust exists):
-- `[package] name = "forge3d"` (was `vulkan-forge`)
-- `[lib] name = "forge3d"` (was `vulkan_forge`)
-- `CMakeLists.txt`, `Find*.cmake`, target names:
-- `vulkan-forge` targets/vars → `forge3d`
-- Docs/CI:
-- README, docs, examples, badges, install snippets (`pip install forge3d`)
-- GitHub Actions / CI scripts referencing old wheel/package name
+1. `README.md` begins with one of the header snippets above, centered, and links to `./`.
+2. The referenced file `assets/logo-2000.png` exists and is exactly **2000×2000** pixels (and `assets/logo-2000-dark.png` if used).
+3. On GitHub preview, the logo renders at the top and appears \~224 px square (or similar), without pushing content off-screen.
+4. All existing README content (badges, headings, TOC, code blocks, links) remains unchanged and in the same order, except for the new header block insertion and a single blank line after it.
+5. No external URLs were added; image paths are relative.
+6. The `alt` attribute is present and descriptive (“forge3d logo”).
+7. If both light and dark assets exist, dark mode shows the dark asset; otherwise the light asset is used universally.
 
-D) PYTHON CODE REWRITE (AST, scope aware)
-- For every `*.py`, perform:
-1. Rename **module** references from `vulkan_forge` → `forge3d` in import statements.
-2. If the import **aliases** the package as `vf`, rename the alias to `f3d` and **rename all bound references** to that alias in the module scope only.
-3. Do **not** rename `vf` if:
-   - It is not importing `vulkan_forge` / `forge3d`
-   - It’s defined later as a variable/function/arg
-- Handle patterns:
-- `import vulkan_forge as vf` → `import forge3d as f3d`
-- `from vulkan_forge import api as vf` → `from forge3d import api as f3d`
-- `import vulkan_forge` → `import forge3d`
-- `from vulkan_forge import X, Y` → `from forge3d import X, Y`
-- Then rename **uses** of `vf.*` / `vf(...)` / `vf` identifier to `f3d` where `vf` is the alias bound to that import.
+SAFETY & SCOPE
 
-Create and run this libcst script from repo root:
+* Do not modify files outside `README.md` and `assets/*` (except creating `assets/README.md` if needed).
+* Do not fetch from the internet or embed data URIs.
+* Keep changes minimal; provide a single commit.
 
-```bash
-python - <<'PY'
-import sys, pathlib, json
-from typing import Optional, Set
-import libcst as cst
-import libcst.matchers as m
+DELIVERABLES
 
-ROOT = pathlib.Path(".")
-PY_FILES = [p for p in ROOT.rglob("*.py") if all(part not in p.parts for part in (".git","dist","build",".venv","venv","node_modules","__pycache__"))]
-
-OLD_MOD = "vulkan_forge"
-NEW_MOD = "forge3d"
-OLD_ALIAS = "vf"
-NEW_ALIAS = "f3d"
-
-class ImportAliasTransformer(cst.CSTTransformer):
-  def __init__(self):
-      # Track whether this module binds OLD_ALIAS from OLD_MOD/NEW_MOD
-      self.binds_old_alias = False
-      self.bound_name: Optional[str] = None
-
-  def leave_Import(self, original_node: cst.Import, updated_node: cst.Import) -> cst.Import:
-      names = []
-      for name in updated_node.names:
-          if m.matches(name, m.ImportAlias(name=m.Attribute() | m.Name(OLD_MOD))):
-              # import vulkan_forge [as ...]
-              base = name
-              new_name = cst.ImportAlias(name=cst.Name(NEW_MOD), asname=base.asname)
-              if base.asname and base.asname.name.value == OLD_ALIAS:
-                  new_name = new_name.with_changes(asname=cst.AsName(cst.Name(NEW_ALIAS)))
-                  self.binds_old_alias = True
-                  self.bound_name = OLD_ALIAS
-              names.append(new_name)
-          else:
-              names.append(name)
-      return updated_node.with_changes(names=names)
-
-  def leave_ImportFrom(self, original_node: cst.ImportFrom, updated_node: cst.ImportFrom) -> cst.ImportFrom:
-      # from vulkan_forge[.sub] import ...
-      if original_node.module and m.matches(original_node.module, m.Name(OLD_MOD)):
-          mod = cst.Name(NEW_MOD)
-      elif original_node.module and m.matches(original_node.module, m.Attribute(
-          value=m.Name(OLD_MOD)
-      )):
-          # from vulkan_forge.something import ...
-          # Convert only the root
-          attr = original_node.module
-          while isinstance(attr, cst.Attribute) and isinstance(attr.value, cst.Attribute):
-              attr = attr.value
-          if isinstance(original_node.module, cst.Attribute) and isinstance(original_node.module.value, cst.Name) and original_node.module.value.value == OLD_MOD:
-              mod = cst.Attribute(value=cst.Name(NEW_MOD), attr=original_node.module.attr)
-          else:
-              mod = updated_node.module
-      else:
-          mod = updated_node.module
-
-      # detect "as vf" on the imported names; if present, rename alias to f3d
-      names = updated_node.names
-      if isinstance(names, list):
-          new_names = []
-          for n in names:
-              if isinstance(n, cst.ImportAlias) and n.asname and n.asname.name.value == OLD_ALIAS:
-                  new_names.append(n.with_changes(asname=cst.AsName(cst.Name(NEW_ALIAS))))
-                  self.binds_old_alias = True
-                  self.bound_name = OLD_ALIAS
-              else:
-                  new_names.append(n)
-          names = new_names
-
-      return updated_node.with_changes(module=mod, names=names)
-
-  def leave_Name(self, original_node: cst.Name, updated_node: cst.Name) -> cst.CSTNode:
-      # If alias was bound in this module, rewrite references
-      if self.binds_old_alias and original_node.value == OLD_ALIAS:
-          return updated_node.with_changes(value=NEW_ALIAS)
-      return updated_node
-
-changed = 0
-for path in PY_FILES:
-  src = path.read_text(encoding="utf-8")
-  try:
-      mod = cst.parse_module(src)
-  except Exception:
-      continue
-  xform = ImportAliasTransformer()
-  new = mod.visit(xform)
-  if new.code != src:
-      path.write_text(new.code, encoding="utf-8")
-      changed += 1
-
-print(json.dumps({"python_files_rewritten": changed}, indent=2))
-PY
-````
-
-E) C/C++/Rust BINDING POINTS
-
-* **PyO3**: rename `#[pymodule] fn vulkan_forge(...)` → `#[pymodule] fn forge3d(...)`
-* **pybind11**: rename `PYBIND11_MODULE(vulkan_forge, m)` → `PYBIND11_MODULE(forge3d, m)`
-* Ensure the produced extension module filename matches `forge3d` (update build config accordingly).
-
-F) DOCS / EXAMPLES
-
-* Update README/docs snippets: `import forge3d as f3d`; update any `vf.` usage to `f3d.` where tied to the import alias.
-
-G) CI / PACKAGING
-
-* Update wheel build metadata (project name, tags), sdist settings, manylinux/macos/windows jobs, and upload targets.
-* If publishing, update `project.urls`, badges, and package index references.
-
-H) ACCEPTANCE CRITERIA (run these checks)
-
-1. `rg -n '\bvulkan[-_ ]forge\b|\bvulkan_forge\b'` → **no matches** (excluding changelogs).
-2. `rg -n '\bimport +vulkan_forge\b|\bfrom +vulkan_forge\b'` → **no matches**.
-3. `rg -n '\bas +vf\b'` where tied to package imports → **no matches**.
-4. In a fresh venv: `python -c "import forge3d as f3d; print(hasattr(f3d,'__doc__'))"` returns `True`.
-5. All tests/linters pass: `pytest -q` (if present), `ruff --quiet .` or `flake8`, and any `mypy` config.
-6. Build succeeds: sdist + wheel produce `forge3d` extension/module.
-
-I) COMMIT
-
-* Commit in logical steps with messages like:
-
-  * `chore(rename): package vulkan-forge → forge3d (metadata/build/docs)`
-  * `refactor(python): alias vf → f3d via AST; rename module vulkan_forge → forge3d`
-  * `ci(packaging): update wheels and publishing targets to forge3d`
-* At the end, post a brief summary of files changed and counts of rewritten Python files from the script output.
+* Updated `README.md` with the header block.
+* `assets/logo-2000.png` (and optional `assets/logo-2000-dark.png`), or a clearly marked placeholder.
+* A short commit message: `docs(readme): add 2000×2000 header logo with light/dark support`.
 
 BEGIN.
