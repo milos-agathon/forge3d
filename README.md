@@ -1,3 +1,17 @@
+<div align="center">
+  <a href="./">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/logo-2000-dark.png">
+      <img src="assets/logo-2000.png"
+           alt="forge3d logo"
+           width="224"
+           height="224"
+           decoding="async"
+           loading="eager">
+    </picture>
+  </a>
+</div>
+
 # forge3d
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).

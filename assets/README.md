@@ -1,0 +1,1 @@
+Replace `logo-2000.png` (and optional `logo-2000-dark.png`) with your final 2000×2000 logo(s).
