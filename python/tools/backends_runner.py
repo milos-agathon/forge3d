@@ -1,7 +1,7 @@
 # A1.7-BEGIN:backends-runner
 #!/usr/bin/env python3
 """
-Cross-backend runner for vulkan-forge.
+Cross-backend runner for forge3d.
 
 Spawns a fresh Python subprocess per backend so that wgpu Instance/OnceCell isn't reused.
 Collects SHA256 of RAW RGBA bytes, timings, and (optionally) writes PNG artifacts.
@@ -37,7 +37,7 @@ class BackendResult:
 
 CHILD_SNIPPET = r"""
 import os, sys, time, hashlib
-from vulkan_forge import Renderer
+from forge3d import Renderer
 w = int(os.environ.get("VF_WIDTH", "128"))
 h = int(os.environ.get("VF_HEIGHT", "128"))
 png = os.environ.get("VF_WRITE_PNG", "0") == "1"

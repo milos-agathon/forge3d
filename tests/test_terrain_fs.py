@@ -15,8 +15,8 @@ def _bump(h, w, amp=1.0, sigma=0.18):
     return (amp * np.exp(-r2 / (2*sigma**2))).astype(np.float32)
 
 def _render_with_sun(azimuth_deg):
-    import vulkan_forge as vf
-    R = vf.Renderer(128, 128)
+    import forge3d as f3d
+    R = f3d.Renderer(128, 128)
     dem = _bump(128, 128, amp=50.0)
     R.add_terrain(dem, (30.0, 30.0), exaggeration=1.0, colormap="viridis")
     R.set_sun(elevation_deg=45.0, azimuth_deg=azimuth_deg)  # unified kw names

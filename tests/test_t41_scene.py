@@ -1,9 +1,9 @@
 import os, numpy as np
-import vulkan_forge._vulkan_forge as vf
+import forge3d as f3d
 
 def test_t41_scene_renders_png(tmp_path):
     out = tmp_path / "scene_smoke.png"
-    scn = vf.Scene(320, 240, grid=64, colormap="viridis")
+    scn = f3d.Scene(320, 240, grid=64, colormap="viridis")
     scn.render_png(str(out))
     assert out.exists()
     # should be non-trivial in size (> 4 KB like T3 smoke)
@@ -12,7 +12,7 @@ def test_t41_scene_renders_png(tmp_path):
 def test_t41_height_upload_changes_output(tmp_path):
     out1 = tmp_path / "scene1.png"
     out2 = tmp_path / "scene2.png"
-    scn = vf.Scene(320, 240, grid=64, colormap="viridis")
+    scn = f3d.Scene(320, 240, grid=64, colormap="viridis")
     scn.render_png(str(out1))
     h = (np.sin(np.linspace(0, 4*np.pi, 128))[:,None] * np.cos(np.linspace(0, 4*np.pi, 128))[None,:]).astype("float32") * 0.25
     scn.set_height_from_r32f(h)

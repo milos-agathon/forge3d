@@ -1,7 +1,7 @@
 <!-- A1.11-BEGIN:python-readme -->
-# vulkan_forge (Python)
+# forge3d (Python)
 
-Public Python API for the vulkan-forge extension.
+Public Python API for the forge3d extension.
 
 ## Install (dev)
 ```bash
@@ -15,7 +15,7 @@ maturin develop --release
 
 ## Usage
 ```python
-from vulkan_forge import Renderer, render_triangle_rgba, render_triangle_png
+from forge3d import Renderer, render_triangle_rgba, render_triangle_png
 r = Renderer(256, 256)
 arr = render_triangle_rgba(256, 256)
 render_triangle_png("triangle.png", 256, 256)

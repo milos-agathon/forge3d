@@ -1,4 +1,4 @@
-## 0) Quick start with the repo
+# 0) Quick start with the repo
 
 ```bash
 # In a fresh virtualenv:
@@ -26,13 +26,6 @@ Tips:
 
 * **Exit criteria:** Produce a deterministic 512×512 PNG across OS backends; return an `H×W×4` `uint8` NumPy array.
 
-Great—here’s a **fine‑grained task breakdown** for **Milestone A — Spikes → A1. Headless rendering spike** so your team can split work and hit the exit criteria:
-
-> **Exit criteria (A1):**
->
-> 1. Produce a **deterministic 512×512 PNG** (same bytes for repeated runs on the same machine; consistent across OS backends with our pinned stack; if a driver produces tiny differences, we allow a fallback SSIM ≥ 0.999).
-> 2. Return an **H×W×4 `uint8` NumPy array** via the Python API.
-
 ---
 
 ## A1.1 Repository + build sanity (0.5d)
@@ -55,7 +48,7 @@ Great—here’s a **fine‑grained task breakdown** for **Milestone A — Spike
 
 ## A1.2 Deterministic render pipeline setup (0.5d)
 
-**Goal**: Eliminate non‑determinism in the pipeline.
+**Goal**: Eliminate non-determinism in the pipeline.
 
 * **Deliverables**
 
@@ -88,14 +81,14 @@ Great—here’s a **fine‑grained task breakdown** for **Milestone A — Spike
 
 ---
 
-## A1.4 Off‑screen target & readback path (0.5d)
+## A1.4 Off-screen target & readback path (0.5d)
 
-**Goal**: Correct copy‑to‑CPU with padding handled identically.
+**Goal**: Correct copy-to-CPU with padding handled identically.
 
 * **Deliverables**
 
-  * Off‑screen texture creation (`Rgba8UnormSrgb`, `RENDER_ATTACHMENT|COPY_SRC`).
-  * **Row‑padding** removal helper (already in starter): confirm with unit test.
+  * Off-screen texture creation (`Rgba8UnormSrgb`, `RENDER_ATTACHMENT|COPY_SRC`).
+  * **Row-padding** removal helper (already in starter): confirm with unit test.
   * Single persistent **readback buffer** sized to the frame (reuse across calls).
 
 * **Acceptance**
@@ -116,7 +109,7 @@ Great—here’s a **fine‑grained task breakdown** for **Milestone A — Spike
 
 * **Acceptance**
 
-  * `help(vulkan_forge.Renderer)` shows clear signatures and docstrings.
+  * `help(forge3d.Renderer)` shows clear signatures and docstrings.
 
 ---
 
@@ -128,38 +121,19 @@ Great—here’s a **fine‑grained task breakdown** for **Milestone A — Spike
 
   * Small Python script (and/or pytest) that:
 
-    1. Renders twice → compares **SHA‑256** (expect equal).
+    1. Renders twice → compares **SHA-256** (expect equal).
     2. Optionally toggles backend via `WGPU_BACKEND` env (`metal|vulkan|dx12`) and repeats.
     3. If bytes differ, compute **SSIM** as a fallback—must be ≥ 0.999.
-  * Prints adapter name/back‑end via `info()`.
+  * Prints adapter name/back-end via `info()`.
 
 * **Acceptance**
 
   * On at least one machine per OS, **two runs** produce identical hashes.
   * Across backends, either hashes match or SSIM ≥ 0.999.
 
-* **Snippet**
-
-  ```python
-  import hashlib, os
-  from vulkan_forge import Renderer
-  def sha256_png_bytes(arr):
-      from PIL import Image
-      import io
-      b = io.BytesIO(); Image.fromarray(arr, "RGBA").save(b, "PNG")
-      return hashlib.sha256(b.getvalue()).hexdigest()
-
-  # same-backend determinism
-  r = Renderer(512,512)
-  h1 = sha256_png_bytes(r.render_triangle_rgba())
-  h2 = sha256_png_bytes(r.render_triangle_rgba())
-  assert h1 == h2, "Non-deterministic within same run/backend"
-  print("SHA256:", h1)
-  ```
-
 ---
 
-## A1.7 Cross‑backend runners (0.5d) (P)
+## A1.7 Cross-backend runners (0.5d) (P)
 
 **Goal**: Exercise Metal/Vulkan/DX12 explicitly.
 
@@ -262,9 +236,9 @@ Parallelizable items: **A1.7** (backend scripts) and **A1.8** (CI) can proceed w
 
 * [ ] Pin `wgpu`, `pyo3` versions; optional `rust-toolchain.toml`.
 * [ ] Fix pipeline state (no MSAA, sRGB target).
-* [ ] Verify row‑padding removal with a unit test.
-* [ ] Add SHA‑256 + SSIM fallback checks.
-* [ ] Backend‑forcing scripts + README.
+* [ ] Verify row-padding removal with a unit test.
+* [ ] Add SHA-256 + SSIM fallback checks.
+* [ ] Backend-forcing scripts + README.
 * [ ] CI: run tests, upload PNGs with hash in filenames.
 * [ ] Device report + helpful errors.
 * [ ] (Opt) Timing logs + thresholds.
@@ -275,16 +249,9 @@ Parallelizable items: **A1.7** (backend scripts) and **A1.8** (CI) can proceed w
 
   * Add `Renderer.add_terrain(heightmap: np.ndarray[f32], spacing: (f32, f32), exaggeration: f32)` in Rust via `numpy` crate.
   * CPU: build indexed grid (triangle list) once.
-  * WGSL: sample height, compute normals (forward differences), single directional light, gamma‑correct + simple tonemap.
-  * Render path: write into the same off‑screen texture.
-* **Exit criteria:** 1024² DEM renders under 50 ms on M‑series/NVIDIA, readback under 30 ms; image test SSIM ≥ 0.98 across backends.
-
-Perfect—here’s a **fine‑grained breakdown** for **Milestone A → A2. Terrain pipeline spike** (Rust‑first, `wgpu`, Python via `PyO3`). Each task lists **Goal**, **Deliverables**, **Acceptance**, **Deps**, **Estimate**, and whether it can run **(P)** in parallel.
-
-> **A2 exit criteria (recap):**
->
-> * Add a `Renderer.add_terrain(...)` path that takes a NumPy DEM and renders a **lit 1024×1024** image through WGSL with simple tonemapping.
-> * Measure render and readback time, and keep them within reasonable budgets on a mainstream GPU.
+  * WGSL: sample height, compute normals (forward differences), single directional light, gamma-correct + simple tonemap.
+  * Render path: write into the same off-screen texture.
+* **Exit criteria:** 1024² DEM renders under 50 ms on M-series/NVIDIA, readback under 30 ms; image test SSIM ≥ 0.98 across backends.
 
 ---
 
@@ -296,7 +263,7 @@ Perfect—here’s a **fine‑grained breakdown** for **Milestone A → A2. Terr
 * **Deliverables:**
 
   * `Renderer.add_terrain(heightmap: np.ndarray, spacing: tuple[float,float], exaggeration: float = 1.0, *, colormap="viridis")`
-  * Accept `float32` (prefer) or `float64` (cast to `f32`), shape `(H, W)`, C‑contiguous.
+  * Accept `float32` (prefer) or `float64` (cast to `f32`), shape `(H, W)`, C-contiguous.
   * Store metadata: `dx, dy, h_min, h_max, exaggeration`, colormap name.
 * **Acceptance:** Invalid dtype/shape/strides raise clear `PyRuntimeError`; docstring explains requirements.
 * **Deps:** none
@@ -334,11 +301,11 @@ Perfect—here’s a **fine‑grained breakdown** for **Milestone A → A2. Terr
 
 ### T1.2 Height texture upload (R32Float)
 
-* **Goal:** Upload DEM to GPU as a single‑channel float texture.
+* **Goal:** Upload DEM to GPU as a single-channel float texture.
 * **Deliverables:**
 
   * Create `Texture2D` with `R32Float`, usage `TEXTURE_BINDING | COPY_DST`.
-  * `queue.write_texture` with **256‑byte row alignment** handled (pad rows when necessary).
+  * `queue.write_texture` with **256-byte row alignment** handled (pad rows when necessary).
   * Linear clamp sampler.
 * **Acceptance:** Validation passes on Metal/Vulkan/DX12; probe a few texels via a temp compute or debug path (optional).
 * **Deps:** T0.1
@@ -349,7 +316,7 @@ Perfect—here’s a **fine‑grained breakdown** for **Milestone A → A2. Terr
 * **Goal:** Map heights to colors via a small LUT.
 * **Deliverables:**
 
-  * 256×1 `RGBA8UnormSrgb` texture with built‑in palettes: `viridis`, `magma`, `terrain`.
+  * 256×1 `RGBA8UnormSrgb` texture with built-in palettes: `viridis`, `magma`, `terrain`.
   * Uniforms: `h_min`, `h_max` for normalization.
 * **Acceptance:** Known scalar inputs map to expected palette colors in a unit test (CPU reference).
 * **Deps:** T0.2
@@ -387,7 +354,7 @@ Perfect—here’s a **fine‑grained breakdown** for **Milestone A → A2. Terr
 
 ### T2.2 Sun direction & tonemap
 
-* **Goal:** Basic single‑sun lighting with simple tonemap.
+* **Goal:** Basic single-sun lighting with simple tonemap.
 * **Deliverables:**
 
   * Helpers: `set_sun(elevation, azimuth)` → normalized world `sun_dir`.
@@ -461,13 +428,13 @@ Perfect—here’s a **fine‑grained breakdown** for **Milestone A → A2. Terr
 * **Deliverables:**
 
   * `Scene` holds `Vec<Layer>`; `Layer::Terrain { gpu, uniforms, mesh }`.
-  * Per‑frame update of `Globals` (view/proj/sun/exposure/h\_range/spacing/exaggeration).
+  * Per-frame update of `Globals` (view/proj/sun/exposure/h\_range/spacing/exaggeration).
   * Command encoder: begin pass → draw terrain → end.
-* **Acceptance:** First image produced from real DEM (even if flat‑shaded initially).
+* **Acceptance:** First image produced from real DEM (even if flat-shaded initially).
 * **Deps:** T1–T3
 * **Estimate:** 0.5 d
 
-### T4.2 PNG & NumPy round‑trip
+### T4.2 PNG & NumPy round-trip
 
 * **Goal:** Provide outputs the same as A1.
 * **Deliverables:**
@@ -518,297 +485,12 @@ Perfect—here’s a **fine‑grained breakdown** for **Milestone A → A2. Terr
 
 ---
 
-## Suggested 4‑day schedule (1–2 engineers)
+## Suggested 4-day schedule (1–2 engineers)
 
 **Day 1:** T0.1, T0.2 (P), T1.1
 **Day 2:** T1.2 (P), T1.3 (P), T2.1
 **Day 3:** T2.2 (P), T3.1, T3.2, T3.3 (P)
 **Day 4:** T4.1, T4.2 (P), T5.1, T5.2 (P), T5.3 (P)
-
----
-
-## Technical specifics & guardrails
-
-* **Texture uploads:** `wgpu` requires `bytes_per_row % 256 == 0`. Pad CPU rows (`W * 4` for RGBA8; for R32F DEM, `W * 4` as well) to the next 256‑aligned stride before `queue.write_texture`.
-* **Coordinate system:** Pick and document **right‑handed**, +Y up, +Z out of the ground. Ensure consistency between CPU world coords and camera/view matrix.
-* **Normals:** Use `cross(dpy, dpx)` for right‑handed orientation; if lighting looks inverted, swap order.
-* **sRGB:** Keep render target `Rgba8UnormSrgb`; do lighting in linear, then `gamma_correct` before writing, or rely on sRGB target with linear input (avoid double‑gamma).
-* **Bounds:** If `(W*H) > 65,535`, use `u32` indices; consider clamping `W,H ≤ 8192` for MVP to avoid huge buffers.
-* **Exposure:** A single scalar is enough; default 1.0.
-* **Determinism:** Avoid MSAA; use `textureSampleLevel(..., 0.0)` to avoid LOD/derivative ambiguity in normals.
-
----
-
-## Definition of Done (A2)
-
-* `add_terrain()` accepts a NumPy DEM and validates it.
-* Rendering a **1024×1024** DEM yields lit terrain with colormap, sun lighting, and tonemap.
-* `render_rgba()` and `render_png()` work; perf metrics are reported.
-* Synthetic tests pass (SSIM ≥ 0.99 vs goldens); README example reproduces.
-
----
-
-**A3. Geo tessellation spike** *(\~3–5 days)*
-
-* **Scope**
-
-  * In Python, accept GeoPandas (or Shapely geometries). In Rust, use `geo` + `earcutr` (or `lyon`) to triangulate multipolygons + holes.
-  * API: `add_polygons(gdf_like, line_color, fill_rgba)`
-  * Require CRS to be pre‑projected for MVP; document this clearly.
-* **Exit criteria:** Non‑self‑intersecting multi‑polygons render correctly; islands/holes respected; one complex city polygon renders in <100 ms (triangulation included).
-
-Excellent—here’s a **fine‑grained breakdown** for **Milestone A → A3. Geo tessellation spike** (Rust‑first core, Python API via PyO3, wgpu rendering). Each task has **Goal, Deliverables, Acceptance, Deps, Estimate**, and parallelizable items are marked **(P)**.
-
-> **Exit criteria for A3:**
->
-> 1. Take a **GeoPandas/Shapely multipolygon** → **robust tessellation (triangles) via earcut** (holes supported).
-> 2. Render **filled polygons** and a **line/outline overlay** to a 2D off‑screen target (512–1024 px).
-> 3. Validate **ring orientation/holes**, reject **self‑intersecting** geometries, and enforce **CRS policy** (planar coords).
-> 4. Provide timing numbers for tessellation & draw, plus minimal tests (golden images or triangle counts).
-
----
-
-## Workstream G0 — Public API & CRS policy
-
-### G0.1 Python API (public) & docstring
-
-* **Goal:** Define input contract and expose a minimal method.
-* **Deliverables:**
-
-  * Python:
-
-    ```python
-    Renderer.add_polygons(
-        geoms,                     # GeoPandas GeoSeries/GeoDataFrame, Shapely objects, or raw arrays
-        *, fill_rgba=(0.2,0.2,0.2,1.0),
-        line_rgba=(0,0,0,1), line_width=1.0,
-        assume_planar: bool = True
-    )
-    ```
-  * Docstring: **Require pre‑projected planar coordinates** (e.g., WebMercator meters or local CRS). No antimeridian handling in A3.
-* **Acceptance:** Clear error if CRS missing or geographic (lat/lon) unless `assume_planar=True`.
-* **Deps:** —
-* **Estimate:** 0.25 d
-
----
-
-## Workstream G1 — Python extraction & FFI packing
-
-### G1.1 GeoPandas/Shapely → raw buffers
-
-* **Goal:** Convert user geometries to a stable FFI format without native deps in Rust for parsing.
-* **Deliverables:**
-
-  * Python helper: `pack_polygons(geoms) -> (coords, ring_offsets, feature_offsets)` where:
-
-    * `coords`: `np.float32` flat `[x0,y0, x1,y1, …]`
-    * `ring_offsets`: `np.uint32` size `R+1` (prefix sums, ring i spans `coords[2*ring_offsets[i]:2*ring_offsets[i+1]]`)
-    * `feature_offsets`: `np.uint32` size `F+1` (rings per feature)
-  * Handles `Polygon` (1 exterior + holes), `MultiPolygon` (multiple polygons).
-  * Strips duplicate consecutive points and enforces closed rings (first==last), but **does not** insert extra closure point into buffers (earcut prefers open rings; we keep open rings internally and ensure closure only for validity checks).
-* **Acceptance:** Unit test: pack a donut (square with hole) & a multipolygon → expected counts for coords/rings/features.
-* **Deps:** G0.1
-* **Estimate:** 0.75 d
-
-### G1.2 Sanity checks & normalization (P)
-
-* **Goal:** Stabilize geometry before FFI call.
-* **Deliverables:**
-
-  * Validate min ring length (≥3 unique points), drop tiny rings (area < ε²).
-  * Optional **RDP simplification** (tolerance `ε`) to reduce extremely dense rings (behind a flag).
-  * Normalize coordinates by feature bbox center (translate to \~origin) and scale to \~`1e4` range to improve earcut numeric stability; keep scale/offset to re‑emit in world coords later.
-* **Acceptance:** Pathological inputs (thousands of collinear points) don’t explode runtime; areas preserved within tolerance.
-* **Deps:** G1.1
-* **Estimate:** 0.5 d
-
----
-
-## Workstream G2 — Rust FFI, validation & canon
-
-### G2.1 FFI structs & PyO3 binding
-
-* **Goal:** Accept packed arrays from Python without copies.
-* **Deliverables:**
-
-  * Rust function:
-
-    ```rust
-    fn add_polygons_raw(coords: PyReadonlyArray1<f32>,
-                        ring_offsets: PyReadonlyArray1<u32>,
-                        feature_offsets: PyReadonlyArray1<u32>,
-                        fill_rgba: [f32;4],
-                        line_rgba: [f32;4],
-                        line_width: f32) -> PyResult<()>
-    ```
-  * Convert to borrowed slices; validate monotonic offsets and bounds.
-* **Acceptance:** Bad inputs raise `PyRuntimeError` with clear message.
-* **Deps:** G1.1
-* **Estimate:** 0.5 d
-
-### G2.2 Ring orientation & topology checks (P)
-
-* **Goal:** Canonicalize ring winding and reject invalid topology.
-* **Deliverables:**
-
-  * For each feature: compute signed area; set **exterior CCW**, **holes CW** (flip if necessary).
-  * Detect **self‑intersection** (use `geo` crate’s `is_simple()` on rings or a lightweight segment intersection check).
-  * Ensure holes lie inside their exterior (point‑in‑polygon test for a sample point).
-* **Acceptance:**
-
-  * Bow‑tie polygon rejected.
-  * Hole outside exterior rejected with explanation.
-* **Deps:** G2.1
-* **Estimate:** 0.75 d
-
----
-
-## Workstream G3 — Tessellation (earcut) & mesh assembly
-
-### G3.1 Per‑feature earcut (core)
-
-* **Goal:** Triangulate polygons with holes.
-* **Deliverables:**
-
-  * Use **`earcutr`** crate: for each feature, build vector of rings (first exterior, then holes) and call earcut.
-  * Return indices (u32) into a **feature‑local** vertex list; accumulate into global buffers with index base offset.
-* **Acceptance:**
-
-  * For a simple polygon with V vertices and H holes, triangle count ≈ **V − 2 − H**.
-  * Triangles are CCW in world coords (check orientation).
-* **Deps:** G2.2
-* **Estimate:** 1 d
-
-### G3.2 Attribute building & compaction (P)
-
-* **Goal:** Construct GPU‑ready vertex attributes.
-* **Deliverables:**
-
-  * Vertex struct: `{ position: vec2<f32>, feature_id: u32 }` (store `feature_id` for flat‑color/ID renders).
-  * Optional dedup of identical vertices (hash by quantized XY) to reduce VBO size.
-* **Acceptance:** VBO/IBO created; counts logged; optional dedup reduces size on shared borders by >10% on test data.
-* **Deps:** G3.1
-* **Estimate:** 0.5 d
-
-### G3.3 Stroke mesh (outline) CPU tessellator
-
-* **Goal:** Build a thin triangle strip mesh for each ring as an outline.
-* **Deliverables:**
-
-  * For each ring, generate **screen‑space width** approximated in world units using current camera scale (for this spike, allow **constant world‑space width** to keep it simple).
-  * **Miter** joins with angle clamp; **butt** caps.
-  * Output a separate VBO/IBO for strokes.
-* **Acceptance:** Visual outline around exteriors and hole boundaries; no gaps or inverted normals; reasonable performance on \~10k segments.
-* **Deps:** G3.1 (can start earlier with ring coords)
-* **Estimate:** 1 d
-
----
-
-## Workstream G4 — GPU upload & render pipelines
-
-### G4.1 Buffer uploads & lifetime management
-
-* **Goal:** Move tessellated geometry to GPU.
-* **Deliverables:**
-
-  * Create static vertex/index buffers for fills and strokes with `COPY_DST|VERTEX/INDEX`.
-  * One **bind group** for a small `feature_color` SSBO or push constants; for spike, a **single uniform fill** is fine.
-* **Acceptance:** Validation clean; memory tracked; debug labels set.
-* **Deps:** G3.2, G3.3
-* **Estimate:** 0.5 d (P)
-
-### G4.2 Fill pipeline (triangles)
-
-* **Goal:** Draw filled polygons.
-* **Deliverables:**
-
-  * WGSL VS: pass through `position.xy` → clip via model/view/proj (for A3 2D, you can map to NDC directly).
-  * WGSL FS: output `fill_rgba` (uniform) or color by `feature_id` (optional LUT).
-  * Blending: premultiplied alpha **off** (straight alpha OK); no depth for 2D spike.
-* **Acceptance:** Donut shows hole correctly (no fill bleeding); multipolygons draw in one pass.
-* **Deps:** G4.1
-* **Estimate:** 0.5 d
-
-### G4.3 Stroke pipeline (triangles)
-
-* **Goal:** Draw outlines above fills.
-* **Deliverables:**
-
-  * Separate pipeline using stroke VBO/IBO; `line_rgba`, `line_width` already baked by CPU expand.
-  * Draw ordered after fill; enable alpha if needed.
-* **Acceptance:** Closed outlines exactly follow polygon and hole boundaries at requested width.
-* **Deps:** G3.3, G4.1
-* **Estimate:** 0.5 d (P)
-
----
-
-## Workstream G5 — Tests, metrics, and determinism
-
-### G5.1 Unit tests: packing & topology
-
-* **Goal:** Validate the data path before GPU.
-* **Deliverables:**
-
-  * Tests for: square, donut (square hole), multipolygon (two squares), invalid bow‑tie.
-  * Assert ring/feature counts, orientation (exterior CCW, holes CW), and rejection messages.
-* **Acceptance:** All pass locally and in CI.
-* **Deps:** G1.1, G2.2
-* **Estimate:** 0.5 d
-
-### G5.2 Golden image tests (64×64) (P)
-
-* **Goal:** Visual correctness with tolerance.
-* **Deliverables:**
-
-  * Render tiny scenes: (1) single polygon, (2) donut, (3) multipolygon overlay.
-  * Compare against goldens (SSIM ≥ 0.99); skip if backend unavailable, log info().
-* **Acceptance:** Tests pass on Linux (Vulkan) & macOS (Metal) CI jobs.
-* **Deps:** G4.2, G4.3
-* **Estimate:** 0.5 d
-
-### G5.3 Performance log
-
-* **Goal:** Establish baseline timings.
-* **Deliverables:**
-
-  * Log: #features, #rings, #verts, #tris; tessellation time; upload time; draw time; total.
-  * Add `Renderer.last_metrics()` to fetch numbers.
-* **Acceptance:** For 10k total vertices, tessellation < \~100 ms on dev laptop; draw negligible.
-* **Deps:** G3.*, G4.*
-* **Estimate:** 0.25 d
-
----
-
-## Workstream G6 — Docs & examples
-
-### G6.1 Example: city blocks
-
-* **Goal:** Showcase A3 end‑to‑end.
-* **Deliverables:**
-
-  * `python/examples/polygons_city.py` that builds synthetic polygon rings (no GeoPandas dependency for the example), calls `add_polygons`, renders PNGs for **fill only** and **fill+stroke** variants.
-* **Acceptance:** Runs after `maturin develop`; produces two PNGs.
-* **Deps:** G4.\*
-* **Estimate:** 0.25 d (P)
-
-### G6.2 README section: “Geo tessellation spike”
-
-* **Goal:** Communicate constraints to users.
-* **Deliverables:**
-
-  * Notes on **CRS requirement**, **unsupported cases** (dateline wrap, very tiny rings), and **performance tips** (simplification).
-* **Acceptance:** PR reviewed and merged.
-* **Deps:** G0.1
-* **Estimate:** 0.25 d
-
----
-
-## Suggested 3–4 day schedule (1–2 engineers)
-
-**Day 1:** G0.1, G1.1, G1.2 (P), G2.1
-**Day 2:** G2.2, G3.1
-**Day 3:** G3.2 (P), G3.3, G4.1
-**Day 4:** G4.2, G4.3 (P), G5.1, G5.2 (P), G5.3, G6.\* (P)
 
 Parallelization tips:
 
@@ -823,18 +505,18 @@ Parallelization tips:
 * **CRS/units:** **Planar coordinates only** for A3. Users must project before calling (e.g., EPSG:3857 meters). Add a clear error if coordinates look like lat/lon ranges (|x| ≤ 180 & |y| ≤ 90) unless `assume_planar=True`.
 * **Orientation:** Standardize to **exterior CCW**, **holes CW** before earcut; while earcut doesn’t strictly require winding, canonicalization helps downstream logic (e.g., stroke expansion).
 * **Holes:** Associate holes with the nearest containing exterior; reject if ambiguous or nested incorrectly.
-* **Degeneracy:** Drop rings with <3 unique points after dedup; area < ε²; simplify long nearly‑collinear runs with RDP if enabled.
-* **Numeric stability:** Translate/scale features locally pre‑earcut; rescale back for rendering.
-* **Stroke width:** For spike, use a **world‑space constant** (e.g., meters). If time permits, add simple screen‑space adjustment based on current camera scale.
+* **Degeneracy:** Drop rings with <3 unique points after dedup; area < ε²; simplify long nearly-collinear runs with RDP if enabled.
+* **Numeric stability:** Translate/scale features locally pre-earcut; rescale back for rendering.
+* **Stroke width:** For spike, use a **world-space constant** (e.g., meters). If time permits, add simple screen-space adjustment based on current camera scale.
 * **WGPU line primitives:** Don’t rely on wireframe polygon mode or line lists; **always** render outlines as triangle meshes.
 
 ---
 
 ## Definition of Done (A3)
 
-* `add_polygons(...)` accepts Geo‑like inputs (or packed arrays) and validates them.
+* `add_polygons(...)` accepts Geo-like inputs (or packed arrays) and validates them.
 * Tessellation produces triangle buffers with correct **holes** and **multipolygons**.
-* Fill + outline render correctly into a PNG via off‑screen target.
+* Fill + outline render correctly into a PNG via off-screen target.
 * Basic tests: packing/topology + golden images pass in CI; timings are logged.
 
 ---
@@ -842,7 +524,7 @@ Parallelization tips:
 **A4. Wheel/CI spike** *(\~1 day)*
 
 * Use the included GitHub Actions workflow.
-* **Exit criteria:** Wheels produced on Ubuntu, Windows, macOS (x64 & Apple Silicon if runner available). Post‑build import & render test passes.
+* **Exit criteria:** Wheels produced on Ubuntu, Windows, macOS (x64 & Apple Silicon if runner available). Post-build import & render test passes.
 
 > **Exit criteria (A4):**
 >
@@ -855,8 +537,8 @@ Parallelization tips:
 
 ## Strategy choice (decide once)
 
-* **S1 (Recommended)**: **maturin‑only pipeline** with `abi3` wheels (already configured) → **build once per OS/arch** (no need to repeat per Python version). Simplest and fastest.
-* **S2**: `cibuildwheel` if you want its ecosystem niceties (e.g., manylinux build images, cross‑arch docker). Slightly more setup.
+* **S1 (Recommended)**: **maturin-only pipeline** with `abi3` wheels (already configured) → **build once per OS/arch** (no need to repeat per Python version). Simplest and fastest.
+* **S2**: `cibuildwheel` if you want its ecosystem niceties (e.g., manylinux build images, cross-arch docker). Slightly more setup.
 
 Below assumes **S1 (maturin)**. If you prefer S2, I’ve put an alternate plan at the bottom.
 
@@ -876,7 +558,7 @@ Below assumes **S1 (maturin)**. If you prefer S2, I’ve put an alternate plan a
     components = ["clippy", "rustfmt"]
     ```
   * Confirm `Cargo.toml` pins: `pyo3 = { features = ["abi3-py310"] }`, `wgpu = "0.19.x"`.
-  * Ensure `pyproject.toml` has `requires-python = ">=3.10"` and module name `vulkan_forge._vulkan_forge`.
+  * Ensure `pyproject.toml` has `requires-python = ">=3.10"` and module name `forge3d._forge3d`.
 
 * **Acceptance**
 
@@ -972,7 +654,7 @@ jobs:
           fi
 
       - name: Install built wheel (test)
-        run: pip install --no-index --find-links wheels vulkan-forge
+        run: pip install --no-index --find-links wheels forge3d
 
       - name: Smoke test render
         env:
@@ -983,8 +665,8 @@ jobs:
           import hashlib, io, sys
           import numpy as np
           from PIL import Image
-          import vulkan_forge
-          r = vulkan_forge.Renderer(512,512)
+          import forge3d
+          r = forge3d.Renderer(512,512)
           print(r.info())
           arr = r.render_triangle_rgba()
           assert arr.shape == (512,512,4) and arr.dtype == np.uint8
@@ -1065,7 +747,7 @@ jobs:
 
 ## A4.7 TestPyPI publish (manual) (0.5 d)
 
-**Goal:** One‑button publish to TestPyPI from CI artifacts.
+**Goal:** One-button publish to TestPyPI from CI artifacts.
 
 * **Deliverables**
 
@@ -1083,7 +765,7 @@ jobs:
       ```
 * **Acceptance**
 
-  * Package appears on TestPyPI; `pip install -i https://test.pypi.org/simple vulkan-forge` works on a fresh VM.
+  * Package appears on TestPyPI; `pip install -i https://test.pypi.org/simple forge3d` works on a fresh VM.
 
 **Deps:** A4.3, A4.5
 
@@ -1135,7 +817,7 @@ jobs:
 
 * **Acceptance**
 
-  * Badges show status; instructions are copy‑pasteable.
+  * Badges show status; instructions are copy-pasteable.
 
 **Deps:** A4.3
 
@@ -1165,7 +847,7 @@ jobs:
 
 ---
 
-## Suggested 2‑day schedule
+## Suggested 2-day schedule
 
 **Day 1:** A4.1–A4.4
 **Day 2:** A4.5–A4.11
@@ -1176,10 +858,10 @@ Parallelizable: A4.5/A4.6 can run while A4.7/A4.8 are drafted.
 
 ## Pitfalls & guardrails
 
-* **Linux GPU stack in CI**: Don’t rely on a display; use surface‑less off‑screen targets (you already do). Prefer software adapters in CI via `VULKAN_FORGE_PREFER_SOFTWARE=1`.
+* **Linux GPU stack in CI**: Don’t rely on a display; use surface-less off-screen targets (you already do). Prefer software adapters in CI via `VULKAN_FORGE_PREFER_SOFTWARE=1`.
 * **abi3 sanity**: With `pyo3` abi3, you **don’t need** to build per Python version—simplify the matrix to one Python (e.g., 3.12). Keep runtime tests with that Python only.
 * **manylinux**: Always pass `--compatibility manylinux2014` on Linux builds.
-* **Universal2?** If you want **one** macOS wheel instead of two, maturin can build `--universal2` on macOS. Trade‑off: longer link times, some crates don’t handle it well. Safe to ship two wheels (arm64 & x86\_64) for now.
+* **Universal2?** If you want **one** macOS wheel instead of two, maturin can build `--universal2` on macOS. Trade-off: longer link times, some crates don’t handle it well. Safe to ship two wheels (arm64 & x86\_64) for now.
 * **Publishing**: Prefer **Trusted Publishing** over tokens; set up PyPI project owners and GitHub OIDC.
 
 ---
@@ -1210,18 +892,16 @@ Parallelizable: A4.5/A4.6 can run while A4.7/A4.8 are drafted.
 * Scene graph (in Rust): `Scene`, `Layer` enum {Terrain, Polygons, Lines, Points}, `Camera`, `Sun`.
 * Terrain layer:
 
-  * CPU tiling & LOD pyramid (simple quad‑tree, memory‑resident).
-  * Per‑tile draw, indexed grid, MSAA=1 for speed, MSAA=4 for stills.
+  * CPU tiling & LOD pyramid (simple quad-tree, memory-resident).
+  * Per-tile draw, indexed grid, MSAA=1 for speed, MSAA=4 for stills.
 * Python API: thin wrappers, type conversions (NumPy ↔ Rust slices).
-
-Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Core & Terrain** (Option B, Rust‑first). It’s organized as small tickets you can drop into your tracker, each with **goal, deliverables, acceptance criteria, dependencies, and estimates**. Items marked **(P)** can run in parallel.
 
 ---
 
 ## Sprint goal (Week 1–2)
 
 * Establish a minimal engine core (device/context, frame targets, camera).
-* Implement a **single‑tile** terrain pipeline end‑to‑end: **NumPy DEM → GPU → lit render → PNG/NumPy RGBA**.
+* Implement a **single-tile** terrain pipeline end-to-end: **NumPy DEM → GPU → lit render → PNG/NumPy RGBA**.
 * Lay foundations for tiling/LOD to extend in Week 3.
 
 ---
@@ -1241,14 +921,14 @@ Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Co
 * **Deps:** none.
 * **Estimate:** 0.5–1 day.
 
-**A2. Off‑screen target & format policy**
+**A2. Off-screen target & format policy**
 
 * **Goal:** Standardize the render target and readback path.
 * **Deliverables:**
 
   * `core/target.rs` with `RenderTarget { texture, view }`, create/destroy, `Rgba8UnormSrgb`.
-  * Readback helper w/ row‑padding (refactor current code).
-* **Acceptance:** 512×512 triangle renders identically to pre‑refactor; round‑trip to PNG.
+  * Readback helper w/ row-padding (refactor current code).
+* **Acceptance:** 512×512 triangle renders identically to pre-refactor; round-trip to PNG.
 * **Deps:** A1.
 * **Estimate:** 0.5 day.
 
@@ -1283,7 +963,7 @@ Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Co
 * **Goal:** Fix conventions used across CPU/GPU.
 * **Deliverables:**
 
-  * Decision doc: right‑handed, +Y up, camera orbit params, degrees vs radians.
+  * Decision doc: right-handed, +Y up, camera orbit params, degrees vs radians.
   * `core/camera.rs` (look\_at, perspective/ortho, orbit).
 * **Acceptance:** Deterministic view/proj matrices; unit tests compare against known values.
 * **Deps:** none.
@@ -1302,7 +982,7 @@ Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Co
 
 ---
 
-## Workstream C — Terrain (single tile, end‑to‑end)
+## Workstream C — Terrain (single tile, end-to-end)
 
 **C1. DEM FFI contract**
 
@@ -1310,7 +990,7 @@ Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Co
 * **Deliverables:**
 
   * Python: `add_terrain(heightmap: np.ndarray[f32|f64], spacing: tuple[float,float], exaggeration: float=1.0, colormap="viridis")`
-  * Rust: `PyArray2<f32>` path (cast f64→f32 if needed), C‑contig check, shape `(H,W)`.
+  * Rust: `PyArray2<f32>` path (cast f64→f32 if needed), C-contig check, shape `(H,W)`.
   * Store in `TerrainLayer` struct with metadata (dx, dy, z\_scale).
 * **Acceptance:** Type/shape errors raise clean `PyRuntimeError`; unit tests for dtype coercion.
 * **Deps:** A1.
@@ -1321,7 +1001,7 @@ Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Co
 * **Goal:** Build an indexed grid once; reuse VBO/IBO.
 * **Deliverables:**
 
-  * `terrain/mesh.rs` with `make_grid(width, height)` producing positions as (x,y) in world‑meters plane and index buffer (u16 when possible, else u32).
+  * `terrain/mesh.rs` with `make_grid(width, height)` producing positions as (x,y) in world-meters plane and index buffer (u16 when possible, else u32).
   * Vertex layout: `pos_xy`, `uv` (0..1) to sample heightmap in shader.
 * **Acceptance:** For 1024×1024, generator under \~40 ms; index type chosen correctly; unit tests on index ranges.
 * **Deps:** C1.
@@ -1343,7 +1023,7 @@ Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Co
 * **Goal:** Map heights to colors in shader via 1D LUT.
 * **Deliverables:**
 
-  * Built‑in LUTs (`viridis`, `magma`, `terrain`) baked as 256×1 `RGBA8` textures.
+  * Built-in LUTs (`viridis`, `magma`, `terrain`) baked as 256×1 `RGBA8` textures.
   * Uniforms for `h_min/h_max` normalization (auto from DEM stats in CPU).
 * **Acceptance:** Simple CPU test verifies mapping at known heights.
 * **Deps:** C1.
@@ -1363,11 +1043,11 @@ Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Co
 
 **C6. Draw path integration**
 
-* **Goal:** Render a single terrain layer into the off‑screen target.
+* **Goal:** Render a single terrain layer into the off-screen target.
 * **Deliverables:**
 
   * `Scene` holds layers; `Renderer.render_rgba()` encodes passes: clear → terrain.
-  * Per‑frame bind updates for uniforms.
+  * Per-frame bind updates for uniforms.
   * Optional MSAA toggle off by default (add later).
 * **Acceptance:** 1024×1024 DEM renders under \~50 ms on mainstream GPUs (readback excluded), image visually correct.
 * **Deps:** A2, B2, C5.
@@ -1375,7 +1055,7 @@ Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Co
 
 **C7. Readback & PNG**
 
-* **Goal:** Finish the round‑trip.
+* **Goal:** Finish the round-trip.
 * **Deliverables:**
 
   * `render_rgba() -> np.ndarray[H,W,4]` and `render_png(path)`.
@@ -1392,7 +1072,7 @@ Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Co
   * CPU prepass for `min/max` of DEM; normalize in shader using uniforms.
   * Option to precompute normals on CPU for comparison; keep shader by default.
   * Basic exposure parameter.
-* **Acceptance:** 4K render < 200 ms GPU on M‑series/RTX‑class; readback < 60 ms; no major banding after tonemap.
+* **Acceptance:** 4K render < 200 ms GPU on M-series/RTX-class; readback < 60 ms; no major banding after tonemap.
 * **Deps:** C7.
 * **Estimate:** 0.5 day.
 
@@ -1402,19 +1082,12 @@ Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Co
 
 **D1. Python API surface (thin)**
 
-* **Goal:** Public methods for Week‑2 demo.
-* **Deliverables:**
-
-  * `Renderer.set_camera_orbit(...)`, `Renderer.set_sun(elevation, azimuth)`.
-  * `Renderer.add_terrain(...)`.
-  * Type hints and docstrings.
-* **Acceptance:** Imports clean; help() shows parameters; invalid args raise friendly errors.
 * **Deps:** B1, C1.
 * **Estimate:** 0.5 day.
 
 **D2. Golden image test**
 
-* **Goal:** Deterministic, cross‑backend test.
+* **Goal:** Deterministic, cross-backend test.
 * **Deliverables:**
 
   * Tiny 64×64 synthetic DEM (gradient) checked into `tests/data/`.
@@ -1425,7 +1098,7 @@ Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Co
 
 **D3. Example notebook/script**
 
-* **Goal:** Showcase end‑to‑end usage.
+* **Goal:** Showcase end-to-end usage.
 * **Deliverables:**
 
   * `examples/terrain_single_tile.py` producing a 1024×1024 PNG with a nice colormap and sun angles.
@@ -1462,7 +1135,7 @@ Absolutely—here’s a **fine‑grained Week 1–2 plan** for **Milestone B: Co
 * **Day 7:** C7, D1
 * **Day 8:** C8 (perf/quality pass)
 * **Day 9:** D2 (golden image), D4 (CI)
-* **Day 10:** D3 (example), buffer for cross‑platform fixes
+* **Day 10:** D3 (example), buffer for cross-platform fixes
 
 Parallelization tips:
 
@@ -1475,7 +1148,7 @@ Parallelization tips:
 
 * **DEM contract (MVP):**
 
-  * `float32` or `float64` (cast to `f32`), shape `(H, W)`, C‑contiguous.
+  * `float32` or `float64` (cast to `f32`), shape `(H, W)`, C-contiguous.
   * `spacing=(dx, dy)` in world units (meters); **Y up**, world XY in meters.
   * Normalize height via `h_min/h_max` uniforms computed on CPU.
 
@@ -1511,17 +1184,9 @@ Parallelization tips:
 **Week 3–4: Vector & Graph layers**
 
 * **Polygons**: earcut tessellation, optional wire overlay.
-* **Lines**: screen‑space wide lines via triangle strips (round caps later).
-* **Points**: instanced disks/sprites using per‑instance buffers.
+* **Lines**: screen-space wide lines via triangle strips (round caps later).
+* **Points**: instanced disks/sprites using per-instance buffers.
 * **Graph snapshot**: node scatter + batched edges; optional depth bias.
-
-Excellent—here’s a **fine‑grained, two‑week plan** for **B2. Week 3–4: Vector & Graph layers** (Rust‑first core with Python API via PyO3; rendering on wgpu). It’s split into small tickets you can drop into your tracker, each with **Goal, Deliverables, Acceptance, Deps, Estimate**, and parallelizable items marked **(P)**.
-
-> **B2 exit criteria (recap)**
->
-> 1. Ship **Vector layers**: Polygons (fill + outline), Lines (screen‑space width, AA), Points (instanced, size in px).
-> 2. Ship **Graph snapshot**: nodes as instanced points, edges as antialiased lines; simple attribute styling.
-> 3. Handle large(ish) inputs via batching; produce golden images + timing metrics; document public APIs.
 
 ---
 
@@ -1560,7 +1225,7 @@ Excellent—here’s a **fine‑grained, two‑week plan** for **B2. Week 3–4:
 
 ### V1.1 Packed data contracts (reuse A3)
 
-* **Goal:** Reuse/extend packed formats to avoid Python‑side overhead.
+* **Goal:** Reuse/extend packed formats to avoid Python-side overhead.
 * **Deliverables:**
 
   * Polygons: `(coords f32 [x,y,...], ring_offsets u32, feature_offsets u32)` (from A3).
@@ -1575,9 +1240,9 @@ Excellent—here’s a **fine‑grained, two‑week plan** for **B2. Week 3–4:
 * **Goal:** Keep draw calls reasonable.
 * **Deliverables:**
 
-  * Per‑layer AABB; pre‑compute per‑path AABB for lines, per‑feature AABB for polygons.
+  * Per-layer AABB; pre-compute per-path AABB for lines, per-feature AABB for polygons.
   * Batch builder to cap **\~100k vertices / draw** (tunable).
-  * (Optional) coarse culling: skip batches entirely if off‑camera (frustum test).
+  * (Optional) coarse culling: skip batches entirely if off-camera (frustum test).
 * **Acceptance:** Large inputs split into multiple draws; memory footprint logged.
 * **Deps:** V1.1
 * **Estimate:** 0.75 d (P)
@@ -1586,15 +1251,15 @@ Excellent—here’s a **fine‑grained, two‑week plan** for **B2. Week 3–4:
 
 ## Workstream V2 — Polygons production pass
 
-> A3 did the tessellation spike. Here we make it “product‑ready” and integrate with styles.
+> A3 did the tessellation spike. Here we make it “product-ready” and integrate with styles.
 
 ### V2.1 Polygon fill pipeline hardening
 
 * **Goal:** Robust fill render with alpha.
 * **Deliverables:**
 
-  * FS outputs straight‑alpha; blending configured (`src = One, dst = OneMinusSrcAlpha`).
-  * Optional per‑feature color via small SSBO or push constants (single color is okay for MVP; add LUT later).
+  * FS outputs straight-alpha; blending configured (`src = One, dst = OneMinusSrcAlpha`).
+  * Optional per-feature color via small SSBO or push constants (single color is okay for MVP; add LUT later).
 * **Acceptance:** Donut (hole) renders correctly over varying backgrounds; no halo at seams.
 * **Deps:** A3 (triangulation), V0.2
 * **Estimate:** 0.5 d
@@ -1605,14 +1270,14 @@ Excellent—here’s a **fine‑grained, two‑week plan** for **B2. Week 3–4:
 * **Deliverables:**
 
   * Reuse A3 stroke mesh; ensure layer order: fill first → stroke.
-  * Line width currently world‑space or pixel? **For polygons** keep world‑space simple, but clamp min width in device px to avoid vanishing.
+  * Line width currently world-space or pixel? **For polygons** keep world-space simple, but clamp min width in device px to avoid vanishing.
 * **Acceptance:** 1px equivalent outline visible at all zooms; no cracks on tight angles.
 * **Deps:** A3 G3.3, V0.2
 * **Estimate:** 0.5 d (P)
 
 ---
 
-## Workstream V3 — Lines (screen‑space AA quads)
+## Workstream V3 — Lines (screen-space AA quads)
 
 ### V3.1 Polyline packing & validation
 
@@ -1621,17 +1286,17 @@ Excellent—here’s a **fine‑grained, two‑week plan** for **B2. Week 3–4:
 
   * Python helper `pack_lines(paths)` producing `(coords, path_offsets)`.
   * Reject paths with <2 points; deduplicate consecutive duplicates.
-* **Acceptance:** Tests for simple path, L‑shape, and degenerate inputs.
+* **Acceptance:** Tests for simple path, L-shape, and degenerate inputs.
 * **Deps:** V1.1
 * **Estimate:** 0.5 d
 
 ### V3.2 Instanced segment expansion (shader path)
 
-* **Goal:** Antialiased screen‑space width without heavy CPU meshing.
+* **Goal:** Antialiased screen-space width without heavy CPU meshing.
 * **Deliverables:**
 
-  * GPU path that draws each **segment** as a **2‑triangle quad** expanded in VS from a unit quad using per‑vertex “side” attribute and **viewport scale**.
-  * Provide miters at joins with miter‑limit; fallback to bevel when exceeded. Round joins later (stretch goal).
+  * GPU path that draws each **segment** as a **2-triangle quad** expanded in VS from a unit quad using per-vertex “side” attribute and **viewport scale**.
+  * Provide miters at joins with miter-limit; fallback to bevel when exceeded. Round joins later (stretch goal).
   * FS does smooth edge AA via distance to edge (simple smoothstep).
 * **Acceptance:** Uniform 2px width regardless of zoom; joints look correct for angles ≥ 30°; no gaps.
 * **Deps:** V3.1, camera uniforms
@@ -1650,589 +1315,1049 @@ Excellent—here’s a **fine‑grained, two‑week plan** for **B2. Week 3–4:
 * **Goal:** Scale to many segments.
 * **Deliverables:**
 
-  * Instance buffer: per‑segment endpoints (`p0, p1`) + color/width; batch draws in \~100k segments.
+  * Instance buffer: per-segment endpoints (`p0, p1`) + color/width; batch draws in \~100k segments.
   * Metrics: #segments, build time, draw time.
-* **Acceptance:** 1e6 short segments render in ≤ 300–500 ms at 1080p headless on a mid‑range GPU (target; adjust per hardware).
+* **Acceptance:** For 1e5 segments, build time and draw time logged; batching prevents giant single draws; AA edges remain stable.
 * **Deps:** V3.2
-* **Estimate:** 0.5 d (P)
+* **Estimate:** 0.5 d
 
 ---
 
-## Workstream V4 — Points (instanced SDF sprites)
+## Workstream V4 — Points (instanced)
 
-### V4.1 Packed points & validation
-
-* **Goal:** Simple input and checks.
-* **Deliverables:** `add_points(xy, size_px, rgba, shape)` with a packed `coords` array; drop NaNs.
-* **Acceptance:** Correct counts; errors on wrong dtypes/shapes.
-* **Deps:** V1.1
-* **Estimate:** 0.25 d
-
-### V4.2 Instanced quad expansion
-
-* **Goal:** Screen‑space sized points.
-* **Deliverables:**
-
-  * VS expands a unit quad per point using size in **px**; converts to NDC with viewport size.
-  * FS draws **SDF circle** (or square) with smooth AA edge; configurable `shape`.
-* **Acceptance:** Sizes in pixels stable across zoom; crisp edges at 1–2 px.
-* **Deps:** camera uniforms
-* **Estimate:** 0.75 d
-
-### V4.3 Attribute styling (size/color arrays)
-
-* **Goal:** Per‑point variability without re‑creating pipelines.
-* **Deliverables:**
-
-  * Optional per‑point `size_px` and `rgba` arrays (float32/uint8).
-  * Small normalization in shader; clamp sizes to \[1, 64] px by default.
-* **Acceptance:** Gradient color/size examples render as expected.
-* **Deps:** V4.2
-* **Estimate:** 0.5 d (P)
-
-### V4.4 Batching & perf
-
-* **Goal:** Handle very large point sets.
-* **Deliverables:** Chunk draws at \~1e5–5e5 instances; reuse instance buffers; metrics.
-* **Acceptance:** 1e6 points in ≤ 200–300 ms at 1080p headless on mid‑range GPU (target).
-* **Deps:** V4.2
-* **Estimate:** 0.5 d (P)
+> **Goal:** Render many points with screen-space sizing.
+> **Deliverables:** Instanced quads expanded in VS; per-instance pos/size/color; FS disc SDF for circle; clamp min size; batching.
+> **Acceptance:** For 1e6 points on mid-range GPU, stable 30–60 FPS headroom offline; golden image tests for sizes/overlap.
 
 ---
 
-## Workstream G — Graph snapshot
+## Workstream V5 — Graph snapshot
 
-### G0 Graph API & ingest
+### V5.1 Node+edge packing
 
-* **Goal:** Define minimal graph inputs.
-* **Deliverables:**
+* **Goal:** Efficient static packing for single-frame graph render.
+* **Deliverables:** Node positions buffer + edge index buffer; optional per-node size/color.
+* **Acceptance:** 1e5 nodes / 2e5 edges pack under a few hundred ms; memory footprint logged.
+* **Deps:** V4, V3
+* **Estimate:** 0.5–1 d
 
-  ```python
-  add_graph(nodes_xy: np.ndarray[(N,2), f32],
-            edges_idx: np.ndarray[(M,2|k), u32],  # 2 for straight segments; k for polyline path indices optional
-            *, node_size_px=4.0, node_rgba=(...), edge_width_px=1.5, edge_rgba=(...))
+### V5.2 Render pipelines
+
+* **Goal:** Separate pipelines for edges (lines) and nodes (points).
+* **Deliverables:** Reuse lines/points implementations; order edges → nodes to avoid overdraw artifacts.
+* **Acceptance:** Golden image tests for a small graph snapshot; AA edges and proper node layering.
+* **Deps:** V3, V4
+* **Estimate:** 0.5 d
+
+---
+
+## Workstream V6 — Tests & docs
+
+### V6.1 Goldens & metrics
+
+* **Goal:** Deterministic visual baselines.
+* **Deliverables:** Tiny goldens for polygons/lines/points/graph; SSIM ≥ 0.99; log counts & timings.
+* **Acceptance:** CI passes on Linux/macOS; artifacts uploaded.
+* **Deps:** V2–V5
+* **Estimate:** 0.5 d
+
+### V6.2 README usage
+
+* **Goal:** Explain vector/graph layer usage & constraints.
+* **Deliverables:** Examples and notes on CRS requirements, batching, AA behavior.
+* **Acceptance:** Build succeeds; example renders; badges show success; clear instructions.
+* **Deps:** A4.3
+
+---
+
+## Optional: `cibuildwheel` variant (if you choose S2)
+
+* Replace the build step with:
+
+  ```yaml
+  - name: Install cibuildwheel
+    run: pip install cibuildwheel==2.20 maturin
+  - name: Build wheels
+    env:
+      CIBW_BUILD: "cp310-*"
+      CIBW_SKIP: "pp* *_i686 *-musllinux_*"
+      CIBW_ENVIRONMENT: >
+        VULKAN_FORGE_PREFER_SOFTWARE=1
+    run: cibuildwheel --output-dir wheels
   ```
+* Add `pyproject.toml` `[tool.cibuildwheel]` to configure manylinux, macOS universal2, etc.
 
-  * Validate ranges (edge indices < N), reject self‑loops if desired.
-* **Acceptance:** Clean errors; stored counts.
-* **Deps:** V4.*, V3.*
-* **Estimate:** 0.5 d
+---
 
-### G1 Nodes: instanced points (reuse V4)
+## Workstream D — tests & docs (terrain)
 
-* **Goal:** Render nodes via the points layer machinery.
-* **Deliverables:** Use V4 pipelines with graph‑specific bind groups if needed.
-* **Acceptance:** 100k nodes draw within V4 budgets; optional per‑node color/size.
-* **Deps:** V4.2
-* **Estimate:** 0.25 d (P)
+**D2. Golden image test**
 
-### G2 Edges: straight segments (reuse V3)
-
-* **Goal:** Render edges via the lines pipeline.
-* **Deliverables:** Build per‑edge instances from node positions; optional color by degree.
-* **Acceptance:** 200k edges render within V3 budgets; no cracks on joins.
-* **Deps:** V3.2
-* **Estimate:** 0.5 d (P)
-
-### G3 Attribute styling (optional)
-
-* **Goal:** Color/size maps by attribute arrays (degree, community id).
+* **Goal:** Deterministic, cross-backend test.
 * **Deliverables:**
 
-  * Small in‑shader LUT for categorical communities; numeric ramp for degree.
-* **Acceptance:** Visual check with a synthetic graph.
-* **Deps:** G1, G2
-* **Estimate:** 0.5 d (optional)
+  * Tiny 64×64 synthetic DEM (gradient) checked into `tests/data/`.
+  * Test renders → compares against a gold PNG using SSIM/PSNR (allow small tolerance).
+* **Acceptance:** Test passes on Vulkan/Metal in CI matrix.
+* **Deps:** C6, C7.
+* **Estimate:** 0.5 day.
 
 ---
 
-## Workstream X — Tests, determinism, docs
+## Workstream D — examples (terrain)
 
-### X1 Golden images (vectors)
+**D3. Example notebook/script**
 
-* **Goal:** Visual regression tests for polygons/lines/points.
+* **Goal:** Showcase end-to-end usage.
 * **Deliverables:**
 
-  * Tiny scenes: donut, polyline with L‑join, random point cloud; 512×512 goldens; SSIM ≥ 0.99.
-* **Acceptance:** CI passes on Linux & macOS.
-* **Deps:** V2–V4
-* **Estimate:** 0.5 d
+  * `examples/terrain_single_tile.py` producing a 1024×1024 PNG with a nice colormap and sun angles.
+* **Acceptance:** Script runs after `maturin develop`; generates image.
+* **Deps:** D1, C7.
+* **Estimate:** 0.25 day. (P)
 
-### X2 Golden images (graph)
+---
 
-* **Goal:** Graph snapshot test.
-* **Deliverables:** Small random graph (N~~1k, M~~2k), layout from spring or fixed grid; goldens.
-* **Acceptance:** SSIM ≥ 0.99 vs goldens; perf metrics logged.
-* **Deps:** G1–G2
-* **Estimate:** 0.25 d (P)
+## Workstream D — CI (terrain)
 
-### X3 Performance & memory metrics
+**D4. CI updates**
 
-* **Goal:** Track budgets.
-* **Deliverables:** `Renderer.last_metrics()` extended: vertex/instance counts, #draws, build/upload/draw times, VRAM used (approx by buffer sizes).
-* **Acceptance:** Metrics printed during examples and in CI logs.
-* **Deps:** V1.2, V3.4, V4.4
-* **Estimate:** 0.25 d (P)
-
-### X4 Docs & examples
-
-* **Goal:** User‑facing recipes.
+* **Goal:** Exercise terrain in CI.
 * **Deliverables:**
 
-  * `examples/vectors_basemap.py` (polygons + roads + POIs).
-  * `examples/graph_snapshot.py` (nodes/edges).
-  * README sections for each layer with API snippets and notes on CRS and pixel sizes.
-* **Acceptance:** Both scripts run after `maturin develop` and emit PNGs.
-* **Deps:** V2–V4, G1–G2
-* **Estimate:** 0.5 d
+  * Extend `.github/workflows/wheels.yml` to run terrain test (headless).
+  * Artifact upload of produced PNGs for inspection.
+* **Acceptance:** CI green across OSes.
+* **Deps:** D2.
+* **Estimate:** 0.25 day. (P)
 
 ---
 
-## Suggested 10‑day schedule (2 engineers)
+## Workstream C — performance & quality (terrain)
 
-**Week 3**
+**C8. Performance & quality passes**
 
-* **Day 1:** V0.1–V0.2, V1.1, V1.2 (P)
-* **Day 2:** V2.1, V2.2 (P)
-* **Day 3–4:** V3.1, V3.2; start V3.3 (P)
-* **Day 5:** V3.4 (perf), X1 (goldens vectors)
+* **Goal:** Hit MVP budgets and polish output.
+* **Deliverables:**
 
-**Week 4**
-
-* **Day 6:** V4.1, V4.2
-* **Day 7:** V4.3 (P), V4.4 (P)
-* **Day 8:** G0, G1 (P), G2 (P)
-* **Day 9:** X2 (graph goldens), X3 (metrics)
-* **Day 10:** X4 (examples/docs), buffer for cross‑platform fixes
+  * CPU prepass for `min/max` of DEM; normalize in shader using uniforms.
+  * Option to precompute normals on CPU for comparison; keep shader by default.
+  * Basic exposure parameter.
+* **Acceptance:** 4K render < 200 ms GPU on M-series/RTX-class; readback < 60 ms; no major banding after tonemap.
+* **Deps:** C7.
+* **Estimate:** 0.5 day.
 
 ---
 
-## Technical guardrails & choices
+## Workstream B — camera/uniforms
 
-* **CRS:** Enforce planar coordinates for vectors/graph inputs. Refuse lat/lon unless `assume_planar=True` with a loud warning.
-* **Pixel‑space sizing:** Lines/points use **pixel sizes** (screen‑space) for MVP. Polygons’ **stroke** may be world‑space with min‑px clamp.
-* **Antialiasing:** Implement **shader‑based AA** (sdf/smoothstep) for lines/points; MSAA remains off for determinism.
-* **Transparency:** Use straight alpha blending; draw order controls compositing; avoid OIT in MVP.
-* **Batching:** Prefer large instance buffers and a few big draws. Keep per‑batch ≤ \~100k–200k instances to avoid huge bind times on some drivers.
-* **Determinism:** Avoid derivatives for AA where possible; prefer analytic distances.
-* **Perf budgets (targets on mid‑range GPU, 1080p):**
+**B1. Coordinate system & camera spec**
 
-  * **Polygons:** 1M tris ≤ 200–300 ms headless.
-  * **Lines:** 1M short segments ≤ 300–500 ms.
-  * **Points:** 1M points ≤ 200–300 ms.
-  * **Graph:** N=100k, M=200k snapshot ≤ 400–600 ms.
+* **Goal:** Fix conventions used across CPU/GPU.
+* **Deliverables:**
 
----
+  * Decision doc: right-handed, +Y up, camera orbit params, degrees vs radians.
+  * `core/camera.rs` (look\_at, perspective/ortho, orbit).
+* **Acceptance:** Deterministic view/proj matrices; unit tests compare against known values.
+* **Deps:** none.
+* **Estimate:** 0.5–1 day.
 
-## Definition of Done (B2)
+**B2. Uniform buffer plumbing**
 
-* Public APIs for polygons/lines/points/graph are implemented and documented.
-* Visual results validated by **golden images** (SSIM ≥ 0.99) across Metal/Vulkan CI jobs.
-* Large input batching is in place; metrics are surfaced.
-* Examples render clean PNGs demonstrating each layer and the graph snapshot.
+* **Goal:** Provide a small uniform block for camera + sun.
+* **Deliverables:**
 
----
-
-Great—here’s a **fine‑grained task plan** for the remaining phases, structured so you can drop items into your tracker. I’ve split **Week 5 (Packaging & docs)** and **Week 6 (Perf & polish)** into small tickets with **Goal, Deliverables, Acceptance, Deps, Estimate**, and I close with **MVP Exit Criteria tasks**.
-*(Note: “vshade” in your exit criteria looks outdated—package is **vulkan‑forge**. I use that below.)*
+  * `GpuUniforms { view, proj, sun_dir, exposure }` with `wgpu::Buffer`, bind group layout/index.
+  * Update triangle shader to read uniforms (even if not used yet).
+* **Acceptance:** Binds do not break the triangle render; passes validation.
+* **Deps:** B1, A1.
+* **Estimate:** 0.5 day. (P)
 
 ---
 
-# Week 5 — Packaging & Docs
+## Workstream A — core scaffolding
 
-## P5.1 Build matrix & reproducible wheels
+**A4. Color management & tonemap stub**
 
-**Goal:** Produce wheels for Linux (manylinux2014 x86\_64), macOS (arm64 & x86\_64 or universal2), and Windows (x86\_64) with **abi3** (`py3.10+`).
-**Deliverables:**
+* **Goal:** Linear workflow, sRGB output, simple tonemap.
+* **Deliverables:**
 
-* Update GH Actions workflow:
+  * WGSL tonemap functions (`reinhard` + gamma 2.2).
+  * Document texture/view format choices.
+* **Acceptance:** Shader compiles; triangle path unchanged; unit test of function values (CPU ref).
+* **Deps:** A2.
+* **Estimate:** 0.5 day. (P)
 
-  * One job per OS/arch (Linux x86\_64, macOS‑arm64, macOS‑x86\_64, Windows x86\_64).
-  * `maturin build --release --strip --compatibility manylinux2014` on Linux.
-  * Cache via `Swatinem/rust-cache@v2`; pin Rust with `rust-toolchain.toml`.
-* Option A: **Two macOS wheels** (arm64 + x86\_64). Option B: **universal2** (one wheel) — choose & document trade‑off.
-  **Acceptance:** CI artifacts include wheels for all targets; re‑runs hit caches and finish faster.
-  **Deps:** none. **Estimate:** 0.5 d.
+**A3. Device diagnostics & feature gating**
 
-## P5.2 Wheel compliance & sdist
+* **Goal:** Deterministic device info and conservative limits.
+* **Deliverables:**
 
-**Goal:** Ensure wheels are compliant and an sdist exists.
-**Deliverables:**
+  * `Renderer.report_device() -> str` (name, backend, limits).
+  * Internal `DeviceCaps` (max texture size, MSAA supported).
+* **Acceptance:** Reports match backend; MSAA off by default if unsupported.
+* **Deps:** A1.
+* **Estimate:** 0.5 day.
 
-* Linux: `auditwheel show wheels/*.whl`; macOS (optional): `delocate-listdeps`.
-* `maturin sdist -o dist`; `twine check wheels/* dist/*`.
-  **Acceptance:** No missing libs; `twine check` passes; local `pip install dist/*.tar.gz` works.
-  **Deps:** P5.1. **Estimate:** 0.25 d.
+**A2. Off-screen target & format policy**
 
-## P5.3 Trusted Publishing & TestPyPI
+* **Goal:** Standardize the render target and readback path.
+* **Deliverables:**
 
-**Goal:** Manual publish path before 1.0.
-**Deliverables:** Secondary workflow (`workflow_dispatch`) that:
+  * `core/target.rs` with `RenderTarget { texture, view }`, create/destroy, `Rgba8UnormSrgb`.
+  * Readback helper w/ row-padding (refactor current code).
+* **Acceptance:** 512×512 triangle renders identically to pre-refactor; round-trip to PNG.
+* **Deps:** A1.
+* **Estimate:** 0.5 day.
 
-* Downloads built wheel artifacts.
-* Publishes to **TestPyPI** via `pypa/gh-action-pypi-publish` (OIDC Trusted Publishing).
-  **Acceptance:** `pip install -i https://test.pypi.org/simple vulkan-forge` works in a fresh venv.
-  **Deps:** P5.1–P5.2. **Estimate:** 0.5 d.
+**A1. Engine layout & error type**
 
-## P5.4 Deterministic image test harness (SSIM)
+* **Goal:** Create module structure and a single error type.
+* **Deliverables:**
 
-**Goal:** Golden image tests with SSIM tolerance.
-**Deliverables:**
-
-* `tests/golden/` with tiny scenes (triangle, small DEM, donut polygon).
-* Pure‑NumPy/Pillow SSIM (or `scikit-image` as dev‑only dep).
-* Pytest fixtures to render → compare SSIM (≥ 0.99 default; 0.98 for cross‑backend).
-  **Acceptance:** `pytest -q` passes locally and in CI (Linux & macOS).
-  **Deps:** A1/A2/A3 spikes done. **Estimate:** 0.5 d.
-
-## P5.5 Golden asset generation & baselines
-
-**Goal:** Reproducible goldens across OS/backends.
-**Deliverables:**
-
-* Script to (re)generate goldens on a designated “authoritative” platform (e.g., macOS/Metal).
-* Store PNGs + metadata (`scene params, adapter info, hash`).
-  **Acceptance:** Fresh goldens regenerate identically on the authoritative machine; CI meets SSIM thresholds.
-  **Deps:** P5.4. **Estimate:** 0.25 d.
-
-## P5.6 Example notebooks (3)
-
-**Goal:** User‑facing examples in Jupyter.
-**Deliverables:** `examples/notebooks/`
-
-1. **Terrain hillshade** (uses synthetic DEM; deterministic).
-2. **City basemap** (synthetic rectangles/roads/points; no heavy deps).
-3. **Graph snapshot** (synthetic graph).
-
-* Each notebook: installs `vulkan‑forge`, sets camera, renders, shows PNG, prints metrics.
-  **Acceptance:** Run clean via `jupyter nbconvert --execute` in CI (or at least smoke‑execute on one OS).
-  **Deps:** A2, A3, B2. **Estimate:** 0.75 d.
-
-## P5.7 Simple video helper (turntable)
-
-**Goal:** Generate turntable videos out‑of‑process via **ffmpeg**.
-**Deliverables:**
-
-* Python utility `vulkan_forge.video.turntable()`:
-
-  * Args: `renderer, orbit(center, distance, elev, az_start, az_end, frames), fps, out_path`.
-  * Renders frames to a temp dir; calls `ffmpeg -framerate … -i %04d.png -pix_fmt yuv420p out.mp4`.
-  * Detects ffmpeg, raises helpful error with install hints.
-* CLI entry point `vulkan-forge-turntable` (console\_scripts).
-  **Acceptance:** Produces a smooth 360° terrain video locally; falls back gracefully if ffmpeg missing.
-  **Deps:** A2 done. **Estimate:** 0.5 d.
-
-## P5.8 Docs refresh (README + API)
-
-**Goal:** Make it easy for newcomers.
-**Deliverables:**
-
-* README: install matrix, backend forcing, troubleshooting, links to notebooks.
-* API doc (lightweight): `pdoc` or markdown stubs for `Renderer` methods.
-  **Acceptance:** New dev can install & run examples in <10 min.
-  **Deps:** P5.6. **Estimate:** 0.5 d.
-
-## P5.9 Third‑party licenses
-
-**Goal:** Legal hygiene.
-**Deliverables:**
-
-* `cargo-about` (or `cargo-lichking`) config; generate `LICENSES-THIRD-PARTY.txt`.
-* Verify PyPI classifiers/license fields.
-  **Acceptance:** File generated and included in sdist/wheels; CI step prints summary.
-  **Deps:** P5.2. **Estimate:** 0.25 d.
-
-## P5.10 CI polish & artifacts
-
-**Goal:** Better visibility for testers.
-**Deliverables:**
-
-* Upload **example PNGs** from tests.
-* Cache pip & Cargo; keep CI ≤ \~10–12 min end‑to‑end.
-  **Acceptance:** Artifacts visible for each run; reruns are faster.
-  **Deps:** P5.1, P5.4. **Estimate:** 0.25 d.
+  * `src/context.rs` (adapter/device/queue, diagnostics).
+  * `src/core/{framegraph.rs, gpu_types.rs}` (skeletons).
+  * `src/error.rs` with `Error` + `Result<T>`.
+  * Rewire `lib.rs` to use `context`.
+* **Acceptance:** Compiles; `Renderer.info()` uses new context; unit tests build.
+* **Deps:** none.
+* **Estimate:** 0.5–1 day.
 
 ---
 
-# Week 6 — Perf & Polish
+4) **Unresolved / Needs Author Review**
 
-## W6.1 Timing & metrics instrumentation
-
-**Goal:** Attribute time to encode/submit/readback.
-**Deliverables:**
-
-* `Renderer.render_metrics()` returns dict: `encode_ms, gpu_ms (approx), readback_ms, total_ms, vram_bytes`.
-* Optional GPU timestamp queries (wgpu feature‑gated), else CPU wall‑clock around submit/poll.
-  **Acceptance:** Metrics printed in examples and CI logs.
-  **Deps:** A1/A2. **Estimate:** 0.5 d.
-
-## W6.2 Draw call grouping & sort
-
-**Goal:** Reduce pipeline/BindGroup churn.
-**Deliverables:**
-
-* Per‑layer batcher that groups by: pipeline id → bind group set → vertex/index buffer ranges.
-* Simple sort before encoding.
-  **Acceptance:** On large scenes, draw call count reduced by ≥30% vs naive order; measurable time win.
-  **Deps:** B2 vector layers. **Estimate:** 0.75 d.
-
-## W6.3 Persistent staging & readback buffers
-
-**Goal:** Minimize allocations/copies.
-**Deliverables:**
-
-* **Upload**: ring buffer for staging (size = worst‑case frame upload), reuse per frame.
-* **Readback**: persistent buffer sized to `(padded_row * H)`, reused.
-  **Acceptance:** No per‑frame buffer creation in logs; render time variance reduced.
-  **Deps:** A1 baseline in place. **Estimate:** 0.5 d.
-
-## W6.4 Adapter/Device diagnostics dump
-
-**Goal:** Actionable environment info for bug reports.
-**Deliverables:**
-
-* `vulkan_forge.report_environment()` → JSON string/dict:
-
-  * OS, Python, package version; adapter name, backend, limits/features; wgpu/wgpu‑native versions.
-* Wire into examples to save `env.json` next to PNGs.
-  **Acceptance:** JSON present; includes all fields; docs show how to attach it to issues.
-  **Deps:** none. **Estimate:** 0.5 d.
-
-## W6.5 Prefer‑software flag & fallback
-
-**Goal:** Reliable headless behavior.
-**Deliverables:**
-
-* Env var: `VULKAN_FORGE_PREFER_SOFTWARE=1` → `force_fallback_adapter=true`.
-* Python param `Renderer(prefer_software: bool=False)` to override.
-* Retry logic: hardware → fallback adapter; clear errors if both fail.
-  **Acceptance:** CI runs use fallback successfully where needed; `info()` shows adapter type.
-  **Deps:** W6.4 (info plumbing). **Estimate:** 0.5 d.
-
-## W6.6 Color/tonemap consistency audit
-
-**Goal:** Avoid double‑gamma & ensure linear workflow.
-**Deliverables:**
-
-* Confirm target is `Rgba8UnormSrgb`; ensure shader outputs **linear** colors (GPU hardware does SRGB → display).
-* Keep tonemap in linear; avoid extra gamma on write.
-  **Acceptance:** Visual parity across backends; no washed‑out or extra‑dark outputs; SSIM improves on goldens.
-  **Deps:** A2. **Estimate:** 0.25 d.
-
-## W6.7 Error model & messages
-
-**Goal:** Friendly, consistent Python exceptions.
-**Deliverables:**
-
-* Map internal errors to `PyRuntimeError` with clear prefix (`[Device]`, `[Upload]`, `[Tessellation]`).
-* Include remediation hints (e.g., “project to planar CRS”, “enable prefer\_software”).
-  **Acceptance:** Failing tests show actionable messages; docs include troubleshooting table.
-  **Deps:** A2/A3/B2. **Estimate:** 0.5 d.
-
-## W6.8 Logging controls
-
-**Goal:** Debug without noisy defaults.
-**Deliverables:**
-
-* Feature‑flag log levels via env var `VULKAN_FORGE_LOG=info|debug|trace`.
-* Use `log` + `env_logger` (Rust) gated behind optional feature; default off.
-  **Acceptance:** Changing env var changes verbosity; default minimal.
-  **Deps:** none. **Estimate:** 0.25 d.
-
-## W6.9 Performance write‑up
-
-**Goal:** Set expectations and tips.
-**Deliverables:**
-
-* Doc page/README section: typical frame times for point/line/polygon/terrain; batching guidelines; data size limits.
-  **Acceptance:** Published with numbers from your hardware; linked from README.
-  **Deps:** W6.1–W6.3. **Estimate:** 0.25 d.
-
-## W6.10 Cross‑platform SSIM sweep
-
-**Goal:** Validate image similarity across OS/backends.
-**Deliverables:**
-
-* CI job matrix renders the three example scenes; compares SSIM vs macOS goldens.
-* Tolerances: **≥ 0.98** (as per MVP).
-  **Acceptance:** All jobs pass; diff artifacts uploaded when failing.
-  **Deps:** P5.4–P5.5, Week‑6 polish. **Estimate:** 0.5 d.
+- *(none detected)*
 
 ---
 
-# MVP Exit Criteria — Task List
+5) **Verification Checklist**
 
-> **Target examples reproducible via `pip install vulkan-forge`:**
->
-> 1. **DEM hillshade with overlays** (terrain + polygons/lines/points)
-> 2. **City basemap polygons/roads**
-> 3. **50k‑node graph snapshot**
->    **Cross‑platform SSIM ≥ 0.98**
+- [ ] IDs are unique and unchanged (A*, T*, G*, V*, etc.).
+- [ ] Major section order is unchanged from the original.
+- [ ] All anchors/headings remain intact; no anchor text was renamed.
+- [ ] Acceptance Criteria sections are present where originally defined; only exact duplicates were removed.
+- [ ] Code fences are balanced and unchanged in content.
+- [ ] Tables and lists render correctly (no structural changes beyond duplicate removals).
+- [ ] Internal references and examples still point to existing sections.
+- [ ] No new content or claims were added; wording preserved except for removed duplicates.
+- [ ] Front-matter/license blocks (if any) remain byte-identical.
+- [ ] Final Markdown passes a renderer preview without errors.
 
-## E1 Publish candidate wheels
+# ROADMAP.md — **forge3d** (WebGPU/wgpu) — Updated with 9 Tutorial Lessons
 
-* **Goal:** Make install trivial.
-* **Deliverables:** Tag `v0.1.0-rc1`; build wheels; **TestPyPI** publish.
-* **Acceptance:** `pip install -i https://test.pypi.org/simple vulkan-forge` works on all OSes.
-  **Deps:** P5.1–P5.3. **Estimate:** 0.25 d.
-
-## E2 Example scripts (installable) + datasets
-
-* **Goal:** Reproducible, dependency‑light examples.
-* **Deliverables:** Three scripts in `python/examples/` and mirrored notebooks:
-
-  * `terrain_hillshade_with_overlays.py` (synthetic DEM + synthetic vectors).
-  * `city_basemap.py` (synthetic blocks/roads/POIs).
-  * `graph_50k_snapshot.py` (generate 50k nodes, \~100k edges; deterministic seed).
-* Package tiny synthetic datasets or generate on the fly (no downloads).
-  **Acceptance:** Each script runs in < 60 s on a mid‑range GPU and emits a PNG (and optional MP4 via P5.7).
-  **Deps:** A2, B2. **Estimate:** 0.75 d.
-
-## E3 CLI entry points
-
-* **Goal:** One‑line run after install.
-  **Deliverables:** `console_scripts`:
-
-  * `vulkan-forge-example-terrain`
-  * `vulkan-forge-example-basemap`
-  * `vulkan-forge-example-graph`
-    **Acceptance:** Running each CLI generates the expected PNGs.
-    **Deps:** E2. **Estimate:** 0.25 d.
-
-## E4 Cross‑platform SSIM CI for examples
-
-* **Goal:** Enforce visual similarity.
-  **Deliverables:** CI job renders all three examples and compares to macOS goldens with SSIM ≥ 0.98; uploads diffs on failure.
-  **Acceptance:** Matrix green across Linux/Windows/macOS; failing SSIM uploads diff images.
-  **Deps:** P5.4–P5.5, W6.10. **Estimate:** 0.5 d.
-
-## E5 Readme “Quick Repro” section
-
-* **Goal:** New users can reproduce in minutes.
-  **Deliverables:** Commands to run each CLI and notebook; screenshots; troubleshooting links.
-  **Acceptance:** Manual check on a clean machine matches screenshots.
-  **Deps:** E2–E3. **Estimate:** 0.25 d.
-
-## E6 Release cut
-
-* **Goal:** Ship v0.1.0.
-  **Deliverables:** Release notes; bump version; PyPI publish (Trusted Publishing).
-  **Acceptance:** `pip install vulkan-forge` (PyPI) works; wheels pulled by pip for all platforms; examples run.
-  **Deps:** E1–E5. **Estimate:** 0.25 d.
+> This version integrates nine WebGPU tutorial lessons into the existing plan, adds missing foundations (uniforms, bind groups, storage buffers, instancing, cube textures/skybox, canvas/presentation nuances, depth, mips), and preserves prior milestones (determinism, headless/off-screen rendering, terrain spike, wheel/CI). Existing sections from the previous roadmap are retained and expanded where relevant.&#x20;
 
 ---
 
-## Suggested scheduling & ownership
+## 0) Quick start with the repo
 
-**Week 5 (2 engineers)**
+```bash
+# In a fresh virtualenv:
+pip install maturin
 
-* Eng A: P5.1–P5.3, P5.10, P5.9
-* Eng B: P5.4–P5.6, P5.7
-* Shared: P5.8
+# From the repo root:
+maturin develop --release
 
-**Week 6 (2 engineers)**
-
-* Eng A: W6.1–W6.3, W6.10
-* Eng B: W6.4–W6.8
-* Shared: W6.9
-
-**Release (end of Week 6)**
-
-* E1–E6 split across team; 0.5–1 day total.
-
----
-
-## Checklists (copy/paste)
-
-**Packaging**
-
-* [ ] Linux manylinux2014 wheel
-* [ ] macOS arm64 & x86\_64 (or universal2) wheels
-* [ ] Windows x86\_64 wheel
-* [ ] sdist, `twine check`
-* [ ] Trusted Publishing to TestPyPI
-
-**Determinism**
-
-* [ ] Golden tests + SSIM (≥ 0.99 unit, ≥ 0.98 cross‑backend)
-* [ ] Goldens regeneration script + metadata
-
-**Docs**
-
-* [ ] 3 notebooks executed (or example scripts)
-* [ ] README sections: install matrix, examples, troubleshooting
-
-**Perf & polish**
-
-* [ ] Metrics emitted, staging/readback persistent
-* [ ] Draw call grouping
-* [ ] `report_environment()` + `prefer_software` flag
-
-**MVP examples**
-
-* [ ] Terrain + overlays PNG
-* [ ] Basemap polygons/roads PNG
-* [ ] 50k‑node graph PNG
-* [ ] CI SSIM gate across OSes
-
----
-
-
-
----
-
-## 2) FFI & crate layout (already scaffolded)
-
-```
-vulkan-forge/
-├─ Cargo.toml                      # Rust crate, cdylib
-├─ pyproject.toml                  # maturin (build backend)
-├─ src/
-│  ├─ lib.rs                       # PyO3 module, headless renderer (triangle)
-│  └─ shaders/triangle.wgsl
-├─ python/
-│  ├─ vshade/__init__.py           # re-exports Renderer from Rust
-│  └─ examples/triangle.py
-└─ .github/workflows/wheels.yml    # CI for wheels + smoke tests
+# Smoke test (creates triangle.png)
+python -m examples.triangle
 ```
 
-**Next files to add during Milestone A2/A3**
+Tips:
 
-* `src/renderer/` (Rust modules): `context.rs`, `scene.rs`, `terrain.rs`, `vectors.rs`.
-* `src/shaders/terrain.wgsl`, `fill.wgsl`, `lines.wgsl`.
-
----
-
-## 3) API sketch (Python, thin over Rust)
-
-```python
-import numpy as np
-from vshade import Renderer
-
-r = Renderer(width=1920, height=1080)
-r.set_clear(0.97, 0.98, 0.99, 1.0)
-r.set_camera_orbit(target=(0,0,0), distance=1200, azimuth=120, elevation=35)
-
-# Terrain
-r.add_terrain(heightmap=dem_np.astype(np.float32),
-              spacing=(30.0, 30.0), exaggeration=1.5,
-              colormap="viridis")            # mapped in Rust with a small LUT
-
-# Vectors (require preprojected coords in MVP)
-r.add_polygons(polys, fill_rgba=(0,0,0,0.1), line_rgba=(0.2,0.2,0.2,1), line_width=1.5)
-r.add_lines(lines, rgba=(0.1,0.1,0.1,1), width=2.0)
-r.add_points(xy_array, rgba=(0.8,0.1,0.1,1), size=6.0)
-
-img = r.render_rgba()          # np.ndarray[H,W,4], uint8
-r.render_png("frame.png")
-```
-
-(For MVP, vectors can accept either packed arrays or a minimal Python-side adapter that extracts coords from GeoPandas/Shapely and passes flat arrays into Rust.)
+* To force a backend during testing: `WGPU_BACKEND=metal|vulkan|dx12`.
+* macOS needs Xcode CLT; Windows needs MSVC Build Tools (C++ workload).&#x20;
 
 ---
 
+## 1) Deliverables & milestones (Option B)
 
-<!-- T41-BEGIN:roadmap-check -->
-- [x] T3 — Terrain Shaders & Pipeline
-- [x] T4.1 — Scene integration (minimal)
-<!-- T41-END:roadmap-check -->
+### Milestone A — Spikes (1–2 weeks total)
+
+**A1. Headless rendering spike** ✅ *Done in the starter*
+
+* **Exit criteria:** Produce a deterministic 512×512 PNG across OS backends; return an `H×W×4` `uint8` NumPy array.&#x20;
+
+---
+
+### A1.1 Repository + build sanity (0.5d)
+
+**Goal**: Everyone can build and run the starter consistently.
+
+* **Deliverables**
+
+  * Confirm local build: `maturin develop --release` works on macOS, Linux, Windows.
+  * Document minimal toolchains (macOS CLT, Windows MSVC Build Tools, Python 3.10–3.12).
+* **Acceptance**
+
+  * `python -m examples.triangle` produces `triangle.png`.
+  * Version pins committed (Rust toolchain in `rust-toolchain.toml` optional).
+* **Notes**: Pin `pyo3`, `wgpu` minor versions in `Cargo.toml`.&#x20;
+
+---
+
+### A1.2 Deterministic render pipeline setup (0.5d)
+
+* **Deliverables**: No MSAA; fixed clear color; fixed viewport/scissor; target `Rgba8UnormSrgb`.
+* **Acceptance**: Repeated runs produce identical PNG bytes (hash match).&#x20;
+
+---
+
+### A1.3 Shader + geometry determinism (0.5d)
+
+* **Deliverables**: Canonical triangle (no uniforms); pure linear interpolation.
+* **Acceptance**: Edge pixels stable; consistent coverage.&#x20;
+
+---
+
+### A1.4 Off-screen target & readback path (0.5d)
+
+* **Deliverables**: Off-screen `Rgba8UnormSrgb` texture; row-padding removal; persistent readback buffer.
+* **Acceptance**: `(512,512,4)` `uint8`; unit test validates padding logic.&#x20;
+
+---
+
+### A1.5 Python API surface (0.25d)
+
+* **Deliverables**: `Renderer(width, height)`, `render_triangle_rgba()`, `render_triangle_png(path)`, `info()`; type hints/docstrings.
+* **Acceptance**: `help(forge3d.Renderer)` is clear.&#x20;
+
+---
+
+### A1.6 Determinism harness (0.5d)
+
+* **Deliverables**: SHA-256 equality + SSIM ≥ 0.999 fallback; backend toggling via `WGPU_BACKEND`.
+* **Acceptance**: Identical hashes per run; SSIM fallback passes across backends.&#x20;
+
+---
+
+### A1.7 Cross-backend runners (0.5d) (P)
+
+* **Deliverables**: Scripts to run Metal/Vulkan/DX12 with determinism harness.
+* **Acceptance**: All available backends pass criteria.&#x20;
+
+---
+
+### A1.8 CI matrix & artifacts (0.5–1d)
+
+* **Deliverables**: Wheels + headless determinism test in CI; upload `triangle-<backend>-<sha>.png`.
+* **Acceptance**: Green on Ubuntu/Windows/macOS; artifacts stable.&#x20;
+
+---
+
+### A1.9 Device diagnostics & failure modes (0.25d)
+
+* **Deliverables**: `Renderer.report_device()`; clear errors/tips on adapter failure.
+* **Acceptance**: Helpful message on unsupported hosts/VMs.&#x20;
+
+---
+
+### A1.10 Performance sanity (optional, 0.25d)
+
+* **Deliverables**: Timing logs for encode/submit/map; perf threshold in CI.
+* **Acceptance**: Meets threshold on CI runners.&#x20;
+
+---
+
+### A1.11 Documentation updates (0.25d)
+
+* **Deliverables**: README sections for spike, backend forcing & hashes, troubleshooting.
+* **Acceptance**: Fresh dev reproduces in <10 minutes.&#x20;
+
+---
+
+### **A2. Terrain pipeline spike** (\~3–5 days)
+
+*(T0–T5 below summarize the current terrain plan; unchanged, kept verbatim in spirit and trimmed here for focus. Full details remain from the original file and are still in scope.)*&#x20;
+
+* **T0 — API & Data Contract**: Python→Rust contract, height range stats/overrides.
+* **T1 — CPU Mesh & GPU Resources**: Indexed grid; DEM as `R32Float` texture; colormap LUT.
+* **T2 — Uniforms/Camera/Lighting**: `Globals` UBO with view/proj/sun/exposure/ranges.
+* **T3 — Terrain Shaders & Pipeline**: VS height reconstruction; FS normals + Lambert; pipeline layout/bindings.
+* **T4 — Integration & Output**: Scene layer; reuse readback; PNG/NumPy parity.
+* **T5 — Tests/Timing/Docs**: Synthetic DEMs + goldens; timing harness; example scripts.&#x20;
+
+---
+
+## 2) **New Workstreams from the 9 WebGPU Lessons**
+
+> These add fundamentals we will implement in Rust/**wgpu** with headless targets and tiny browser demos when useful. Each item cites the lesson it came from using `:contentReference[oaicite:0]{index=N}` and an inline file marker.
+
+### U) Uniforms & Bind Groups
+
+**U1. Single-struct uniforms (color/scale/offset)**
+
+* **Deliverables**
+
+  * Rust `wgpu` example+test mirroring a single `@group(0) @binding(0)` uniform struct with `color: vec4f`, `scale: vec2f`, `offset: vec2f`.
+  * Bind group set once per draw; update `scale` by aspect each frame.
+* **Acceptance**
+
+  * 100 triangles render with per-object color/offset by writing different uniform buffers; aspect-correct scale verified in image test.
+  * Ported headless example produces deterministic PNG.
+  * Source: &#x20;
+
+**U2. Many objects via **per-object uniform buffers****
+
+* **Deliverables**
+
+  * Allocate one uniform buffer **per object**; create one bind group per object; loop setBindGroup/draw.
+* **Acceptance**
+
+  * 100 objects render; functional but measured overhead of bind group churn logged for comparison with storage-buffer approach (S2).
+  * Source: &#x20;
+
+**U3. Split uniforms across multiple UBOs**
+
+* **Deliverables**
+
+  * Two uniform buffers: static (`color+offset`) and dynamic (`scale`), each with its own binding; update only dynamic per frame.
+* **Acceptance**
+
+  * Byte-accurate updates to dynamic UBO only; frame time improvement vs U2 recorded.
+  * Source: &#x20;
+
+---
+
+### S) Storage Buffers & Instancing
+
+**S1. Replace uniforms with storage buffers (one struct per bind)**
+
+* **Deliverables**
+
+  * Mirror U3 but with `var<storage, read>` buffers for the same structs.
+* **Acceptance**
+
+  * Visual parity with U3; API plumbing differs; micro-benchmark notes included.
+  * Source: &#x20;
+
+**S2. **Array-of-structs** + `@builtin(instance_index)` instancing**
+
+* **Deliverables**
+
+  * Two SSBOs: `array<OurStruct>` and `array<OtherStruct>`; single bind group; draw once with `draw(vertex_count, instance_count)`.
+* **Acceptance**
+
+  * 100 instances render via one draw; functional image test; per-instance `scale/offset/color` applied; aspect handled in host.
+  * Source: &#x20;
+
+**S3. Split-buffers (static vs dynamic) performance demo**
+
+* **Deliverables**
+
+  * “Minimal changes” variant with one static SSBO (color+offset) and one dynamic SSBO (scale) updated each frame; per-object bind groups.
+* **Acceptance**
+
+  * Correctness parity; captures perf impact of per-object bind groups vs S2’s single bind group + instancing.
+  * Source: &#x20;
+
+---
+
+### P) Presentation & Canvas/Surface Nuances (for demos)
+
+> Our core is headless, but browser demos and on-screen tests are helpful.
+
+**P1. Canvas configure & presentation format**
+
+* **Deliverables**
+
+  * Tiny demo that configures a canvas WebGPU context using `navigator.gpu.getPreferredCanvasFormat()` and renders the basic triangle.
+* **Acceptance**
+
+  * Demo runs; parity triangle renders.
+  * Source: &#x20;
+
+**P2. CSS-scaled canvas vs backing store**
+
+* **Deliverables**
+
+  * Document the difference between CSS size and `canvas.width/height`; keep the backing store fixed for determinism tests.
+* **Acceptance**
+
+  * Demo renders correctly with CSS fill; roadmap note codifies headless settings.
+  * Source: &#x20;
+
+**P3. Resize handling + clamping to device limits**
+
+* **Deliverables**
+
+  * Example with `ResizeObserver`; clamp width/height to `device.limits.maxTextureDimension2D`; re-render on resize.
+* **Acceptance**
+
+  * Verified no exceptions at extreme sizes; off-screen path mirrors clamping logic.
+  * Source: &#x20;
+
+---
+
+### T) Textures, Samplers, Mips, Cube Maps (Skybox)
+
+**T1. Cube texture sampling + sampler setup**
+
+* **Deliverables**
+
+  * Create a `TextureViewDimension::Cube` (wgpu) and sample in FS using `textureSample` with a linear sampler.
+* **Acceptance**
+
+  * Headless sample renders a skybox-like lit background (or a solid diagnostic if images unavailable).
+  * Source: &#x20;
+
+**T2. View-direction projection inverse in uniform buffer**
+
+* **Deliverables**
+
+  * Compute `viewDirProjInv` on host; write 4×4 matrix to UBO; reconstruct direction in FS to sample the cubemap.
+* **Acceptance**
+
+  * Image changes as camera orbits; verified with a golden series.
+  * Source: &#x20;
+
+**T3. Mipmap generation via render pass (GPU)**
+
+* **Deliverables**
+
+  * Off-screen pipeline to generate mips by successively rendering the previous level to the next (linear sampling).
+* **Acceptance**
+
+  * Mip chain complete; minification looks correct; no validation errors; measurable bandwidth reduction when zoomed out.
+  * Source: &#x20;
+
+**T4. `copyExternalImageToTexture` + `flipY`**
+
+* **Deliverables**
+
+  * Demo load path for external image bitmaps; optional `flipY=false/true` discussion; retained as browser-only helper.
+* **Acceptance**
+
+  * Images load into a texture array; visually correct orientation.
+  * Source: &#x20;
+
+---
+
+### D) Depth & Stencil
+
+**D1. Depth buffer enablement**
+
+* **Deliverables**
+
+  * Add depth attachment to pipeline (`depth24plus`), `less-equal` compare to allow skybox to pass at infinity.
+* **Acceptance**
+
+  * No z-fighting; skybox draws behind all geometry; validation passes.
+  * Source: &#x20;
+
+---
+
+### B) Blending & Alpha
+
+**B1. Premultiplied alpha presentation**
+
+* **Deliverables**
+
+  * Note/demonstrate `alphaMode: 'premultiplied'` when configuring the surface; document implications vs off-screen renders (opaque) for determinism.
+* **Acceptance**
+
+  * Demo shows correct compositing with translucent content; headless path remains explicitly opaque for bit-exact PNGs.
+  * Source: &#x20;
+
+---
+
+### F) Formats & Color
+
+**F1. sRGB render target consistency**
+
+* **Deliverables**
+
+  * Keep `Rgba8UnormSrgb` for targets; clarify gamma in headless and demo paths; validate consistent conversion.
+* **Acceptance**
+
+  * Golden images consistent across backends; doc blurb in README.
+  * Reinforces existing A1.2 choices.&#x20;
+
+---
+
+### O) Performance Patterns & API Hygiene
+
+**O1. Bind group churn vs single-bind instancing**
+
+* **Deliverables**
+
+  * Micro-bench that compares U2/U3 (per-object bind groups) vs S2 (single bind group + instancing).
+* **Acceptance**
+
+  * Timing table committed; recommendation recorded (“prefer S2 for many objects”).
+  * Sources:  , &#x20;
+
+**O2. Resize-safe pipelines**
+
+* **Deliverables**
+
+  * Ensure attachments and depth textures are recreated on resize; clamp to device limits.
+* **Acceptance**
+
+  * No crashes on continuous resizes; headless mirrors clamping logic.
+  * Source:   and &#x20;
+
+---
+
+## 3) Implementation checklist (updated)
+
+* [ ] **Uniforms:** Single struct UBO example (U1). &#x20;
+* [ ] **Uniforms (split):** Static + dynamic UBOs (U3). &#x20;
+* [ ] **Storage buffers:** SSBO parity + AoS instancing (S1–S2). &#x20;
+* [ ] **Minimal SSBO changes:** Static/dynamic split (S3). &#x20;
+* [ ] **Presentation:** Canvas CSS & resize demo (P2–P3).  , &#x20;
+* [ ] **Depth:** `depth24plus` + `less-equal` (D1). &#x20;
+* [ ] **Skybox:** Cube texture + mips + viewDirProjInv (T1–T3). &#x20;
+* [ ] **Alpha:** Premultiplied presentation note (B1). &#x20;
+* [ ] **sRGB:** Re-assert render target (`Rgba8UnormSrgb`) (F1).&#x20;
+
+---
+
+## 4) Extracted topics from the 9 lessons (normalized)
+
+1. **Basic pipeline bootstrapping** — adapter/device; canvas context; configure with preferred format; minimal VS/FS returning a fixed color; single render pass & submit. &#x20;
+2. **CSS size vs backing size** — CSS fills container but you still manage `canvas.width/height` separately for resolution. &#x20;
+3. **Resize flow** — `ResizeObserver`, clamp to `device.limits.maxTextureDimension2D`, and re-render. &#x20;
+4. **Uniforms (single struct)** — `color/scale/offset` in a UBO; update with `queue.writeBuffer`; aspect-dependent scaling. &#x20;
+5. **Uniforms (many objects)** — per-object uniform buffer + per-object bind group; simple loop. &#x20;
+6. **Uniforms split** — static vs dynamic values in separate UBOs to reduce writes. &#x20;
+7. **Storage buffers, per-object** — SSBOs used like uniforms (`var<storage, read>`). &#x20;
+8. **Instancing with SSBO arrays** — `array<struct>` + `@builtin(instance_index)`; single bind group + one instanced draw. &#x20;
+9. **Skybox** — cube textures + sampler; premultiplied alpha on surface; enable depth; compute `viewDirProjInv`; GPU mip generation; `copyExternalImageToTexture`.   &#x20;
+
+---
+
+## 5) Gap analysis vs the existing roadmap
+
+**Gaps newly covered**
+
+* **Uniforms & Bind Groups (single, many, split):** Not explicitly specified in A-series; added U1–U3.  ,  , &#x20;
+* **Storage Buffers & Instancing:** New S1–S3 cover SSBOs and `@builtin(instance_index)`.  , &#x20;
+* **Skybox / Cube textures / Mips:** New T1–T3. &#x20;
+* **Depth enablement & less-equal for skybox:** New D1. &#x20;
+* **Presentation nuances (CSS sizing, resize, limits):** New P1–P3 (demo-only).  , &#x20;
+
+**Reinforcement overlaps (tutorial deepens existing topics)**
+
+* **sRGB target format** reaffirmed (A1.2 ↔ F1).&#x20;
+* **Deterministic pipeline & clear color** shown again in minimal triangle lessons. &#x20;
+* **Resource re-creation on resize** complements our off-screen texture lifetime practices. &#x20;
+
+---
+
+## 6) Suggested 4-day schedule (revised) — adding new tracks
+
+**Day 1:** U1, U2 → basic/multi-object uniforms; P1 demo
+**Day 2:** U3; S1 (SSBO parity)
+**Day 3:** S2 (instancing AoS); S3 (minimal split) + O1 micro-bench
+**Day 4:** T1–T3 (cube, mips, viewProjInv) + D1; finalize P2–P3 notes
+
+Parallelization: Skybox (T\*) can proceed independently once a presentable target exists.
+
+---
+
+## 7) CI & packaging (kept)
+
+The wheel/CI spike (A4.1–A4.4) remains unchanged (abi3 wheels via maturin, matrix/caching, smoke test render, fallback adapter option).&#x20;
+
+---
+
+## 8) Definition of Done (updated)
+
+* Headless renders deterministic across backends (A1.\*).&#x20;
+* Terrain spike (T0–T5) produces PNG/NumPy parity and golden tests.&#x20;
+* **New DoD items:**
+
+  * **Uniforms/Storage:** U1–U3/S1–S3 examples compile and pass image tests (100 instances).  , &#x20;
+  * **Skybox:** Cube map with mips renders correctly; depth works as specified. &#x20;
+  * **Docs:** Notes on CSS size, resizing & device limits published (demo-only). &#x20;
+
+---
+
+## 9) What changed vs the old roadmap (summary)
+
+* **Added** new workstreams **U/S/P/T/D/B/F/O** to cover uniforms, storage buffers, instancing, presentation/resize, skybox (cube textures, samplers, mips), depth, alpha premultiplication, and perf patterns. (New)
+* **Kept** all A1.\* determinism and A2 (terrain) content intact; added references tying sRGB/clear color and resize practices back to lessons. (Unchanged + reinforced)
+* **Expanded** implementation checklist to include lesson-derived tasks with acceptance criteria and image tests. (Expanded)
+* **Clarified** demo-only vs headless scope (presentation features are demos; headless path remains opaque & deterministic). (Clarified)
+
+---
+
+## Sources (index mapping for `:contentReference[oaicite:0]{index=…}`)
+
+0. **webgpu-simple-triangle.html** &#x20;
+1. **webgpu-simple-triangle-with-canvas-css.html** &#x20;
+2. **webgpu-simple-triangle-with-canvas-resize.html** &#x20;
+3. **webgpu-simple-triangle-uniforms.html** &#x20;
+4. **webgpu-simple-triangle-uniforms-multiple.html** &#x20;
+5. **webgpu-simple-triangle-uniforms-split.html** &#x20;
+6. **webgpu-simple-triangle-storage-buffer-split.html** &#x20;
+7. **webgpu-simple-triangle-storage-split-minimal-changes.html** &#x20;
+8. **webgpu-skybox.html** &#x20;
+
+---
+
+# New Tasks (Insertion-Ready)
+
+#### \[TX-01] — Textured Quad Baseline (2D Texture + Sampler)
+
+**Section/Phase:** v0.2.x: Rendering › Textures & Samplers
+**Summary (1–3 lines):** Add a minimal headless **wgpu** example that draws a textured quad using a 2D texture (`rgba8unorm`) and a sampler; serve as the foundation for filtering/wrapping/mips. &#x20;
+**Deliverables:**
+
+* Rust/**wgpu** headless sample: creates `Texture2D` + `Sampler`, bind group layout (texture/sampler), VS (two triangles via `vertex_index`), FS `textureSample(...)`.
+* CPU upload path demonstrating `queue.write_texture` with correct `bytes_per_row` padding.
+* Python wrapper `Renderer.render_textured_quad_rgba(image: ndarray|None)`; if `None`, render a built-in 5×7 pattern.
+  **Acceptance Criteria:**
+* Produces deterministic 512×512 PNG with expected pattern (**pixel hash exact**).
+* Validation passes on Metal/Vulkan/DX12; target format `Rgba8UnormSrgb` documented.
+  **Dependencies:** Headless pipeline + readback from A1.4; sRGB target from A1.2.&#x20;
+  **Risks/Mitigations:** Row-padding mistakes → unit test with synthetic strides; add assert on `bytes_per_row % 256 == 0`.
+  **Refs:** &#x20;
+
+#### \[TX-02] — Sampler Matrix: Wrapping & Magnification
+
+**Section/Phase:** v0.2.x: Rendering › Textures & Samplers
+**Summary:** Implement an 8-case **sampler** matrix (repeat/clamp × repeat/clamp × nearest/linear mag) and snapshot outputs for regression tests. &#x20;
+**Deliverables:**
+
+* Create 8 `Sampler`s covering `{addressModeU,V}∈{repeat,clamp-to-edge}`, `magFilter∈{nearest,linear}`; per-case bind group & render.
+* Golden images stored; Python harness to compare.
+  **Acceptance Criteria:**
+* 8 rendered PNGs differ in expected edge/zoom behavior; **hash-stable** per case on a given backend.
+  **Dependencies:** TX-01.
+  **Risks/Mitigations:** Backend differences at edges → lock to `clamp-to-edge` for baseline and document expected variance.
+  **Refs:** &#x20;
+
+#### \[TX-03] — Minification Visuals (Uniform Scale/Offset)
+
+**Section/Phase:** v0.2.x: Rendering › Textures & Samplers › Minification
+**Summary:** Add a test that uses a uniform `{scale, offset}` to draw a *small* quad (minification), validating visual differences under filtering. &#x20;
+**Deliverables:**
+
+* Uniform buffer with `{scale: vec2f, offset: vec2f}`; VS multiplies positions accordingly.
+* Two runs: `magFilter=linear` vs `nearest` (address modes fixed).
+  **Acceptance Criteria:**
+* PNG pair shows characteristic minification differences (checked with simple frequency-based metric or golden diff).
+  **Dependencies:** TX-01, TX-02.
+  **Risks/Mitigations:** CSS `image-rendering` is browser-only → headless ignores; document difference.
+  **Refs:** &#x20;
+
+#### \[TX-04] — Mipmap Generation (On-GPU)
+
+**Section/Phase:** v0.2.x: Rendering › Textures & Samplers › Mipmaps
+**Summary:** Implement a render-pass mipmap generator for `rgba8unorm` textures and validate minification quality with/without mips. ,  &#x20;
+**Deliverables:**
+
+* Utility: `generate_mips(device, texture_view)` that renders level N→N+1 using a full-screen pipeline.
+* Test: render a checkerboard at 64×, sample at 1× with minification; compare **PSNR/SSIM** for **w/ mips** vs **no mips**.
+  **Acceptance Criteria:**
+* Mip chain complete (`mip_level_count == 1 + floor(log2(max(w,h)))`); **SSIM(w/ mips) > SSIM(no mips)** for minified view.
+  **Dependencies:** TX-01.
+  **Risks/Mitigations:** Format constraints → start with `rgba8unorm` only; assert usage includes `RENDER_ATTACHMENT`.
+  **Refs:** ,  &#x20;
+
+#### \[IO-IMG-01] — Image Import (`copyExternalImageToTexture`) + flipY
+
+**Section/Phase:** v0.2.x: I/O › Image Ingest (Web demo + headless parity)
+**Summary:** Provide a **browser demo** to import `ImageBitmap/HTMLImageElement` with optional `flipY` and mips; add a **headless** PNG loader path for parity tests. ,  &#x20;
+**Deliverables:**
+
+* Web: `createImageBitmap(...,{colorSpaceConversion:'none'})` → `copyExternalImageToTexture({source, flipY}, {texture}, size)`.
+* Headless: decode PNG (CPU) → upload via `queue.write_texture`; optional flipY in shader or staging.
+* Docs: note color-space conversion disable to avoid double sRGB.
+  **Acceptance Criteria:**
+* Web + headless produce **matching** PNGs for the same input (within byte-exact or SSIM≥0.999 if gamma differs).
+  **Dependencies:** TX-01, TX-04.
+  **Risks/Mitigations:** Color-space differences across platforms → lock to `Rgba8UnormSrgb`, disable browser conversions.
+  **Refs:** ,  &#x20;
+
+#### \[IO-CAN-01] — Canvas/OffscreenCanvas Import
+
+**Section/Phase:** v0.2.x: I/O › Image Ingest (Web demo)
+**Summary:** Demonstrate importing from `HTMLCanvasElement`/**OffscreenCanvas** into a GPU texture, with optional on-GPU mip generation. &#x20;
+**Deliverables:**
+
+* Web demo: draw dynamic 2D content on a canvas; call `copyExternalImageToTexture(...)`; generate mips if requested.
+* Comparison images: minified view with/without mips.
+  **Acceptance Criteria:**
+* Visual parity between canvas content and textured quad; mip variant shows smoother minification in golden diff.
+  **Dependencies:** TX-04.
+  **Risks/Mitigations:** Browser-only; mark as demo (non-blocking for headless DoD).
+  **Refs:** &#x20;
+
+#### \[IO-VID-01] — Video Import via `copyExternalImageToTexture`
+
+**Section/Phase:** v0.2.x: I/O › Media Ingest (Web demo)
+**Summary:** Import frames from `HTMLVideoElement`, generate mips per frame, and render to a quad; gate playback until first frame is ready. &#x20;
+**Deliverables:**
+
+* Web demo: `startPlayingAndWaitForVideo(...)` → copy each frame → (optional) `generateMips(...)`.
+* Frame-time log and dropped-frame counter.
+  **Acceptance Criteria:**
+* Sustains ≥30 FPS for 540p sample on a mid-range laptop; no validation errors; visual output updates each frame.
+  **Dependencies:** TX-04.
+  **Risks/Mitigations:** Browser security/user gesture → click-to-start overlay; handle pause/resume.
+  **Refs:** &#x20;
+
+#### \[IO-VID-02] — External Texture (Video)
+
+**Section/Phase:** v0.2.x: I/O › Media Ingest (Web demo; web-only)
+**Summary:** Use `texture_external` and `textureSampleBaseClampToEdge(...)` for video sampling (clamped, implementation-defined sampler). &#x20;
+**Deliverables:**
+
+* Web demo using `texture_external`; click-to-start, play/pause toggle, requestVideoFrameCallback readiness.
+* Doc note: **web-only**, not available in native headless path.
+  **Acceptance Criteria:**
+* Renders video frames; no out-of-range sampling (edges clamped); stable at ≥30 FPS for 540p sample.
+  **Dependencies:** None beyond baseline WebGPU demo infra.
+  **Risks/Mitigations:** Platform support variance; feature-detect and show fallback message.
+  **Refs:** &#x20;
+
+#### \[IO-CAM-01] — External Texture (Camera)
+
+**Section/Phase:** v0.2.x: I/O › Media Ingest (Web demo; web-only)
+**Summary:** Capture camera via `getUserMedia({video:true})` and sample with `texture_external` + `textureSampleBaseClampToEdge(...)`. &#x20;
+**Deliverables:**
+
+* Permission flow (overlay + error handling), play/pause toggle, frame callback; render to quad.
+* Privacy note and teardown on page hide.
+  **Acceptance Criteria:**
+* Works with default camera; ≥24 FPS; handles permission denial gracefully.
+  **Dependencies:** IO-VID-02 (shared code).
+  **Risks/Mitigations:** Permissions/security; provide clear UX + errors.
+  **Refs:** &#x20;
+
+---
+
+3. # Reinforcement Overlaps (Advisory)
+
+* **Textures already used in terrain** (height `R32Float`, LUT `RGBA8UnormSrgb`) → tutorials add broader **2D image** sampling patterns and **sampler** options (wrapping/filtering) and **mips**; no task needed for terrain itself. ,   &#x20;
+* **Uniform matrices** are already present for terrain camera globals; tutorials use a quad-transform `mat4x4f`—kept as stylistic reinforcement only.  &#x20;
+* **sRGB target** and presentation setup match existing determinism choices; tutorials’ import path adds **colorSpaceConversion:'none'** nuance.  &#x20;
+
+---
+
+4. # What Changed (Summary)
+
+* **TX-01** Textured Quad Baseline → *Rendering › Textures & Samplers*.
+* **TX-02** Sampler Matrix (wrap/filter) → *Rendering › Textures & Samplers*.
+* **TX-03** Minification Visuals via uniforms → *Rendering › Textures & Samplers › Minification*.
+* **TX-04** On-GPU Mipmap Generation → *Rendering › Textures & Samplers › Mipmaps*.
+* **IO-IMG-01** Image import + flipY (web + headless parity) → *I/O › Image Ingest*.
+* **IO-CAN-01** Canvas/OffscreenCanvas import (web) → *I/O › Image Ingest*.
+* **IO-VID-01** Video import via `copyExternalImageToTexture` (web) → *I/O › Media Ingest*.
+* **IO-VID-02** External video texture (web-only) → *I/O › Media Ingest*.
+* **IO-CAM-01** External camera texture (web-only) → *I/O › Media Ingest*.
+
+
+## New Tasks (Insertion-Ready)
+
+#### \[NEW-SB-01] — Vertex Streams from Storage Buffers (SSBO-as-Vertex)
+
+**Section/Phase:** Milestone B — MVP Implementation › Storage Buffers
+**Summary (1–3 lines):** Add support for sourcing vertex positions from `var<storage, read>` buffers in the vertex stage (no `vertexBuffer`), enabling procedural/dynamic meshes and very large shared vertex pools.
+**Deliverables:**
+
+* A sample pipeline where the vertex shader fetches `pos[vertex_index]` from a storage buffer and applies per-instance transforms/colors from separate storage buffers.
+* Utility to build ring/annulus vertex data on CPU and upload to a storage buffer.
+* Bench harness comparing SSBO-vertex vs traditional vertex-buffer path on 100 instances.
+  **Acceptance Criteria:**
+* Demo renders ≥100 instanced rings (outer/inner radius), positions read only from a storage buffer; colors/offsets/scales from separate storage buffers.
+* Frame time at 100 instances within 10% of a baseline VB path for same geometry and state, measured over 300 frames (median excluding first 30 warmup).
+* Code path is toggleable at runtime: “VB” ↔ “SSBO” with identical visual result (RMSE of readback over center 256×256 < 1/255).
+  **Dependencies:** WebGPU; WGSL storage buffers; existing storage-buffer infra in S-workstream.
+  **Risks/Mitigations:** Some drivers may have different perf for SSBO fetch; keep VB path as fallback and gate via feature flag; add CI perf tolerance band.
+  **Refs:** `:contentReference[oaicite:0]{index=0}`  &#x20;
+
+---
+
+#### \[NEW-TX-04] — CPU Mip Pyramid Builder & Uploader (rgba8unorm)
+
+**Section/Phase:** Milestone B — MVP Implementation › Textures & Samplers
+**Summary (1–3 lines):** Implement CPU-side mip pyramid generation and upload via `queue.writeTexture`, to compare quality/latency vs render-pass-based generation and to support assets/sources without GPU mip access.
+**Deliverables:**
+
+* CPU downsampler (box/bilinear) producing full mip chain (1×1) for `rgba8unorm`.
+* Uploader that creates a texture with `mipLevelCount = len(mips)` and writes each level via `queue.writeTexture`.
+* Visual demo toggling between “blended” and “checker” mip pyramids to reveal filtering behavior.
+  **Acceptance Criteria:**
+* For a 512×512 source, generated mip count = 10; `queue.writeTexture` calls per level succeed and texture renders.
+* Visual parity check: CPU-mipped vs GPU render-pass mipped image—average absolute channel difference over a 256×256 probe < 6/255.
+* Runtime toggle between CPU and GPU mip sources with no pipeline changes.
+  **Dependencies:** Existing render-pass mip generator (T3).
+  **Risks/Mitigations:** CPU gen can stall main thread—perform generation off main tick (microtask/batched chunks) and cache pyramids.
+  **Refs:** `:contentReference[oaicite:2]{index=2}` &#x20;
+
+---
+
+#### \[NEW-TX-05] — Mipmap Filter Matrix (mag/min/mipmap combinations + LOD exploration)
+
+**Section/Phase:** Milestone B — MVP Implementation › Textures & Samplers
+**Summary (1–3 lines):** Add a matrix demo that renders 8 sampler states (mag ∈ {nearest,linear} × min ∈ {nearest,linear} × mipmap ∈ {nearest,linear}) across varying scale/depth to document practical differences.
+**Deliverables:**
+
+* Sampler factory for the 8 combinations; grid renderer showing each combo on tall stretched quads (large z-depth span).
+* Click/keyboard to switch between two contrasting mip pyramids (“blended” vs “checker”).
+* Optional LOD debug: show computed base mip and weight per pixel row (UI overlay).
+  **Acceptance Criteria:**
+* All 8 samplers render concurrently; each cell annotated with its (mag,min,mipmap) triple.
+* Measurable difference: along a 512-px center scanline, at least 4 of 8 cells differ in >10% pixels vs “linear/linear/linear” baseline.
+* Works with CPU-mipped textures from NEW-TX-04.
+  **Dependencies:** NEW-TX-04.
+  **Risks/Mitigations:** Readback cost—limit probes to 1D scanlines; throttle to on-demand.
+  **Refs:** `:contentReference[oaicite:2]{index=2}` `:contentReference[oaicite:1]{index=1}` &#x20;
+
+---
+
+#### \[NEW-VF-01] — Packed Vertex Color Attribute (unorm8x4) + Interleaved Layout
+
+**Section/Phase:** Milestone B — MVP Implementation › Formats & Color
+**Summary (1–3 lines):** Introduce interleaved vertex streams with positions (f32x3) and colors packed as `unorm8x4`, validating correct attribute decoding and sRGB output path.
+**Deliverables:**
+
+* Mesh builder that writes color bytes into a `Float32Array`’s backing buffer via `Uint8Array` view; set `vertex.buffers[].attributes.format = 'unorm8x4'`.
+* Reference cube/hand mesh showcasing per-quad color groups.
+* Unit test that verifies GPU output matches CPU-decoded color within 2/255 tolerance on a 64×64 probe.
+  **Acceptance Criteria:**
+* Pipeline renders colored cube/hand using a single interleaved vertex buffer; no per-vertex WGSL conversions.
+* Attribute formats logged and validated at pipeline creation; decoding matches expected colors in readback.
+  **Dependencies:** Existing vertex-buffer path.
+  **Risks/Mitigations:** Endianness/padding mistakes—add struct layout doc and buffer stride/assert checks.
+  **Refs:** `:contentReference[oaicite:3]{index=3}` `:contentReference[oaicite:4]{index=4}` &#x20;
+
+---
+
+#### \[NEW-SG-01] — Scene Graph Core: TRS Hierarchy, World-Matrix Propagation, Draw Walker
+
+**Section/Phase:** Milestone B — MVP Implementation › Scene Graph
+**Summary (1–3 lines):** Implement a minimal node system (TRS + parent/child), compute local/world matrices, and traverse to draw attached meshes with per-object uniforms (matrix+color).
+**Deliverables:**
+
+* `SceneGraphNode { localMatrix, worldMatrix, translation, rotation, scale, parent, children }` with `updateWorldMatrix()`; re-compute order after structural edits.
+* Draw walker that multiplies `viewProjection * worldMatrix` into a per-object UBO and issues `setVertexBuffer/draw`.
+* Demo: articulated “hand/arm” hierarchy animating finger joints.
+  **Acceptance Criteria:**
+* Adding/removing/reparenting nodes updates `worldMatrix` correctly (randomized fuzz test of 10k ops; world transforms CPU-verified).
+* Depth test (`depth24plus`) and back-face culling enabled; meshes render in correct front/back order across camera orbits.
+* Visual animation matches the tutorial pose evolution within RMSE < 8/255 on a 128×128 readback over 120 frames.
+  **Dependencies:** Camera/uniform infrastructure.
+  **Risks/Mitigations:** Update-order bugs—maintain dirty flags and topological update; add unit tests for parent/child invariants.
+  **Refs:** `:contentReference[oaicite:3]{index=3}` &#x20;
+
+---
+
+#### \[NEW-SG-02] — Aim/Attachment Utilities & Projectile Demo (“Hand Shoot”)
+
+**Section/Phase:** Milestone B — MVP Implementation › Scene Graph
+**Summary (1–3 lines):** Add utilities to “aim” a node at a target using basis extraction, attach temporary child nodes (shots), and simulate forward motion in world space.
+**Deliverables:**
+
+* `aim(eye, target, up)` and `cameraAim` helpers; `getAxis(worldMatrix, axisIndex)` to extract forward/up vectors.
+* Attachment API to spawn a child at a fingertip transform; per-frame update of a simple projectile list with lifetime and velocity.
+* Demo scene that fires shots along the finger’s forward axis; UI toggle to animate vs manual pose.
+  **Acceptance Criteria:**
+* Fired projectiles follow the node’s current forward axis (angle error < 2° vs computed world matrix axis over first 10 frames).
+* After window resize, depth texture is recreated and rendering remains correct (no NaNs; depth view dimensions match canvas).
+* Shots auto-expire at 5s and detach without leaving GPU resources (no leaking bind groups/buffers verified by resource counters).
+  **Dependencies:** NEW-SG-01.
+  **Risks/Mitigations:** Numerical drift—normalize velocity each step; clamp timestep for dropped frames.
+  **Refs:** `:contentReference[oaicite:4]{index=4}` `:contentReference[oaicite:5]{index=5}`  &#x20;
+
+---
+
+#### \[NEW-SG-03] — Scene Graph Editing: Reparent, Remove, and Stable Traversal
+
+**Section/Phase:** Milestone B — MVP Implementation › Scene Graph
+**Summary (1–3 lines):** Provide robust APIs for reparenting/removing nodes and ensure a stable traversal order for rendering after structural edits.
+**Deliverables:**
+
+* `setParent(newParent|null)` with cycle prevention; `remove()`; stable child list with insertion indices.
+* Fuzz test that performs random reparent/remove operations and validates traversal produces consistent draw order snapshots.
+* Example “file cabinets” hierarchy highlighting nested parts and open/close toggles.
+  **Acceptance Criteria:**
+* 10k random reparent/remove ops complete with zero cycles; traversal count matches node count and remains deterministic across runs.
+* Visual toggle opens/closes subtrees and updates in the next frame without missed updates or stale transforms.
+  **Dependencies:** NEW-SG-01.
+  **Risks/Mitigations:** Event storms—coalesce edits per frame and mark subtree dirty bit for recompute.
+  **Refs:** `:contentReference[oaicite:5]{index=5}`&#x20;
+
+---
+
+
+**Rationale:** Demonstrates passing data from vertex to fragment via an inter-stage struct and default interpolation. \[ref:1]
+**Deliverables:**
+
+* WGSL module `triangle_color_struct.wgsl` with `struct VSOut { @builtin(position) position: vec4f, @location(0) color: vec4f }`, vertex returns `VSOut`, fragment takes `VSOut` and returns color. \[ref:1]
+* Render test that draws a single triangle to an offscreen 256×256 texture and saves `triangle_struct.png`. \[ref:1]
+  **Acceptance Criteria:**
+* Center pixel RGB is within ±0.1 of `(0.33, 0.33, 0.33)` (given vertices colored red/green/blue), alpha within ±0.01 of 1.0. \[ref:1]
+* No validation errors creating the pipeline or running the draw. \[ref:1]
+  **Dependencies:** WebGPU runtime (core), WGSL, offscreen render/readback utility.
+  **Risks/Mitigations:** Floating-point tolerances may vary → use epsilon checks (±0.1).
+
+#### Link VS→FS by `@location` without a shared struct
+
+**Rationale:** Inter-stage variables connect by location index; a fragment entry point can take a parameter annotated with `@location(0)` directly. \[ref:1]
+**Deliverables:**
+
+* WGSL module `triangle_color_location.wgsl` with `@fragment fn fs(@location(0) color: vec4f) -> @location(0) vec4f`. \[ref:1]
+* A/B render harness comparing this shader against `triangle_color_struct.wgsl`; output `diff_location_vs_struct.txt`. \[ref:1]
+  **Acceptance Criteria:**
+* Mean absolute per-channel pixel difference across the frame ≤ 1/255 vs the struct version. \[ref:1]
+* Both pipelines compile and render without errors. \[ref:1]
+  **Dependencies:** WebGPU runtime (core), WGSL.
+  **Risks/Mitigations:** Mismatched locations lead to black/UB → unit test asserts declared locations align in VS/FS.
+
+#### Use `@builtin(position)` in FS to compute a checkerboard
+
+**Rationale:** `@builtin(position)` is NOT an inter-stage variable; in FS it provides the pixel center coordinate; use it to generate a pattern. \[ref:1]
+**Deliverables:**
+
+* WGSL module `checker_by_fs_position.wgsl` where FS reads `@builtin(position)` and returns red/cyan based on `(u32(x)/8 + u32(y)/8) % 2`. \[ref:1]
+* Render `64×64` offscreen target to `checker_64.png`. \[ref:1]
+  **Acceptance Criteria:**
+* Pixel (0,0) is red; pixel (8,0) is cyan; pixel (8,8) is red. \[ref:1]
+* Resizing the target to `80×64` preserves tile size in pixels (pattern tied to pixel coords). \[ref:1]
+  **Dependencies:** WebGPU runtime (core), WGSL.
+  **Risks/Mitigations:** Integer casts must use `vec2u`/`u32` precisely → add compile-time type checks.
+
+#### Split shaders into separate VS/FS modules
+
+**Rationale:** VS and FS can be compiled from separate modules; shared strings are convenience only. \[ref:1]
+**Deliverables:**
+
+* `vs_module.wgsl` (returns `@builtin(position)` only) and `fs_module.wgsl` (takes `@builtin(position)`), plus pipeline setup that links them. \[ref:1]
+* A/B image diff vs the single-module checkerboard: `separate_modules_diff.txt`. \[ref:1]
+  **Acceptance Criteria:**
+* L1 mean pixel difference between single-module and split-module outputs ≤ 1/255. \[ref:1]
+* Pipeline creation succeeds with distinct `GPUShaderModule`s and the expected entryPoints. \[ref:1]
+  **Dependencies:** WebGPU runtime (core), WGSL.
+  **Risks/Mitigations:** Entry point/IO mismatch → CI check validates entryPoint names and IO signatures.
+
+#### Implement and exercise WGSL interpolation attributes
+
+**Rationale:** Inter-stage variables support interpolation type (`perspective` default, `linear`, `flat`) and sampling (`center` default, `centroid`, `sample`; `first`/`either` for flat). \[ref:1]
+**Deliverables:**
+
+* WGSL variants `interp_perspective_center.wgsl`, `interp_linear_center.wgsl`, `interp_flat_first.wgsl`, `interp_flat_either.wgsl`, `interp_linear_sample_msaa4.wgsl` that annotate `@location(n)` with `@interpolate(...)`. \[ref:1]
+* Test harness that draws a full-screen triangle for each variant; for the `sample` case, use a 4× MSAA color target and an atomic counter in a storage buffer to count FS invocations; report `invocations_report.json`. \[ref:1]\[ref:2]
+  **Acceptance Criteria:**
+* All variants compile and render without validation errors. \[ref:1]
+* `flat_first` output is uniform across the triangle and matches the first vertex’s value (within ±1 ULP if float; exact if integer). \[ref:1]
+* With `@interpolate(linear, sample)` and MSAA=4, the recorded fragment invocation count is ≥ 3.5× the non-sampled variant over a full-screen draw (edges excluded), indicating per-sample execution. \[ref:1]\[ref:2]
+  **Dependencies:** WebGPU runtime (core), WGSL; MSAA render target for `sample`. \[ref:1]\[ref:2]
+  **Risks/Mitigations:** GPU/driver differences near edges → exclude 2-pixel border from invocation stats.
+
+#### Enforce “integers must be flat-interpolated”
+
+**Rationale:** Integer inter-stage variables require `@interpolate(flat)`; verify correctness and catch violations. \[ref:1]
+**Deliverables:**
+
+* Positive WGSL `int_flat_ok.wgsl` using `@location(1) @interpolate(flat) myInt: u32`. \[ref:1]
+* Negative WGSL `int_flat_error.wgsl` with an integer inter-stage var lacking `flat`, plus a compile test that expects failure; report `int_flat_test.log`. \[ref:1]
+  **Acceptance Criteria:**
+* `int_flat_ok.wgsl` compiles and renders; per-triangle value in FS equals the chosen vertex’s value. \[ref:1]
+* Compiling `int_flat_error.wgsl` produces a validation/compile error; test passes only if an error is detected. \[ref:1]
+  **Dependencies:** WebGPU runtime (core), WGSL; CI harness to assert compile failures.
+  **Risks/Mitigations:** Error messages may vary → assert on failure presence (non-success), not exact text.

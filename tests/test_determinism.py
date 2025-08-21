@@ -3,7 +3,7 @@ import os, hashlib
 import numpy as np
 import pytest
 
-from vulkan_forge import Renderer
+from forge3d import Renderer
 
 @pytest.mark.timeout(20)
 def test_repeatable_rgba_bytes_small():

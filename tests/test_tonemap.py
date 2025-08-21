@@ -2,7 +2,7 @@
 import math
 import numpy as np
 import pytest
-import vulkan_forge as vf
+import forge3d as f3d
 
 def reinhard(x):
     return x / (1.0 + x)
@@ -24,7 +24,7 @@ def test_tonemap_cpu_vector():
     assert out[2] < 1.0
 
 def test_set_sun_and_exposure():
-    r = vf.Renderer(16, 16)
+    r = f3d.Renderer(16, 16)
     # Should not throw
     r.set_sun(45.0, 30.0)
     with pytest.raises(ValueError): r.set_exposure(0.0)

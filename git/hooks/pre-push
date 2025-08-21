@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Multi-agent pre-push hook for vulkan-forge
+# Multi-agent pre-push hook for forge3d
 # - Runs your local orchestrator (XML mode by default)
 # - If it creates a new commit (e.g., Claude applied a patch), the push is blocked once.
 # - Compatible with Windows (Git Bash), macOS, and Linux.

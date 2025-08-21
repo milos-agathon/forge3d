@@ -21,7 +21,7 @@ pub fn ctx() -> &'static GpuContext {
             &wgpu::DeviceDescriptor {
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::downlevel_defaults(),
-                label: Some("vulkan-forge-device"),
+                label: Some("forge3d-device"),
             }, None
         )).expect("request_device failed");
 

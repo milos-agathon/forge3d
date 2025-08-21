@@ -186,7 +186,7 @@ return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
 
 Before tagging, run this checklist (no exceptions):
 
-1. Bump **all** versions: `pyproject.toml`, `vulkan_forge/__init__.py`, `Cargo.toml`, `CHANGELOG.md`, and mention in `README.md`.
+1. Bump **all** versions: `pyproject.toml`, `forge3d/__init__.py`, `Cargo.toml`, `CHANGELOG.md`, and mention in `README.md`.
 2. `pytest -q` (with backend-aware skips) must pass locally.
 3. Build wheels: abi3 (py>=3.10), manylinux2014, strip, thin LTO.
 4. Attach artifacts, tag, and paste the *Highlights* block from CHANGELOG.

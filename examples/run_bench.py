@@ -1,4 +1,4 @@
-from vulkan_forge import run_benchmark
+from forge3d import run_benchmark
 
 def main():
     res = run_benchmark("renderer_rgba", width=256, height=256, iterations=20)

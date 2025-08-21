@@ -18,7 +18,7 @@ All examples must:
 - Include small inline thumbnails; keep cell output minimal.
 
 ## Video helper
-- `vulkan_forge.video.turntable(renderer, orbit, frames, fps, out_path)` renders frames then shells out to **ffmpeg**.
+- `forge3d.video.turntable(renderer, orbit, frames, fps, out_path)` renders frames then shells out to **ffmpeg**.
 - Detect missing ffmpeg and raise an actionable error (don’t download ffmpeg).
 
 ## Troubleshooting

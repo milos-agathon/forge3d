@@ -1,5 +1,5 @@
 import os, numpy as np
-import vulkan_forge._vulkan_forge as vf
+import forge3d as f3d
 
 def test_t42_numpy_to_png_and_back_rgba(tmp_path):
     h, w = 33, 77
@@ -12,14 +12,14 @@ def test_t42_numpy_to_png_and_back_rgba(tmp_path):
     rgba = np.stack([r,g,b,a], axis=-1)
 
     p = tmp_path / "roundtrip.png"
-    vf.numpy_to_png(str(p), rgba)
-    out = vf.png_to_numpy(str(p))
+    f3d.numpy_to_png(str(p), rgba)
+    out = f3d.png_to_numpy(str(p))
     assert out.dtype == np.uint8 and out.shape == (h,w,4)
     assert np.array_equal(out, rgba)
 
 def test_t42_scene_render_rgba_matches_png(tmp_path):
     out = tmp_path / "scene.png"
-    scn = vf.Scene(160, 120, grid=32, colormap="viridis")
+    scn = f3d.Scene(160, 120, grid=32, colormap="viridis")
     # save PNG
     scn.render_png(str(out))
     assert out.exists()
@@ -27,5 +27,5 @@ def test_t42_scene_render_rgba_matches_png(tmp_path):
     arr = scn.render_rgba()
     assert arr.dtype == np.uint8 and arr.shape == (120,160,4)
     # read back file and compare pixels
-    file_pixels = vf.png_to_numpy(str(out))
+    file_pixels = f3d.png_to_numpy(str(out))
     assert np.array_equal(arr, file_pixels)

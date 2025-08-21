@@ -2,11 +2,11 @@ import math
 import numpy as np
 import pytest
 
-import vulkan_forge as vf
+import forge3d as f3d
 
 
 def _gpu_or_skip():
-    info = vf.device_probe()
+    info = f3d.device_probe()
     if not isinstance(info, dict) or info.get("status") != "ok":
         msg = info.get("message", "No suitable GPU adapter") if isinstance(info, dict) else "Unknown device status"
         pytest.skip(f"Skipping GPU-dependent tests: {msg}")
@@ -39,7 +39,7 @@ def gaussian2d(h, w, sigma_ratio=0.25, dtype=np.float32):
 @pytest.mark.parametrize("h,w,val", [(8, 11, 42.0), (3, 2, 0.0)])
 def test_plane_stats_and_minmax_flat_epsilon(h, w, val):
     _gpu_or_skip()
-    r = vf.Renderer(16, 16)
+    r = f3d.Renderer(16, 16)
     dem = plane(h, w, val)
     r.add_terrain(dem, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
 
@@ -68,7 +68,7 @@ def test_plane_stats_and_minmax_flat_epsilon(h, w, val):
 @pytest.mark.parametrize("h,w", [(9, 10), (16, 5), (32, 33)])
 def test_ramp_x_stats_and_zscore(h, w):
     _gpu_or_skip()
-    r = vf.Renderer(32, 32)
+    r = f3d.Renderer(32, 32)
     dem = ramp_x(h, w)
     r.add_terrain(dem, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
 
@@ -97,7 +97,7 @@ def test_ramp_x_stats_and_zscore(h, w):
 @pytest.mark.parametrize("h,w", [(19, 21), (32, 32)])
 def test_gaussian_minmax_peak_near_one(h, w):
     _gpu_or_skip()
-    r = vf.Renderer(64, 64)
+    r = f3d.Renderer(64, 64)
     dem = gaussian2d(h, w)
     r.add_terrain(dem, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
 
@@ -119,7 +119,7 @@ def test_upload_readback_padding_exact_parity(h, w):
     Expect exact parity after upload/readback (R32Float).
     """
     _gpu_or_skip()
-    r = vf.Renderer(8, 8)
+    r = f3d.Renderer(8, 8)
     rng = np.random.default_rng(0)
     dem = rng.uniform(low=-123.0, high=456.0, size=(h, w)).astype(np.float32)
     r.add_terrain(dem, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
@@ -133,7 +133,7 @@ def test_upload_readback_padding_exact_parity(h, w):
 
 def test_add_terrain_validation_errors():
     _gpu_or_skip()
-    r = vf.Renderer(16, 16)
+    r = f3d.Renderer(16, 16)
 
     # Fortran order should be rejected (not C-contiguous)
     f_arr = np.asfortranarray(np.ones((4, 5), dtype=np.float32))
@@ -162,7 +162,7 @@ def test_add_terrain_validation_errors():
 def test_scene_accepts_height_and_renders_rgba_shape():
     _gpu_or_skip()
     # Small scene to keep things light; height map 5x7
-    sc = vf.Scene(64, 64, grid=8, colormap="viridis")
+    sc = f3d.Scene(64, 64, grid=8, colormap="viridis")
     dem = ramp_y(5, 7)  # float32, C-contiguous
     sc.set_height_from_r32f(dem)
     rgba = sc.render_rgba()

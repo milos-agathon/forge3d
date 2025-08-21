@@ -1,6 +1,6 @@
 # python/ — Memory for Python surface & packaging
 
-This directory is the thin Python API for `vulkan_forge`. The Rust core is exposed via **PyO3** as `vulkan_forge._vulkan_forge` and re-exported from `vulkan_forge/__init__.py`. Keep the surface minimal, explicit, and deterministic.  
+This directory is the thin Python API for `forge3d`. The Rust core is exposed via **PyO3** as `forge3d._forge3d` and re-exported from `forge3d/__init__.py`. Keep the surface minimal, explicit, and deterministic.  
 
 ## What Claude tends to forget
 
@@ -58,7 +58,7 @@ impl Renderer {
 1. **Version bump** in:
 
    * `pyproject.toml` (`version = …`)
-   * `vulkan_forge/__init__.py` (`__version__ = "…"`)
+   * `forge3d/__init__.py` (`__version__ = "…"`)
    * `Cargo.toml` (`version = …`)
    * `CHANGELOG.md`, `README.md`
 2. Build wheels:

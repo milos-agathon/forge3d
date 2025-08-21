@@ -1,7 +1,7 @@
 # A1.9-BEGIN:device-diagnostics
 #!/usr/bin/env python3
 """
-Device diagnostics & failure modes for vulkan-forge.
+Device diagnostics & failure modes for forge3d.
 
 - Enumerates adapters/features/limits (best-effort).
 - Probes per-backend device creation and classifies outcomes (ok/unsupported/error).
@@ -16,13 +16,13 @@ from typing import List
 
 # Robust import: try top-level first (rare), then package-internal (common for maturin)
 try:
-    from _vulkan_forge import enumerate_adapters, device_probe  # top-level
+    from _forge3d import enumerate_adapters, device_probe  # top-level
 except Exception:
     try:
-        from vulkan_forge._vulkan_forge import enumerate_adapters, device_probe  # package-internal
+        from forge3d._forge3d import enumerate_adapters, device_probe  # package-internal
     except Exception as e:
         raise SystemExit(
-            "Failed to import compiled extension '_vulkan_forge'.\n"
+            "Failed to import compiled extension '_forge3d'.\n"
             f"Python: {sys.executable}\n"
             "If you just built, ensure you're in the same venv; then run:\n"
             "  python -m pip install -U pip maturin\n"

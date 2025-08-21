@@ -1,6 +1,6 @@
 # T02-BEGIN:tests-dem
 import numpy as np
-import vulkan_forge as vf
+import forge3d as f3d
 
 def _make_plane(h, w):
     x = np.linspace(-1, 1, w, dtype=np.float32)
@@ -10,18 +10,18 @@ def _make_plane(h, w):
 
 def test_dem_stats_minmax():
     Z = _make_plane(32, 48)
-    mn, mx, mean, std = vf.dem_stats(Z)
+    mn, mx, mean, std = f3d.dem_stats(Z)
     assert mx > mn
     assert std > 0.0
 
 def test_dem_normalize_minmax_shape_dtype():
     Z = _make_plane(16, 20)
-    N = vf.dem_normalize(Z, mode="minmax", out_range=(0.0, 1.0))
+    N = f3d.dem_normalize(Z, mode="minmax", out_range=(0.0, 1.0))
     assert N.shape == Z.shape and N.dtype == np.float32
     assert N.min() >= -1e-5 and N.max() <= 1.0 + 1e-5
 
 def test_renderer_terrain_stats_and_normalize():
-    r = vf.Renderer(64, 64)
+    r = f3d.Renderer(64, 64)
     Z = _make_plane(64, 64)
     r.add_terrain(Z, spacing=(1.0,1.0), exaggeration=1.0, colormap="viridis")
     mn, mx, mean, std = r.terrain_stats()

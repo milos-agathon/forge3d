@@ -1,4 +1,4 @@
-# vulkan_forge
+# forge3d
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
@@ -9,7 +9,7 @@ Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 pip install -U maturin
 maturin develop --release
 # or via wheel (if provided)
-# pip install vulkan_forge
+# pip install forge3d
 ```
 
 ## Platform requirements
@@ -45,14 +45,14 @@ Each item below links back to these features.
 ```python
 from pathlib import Path
 import numpy as np
-import vulkan_forge as vf
+import forge3d as f3d
 
 # RGB -> PNG (PathLike supported)
 rgb = (np.linspace(0,255,64, dtype=np.uint8)[None, :, None] * np.ones((64,1,3), np.uint8)).copy(order="C")
-vf.numpy_to_png(Path("out_rgb.png"), rgb)
+f3d.numpy_to_png(Path("out_rgb.png"), rgb)
 
 # PNG -> RGBA ndarray (H, W, 4) uint8, C-contiguous
-arr = vf.png_to_numpy("out_rgb.png")
+arr = f3d.png_to_numpy("out_rgb.png")
 assert arr.shape == (64, 64, 4)
 ```
 
@@ -83,9 +83,9 @@ assert arr.shape == (64, 64, 4)
 
 ```python
 from pathlib import Path
-import vulkan_forge as vf
+import forge3d as f3d
 
-r = vf.Renderer(256, 256)
+r = f3d.Renderer(256, 256)
 r.render_triangle_png(Path("triangle.png"))     # file
 tri = r.render_triangle_rgba()                  # np.ndarray (H,W,4) uint8
 ```
@@ -95,13 +95,13 @@ tri = r.render_triangle_rgba()                  # np.ndarray (H,W,4) uint8
 ```python
 import numpy as np
 from pathlib import Path
-import vulkan_forge as vf
+import forge3d as f3d
 
 H, W = 64, 64
 # simple synthetic slope for demo
 h32 = (np.linspace(0,1,W, dtype=np.float32)[None,:] * np.ones((H,1), np.float32)).copy(order="C")
 
-s = vf.Scene(256, 256, grid=128, colormap="viridis")
+s = f3d.Scene(256, 256, grid=128, colormap="viridis")
 s.set_height_from_r32f(h32)
 s.set_camera_look_at((3,2,3), (0,0,0), (0,1,0), fovy_deg=45, znear=0.1, zfar=100.0)
 s.render_png(Path("terrain.png"))
@@ -111,7 +111,7 @@ rgba = s.render_rgba()  # byte-for-byte pixel parity with the PNG write
 ## Terrain utilities
 
 ```python
-r = vf.Renderer(256, 256)
+r = f3d.Renderer(256, 256)
 r.add_terrain(height_data, spacing=(1.0, 1.0), exaggeration=1.0, colormap="viridis")
 mn, mx, mean, std = r.terrain_stats()
 r.set_height_range(mn, mx)                # override normalization
@@ -124,20 +124,20 @@ full = r.read_full_height_texture()
 ## Colormaps
 
 ```python
-from vulkan_forge import colormap_supported
+from forge3d import colormap_supported
 print(colormap_supported())  # list of valid names
 ```
 
 ## Mesh & grid
 
 ```python
-xy, uv, indices = vf.grid_generate(64, 64, spacing=(1.0, 1.0), origin="center")
+xy, uv, indices = f3d.grid_generate(64, 64, spacing=(1.0, 1.0), origin="center")
 ```
 
 ## Camera helpers
 
 ```python
-vp = vf.camera_view_proj(
+vp = f3d.camera_view_proj(
     eye=(3,2,3), target=(0,0,0), up=(0,1,0), fovy_deg=45.0, aspect=1.0, znear=0.1, zfar=100.0
 )
 ```
@@ -145,9 +145,9 @@ vp = vf.camera_view_proj(
 ## Diagnostics
 
 ```python
-import vulkan_forge as vf
-print(vf.enumerate_adapters())
-print(vf.device_probe())  # {'status': 'ok', ...} or diagnostic info
+import forge3d as f3d
+print(f3d.enumerate_adapters())
+print(f3d.device_probe())  # {'status': 'ok', ...} or diagnostic info
 ```
 
 ## Timing harness (T5.2)
@@ -155,7 +155,7 @@ print(vf.device_probe())  # {'status': 'ok', ...} or diagnostic info
 Python:
 
 ```python
-from vulkan_forge import run_benchmark
+from forge3d import run_benchmark
 res = run_benchmark("renderer_rgba", width=512, height=512, iterations=50)
 print(res["stats"], res["throughput"])
 ```
@@ -194,7 +194,7 @@ pytest -q
 
 ## Versioning
 
-`vulkan_forge.__version__` mirrors the Rust crate version (`env!("CARGO_PKG_VERSION")`), now **0.1.0**.
+`forge3d.__version__` mirrors the Rust crate version (`env!("CARGO_PKG_VERSION")`), now **0.1.0**.
 
 ## Changelog
 

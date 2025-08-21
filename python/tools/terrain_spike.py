@@ -12,7 +12,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     try:
-        import sys; exe={'exe': sys.executable}; from vulkan_forge import TerrainSpike
+        import sys; exe={'exe': sys.executable}; from forge3d import TerrainSpike
     except Exception as e:
         raise SystemExit(
             "TerrainSpike not available. Rebuild in THIS venv with:\n  export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1  # if Python 3.13\n  maturin develop --release --features terrain_spike\n(Current python: %(exe)s)" % {'exe': sys.executable}

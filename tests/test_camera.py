@@ -10,18 +10,18 @@ import pytest
 import math
 
 try:
-    import vulkan_forge._vulkan_forge as vf
-    from vulkan_forge import camera_look_at, camera_perspective, camera_view_proj
+    import forge3d as f3d
+    from forge3d import camera_look_at, camera_perspective, camera_view_proj
     HAS_MAIN_MODULE = True
 except ImportError:
     try:
-        import _vulkan_forge as vf
-        camera_look_at = vf.camera_look_at
-        camera_perspective = vf.camera_perspective
-        camera_view_proj = vf.camera_view_proj
+        import _forge3d as f3d
+        camera_look_at = f3d.camera_look_at
+        camera_perspective = f3d.camera_perspective
+        camera_view_proj = f3d.camera_view_proj
         HAS_MAIN_MODULE = False
     except ImportError:
-        pytest.skip("vulkan_forge module not available", allow_module_level=True)
+        pytest.skip("forge3d module not available", allow_module_level=True)
 
 # Error messages that must match exactly (escaped for regex)
 import re
@@ -216,19 +216,19 @@ class TestCameraViewProj:
             camera_view_proj(eye, target, (0.0, 0.0, -1.0), 45.0, 1.0, 0.1, 100.0)
 
 
-@pytest.mark.skipif(not hasattr(vf, 'TerrainSpike'), reason="TerrainSpike not available (terrain_spike feature disabled)")
+@pytest.mark.skipif(not hasattr(f3d, 'TerrainSpike'), reason="TerrainSpike not available (terrain_spike feature disabled)")
 class TestTerrainSpikeIntegration:
     """Test TerrainSpike camera integration."""
     
     def test_set_camera_look_at_exists(self):
         """Test that set_camera_look_at method exists."""
-        spike = vf.TerrainSpike(512, 512)
+        spike = f3d.TerrainSpike(512, 512)
         assert hasattr(spike, 'set_camera_look_at'), "TerrainSpike should have set_camera_look_at method"
         assert hasattr(spike, 'debug_uniforms_f32'), "TerrainSpike should have debug_uniforms_f32 method"
     
     def test_set_camera_look_at_updates_uniforms(self):
         """Test that set_camera_look_at updates UBO and debug uniforms."""
-        spike = vf.TerrainSpike(512, 512)
+        spike = f3d.TerrainSpike(512, 512)
         
         # Get initial uniforms
         initial_uniforms = spike.debug_uniforms_f32()
@@ -252,7 +252,7 @@ class TestTerrainSpikeIntegration:
     
     def test_set_camera_look_at_validates_parameters(self):
         """Test that set_camera_look_at validates parameters correctly."""
-        spike = vf.TerrainSpike(512, 512)
+        spike = f3d.TerrainSpike(512, 512)
         
         # Test invalid fovy
         with pytest.raises(RuntimeError, match=ERROR_FOVY):
@@ -264,7 +264,7 @@ class TestTerrainSpikeIntegration:
     
     def test_debug_uniforms_match_expected_layout(self):
         """Test that debug uniforms match expected matrix layout."""
-        spike = vf.TerrainSpike(512, 512)
+        spike = f3d.TerrainSpike(512, 512)
         
         # Set known camera parameters
         eye = (0.0, 0.0, 3.0)
@@ -299,16 +299,16 @@ def test_terrainspike_default_proj_is_wgpu():
     """Test that TerrainSpike defaults to WGPU clip space projection."""
     import numpy as np
     try:
-        import vulkan_forge as vf
+        import forge3d as f3d
     except ImportError:
-        import _vulkan_forge as vf
+        import _forge3d as f3d
         
-    if not hasattr(vf, "TerrainSpike"):
+    if not hasattr(f3d, "TerrainSpike"):
         import pytest
         pytest.skip("TerrainSpike not built")
         
     W, H = 128, 96
-    t = vf.TerrainSpike(W, H, grid=32)
+    t = f3d.TerrainSpike(W, H, grid=32)
     u = t.debug_uniforms_f32()  # 44 floats
     
     # View (0:16), Proj (16:32) in column-major
@@ -317,11 +317,11 @@ def test_terrainspike_default_proj_is_wgpu():
     aspect = float(W) / float(H)
     
     # Import the camera_perspective function
-    if hasattr(vf, 'camera_perspective'):
-        expected = vf.camera_perspective(fovy, aspect, znear, zfar, clip_space="wgpu")
+    if hasattr(f3d, 'camera_perspective'):
+        expected = f3d.camera_perspective(fovy, aspect, znear, zfar, clip_space="wgpu")
     else:
         # Fallback to module-level import
-        from vulkan_forge import camera_perspective
+        from forge3d import camera_perspective
         expected = camera_perspective(fovy, aspect, znear, zfar, clip_space="wgpu")
     
     assert proj.shape == (4, 4) and expected.shape == (4, 4)

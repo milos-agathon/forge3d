@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 
 try:
-    from vulkan_forge import Renderer
+    from forge3d import Renderer
 except Exception as e:
     print("IMPORT_FAIL:", e)
     sys.exit(2)

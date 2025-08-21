@@ -5,7 +5,7 @@ try:
     import _vulkan_forge as vf
 except ImportError:
     try:
-        import vulkan_forge as vf
+        import forge3d as f3d
     except ImportError:
         pytest.skip("Extension module _vulkan_forge not built; skipping terrain tests.", allow_module_level=True)
 
@@ -18,7 +18,7 @@ def create_heightmap(dtype, shape=(4, 4)):
 
 
 def test_add_terrain_float32_and_stats():
-    renderer = vf.Renderer(16, 16)
+    renderer = f3d.Renderer(16, 16)
     hm32 = create_heightmap(np.float32, (4, 4))
     renderer.add_terrain(hm32, (1.0, 1.0), 2.0, colormap="viridis")
     min_, max_, mean_, std_ = renderer.terrain_stats()
@@ -33,7 +33,7 @@ def test_add_terrain_float32_and_stats():
 
 
 def test_add_terrain_float64_and_normalize_minmax_zscore():
-    renderer = vf.Renderer(8, 8)
+    renderer = f3d.Renderer(8, 8)
     hm64 = create_heightmap(np.float64, (3, 3))
     renderer.add_terrain(hm64, (1.0, 1.0), 1.0, colormap="magma")
     # minmax normalize to [10, 20]
@@ -50,7 +50,7 @@ def test_add_terrain_float64_and_normalize_minmax_zscore():
 
 
 def test_upload_and_readback_full_and_patch():
-    renderer = vf.Renderer(32, 32)
+    renderer = f3d.Renderer(32, 32)
     hm = create_heightmap(np.float32, (5, 5))
     renderer.add_terrain(hm, (1.0, 1.0), 1.0, colormap="terrain")
 
@@ -74,7 +74,7 @@ def test_upload_and_readback_full_and_patch():
 
 
 def test_out_of_bounds_patch_errors():
-    renderer = vf.Renderer(8, 8)
+    renderer = f3d.Renderer(8, 8)
     hm = create_heightmap(np.float32, (4, 4))
     renderer.add_terrain(hm, (1.0, 1.0), 1.0, colormap="viridis")
     renderer.upload_height_r32f()
@@ -87,7 +87,7 @@ def test_out_of_bounds_patch_errors():
 
 
 def test_dirty_flag_behavior():
-    renderer = vf.Renderer(16, 16)
+    renderer = f3d.Renderer(16, 16)
     hm = create_heightmap(np.float32, (4, 4))
     renderer.add_terrain(hm, (1.0, 1.0), 1.0, colormap="viridis")
 
@@ -114,7 +114,7 @@ def test_upload_height_roundtrip_various_sizes():
     test_sizes = [(7, 5), (64, 48), (255, 3), (33, 33)]
     
     for width, height in test_sizes:
-        renderer = vf.Renderer(max(width, 16), max(height, 16))
+        renderer = f3d.Renderer(max(width, 16), max(height, 16))
         
         # Create deterministic heightmap
         heightmap = np.arange(width * height, dtype=np.float32).reshape((height, width))
@@ -134,7 +134,7 @@ def test_upload_height_roundtrip_various_sizes():
 
 def test_upload_requires_terrain():
     """Test that calling upload_height_r32f() without add_terrain() raises the correct error."""
-    renderer = vf.Renderer(32, 32)
+    renderer = f3d.Renderer(32, 32)
     
     with pytest.raises(RuntimeError, match="no terrain uploaded; call add_terrain\\(\\) first"):
         renderer.upload_height_r32f()
@@ -144,7 +144,7 @@ def test_upload_handles_non_256_aligned_rows():
     """Test width where width*4 % 256 != 0 to validate row padding."""
     width, height = 61, 17  # 61 * 4 = 244 bytes, not 256-aligned
     
-    renderer = vf.Renderer(max(width, 32), max(height, 32))
+    renderer = f3d.Renderer(max(width, 32), max(height, 32))
     
     # Create deterministic heightmap
     heightmap = np.random.RandomState(42).rand(height, width).astype(np.float32)
