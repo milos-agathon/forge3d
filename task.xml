@@ -1,157 +1,121 @@
-<task id="forge3d-workstream-audit" version="1.1">
-  <title>Audit repo against roadmap.csv for a specified workstream (presence, readiness, evidence; no code edits)</title>
-
-  <role>
-    You are Claude Code in <b>Audit Mode</b>. Act as an elite graphics/runtime engineer (Vulkan ≥1.2, WebGPU/WGSL, RAII, Rust, Python ≥3.8, CMake ≥3.24, VMA, Sphinx).
-    Project: forge3d — Rust backend + Python frontend (PyO3), targeting interactive/offline 3D visualization.
-  </role>
-
-  <constraints>
-    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
-    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
-    <build>cmake>=3.24, cargo/rustc, PyO3, VMA</build>
-    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
-    <docs>Sphinx preferred</docs>
-    <uncertainRule>If essential CSV fields or feature details are missing/ambiguous, reply <b>UNCERTAIN</b> and list the exact headers/rows/paths needed.</uncertainRule>
-    <safety>
-      - <b>Audit-only:</b> Do not modify repository contents.
-      - No third-party code changes; skip binaries/large assets.
-      - Prefer structured searches and header-aware CSV parsing.
-    </safety>
-    <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz</exclusions>
-  </constraints>
+<task>
+  <title>Remediate failed criteria only</title>
 
   <inputs>
-    <repoRoot>./</repoRoot>
-    <roadmapPath>./roadmap.csv</roadmapPath>
-    <!-- Provide either Workstream ID (e.g., "A") or exact Workstream Title -->
-    <workstreamSelector>
-      <![CDATA[
-      ID: M
-      Title: Interop & Memory
-      ]]>
-    </workstreamSelector>
+    <repoRoot>.</repoRoot>
+    <paths>
+      <!-- Tests -->
+      <path>tests/test_numpy_interop.py</path>
+      <path>tests/test_memory_budget.py</path>
+      <!-- Python helpers/tools -->
+      <path>python/forge3d/_validate.py</path>
+      <path>python/tools/profile_copies.py</path>
+      <!-- Rust product code (minimal hooks + accounting fix) -->
+      <path>src/lib.rs</path>
+      <path>src/core/memory_tracker.rs</path>
+      <!-- Docs -->
+      <path>docs/index.rst</path>
+      <path>docs/interop_zero_copy.rst</path>
+      <path>docs/memory_budget.rst</path>
+      <path>CHANGELOG.md</path>
+    </paths>
+    <constraints>
+      <platforms>win_amd64; linux_x86_64; macos_universal2</platforms>
+      <memory>≤ 512 MiB host-visible heap</memory>
+      <toolchain>cmake≥3.24; cargo/rustc stable; PyO3; VMA</toolchain>
+      <apis>WebGPU/WGSL primary; Vulkan 1.2-compatible design</apis>
+      <docs>Sphinx preferred</docs>
+    </constraints>
   </inputs>
 
-  <!-- Exact structure of your roadmap.csv -->
-  <csvSchema>
-    <encoding>utf-8</encoding>
-    <delimiter>comma</delimiter>
-    <columns order="fixed">
-      <col index="0">Workstream ID</col>
-      <col index="1">Workstream Title</col>
-      <col index="2">Task ID</col>
-      <col index="3">Task Title</col>
-      <col index="4">Rationale</col>
-      <col index="5">Deliverables</col>
-      <col index="6">Acceptance Criteria</col>
-      <col index="7">Priority</col>
-      <col index="8">Phase</col>
-      <col index="9">Missing Features</col>
-      <col index="10">Dependencies</col>
-      <col index="11">Risks/Mitigations</col>
-      <col index="12">Original Ref</col>
-      <!-- Trailing column observed in file; treat as ignorable/empty -->
-      <col index="13" optional="true" ignore="true">Unnamed: 13</col>
-    </columns>
-    <cellConventions>
-      <!-- Inside some cells, items are separated by semicolons; DO NOT split columns by this; use only for keyword extraction -->
-      <listSeparator>semicolon-inside-cell</listSeparator>
-      <markdownInline>allowed (e.g., backticks)</markdownInline>
-      <emptyTrailingColumn>ignore if entirely blank</emptyTrailingColumn>
-    </cellConventions>
-    <validation>
-      <!-- Expected controlled vocabularies; report anomalies in hygiene output (do not mutate file) -->
-      <priorityAllowed>High,Medium,Low</priorityAllowed>
-      <phaseAllowed>MVP,Beyond MVP</phaseAllowed>
-    </validation>
-  </csvSchema>
-
   <plan>
-    1) Validate & Load CSV
-       - Open <roadmapPath> with UTF-8; delimiter comma.
-       - Confirm exact header names and order per <csvSchema>. If mismatch → <b>UNCERTAIN</b> listing differences.
-       - Drop/ignore column "Unnamed: 13" if entirely empty.
-       - Produce a brief CSV hygiene report:
-         * Rows with Priority not in {High, Medium, Low}.
-         * Rows with Phase not in {MVP, Beyond MVP}.
-         * Missing Task ID/Title/Deliverables/Acceptance Criteria.
+    <!-- Safety -->
+    <step>Create branch <code>wsM-remediate</code>; exclude <code>target/ dist/ build/ .venv/ node_modules/ .git/</code>.</step>
 
-    2) Select Workstream
-       - Filter rows where Workstream ID == provided ID OR Workstream Title == provided Title (case-insensitive).
-       - If none match → <b>UNCERTAIN</b> and list discovered workstreams (ID → Title).
+    <!-- M1: Zero-copy validation (tests + minimal hooks) -->
+    <step>Move helpers to correct paths: <code>git mv _validate.py python/forge3d/_validate.py</code>; <code>git mv profile_copies.py python/tools/profile_copies.py</code>.</step>
+    <step>In <code>src/lib.rs</code>, add minimal test-only hooks (no API break): 
+      <ul>
+        <li><code>#[cfg(test)]</code> method <code>render_triangle_rgba_with_ptr(py) -&gt; (PyArray3&lt;u8&gt;, usize)</code> returning the array and its data pointer.</li>
+        <li><code>#[cfg(test)]</code> store and expose <code>debug_last_height_src_ptr() -&gt; usize</code> set by height upload path.</li>
+      </ul>
+    </step>
+    <step>Refactor height upload to avoid intermediate copy for compliant inputs:
+      <ul>
+        <li>Accept/read <code>PyReadonlyArray2&lt;f32&gt;</code> when provided and write directly to texture using its contiguous slice (row padding only), setting <code>debug_last_height_src_ptr</code> to <code>as_slice().as_ptr()</code>.</li>
+        <li>Retain current fallback for non-contiguous/dtype mismatch.</li>
+      </ul>
+    </step>
+    <step>Complete <code>tests/test_numpy_interop.py</code>:
+      <ul>
+        <li>RGBA output: call <code>render_triangle_rgba_with_ptr()</code>; assert <code>np_arr.ctypes.data == ptr</code>.</li>
+        <li>Height input: pass C-contiguous <code>float32</code> heightmap; assert <code>height.ctypes.data == r.debug_last_height_src_ptr()</code>.</li>
+        <li>Use <code>python/forge3d/_validate.py</code> helpers for pointer extraction and contiguity checks.</li>
+      </ul>
+    </step>
+    <step>Finish <code>python/tools/profile_copies.py</code>: render once; print “zero-copy OK” if both RGBA and height pointers match expectations; warn otherwise.</step>
 
-    3) Derive Audit Keywords per Task
-       - From Deliverables/Acceptance Criteria/Dependencies, extract filenames (e.g., *.wgsl), symbols (create_render_pipeline, bind_group), Python API entry points (forge3d.*), example script names, and doc page slugs.
-       - Use semicolon-separated items inside cells as hints; do not alter CSV.
+    <!-- M2: Budget tests + minor accounting fix -->
+    <step>In <code>src/lib.rs</code>, when resizing readback buffers, call <code>free_buffer_allocation(old_size, true)</code> before tracking the new size to keep metrics accurate. Similarly free temporary readback in <code>debug_read_height_patch</code> after unmap.</step>
+    <step>Complete <code>tests/test_memory_budget.py</code>:
+      <ul>
+        <li>Assert <code>get_memory_metrics()</code> returns required fields and <code>within_budget</code> for a small render.</li>
+        <li>Force an oversized readback (e.g., render 11000×11000 → compute intended bytes; skip if device limits too low) and assert an error is raised; check message includes “current”, “requested”, and “limit”.</li>
+      </ul>
+    </step>
 
-    4) Repository Scan (read-only)
-       - Search src/, shaders/, python/forge3d/, examples/, docs/ with ripgrep.
-       - Collect evidence per task: file paths + line numbers/snippets that match expected artifacts and wiring (e.g., shader referenced by pipeline; Python API exposed; example present).
+    <!-- Docs -->
+    <step>Move or sync docs content to <code>docs/interop_zero_copy.rst</code> and <code>docs/memory_budget.rst</code>; update <code>docs/index.rst</code> to include both in the toctree. Keep existing .md files as sources only if MyST is enabled; otherwise rely on .rst.</step>
 
-    5) Readiness Classification (per task)
-       - <b>Present & Wired</b>: artifacts exist and appear integrated (pipeline + API + example/test/doc).
-       - <b>Present but Partial</b>: artifacts exist but missing wiring/exposure/tests/docs.
-       - <b>Absent</b>: no meaningful artifacts found.
+    <!-- CHANGELOG -->
+    <step>Add a concise entry under “Workstream M – interop &amp; memory” summarizing tests, hooks, docs, and metrics.</step>
 
-    6) Minimal Change Plan (No Edits)
-       - For Partial/Absent: list the minimal file-level actions (paths/symbols) needed to reach “Present & Wired,” respecting platform/build/memory constraints.
-
-    7) Outputs
-       - Emit a Markdown audit report and a machine-readable audit matrix CSV. Include CSV hygiene observations.
+    <!-- Verification -->
+    <step>Build: <code>maturin develop --release</code>.</step>
+    <step>Tests: <code>pytest -q -k "numpy_interop or memory_budget"</code> then full <code>pytest -q</code>.</step>
+    <step>Docs: <code>make -C docs html</code> and verify both pages appear in sidebar TOC.</step>
   </plan>
 
   <deliverables>
-    - <b>reports/audit_&lt;workstream&gt;.md</b> — Markdown:
-      1) Scope (workstream, matched rows count) & CSV Hygiene summary
-      2) Readiness Verdict per task (Present & Wired / Partial / Absent)
-      3) Evidence Map (file paths + line refs/snippets)
-      4) Blocking Gaps
-      5) Minimal Change Plan (file-level)
-      6) Validation Runbook (commands to verify after implementation)
-    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b> — Columns:
-      <code>Workstream ID,Workstream Title,Task ID,Task Title,Readiness,Evidence Paths,Missing Pieces,Minimal Changes,Priority,Phase,Dependencies,Risks/Mitigations,Original Ref</code>
-    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b> — Detected anomalies (Priority/Phase out-of-vocab, missing required cells).
+    <item>M1: Finished <code>tests/test_numpy_interop.py</code> with RGBA and height zero-copy pointer assertions.</item>
+    <item>M1: Helpers at <code>python/forge3d/_validate.py</code>; profiler at <code>python/tools/profile_copies.py</code> printing “zero-copy OK”.</item>
+    <item>M1: Minimal test-only hooks in <code>src/lib.rs</code> to expose pointers for verification.</item>
+    <item>M2: Accurate memory accounting on readback resize and temp buffers; finished <code>tests/test_memory_budget.py</code> (metrics + exceed assertions).</item>
+    <item>Docs: <code>docs/interop_zero_copy.rst</code> and <code>docs/memory_budget.rst</code> included in <code>docs/index.rst</code>.</item>
+    <item>CHANGELOG: “Workstream M – interop &amp; memory” entry.</item>
   </deliverables>
 
   <acceptanceCriteria>
-    - AC-001: Exact headers match those specified (including ignorable "Unnamed: 13"); else returns <b>UNCERTAIN</b> with diffs.
-    - AC-002: Report states selected workstream and matched tasks count.
-    - AC-003: Each audited task has a single Readiness Verdict and at least one evidence reference (or explicit “no evidence found”).
-    - AC-004: Minimal Change Plan lists concrete file paths/symbols for all Partial/Absent items.
-    - AC-005: Validation Runbook includes build, headless demo/test, and docs build commands if applicable.
-    - AC-006: No repository modifications were made (audit-only).
+    <item>M1: RGBA test asserts <code>np_arr.ctypes.data == ptr</code>; height test asserts <code>height.ctypes.data == debug_last_height_src_ptr()</code>; both pass under <code>pytest -q -k numpy_interop</code>.</item>
+    <item>M1: <code>python/tools/profile_copies.py</code> prints “zero-copy OK” with no warnings.</item>
+    <item>M2: Small scene reports <code>within_budget=True</code>; exceeding 512 MiB host-visible raises an error containing “current”, “requested”, and “limit”.</item>
+    <item>Docs: <code>make -C docs html</code> exits 0 and both pages appear in the TOC.</item>
+    <item>Runbook: <code>maturin develop --release</code> and <code>pytest -q</code> exit 0 on CI across win_amd64, linux_x86_64, macos_universal2.</item>
   </acceptanceCriteria>
 
-  <execution>
-    <commands>
-      - python - <<'PY'
-import csv, sys, pathlib, codecs
-p = pathlib.Path("{{roadmapPath}}")
-if not p.exists():
-    print("UNCERTAIN: roadmap.csv not found at", p, file=sys.stderr); sys.exit(2)
-with codecs.open(p, "r", "utf-8-sig") as f:
-    reader = csv.reader(f)
-    headers = next(reader, [])
-print("CSV_HEADERS:", headers)
-PY
-      - rg --version
-      - rg -n --stats --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node_modules' -g '!__pycache__' \
-        '(wgsl|create_render_pipeline|bind_group|sampler|texture|queue\\.write_(buffer|texture)|forge3d|import +forge3d|from +forge3d +import)' \
-        src/ shaders/ python/ examples/ docs/ || true
-    </commands>
-    <notes>
-      - Build keyword sets from Deliverables/Acceptance Criteria/Dependencies; use semicolons inside cells as list separators for extraction only.
-      - Document multiple candidate implementations if found; pick the best match by AC phrasing.
-      - Do not mutate or re-save the CSV.
-    </notes>
-  </execution>
+  <safety>
+    <rule>Branch creation; small, reviewable commits. No blind search/replace.</rule>
+    <rule>Limit code changes to test hooks and memory accounting noted above.</rule>
+    <rule>Exclude build/binary dirs from edits.</rule>
+  </safety>
+
+  <constraints>
+    <platforms>win_amd64; linux_x86_64; macos_universal2</platforms>
+    <memory>≤ 512 MiB host-visible heap</memory>
+    <toolchain>cmake≥3.24; cargo/rustc stable; PyO3; VMA</toolchain>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2-compatible design</apis>
+  </constraints>
 
   <completion>
-    Provide:
-    - <b>reports/audit_&lt;workstream&gt;.md</b>
-    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b>
-    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b>
-    If headers or the workstream filter are invalid, reply <b>UNCERTAIN</b> with exact corrections needed.
+    <summary>Finalize Workstream M by completing zero-copy validation (tests/hooks), correcting docs locations/TOC, fixing budget tests and accounting, and adding a CHANGELOG entry.</summary>
+    <commands>
+      <cmd>git checkout -b wsM-remediate</cmd>
+      <cmd>git mv _validate.py python/forge3d/_validate.py</cmd>
+      <cmd>git mv profile_copies.py python/tools/profile_copies.py</cmd>
+      <cmd>maturin develop --release</cmd>
+      <cmd>pytest -q -k "numpy_interop or memory_budget"</cmd>
+      <cmd>pytest -q</cmd>
+      <cmd>make -C docs html</cmd>
+    </commands>
   </completion>
 </task>
