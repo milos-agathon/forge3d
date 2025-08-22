@@ -1,104 +1,157 @@
-<task>
-  <title>Remediate failed criteria only</title>
+<task id="forge3d-workstream-audit" version="1.1">
+  <title>Audit repo against roadmap.csv for a specified workstream (presence, readiness, evidence; no code edits)</title>
+
+  <role>
+    You are Claude Code in <b>Audit Mode</b>. Act as an elite graphics/runtime engineer (Vulkan ≥1.2, WebGPU/WGSL, RAII, Rust, Python ≥3.8, CMake ≥3.24, VMA, Sphinx).
+    Project: forge3d — Rust backend + Python frontend (PyO3), targeting interactive/offline 3D visualization.
+  </role>
+
+  <constraints>
+    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
+    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
+    <build>cmake>=3.24, cargo/rustc, PyO3, VMA</build>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
+    <docs>Sphinx preferred</docs>
+    <uncertainRule>If essential CSV fields or feature details are missing/ambiguous, reply <b>UNCERTAIN</b> and list the exact headers/rows/paths needed.</uncertainRule>
+    <safety>
+      - <b>Audit-only:</b> Do not modify repository contents.
+      - No third-party code changes; skip binaries/large assets.
+      - Prefer structured searches and header-aware CSV parsing.
+    </safety>
+    <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz</exclusions>
+  </constraints>
 
   <inputs>
-    <repoRoot>.</repoRoot>
-    <paths>
-      <!-- C1 path fix -->
-      <path>src/code/gpu_types.rs</path>
-      <path>src/code/mod.rs</path>
-      <path>src/core/</path>
-
-      <!-- C2/C3 test placement -->
-      <path>test_c2_png_regression.py</path>
-      <path>test_c3_device_caps.py</path>
-      <path>tests/</path>
-
-      <!-- C4 docs + test -->
-      <path>color_management.md</path>
-      <path>docs/index.rst</path>
-      <path>docs/</path>
-      <path>tests/test_tonemap.py</path>
-      <path>src/shaders/terrain.wgsl</path>
-    </paths>
-    <constraints>
-      <platforms>win_amd64; linux_x86_64; macos_universal2</platforms>
-      <memory>≤ 512 MiB host-visible heap</memory>
-      <toolchain>cmake≥3.24; cargo/rustc stable; PyO3; VMA</toolchain>
-      <apis>WebGPU/WGSL primary; Vulkan 1.2-compatible design</apis>
-      <docs>Sphinx preferred</docs>
-    </constraints>
+    <repoRoot>./</repoRoot>
+    <roadmapPath>./roadmap.csv</roadmapPath>
+    <!-- Provide either Workstream ID (e.g., "A") or exact Workstream Title -->
+    <workstreamSelector>
+      <![CDATA[
+      ID: M
+      Title: Interop & Memory
+      ]]>
+    </workstreamSelector>
   </inputs>
 
+  <!-- Exact structure of your roadmap.csv -->
+  <csvSchema>
+    <encoding>utf-8</encoding>
+    <delimiter>comma</delimiter>
+    <columns order="fixed">
+      <col index="0">Workstream ID</col>
+      <col index="1">Workstream Title</col>
+      <col index="2">Task ID</col>
+      <col index="3">Task Title</col>
+      <col index="4">Rationale</col>
+      <col index="5">Deliverables</col>
+      <col index="6">Acceptance Criteria</col>
+      <col index="7">Priority</col>
+      <col index="8">Phase</col>
+      <col index="9">Missing Features</col>
+      <col index="10">Dependencies</col>
+      <col index="11">Risks/Mitigations</col>
+      <col index="12">Original Ref</col>
+      <!-- Trailing column observed in file; treat as ignorable/empty -->
+      <col index="13" optional="true" ignore="true">Unnamed: 13</col>
+    </columns>
+    <cellConventions>
+      <!-- Inside some cells, items are separated by semicolons; DO NOT split columns by this; use only for keyword extraction -->
+      <listSeparator>semicolon-inside-cell</listSeparator>
+      <markdownInline>allowed (e.g., backticks)</markdownInline>
+      <emptyTrailingColumn>ignore if entirely blank</emptyTrailingColumn>
+    </cellConventions>
+    <validation>
+      <!-- Expected controlled vocabularies; report anomalies in hygiene output (do not mutate file) -->
+      <priorityAllowed>High,Medium,Low</priorityAllowed>
+      <phaseAllowed>MVP,Beyond MVP</phaseAllowed>
+    </validation>
+  </csvSchema>
+
   <plan>
-    <!-- Safety -->
-    <step>Create branch <code>wsC-verify-remediate</code>. Exclude <code>target/ dist/ build/ .venv/ node_modules/ .git/</code> from edits.</step>
+    1) Validate & Load CSV
+       - Open <roadmapPath> with UTF-8; delimiter comma.
+       - Confirm exact header names and order per <csvSchema>. If mismatch → <b>UNCERTAIN</b> listing differences.
+       - Drop/ignore column "Unnamed: 13" if entirely empty.
+       - Produce a brief CSV hygiene report:
+         * Rows with Priority not in {High, Medium, Low}.
+         * Rows with Phase not in {MVP, Beyond MVP}.
+         * Missing Task ID/Title/Deliverables/Acceptance Criteria.
 
-    <!-- C1: Fix module paths to match deliverables -->
-    <step>If not present, ensure <code>src/core/</code> exists. Move <code>src/code/gpu_types.rs</code> → <code>src/core/gpu_types.rs</code> via <code>git mv</code>.</step>
-    <step>Move <code>src/code/mod.rs</code> → <code>src/core/mod.rs</code> (create or merge if <code>src/core/mod.rs</code> exists) so that it exports <code>pub mod framegraph;</code> and <code>pub mod gpu_types;</code>.</step>
-    <step>Remove now-empty <code>src/code/</code>. Verify <code>lib.rs</code> compiles with <code>mod core;</code> and references <code>core::*</code> still resolve.</step>
+    2) Select Workstream
+       - Filter rows where Workstream ID == provided ID OR Workstream Title == provided Title (case-insensitive).
+       - If none match → <b>UNCERTAIN</b> and list discovered workstreams (ID → Title).
 
-    <!-- C2/C3: Place tests where pytest discovers them -->
-    <step>Create <code>tests/</code> if missing; <code>git mv</code> <code>test_c2_png_regression.py</code> → <code>tests/test_c2_png_regression.py</code>.</step>
-    <step><code>git mv</code> <code>test_c3_device_caps.py</code> → <code>tests/test_c3_device_caps.py</code>.</step>
+    3) Derive Audit Keywords per Task
+       - From Deliverables/Acceptance Criteria/Dependencies, extract filenames (e.g., *.wgsl), symbols (create_render_pipeline, bind_group), Python API entry points (forge3d.*), example script names, and doc page slugs.
+       - Use semicolon-separated items inside cells as hints; do not alter CSV.
 
-    <!-- C4: Docs location + TOC -->
-    <step>Create <code>docs/</code> if missing. <code>git mv</code> <code>color_management.md</code> → <code>docs/color_management.md</code>.</step>
-    <step>Append <code>color_management</code> into the Sphinx TOC in <code>docs/index.rst</code> under a toctree. Do not alter other sections.</step>
+    4) Repository Scan (read-only)
+       - Search src/, shaders/, python/forge3d/, examples/, docs/ with ripgrep.
+       - Collect evidence per task: file paths + line numbers/snippets that match expected artifacts and wiring (e.g., shader referenced by pipeline; Python API exposed; example present).
 
-    <!-- C4: Add missing tonemap test -->
-    <step>Add <code>tests/test_tonemap.py</code> that: (1) defines CPU <code>reinhard()</code> and <code>gamma_correct()</code>, (2) renders a tiny scene (e.g., 32×32), (3) asserts fragment output is in [0,255], and (4) checks that enabling/removing tonemap path changes average luminance as expected (threshold-based, not exact byte match).</step>
+    5) Readiness Classification (per task)
+       - <b>Present & Wired</b>: artifacts exist and appear integrated (pipeline + API + example/test/doc).
+       - <b>Present but Partial</b>: artifacts exist but missing wiring/exposure/tests/docs.
+       - <b>Absent</b>: no meaningful artifacts found.
 
-    <!-- Verification -->
-    <step>Build: <code>maturin develop --release</code>.</step>
-    <step>Tests: <code>pytest -q</code> (confirm all three testsuites run under <code>tests/</code>).</step>
-    <step>Docs: <code>make -C docs html</code> and confirm <code>color_management</code> appears in the built TOC.</step>
+    6) Minimal Change Plan (No Edits)
+       - For Partial/Absent: list the minimal file-level actions (paths/symbols) needed to reach “Present & Wired,” respecting platform/build/memory constraints.
+
+    7) Outputs
+       - Emit a Markdown audit report and a machine-readable audit matrix CSV. Include CSV hygiene observations.
   </plan>
 
   <deliverables>
-    <item>C1: <code>src/core/gpu_types.rs</code> exists; <code>src/core/mod.rs</code> exports <code>gpu_types</code> and <code>framegraph</code>; no <code>src/code/</code> remnants.</item>
-    <item>C2: <code>tests/test_c2_png_regression.py</code> present and collected by pytest.</item>
-    <item>C3: <code>tests/test_c3_device_caps.py</code> present and collected by pytest.</item>
-    <item>C4: <code>docs/color_management.md</code> present and referenced from <code>docs/index.rst</code>.</item>
-    <item>C4: <code>tests/test_tonemap.py</code> added and passing.</item>
+    - <b>reports/audit_&lt;workstream&gt;.md</b> — Markdown:
+      1) Scope (workstream, matched rows count) & CSV Hygiene summary
+      2) Readiness Verdict per task (Present & Wired / Partial / Absent)
+      3) Evidence Map (file paths + line refs/snippets)
+      4) Blocking Gaps
+      5) Minimal Change Plan (file-level)
+      6) Validation Runbook (commands to verify after implementation)
+    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b> — Columns:
+      <code>Workstream ID,Workstream Title,Task ID,Task Title,Readiness,Evidence Paths,Missing Pieces,Minimal Changes,Priority,Phase,Dependencies,Risks/Mitigations,Original Ref</code>
+    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b> — Detected anomalies (Priority/Phase out-of-vocab, missing required cells).
   </deliverables>
 
   <acceptanceCriteria>
-    <item>C1: Repository builds after moving modules; <code>cargo build</code> (via <code>maturin develop --release</code>) succeeds.</item>
-    <item>C2/C3: <code>pytest -q</code> shows both tests discovered under <code>tests/</code> and passing.</item>
-    <item>C4-Docs: <code>make -C docs html</code> exits 0 and the sidebar/TOC includes “Color Management &amp; Tonemap Pipeline”.</item>
-    <item>C4-Tests: <code>pytest -q -k tonemap</code> exits 0 and reports at least one assertion validating tonemap effect (brightness threshold) has passed.</item>
+    - AC-001: Exact headers match those specified (including ignorable "Unnamed: 13"); else returns <b>UNCERTAIN</b> with diffs.
+    - AC-002: Report states selected workstream and matched tasks count.
+    - AC-003: Each audited task has a single Readiness Verdict and at least one evidence reference (or explicit “no evidence found”).
+    - AC-004: Minimal Change Plan lists concrete file paths/symbols for all Partial/Absent items.
+    - AC-005: Validation Runbook includes build, headless demo/test, and docs build commands if applicable.
+    - AC-006: No repository modifications were made (audit-only).
   </acceptanceCriteria>
 
-  <safety>
-    <rule>Create branch; small commits per step; no blind search/replace.</rule>
-    <rule>Only touch the files listed in <paths>; keep shader/engine logic unchanged.</rule>
-    <rule>Exclude build/binary dirs from edits: <code>target/ dist/ build/ .venv/ node_modules/ .git/</code>.</rule>
-  </safety>
-
-  <constraints>
-    <platforms>win_amd64; linux_x86_64; macos_universal2</platforms>
-    <memory>≤ 512 MiB host-visible heap</memory>
-    <toolchain>cmake≥3.24; cargo/rustc stable; PyO3; VMA</toolchain>
-    <apis>WebGPU/WGSL primary; Vulkan 1.2-compatible design</apis>
-    <docs>Sphinx preferred</docs>
-  </constraints>
+  <execution>
+    <commands>
+      - python - <<'PY'
+import csv, sys, pathlib, codecs
+p = pathlib.Path("{{roadmapPath}}")
+if not p.exists():
+    print("UNCERTAIN: roadmap.csv not found at", p, file=sys.stderr); sys.exit(2)
+with codecs.open(p, "r", "utf-8-sig") as f:
+    reader = csv.reader(f)
+    headers = next(reader, [])
+print("CSV_HEADERS:", headers)
+PY
+      - rg --version
+      - rg -n --stats --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node_modules' -g '!__pycache__' \
+        '(wgsl|create_render_pipeline|bind_group|sampler|texture|queue\\.write_(buffer|texture)|forge3d|import +forge3d|from +forge3d +import)' \
+        src/ shaders/ python/ examples/ docs/ || true
+    </commands>
+    <notes>
+      - Build keyword sets from Deliverables/Acceptance Criteria/Dependencies; use semicolons inside cells as list separators for extraction only.
+      - Document multiple candidate implementations if found; pick the best match by AC phrasing.
+      - Do not mutate or re-save the CSV.
+    </notes>
+  </execution>
 
   <completion>
-    <summary>Remediated Workstream C verification gaps: fixed C1 pathing; placed tests; added tonemap test; moved docs and registered TOC; verified build/tests/docs.</summary>
-    <commands>
-      <cmd>git checkout -b wsC-verify-remediate</cmd>
-      <cmd>git mv src/code/gpu_types.rs src/core/gpu_types.rs</cmd>
-      <cmd>git mv src/code/mod.rs src/core/mod.rs</cmd>
-      <cmd>git rm -r src/code || true</cmd>
-      <cmd>mkdir -p tests docs</cmd>
-      <cmd>git mv test_c2_png_regression.py tests/test_c2_png_regression.py</cmd>
-      <cmd>git mv test_c3_device_caps.py tests/test_c3_device_caps.py</cmd>
-      <cmd>git mv color_management.md docs/color_management.md</cmd>
-      <cmd>maturin develop --release</cmd>
-      <cmd>pytest -q</cmd>
-      <cmd>make -C docs html</cmd>
-    </commands>
+    Provide:
+    - <b>reports/audit_&lt;workstream&gt;.md</b>
+    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b>
+    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b>
+    If headers or the workstream filter are invalid, reply <b>UNCERTAIN</b> with exact corrections needed.
   </completion>
 </task>
