@@ -1,134 +1,156 @@
-<task id="forge3d-workstream-audit" version="1.0">
-  <title>Audit repo against roadmap.csv for a specified workstream (presence, readiness, evidence; no code edits)</title>
-
-  <role>
-    You are Claude Code in <b>Audit Mode</b>. Act as an elite graphics/runtime engineer (Vulkan ≥1.2, WebGPU/WGSL, RAII, Rust, Python ≥3.8, CMake ≥3.24, VMA, Sphinx).
-    Project: forge3d — Rust backend + Python frontend (PyO3), targeting interactive/offline 3D visualization.
-  </role>
-
-  <constraints>
-    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
-    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
-    <build>cmake>=3.24, cargo/rustc, PyO3, VMA</build>
-    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
-    <docs>Sphinx preferred</docs>
-    <uncertainRule>If essential CSV fields or feature details are missing/ambiguous, reply <b>UNCERTAIN</b> and list the exact headers/rows/paths needed.</uncertainRule>
-    <safety>
-      - <b>Audit-only:</b> Do not modify repository contents.
-      - No third-party code changes; skip binaries and large assets.
-      - Prefer structured searches and header-aware CSV parsing.
-    </safety>
-    <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz</exclusions>
-  </constraints>
+<task>
+  <title>Implement & wire missing/partial items for Workstream C</title>
 
   <inputs>
-    <repoRoot>./</repoRoot>
-    <roadmapPath>./roadmap.csv</roadmapPath>
-    <!-- Provide either Workstream ID (e.g., "A") or exact Workstream Title -->
-    <workstreamSelector>
-      <![CDATA[
-      ID: A
-      Title: Rendering & Pipelines
-      ]]>
-    </workstreamSelector>
+    <repoRoot>.</repoRoot>
+    <paths>
+      <path>src/</path>
+      <path>src/core/</path>
+      <path>src/shaders/</path>
+      <path>python/forge3d/</path>
+      <path>python/tools/</path>
+      <path>examples/</path>
+      <path>tests/</path>
+      <path>docs/</path>
+    </paths>
+    <workstream>
+      <item id="C1">Engine layout &amp; error type</item>
+      <item id="C2">Off-screen target &amp; readback path (merged)</item>
+      <item id="C3">Device diagnostics &amp; feature gating (merged)</item>
+      <item id="C4">Color management &amp; tonemap stub</item>
+    </workstream>
+    <constraints>
+      <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
+      <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
+      <build>cmake≥3.24, cargo/rustc, PyO3, VMA</build>
+      <apis>WebGPU/WGSL primary; Vulkan 1.2-compatible design</apis>
+      <docs>Sphinx preferred</docs>
+    </constraints>
   </inputs>
 
-  <csvSchema>
-    Expected headers (case-insensitive, trimmed). Accept synonyms in parentheses:
-    - Workstream ID (WorkstreamID, WS)
-    - Workstream Title (Workstream, Stream)
-    - Task ID (ID)
-    - Task Title (Title, Name)
-    - Rationale
-    - Deliverables
-    - Acceptance Criteria (AC, AcceptanceCriteria)
-    - Priority
-    - Phase (MVP, Beyond MVP)
-    - Missing Features (Missing, Gap)
-    - Dependencies
-    - Risks/Mitigations (Risks, Mitigations)
-    - Original Ref (Ref, Source)
-  </csvSchema>
-
   <plan>
-    1) Validate & Load CSV
-       - Detect delimiter (default comma), handle quotes/BOM/CRLF.
-       - Verify presence of required columns: Workstream ID/Title, Task ID, Task Title, Deliverables, Acceptance Criteria.
-       - If missing → <b>UNCERTAIN</b> with the exact missing header(s).
-    2) Select Workstream
-       - Filter rows where Workstream ID equals the provided ID OR Workstream Title equals the provided Title (case-insensitive).
-       - If zero rows match → <b>UNCERTAIN</b> and list available workstreams discovered.
-       - Produce a task list (Task ID/Title + Deliverables + AC + Dependencies).
-    3) Derive Audit Keywords per Task
-       - From Deliverables & ACs, extract likely artifacts: filenames (e.g., <code>*.wgsl</code>), symbols (<code>create_render_pipeline</code>, <code>bind_group</code>), Python entry points (<code>forge3d</code> API names), examples/docs paths.
-       - Build a concise keyword set per task to minimize false positives.
-    4) Repository Scan (read-only)
-       - Search <code>src/</code>, <code>shaders/</code>, <code>python/forge3d/</code>, <code>examples/</code>, <code>docs/</code> using ripgrep.
-       - Collect evidence snippets (file path, line numbers) for matches. Confirm wiring where feasible (e.g., shader referenced by pipeline; Python API exposes function).
-    5) Readiness Classification
-       - For each task, decide:
-         * <b>Present & Wired</b>: artifacts exist and appear integrated (e.g., pipeline + API + example/test/doc).
-         * <b>Present but Partial</b>: artifacts exist but wiring/exposure/tests/docs missing.
-         * <b>Absent</b>: no meaningful artifacts detected.
-       - Note platform/memory/build considerations if ACs or Dependencies imply them.
-    6) Minimal Change Plan (No Edits)
-       - For Partial/Absent items, outline the minimal file-level changes needed (paths/symbols), ordered to reach “Present & Wired.”
-       - Keep within stated constraints (platforms, memory, build).
-    7) Outputs
-       - Generate a Markdown audit report and a machine-readable audit matrix CSV. Include an optional search transcript.
+    <!-- Safety & setup -->
+    <step>Audit the tree; create branch <code>wsC-gap-fill</code>. Do not touch: <code>target/ dist/ build/ .venv/ node_modules/ .git/</code>. Use ripgrep to confirm file locations before edits.</step>
+    <step>Run a clean build to establish baseline: <code>maturin develop --release</code> and smoke test <code>python -c "import forge3d; r=forge3d.Renderer(64,64); print('OK')"</code>.</step>
+
+    <!-- C1: Engine layout & error type -->
+    <step>
+      Create <code>src/error.rs</code> with <code>RenderError</code> enum
+      (Device, Upload, Render, Readback, Io) and <code>From&lt;RenderError&gt; for pyo3::PyErr</code>.
+    </step>
+    <step>
+      Replace ad-hoc <code>PyRuntimeError::new_err(...)</code> with <code>RenderError</code> in
+      <code>src/lib.rs</code>, <code>src/gpu.rs</code>, <code>src/scene/mod.rs</code>, and any renderer paths
+      (small, reviewable commits).
+    </step>
+    <step>
+      Provide thin layout shims to satisfy deliverables without large refactors:
+      create <code>src/context.rs</code> that re-exports the active GPU context from <code>src/gpu.rs</code>;
+      create <code>src/core/framegraph.rs</code> and <code>src/core/gpu_types.rs</code> as focused modules
+      (move/alias existing types if present; otherwise minimal stubs + TODO headers). Update <code>lib.rs</code> wiring.
+    </step>
+
+    <!-- C2: Off-screen target & readback (no-op, protect) -->
+    <step>Do not modify working off-screen/readback paths. Add a regression test that re-runs the PNG round-trip to guard against regressions.</step>
+
+    <!-- C3: Device diagnostics & feature gating -->
+    <step>
+      Introduce <code>DeviceCaps</code> (Rust) capturing: backend id/name, adapter name, key limits
+      (e.g., <code>max_texture_dimension_2d</code>), features, and <code>msaa_supported</code> (true if sample_count&gt;1 supported).
+    </step>
+    <step>
+      Add <code>Renderer.report_device()</code> (PyO3) returning a dict/typed object with fields from <code>DeviceCaps</code>.
+      Internally reuse existing <code>enumerate_adapters()</code>/<code>device_probe()</code>.
+    </step>
+    <step>
+      Gate MSAA automatically: disable or downgrade if <code>msaa_supported == false</code>.
+      Add a unit test asserting MSAA is off on adapters that report no MSAA.
+    </step>
+
+    <!-- C4: Color management & tonemap -->
+    <step>
+      In <code>src/shaders/terrain.wgsl</code>, add explicit functions:
+      <code>fn reinhard(x: vec3&lt;f32&gt;) -&gt; vec3&lt;f32&gt;</code> and
+      <code>fn gamma_correct(x: vec3&lt;f32&gt;) -&gt; vec3&lt;f32&gt;</code> (gamma=2.2),
+      and call them in the fragment shader after exposure/shading.
+    </step>
+    <step>
+      Add Sphinx page <code>docs/color_management.md</code> describing the pipeline:
+      linear lighting -&gt; reinhard -&gt; gamma 2.2 -&gt; <code>Rgba8UnormSrgb</code>; include rationale and when to use sRGB targets.
+      Register in <code>docs/index.rst</code> TOC.
+    </step>
+
+    <!-- Finalization -->
+    <step>Run examples and tests; update/author missing tests as specified in AcceptanceCriteria. Commit in small diffs with clear messages.</step>
+    <step>Open a short summary in <code>CHANGELOG.md</code> under "Workstream C – gap fill".</step>
   </plan>
 
   <deliverables>
-    - <b>reports/audit_&lt;workstream&gt;.md</b> — Markdown report with:
-      1) Scope & CSV summary (matched rows count)
-      2) Readiness Verdict per task (Present & Wired / Partial / Absent)
-      3) Evidence Map (file paths + line refs/snippets)
-      4) Blocking Gaps
-      5) Minimal Change Plan (file-level)
-      6) Validation Runbook (commands to verify after implementation)
-    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b> — Columns:
-      <code>Workstream ID,Workstream Title,Task ID,Task Title,Readiness,Evidence Paths,Missing Pieces,Minimal Changes,Priority,Phase,Dependencies,Risks/Mitigations,Original Ref</code>
-    - <b>reports/audit_&lt;workstream&gt;_grep.txt</b> — Key ripgrep snippets supporting findings (optional).
+    <!-- From CSV, normalized to the current repo -->
+    <item task="C1">
+      src/error.rs (RenderError + PyErr conversion);
+      src/context.rs (thin re-export shim);
+      src/core/framegraph.rs and src/core/gpu_types.rs (focused modules or re-exports);
+      lib.rs rewired to use context/error modules.
+    </item>
+    <item task="C2">
+      (No changes) Regression test ensuring 512×512 PNG round-trip; row-padding helper untouched.
+    </item>
+    <item task="C3">
+      src/device_caps.rs (or within lib.rs) defining DeviceCaps; Renderer.report_device() PyO3 method; unit tests in tests/test_diagnostics.py updated/added; optional CLI enrichment in python/tools/device_diagnostics.py.
+    </item>
+    <item task="C4">
+      src/shaders/terrain.wgsl: explicit reinhard() + gamma_correct() calls wired;
+      docs/color_management.md (Sphinx) with format choices and workflow; tests/test_tonemap.py updated to validate CPU vs. shader intent where feasible.
+    </item>
   </deliverables>
 
   <acceptanceCriteria>
-    - AC-001: CSV loaded and filtered; report states matched workstream and counts.
-    - AC-002: Every task row audited has a single Readiness Verdict with at least one evidence reference (or explicit “no evidence found”).
-    - AC-003: Minimal Change Plan lists concrete file paths/symbols for all Partial/Absent items.
-    - AC-004: Validation Runbook includes build, headless demo/test, and (if applicable) docs build commands.
-    - AC-005: No repo modifications were made (audit-only).
+    <item task="C1">
+      Builds on all 3 OS locally; <code>RenderError</code> used in modified code paths; <code>Renderer.info()</code> (or equivalent) compiles and uses new context wiring; unit tests build and pass.
+    </item>
+    <item task="C2">
+      Rendering a 512×512 triangle pre/post change yields identical PNG bytes (hash match);
+      PNG round-trip test green; row-padding test remains green.
+    </item>
+    <item task="C3">
+      <code>Renderer.report_device()</code> returns backend, limits, features, and MSAA capability; values consistent with <code>enumerate_adapters()</code>/<code>device_probe()</code>;
+      when MSAA unsupported, pipeline initializes with MSAA disabled; unit test asserts behavior.
+    </item>
+    <item task="C4">
+      WGSL compiles successfully; fragment path invokes <code>reinhard()</code> then <code>gamma_correct()</code>;
+      CPU reference in <code>tests/test_tonemap.py</code> matches shader-intent thresholds;
+      docs page built and appears in Sphinx TOC.
+    </item>
+    <item>
+      Full runbook passes: <code>maturin develop --release</code>, <code>pytest -q</code>, and demo scripts in examples/.
+    </item>
   </acceptanceCriteria>
 
-  <execution>
-    <commands>
-      - python - <<'PY'
-import csv, sys, os, re, json, pathlib
-p = pathlib.Path("{{roadmapPath}}")
-if not p.exists():
-    print("UNCERTAIN: roadmap.csv not found at", p, file=sys.stderr); sys.exit(2)
-# Basic header read (robust to BOM)
-import codecs
-with codecs.open(p, "r", "utf-8-sig") as f:
-    head = f.readline()
-print("CSV_HEADER_SAMPLE:", head.strip())
-PY
-      - rg --version
-      - rg -n --stats --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node_modules' -g '!__pycache__' \
-        '(wgsl|create_render_pipeline|bind_group|sampler|texture|queue\\.write_(buffer|texture)|forge3d|import +forge3d|from +forge3d +import)' \
-        src/ shaders/ python/ examples/ docs/ || true
-    </commands>
-    <notes>
-      - When building keyword sets, prefer exact filenames and identifiers from the Deliverables/AC cells.
-      - Disambiguate similar tasks by checking adjacency (e.g., shader present <i>and</i> referenced by a pipeline).
-      - If multiple implementations exist, document each and pick the best match based on AC phrasing.
-    </notes>
-  </execution>
+  <safety>
+    <rule>Create branch <code>wsC-gap-fill</code>; commit in small steps; open a PR at end.</rule>
+    <rule>Exclude binary/build/output directories from edits: <code>target/</code>, <code>dist/</code>, <code>build/</code>, <code>.venv/</code>, <code>node_modules/</code>, <code>.git/</code>.</rule>
+    <rule>No blind search/replace; confirm each replacement with a focused diff.</rule>
+    <rule>Prefer additive stubs/wrappers over large refactors to satisfy deliverables.</rule>
+  </safety>
+
+  <constraints>
+    <platforms>win_amd64; linux_x86_64; macos_universal2</platforms>
+    <memory>Respect ≤512 MiB host-visible heap; avoid allocations &gt; 64 MiB per buffer unless justified.</memory>
+    <toolchain>cmake≥3.24; cargo/rustc stable; PyO3; VMA</toolchain>
+    <apis>WebGPU/WGSL primary; design choices remain Vulkan 1.2 compatible.</apis>
+    <docs>Sphinx build <code>make -C docs html</code> must succeed.</docs>
+  </constraints>
 
   <completion>
-    Provide:
-    - <b>reports/audit_&lt;workstream&gt;.md</b>
-    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b>
-    - (optional) <b>reports/audit_&lt;workstream&gt;_grep.txt</b>
-    If CSV headers or the workstream filter are invalid, reply <b>UNCERTAIN</b> with exact corrections needed.
+    <summary>Workstream C gaps closed (C1, C3, C4), C2 preserved; repo builds/tests/docs green.</summary>
+    <commands>
+      <cmd>git checkout -b wsC-gap-fill</cmd>
+      <cmd>maturin develop --release</cmd>
+      <cmd>pytest -q</cmd>
+      <cmd>python examples/triangle_png.py</cmd>
+      <cmd>python -c "import forge3d; import json; r=forge3d.Renderer(64,64); print(json.dumps(r.report_device()))"</cmd>
+      <cmd>make -C docs html</cmd>
+    </commands>
   </completion>
 </task>
