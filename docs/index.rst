@@ -22,6 +22,8 @@ forge3d provides:
 Getting Started
 --------------
 
+For a quick terrain rendering example that runs in under 10 minutes, see the README Quick Start section and ``examples/terrain_single_tile.py``.
+
 Install forge3d::
 
     pip install forge3d

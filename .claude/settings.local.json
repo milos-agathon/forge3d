@@ -75,7 +75,8 @@
       "Bash(git commit:*)",
       "Bash(pip uninstall:*)",
       "Bash(cmd /C:*)",
-      "Bash(sphinx-build:*)"
+      "Bash(sphinx-build:*)",
+      "Bash(make:*)"
     ],
     "deny": [],
     "additionalDirectories": [
