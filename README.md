@@ -26,6 +26,26 @@ maturin develop --release
 # pip install forge3d
 ```
 
+## Quick Start (< 10 minutes)
+
+New to forge3d? Get a terrain rendering example working in under 10 minutes:
+
+1. **Install prerequisites**: Ensure you have Python ≥3.8 installed
+2. **Install maturin**: `pip install -U maturin`
+3. **Build forge3d**: `maturin develop --release`
+4. **Run terrain example**: `python examples/terrain_single_tile.py`
+5. **Verify output**: Check that `terrain_single_tile.png` was created and shows a shaded terrain
+
+Expected runtime: ~1-2 minutes for the script at default 128×128 resolution. The PNG will be saved in your current directory and shows a procedural terrain with the viridis colormap.
+
+```bash
+# Complete quick start sequence
+pip install -U maturin
+maturin develop --release
+python examples/terrain_single_tile.py
+# -> Creates terrain_single_tile.png (512×512 image)
+```
+
 ## Platform requirements
 
 Runs anywhere wgpu supports: Vulkan / Metal / DX12 / GL (and Browser WebGPU for diagnostics). A discrete or integrated GPU is recommended. Examples/tests that need a GPU will skip if no compatible adapter is found.
