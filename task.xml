@@ -1,85 +1,134 @@
-You are Claude Code operating in **Safe Edit Mode**.
+<task id="forge3d-workstream-audit" version="1.0">
+  <title>Audit repo against roadmap.csv for a specified workstream (presence, readiness, evidence; no code edits)</title>
 
-OBJECTIVE
-Reformat the repository’s README so the header displays a **2000×2000 logo asset** at the top (visually sized down for GitHub), while preserving all other README content and structure.
+  <role>
+    You are Claude Code in <b>Audit Mode</b>. Act as an elite graphics/runtime engineer (Vulkan ≥1.2, WebGPU/WGSL, RAII, Rust, Python ≥3.8, CMake ≥3.24, VMA, Sphinx).
+    Project: forge3d — Rust backend + Python frontend (PyO3), targeting interactive/offline 3D visualization.
+  </role>
 
-REQUIREMENTS
-- Use a high-res raster asset: `assets/logo-2000.png` (2000×2000). If a dark-mode variant exists, use `assets/logo-2000-dark.png` too.
-- If the exact asset(s) don’t exist, create an `assets/` folder and add a **temporary placeholder** 2000×2000 PNG with “LOGO” text (clearly marked to be replaced), then wire it up. Do not fetch network resources.
-- Insert the logo at the very top of `README.md`, centered, with a link to the repo root.
-- Keep the **display size** reasonable (e.g., width 192–256 px) but keep the **source file 2000×2000** for crispness.
-- Preserve all existing badges, titles, and TOC. Do not change other content besides adding the header block and adjusting spacing if needed.
-- Prefer `<picture>` for light/dark theme switching; fall back to a single `<img>` if only one asset is available.
-- Add meaningful `alt` text and set `decoding="async"`, `loading="eager"`.
+  <constraints>
+    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
+    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
+    <build>cmake>=3.24, cargo/rustc, PyO3, VMA</build>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
+    <docs>Sphinx preferred</docs>
+    <uncertainRule>If essential CSV fields or feature details are missing/ambiguous, reply <b>UNCERTAIN</b> and list the exact headers/rows/paths needed.</uncertainRule>
+    <safety>
+      - <b>Audit-only:</b> Do not modify repository contents.
+      - No third-party code changes; skip binaries and large assets.
+      - Prefer structured searches and header-aware CSV parsing.
+    </safety>
+    <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz</exclusions>
+  </constraints>
 
-PLAN
-1) Create `assets/` if missing. If no 2000×2000 logo exists, add `assets/logo-2000.png` placeholder (2000×2000) and, optionally, `assets/logo-2000-dark.png`.
-2) Insert a centered header block at the very top of `README.md`:
-   - Use `<div align="center">...</div>` to center on GitHub.
-   - Use `<picture>` with `prefers-color-scheme` sources if both light/dark assets exist.
-   - Make the image clickable to the repo root (`./`).
-   - Keep a compact vertical rhythm (one blank line after the block).
-3) Leave everything else untouched, including badges and headings order. If badges exist at line 1, place the logo **above** them; don’t re-order badges.
-4) Validate relative paths.
+  <inputs>
+    <repoRoot>./</repoRoot>
+    <roadmapPath>./roadmap.csv</roadmapPath>
+    <!-- Provide either Workstream ID (e.g., "A") or exact Workstream Title -->
+    <workstreamSelector>
+      <![CDATA[
+      ID: A
+      Title: Rendering & Pipelines
+      ]]>
+    </workstreamSelector>
+  </inputs>
 
-HEADER SNIPPETS (choose first if both light/dark exist; otherwise use fallback)
+  <csvSchema>
+    Expected headers (case-insensitive, trimmed). Accept synonyms in parentheses:
+    - Workstream ID (WorkstreamID, WS)
+    - Workstream Title (Workstream, Stream)
+    - Task ID (ID)
+    - Task Title (Title, Name)
+    - Rationale
+    - Deliverables
+    - Acceptance Criteria (AC, AcceptanceCriteria)
+    - Priority
+    - Phase (MVP, Beyond MVP)
+    - Missing Features (Missing, Gap)
+    - Dependencies
+    - Risks/Mitigations (Risks, Mitigations)
+    - Original Ref (Ref, Source)
+  </csvSchema>
 
-A) Light+Dark (preferred):
-```html
-<div align="center">
-  <a href="./">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="assets/logo-2000-dark.png">
-      <img src="assets/logo-2000.png"
-           alt="forge3d logo"
-           width="224"
-           height="224"
-           decoding="async"
-           loading="eager">
-    </picture>
-  </a>
-</div>
-````
+  <plan>
+    1) Validate & Load CSV
+       - Detect delimiter (default comma), handle quotes/BOM/CRLF.
+       - Verify presence of required columns: Workstream ID/Title, Task ID, Task Title, Deliverables, Acceptance Criteria.
+       - If missing → <b>UNCERTAIN</b> with the exact missing header(s).
+    2) Select Workstream
+       - Filter rows where Workstream ID equals the provided ID OR Workstream Title equals the provided Title (case-insensitive).
+       - If zero rows match → <b>UNCERTAIN</b> and list available workstreams discovered.
+       - Produce a task list (Task ID/Title + Deliverables + AC + Dependencies).
+    3) Derive Audit Keywords per Task
+       - From Deliverables & ACs, extract likely artifacts: filenames (e.g., <code>*.wgsl</code>), symbols (<code>create_render_pipeline</code>, <code>bind_group</code>), Python entry points (<code>forge3d</code> API names), examples/docs paths.
+       - Build a concise keyword set per task to minimize false positives.
+    4) Repository Scan (read-only)
+       - Search <code>src/</code>, <code>shaders/</code>, <code>python/forge3d/</code>, <code>examples/</code>, <code>docs/</code> using ripgrep.
+       - Collect evidence snippets (file path, line numbers) for matches. Confirm wiring where feasible (e.g., shader referenced by pipeline; Python API exposes function).
+    5) Readiness Classification
+       - For each task, decide:
+         * <b>Present & Wired</b>: artifacts exist and appear integrated (e.g., pipeline + API + example/test/doc).
+         * <b>Present but Partial</b>: artifacts exist but wiring/exposure/tests/docs missing.
+         * <b>Absent</b>: no meaningful artifacts detected.
+       - Note platform/memory/build considerations if ACs or Dependencies imply them.
+    6) Minimal Change Plan (No Edits)
+       - For Partial/Absent items, outline the minimal file-level changes needed (paths/symbols), ordered to reach “Present & Wired.”
+       - Keep within stated constraints (platforms, memory, build).
+    7) Outputs
+       - Generate a Markdown audit report and a machine-readable audit matrix CSV. Include an optional search transcript.
+  </plan>
 
-B) Single asset fallback:
+  <deliverables>
+    - <b>reports/audit_&lt;workstream&gt;.md</b> — Markdown report with:
+      1) Scope & CSV summary (matched rows count)
+      2) Readiness Verdict per task (Present & Wired / Partial / Absent)
+      3) Evidence Map (file paths + line refs/snippets)
+      4) Blocking Gaps
+      5) Minimal Change Plan (file-level)
+      6) Validation Runbook (commands to verify after implementation)
+    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b> — Columns:
+      <code>Workstream ID,Workstream Title,Task ID,Task Title,Readiness,Evidence Paths,Missing Pieces,Minimal Changes,Priority,Phase,Dependencies,Risks/Mitigations,Original Ref</code>
+    - <b>reports/audit_&lt;workstream&gt;_grep.txt</b> — Key ripgrep snippets supporting findings (optional).
+  </deliverables>
 
-```html
-<div align="center">
-  <a href="./">
-    <img src="assets/logo-2000.png"
-         alt="forge3d logo"
-         width="224"
-         height="224"
-         decoding="async"
-         loading="eager">
-  </a>
-</div>
-```
+  <acceptanceCriteria>
+    - AC-001: CSV loaded and filtered; report states matched workstream and counts.
+    - AC-002: Every task row audited has a single Readiness Verdict with at least one evidence reference (or explicit “no evidence found”).
+    - AC-003: Minimal Change Plan lists concrete file paths/symbols for all Partial/Absent items.
+    - AC-004: Validation Runbook includes build, headless demo/test, and (if applicable) docs build commands.
+    - AC-005: No repo modifications were made (audit-only).
+  </acceptanceCriteria>
 
-PLACEHOLDER (only if no logo image exists yet)
+  <execution>
+    <commands>
+      - python - <<'PY'
+import csv, sys, os, re, json, pathlib
+p = pathlib.Path("{{roadmapPath}}")
+if not p.exists():
+    print("UNCERTAIN: roadmap.csv not found at", p, file=sys.stderr); sys.exit(2)
+# Basic header read (robust to BOM)
+import codecs
+with codecs.open(p, "r", "utf-8-sig") as f:
+    head = f.readline()
+print("CSV_HEADER_SAMPLE:", head.strip())
+PY
+      - rg --version
+      - rg -n --stats --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node_modules' -g '!__pycache__' \
+        '(wgsl|create_render_pipeline|bind_group|sampler|texture|queue\\.write_(buffer|texture)|forge3d|import +forge3d|from +forge3d +import)' \
+        src/ shaders/ python/ examples/ docs/ || true
+    </commands>
+    <notes>
+      - When building keyword sets, prefer exact filenames and identifiers from the Deliverables/AC cells.
+      - Disambiguate similar tasks by checking adjacency (e.g., shader present <i>and</i> referenced by a pipeline).
+      - If multiple implementations exist, document each and pick the best match based on AC phrasing.
+    </notes>
+  </execution>
 
-* Create a 2000×2000 PNG placeholder named `assets/logo-2000.png`. Include neutral background and centered “LOGO” text so it’s obvious it’s a temporary asset. Also create `assets/README.md` with a one-liner: “Replace `logo-2000.png` (and optional `logo-2000-dark.png`) with your final 2000×2000 logo(s).”
-
-ACCEPTANCE CRITERIA
-
-1. `README.md` begins with one of the header snippets above, centered, and links to `./`.
-2. The referenced file `assets/logo-2000.png` exists and is exactly **2000×2000** pixels (and `assets/logo-2000-dark.png` if used).
-3. On GitHub preview, the logo renders at the top and appears \~224 px square (or similar), without pushing content off-screen.
-4. All existing README content (badges, headings, TOC, code blocks, links) remains unchanged and in the same order, except for the new header block insertion and a single blank line after it.
-5. No external URLs were added; image paths are relative.
-6. The `alt` attribute is present and descriptive (“forge3d logo”).
-7. If both light and dark assets exist, dark mode shows the dark asset; otherwise the light asset is used universally.
-
-SAFETY & SCOPE
-
-* Do not modify files outside `README.md` and `assets/*` (except creating `assets/README.md` if needed).
-* Do not fetch from the internet or embed data URIs.
-* Keep changes minimal; provide a single commit.
-
-DELIVERABLES
-
-* Updated `README.md` with the header block.
-* `assets/logo-2000.png` (and optional `assets/logo-2000-dark.png`), or a clearly marked placeholder.
-* A short commit message: `docs(readme): add 2000×2000 header logo with light/dark support`.
-
-BEGIN.
+  <completion>
+    Provide:
+    - <b>reports/audit_&lt;workstream&gt;.md</b>
+    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b>
+    - (optional) <b>reports/audit_&lt;workstream&gt;_grep.txt</b>
+    If CSV headers or the workstream filter are invalid, reply <b>UNCERTAIN</b> with exact corrections needed.
+  </completion>
+</task>
