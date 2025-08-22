@@ -12,6 +12,11 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - **C3 – Device diagnostics integration**: Added `Renderer.report_device()` method returning structured device capabilities including backend, limits, and MSAA support; MSAA automatically gated based on device capabilities
 - **C4 – Explicit tonemap functions**: Added `reinhard()` and `gamma_correct()` functions to `terrain.wgsl` with explicit gamma 2.2 correction; created comprehensive color management documentation
 
+### Workstream M – Interop & Memory
+
+- **M1 – Zero-copy NumPy interop**: Added comprehensive zero-copy validation for RGBA output and height input with pointer-equality tests using test-only hooks (`render_triangle_rgba_with_ptr()`, `debug_last_height_src_ptr()`); created `python/forge3d/_validate.py` helper module with `ptr()`, `is_c_contiguous()`, and `validate_zero_copy_path()` functions; enhanced `python/tools/profile_copies.py` profiler tool to print "zero-copy OK" when validation succeeds; updated `tests/test_numpy_interop.py` with direct pointer assertions; documentation in `docs/interop_zero_copy.rst`
+- **M2 – Memory budget tracker**: Implemented `src/core/memory_tracker.rs` with `ResourceRegistry` for tracking GPU resource allocations; enforces 512 MiB host-visible memory budget with automatic checking before allocations; fixed memory accounting for readback buffer resizing and temporary buffer cleanup; added `Renderer.get_memory_metrics()` method returning counts, bytes, and budget status; enhanced `tests/test_memory_budget.py` with oversized allocation tests that validate error messages contain "current", "requested", and "limit" information; documentation in `docs/memory_budget.rst`
+
 ## [0.1.0] - 2025-08-19
 
 ### Added
