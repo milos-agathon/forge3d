@@ -3,6 +3,15 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
+## [Unreleased]
+
+### Workstream C – Gap Fill
+
+- **C1 – Engine layout & error type**: Added centralized `RenderError` enum with PyErr conversion; created modular layout shims (`src/context.rs`, `src/core/framegraph.rs`, `src/core/gpu_types.rs`) for deliverable compliance
+- **C2 – Off-screen target preservation**: Added regression tests to ensure 512×512 PNG round-trip remains deterministic; existing row-padding and readback functionality preserved  
+- **C3 – Device diagnostics integration**: Added `Renderer.report_device()` method returning structured device capabilities including backend, limits, and MSAA support; MSAA automatically gated based on device capabilities
+- **C4 – Explicit tonemap functions**: Added `reinhard()` and `gamma_correct()` functions to `terrain.wgsl` with explicit gamma 2.2 correction; created comprehensive color management documentation
+
 ## [0.1.0] - 2025-08-19
 
 ### Added

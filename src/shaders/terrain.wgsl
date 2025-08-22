@@ -87,5 +87,19 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   // Mix in a small ambient floor to avoid large flat regions in the PNG.
   let shade = mix(0.15, 1.0, lambert);
 
-  return vec4<f32>(lut_color.rgb * exposure * shade, 1.0);
+  // Apply explicit tonemap pipeline: reinhard -> gamma correction
+  let lit_color = lut_color.rgb * exposure * shade;
+  let tonemapped = reinhard(lit_color);
+  let gamma_corrected = gamma_correct(tonemapped);
+
+  return vec4<f32>(gamma_corrected, 1.0);
+}
+
+// C4: Explicit tonemap functions for compliance
+fn reinhard(x: vec3<f32>) -> vec3<f32> {
+  return x / (1.0 + x);
+}
+
+fn gamma_correct(x: vec3<f32>) -> vec3<f32> {
+  return pow(x, vec3<f32>(1.0 / 2.2));
 }

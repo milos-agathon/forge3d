@@ -3,6 +3,15 @@
 
 use std::num::NonZeroU32;
 
+// Import central error handling
+mod error;
+use error::{RenderError, RenderResult};
+
+// Import modular components
+mod context;
+mod core;
+mod device_caps;
+
 use bytemuck::{Pod, Zeroable};
 use image::{ImageBuffer, GenericImageView};
 use pyo3::prelude::*;
@@ -265,7 +274,7 @@ impl Renderer {
 
         let arr3 = Array3::from_shape_vec(
             (self.height as usize, self.width as usize, 4), pixels
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        ).map_err(|e| RenderError::render(e.to_string()))?;
         Ok(arr3.into_pyarray_bound(py))
     }
 
@@ -295,8 +304,8 @@ impl Renderer {
             &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
 
         let img: ImageBuffer<image::Rgba<u8>, _> = ImageBuffer::from_raw(self.width, self.height, pixels)
-            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("ImageBuffer::from_raw failed"))?;
-        img.save(&path).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            .ok_or_else(|| RenderError::readback("ImageBuffer::from_raw failed"))?;
+        img.save(&path).map_err(|e| RenderError::io(e.to_string()))?;
         Ok(())
     }
 
@@ -309,10 +318,10 @@ impl Renderer {
         colormap: String,
     ) -> pyo3::PyResult<()> {
         if spacing.0 <= 0.0 || spacing.1 <= 0.0 {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err("spacing components must be > 0"));
+            return Err(RenderError::upload("spacing components must be > 0").into());
         }
         if exaggeration <= 0.0 {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err("exaggeration must be > 0"));
+            return Err(RenderError::upload("exaggeration must be > 0").into());
         }
 
         let as_f32: Result<(Vec<f32>, usize, usize), pyo3::PyErr> = (|| {
@@ -440,6 +449,23 @@ impl Renderer {
         Ok(())
     }
     // T22-END:sun-and-exposure
+
+    /// Report device capabilities and diagnostics
+    ///
+    /// Returns a dictionary with device information including:
+    /// - backend: Backend type (vulkan, dx12, metal, gl)
+    /// - adapter_name: GPU adapter name
+    /// - device_name: Device name  
+    /// - max_texture_dimension_2d: Maximum 2D texture size
+    /// - max_buffer_size: Maximum buffer size
+    /// - msaa_supported: Whether MSAA is supported
+    /// - max_samples: Maximum MSAA sample count
+    /// - device_type: Device type (integrated, discrete, etc.)
+    #[pyo3(text_signature = "($self)")]
+    pub fn report_device(&self, py: Python<'_>) -> PyResult<Py<pyo3::types::PyDict>> {
+        let caps = crate::device_caps::DeviceCaps::from_current_device()?;
+        caps.to_py_dict(py)
+    }
 
     #[pyo3(text_signature = "($self, mode, range=None, eps=1e-8)")]
     pub fn normalize_terrain(&mut self, mode: &str, range: Option<(f32, f32)>, eps: Option<f32>) -> pyo3::PyResult<()> {
