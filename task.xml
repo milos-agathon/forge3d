@@ -1,155 +1,103 @@
 <task>
-  <title>Implement & wire missing/partial items for Workstream C</title>
+  <title>Remediate failed criteria only</title>
 
   <inputs>
     <repoRoot>.</repoRoot>
     <paths>
-      <path>src/</path>
+      <!-- C1 path fix -->
+      <path>src/code/gpu_types.rs</path>
+      <path>src/code/mod.rs</path>
       <path>src/core/</path>
-      <path>src/shaders/</path>
-      <path>python/forge3d/</path>
-      <path>python/tools/</path>
-      <path>examples/</path>
+
+      <!-- C2/C3 test placement -->
+      <path>test_c2_png_regression.py</path>
+      <path>test_c3_device_caps.py</path>
       <path>tests/</path>
+
+      <!-- C4 docs + test -->
+      <path>color_management.md</path>
+      <path>docs/index.rst</path>
       <path>docs/</path>
+      <path>tests/test_tonemap.py</path>
+      <path>src/shaders/terrain.wgsl</path>
     </paths>
-    <workstream>
-      <item id="C1">Engine layout &amp; error type</item>
-      <item id="C2">Off-screen target &amp; readback path (merged)</item>
-      <item id="C3">Device diagnostics &amp; feature gating (merged)</item>
-      <item id="C4">Color management &amp; tonemap stub</item>
-    </workstream>
     <constraints>
-      <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
-      <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
-      <build>cmake≥3.24, cargo/rustc, PyO3, VMA</build>
+      <platforms>win_amd64; linux_x86_64; macos_universal2</platforms>
+      <memory>≤ 512 MiB host-visible heap</memory>
+      <toolchain>cmake≥3.24; cargo/rustc stable; PyO3; VMA</toolchain>
       <apis>WebGPU/WGSL primary; Vulkan 1.2-compatible design</apis>
       <docs>Sphinx preferred</docs>
     </constraints>
   </inputs>
 
   <plan>
-    <!-- Safety & setup -->
-    <step>Audit the tree; create branch <code>wsC-gap-fill</code>. Do not touch: <code>target/ dist/ build/ .venv/ node_modules/ .git/</code>. Use ripgrep to confirm file locations before edits.</step>
-    <step>Run a clean build to establish baseline: <code>maturin develop --release</code> and smoke test <code>python -c "import forge3d; r=forge3d.Renderer(64,64); print('OK')"</code>.</step>
+    <!-- Safety -->
+    <step>Create branch <code>wsC-verify-remediate</code>. Exclude <code>target/ dist/ build/ .venv/ node_modules/ .git/</code> from edits.</step>
 
-    <!-- C1: Engine layout & error type -->
-    <step>
-      Create <code>src/error.rs</code> with <code>RenderError</code> enum
-      (Device, Upload, Render, Readback, Io) and <code>From&lt;RenderError&gt; for pyo3::PyErr</code>.
-    </step>
-    <step>
-      Replace ad-hoc <code>PyRuntimeError::new_err(...)</code> with <code>RenderError</code> in
-      <code>src/lib.rs</code>, <code>src/gpu.rs</code>, <code>src/scene/mod.rs</code>, and any renderer paths
-      (small, reviewable commits).
-    </step>
-    <step>
-      Provide thin layout shims to satisfy deliverables without large refactors:
-      create <code>src/context.rs</code> that re-exports the active GPU context from <code>src/gpu.rs</code>;
-      create <code>src/core/framegraph.rs</code> and <code>src/core/gpu_types.rs</code> as focused modules
-      (move/alias existing types if present; otherwise minimal stubs + TODO headers). Update <code>lib.rs</code> wiring.
-    </step>
+    <!-- C1: Fix module paths to match deliverables -->
+    <step>If not present, ensure <code>src/core/</code> exists. Move <code>src/code/gpu_types.rs</code> → <code>src/core/gpu_types.rs</code> via <code>git mv</code>.</step>
+    <step>Move <code>src/code/mod.rs</code> → <code>src/core/mod.rs</code> (create or merge if <code>src/core/mod.rs</code> exists) so that it exports <code>pub mod framegraph;</code> and <code>pub mod gpu_types;</code>.</step>
+    <step>Remove now-empty <code>src/code/</code>. Verify <code>lib.rs</code> compiles with <code>mod core;</code> and references <code>core::*</code> still resolve.</step>
 
-    <!-- C2: Off-screen target & readback (no-op, protect) -->
-    <step>Do not modify working off-screen/readback paths. Add a regression test that re-runs the PNG round-trip to guard against regressions.</step>
+    <!-- C2/C3: Place tests where pytest discovers them -->
+    <step>Create <code>tests/</code> if missing; <code>git mv</code> <code>test_c2_png_regression.py</code> → <code>tests/test_c2_png_regression.py</code>.</step>
+    <step><code>git mv</code> <code>test_c3_device_caps.py</code> → <code>tests/test_c3_device_caps.py</code>.</step>
 
-    <!-- C3: Device diagnostics & feature gating -->
-    <step>
-      Introduce <code>DeviceCaps</code> (Rust) capturing: backend id/name, adapter name, key limits
-      (e.g., <code>max_texture_dimension_2d</code>), features, and <code>msaa_supported</code> (true if sample_count&gt;1 supported).
-    </step>
-    <step>
-      Add <code>Renderer.report_device()</code> (PyO3) returning a dict/typed object with fields from <code>DeviceCaps</code>.
-      Internally reuse existing <code>enumerate_adapters()</code>/<code>device_probe()</code>.
-    </step>
-    <step>
-      Gate MSAA automatically: disable or downgrade if <code>msaa_supported == false</code>.
-      Add a unit test asserting MSAA is off on adapters that report no MSAA.
-    </step>
+    <!-- C4: Docs location + TOC -->
+    <step>Create <code>docs/</code> if missing. <code>git mv</code> <code>color_management.md</code> → <code>docs/color_management.md</code>.</step>
+    <step>Append <code>color_management</code> into the Sphinx TOC in <code>docs/index.rst</code> under a toctree. Do not alter other sections.</step>
 
-    <!-- C4: Color management & tonemap -->
-    <step>
-      In <code>src/shaders/terrain.wgsl</code>, add explicit functions:
-      <code>fn reinhard(x: vec3&lt;f32&gt;) -&gt; vec3&lt;f32&gt;</code> and
-      <code>fn gamma_correct(x: vec3&lt;f32&gt;) -&gt; vec3&lt;f32&gt;</code> (gamma=2.2),
-      and call them in the fragment shader after exposure/shading.
-    </step>
-    <step>
-      Add Sphinx page <code>docs/color_management.md</code> describing the pipeline:
-      linear lighting -&gt; reinhard -&gt; gamma 2.2 -&gt; <code>Rgba8UnormSrgb</code>; include rationale and when to use sRGB targets.
-      Register in <code>docs/index.rst</code> TOC.
-    </step>
+    <!-- C4: Add missing tonemap test -->
+    <step>Add <code>tests/test_tonemap.py</code> that: (1) defines CPU <code>reinhard()</code> and <code>gamma_correct()</code>, (2) renders a tiny scene (e.g., 32×32), (3) asserts fragment output is in [0,255], and (4) checks that enabling/removing tonemap path changes average luminance as expected (threshold-based, not exact byte match).</step>
 
-    <!-- Finalization -->
-    <step>Run examples and tests; update/author missing tests as specified in AcceptanceCriteria. Commit in small diffs with clear messages.</step>
-    <step>Open a short summary in <code>CHANGELOG.md</code> under "Workstream C – gap fill".</step>
+    <!-- Verification -->
+    <step>Build: <code>maturin develop --release</code>.</step>
+    <step>Tests: <code>pytest -q</code> (confirm all three testsuites run under <code>tests/</code>).</step>
+    <step>Docs: <code>make -C docs html</code> and confirm <code>color_management</code> appears in the built TOC.</step>
   </plan>
 
   <deliverables>
-    <!-- From CSV, normalized to the current repo -->
-    <item task="C1">
-      src/error.rs (RenderError + PyErr conversion);
-      src/context.rs (thin re-export shim);
-      src/core/framegraph.rs and src/core/gpu_types.rs (focused modules or re-exports);
-      lib.rs rewired to use context/error modules.
-    </item>
-    <item task="C2">
-      (No changes) Regression test ensuring 512×512 PNG round-trip; row-padding helper untouched.
-    </item>
-    <item task="C3">
-      src/device_caps.rs (or within lib.rs) defining DeviceCaps; Renderer.report_device() PyO3 method; unit tests in tests/test_diagnostics.py updated/added; optional CLI enrichment in python/tools/device_diagnostics.py.
-    </item>
-    <item task="C4">
-      src/shaders/terrain.wgsl: explicit reinhard() + gamma_correct() calls wired;
-      docs/color_management.md (Sphinx) with format choices and workflow; tests/test_tonemap.py updated to validate CPU vs. shader intent where feasible.
-    </item>
+    <item>C1: <code>src/core/gpu_types.rs</code> exists; <code>src/core/mod.rs</code> exports <code>gpu_types</code> and <code>framegraph</code>; no <code>src/code/</code> remnants.</item>
+    <item>C2: <code>tests/test_c2_png_regression.py</code> present and collected by pytest.</item>
+    <item>C3: <code>tests/test_c3_device_caps.py</code> present and collected by pytest.</item>
+    <item>C4: <code>docs/color_management.md</code> present and referenced from <code>docs/index.rst</code>.</item>
+    <item>C4: <code>tests/test_tonemap.py</code> added and passing.</item>
   </deliverables>
 
   <acceptanceCriteria>
-    <item task="C1">
-      Builds on all 3 OS locally; <code>RenderError</code> used in modified code paths; <code>Renderer.info()</code> (or equivalent) compiles and uses new context wiring; unit tests build and pass.
-    </item>
-    <item task="C2">
-      Rendering a 512×512 triangle pre/post change yields identical PNG bytes (hash match);
-      PNG round-trip test green; row-padding test remains green.
-    </item>
-    <item task="C3">
-      <code>Renderer.report_device()</code> returns backend, limits, features, and MSAA capability; values consistent with <code>enumerate_adapters()</code>/<code>device_probe()</code>;
-      when MSAA unsupported, pipeline initializes with MSAA disabled; unit test asserts behavior.
-    </item>
-    <item task="C4">
-      WGSL compiles successfully; fragment path invokes <code>reinhard()</code> then <code>gamma_correct()</code>;
-      CPU reference in <code>tests/test_tonemap.py</code> matches shader-intent thresholds;
-      docs page built and appears in Sphinx TOC.
-    </item>
-    <item>
-      Full runbook passes: <code>maturin develop --release</code>, <code>pytest -q</code>, and demo scripts in examples/.
-    </item>
+    <item>C1: Repository builds after moving modules; <code>cargo build</code> (via <code>maturin develop --release</code>) succeeds.</item>
+    <item>C2/C3: <code>pytest -q</code> shows both tests discovered under <code>tests/</code> and passing.</item>
+    <item>C4-Docs: <code>make -C docs html</code> exits 0 and the sidebar/TOC includes “Color Management &amp; Tonemap Pipeline”.</item>
+    <item>C4-Tests: <code>pytest -q -k tonemap</code> exits 0 and reports at least one assertion validating tonemap effect (brightness threshold) has passed.</item>
   </acceptanceCriteria>
 
   <safety>
-    <rule>Create branch <code>wsC-gap-fill</code>; commit in small steps; open a PR at end.</rule>
-    <rule>Exclude binary/build/output directories from edits: <code>target/</code>, <code>dist/</code>, <code>build/</code>, <code>.venv/</code>, <code>node_modules/</code>, <code>.git/</code>.</rule>
-    <rule>No blind search/replace; confirm each replacement with a focused diff.</rule>
-    <rule>Prefer additive stubs/wrappers over large refactors to satisfy deliverables.</rule>
+    <rule>Create branch; small commits per step; no blind search/replace.</rule>
+    <rule>Only touch the files listed in <paths>; keep shader/engine logic unchanged.</rule>
+    <rule>Exclude build/binary dirs from edits: <code>target/ dist/ build/ .venv/ node_modules/ .git/</code>.</rule>
   </safety>
 
   <constraints>
     <platforms>win_amd64; linux_x86_64; macos_universal2</platforms>
-    <memory>Respect ≤512 MiB host-visible heap; avoid allocations &gt; 64 MiB per buffer unless justified.</memory>
+    <memory>≤ 512 MiB host-visible heap</memory>
     <toolchain>cmake≥3.24; cargo/rustc stable; PyO3; VMA</toolchain>
-    <apis>WebGPU/WGSL primary; design choices remain Vulkan 1.2 compatible.</apis>
-    <docs>Sphinx build <code>make -C docs html</code> must succeed.</docs>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2-compatible design</apis>
+    <docs>Sphinx preferred</docs>
   </constraints>
 
   <completion>
-    <summary>Workstream C gaps closed (C1, C3, C4), C2 preserved; repo builds/tests/docs green.</summary>
+    <summary>Remediated Workstream C verification gaps: fixed C1 pathing; placed tests; added tonemap test; moved docs and registered TOC; verified build/tests/docs.</summary>
     <commands>
-      <cmd>git checkout -b wsC-gap-fill</cmd>
+      <cmd>git checkout -b wsC-verify-remediate</cmd>
+      <cmd>git mv src/code/gpu_types.rs src/core/gpu_types.rs</cmd>
+      <cmd>git mv src/code/mod.rs src/core/mod.rs</cmd>
+      <cmd>git rm -r src/code || true</cmd>
+      <cmd>mkdir -p tests docs</cmd>
+      <cmd>git mv test_c2_png_regression.py tests/test_c2_png_regression.py</cmd>
+      <cmd>git mv test_c3_device_caps.py tests/test_c3_device_caps.py</cmd>
+      <cmd>git mv color_management.md docs/color_management.md</cmd>
       <cmd>maturin develop --release</cmd>
       <cmd>pytest -q</cmd>
-      <cmd>python examples/triangle_png.py</cmd>
-      <cmd>python -c "import forge3d; import json; r=forge3d.Renderer(64,64); print(json.dumps(r.report_device()))"</cmd>
       <cmd>make -C docs html</cmd>
     </commands>
   </completion>
