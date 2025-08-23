@@ -1,10 +1,13 @@
 Zero-Copy NumPy Interoperability
+
 =================================
 
 forge3d provides zero-copy interoperability between NumPy arrays and the underlying Rust GPU memory system, enabling efficient data transfer without unnecessary copying.
+=======
 
 Overview
 --------
+
 
 Zero-copy operations allow NumPy arrays to share memory directly with Rust-allocated buffers, eliminating the performance overhead of data copying between Python and Rust. This is particularly important for:
 

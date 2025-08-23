@@ -98,6 +98,7 @@
   </constraints>
 
   <completion>
+
     <summary>Add the missing hooks, finish/relocate tests and tools, correct memory accounting, wire docs TOC, and update CHANGELOG so all ACs pass.</summary>
     <commands>
       <cmd>git checkout -b wsM-remediate</cmd>

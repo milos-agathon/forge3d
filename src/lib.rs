@@ -51,16 +51,30 @@ fn triangle_geometry(device: &wgpu::Device) -> (wgpu::Buffer, wgpu::Buffer, u32)
     ];
     let indices: &[u16] = &[0, 1, 2];
 
+    let v_usage = wgpu::BufferUsages::VERTEX;
     let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("triangle-vertices"),
         contents: bytemuck::cast_slice(verts),
-        usage: wgpu::BufferUsages::VERTEX,
+        usage: v_usage,
     });
+    
+    let i_usage = wgpu::BufferUsages::INDEX;
     let ibuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("triangle-indices"),
         contents: bytemuck::cast_slice(indices),
-        usage: wgpu::BufferUsages::INDEX,
+        usage: i_usage,
     });
+    
+    // Track geometry buffer allocations (not host-visible)
+    let tracker = global_tracker();
+    tracker.track_buffer_allocation(
+        (std::mem::size_of::<Vertex>() * verts.len()) as u64, 
+        is_host_visible_usage(v_usage)
+    );
+    tracker.track_buffer_allocation(
+        (std::mem::size_of::<u16>() * indices.len()) as u64,
+        is_host_visible_usage(i_usage)
+    );
     (vbuf, ibuf, indices.len() as u32)
 }
 
@@ -127,6 +141,11 @@ fn create_offscreen(device: &wgpu::Device, width: u32, height: u32, format: wgpu
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
+    
+    // Track offscreen texture allocation
+    let tracker = global_tracker();
+    tracker.track_texture_allocation(width, height, format);
+    
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (texture, view)
 }
@@ -227,10 +246,11 @@ impl Renderer {
         let pipeline = create_pipeline(&g.device, TEXTURE_FORMAT);
         let (vbuf, ibuf, icount) = triangle_geometry(&g.device);
         let (color_tex, color_view) = create_offscreen(&g.device, width, height, TEXTURE_FORMAT);
+        let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
         let readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback-buffer"),
             size: 4,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            usage,
             mapped_at_creation: false,
         });
         
@@ -283,7 +303,7 @@ impl Renderer {
             self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                usage,
                 mapped_at_creation: false,
             });
             
@@ -326,7 +346,7 @@ impl Renderer {
             self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                usage,
                 mapped_at_creation: false,
             });
             
@@ -371,6 +391,10 @@ impl Renderer {
             self.debug_last_height_src_ptr = ro32.as_array().as_ptr() as usize;
             let view = ro32.as_array();
             let (h, w) = (view.shape()[0], view.shape()[1]);
+            
+            // Store pointer for zero-copy validation
+            self.debug_last_height_src_ptr = view.as_ptr() as usize;
+            
             let mut v = Vec::with_capacity(h * w);
             for val in view.iter() {
                 v.push(*val * exaggeration);
@@ -393,6 +417,10 @@ impl Renderer {
                 }
                 let view = ro64.as_array();
                 let (h, w) = (view.shape()[0], view.shape()[1]);
+                
+                // Store pointer for zero-copy validation (even though this path involves conversion)
+                self.debug_last_height_src_ptr = view.as_ptr() as usize;
+                
                 let mut v = Vec::with_capacity(h * w);
                 for val in view.iter() {
                     v.push((*val as f32) * exaggeration);
@@ -529,6 +557,13 @@ impl Renderer {
 
         let terr = self.terrain.as_ref()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("no terrain uploaded; call add_terrain() first"))?;
+            
+        // Check budget before allocating height texture
+        let tracker = global_tracker();
+        let texture_bytes = (terr.width as u64) * (terr.height as u64) * 4; // R32Float = 4 bytes per pixel
+        if let Err(e) = tracker.check_budget_limits(0) { // Check current budget state
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("{}", e)));
+        }
 
         let width = terr.width;
         let height = terr.height;
@@ -546,6 +581,10 @@ impl Renderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
+        
+        // Track height texture allocation
+        let tracker = global_tracker();
+        tracker.track_texture_allocation(width, height, wgpu::TextureFormat::R32Float);
         let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
         let samp = g.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("terrain-height-sampler"),
@@ -637,12 +676,17 @@ impl Renderer {
         let row_bytes = (w * 4) as u32;
         let padded_bpr = align_copy_bpr(row_bytes);
         let buf_size = padded_bpr as u64 * h as u64;
+        let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
         let readback = g.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("height-patch-readback"),
             size: buf_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            usage,
             mapped_at_creation: false,
         });
+        
+        // Track readback buffer allocation (host-visible)
+        let tracker = global_tracker();
+        tracker.track_buffer_allocation(buf_size, is_host_visible_usage(usage));
 
         let mut encoder = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("height-patch-encoder"),
@@ -686,6 +730,9 @@ impl Renderer {
         }
         drop(data);
         readback.unmap();
+        
+        // Free temporary readback buffer allocation
+        tracker.free_buffer_allocation(buf_size, true);
 
         let floats: &[f32] = bytemuck::cast_slice(&out);
         let rows: Vec<Vec<f32>> = floats
@@ -1128,6 +1175,22 @@ fn grid_generate(py: Python<'_>, nx: u32, nz: u32, spacing: (f32, f32), origin: 
     terrain::mesh::grid_generate(py, nx, nz, spacing, origin)
 }
 
+/// Module-level convenience function for rendering a triangle to RGBA array
+#[pyfunction]
+#[pyo3(text_signature = "(width, height)")]
+fn render_triangle_rgba<'py>(py: Python<'py>, width: u32, height: u32) -> PyResult<Bound<'py, PyArray3<u8>>> {
+    let mut renderer = Renderer::new(width, height);
+    renderer.render_triangle_rgba(py)
+}
+
+/// Module-level convenience function for rendering a triangle to PNG file
+#[pyfunction]
+#[pyo3(text_signature = "(path, width, height)")]
+fn render_triangle_png(_py: Python<'_>, path: PathBuf, width: u32, height: u32) -> PyResult<()> {
+    let mut renderer = Renderer::new(width, height);
+    renderer.render_triangle_png(path)
+}
+
 #[allow(deprecated)]
 #[pymodule]
 fn _forge3d(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
@@ -1138,6 +1201,8 @@ fn _forge3d(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
     m.add_function(wrap_pyfunction!(grid_generate, m)?)?;
+    m.add_function(wrap_pyfunction!(render_triangle_rgba, m)?)?;
+    m.add_function(wrap_pyfunction!(render_triangle_png, m)?)?;
     m.add_function(wrap_pyfunction!(png_to_numpy, m)?)?;
     m.add_function(wrap_pyfunction!(numpy_to_png, m)?)?;
     m.add_function(wrap_pyfunction!(colormap::colormap_supported, m)?)?;

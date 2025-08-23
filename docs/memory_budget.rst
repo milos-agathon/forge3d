@@ -2,7 +2,6 @@ Memory Budget Management
 ========================
 
 forge3d provides comprehensive GPU memory budget tracking and enforcement to prevent out-of-memory errors and ensure predictable resource usage.
-
 Overview
 --------
 
