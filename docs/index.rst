@@ -8,6 +8,8 @@ Welcome to the forge3d documentation. This is a Rust-first WebGPU/wgpu renderer 
    :caption: Contents:
 
    color_management
+   interop_zero_copy
+   memory_budget
 
 Overview
 --------

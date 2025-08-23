@@ -38,3 +38,49 @@ def png_path(p: str | Path) -> str:
         raise ValueError(f"directory does not exist: {parent}")
     return s
 # T01-END:validate
+
+# Zero-copy validation helpers
+import numpy as np
+from typing import Dict, List, Any
+
+def ptr(arr: np.ndarray) -> int:
+    """Get the underlying data pointer from a NumPy array."""
+    return arr.ctypes.data
+
+def is_c_contiguous(arr: np.ndarray) -> bool:
+    """Check if a NumPy array is C-contiguous."""
+    return arr.flags['C_CONTIGUOUS']
+
+def validate_zero_copy_path(arr: np.ndarray, context: str = "") -> Dict[str, Any]:
+    """Validate that an array is suitable for zero-copy operations."""
+    issues = []
+    
+    if not is_c_contiguous(arr):
+        issues.append("Array is not C-contiguous")
+    
+    if arr.data.nbytes == 0:
+        issues.append("Array has no data")
+    
+    data_ptr = ptr(arr)
+    if data_ptr == 0:
+        issues.append("Array has null data pointer")
+    
+    return {
+        'compatible': len(issues) == 0,
+        'issues': issues,
+        'context': context,
+        'dtype': str(arr.dtype),
+        'shape': arr.shape,
+        'strides': arr.strides,
+        'flags': {
+            'c_contiguous': arr.flags['C_CONTIGUOUS'],
+            'f_contiguous': arr.flags['F_CONTIGUOUS'],
+            'owndata': arr.flags['OWNDATA'],
+            'writeable': arr.flags['WRITEABLE']
+        },
+        'data_ptr': data_ptr
+    }
+
+def check_zero_copy_compatibility(arr: np.ndarray, context: str = "") -> Dict[str, Any]:
+    """Check zero-copy compatibility and return detailed analysis."""
+    return validate_zero_copy_path(arr, context)

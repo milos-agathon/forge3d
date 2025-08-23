@@ -12,11 +12,14 @@ mod context;
 mod core;
 mod device_caps;
 
+// Import memory tracking
+use crate::core::memory_tracker::global_tracker;
+
 use bytemuck::{Pod, Zeroable};
 use image::{ImageBuffer, GenericImageView};
 use pyo3::prelude::*;
 use pyo3::Bound;
-use numpy::{PyArray3, IntoPyArray, PyArray2, PyReadonlyArray2, PyArray1, PyReadonlyArray3};
+use numpy::{PyArray3, IntoPyArray, PyArray2, PyReadonlyArray2, PyArray1, PyReadonlyArray3, PyArrayMethods};
 use numpy::PyUntypedArrayMethods; // needed for contiguous checks
 use ndarray::Array3;
 use wgpu::util::DeviceExt;
@@ -210,6 +213,8 @@ pub struct Renderer {
     #[cfg(feature = "terrain_spike")]
     globals_dirty: bool,
     // T22-END:sun-and-exposure
+    // Debug field for zero-copy testing (test-only, always available for PyO3)
+    debug_last_height_src_ptr: usize,
 }
 
 #[pymethods]
@@ -228,6 +233,10 @@ impl Renderer {
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
+        
+        // Register initial readback buffer allocation
+        let registry = crate::core::memory_tracker::global_tracker();
+        registry.track_buffer_allocation(4, true); // host-visible
 
         Self {
             width, height,
@@ -245,6 +254,8 @@ impl Renderer {
             #[cfg(feature = "terrain_spike")]
             globals_dirty: true,
             // T22-END:sun-and-exposure
+            // Debug field for zero-copy testing (test-only, always available for PyO3)
+            debug_last_height_src_ptr: 0,
         }
     }
 
@@ -260,12 +271,24 @@ impl Renderer {
 
         let need = (align_copy_bpr(self.width * 4) as u64) * (self.height as u64);
         if need > self.readback_size {
+            // Check budget before allocation
+            let registry = crate::core::memory_tracker::global_tracker();
+            registry.check_budget(need).map_err(|e| RenderError::device(e))?;
+            
+            // Free old buffer allocation
+            if self.readback_size > 0 {
+                registry.free_buffer_allocation(self.readback_size, true); // host-visible
+            }
+            
             self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
             });
+            
+            // Register new allocation
+            registry.track_buffer_allocation(need, true); // host-visible
             self.readback_size = need;
         }
 
@@ -291,12 +314,24 @@ impl Renderer {
 
         let need = (align_copy_bpr(self.width * 4) as u64) * (self.height as u64);
         if need > self.readback_size {
+            // Check budget before allocation
+            let registry = crate::core::memory_tracker::global_tracker();
+            registry.check_budget(need).map_err(|e| RenderError::device(e))?;
+            
+            // Free old buffer allocation
+            if self.readback_size > 0 {
+                registry.free_buffer_allocation(self.readback_size, true); // host-visible
+            }
+            
             self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
             });
+            
+            // Register new allocation
+            registry.track_buffer_allocation(need, true); // host-visible
             self.readback_size = need;
         }
 
@@ -331,6 +366,9 @@ impl Renderer {
             if !ro32.is_c_contiguous() {
                 return Err(pyo3::exceptions::PyRuntimeError::new_err("heightmap must be C-contiguous (row-major)"));
             }
+            
+            // Capture source pointer for zero-copy validation (float32 path)
+            self.debug_last_height_src_ptr = ro32.as_array().as_ptr() as usize;
             let view = ro32.as_array();
             let (h, w) = (view.shape()[0], view.shape()[1]);
             let mut v = Vec::with_capacity(h * w);
@@ -671,6 +709,55 @@ impl Renderer {
         let width = terr.width;
         let height = terr.height;
         self.debug_read_height_patch(py, 0, 0, width, height)
+    }
+    
+    // Test-only hooks for zero-copy validation
+    
+    #[pyo3(text_signature = "($self)")]
+    pub fn render_triangle_rgba_with_ptr<'py>(&mut self, py: Python<'py>) -> PyResult<(Bound<'py, PyArray3<u8>>, usize)> {
+        let g = ctx();
+        self.render_into_offscreen(g)?;
+
+        let need = (align_copy_bpr(self.width * 4) as u64) * (self.height as u64);
+        if need > self.readback_size {
+            // Check budget before allocation
+            let registry = crate::core::memory_tracker::global_tracker();
+            registry.check_budget(need).map_err(|e| RenderError::device(e))?;
+            
+            // Free old buffer allocation
+            if self.readback_size > 0 {
+                registry.free_buffer_allocation(self.readback_size, true); // host-visible
+            }
+            
+            self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("readback-buffer"),
+                size: need,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            
+            // Register new allocation
+            registry.track_buffer_allocation(need, true); // host-visible
+            self.readback_size = need;
+        }
+
+        let pixels = copy_texture_to_rgba_unpadded(
+            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
+
+        let arr3 = Array3::from_shape_vec(
+            (self.height as usize, self.width as usize, 4), pixels
+        ).map_err(|e| RenderError::render(e.to_string()))?;
+        
+        // Get the data pointer from the ndarray before converting to PyArray
+        let data_ptr = arr3.as_ptr() as usize;
+        let py_array = arr3.into_pyarray_bound(py);
+        
+        Ok((py_array, data_ptr))
+    }
+    
+    #[pyo3(text_signature = "($self)")]
+    pub fn debug_last_height_src_ptr(&self) -> usize {
+        self.debug_last_height_src_ptr
     }
 }
 
