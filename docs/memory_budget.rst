@@ -1,360 +1,233 @@
 Memory Budget Management
 ========================
 
-This document describes forge3d's memory budget tracking and enforcement system, which ensures efficient GPU memory usage and prevents excessive memory consumption.
-
+forge3d provides comprehensive GPU memory budget tracking and enforcement to prevent out-of-memory errors and ensure predictable resource usage.
 Overview
 --------
 
-forge3d implements a comprehensive memory budget system that:
+The memory budget system tracks all GPU resource allocations and enforces a configurable limit on host-visible memory usage. This prevents applications from exhausting system memory while providing detailed metrics for monitoring and optimization.
 
-- **Tracks all GPU resource allocations** (buffers and textures)
-- **Enforces a 512 MiB limit** on host-visible memory usage
-- **Provides detailed metrics** for monitoring and debugging
-- **Prevents out-of-memory scenarios** before they occur
+**Default Budget**: 512 MiB of host-visible GPU memory
 
-The system focuses primarily on **host-visible memory** as this is typically the most constrained resource in GPU environments.
+Key Features
+------------
 
-Budget Limits
--------------
-
-Default Budget: 512 MiB
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-forge3d enforces a default budget limit of **512 MiB (536,870,912 bytes)** for host-visible memory allocations. This limit is:
-
-- **Conservative and widely compatible** across different GPU types
-- **Focused on host-visible resources** (CPU-accessible GPU memory)
-- **Automatically enforced** at allocation time
-- **Configurable at the global level** (though not exposed in Python API)
-
-What Counts Towards the Budget
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. list-table:: Resource Type Budget Accounting
-   :header-rows: 1
-   :widths: 25 10 65
-
-   * - Resource Type
-     - Counted
-     - Notes
-   * - Readback buffers
-     - Yes
-     - COPY_DST + MAP_READ usage (host-visible)
-   * - Color target textures
-     - No
-     - GPU-only resources
-   * - Height textures
-     - No
-     - GPU-only resources  
-   * - Vertex/index buffers
-     - No
-     - GPU-only resources
-   * - Temporary readback buffers
-     - Yes
-     - Created and freed during operations
-   * - Debug buffers
-     - Yes
-     - Test-only buffers with MAP_READ usage
-
-Budget Enforcement
-~~~~~~~~~~~~~~~~~~
-
-The memory budget is enforced at allocation time:
-
-1. **Before allocation**: Check if requested size would exceed budget
-2. **During allocation**: Track the new resource in global registry
-3. **After deallocation**: Update tracking to reflect freed resources
-
-When the budget would be exceeded, operations fail with detailed error messages containing:
-
-- Current memory usage
-- Requested allocation size  
-- Budget limit
-- Suggested actions
-
-Memory Tracking API
--------------------
+- **Automatic tracking**: All buffer and texture allocations are monitored
+- **Budget enforcement**: Operations fail gracefully when budget would be exceeded
+- **Detailed metrics**: Real-time usage statistics and utilization ratios
+- **Host-visible focus**: Tracks memory that impacts system resources
+- **Thread-safe**: Atomic counters support concurrent operations
 
 Getting Memory Metrics
-~~~~~~~~~~~~~~~~~~~~~~~
+-----------------------
 
-The ``Renderer.get_memory_metrics()`` method provides comprehensive memory usage information::
+Access current memory usage and budget information:
+
+.. code-block:: python
 
     import forge3d as f3d
     
-    renderer = f3d.Renderer(512, 512)
-    metrics = renderer.get_memory_metrics()
+    # Get current memory metrics
+    metrics = f3d.get_memory_metrics()
     
-    print(f"Buffers: {metrics['buffer_count']} ({metrics['buffer_bytes']} bytes)")
-    print(f"Textures: {metrics['texture_count']} ({metrics['texture_bytes']} bytes)")
-    print(f"Host-visible: {metrics['host_visible_bytes']} bytes")
-    print(f"Total: {metrics['total_bytes']} bytes")
-    print(f"Budget limit: {metrics['limit_bytes']} bytes")
-    print(f"Within budget: {metrics['within_budget']}")
+    print(f"Budget limit: {metrics['budget_limit_mb']:.1f} MB")
+    print(f"Host-visible used: {metrics['host_visible_mb']:.1f} MB") 
     print(f"Utilization: {metrics['utilization_ratio']:.1%}")
+    print(f"Buffer count: {metrics['buffer_count']}")
+    print(f"Texture count: {metrics['texture_count']}")
+
+**Sample Output:**
+
+.. code-block::
+
+    Budget limit: 512.0 MB
+    Host-visible used: 24.3 MB
+    Utilization: 4.7%
+    Buffer count: 3
+    Texture count: 2
 
 Metrics Structure
-~~~~~~~~~~~~~~~~~
+-----------------
 
-The returned metrics dictionary contains:
+The memory metrics dictionary contains:
 
-.. list-table:: Memory Metrics Fields
-   :header-rows: 1
-   :widths: 25 15 60
+.. code-block:: python
 
-   * - Field
-     - Type
-     - Description
-   * - ``buffer_count``
-     - ``int``
-     - Number of allocated buffers
-   * - ``texture_count``
-     - ``int``
-     - Number of allocated textures
-   * - ``buffer_bytes``
-     - ``int``
-     - Total bytes in buffer allocations
-   * - ``texture_bytes``
-     - ``int``
-     - Total bytes in texture allocations
-   * - ``host_visible_bytes``
-     - ``int``
-     - Bytes that count against budget limit
-   * - ``total_bytes``
-     - ``int``
-     - Sum of buffer_bytes + texture_bytes
-   * - ``limit_bytes``
-     - ``int``
-     - Budget limit (536,870,912 bytes)
-   * - ``within_budget``
-     - ``bool``
-     - True if host_visible_bytes ≤ limit_bytes
-   * - ``utilization_ratio``
-     - ``float``
-     - host_visible_bytes / limit_bytes
+    {
+        'budget_limit_mb': 512.0,           # Maximum allowed (MB)
+        'host_visible_mb': 24.3,            # Currently allocated (MB)
+        'gpu_only_mb': 8.1,                 # GPU-only memory (MB)
+        'utilization_ratio': 0.047,         # host_visible / budget_limit
+        'buffer_count': 3,                  # Number of allocated buffers
+        'texture_count': 2,                 # Number of allocated textures
+        'buffer_bytes': 25485312,           # Total buffer bytes
+        'texture_bytes': 8388608            # Total texture bytes
+    }
 
-Global Tracking
-~~~~~~~~~~~~~~~
+Budget Enforcement
+------------------
 
-Memory tracking is global across all renderer instances::
+When operations would exceed the memory budget, they fail with descriptive errors:
 
-    # Multiple renderers share the same global tracker
-    r1 = f3d.Renderer(256, 256)
-    r2 = f3d.Renderer(512, 512)
-    
-    # Both show the same global totals
-    metrics1 = r1.get_memory_metrics()
-    metrics2 = r2.get_memory_metrics()
-    
-    assert metrics1['total_bytes'] == metrics2['total_bytes']
-
-This ensures accurate tracking when multiple renderers or operations are active simultaneously.
-
-Budget Enforcement Examples
----------------------------
-
-Normal Usage Within Budget
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Small to moderate operations stay within the 512 MiB budget::
-
-    import forge3d as f3d
-    import numpy as np
-    
-    # Create renderer and add terrain
-    renderer = f3d.Renderer(1024, 1024)
-    heightmap = np.random.rand(256, 256).astype(np.float32)
-    renderer.add_terrain(heightmap, spacing=(1.0, 1.0), exaggeration=2.0, colormap="viridis")
-    renderer.upload_height_r32f()
-    
-    # Render and readback
-    rgba = renderer.render_triangle_rgba()
-    heights_back = renderer.read_full_height_texture()
-    
-    # Check budget status
-    metrics = renderer.get_memory_metrics()
-    print(f"Memory usage: {metrics['host_visible_bytes']:,} / {metrics['limit_bytes']:,} bytes")
-    print(f"Within budget: {metrics['within_budget']}")
-
-Budget Exceeded Scenarios
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Very large operations may exceed the budget and raise errors::
+.. code-block:: python
 
     import forge3d as f3d
     
     try:
-        # Try to create a very large render target
-        huge_renderer = f3d.Renderer(20000, 20000)
-        rgba = huge_renderer.render_triangle_rgba()
-        
+        # This might exceed budget
+        renderer = f3d.Renderer(8192, 8192)  # Large render target
     except RuntimeError as e:
-        print(f"Budget exceeded: {e}")
-        # Error message includes current, requested, and limit information
+        if "budget" in str(e):
+            print(f"Budget exceeded: {e}")
+            # Handle gracefully or reduce size
+            renderer = f3d.Renderer(4096, 4096)  # Smaller fallback
 
-Error Message Format
-~~~~~~~~~~~~~~~~~~~~
+**Error Format:**
 
-Budget exceeded errors provide detailed information::
+.. code-block::
 
-    RuntimeError: Memory budget exceeded: current 450,560,000 bytes + requested 134,217,728 bytes 
-    would exceed limit of 536,870,912 bytes. Consider reducing render size or freeing resources.
+    RuntimeError: Memory budget exceeded: requested 268.4 MB for readback buffer resize would exceed limit of 512.0 MB (currently using 245.2 MB)
 
-The error message contains:
-
-- **Current usage**: Currently allocated host-visible memory
-- **Requested size**: Size of the failed allocation
-- **Budget limit**: The 512 MiB limit  
-- **Actionable advice**: Suggestions for resolution
-
-Best Practices
---------------
-
-Efficient Memory Usage
-~~~~~~~~~~~~~~~~~~~~~~
-
-1. **Choose appropriate render sizes**::
-
-    # Good: Reasonable size for most use cases
-    renderer = f3d.Renderer(2048, 2048)  # ~16 MB readback buffer
-    
-    # Caution: Very large sizes may exceed budget  
-    renderer = f3d.Renderer(8192, 8192)  # ~256 MB readback buffer
-
-2. **Monitor memory usage in long-running applications**::
-
-    def render_with_monitoring(renderer):
-        metrics = renderer.get_memory_metrics()
-        if metrics['utilization_ratio'] > 0.8:
-            print("Warning: High memory utilization")
-        
-        rgba = renderer.render_triangle_rgba()
-        return rgba
-
-3. **Consider multiple smaller operations vs single large operations**::
-
-    # Instead of one huge render:
-    # huge_rgba = renderer.render_triangle_rgba(16384, 16384)
-    
-    # Consider tiling:
-    tiles = []
-    tile_size = 2048
-    for y in range(0, height, tile_size):
-        for x in range(0, width, tile_size):
-            tile = render_tile(x, y, tile_size, tile_size)
-            tiles.append(tile)
-
-Resource Cleanup
-~~~~~~~~~~~~~~~~
-
-Resources are automatically cleaned up, but understanding the lifecycle helps::
-
-    # Readback buffers are reused when possible
-    r = f3d.Renderer(1024, 1024)
-    
-    # First render allocates readback buffer
-    rgba1 = r.render_triangle_rgba()  # Allocates ~4MB buffer
-    
-    # Second render reuses same buffer
-    rgba2 = r.render_triangle_rgba()  # Reuses existing buffer
-    
-    # Larger render may reallocate
-    r2 = f3d.Renderer(2048, 2048)
-    rgba3 = r2.render_triangle_rgba()  # May allocate ~16MB buffer
-
-Testing Memory Budget
----------------------
-
-Test Infrastructure
-~~~~~~~~~~~~~~~~~~~
-
-The ``tests/test_memory_budget.py`` module provides comprehensive testing::
-
-    # Run memory budget tests
-    pytest tests/test_memory_budget.py -v
-    
-    # Run specific budget enforcement tests
-    pytest tests/test_memory_budget.py::TestMemoryBudgetEnforcement -v
-
-The tests validate:
-
-- Correct metrics structure and types
-- Budget limit enforcement  
-- Error message formatting
-- Allocation tracking accuracy
-- Multi-renderer global tracking
-
-Debugging Memory Issues
-~~~~~~~~~~~~~~~~~~~~~~~
-
-When encountering memory budget issues:
-
-1. **Check current usage**::
-
-    metrics = renderer.get_memory_metrics()
-    print(f"Host-visible usage: {metrics['host_visible_bytes']:,} bytes")
-    print(f"Utilization: {metrics['utilization_ratio']:.1%}")
-
-2. **Identify large allocations**::
-
-    # Large readback buffers are the most common issue
-    render_area = width * height
-    expected_readback = render_area * 4  # RGBA bytes
-    print(f"Expected readback size: {expected_readback:,} bytes")
-
-3. **Consider alternatives**::
-
-    # Reduce render size
-    # Use streaming/tiling approaches
-    # Process in multiple passes
-
-Implementation Details
+Budget Tracking Scope
 ----------------------
 
-Tracking Mechanism
-~~~~~~~~~~~~~~~~~~
+The memory budget tracks these allocation types:
 
-The memory tracker uses:
+**Host-Visible Memory (counted against budget):**
+- Readback buffers (``MAP_READ`` usage)
+- Staging buffers for uploads
+- CPU-accessible resources
 
-- **Atomic counters** for thread-safe tracking
-- **Resource registry** with allocation metadata
-- **Usage classification** (host-visible vs GPU-only)
-- **Global singleton** for cross-renderer consistency
+**GPU-Only Memory (informational only):**
+- Render targets and textures
+- Vertex/index buffers  
+- GPU-only resources
 
-Host-Visible Detection
-~~~~~~~~~~~~~~~~~~~~~~
+Only host-visible allocations count against the 512 MiB budget limit, as these directly impact system memory availability.
 
-Buffer usage flags are analyzed to determine host-visibility:
+Usage Patterns
+---------------
 
-.. code-block:: rust
+**Monitoring During Operations:**
 
-   // Host-visible usages (count against budget)
-   wgpu::BufferUsages::MAP_READ      // CPU-readable
-   wgpu::BufferUsages::MAP_WRITE     // CPU-writable
-   
-   // GPU-only usages (don't count against budget)
-   wgpu::BufferUsages::VERTEX        // GPU vertex data
-   wgpu::BufferUsages::INDEX         // GPU index data
-   wgpu::BufferUsages::UNIFORM       // GPU uniform data
+.. code-block:: python
 
-Allocation Lifecycle
-~~~~~~~~~~~~~~~~~~~~
+    import forge3d as f3d
+    
+    renderer = f3d.Renderer(1024, 1024)
+    print("After renderer:", f3d.get_memory_metrics()['host_visible_mb'])
+    
+    # Add terrain data
+    heights = np.random.rand(512, 512).astype(np.float32)  
+    renderer.add_terrain(heights, (1.0, 1.0), 2.0)
+    print("After terrain:", f3d.get_memory_metrics()['host_visible_mb'])
+    
+    # Render operations
+    rgba = renderer.render_triangle_rgba()
+    print("After render:", f3d.get_memory_metrics()['host_visible_mb'])
 
-1. **Pre-allocation check**: Verify budget compliance
-2. **Resource creation**: Create GPU resource via wgpu
-3. **Tracking registration**: Record in global tracker
-4. **Usage monitoring**: Track through resource lifecycle
-5. **Deallocation cleanup**: Remove from tracker on drop
+**Progressive Size Testing:**
 
-Platform Considerations
-~~~~~~~~~~~~~~~~~~~~~~~
+.. code-block:: python
 
-Memory behavior may vary across:
+    def find_max_render_size():
+        """Find maximum render size within budget."""
+        for size in [512, 1024, 2048, 4096, 8192]:
+            try:
+                renderer = f3d.Renderer(size, size)
+                rgba = renderer.render_triangle_rgba()
+                print(f"Size {size}x{size}: OK")
+                del renderer  # Free memory
+            except RuntimeError as e:
+                if "budget" in str(e):
+                    print(f"Size {size}x{size}: Budget exceeded")
+                    break
+        return size // 2  # Last successful size
 
-- **GPU types**: Integrated vs discrete GPUs have different memory architectures
-- **Operating systems**: Memory mapping and allocation strategies differ
-- **Drivers**: GPU driver versions affect memory management
-- **Backend APIs**: Vulkan, DirectX 12, Metal have different memory models
+Memory Lifecycle
+----------------
 
-The 512 MiB limit is conservative enough to work across all supported platforms while providing sufficient space for most use cases.
+**Allocation Tracking:**
+
+- Buffer/texture creation increments counters
+- Memory usage is tracked in real-time
+- Budget checks occur before allocation
+
+**Deallocation:**
+
+- Resources are freed when Python objects are deleted
+- Memory tracking decrements automatically
+- Budget space becomes available immediately
+
+**Buffer Reuse:**
+
+- Renderers reuse readback buffers when possible
+- Only resizes trigger new allocations
+- Old buffers are properly deallocated before replacement
+
+Best Practices
+---------------
+
+**1. Monitor Usage Patterns:**
+
+.. code-block:: python
+
+    # Check usage before large operations
+    metrics = f3d.get_memory_metrics()
+    if metrics['utilization_ratio'] > 0.8:  # Above 80%
+        print("Warning: High memory usage")
+
+**2. Handle Budget Errors Gracefully:**
+
+.. code-block:: python
+
+    try:
+        renderer = f3d.Renderer(target_width, target_height)
+    except RuntimeError as e:
+        if "budget" in str(e):
+            # Fallback to smaller size
+            target_width = int(target_width * 0.7)
+            target_height = int(target_height * 0.7)
+            renderer = f3d.Renderer(target_width, target_height)
+
+**3. Explicit Memory Management:**
+
+.. code-block:: python
+
+    # Free resources explicitly when done
+    del renderer
+    
+    # Or use context managers for automatic cleanup
+    with f3d.Renderer(1024, 1024) as renderer:
+        rgba = renderer.render_triangle_rgba()
+    # Automatically freed
+
+**4. Size Estimation:**
+
+For planning resource usage:
+
+- **RGBA buffer**: ``width × height × 4 bytes``
+- **Height texture**: ``width × height × 4 bytes`` (R32F format)
+- **Readback buffer**: Uses 256-byte aligned rows (padded)
+
+Troubleshooting
+---------------
+
+**Budget Exceeded Errors:**
+
+1. Check current usage with ``get_memory_metrics()``
+2. Reduce render target sizes
+3. Free unused renderers with ``del``
+4. Consider processing in smaller batches
+
+**Memory Leaks:**
+
+If memory usage grows unexpectedly:
+
+1. Ensure renderer objects are deleted
+2. Check for retained references to RGBA arrays
+3. Monitor metrics over time to identify leaks
+
+**Platform Differences:**
+
+Budget enforcement may vary by GPU driver and available system memory. The 512 MiB limit is conservative to work across platforms.

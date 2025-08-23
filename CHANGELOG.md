@@ -12,10 +12,24 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - **C3 – Device diagnostics integration**: Added `Renderer.report_device()` method returning structured device capabilities including backend, limits, and MSAA support; MSAA automatically gated based on device capabilities
 - **C4 – Explicit tonemap functions**: Added `reinhard()` and `gamma_correct()` functions to `terrain.wgsl` with explicit gamma 2.2 correction; created comprehensive color management documentation
 
-### Workstream M – Interop & Memory
+### Workstream M – Zero-Copy NumPy Interop & Memory Budget
 
-- **M1 – Zero-copy NumPy interop**: Added comprehensive zero-copy validation for RGBA output and height input with pointer-equality tests using test-only hooks (`render_triangle_rgba_with_ptr()`, `debug_last_height_src_ptr()`); created `python/forge3d/_validate.py` helper module with `ptr()`, `is_c_contiguous()`, and `validate_zero_copy_path()` functions; enhanced `python/tools/profile_copies.py` profiler tool to print "zero-copy OK" when validation succeeds; updated `tests/test_numpy_interop.py` with direct pointer assertions; documentation in `docs/interop_zero_copy.rst`
-- **M2 – Memory budget tracker**: Implemented `src/core/memory_tracker.rs` with `ResourceRegistry` for tracking GPU resource allocations; enforces 512 MiB host-visible memory budget with automatic checking before allocations; fixed memory accounting for readback buffer resizing and temporary buffer cleanup; added `Renderer.get_memory_metrics()` method returning counts, bytes, and budget status; enhanced `tests/test_memory_budget.py` with oversized allocation tests that validate error messages contain "current", "requested", and "limit" information; documentation in `docs/memory_budget.rst`
+- **M1 – Zero-Copy NumPy Interoperability**: Implemented zero-copy pathways between NumPy arrays and Rust GPU memory system
+  - Added test-only hooks for pointer validation: `render_triangle_rgba_with_ptr()`, `debug_last_height_src_ptr()`
+  - Float32 C-contiguous heightmap arrays processed without copying via direct memory access
+  - RGBA output buffers returned as NumPy arrays sharing memory with Rust allocations
+  - Comprehensive test suite in `tests/test_numpy_interop.py` with 13 validation tests
+  - Zero-copy profiler tool `python/tools/profile_copies.py` with "zero-copy OK" validation
+  - Added validation helpers in `python/forge3d/_validate.py` for compatibility checking
+  - Documentation: `docs/interop_zero_copy.rst` with usage patterns and troubleshooting
+- **M2 – Memory Budget Tracking**: Implemented 512 MiB host-visible memory budget enforcement
+  - Created memory tracker module `src/core/memory_tracker.rs` with atomic resource counters  
+  - Budget checking prevents out-of-memory errors with descriptive failure messages
+  - Real-time memory metrics via `get_memory_metrics()` API with utilization ratios
+  - Thread-safe tracking of buffer/texture allocations and deallocations
+  - Fixed readback buffer accounting in render methods with proper budget validation
+  - Memory budget test suite in `tests/test_memory_budget.py` with 15 validation tests
+  - Documentation: `docs/memory_budget.rst` with usage patterns and best practices
 
 ## [0.1.0] - 2025-08-19
 

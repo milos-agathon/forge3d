@@ -13,7 +13,7 @@ mod core;
 mod device_caps;
 
 // Import memory tracking
-use core::memory_tracker::{global_tracker, is_host_visible_usage};
+use crate::core::memory_tracker::global_tracker;
 
 use bytemuck::{Pod, Zeroable};
 use image::{ImageBuffer, GenericImageView};
@@ -254,10 +254,9 @@ impl Renderer {
             mapped_at_creation: false,
         });
         
-        // Track initial readback buffer allocation (host-visible) and set budget
-        let tracker = global_tracker();
-        tracker.set_budget_limit(512 * 1024 * 1024); // 512 MiB limit
-        tracker.track_buffer_allocation(4, is_host_visible_usage(usage));
+        // Register initial readback buffer allocation
+        let registry = crate::core::memory_tracker::global_tracker();
+        registry.track_buffer_allocation(4, true); // host-visible
 
         Self {
             width, height,
@@ -292,18 +291,15 @@ impl Renderer {
 
         let need = (align_copy_bpr(self.width * 4) as u64) * (self.height as u64);
         if need > self.readback_size {
-            // Check budget before allocating larger readback buffer
-            let tracker = global_tracker();
-            if let Err(e) = tracker.check_budget_limits(need - self.readback_size) {
-                return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("{}", e)));
-            }
+            // Check budget before allocation
+            let registry = crate::core::memory_tracker::global_tracker();
+            registry.check_budget(need).map_err(|e| RenderError::device(e))?;
             
-            // Free the old readback buffer from tracking
+            // Free old buffer allocation
             if self.readback_size > 0 {
-                tracker.free_buffer_allocation(self.readback_size, true);
+                registry.free_buffer_allocation(self.readback_size, true); // host-visible
             }
             
-            let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
             self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
@@ -311,9 +307,8 @@ impl Renderer {
                 mapped_at_creation: false,
             });
             
-            // Track memory allocation (readback buffers are host-visible)
-            tracker.track_buffer_allocation(need, is_host_visible_usage(usage));
-            
+            // Register new allocation
+            registry.track_buffer_allocation(need, true); // host-visible
             self.readback_size = need;
         }
 
@@ -339,13 +334,15 @@ impl Renderer {
 
         let need = (align_copy_bpr(self.width * 4) as u64) * (self.height as u64);
         if need > self.readback_size {
-            // Free the old allocation before tracking the new one
+            // Check budget before allocation
+            let registry = crate::core::memory_tracker::global_tracker();
+            registry.check_budget(need).map_err(|e| RenderError::device(e))?;
+            
+            // Free old buffer allocation
             if self.readback_size > 0 {
-                let tracker = global_tracker();
-                tracker.free_buffer_allocation(self.readback_size, true);
+                registry.free_buffer_allocation(self.readback_size, true); // host-visible
             }
             
-            let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
             self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
@@ -353,10 +350,8 @@ impl Renderer {
                 mapped_at_creation: false,
             });
             
-            // Track memory allocation (readback buffers are host-visible)
-            let tracker = global_tracker();
-            tracker.track_buffer_allocation(need, is_host_visible_usage(usage));
-            
+            // Register new allocation
+            registry.track_buffer_allocation(need, true); // host-visible
             self.readback_size = need;
         }
 
@@ -391,6 +386,9 @@ impl Renderer {
             if !ro32.is_c_contiguous() {
                 return Err(pyo3::exceptions::PyRuntimeError::new_err("heightmap must be C-contiguous (row-major)"));
             }
+            
+            // Capture source pointer for zero-copy validation (float32 path)
+            self.debug_last_height_src_ptr = ro32.as_array().as_ptr() as usize;
             let view = ro32.as_array();
             let (h, w) = (view.shape()[0], view.shape()[1]);
             
@@ -760,31 +758,48 @@ impl Renderer {
         self.debug_read_height_patch(py, 0, 0, width, height)
     }
     
-    #[pyo3(text_signature = "($self)")]
-    pub fn get_memory_metrics(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let tracker = global_tracker();
-        let metrics = tracker.get_metrics();
-        
-        let dict = PyDict::new_bound(py);
-        dict.set_item("buffer_count", metrics.buffer_count)?;
-        dict.set_item("texture_count", metrics.texture_count)?;
-        dict.set_item("buffer_bytes", metrics.buffer_bytes)?;
-        dict.set_item("texture_bytes", metrics.texture_bytes)?;
-        dict.set_item("host_visible_bytes", metrics.host_visible_bytes)?;
-        dict.set_item("total_bytes", metrics.total_bytes())?;
-        dict.set_item("limit_bytes", metrics.limit_bytes)?;
-        dict.set_item("within_budget", metrics.within_budget)?;
-        dict.set_item("utilization_ratio", metrics.utilization_ratio())?;
-        
-        Ok(dict.into_any().unbind())
-    }
+    // Test-only hooks for zero-copy validation
     
-    // Test-only hooks for zero-copy validation (always available for PyO3)
     #[pyo3(text_signature = "($self)")]
     pub fn render_triangle_rgba_with_ptr<'py>(&mut self, py: Python<'py>) -> PyResult<(Bound<'py, PyArray3<u8>>, usize)> {
-        let rgba_array = self.render_triangle_rgba(py)?;
-        let ptr = unsafe { rgba_array.as_array().as_ptr() } as usize;
-        Ok((rgba_array, ptr))
+        let g = ctx();
+        self.render_into_offscreen(g)?;
+
+        let need = (align_copy_bpr(self.width * 4) as u64) * (self.height as u64);
+        if need > self.readback_size {
+            // Check budget before allocation
+            let registry = crate::core::memory_tracker::global_tracker();
+            registry.check_budget(need).map_err(|e| RenderError::device(e))?;
+            
+            // Free old buffer allocation
+            if self.readback_size > 0 {
+                registry.free_buffer_allocation(self.readback_size, true); // host-visible
+            }
+            
+            self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("readback-buffer"),
+                size: need,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            
+            // Register new allocation
+            registry.track_buffer_allocation(need, true); // host-visible
+            self.readback_size = need;
+        }
+
+        let pixels = copy_texture_to_rgba_unpadded(
+            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
+
+        let arr3 = Array3::from_shape_vec(
+            (self.height as usize, self.width as usize, 4), pixels
+        ).map_err(|e| RenderError::render(e.to_string()))?;
+        
+        // Get the data pointer from the ndarray before converting to PyArray
+        let data_ptr = arr3.as_ptr() as usize;
+        let py_array = arr3.into_pyarray_bound(py);
+        
+        Ok((py_array, data_ptr))
     }
     
     #[pyo3(text_signature = "($self)")]

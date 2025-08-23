@@ -6,6 +6,7 @@ allocations and enforces the 512 MiB budget limit for host-visible memory.
 """
 import pytest
 import numpy as np
+import math
 
 # Import forge3d
 import forge3d as f3d
@@ -206,8 +207,6 @@ class TestMemoryBudgetEnforcement:
             
     def test_oversized_allocation_error(self):
         """Test that oversized allocations raise appropriate budget errors."""
-        import math
-        
         # Calculate size that would exceed 512 MiB limit
         limit_bytes = 512 * 1024 * 1024  # 512 MiB
         

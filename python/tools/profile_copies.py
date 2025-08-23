@@ -85,10 +85,10 @@ def profile_rgba_output(width: int, height: int) -> Dict[str, Any]:
         
         # Validate zero-copy
         if numpy_ptr == rust_ptr:
-            print("  ✓ RGBA zero-copy validated - pointers match")
+            print("  RGBA zero-copy validated - pointers match")
             results['zero_copy_status'] = 'zero_copy_confirmed'
         else:
-            print(f"  ⚠ RGBA zero-copy failed - pointer mismatch (offset: {abs(numpy_ptr - rust_ptr)} bytes)")
+            print(f"  RGBA zero-copy failed - pointer mismatch (offset: {abs(numpy_ptr - rust_ptr)} bytes)")
             results['zero_copy_status'] = 'copy_detected'
             results['warnings'].append(f"RGBA pointer mismatch: numpy=0x{numpy_ptr:x}, rust=0x{rust_ptr:x}")
         
@@ -102,7 +102,7 @@ def profile_rgba_output(width: int, height: int) -> Dict[str, Any]:
             
     except AttributeError:
         # Fallback for non-test builds
-        print("  ⚠ Test hooks not available (not a test build)")
+        print("  Test hooks not available (not a test build)")
         rgba_array = renderer.render_triangle_rgba()
         numpy_ptr = ptr(rgba_array)
         print(f"  NumPy array pointer: 0x{numpy_ptr:x}")
@@ -146,7 +146,7 @@ def profile_height_input(terrain_width: int, terrain_height: int, render_width: 
     if not compat['compatible']:
         results['warnings'].extend([f"Heightmap issue: {issue}" for issue in compat['issues']])
     else:
-        print("  ✓ Input heightmap is zero-copy compatible")
+        print("  Input heightmap is zero-copy compatible")
     
     # Add terrain (should use zero-copy path for float32 C-contiguous)
     _, add_time = time_operation("add_terrain", renderer.add_terrain, 
@@ -161,16 +161,16 @@ def profile_height_input(terrain_width: int, terrain_height: int, render_width: 
         print(f"  Captured source pointer: 0x{captured_ptr:x}")
         
         if input_ptr == captured_ptr:
-            print("  ✓ Height input zero-copy validated - pointers match")
+            print("  Height input zero-copy validated - pointers match")
             results['zero_copy_status'] = 'zero_copy_confirmed'
         else:
-            print(f"  ⚠ Height input zero-copy failed - pointer mismatch (offset: {abs(input_ptr - captured_ptr)} bytes)")
+            print(f"  Height input zero-copy failed - pointer mismatch (offset: {abs(input_ptr - captured_ptr)} bytes)")
             results['zero_copy_status'] = 'copy_detected'
             results['warnings'].append(f"Height pointer mismatch: input=0x{input_ptr:x}, captured=0x{captured_ptr:x}")
             
     except AttributeError:
         # Fallback for non-test builds
-        print("  ⚠ Test hooks not available (not a test build)")
+        print("  Test hooks not available (not a test build)")
         results['zero_copy_status'] = 'test_hooks_unavailable'
         results['warnings'].append("Cannot validate height zero-copy without test hooks")
     
@@ -194,15 +194,14 @@ def profile_height_input(terrain_width: int, terrain_height: int, render_width: 
         if max_diff > 1e-6:
             results['warnings'].append(f"Large roundtrip error: {max_diff}")
         else:
-            print("  ✓ Roundtrip accuracy is good")
+            print("  Roundtrip accuracy is good")
             
     # Input and readback should have different pointers (different purposes)
     if input_ptr == readback_ptr:
         results['warnings'].append("Input and readback have same pointer (unexpected)")
     else:
-        print("  ✓ Input and readback use different buffers (expected)")
+        print("  Input and readback use different buffers (expected)")
     
-    results['zero_copy_status'] = 'validated'
     return results
 
 
@@ -214,7 +213,8 @@ def profile_module_functions(width: int, height: int) -> Dict[str, Any]:
         'width': width,
         'height': height, 
         'operations': {},
-        'warnings': []
+        'warnings': [],
+        'zero_copy_status': 'test_hooks_unavailable'  # Module functions don't have pointer validation
     }
     
     # Test module-level render_triangle_rgba
@@ -232,7 +232,7 @@ def profile_module_functions(width: int, height: int) -> Dict[str, Any]:
     if not compat['compatible']:
         results['warnings'].extend([f"Module output issue: {issue}" for issue in compat['issues']])
     else:
-        print("  ✓ Module function output is zero-copy compatible")
+        print("  Module function output is zero-copy compatible")
     
     ptr_val = ptr(rgba)
     print(f"  Module function output pointer: 0x{ptr_val:x}")
@@ -308,16 +308,16 @@ Examples:
                 break
         
         if len(total_warnings) == 0 and zero_copy_confirmed:
-            print("✓ Zero-copy pathways validated successfully") 
-            print("✓ zero-copy OK")
+            print("Zero-copy pathways validated successfully") 
+            print("zero-copy OK")
             status = 0
         elif len(total_warnings) == 0:
-            print("✓ No warnings detected")
+            print("No warnings detected")
             if zero_copy_confirmed:
-                print("✓ zero-copy OK")
+                print("zero-copy OK")
             status = 0
         else:
-            print(f"⚠ {len(total_warnings)} warnings detected:")
+            print(f"{len(total_warnings)} warnings detected:")
             for warning in total_warnings:
                 print(f"  - {warning}")
             status = 1
@@ -333,7 +333,7 @@ Examples:
             print(f"\nDetailed results: {all_results}")
             
     except Exception as e:
-        print(f"\n❌ Profiling failed: {e}")
+        print(f"\nProfiling failed: {e}")
         if args.verbose:
             import traceback
             traceback.print_exc()

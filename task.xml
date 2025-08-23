@@ -10,93 +10,84 @@
       <!-- Python helpers/tools -->
       <path>python/forge3d/_validate.py</path>
       <path>python/tools/profile_copies.py</path>
-      <!-- Rust product code (minimal hooks + accounting fix) -->
+      <!-- Rust product code -->
       <path>src/lib.rs</path>
       <path>src/core/memory_tracker.rs</path>
-      <!-- Docs -->
+      <!-- Docs + changelog -->
       <path>docs/index.rst</path>
       <path>docs/interop_zero_copy.rst</path>
       <path>docs/memory_budget.rst</path>
       <path>CHANGELOG.md</path>
     </paths>
-    <constraints>
-      <platforms>win_amd64; linux_x86_64; macos_universal2</platforms>
-      <memory>≤ 512 MiB host-visible heap</memory>
-      <toolchain>cmake≥3.24; cargo/rustc stable; PyO3; VMA</toolchain>
-      <apis>WebGPU/WGSL primary; Vulkan 1.2-compatible design</apis>
-      <docs>Sphinx preferred</docs>
-    </constraints>
   </inputs>
 
   <plan>
     <!-- Safety -->
-    <step>Create branch <code>wsM-remediate</code>; exclude <code>target/ dist/ build/ .venv/ node_modules/ .git/</code>.</step>
+    <step>Create branch <code>wsM-remediate</code>; exclude <code>target/ dist/ build/ .venv/ node_modules/ .git/</code> from edits.</step>
 
-    <!-- M1: Zero-copy validation (tests + minimal hooks) -->
-    <step>Move helpers to correct paths: <code>git mv _validate.py python/forge3d/_validate.py</code>; <code>git mv profile_copies.py python/tools/profile_copies.py</code>.</step>
-    <step>In <code>src/lib.rs</code>, add minimal test-only hooks (no API break): 
+    <!-- Fix M1: zero-copy hooks + tests + profiler -->
+    <step>In <code>src/lib.rs</code>, add minimal hooks if missing:
       <ul>
-        <li><code>#[cfg(test)]</code> method <code>render_triangle_rgba_with_ptr(py) -&gt; (PyArray3&lt;u8&gt;, usize)</code> returning the array and its data pointer.</li>
-        <li><code>#[cfg(test)]</code> store and expose <code>debug_last_height_src_ptr() -&gt; usize</code> set by height upload path.</li>
+        <li><code>pub fn render_triangle_rgba_with_ptr(py) -&gt; (PyArray3&lt;u8&gt;, usize)</code> returning the PyArray and its data pointer.</li>
+        <li>Store height input pointer during <code>add_terrain()</code> in <code>debug_last_height_src_ptr: usize</code> and expose <code>pub fn debug_last_height_src_ptr(&self) -&gt; usize</code>.</li>
       </ul>
     </step>
-    <step>Refactor height upload to avoid intermediate copy for compliant inputs:
+    <step>Update <code>tests/test_numpy_interop.py</code> to assert:
       <ul>
-        <li>Accept/read <code>PyReadonlyArray2&lt;f32&gt;</code> when provided and write directly to texture using its contiguous slice (row padding only), setting <code>debug_last_height_src_ptr</code> to <code>as_slice().as_ptr()</code>.</li>
-        <li>Retain current fallback for non-contiguous/dtype mismatch.</li>
+        <li>RGBA zero-copy: <code>np_arr.ctypes.data == ptr</code> from <code>render_triangle_rgba_with_ptr()</code>.</li>
+        <li>Height zero-copy: for C-contig float32 input, <code>height.ctypes.data == r.debug_last_height_src_ptr()</code>.</li>
       </ul>
     </step>
-    <step>Complete <code>tests/test_numpy_interop.py</code>:
+    <step>Move helper files to canonical paths and import:
       <ul>
-        <li>RGBA output: call <code>render_triangle_rgba_with_ptr()</code>; assert <code>np_arr.ctypes.data == ptr</code>.</li>
-        <li>Height input: pass C-contiguous <code>float32</code> heightmap; assert <code>height.ctypes.data == r.debug_last_height_src_ptr()</code>.</li>
-        <li>Use <code>python/forge3d/_validate.py</code> helpers for pointer extraction and contiguity checks.</li>
+        <li><code>git mv ./_validate.py python/forge3d/_validate.py</code></li>
+        <li><code>git mv ./profile_copies.py python/tools/profile_copies.py</code></li>
       </ul>
     </step>
-    <step>Finish <code>python/tools/profile_copies.py</code>: render once; print “zero-copy OK” if both RGBA and height pointers match expectations; warn otherwise.</step>
+    <step>Modify <code>python/tools/profile_copies.py</code> to print exactly <b>zero-copy OK</b> on success and emit no warnings in that case.</step>
 
-    <!-- M2: Budget tests + minor accounting fix -->
-    <step>In <code>src/lib.rs</code>, when resizing readback buffers, call <code>free_buffer_allocation(old_size, true)</code> before tracking the new size to keep metrics accurate. Similarly free temporary readback in <code>debug_read_height_patch</code> after unmap.</step>
-    <step>Complete <code>tests/test_memory_budget.py</code>:
+    <!-- Fix M2: memory accounting + tests -->
+    <step>In <code>src/lib.rs</code>, on readback resize: call <code>free_buffer_allocation(old_size, true)</code> before tracking the new size; in any temporary readback path (e.g., height debug readback), free after unmap.</step>
+    <step>Ensure budget checks use additional host-visible bytes (delta) when resizing to avoid false positives; preserve error message tokens “current”, “requested”, “limit”.</step>
+    <step>If absent, add <code>Renderer::get_memory_metrics()</code> to return the registry metrics to Python.</step>
+    <step>Finish <code>tests/test_memory_budget.py</code>:
       <ul>
-        <li>Assert <code>get_memory_metrics()</code> returns required fields and <code>within_budget</code> for a small render.</li>
-        <li>Force an oversized readback (e.g., render 11000×11000 → compute intended bytes; skip if device limits too low) and assert an error is raised; check message includes “current”, “requested”, and “limit”.</li>
+        <li>Validate metrics fields and <code>within_budget</code> for a small render.</li>
+        <li>Trigger &gt;512&nbsp;MiB host-visible (oversized readback) and assert an error is raised; message contains “current”, “requested”, “limit”.</li>
       </ul>
     </step>
 
-    <!-- Docs -->
-    <step>Move or sync docs content to <code>docs/interop_zero_copy.rst</code> and <code>docs/memory_budget.rst</code>; update <code>docs/index.rst</code> to include both in the toctree. Keep existing .md files as sources only if MyST is enabled; otherwise rely on .rst.</step>
-
-    <!-- CHANGELOG -->
-    <step>Add a concise entry under “Workstream M – interop &amp; memory” summarizing tests, hooks, docs, and metrics.</step>
+    <!-- Docs + changelog -->
+    <step>Update <code>docs/index.rst</code> to include <code>interop_zero_copy</code> and <code>memory_budget</code> in the toctree.</step>
+    <step>Add concise “Workstream M – interop &amp; memory” entry to <code>CHANGELOG.md</code> summarizing hooks, tests, profiler, budget metrics, and docs.</step>
 
     <!-- Verification -->
     <step>Build: <code>maturin develop --release</code>.</step>
-    <step>Tests: <code>pytest -q -k "numpy_interop or memory_budget"</code> then full <code>pytest -q</code>.</step>
-    <step>Docs: <code>make -C docs html</code> and verify both pages appear in sidebar TOC.</step>
+    <step>Run tests: <code>pytest -q -k "numpy_interop or memory_budget"</code> then full <code>pytest -q</code>.</step>
+    <step>Docs: <code>make -C docs html</code> and verify both pages appear in the sidebar TOC.</step>
+    <step>Profiler: <code>python python/tools/profile_copies.py --render-size 64x64</code> prints exactly "zero-copy OK".</step>
   </plan>
 
   <deliverables>
-    <item>M1: Finished <code>tests/test_numpy_interop.py</code> with RGBA and height zero-copy pointer assertions.</item>
-    <item>M1: Helpers at <code>python/forge3d/_validate.py</code>; profiler at <code>python/tools/profile_copies.py</code> printing “zero-copy OK”.</item>
-    <item>M1: Minimal test-only hooks in <code>src/lib.rs</code> to expose pointers for verification.</item>
-    <item>M2: Accurate memory accounting on readback resize and temp buffers; finished <code>tests/test_memory_budget.py</code> (metrics + exceed assertions).</item>
-    <item>Docs: <code>docs/interop_zero_copy.rst</code> and <code>docs/memory_budget.rst</code> included in <code>docs/index.rst</code>.</item>
-    <item>CHANGELOG: “Workstream M – interop &amp; memory” entry.</item>
+    <item>Zero-copy hooks in <code>src/lib.rs</code> and finished pointer tests in <code>tests/test_numpy_interop.py</code>.</item>
+    <item>Helpers/tools in correct paths; <code>python/tools/profile_copies.py</code> prints “zero-copy OK”.</item>
+    <item>Memory accounting corrections in <code>src/lib.rs</code>; finished <code>tests/test_memory_budget.py</code>.</item>
+    <item>Docs TOC wired in <code>docs/index.rst</code>.</item>
+    <item>CHANGELOG updated for Workstream M.</item>
   </deliverables>
 
   <acceptanceCriteria>
-    <item>M1: RGBA test asserts <code>np_arr.ctypes.data == ptr</code>; height test asserts <code>height.ctypes.data == debug_last_height_src_ptr()</code>; both pass under <code>pytest -q -k numpy_interop</code>.</item>
-    <item>M1: <code>python/tools/profile_copies.py</code> prints “zero-copy OK” with no warnings.</item>
-    <item>M2: Small scene reports <code>within_budget=True</code>; exceeding 512 MiB host-visible raises an error containing “current”, “requested”, and “limit”.</item>
-    <item>Docs: <code>make -C docs html</code> exits 0 and both pages appear in the TOC.</item>
-    <item>Runbook: <code>maturin develop --release</code> and <code>pytest -q</code> exit 0 on CI across win_amd64, linux_x86_64, macos_universal2.</item>
+    <item>M1: RGBA and height zero-copy pointer assertions pass under <code>pytest -q -k numpy_interop</code>.</item>
+    <item>M1: <code>python/tools/profile_copies.py</code> prints exactly “zero-copy OK” with no warnings.</item>
+    <item>M2: <code>get_memory_metrics()</code> returns required fields; small scene within budget; exceeding 512&nbsp;MiB host-visible raises an error containing “current”, “requested”, “limit”.</item>
+    <item>Docs: <code>make -C docs html</code> exits 0 and both pages appear in TOC.</item>
+    <item>Runbook: <code>maturin develop --release</code> and <code>pytest -q</code> exit 0.</item>
   </acceptanceCriteria>
 
   <safety>
-    <rule>Branch creation; small, reviewable commits. No blind search/replace.</rule>
-    <rule>Limit code changes to test hooks and memory accounting noted above.</rule>
-    <rule>Exclude build/binary dirs from edits.</rule>
+    <rule>Branch creation; small, reviewable commits; no blind search/replace.</rule>
+    <rule>Limit edits to listed files; exclude build/binary dirs.</rule>
+    <rule>Respect ≤512&nbsp;MiB host-visible budget; use oversized readback only in the exceedance test.</rule>
   </safety>
 
   <constraints>
@@ -107,7 +98,8 @@
   </constraints>
 
   <completion>
-    <summary>Finalize Workstream M by completing zero-copy validation (tests/hooks), correcting docs locations/TOC, fixing budget tests and accounting, and adding a CHANGELOG entry.</summary>
+
+    <summary>Add the missing hooks, finish/relocate tests and tools, correct memory accounting, wire docs TOC, and update CHANGELOG so all ACs pass.</summary>
     <commands>
       <cmd>git checkout -b wsM-remediate</cmd>
       <cmd>git mv _validate.py python/forge3d/_validate.py</cmd>
@@ -116,6 +108,7 @@
       <cmd>pytest -q -k "numpy_interop or memory_budget"</cmd>
       <cmd>pytest -q</cmd>
       <cmd>make -C docs html</cmd>
+      <cmd>python python/tools/profile_copies.py --render-size 64x64</cmd>
     </commands>
   </completion>
 </task>
