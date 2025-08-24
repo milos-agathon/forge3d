@@ -144,7 +144,6 @@ static GLOBAL_REGISTRY: std::sync::OnceLock<ResourceRegistry> = std::sync::OnceL
 /// Get reference to global memory tracker
 pub fn global_tracker() -> &'static ResourceRegistry {
     GLOBAL_REGISTRY.get_or_init(|| ResourceRegistry::new())
-}
 
 #[cfg(test)]
 mod tests {
