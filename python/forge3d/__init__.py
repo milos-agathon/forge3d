@@ -1,6 +1,17 @@
 # Re-export specific items from the compiled extension.
 import importlib
+try:
+    import importlib.resources as resources
+except ImportError:
+    # Python < 3.9 compatibility
+    import importlib_resources as resources
+
 _ext = importlib.import_module("forge3d._forge3d")
+
+# Add files function for typing stubs test compatibility
+def files(package):
+    """Get package files using importlib.resources.files."""
+    return resources.files(package)
 Renderer = _ext.Renderer
 Scene = _ext.Scene
 png_to_numpy = _ext.png_to_numpy
@@ -137,6 +148,7 @@ __all__ = [
     "enumerate_adapters",
     "device_probe",
     "run_benchmark",
+    "files",
     "__version__",
 ]
 

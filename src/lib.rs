@@ -234,9 +234,10 @@ impl Renderer {
             mapped_at_creation: false,
         });
         
-        // Register initial readback buffer allocation
+        // Register initial allocations
         let registry = crate::core::memory_tracker::global_tracker();
-        registry.track_buffer_allocation(4, true); // host-visible
+        registry.track_buffer_allocation(4, true); // host-visible readback buffer
+        registry.track_texture_allocation(width, height, TEXTURE_FORMAT); // offscreen color texture
 
         Self {
             width, height,
@@ -262,6 +263,25 @@ impl Renderer {
     #[pyo3(text_signature = "($self)")]
     pub fn info(&self) -> PyResult<String> {
         Ok(format!("Renderer {}x{}, format={:?}", self.width, self.height, TEXTURE_FORMAT))
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn get_memory_metrics<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let registry = crate::core::memory_tracker::global_tracker();
+        let metrics = registry.get_metrics();
+        
+        let dict = pyo3::types::PyDict::new_bound(py);
+        dict.set_item("buffer_count", metrics.buffer_count)?;
+        dict.set_item("texture_count", metrics.texture_count)?;
+        dict.set_item("buffer_bytes", metrics.buffer_bytes)?;
+        dict.set_item("texture_bytes", metrics.texture_bytes)?;
+        dict.set_item("host_visible_bytes", metrics.host_visible_bytes)?;
+        dict.set_item("total_bytes", metrics.total_bytes)?;
+        dict.set_item("limit_bytes", metrics.limit_bytes)?;
+        dict.set_item("within_budget", metrics.within_budget)?;
+        dict.set_item("utilization_ratio", metrics.utilization_ratio)?;
+        
+        Ok(dict)
     }
 
     #[pyo3(text_signature = "($self)")]
@@ -546,6 +566,11 @@ impl Renderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
+        
+        // Track height texture allocation
+        let registry = crate::core::memory_tracker::global_tracker();
+        registry.track_texture_allocation(width, height, wgpu::TextureFormat::R32Float);
+        
         let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
         let samp = g.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("terrain-height-sampler"),
