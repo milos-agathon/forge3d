@@ -13,7 +13,7 @@ mod core;
 mod device_caps;
 
 // Import memory tracking
-use crate::core::memory_tracker::global_tracker;
+use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
 
 use bytemuck::{Pod, Zeroable};
 use image::{ImageBuffer, GenericImageView};
@@ -323,7 +323,7 @@ impl Renderer {
             self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
-                usage,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
             
@@ -366,7 +366,7 @@ impl Renderer {
             self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
-                usage,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
             
@@ -581,7 +581,7 @@ impl Renderer {
         // Check budget before allocating height texture
         let tracker = global_tracker();
         let texture_bytes = (terr.width as u64) * (terr.height as u64) * 4; // R32Float = 4 bytes per pixel
-        if let Err(e) = tracker.check_budget_limits(0) { // Check current budget state
+        if let Err(e) = tracker.check_budget(0) { // Check current budget state
             return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("{}", e)));
         }
 
