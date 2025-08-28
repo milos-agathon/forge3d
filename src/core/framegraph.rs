@@ -1,36 +1,40 @@
-//! Framegraph module - focused on render pass organization
+//! Framegraph legacy compatibility layer
 //!
-//! TODO: This is a focused module stub to satisfy C1 deliverables.
-//! In the future, this could contain render graph/framegraph logic
-//! for managing render passes and resource dependencies.
+//! This module provides backward compatibility for the old framegraph API
+//! while redirecting to the new full implementation.
 
 use crate::error::{RenderError, RenderResult};
 
-/// Placeholder framegraph structure
-/// 
-/// This is a minimal stub to satisfy the C1 deliverable requirements.
-/// Future implementations could include:
-/// - Render pass dependency tracking
-/// - Resource lifetime management  
-/// - GPU command buffer organization
+// Re-export main types from the new implementation
+pub use super::framegraph_impl::{FrameGraph as NewFrameGraph, PassType, ResourceDesc, ResourceType};
+
+/// Legacy FrameGraph wrapper for backward compatibility
 #[derive(Debug)]
 pub struct FrameGraph {
-    // Placeholder - to be expanded based on actual needs
-    passes: Vec<String>,
+    inner: NewFrameGraph,
 }
 
 impl FrameGraph {
     /// Create a new framegraph
     pub fn new() -> Self {
         Self {
-            passes: Vec::new(),
+            inner: NewFrameGraph::new(),
         }
     }
     
-    /// Add a render pass (placeholder)
+    /// Add a render pass (legacy compatibility)
     pub fn add_pass(&mut self, name: impl Into<String>) -> RenderResult<()> {
-        self.passes.push(name.into());
+        let _handle = self.inner.add_pass(
+            &name.into(),
+            PassType::Graphics,
+            |_builder| Ok(())
+        )?;
         Ok(())
+    }
+    
+    /// Get access to the full framegraph implementation
+    pub fn full(&mut self) -> &mut NewFrameGraph {
+        &mut self.inner
     }
 }
 

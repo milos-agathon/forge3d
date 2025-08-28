@@ -9,7 +9,7 @@ use error::{RenderError, RenderResult};
 
 // Import modular components
 mod context;
-mod core;
+pub mod core;  // Make core public for tests
 mod device_caps;
 
 // Import memory tracking
