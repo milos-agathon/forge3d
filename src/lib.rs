@@ -581,7 +581,7 @@ impl Renderer {
         // Check budget before allocating height texture
         let tracker = global_tracker();
         let texture_bytes = (terr.width as u64) * (terr.height as u64) * 4; // R32Float = 4 bytes per pixel
-        if let Err(e) = tracker.check_budget(0) { // Check current budget state
+        if let Err(e) = tracker.check_budget(texture_bytes) { // Preflight upcoming allocation
             return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("{}", e)));
         }
 
