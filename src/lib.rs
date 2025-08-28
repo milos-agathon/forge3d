@@ -14,7 +14,6 @@ mod device_caps;
 
 // Import memory tracking
 use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
-use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
 
 use bytemuck::{Pod, Zeroable};
 use image::{ImageBuffer, GenericImageView};
