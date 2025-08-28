@@ -187,9 +187,9 @@ impl ColormapLUT {
     }
 }
 
-// ---------- Uniforms (std140-compatible, 176 bytes) ----------
+// ---------- Uniforms (std140-compatible, 592 bytes to match WGSL) ----------
 
-// B16: Updated TerrainUniforms to match new shader layout (384 bytes)
+// B16: Updated TerrainUniforms to match WGSL shader layout (592 bytes)
 #[repr(C, align(16))]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TerrainUniforms {
@@ -199,10 +199,17 @@ pub struct TerrainUniforms {
     pub spacing_h_exag_pad: [f32; 4],  // (spacing, h_range, exaggeration, 0) -> 16 B
     pub light_counts: [f32; 4],        // (num_point_lights, num_spot_lights, 0, 0) -> 16 B
     pub _pad_tail: [f32; 4],           // pad -> 16 B (total 192 B so far)
-    pub point_lights: [PointLight; 4], // 4 * 32 = 128 B
-    pub spot_lights: [SpotLight; 2],   // 2 * 48 = 96 B (+ 32B pad = 128B)
-    pub _pad_end: [f32; 4],            // 16 B padding (total 384 B)
+    pub point_lights: [PointLight; 4], // 4 * 48 = 192 B
+    pub spot_lights: [SpotLight; 2],   // 2 * 64 = 128 B
+    pub _pad_end: [f32; 4],            // 16 B padding (total 528 B)
+    pub _pad_extra: [f32; 16],         // 64 B additional padding to reach 592 B
 }
+
+// Compile-time size and alignment checks
+#[allow(dead_code)]
+pub const TERRAIN_UNIF_SIZE: usize = 592;
+const _: () = assert!(::std::mem::size_of::<TerrainUniforms>() == TERRAIN_UNIF_SIZE);
+const _: () = assert!(::std::mem::align_of::<TerrainUniforms>() == 16);
 
 impl TerrainUniforms {
     /// Note: `h_range = max - min` (pass a single range, not min/max separately)
@@ -225,6 +232,7 @@ impl TerrainUniforms {
             point_lights: [PointLight::default(); 4],
             spot_lights: [SpotLight::default(); 2], 
             _pad_end: [0.0; 4],
+            _pad_extra: [0.0; 16], // Additional padding to reach 592 bytes
         }
     }
     
@@ -286,6 +294,38 @@ impl TerrainUniforms {
             height_range,
             height_exaggeration,
         )
+    }
+    
+    /// T31: Pack the first 44 floats in the expected T31 lanes order for debug tests
+    /// Layout: [0..15]=view, [16..31]=proj, [32..35]=sun_exposure, [36..39]=spacing/h_range/exag/0, [40..43]=pad
+    /// Matrices are stored in column-major format (compatible with WGSL/GPU layout)
+    pub fn to_debug_lanes_44(&self) -> [f32; 44] {
+        let mut lanes = [0.0f32; 44];
+        
+        // [0..15] = view matrix (16 floats, keep in column-major format as stored)
+        for col in 0..4 {
+            for row in 0..4 {
+                lanes[col * 4 + row] = self.view[col][row];
+            }
+        }
+        
+        // [16..31] = proj matrix (16 floats, keep in column-major format as stored)
+        for col in 0..4 {
+            for row in 0..4 {
+                lanes[16 + col * 4 + row] = self.proj[col][row];
+            }
+        }
+        
+        // [32..35] = sun_exposure (4 floats: sun_dir.xyz, exposure)
+        lanes[32..36].copy_from_slice(&self.sun_exposure);
+        
+        // [36..39] = spacing_h_exag_pad (4 floats: spacing, h_range, exaggeration, 0)
+        lanes[36..40].copy_from_slice(&self.spacing_h_exag_pad);
+        
+        // [40..43] = pad (4 floats, zeroed)
+        lanes[40..44].copy_from_slice(&[0.0f32; 4]);
+        
+        lanes
     }
 }
 
@@ -447,6 +487,13 @@ impl TerrainSpike {
         let uniforms = globals.to_uniforms(view, proj);
 
         let ubo_usage = wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST;
+        let uniform_size = std::mem::size_of::<TerrainUniforms>() as u64;
+        
+        // Runtime debug assertion to ensure uniform buffer matches WGSL expectations
+        debug_assert_eq!(uniform_size, TERRAIN_UNIF_SIZE as u64, 
+                        "Uniform buffer size {} doesn't match WGSL expectation {}", 
+                        uniform_size, TERRAIN_UNIF_SIZE);
+        
         let ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("terrain-ubo"),
             contents: bytemuck::cast_slice(&[uniforms]),
@@ -455,10 +502,7 @@ impl TerrainSpike {
         
         // B15: Track UBO allocation (not host-visible)
         let tracker = global_tracker();
-        tracker.track_buffer_allocation(
-            std::mem::size_of::<TerrainUniforms>() as u64, 
-            is_host_visible_usage(ubo_usage)
-        );
+        tracker.track_buffer_allocation(uniform_size, is_host_visible_usage(ubo_usage));
 
         let (lut, lut_format) = ColormapLUT::new(&device, &queue, &adapter, which)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
@@ -680,10 +724,10 @@ impl TerrainSpike {
         &self,
         py: pyo3::Python<'py>,
     ) -> pyo3::PyResult<pyo3::Bound<'py, numpy::PyArray1<f32>>> {
-        // Convert TerrainUniforms (176 bytes) to 44 floats
-        let bytes = bytemuck::bytes_of(&self.last_uniforms);
-        let float_slice: &[f32] = bytemuck::cast_slice(bytes);
-        Ok(numpy::PyArray1::from_vec_bound(py, float_slice.to_vec()))
+        // Return only the first 44 floats (176 bytes) for T31 compatibility:
+        // [0..15]=view, [16..31]=proj, [32..35]=sun_exposure, [36..39]=spacing/h_range/exag/0, [40..43]=pad
+        let uniform_lanes = self.last_uniforms.to_debug_lanes_44();
+        Ok(numpy::PyArray1::from_slice_bound(py, &uniform_lanes))
     }
 
     // B15: Expose memory metrics to Python
