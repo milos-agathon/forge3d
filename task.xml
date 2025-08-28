@@ -1,0 +1,111 @@
+<task>
+  <title>Remediate failed criteria only</title>
+  <inputs>
+    <repoRoot>.</repoRoot>
+    <paths>
+      <!-- Align B11 API naming -->
+      <path>src/terrain/mod.rs</path>
+      <!-- B12 -->
+      <path>src/terrain/lod.rs</path>
+      <path>tests/test_b12_lod.py</path>
+      <path>docs/terrain_lod.rst</path>
+      <!-- B13/B14 -->
+      <path>src/terrain/analysis.rs</path>
+      <path>tests/test_b13_slope_aspect.py</path>
+      <path>tests/test_b14_contours.py</path>
+      <path>docs/slope_aspect.rst</path>
+      <path>docs/contours.rst</path>
+      <!-- B16 -->
+      <path>src/shaders/terrain.wgsl</path>
+      <path>src/terrain/pipeline.rs</path>
+      <path>tests/test_b16_lights.py</path>
+      <path>docs/lighting_point_spot.rst</path>
+      <!-- Docs index -->
+      <path>docs/index.rst</path>
+    </paths>
+    <commands>
+      <cmd>git checkout -b wsB-remediate</cmd>
+    </commands>
+  </inputs>
+  <plan>
+    <!-- Keep scope minimal; only failed items -->
+    <step id="0">B11 naming shim: add Python-visible <code>set_height_tiled(...)</code> in <file>src/terrain/mod.rs</file> that forwards to existing <code>enable_tiling(...)</code> to satisfy deliverable wording without altering behavior.</step>
+
+    <step id="1">B12 LOD (depends on B11):
+      <ul>
+        <li>Create <file>src/terrain/lod.rs</file> with <code>screen_space_error()</code> and <code>select_lod_for_tile()</code> (projected edge length vs pixel budget).</li>
+        <li>Integrate selection in tiling flow used by tests (pure CPU math OK).</li>
+        <li>Add <file>tests/test_b12_lod.py</file> asserting ≥40% triangle reduction and budget-compliant selection.</li>
+        <li>Add concise docs in <file>docs/terrain_lod.rst</file>.</li>
+      </ul>
+    </step>
+
+    <step id="2">B13/B14 analysis (CPU implementations acceptable for AC):
+      <ul>
+        <li>Add <file>src/terrain/analysis.rs</file> with <code>slope_aspect_compute()</code> (finite differences) and <code>contour_extract()</code> (marching squares).</li>
+        <li>Provide minimal Python-facing wrappers if tests require.</li>
+        <li>Add tests: <file>tests/test_b13_slope_aspect.py</file>, <file>tests/test_b14_contours.py</file> per AC tolerances.</li>
+        <li>Add docs: <file>docs/slope_aspect.rst</file>, <file>docs/contours.rst</file>.</li>
+      </ul>
+    </step>
+
+    <step id="3">B16 point/spot lights:
+      <ul>
+        <li>Extend <file>src/shaders/terrain.wgsl</file> to support 1 point + 1 spot light (structs, loop, inverse-square falloff, cosine cutoff).</li>
+        <li>Update <file>src/terrain/pipeline.rs</file> UBO layout and bind groups.</li>
+        <li>Add <file>tests/test_b16_lights.py</file> checking numeric contributions at probe pixels.</li>
+        <li>Add <file>docs/lighting_point_spot.rst</file> with formulas/examples.</li>
+      </ul>
+    </step>
+
+    <step id="4">Docs index:
+      <ul>
+        <li>Update <file>docs/index.rst</file> to include new pages in toctree.</li>
+      </ul>
+    </step>
+
+    <step id="5">Verification:
+      <ul>
+        <li>Build: <code>maturin develop --release</code>.</li>
+        <li>Run focused tests: <code>pytest -q tests/test_b12_lod.py tests/test_b13_slope_aspect.py tests/test_b14_contours.py tests/test_b16_lights.py</code>.</li>
+        <li>Docs: <code>make -C docs html</code>.</li>
+      </ul>
+    </step>
+  </plan>
+  <deliverables>
+    <item>B11: <code>set_height_tiled(...)</code> alias present in <code>src/terrain/mod.rs</code>.</item>
+    <item>B12: <code>src/terrain/lod.rs</code>, <code>tests/test_b12_lod.py</code>, <code>docs/terrain_lod.rst</code>.</item>
+    <item>B13: <code>src/terrain/analysis.rs</code> with <code>slope_aspect_compute()</code>, <code>tests/test_b13_slope_aspect.py</code>, <code>docs/slope_aspect.rst</code>.</item>
+    <item>B14: <code>contour_extract()</code> in <code>analysis.rs</code>, <code>tests/test_b14_contours.py</code>, <code>docs/contours.rst</code>.</item>
+    <item>B16: Updated <code>shaders/terrain.wgsl</code>, <code>pipeline.rs</code>, <code>tests/test_b16_lights.py</code>, <code>docs/lighting_point_spot.rst</code>.</item>
+    <item>Docs index: <code>docs/index.rst</code> updated.</item>
+  </deliverables>
+  <acceptanceCriteria>
+    <item>B11: <code>set_height_tiled(...)</code> callable from Python (smoke import/use).</item>
+    <item>B12: LOD tests pass; triangle count reduction ≥40% vs full-res for provided pose; pixel error budget satisfied.</item>
+    <item>B13: Slope/aspect RMSE ≤ 0.5° vs reference on ramps/gaussians; tests pass.</item>
+    <item>B14: Contour polyline counts/lengths deterministic within ±1%; tests pass.</item>
+    <item>B16: Point/spot light contributions affect shading; unit tests on probe pixels pass.</item>
+    <item>Docs: <code>make -C docs html</code> returns 0; pages visible in sidebar TOC.</item>
+  </acceptanceCriteria>
+  <safety>
+    <branch>Work in <code>wsB-remediate</code>; small commits per feature.</branch>
+    <excludes>Do not alter <code>src/core/memory_tracker.rs</code> or existing B11/B15 logic.</excludes>
+    <noBlindSearchReplace>true</noBlindSearchReplace>
+  </safety>
+  <constraints>
+    <platforms>win_amd64; linux_x86_64; macos_universal2</platforms>
+    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
+    <build>cmake≥3.24; cargo/rustc, PyO3</build>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible</apis>
+    <docs>Sphinx preferred</docs>
+  </constraints>
+  <completion>
+    <summary>All failed Workstream B criteria implemented and verified.</summary>
+    <commands>
+      <cmd>maturin develop --release</cmd>
+      <cmd>pytest -q tests/test_b12_lod.py tests/test_b13_slope_aspect.py tests/test_b14_contours.py tests/test_b16_lights.py</cmd>
+      <cmd>make -C docs html</cmd>
+    </commands>
+  </completion>
+</task>

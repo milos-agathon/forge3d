@@ -11,13 +11,91 @@ pub mod pipeline;
 pub use pipeline::TerrainPipeline;
 // T33-END:terrain-mod
 
+// B11-BEGIN:tiling-mod
+pub mod tiling;
+pub use tiling::{TilingSystem, TileId, TileCache, TileData, QuadTreeNode, TileBounds, Frustum, CacheStats};
+// B11-END:tiling-mod
+
+// B12-BEGIN:lod-mod
+pub mod lod;
+pub use lod::{LodConfig, ScreenSpaceError, screen_space_error, select_lod_for_tile, calculate_triangle_reduction};
+// B12-END:lod-mod
+
+// B13/B14-BEGIN:analysis-mod
+pub mod analysis;
+pub use analysis::{SlopeAspect, ContourPolyline, ContourResult, slope_aspect_compute, contour_extract};
+// B13/B14-END:analysis-mod
+
 use pyo3::prelude::*;
 use std::num::NonZeroU32;
 use wgpu::util::DeviceExt;
+use numpy::IntoPyArray;
+
+// B16-BEGIN: Light data structures
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct PointLight {
+    pub position: [f32; 3],
+    pub _pad0: f32,
+    pub color: [f32; 3],
+    pub intensity: f32,
+    pub radius: f32,
+    pub _pad1: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct SpotLight {
+    pub position: [f32; 3],
+    pub _pad0: f32,
+    pub direction: [f32; 3],
+    pub _pad1: f32,
+    pub color: [f32; 3],
+    pub intensity: f32,
+    pub radius: f32,
+    pub inner_cone: f32,
+    pub outer_cone: f32,
+    pub _pad2: f32,
+}
+
+impl Default for PointLight {
+    fn default() -> Self {
+        Self {
+            position: [0.0, 0.0, 0.0],
+            _pad0: 0.0,
+            color: [1.0, 1.0, 1.0],
+            intensity: 1.0,
+            radius: 10.0,
+            _pad1: [0.0; 3],
+        }
+    }
+}
+
+impl Default for SpotLight {
+    fn default() -> Self {
+        Self {
+            position: [0.0, 0.0, 0.0],
+            _pad0: 0.0,
+            direction: [0.0, -1.0, 0.0], // Point downward
+            _pad1: 0.0,
+            color: [1.0, 1.0, 1.0],
+            intensity: 1.0,
+            radius: 10.0,
+            inner_cone: 0.2, // ~11.5 degrees
+            outer_cone: 0.4, // ~23 degrees
+            _pad2: 0.0,
+        }
+    }
+}
+// B16-END: Light data structures
 
 // T33-BEGIN:colormap-imports
 use crate::colormap::{ColormapType, map_name_to_type, decode_png_rgba8, to_linear_u8_rgba, SUPPORTED};
 // T33-END:colormap-imports
+
+// B15-BEGIN:memory-integration
+use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
+// B15-END:memory-integration
 
 // ---------- Colormaps ----------
 
@@ -111,14 +189,19 @@ impl ColormapLUT {
 
 // ---------- Uniforms (std140-compatible, 176 bytes) ----------
 
+// B16: Updated TerrainUniforms to match new shader layout (384 bytes)
 #[repr(C, align(16))]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TerrainUniforms {
     pub view: [[f32; 4]; 4],           // 64 B
-    pub proj: [[f32; 4]; 4],           // 64 B
+    pub proj: [[f32; 4]; 4],           // 64 B  
     pub sun_exposure: [f32; 4],        // (sun_dir.xyz, exposure) -> 16 B
     pub spacing_h_exag_pad: [f32; 4],  // (spacing, h_range, exaggeration, 0) -> 16 B
-    pub _pad_tail: [f32; 4],           // final 16 B lane to satisfy 176 total
+    pub light_counts: [f32; 4],        // (num_point_lights, num_spot_lights, 0, 0) -> 16 B
+    pub _pad_tail: [f32; 4],           // pad -> 16 B (total 192 B so far)
+    pub point_lights: [PointLight; 4], // 4 * 32 = 128 B
+    pub spot_lights: [SpotLight; 2],   // 2 * 48 = 96 B (+ 32B pad = 128B)
+    pub _pad_end: [f32; 4],            // 16 B padding (total 384 B)
 }
 
 impl TerrainUniforms {
@@ -137,8 +220,40 @@ impl TerrainUniforms {
             proj: proj.to_cols_array_2d(),
             sun_exposure: [sun_dir.x, sun_dir.y, sun_dir.z, exposure],
             spacing_h_exag_pad: [spacing, h_range, exaggeration, 0.0],
+            light_counts: [0.0, 0.0, 0.0, 0.0], // No lights by default
             _pad_tail: [0.0; 4],
+            point_lights: [PointLight::default(); 4],
+            spot_lights: [SpotLight::default(); 2], 
+            _pad_end: [0.0; 4],
         }
+    }
+    
+    /// B16: Create TerrainUniforms with lighting data
+    pub fn with_lights(
+        view: glam::Mat4,
+        proj: glam::Mat4,
+        sun_dir: glam::Vec3,
+        exposure: f32,
+        spacing: f32,
+        h_range: f32,
+        exaggeration: f32,
+        point_lights: &[PointLight],
+        spot_lights: &[SpotLight],
+    ) -> Self {
+        let mut uniforms = Self::new(view, proj, sun_dir, exposure, spacing, h_range, exaggeration);
+        
+        // Copy point lights (up to 4)
+        let num_point = point_lights.len().min(4);
+        uniforms.point_lights[..num_point].copy_from_slice(&point_lights[..num_point]);
+        
+        // Copy spot lights (up to 2) 
+        let num_spot = spot_lights.len().min(2);
+        uniforms.spot_lights[..num_spot].copy_from_slice(&spot_lights[..num_spot]);
+        
+        // Update light counts
+        uniforms.light_counts = [num_point as f32, num_spot as f32, 0.0, 0.0];
+        
+        uniforms
     }
 
     pub fn from_mvp_legacy(
@@ -250,6 +365,9 @@ pub struct TerrainSpike {
     // T33: optional height texture state
     height_view: Option<wgpu::TextureView>,
     height_sampler: Option<wgpu::Sampler>,
+    
+    // B11: Tiling system for large DEMs
+    tiling_system: Option<TilingSystem>,
 }
 
 #[pymethods]
@@ -328,11 +446,19 @@ impl TerrainSpike {
         // Use globals (with h_min/h_max) -> h_range is computed inside to_uniforms()
         let uniforms = globals.to_uniforms(view, proj);
 
+        let ubo_usage = wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST;
         let ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("terrain-ubo"),
             contents: bytemuck::cast_slice(&[uniforms]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            usage: ubo_usage,
         });
+        
+        // B15: Track UBO allocation (not host-visible)
+        let tracker = global_tracker();
+        tracker.track_buffer_allocation(
+            std::mem::size_of::<TerrainUniforms>() as u64, 
+            is_host_visible_usage(ubo_usage)
+        );
 
         let (lut, lut_format) = ColormapLUT::new(&device, &queue, &adapter, which)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
@@ -403,6 +529,8 @@ impl TerrainSpike {
             last_uniforms: uniforms,
             height_view: Some(hview),
             height_sampler: Some(hsamp),
+            // B11: Initialize tiling system as None (enabled via separate method)
+            tiling_system: None,
         })
     }
 
@@ -443,12 +571,22 @@ impl TerrainSpike {
         let padded_bpr = ((unpadded_bpr + align - 1) / align) * align;
 
         let buf_size = (padded_bpr * self.height) as wgpu::BufferAddress;
+        
+        // B15: Check memory budget before creating host-visible readback buffer
+        let tracker = global_tracker();
+        tracker.check_budget(buf_size).map_err(|e| 
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Memory budget exceeded during terrain readback: {}", e)))?;
+        
+        let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
         let readback = self.device.create_buffer(&wgpu::BufferDescriptor{
             label: Some("terrain-readback"),
             size: buf_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            usage,
             mapped_at_creation: false,
         });
+        
+        // B15: Track allocation (host-visible)
+        tracker.track_buffer_allocation(buf_size, is_host_visible_usage(usage));
 
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor{ label: Some("copy-encoder") });
         encoder.copy_texture_to_buffer(
@@ -483,6 +621,9 @@ impl TerrainSpike {
         }
         drop(data);
         readback.unmap();
+        
+        // B15: Free allocation after use
+        tracker.free_buffer_allocation(buf_size, is_host_visible_usage(usage));
 
         let img = image::RgbaImage::from_raw(self.width, self.height, pixels)
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Invalid image buffer"))?;
@@ -544,6 +685,419 @@ impl TerrainSpike {
         let float_slice: &[f32] = bytemuck::cast_slice(bytes);
         Ok(numpy::PyArray1::from_vec_bound(py, float_slice.to_vec()))
     }
+
+    // B15: Expose memory metrics to Python
+    #[pyo3(text_signature = "($self)")]
+    pub fn get_memory_metrics<'py>(
+        &self,
+        py: pyo3::Python<'py>,
+    ) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::types::PyDict>> {
+        let tracker = global_tracker();
+        let metrics = tracker.get_metrics();
+        
+        let dict = pyo3::types::PyDict::new_bound(py);
+        dict.set_item("buffer_count", metrics.buffer_count)?;
+        dict.set_item("texture_count", metrics.texture_count)?;
+        dict.set_item("buffer_bytes", metrics.buffer_bytes)?;
+        dict.set_item("texture_bytes", metrics.texture_bytes)?;
+        dict.set_item("host_visible_bytes", metrics.host_visible_bytes)?;
+        dict.set_item("total_bytes", metrics.total_bytes)?;
+        dict.set_item("limit_bytes", metrics.limit_bytes)?;
+        dict.set_item("within_budget", metrics.within_budget)?;
+        dict.set_item("utilization_ratio", metrics.utilization_ratio)?;
+        
+        Ok(dict)
+    }
+
+    // B11: Enable tiled DEM system
+    #[pyo3(text_signature = "($self, bounds_min_x, bounds_min_y, bounds_max_x, bounds_max_y, cache_capacity=4, max_lod=4)")]
+    pub fn enable_tiling(&mut self, 
+        bounds_min_x: f32, bounds_min_y: f32, 
+        bounds_max_x: f32, bounds_max_y: f32,
+        cache_capacity: Option<usize>,
+        max_lod: Option<u32>
+    ) -> PyResult<()> {
+        use glam::Vec2;
+        
+        let root_bounds = TileBounds::new(
+            Vec2::new(bounds_min_x, bounds_min_y),
+            Vec2::new(bounds_max_x, bounds_max_y)
+        );
+        
+        let capacity = cache_capacity.unwrap_or(4);
+        let max_lod = max_lod.unwrap_or(4);
+        let tile_size = Vec2::new(1000.0, 1000.0); // Default 1km tiles
+        
+        let tiling_system = TilingSystem::new(root_bounds, capacity, max_lod, tile_size);
+        self.tiling_system = Some(tiling_system);
+        
+        Ok(())
+    }
+
+    // B11: Naming shim for deliverable requirement - forwards to enable_tiling()
+    #[pyo3(text_signature = "($self, bounds_min_x, bounds_min_y, bounds_max_x, bounds_max_y, cache_capacity=4, max_lod=4)")]
+    pub fn set_height_tiled(&mut self, 
+        bounds_min_x: f32, bounds_min_y: f32, 
+        bounds_max_x: f32, bounds_max_y: f32,
+        cache_capacity: Option<usize>,
+        max_lod: Option<u32>
+    ) -> PyResult<()> {
+        // Forward to existing implementation
+        self.enable_tiling(bounds_min_x, bounds_min_y, bounds_max_x, bounds_max_y, cache_capacity, max_lod)
+    }
+
+    // B11: Get visible tiles for a camera position
+    #[pyo3(text_signature = "($self, camera_pos, camera_dir, fov_deg=45.0, aspect=1.0, near=0.1, far=1000.0)")]
+    pub fn get_visible_tiles(&mut self,
+        camera_pos: (f32, f32, f32),
+        camera_dir: (f32, f32, f32),
+        fov_deg: Option<f32>,
+        aspect: Option<f32>,
+        near: Option<f32>,
+        far: Option<f32>
+    ) -> PyResult<Vec<(u32, u32, u32)>> {
+        use glam::Vec3;
+        
+        let tiling_system = self.tiling_system.as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
+                "Tiling system not enabled. Call enable_tiling() first."))?;
+        
+        let frustum = Frustum::new(
+            Vec3::new(camera_pos.0, camera_pos.1, camera_pos.2),
+            Vec3::new(camera_dir.0, camera_dir.1, camera_dir.2).normalize(),
+            fov_deg.unwrap_or(45.0).to_radians(),
+            aspect.unwrap_or(1.0),
+            near.unwrap_or(0.1),
+            far.unwrap_or(1000.0)
+        );
+        
+        let visible_tiles = tiling_system.get_visible_tiles(&frustum);
+        
+        // Convert TileId to Python-friendly tuples (lod, x, y)
+        let result: Vec<(u32, u32, u32)> = visible_tiles.into_iter()
+            .map(|tile_id| (tile_id.lod, tile_id.x, tile_id.y))
+            .collect();
+        
+        Ok(result)
+    }
+    
+    // B11: Load a specific tile
+    #[pyo3(text_signature = "($self, lod, x, y)")]
+    pub fn load_tile(&mut self, lod: u32, x: u32, y: u32) -> PyResult<()> {
+        let tiling_system = self.tiling_system.as_mut()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
+                "Tiling system not enabled. Call enable_tiling() first."))?;
+        
+        let tile_id = TileId::new(lod, x, y);
+        tiling_system.load_tile(tile_id)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to load tile: {}", e)))?;
+        
+        Ok(())
+    }
+    
+    // B11: Get cache statistics
+    #[pyo3(text_signature = "($self)")]
+    pub fn get_cache_stats<'py>(&self, py: pyo3::Python<'py>) -> PyResult<pyo3::Bound<'py, pyo3::types::PyDict>> {
+        let tiling_system = self.tiling_system.as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
+                "Tiling system not enabled. Call enable_tiling() first."))?;
+        
+        let stats = tiling_system.get_cache_stats();
+        let dict = pyo3::types::PyDict::new_bound(py);
+        
+        dict.set_item("capacity", stats.capacity)?;
+        dict.set_item("current_size", stats.current_size)?;
+        dict.set_item("memory_usage_bytes", stats.memory_usage_bytes)?;
+        
+        Ok(dict)
+    }
+    
+    // B11: Stream and load visible tiles for a camera
+    #[pyo3(text_signature = "($self, camera_pos, camera_dir, fov_deg=45.0, aspect=1.0, near=0.1, far=1000.0)")]
+    pub fn stream_visible_tiles(&mut self,
+        camera_pos: (f32, f32, f32),
+        camera_dir: (f32, f32, f32),
+        fov_deg: Option<f32>,
+        aspect: Option<f32>,
+        near: Option<f32>,
+        far: Option<f32>
+    ) -> PyResult<Vec<(u32, u32, u32)>> {
+        // Get visible tiles
+        let visible_tiles = self.get_visible_tiles(camera_pos, camera_dir, fov_deg, aspect, near, far)?;
+        
+        // Load each visible tile
+        for (lod, x, y) in &visible_tiles {
+            if let Err(e) = self.load_tile(*lod, *x, *y) {
+                // Log error but continue with other tiles
+                eprintln!("Warning: Failed to load tile ({}, {}, {}): {}", lod, x, y, e);
+            }
+        }
+        
+        Ok(visible_tiles)
+    }
+    
+    // B12: Calculate screen-space error for a tile
+    #[pyo3(text_signature = "($self, tile_lod, tile_x, tile_y, camera_pos, camera_target, camera_up, fov_deg=45.0, viewport_width=1024, viewport_height=768, pixel_error_budget=2.0)")]
+    pub fn calculate_screen_space_error(&self,
+        tile_lod: u32,
+        tile_x: u32, 
+        tile_y: u32,
+        camera_pos: (f32, f32, f32),
+        camera_target: (f32, f32, f32),
+        camera_up: (f32, f32, f32),
+        fov_deg: Option<f32>,
+        viewport_width: Option<u32>,
+        viewport_height: Option<u32>,
+        pixel_error_budget: Option<f32>
+    ) -> PyResult<(f32, f32, bool)> {
+        use glam::Vec3;
+        use crate::terrain::lod::{screen_space_error, LodConfig};
+        
+        let tiling_system = self.tiling_system.as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
+                "Tiling system not enabled. Call enable_tiling() first."))?;
+        
+        let tile_id = TileId::new(tile_lod, tile_x, tile_y);
+        let root_bounds = &tiling_system.root_bounds;
+        let tile_bounds = QuadTreeNode::calculate_bounds(root_bounds, tile_id, tiling_system.tile_size);
+        
+        let eye = Vec3::new(camera_pos.0, camera_pos.1, camera_pos.2);
+        let target = Vec3::new(camera_target.0, camera_target.1, camera_target.2);
+        let up = Vec3::new(camera_up.0, camera_up.1, camera_up.2);
+        
+        let view = crate::terrain::lod::create_view_matrix(eye, target, up);
+        let fov_rad = fov_deg.unwrap_or(45.0).to_radians();
+        let vp_width = viewport_width.unwrap_or(1024);
+        let vp_height = viewport_height.unwrap_or(768);
+        let aspect = vp_width as f32 / vp_height as f32;
+        let proj = crate::terrain::lod::create_projection_matrix(fov_rad, aspect, 0.1, 1000.0);
+        
+        let config = LodConfig::new(
+            pixel_error_budget.unwrap_or(2.0),
+            vp_width,
+            vp_height,
+            fov_rad
+        );
+        
+        let sse = screen_space_error(&tile_bounds, tile_id, eye, view, proj, &config);
+        
+        Ok((sse.edge_length_pixels, sse.error_pixels, sse.within_budget))
+    }
+    
+    // B12: Select appropriate LOD for a tile based on screen-space error
+    #[pyo3(text_signature = "($self, base_tile_lod, base_tile_x, base_tile_y, camera_pos, camera_target, camera_up, fov_deg=45.0, viewport_width=1024, viewport_height=768, pixel_error_budget=2.0, max_lod=4)")]
+    pub fn select_lod_for_tile(&self,
+        base_tile_lod: u32,
+        base_tile_x: u32,
+        base_tile_y: u32,
+        camera_pos: (f32, f32, f32),
+        camera_target: (f32, f32, f32),
+        camera_up: (f32, f32, f32),
+        fov_deg: Option<f32>,
+        viewport_width: Option<u32>,
+        viewport_height: Option<u32>,
+        pixel_error_budget: Option<f32>,
+        max_lod: Option<u32>
+    ) -> PyResult<(u32, u32, u32)> {
+        use glam::Vec3;
+        use crate::terrain::lod::{select_lod_for_tile, LodConfig};
+        
+        let tiling_system = self.tiling_system.as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
+                "Tiling system not enabled. Call enable_tiling() first."))?;
+        
+        let base_tile_id = TileId::new(base_tile_lod, base_tile_x, base_tile_y);
+        let root_bounds = &tiling_system.root_bounds;
+        let tile_bounds = QuadTreeNode::calculate_bounds(root_bounds, base_tile_id, tiling_system.tile_size);
+        
+        let eye = Vec3::new(camera_pos.0, camera_pos.1, camera_pos.2);
+        let target = Vec3::new(camera_target.0, camera_target.1, camera_target.2);
+        let up = Vec3::new(camera_up.0, camera_up.1, camera_up.2);
+        
+        let view = crate::terrain::lod::create_view_matrix(eye, target, up);
+        let fov_rad = fov_deg.unwrap_or(45.0).to_radians();
+        let vp_width = viewport_width.unwrap_or(1024);
+        let vp_height = viewport_height.unwrap_or(768);
+        let aspect = vp_width as f32 / vp_height as f32;
+        let proj = crate::terrain::lod::create_projection_matrix(fov_rad, aspect, 0.1, 1000.0);
+        
+        let config = LodConfig::new(
+            pixel_error_budget.unwrap_or(2.0),
+            vp_width,
+            vp_height,
+            fov_rad
+        );
+        
+        let selected_tile = select_lod_for_tile(
+            &tile_bounds,
+            base_tile_id,
+            eye,
+            view,
+            proj,
+            &config,
+            max_lod.unwrap_or(4)
+        );
+        
+        Ok((selected_tile.lod, selected_tile.x, selected_tile.y))
+    }
+    
+    // B12: Calculate triangle count reduction for LOD comparison
+    #[pyo3(text_signature = "($self, full_res_tiles, lod_tiles, base_triangles_per_tile=1000)")]
+    pub fn calculate_triangle_reduction(&self,
+        full_res_tiles: Vec<(u32, u32, u32)>,
+        lod_tiles: Vec<(u32, u32, u32)>,
+        base_triangles_per_tile: Option<u32>
+    ) -> PyResult<f32> {
+        use crate::terrain::lod::calculate_triangle_reduction;
+        
+        let full_res: Vec<TileId> = full_res_tiles.into_iter()
+            .map(|(lod, x, y)| TileId::new(lod, x, y))
+            .collect();
+        
+        let lod: Vec<TileId> = lod_tiles.into_iter()
+            .map(|(lod, x, y)| TileId::new(lod, x, y))
+            .collect();
+        
+        let base_triangles = base_triangles_per_tile.unwrap_or(1000);
+        let reduction = calculate_triangle_reduction(&full_res, &lod, base_triangles);
+        
+        Ok(reduction)
+    }
+    
+    // B13: Compute slope and aspect for height field
+    #[pyo3(text_signature = "($self, heights, width, height, dx=1.0, dy=1.0)")]
+    pub fn slope_aspect_compute<'py>(&self, py: pyo3::Python<'py>,
+        heights: numpy::PyReadonlyArray1<f32>,
+        width: u32,
+        height: u32,
+        dx: Option<f32>,
+        dy: Option<f32>
+    ) -> pyo3::PyResult<(pyo3::Bound<'py, numpy::PyArray1<f32>>, pyo3::Bound<'py, numpy::PyArray1<f32>>)> {
+        use numpy::PyUntypedArrayMethods;
+        use crate::terrain::analysis::slope_aspect_compute;
+        
+        // Validate input array
+        if !heights.is_c_contiguous() {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Heights array must be C-contiguous. Use np.ascontiguousarray()."
+            ));
+        }
+        
+        let heights_slice = heights.as_slice()?;
+        let expected_len = (width * height) as usize;
+        
+        if heights_slice.len() != expected_len {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Heights array length {} does not match dimensions {}x{}={}",
+                heights_slice.len(), width, height, expected_len
+            )));
+        }
+        
+        let dx = dx.unwrap_or(1.0);
+        let dy = dy.unwrap_or(1.0);
+        
+        // Compute slope and aspect
+        let result = slope_aspect_compute(heights_slice, width as usize, height as usize, dx, dy)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+        
+        // Extract slopes and aspects into separate arrays
+        let mut slopes = Vec::with_capacity(result.len());
+        let mut aspects = Vec::with_capacity(result.len());
+        
+        for sa in result {
+            slopes.push(sa.slope_deg);
+            aspects.push(sa.aspect_deg);
+        }
+        
+        // Convert to NumPy arrays
+        let slopes_arr = ndarray::Array1::from_vec(slopes);
+        let aspects_arr = ndarray::Array1::from_vec(aspects);
+        
+        Ok((
+            slopes_arr.into_pyarray_bound(py),
+            aspects_arr.into_pyarray_bound(py)
+        ))
+    }
+    
+    // B14: Extract contour lines from height field
+    #[pyo3(signature = (heights, width, height, /, dx=1.0, dy=1.0, *, levels))]
+    pub fn contour_extract<'py>(&self, py: pyo3::Python<'py>,
+        heights: numpy::PyReadonlyArray1<f32>,
+        width: u32,
+        height: u32,
+        dx: Option<f32>,
+        dy: Option<f32>,
+        levels: Vec<f32>
+    ) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::types::PyDict>> {
+        use numpy::PyUntypedArrayMethods;
+        use crate::terrain::analysis::contour_extract;
+        
+        // Validate input array
+        if !heights.is_c_contiguous() {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Heights array must be C-contiguous. Use np.ascontiguousarray()."
+            ));
+        }
+        
+        let heights_slice = heights.as_slice()?;
+        let expected_len = (width * height) as usize;
+        
+        if heights_slice.len() != expected_len {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Heights array length {} does not match dimensions {}x{}={}",
+                heights_slice.len(), width, height, expected_len
+            )));
+        }
+        
+        if levels.is_empty() {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "At least one contour level must be specified"
+            ));
+        }
+        
+        let dx = dx.unwrap_or(1.0);
+        let dy = dy.unwrap_or(1.0);
+        
+        // Extract contours
+        let result = contour_extract(heights_slice, width as usize, height as usize, dx, dy, &levels)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+        
+        // Build Python result dictionary
+        let dict = pyo3::types::PyDict::new_bound(py);
+        dict.set_item("polyline_count", result.polyline_count)?;
+        dict.set_item("total_points", result.total_points)?;
+        
+        // Convert polylines to Python format
+        let polylines_list = pyo3::types::PyList::empty_bound(py);
+        for polyline in result.polylines {
+            let polyline_dict = pyo3::types::PyDict::new_bound(py);
+            polyline_dict.set_item("level", polyline.level)?;
+            
+            // Convert points to NumPy array (Nx2)
+            let points_flat: Vec<f32> = polyline.points.iter()
+                .flat_map(|(x, y)| vec![*x, *y])
+                .collect();
+            
+            if !points_flat.is_empty() {
+                let points_arr = ndarray::Array2::from_shape_vec(
+                    (polyline.points.len(), 2), 
+                    points_flat
+                ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                
+                polyline_dict.set_item("points", points_arr.into_pyarray_bound(py))?;
+            } else {
+                // Empty points array (0x2)
+                let empty_arr = ndarray::Array2::<f32>::zeros((0, 2));
+                polyline_dict.set_item("points", empty_arr.into_pyarray_bound(py))?;
+            }
+            
+            polylines_list.append(polyline_dict)?;
+        }
+        
+        dict.set_item("polylines", polylines_list)?;
+        
+        Ok(dict)
+    }
 }
 
 // ---------- Geometry (analytic spike) ----------
@@ -584,16 +1138,25 @@ fn build_grid_xyuv(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, wgpu::Buffer
     }
 
     use wgpu::util::DeviceExt;
+    let v_usage = wgpu::BufferUsages::VERTEX;
     let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("terrain-xyuv-vbuf"),
         contents: bytemuck::cast_slice(&verts),
-        usage: wgpu::BufferUsages::VERTEX,
+        usage: v_usage,
     });
+    let i_usage = wgpu::BufferUsages::INDEX;
     let ibuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("terrain-xyuv-ibuf"),
         contents: bytemuck::cast_slice(&idx),
-        usage: wgpu::BufferUsages::INDEX,
+        usage: i_usage,
     });
+    
+    // B15: Track buffer allocations (not host-visible)
+    let tracker = global_tracker();
+    let vbuf_size = (verts.len() * std::mem::size_of::<f32>()) as u64;
+    let ibuf_size = (idx.len() * std::mem::size_of::<u32>()) as u64;
+    tracker.track_buffer_allocation(vbuf_size, is_host_visible_usage(v_usage));
+    tracker.track_buffer_allocation(ibuf_size, is_host_visible_usage(i_usage));
     (vbuf, ibuf, idx.len() as u32)
 }
 // T33-END:build-grid-xyuv
