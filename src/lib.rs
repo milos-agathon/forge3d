@@ -13,7 +13,7 @@ mod core;
 mod device_caps;
 
 // Import memory tracking
-use crate::core::memory_tracker::global_tracker;
+use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
 
 use bytemuck::{Pod, Zeroable};
 use image::{ImageBuffer, GenericImageView};
@@ -320,6 +320,7 @@ impl Renderer {
                 registry.free_buffer_allocation(self.readback_size, true); // host-visible
             }
             
+            let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
             self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
@@ -363,6 +364,7 @@ impl Renderer {
                 registry.free_buffer_allocation(self.readback_size, true); // host-visible
             }
             
+            let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
             self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
@@ -581,7 +583,7 @@ impl Renderer {
         // Check budget before allocating height texture
         let tracker = global_tracker();
         let texture_bytes = (terr.width as u64) * (terr.height as u64) * 4; // R32Float = 4 bytes per pixel
-        if let Err(e) = tracker.check_budget_limits(0) { // Check current budget state
+        if let Err(e) = tracker.check_budget(0) { // Check current budget state
             return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("{}", e)));
         }
 
@@ -1198,18 +1200,19 @@ fn grid_generate(py: Python<'_>, nx: u32, nz: u32, spacing: (f32, f32), origin: 
 
 /// Module-level convenience function for rendering a triangle to RGBA array
 #[pyfunction]
-#[pyo3(text_signature = "(width, height)")]
-fn render_triangle_rgba<'py>(py: Python<'py>, width: u32, height: u32) -> PyResult<Bound<'py, PyArray3<u8>>> {
-    let mut renderer = Renderer::new(width, height);
-    renderer.render_triangle_rgba(py)
+pub fn render_triangle_rgba<'py>(py: Python<'py>, width: u32, height: u32)
+    -> PyResult<pyo3::Bound<'py, PyArray3<u8>>>
+{
+    let mut r = Renderer::new(width, height);
+    r.render_triangle_rgba(py)
 }
 
 /// Module-level convenience function for rendering a triangle to PNG file
 #[pyfunction]
-#[pyo3(text_signature = "(path, width, height)")]
-fn render_triangle_png(_py: Python<'_>, path: PathBuf, width: u32, height: u32) -> PyResult<()> {
-    let mut renderer = Renderer::new(width, height);
-    renderer.render_triangle_png(path)
+pub fn render_triangle_png(path: &str, width: u32, height: u32) -> PyResult<()> {
+    use std::path::Path;
+    let mut r = Renderer::new(width, height);
+    r.render_triangle_png(Path::new(path).to_path_buf())
 }
 
 #[allow(deprecated)]

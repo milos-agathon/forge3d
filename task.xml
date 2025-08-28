@@ -1,139 +1,111 @@
-<task id="forge3d-fix-pytests-memory-metrics-and-typing" version="1.0">
-  <title>Fix failing pytests: implement Renderer.get_memory_metrics() + ship py.typed; keep changes minimal</title>
-
-  <role>
-    You are Claude Code in **Debug & Implement Mode**. Act as a senior Python/Rust (PyO3/wgpu) engineer with testing/packaging expertise.
-  </role>
-
-  <objective>
-    Diagnose the test failures reported and perform only the minimal code and packaging changes required to make the tests pass:
-    1) Implement `Renderer.get_memory_metrics()` (and any minimal backing machinery) so all `tests/test_memory_budget.py` checks pass.
-    2) Ensure `py.typed` is included in the installed `forge3d` package so `tests/test_typing_stubs.py::test_py_typed_shipped` passes.
-    3) Do not change the tests. Do not introduce broad refactors. Keep the public API stable.
-  </objective>
-
+<task>
+  <title>Remediate failed criteria only</title>
   <inputs>
-    <repoRoot>./</repoRoot>
-    <tests>
-      tests/test_memory_budget.py
-      tests/test_typing_stubs.py
-    </tests>
+    <repoRoot>.</repoRoot>
+    <paths>
+      <!-- Align B11 API naming -->
+      <path>src/terrain/mod.rs</path>
+      <!-- B12 -->
+      <path>src/terrain/lod.rs</path>
+      <path>tests/test_b12_lod.py</path>
+      <path>docs/terrain_lod.rst</path>
+      <!-- B13/B14 -->
+      <path>src/terrain/analysis.rs</path>
+      <path>tests/test_b13_slope_aspect.py</path>
+      <path>tests/test_b14_contours.py</path>
+      <path>docs/slope_aspect.rst</path>
+      <path>docs/contours.rst</path>
+      <!-- B16 -->
+      <path>src/shaders/terrain.wgsl</path>
+      <path>src/terrain/pipeline.rs</path>
+      <path>tests/test_b16_lights.py</path>
+      <path>docs/lighting_point_spot.rst</path>
+      <!-- Docs index -->
+      <path>docs/index.rst</path>
+    </paths>
+    <commands>
+      <cmd>git checkout -b wsB-remediate</cmd>
+    </commands>
   </inputs>
-
-  <constraints>
-    <safety>
-      - Create a branch and make small, logically grouped commits.
-      - Prefer additive, localized implementations; avoid breaking changes.
-      - No blind find/replace. Use structured edits.
-    </safety>
-    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
-    <toolchain>Python ≥3.8, PyO3/Rust (if needed), CMake ≥3.24</toolchain>
-    <memoryBudget>512 MiB host-visible (enforced/reported by metrics)</memoryBudget>
-  </constraints>
-
-  <preflight>
-    <commands>
-      - git checkout -b fix/pytests-memory-metrics
-      - pytest -q || true
-      - rg -n "get_memory_metrics" tests/ src/ python/ || true
-      - rg -n "(Renderer\\(|class +Renderer|def +get_memory_metrics)" -S .
-      - rg -n "py\\.typed|package-data|include_package_data|package_data|[tool.setuptools]" -S .
-    </commands>
-  </preflight>
-
   <plan>
-    1) **Understand test expectations**
-       - Open `tests/test_memory_budget.py` and extract the expected data schema, keys, units, and computed fields (e.g., utilization ratio).
-       - Identify when the tests expect usage to change: renderer init, `add_terrain(...)`, `upload_height_r32f()`, `render_triangle_rgba()`, `read_full_height_texture()`, etc.
-       - Confirm budget limit constant used in tests (expected 512 MiB host-visible).
-       - Open `tests/test_typing_stubs.py` to see exactly how `py.typed` is looked up (via `importlib.resources` or backport). Do not modify tests.
+    <!-- Keep scope minimal; only failed items -->
+    <step id="0">B11 naming shim: add Python-visible <code>set_height_tiled(...)</code> in <file>src/terrain/mod.rs</file> that forwards to existing <code>enable_tiling(...)</code> to satisfy deliverable wording without altering behavior.</step>
 
-    2) **Implement `get_memory_metrics()` (minimal, robust)**
-       - Add a small **Python-side memory tracker** with predictable, testable accounting. Keep it in `python/forge3d/_memory.py` (new) or similar:
-         * Global singleton with process-wide counters and per-renderer handles (weakrefs).
-         * Track at least: `host_visible_used_bytes`, `device_local_used_bytes` (if applicable), `budget_limit_bytes`, `utilization_ratio`, and any other keys the tests expect.
-         * Provide functions to increment/decrement counters on known operations (init buffers, textures, readbacks).
-       - In `python/forge3d/renderer.py` (or wherever `Renderer` is defined/exposed), add:
-         * `get_memory_metrics(self) -> dict` that returns exactly the structure the tests expect (keys, types, nested dicts if any).
-         * Hook calls in `__init__`, `add_terrain`, `upload_height_r32f`, `render_triangle_rgba`, `read_full_height_texture`, and any other tested methods to update the tracker.
-         * If the Rust/PyO3 layer allocates resources, add minimal signals/callbacks to update Python tracker (only if necessary to satisfy tests). Otherwise, approximate sizes using buffer/image shapes/dtypes in Python-visible operations.
-       - Ensure **determinism and idempotence**: repeated calls without new allocations should not change counters.
+    <step id="1">B12 LOD (depends on B11):
+      <ul>
+        <li>Create <file>src/terrain/lod.rs</file> with <code>screen_space_error()</code> and <code>select_lod_for_tile()</code> (projected edge length vs pixel budget).</li>
+        <li>Integrate selection in tiling flow used by tests (pure CPU math OK).</li>
+        <li>Add <file>tests/test_b12_lod.py</file> asserting ≥40% triangle reduction and budget-compliant selection.</li>
+        <li>Add concise docs in <file>docs/terrain_lod.rst</file>.</li>
+      </ul>
+    </step>
 
-    3) **Budget and messaging**
-       - Set `budget_limit_bytes = 512 * 1024 * 1024`.
-       - Add computed fields the tests might check (e.g., `within_budget: bool`, `budget_exceeded: bool`, `status_message` with a predictable format).
-       - Implement a helper to format error/warning messages exactly as tests expect (open the test to mirror formatting).
+    <step id="2">B13/B14 analysis (CPU implementations acceptable for AC):
+      <ul>
+        <li>Add <file>src/terrain/analysis.rs</file> with <code>slope_aspect_compute()</code> (finite differences) and <code>contour_extract()</code> (marching squares).</li>
+        <li>Provide minimal Python-facing wrappers if tests require.</li>
+        <li>Add tests: <file>tests/test_b13_slope_aspect.py</file>, <file>tests/test_b14_contours.py</file> per AC tolerances.</li>
+        <li>Add docs: <file>docs/slope_aspect.rst</file>, <file>docs/contours.rst</file>.</li>
+      </ul>
+    </step>
 
-    4) **Ship typing marker**
-       - Create `python/forge3d/py.typed` (empty file).
-       - Update packaging so `py.typed` is included in wheels/sdists:
-         * If using setuptools: in `pyproject.toml` add `[tool.setuptools.package-data] forge3d = ["py.typed"]` **or** `include-package-data = true` with MANIFEST.in entry `include python/forge3d/py.typed`.
-         * If using hatch/poetry, add the equivalent include stanza.
-       - Verify at runtime: `python -c "import importlib.resources as res; print(res.files('forge3d').joinpath('py.typed').is_file())"` returns `True`.
+    <step id="3">B16 point/spot lights:
+      <ul>
+        <li>Extend <file>src/shaders/terrain.wgsl</file> to support 1 point + 1 spot light (structs, loop, inverse-square falloff, cosine cutoff).</li>
+        <li>Update <file>src/terrain/pipeline.rs</file> UBO layout and bind groups.</li>
+        <li>Add <file>tests/test_b16_lights.py</file> checking numeric contributions at probe pixels.</li>
+        <li>Add <file>docs/lighting_point_spot.rst</file> with formulas/examples.</li>
+      </ul>
+    </step>
 
-    5) **Run & iterate**
-       - Run `pytest -q`. If failures persist:
-         * Adjust dict keys/nesting/types and message formatting to **exactly** match test assertions.
-         * Ensure multi-renderer tracking logic meets `test_memory_metrics_with_multiple_renderers`.
-         * Ensure history or soft usage tracking required by tests is implemented (e.g., `operations: {renders, uploads, readbacks}` counters).
+    <step id="4">Docs index:
+      <ul>
+        <li>Update <file>docs/index.rst</file> to include new pages in toctree.</li>
+      </ul>
+    </step>
 
-    6) **Docs and minimal tests (optional)**
-       - Add docstrings to `get_memory_metrics()` and tracker module.
-       - Add a small internal sanity test under `tests/` only if allowed, otherwise skip.
-
+    <step id="5">Verification:
+      <ul>
+        <li>Build: <code>maturin develop --release</code>.</li>
+        <li>Run focused tests: <code>pytest -q tests/test_b12_lod.py tests/test_b13_slope_aspect.py tests/test_b14_contours.py tests/test_b16_lights.py</code>.</li>
+        <li>Docs: <code>make -C docs html</code>.</li>
+      </ul>
+    </step>
   </plan>
-
-  <implementationHints>
-    <python>
-      - Prefer a dataclass `MemoryMetrics` with `.to_dict()` returning the test-required shape.
-      - Use `threading.Lock()` or `contextvars` to protect global counters if multi-threading can occur.
-      - Approximate memory sizes using `numpy.ndarray.nbytes`, width×height×channels×dtype, plus small overhead constants if needed to make deltas observable and consistent.
-      - Use `weakref.finalize(self, ...)` to decrement counters when renderers are GC’d (tests may rely on global persistence; confirm by reading the tests).
-    </python>
-    <rust_pyO3 optional="true">
-      - Only add Rust hooks if the tests depend on actual GPU allocations stats; otherwise keep it Python-side for determinism.
-    </rust_pyO3>
-  </implementationHints>
-
+  <deliverables>
+    <item>B11: <code>set_height_tiled(...)</code> alias present in <code>src/terrain/mod.rs</code>.</item>
+    <item>B12: <code>src/terrain/lod.rs</code>, <code>tests/test_b12_lod.py</code>, <code>docs/terrain_lod.rst</code>.</item>
+    <item>B13: <code>src/terrain/analysis.rs</code> with <code>slope_aspect_compute()</code>, <code>tests/test_b13_slope_aspect.py</code>, <code>docs/slope_aspect.rst</code>.</item>
+    <item>B14: <code>contour_extract()</code> in <code>analysis.rs</code>, <code>tests/test_b14_contours.py</code>, <code>docs/contours.rst</code>.</item>
+    <item>B16: Updated <code>shaders/terrain.wgsl</code>, <code>pipeline.rs</code>, <code>tests/test_b16_lights.py</code>, <code>docs/lighting_point_spot.rst</code>.</item>
+    <item>Docs index: <code>docs/index.rst</code> updated.</item>
+  </deliverables>
   <acceptanceCriteria>
-    - AC-001: `Renderer.get_memory_metrics()` exists and returns a dict matching the structure asserted in `tests/test_memory_budget.py` (keys, data types, nesting).
-    - AC-002: Counters change predictably after the operations used in tests (`add_terrain`, `upload_height_r32f`, `render_triangle_rgba`, `read_full_height_texture`), and budget math is correct.
-    - AC-003: Global tracking behavior across multiple renderers matches the test’s expectations.
-    - AC-004: `py.typed` is present in the installed `forge3d` package so `importlib.resources.files('forge3d').joinpath('py.typed').is_file()` returns `True`.
-    - AC-005: `pytest -q` passes for the failing tests listed, with no regressions.
+    <item>B11: <code>set_height_tiled(...)</code> callable from Python (smoke import/use).</item>
+    <item>B12: LOD tests pass; triangle count reduction ≥40% vs full-res for provided pose; pixel error budget satisfied.</item>
+    <item>B13: Slope/aspect RMSE ≤ 0.5° vs reference on ramps/gaussians; tests pass.</item>
+    <item>B14: Contour polyline counts/lengths deterministic within ±1%; tests pass.</item>
+    <item>B16: Point/spot light contributions affect shading; unit tests on probe pixels pass.</item>
+    <item>Docs: <code>make -C docs html</code> returns 0; pages visible in sidebar TOC.</item>
   </acceptanceCriteria>
-
-  <execution>
-    <commands>
-      - rg -n "Renderer|get_memory_metrics|add_terrain|upload_height_r32f|render_triangle_rgba|read_full_height_texture" -S python/ src/
-      - python - <<'PY'
-import pathlib, re
-p = pathlib.Path("tests/test_memory_budget.py")
-print("EXISTS:", p.exists())
-print(p.read_text("utf-8")[:2000])
-PY
-      - $SHELL_IMPLEMENT_CHANGES   <!-- (edit files per plan) -->
-      - pytest -q || true
-      - python - <<'PY'
-import importlib.resources as res
-print("py.typed present:", res.files("forge3d").joinpath("py.typed").is_file())
-PY
-      - pytest -q
-    </commands>
-  </execution>
-
-  <artifacts>
-    - python/forge3d/_memory.py (new) OR python/forge3d/_memory_tracking.py
-    - python/forge3d/renderer.py (or wherever `Renderer` lives) — adds `get_memory_metrics()` + hooks
-    - python/forge3d/__init__.py (ensure export of Renderer unchanged)
-    - python/forge3d/py.typed (new)
-    - pyproject.toml / MANIFEST.in updates to include `py.typed`
-  </artifacts>
-
+  <safety>
+    <branch>Work in <code>wsB-remediate</code>; small commits per feature.</branch>
+    <excludes>Do not alter <code>src/core/memory_tracker.rs</code> or existing B11/B15 logic.</excludes>
+    <noBlindSearchReplace>true</noBlindSearchReplace>
+  </safety>
+  <constraints>
+    <platforms>win_amd64; linux_x86_64; macos_universal2</platforms>
+    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
+    <build>cmake≥3.24; cargo/rustc, PyO3</build>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible</apis>
+    <docs>Sphinx preferred</docs>
+  </constraints>
   <completion>
-    Provide a summary:
-    - Files changed and key symbols added (e.g., `Renderer.get_memory_metrics`, `MemoryTracker`).
-    - Exact dict schema returned by `get_memory_metrics()` (keys and example values).
-    - Commands to reproduce passing tests.
+    <summary>All failed Workstream B criteria implemented and verified.</summary>
+    <commands>
+      <cmd>maturin develop --release</cmd>
+      <cmd>pytest -q tests/test_b12_lod.py tests/test_b13_slope_aspect.py tests/test_b14_contours.py tests/test_b16_lights.py</cmd>
+      <cmd>make -C docs html</cmd>
+    </commands>
   </completion>
 </task>
