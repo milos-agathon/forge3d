@@ -2,14 +2,44 @@
 // Layout: 0=Globals UBO, 1=height R32Float + NonFiltering sampler, 2=LUT RGBA8 + Filtering sampler.
 // This version adds a deterministic analytic height fallback to avoid uniform output with a 1×1 dummy height.
 
-// ---------- Globals UBO (176 bytes total, must match Rust) ----------
+// B16-BEGIN: Point/spot light structures
+struct PointLight {
+  position: vec3<f32>,
+  _pad0: f32,
+  color: vec3<f32>, 
+  intensity: f32,
+  radius: f32,
+  _pad1: vec3<f32>,
+}; // 32 bytes
+
+struct SpotLight {
+  position: vec3<f32>,
+  _pad0: f32,
+  direction: vec3<f32>,
+  _pad1: f32,
+  color: vec3<f32>,
+  intensity: f32,
+  radius: f32,
+  inner_cone: f32,
+  outer_cone: f32,
+  _pad2: f32,
+}; // 48 bytes
+// B16-END: Point/spot light structures
+
+// ---------- Globals UBO (256 bytes total, must match Rust) ----------
 struct Globals {
   view : mat4x4<f32>,          // 64 B
   proj : mat4x4<f32>,          // 64 B
   sun_exposure : vec4<f32>,    // xyz = sun_dir, w = exposure
   // packs (spacing, h_range, exaggeration, 0) for source-compat with globals.spacing.x, .y, .z
-  spacing : vec4<f32>,
-  _pad_tail : vec4<f32>,       // pad to 176 B
+  spacing : vec4<f32>,         // 16 B
+  // B16: Light counts and configuration
+  light_counts: vec4<f32>,     // xyz = (num_point_lights, num_spot_lights, 0, 0)
+  _pad_tail : vec4<f32>,       // pad to 128 B
+  // Light data arrays (up to 4 point lights + 2 spot lights)
+  point_lights: array<PointLight, 4>,   // 4 * 32 = 128 B  
+  spot_lights: array<SpotLight, 2>,     // 2 * 48 = 96 B (+ 32B pad = 128B)
+  _pad_end: vec4<f32>,                  // Total: 384 bytes
 };
 
 @group(0) @binding(0) var<uniform> globals : Globals;
@@ -65,6 +95,61 @@ fn vs_main(in: VsIn) -> VsOut {
   return out;
 }
 
+// B16-BEGIN: Lighting calculation functions
+fn calculate_point_light(light: PointLight, world_pos: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
+  let light_dir = light.position - world_pos;
+  let distance = length(light_dir);
+  
+  // Early exit if outside light radius
+  if (distance > light.radius) {
+    return vec3<f32>(0.0);
+  }
+  
+  let L = normalize(light_dir);
+  let lambert = max(dot(normal, L), 0.0);
+  
+  // Distance attenuation (inverse square with smooth falloff)
+  let attenuation = 1.0 / (1.0 + distance * distance / (light.radius * light.radius));
+  let smooth_attenuation = attenuation * attenuation * (3.0 - 2.0 * attenuation); // Smoothstep
+  
+  return light.color * light.intensity * lambert * smooth_attenuation;
+}
+
+fn calculate_spot_light(light: SpotLight, world_pos: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
+  let light_dir = light.position - world_pos;
+  let distance = length(light_dir);
+  
+  // Early exit if outside light radius
+  if (distance > light.radius) {
+    return vec3<f32>(0.0);
+  }
+  
+  let L = normalize(light_dir);
+  let spot_dir = normalize(-light.direction);
+  
+  // Cone attenuation
+  let cos_angle = dot(L, spot_dir);
+  let cos_inner = cos(light.inner_cone);
+  let cos_outer = cos(light.outer_cone);
+  
+  // Early exit if outside outer cone
+  if (cos_angle < cos_outer) {
+    return vec3<f32>(0.0);
+  }
+  
+  // Smooth transition between inner and outer cone
+  let cone_attenuation = smoothstep(cos_outer, cos_inner, cos_angle);
+  
+  let lambert = max(dot(normal, L), 0.0);
+  
+  // Distance attenuation
+  let attenuation = 1.0 / (1.0 + distance * distance / (light.radius * light.radius));
+  let smooth_attenuation = attenuation * attenuation * (3.0 - 2.0 * attenuation);
+  
+  return light.color * light.intensity * lambert * cone_attenuation * smooth_attenuation;
+}
+// B16-END: Lighting calculation functions
+
 // ---------- Fragment ----------
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
@@ -75,20 +160,46 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   // 256x1 LUT: sample along X at row center (v=0.5).
   let lut_color = textureSampleLevel(lut_tex, lut_samp, vec2<f32>(t, 0.5), 0.0);
 
-  // Simple Lambert term from analytic slope (adds spatial variation even with flat height_tex).
+  // B16-BEGIN: Calculate world position and normal for lighting
+  let spacing      = max(globals.spacing.x, 1e-8);
+  let exaggeration = globals.spacing.z;
+  let world_pos = vec3<f32>(in.xz.x * spacing, in.height * exaggeration, in.xz.y * spacing);
+  
+  // Calculate normal from analytic slope (adds spatial variation even with flat height_tex).
   let dhdx = 1.3 * cos(in.xz.x * 1.3) * 0.25;
   let dhdz = -1.1 * sin(in.xz.y * 1.1) * 0.25;
-  let n = normalize(vec3<f32>(-dhdx, 1.0, -dhdz));
+  let normal = normalize(vec3<f32>(-dhdx, 1.0, -dhdz));
 
-  let L = normalize(globals.sun_exposure.xyz);
-  let lambert = clamp(dot(n, L), 0.0, 1.0);
-  let exposure = globals.sun_exposure.w;
-
-  // Mix in a small ambient floor to avoid large flat regions in the PNG.
-  let shade = mix(0.15, 1.0, lambert);
+  // Directional lighting (sun)
+  let sun_L = normalize(globals.sun_exposure.xyz);
+  let sun_lambert = clamp(dot(normal, sun_L), 0.0, 1.0);
+  let sun_contribution = globals.sun_exposure.w * sun_lambert;
+  
+  // Accumulate point light contributions
+  var additional_lighting = vec3<f32>(0.0);
+  let num_point_lights = i32(globals.light_counts.x);
+  for (var i = 0; i < num_point_lights; i++) {
+    if (i < 4) { // Bounds check for array access
+      additional_lighting += calculate_point_light(globals.point_lights[i], world_pos, normal);
+    }
+  }
+  
+  // Accumulate spot light contributions  
+  let num_spot_lights = i32(globals.light_counts.y);
+  for (var i = 0; i < num_spot_lights; i++) {
+    if (i < 2) { // Bounds check for array access
+      additional_lighting += calculate_spot_light(globals.spot_lights[i], world_pos, normal);
+    }
+  }
+  
+  // Combine all lighting with ambient floor
+  let total_lighting = sun_contribution + length(additional_lighting);
+  let shade = mix(0.15, 1.0, clamp(total_lighting, 0.0, 1.0));
+  let additional_color = additional_lighting;
+  // B16-END: Enhanced lighting calculation
 
   // Apply explicit tonemap pipeline: reinhard -> gamma correction
-  let lit_color = lut_color.rgb * exposure * shade;
+  let lit_color = (lut_color.rgb * shade) + additional_color;
   let tonemapped = reinhard(lit_color);
   let gamma_corrected = gamma_correct(tonemapped);
 

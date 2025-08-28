@@ -76,7 +76,17 @@
       "Bash(pip uninstall:*)",
       "Bash(cmd /C:*)",
       "Bash(sphinx-build:*)",
-      "Bash(make:*)"
+      "Bash(make:*)",
+      "Bash(src/ shaders/ python/ examples/ docs/)",
+      "Bash(src/ python/ examples/ docs/ tests/)",
+      "Bash('(terrain|height|colormap|render_png|render_rgba|DEM|elevation|make_grid|add_terrain)' )",
+      "Bash(VF_ENABLE_TERRAIN_TESTS=1 pytest tests/test_b15_memory_integration.py -v)",
+      "Bash(VF_ENABLE_TERRAIN_TESTS=1 pytest tests/test_b11_tiling.py -v)",
+      "Bash(VF_ENABLE_TERRAIN_TESTS=1 pytest tests/test_b12_lod.py -v)",
+      "Bash(VF_ENABLE_TERRAIN_TESTS=1 pytest tests/test_b13_slope_aspect.py -v)",
+      "Bash(VF_ENABLE_TERRAIN_TESTS=1 pytest tests/test_b14_contour_extract.py -v)",
+      "Bash(VF_ENABLE_TERRAIN_TESTS=1 pytest tests/test_b13_slope_aspect.py tests/test_b14_contour_extract.py -v --tb=no)",
+      "Bash(set VF_ENABLE_TERRAIN_TESTS=1)"
     ],
     "deny": [],
     "additionalDirectories": [
