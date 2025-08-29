@@ -26,20 +26,22 @@ struct SpotLight {
 }; // 48 bytes
 // B16-END: Point/spot light structures
 
-// ---------- Globals UBO (256 bytes total, must match Rust) ----------
+// ---------- Globals UBO (656 bytes total, must match Rust) ----------
 struct Globals {
-  view : mat4x4<f32>,          // 64 B
-  proj : mat4x4<f32>,          // 64 B
-  sun_exposure : vec4<f32>,    // xyz = sun_dir, w = exposure
+  view : mat4x4<f32>,                   // 64 B
+  proj : mat4x4<f32>,                   // 64 B
+  sun_exposure : vec4<f32>,             // xyz = sun_dir, w = exposure (16 B)
   // packs (spacing, h_range, exaggeration, 0) for source-compat with globals.spacing.x, .y, .z
-  spacing : vec4<f32>,         // 16 B
+  spacing : vec4<f32>,                  // 16 B
   // B16: Light counts and configuration
-  light_counts: vec4<f32>,     // xyz = (num_point_lights, num_spot_lights, 0, 0)
-  _pad_tail : vec4<f32>,       // pad to 128 B
+  light_counts: vec4<f32>,              // xyz = (num_point_lights, num_spot_lights, 0, 0) (16 B)
+  view_world_position : vec4<f32>,      // xyz = camera world position, w = padding (16 B)
   // Light data arrays (up to 4 point lights + 2 spot lights)
-  point_lights: array<PointLight, 4>,   // 4 * 32 = 128 B  
-  spot_lights: array<SpotLight, 2>,     // 2 * 48 = 96 B (+ 32B pad = 128B)
-  _pad_end: vec4<f32>,                  // Total: 384 bytes
+  point_lights: array<PointLight, 4>,   // 4 * 48 = 192 B (updated struct size)  
+  spot_lights: array<SpotLight, 2>,     // 2 * 64 = 128 B (updated struct size)
+  _pad_end: vec4<f32>,                  // 16 B padding
+  normal_matrix: mat4x4<f32>,           // 64 B normal matrix for proper normal transformation
+  _final_pad: array<vec4<f32>, 4>,      // 64 B final padding to reach 656 B total
 };
 
 @group(0) @binding(0) var<uniform> globals : Globals;
@@ -168,7 +170,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   // Calculate normal from analytic slope (adds spatial variation even with flat height_tex).
   let dhdx = 1.3 * cos(in.xz.x * 1.3) * 0.25;
   let dhdz = -1.1 * sin(in.xz.y * 1.1) * 0.25;
-  let normal = normalize(vec3<f32>(-dhdx, 1.0, -dhdz));
+  let local_normal = normalize(vec3<f32>(-dhdx, 1.0, -dhdz));
+  
+  // Transform normal using normal matrix (upper-left 3x3 for normals)
+  let transformed_normal = (globals.normal_matrix * vec4<f32>(local_normal, 0.0)).xyz;
+  let normal = normalize(transformed_normal);
 
   // Directional lighting (sun)
   let sun_L = normalize(globals.sun_exposure.xyz);

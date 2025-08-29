@@ -11,6 +11,7 @@ use error::{RenderError, RenderResult};
 mod context;
 pub mod core;  // Make core public for tests
 mod device_caps;
+mod transforms;
 
 // Import memory tracking
 use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
@@ -1420,7 +1421,20 @@ fn _forge3d(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(colormap::colormap_supported, m)?)?;
     m.add_function(wrap_pyfunction!(camera::camera_look_at, m)?)?;
     m.add_function(wrap_pyfunction!(camera::camera_perspective, m)?)?;
+    m.add_function(wrap_pyfunction!(camera::camera_orthographic, m)?)?;
     m.add_function(wrap_pyfunction!(camera::camera_view_proj, m)?)?;
+    // Transform functions for D4
+    m.add_function(wrap_pyfunction!(transforms::translate, m)?)?;
+    m.add_function(wrap_pyfunction!(transforms::rotate_x, m)?)?;
+    m.add_function(wrap_pyfunction!(transforms::rotate_y, m)?)?;
+    m.add_function(wrap_pyfunction!(transforms::rotate_z, m)?)?;
+    m.add_function(wrap_pyfunction!(transforms::scale, m)?)?;
+    m.add_function(wrap_pyfunction!(transforms::scale_uniform, m)?)?;
+    m.add_function(wrap_pyfunction!(transforms::compose_trs, m)?)?;
+    m.add_function(wrap_pyfunction!(transforms::look_at_transform, m)?)?;
+    m.add_function(wrap_pyfunction!(transforms::multiply_matrices, m)?)?;
+    m.add_function(wrap_pyfunction!(transforms::invert_matrix, m)?)?;
+    m.add_function(wrap_pyfunction!(transforms::compute_normal_matrix, m)?)?;
     // Test helper functions for Workstream C validation
     m.add_function(wrap_pyfunction!(c5_build_framegraph_report, m)?)?;
     m.add_function(wrap_pyfunction!(c6_parallel_record_metrics, m)?)?;

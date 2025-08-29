@@ -6,17 +6,22 @@
 use pyo3::prelude::*;
 use pyo3::Bound; // needed for Bound<'py, PyArray2<f32>> return types
 use numpy::PyArray2;
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec3, Vec4Swizzles};
 
 /// Returns the GL→WGPU depth conversion matrix.
 /// Maps GL clip-space Z [-1,1] to WGPU/Vulkan/Metal [0,1].
+/// Matrix layout (mathematical/row-major view):
+/// | 1  0  0  0   |
+/// | 0  1  0  0   |  
+/// | 0  0  0.5 0.5|
+/// | 0  0  0  1   |
 #[inline]
 fn gl_to_wgpu() -> Mat4 {
     Mat4::from_cols_array(&[
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
-        0.0, 0.0, 0.5, 0.5,
-        0.0, 0.0, 0.0, 1.0,
+        1.0, 0.0, 0.0, 0.0,     // column 0
+        0.0, 1.0, 0.0, 0.0,     // column 1
+        0.0, 0.0, 0.5, 0.0,     // column 2
+        0.0, 0.0, 0.5, 1.0,     // column 3
     ])
 }
 
@@ -28,6 +33,8 @@ const ERROR_ASPECT: &str = "aspect must be finite and > 0";
 const ERROR_VECFINITE: &str = "eye/target/up components must be finite";
 const ERROR_UPCOLINEAR: &str = "up vector must not be colinear with view direction";
 const ERROR_CLIP: &str = "clip_space must be 'wgpu' or 'gl'";
+const ERROR_ORTHO_LEFT_RIGHT: &str = "left must be finite and < right";
+const ERROR_ORTHO_BOTTOM_TOP: &str = "bottom must be finite and < top";
 
 /// Validates all components of a Vec3 are finite
 fn validate_vec3_finite(v: Vec3, _param_name: &str) -> PyResult<()> {
@@ -86,6 +93,22 @@ fn validate_up_not_colinear(eye: Vec3, target: Vec3, up: Vec3) -> PyResult<()> {
     let cross = view_dir.cross(up_norm);
     if cross.length_squared() < 1e-6 {
         return Err(pyo3::exceptions::PyRuntimeError::new_err(ERROR_UPCOLINEAR));
+    }
+    Ok(())
+}
+
+/// Validates orthographic left and right parameters
+fn validate_ortho_left_right(left: f32, right: f32) -> PyResult<()> {
+    if !left.is_finite() || !right.is_finite() || left >= right {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(ERROR_ORTHO_LEFT_RIGHT));
+    }
+    Ok(())
+}
+
+/// Validates orthographic bottom and top parameters  
+fn validate_ortho_bottom_top(bottom: f32, top: f32) -> PyResult<()> {
+    if !bottom.is_finite() || !top.is_finite() || bottom >= top {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(ERROR_ORTHO_BOTTOM_TOP));
     }
     Ok(())
 }
@@ -168,6 +191,56 @@ pub fn camera_perspective<'py>(
     mat4_to_numpy(py, proj_matrix)
 }
 
+/// Compute orthographic projection matrix
+#[pyfunction]
+#[pyo3(text_signature = "(left, right, bottom, top, znear, zfar, clip_space='wgpu')")]
+pub fn camera_orthographic<'py>(
+    py: Python<'py>,
+    left: f32,
+    right: f32,
+    bottom: f32,
+    top: f32,
+    znear: f32,
+    zfar: f32,
+    clip_space: Option<String>,
+) -> PyResult<Bound<'py, PyArray2<f32>>> {
+    let clip_space = clip_space.as_deref().unwrap_or("wgpu");
+    
+    // Validate inputs
+    validate_ortho_left_right(left, right)?;
+    validate_ortho_bottom_top(bottom, top)?;
+    validate_near(znear)?;
+    validate_far(zfar, znear)?;
+    validate_clip_space(clip_space)?;
+    
+    // Manual orthographic projection matrix for GL clip space
+    // Standard orthographic projection: maps [left,right] -> [-1,1], [bottom,top] -> [-1,1], [znear,zfar] -> [-1,1]
+    let w = right - left;
+    let h = top - bottom; 
+    let d = zfar - znear;
+    
+    // Build matrix in column-major order for glam::Mat4::from_cols_array
+    // Matrix layout (mathematical/row-major view):
+    // | 2/w   0     0      -(r+l)/w |
+    // | 0     2/h   0      -(t+b)/h |  
+    // | 0     0    -2/d    -(f+n)/d |
+    // | 0     0     0       1       |
+    let proj_gl = Mat4::from_cols_array(&[
+        2.0/w,     0.0,       0.0,       0.0,         // column 0
+        0.0,       2.0/h,     0.0,       0.0,         // column 1
+        0.0,       0.0,       -2.0/d,    0.0,         // column 2
+        -(right+left)/w, -(top+bottom)/h, -(zfar+znear)/d, 1.0,  // column 3
+    ]);
+    
+    let proj_matrix = match clip_space {
+        "gl" => proj_gl,
+        "wgpu" => gl_to_wgpu() * proj_gl,
+        _ => unreachable!(), // Already validated
+    };
+    
+    mat4_to_numpy(py, proj_matrix)
+}
+
 /// Compute combined view-projection matrix
 #[pyfunction]
 #[pyo3(text_signature = "(eye, target, up, fovy_deg, aspect, znear, zfar, clip_space='wgpu')")]
@@ -237,4 +310,15 @@ pub fn validate_camera_params(
     validate_near(znear)?;
     validate_far(zfar, znear)?;
     Ok(())
+}
+
+/// Extract camera world position from view matrix
+/// The view matrix transforms world coordinates to view coordinates.
+/// To get the camera's world position, we invert the view matrix and extract the translation.
+pub fn camera_world_position_from_view(view_matrix: Mat4) -> Vec3 {
+    // The camera's world position is the negative of the view matrix's translation
+    // when applied to the inverse view matrix, or equivalently -transpose(R) * t
+    // where R is the rotation part and t is the translation part of the view matrix.
+    let inv_view = view_matrix.inverse();
+    inv_view.w_axis.xyz()
 }

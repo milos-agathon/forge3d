@@ -1,77 +1,147 @@
 <task>
-  <title>Remediate failed criteria only</title>
+  <title>Implement & wire missing/partial items for Workstream D</title>
+
   <inputs>
     <repoRoot>.</repoRoot>
     <paths>
-      <!-- Ensure tests live under tests/ -->
-      <path>tests/test_c5_framegraph.py</path>
-      <path>tests/test_c8_tonemap_pass.py</path>
+      <path>src/</path>
+      <path>src/shaders/</path>
+      <path>python/forge3d/</path>
+      <path>tests/</path>
+      <path>docs/</path>
     </paths>
+    <workstreamD>
+      <task id="D1">Camera math + uniform buffer (Present & Wired; no changes)</task>
+      <task id="D2">Sun direction & tonemap helpers (Present & Wired; no changes)</task>
+      <task id="D3">Light array uniforms (directional, point, spot) (Present & Wired; no changes)</task>
+      <task id="D4">Model transforms & math helpers (T/R/S)</task>
+      <task id="D5">Orthographic camera mode (pixel-aligned 2D)</task>
+      <task id="D6">Camera uniforms: viewWorldPosition + near/far/FOV policy</task>
+      <task id="D7">Normal matrix (inverse-transpose of model) uniform & tests</task>
+    </workstreamD>
   </inputs>
+
   <plan>
-    <step id="s1">
-      <desc>Create/ensure tests/ directory and place WS-C tests under tests/*.py (do not delete existing files; copy/move as needed).</desc>
-      <cmd>mkdir -p tests</cmd>
+    <!-- Audit-first & safety wrapper -->
+    <step>Create branch: feature/wsD-impl</step>
+    <step>Run quick audit: ensure D1–D3 symbols exist and tests pass to avoid regressions</step>
+
+    <!-- Dependency-ordered implementation -->
+    <!-- D5 is smallest and unblocks 2D/UI use; D6 expands Globals UBO; D4 introduces model matrix; D7 depends on D4 -->
+    <step id="D5">
+      Implement orthographic projection in Rust and expose to Python.
+      Files: src/camera.rs, src/lib.rs (PyO3 export), python/forge3d/__init__.py, tests/test_d5_ortho_camera.py
+      Shader impact: none.
     </step>
 
-    <step id="s2">
-      <desc>Fix C5 test to assert booleans are True (not just present/non-None).</desc>
-      <edit file="tests/test_c5_framegraph.py">
-        Replace:
-          assert rpt.get('alias_reuse') is not None
-        With:
-          assert rpt.get('alias_reuse') is True
-        Replace:
-          assert rpt.get('barrier_ok') is not None
-        With:
-          assert rpt.get('barrier_ok') is True
-      </edit>
+    <step id="D6">
+      Extend camera/uniforms with viewWorldPosition and document near/far/FOV policy.
+      Files: src/terrain/mod.rs (Globals/Uniforms), src/camera.rs (extract world position), src/shaders/terrain.wgsl (UBO layout), tests/test_d6_camera_uniforms.py, docs/workstream_d/camera_uniforms.rst
     </step>
 
-    <step id="s3">
-      <desc>Implement C8 exposure monotonicity properly by testing monotone increase across multiple exposure factors on the rendered image (no engine API changes).</desc>
-      <edit file="tests/test_c8_tonemap_pass.py">
-        <!-- Keep the existing ΔE ≤ 1.5 check intact. Update the monotonicity test: -->
-        Replace the body of test_c8_exposure_monotonicity() with code that:
-          - Renders a single RGBA image via forge3d.Renderer.
-          - Converts its RGB to linear (inverse sRGB gamma).
-          - For exposure factors [0.125, 0.25, 0.5, 1.0, 2.0, 4.0], scales the linear RGB by the factor,
-            re-encodes to sRGB, and records mean brightness.
-          - Asserts the sequence of means is non-decreasing: m[i] <= m[i+1] for all i.
-      </edit>
+    <step id="D4">
+      Add transforms module with T/R/S helpers and per-object model matrix plumbing (CPU-side).
+      Files: src/transforms.rs (new), src/lib.rs (PyO3 wrappers), python/forge3d/__init__.py (exports), tests/test_d4_transforms.py
+      Hook a model matrix slot into render path where applicable (no scene rewrite; minimal integration).
     </step>
+
+    <step id="D7">
+      Compute and supply 3×3 normal matrix (inverse-transpose of model upper-left) to shaders.
+      Files: src/transforms.rs (normal matrix util), src/terrain/mod.rs (UBO add mat3x3), src/shaders/terrain.wgsl (use normal matrix), tests/test_d7_normal_matrix.py
+    </step>
+
+    <!-- Verification & wrap-up -->
+    <step>Rebuild (maturin develop --release)</step>
+    <step>Run targeted tests: pytest -q tests/test_d5_ortho_camera.py tests/test_d6_camera_uniforms.py tests/test_d4_transforms.py tests/test_d7_normal_matrix.py</step>
+    <step>Run regression subset (camera/uniforms/tonemap): pytest -k "camera or uniform or tonemap" -q</step>
+    <step>Update CHANGELOG and open PR</step>
   </plan>
 
   <deliverables>
-    <item>tests/test_c5_framegraph.py with explicit True assertions for alias_reuse and barrier_ok.</item>
-    <item>tests/test_c8_tonemap_pass.py with a real exposure monotonicity test over ≥5 exposure factors.</item>
-    <item>All WS-C tests located under tests/*.py.</item>
+    <!-- D5 -->
+    <file>src/camera.rs  <!-- add fn camera_orthographic(left,right,bottom,top,near,far) --></file>
+    <file>python/forge3d/__init__.py  <!-- export camera_orthographic --></file>
+    <file>tests/test_d5_ortho_camera.py</file>
+
+    <!-- D6 -->
+    <file>src/terrain/mod.rs  <!-- add viewWorldPosition (vec3 + pad) to Globals/UBO --></file>
+    <file>src/camera.rs  <!-- utility to compute camera world position from view --></file>
+    <file>src/shaders/terrain.wgsl  <!-- extend Globals/UBO and plumb through --></file>
+    <file>tests/test_d6_camera_uniforms.py</file>
+    <file>docs/workstream_d/camera_uniforms.rst</file>
+
+    <!-- D4 -->
+    <file>src/transforms.rs  <!-- translate/rotateX/Y/Z/scale; compose_model(trs) --></file>
+    <file>src/lib.rs  <!-- PyO3 wrappers for transforms; optional Renderer.set_model(mat4) --></file>
+    <file>python/forge3d/__init__.py  <!-- export transform helpers --></file>
+    <file>tests/test_d4_transforms.py</file>
+
+    <!-- D7 -->
+    <file>src/transforms.rs  <!-- normal_matrix3x3(model4x4) -> mat3 --></file>
+    <file>src/terrain/mod.rs  <!-- add normalMat3x3 to per-object uniforms/struct --></file>
+    <file>src/shaders/terrain.wgsl  <!-- use normalMat3x3 for lighting normal transform --></file>
+    <file>tests/test_d7_normal_matrix.py</file>
   </deliverables>
 
   <acceptanceCriteria>
-    <criterion>C5 test fails if alias_reuse != True or barrier_ok != True (asserts on booleans, not existence).</criterion>
-    <criterion>C8: ΔE check remains ≤ 1.5 vs reference (existing), AND exposure monotonicity test asserts non-decreasing mean brightness for exposures [0.125..4.0].</criterion>
-    <criterion>Repository contains tests at paths matching tests/test_*.py for WS-C.</criterion>
+    <!-- D5: Orthographic camera -->
+    <criterion>
+      Given width=800,height=600 and camera_orthographic(0,800,0,600,near=0.1,far=10),
+      mapping (0,0) pixel center -> NDC ≈ (-1,+1), (800,600) -> (+1,-1) within 1e-5.
+      Test: tests/test_d5_ortho_camera.py must pass.
+    </criterion>
+
+    <!-- D6: Camera uniforms -->
+    <criterion>
+      Uniforms expose viewWorldPosition matching the inverse of view matrix translation (within 1e-5).
+      Near/Far/FOV policy documented in docs/workstream_d/camera_uniforms.rst and asserted for defaults in tests/test_d6_camera_uniforms.py.
+    </criterion>
+
+    <!-- D4: Transforms -->
+    <criterion>
+      compose_model(T(1,2,3), Rz(90deg), S(2,1,1)) applied to unit x-axis yields world ≈ (1,2,3)+Rz(90)*(2,0,0) within 1e-5.
+      Python APIs for translate/rotate/scale/model_compose exported; tests/test_d4_transforms.py must pass.
+    </criterion>
+
+    <!-- D7: Normal matrix -->
+    <criterion>
+      For non-uniform scale S(2,1,3) with rotation, normal_matrix equals inverse-transpose(upper-left(model)) within 1e-5 and normals remain unit-length after transform (±1e-5).
+      WGSL uses normalMat3x3 in lighting path. tests/test_d7_normal_matrix.py must pass.
+    </criterion>
+
+    <!-- Global/build -->
+    <criterion>Project builds on supported platforms via: maturin develop --release.</criterion>
+    <criterion>All new tests (Python .py files) pass: pytest -q tests/test_d4_transforms.py tests/test_d5_ortho_camera.py tests/test_d6_camera_uniforms.py tests/test_d7_normal_matrix.py.</criterion>
+    <criterion>No increase in host-visible heap above 512 MiB; add/update checks if needed.</criterion>
+    <criterion>Existing D1–D3 tests continue to pass (no regressions): pytest -k "camera or tonemap or light" -q.</criterion>
   </acceptanceCriteria>
 
   <safety>
-    <branch>wsC-test-remediation</branch>
-    <commits>Small, focused commits per step (s1..s3).</commits>
-    <exclusions>Do not touch src/ or engine code; do not modify non-WS-C tests; exclude build artifacts (target/, .maturin/).</exclusions>
-    <noBlindSearchReplace>true</noBlindSearchReplace>
+    <rule>Create branch feature/wsD-impl; small, isolated commits per task (D5, D6, D4, D7).</rule>
+    <rule>Audit-before-change: run current tests affecting camera/tonemap/lights to baseline.</rule>
+    <rule>Exclude binary/build dirs from edits: target/, build/, dist/, *.egg-info/.</rule>
+    <rule>No blind search/replace; limit diffs to listed files.</rule>
+    <rule>Respect PyO3 ABI and WGSL UBO alignment; pad structs to 16B multiples.</rule>
+    <rule>Keep host-visible allocations within 512 MiB budget.</rule>
   </safety>
 
   <constraints>
-    <platform>Python-based tests only (.py); no .rs tests.</platform>
-    <tools>pytest; no GPU runtime changes required for this remediation.</tools>
+    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
+    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
+    <build>cmake ≥ 3.24; cargo/rustc; PyO3; VMA</build>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
+    <docs>Sphinx preferred</docs>
+    <python>Python ≥ 3.8</python>
   </constraints>
 
   <completion>
-    <summary>All WS-C Python tests live under tests/, C5 asserts booleans, and C8 has a proper exposure monotonicity test.</summary>
+    <summary>All four missing Workstream D items (D4–D7) implemented and wired with tests and docs, without regressing D1–D3.</summary>
     <verify>
-      <cmd>pytest -q</cmd>
-      <cmd>python -c "import forge3d; print('import ok')"</cmd>
-      <cmd>ls tests/test_c5_framegraph.py tests/test_c8_tonemap_pass.py</cmd>
+      <cmd>maturin develop --release</cmd>
+      <cmd>pytest -q tests/test_d5_ortho_camera.py tests/test_d6_camera_uniforms.py tests/test_d4_transforms.py tests/test_d7_normal_matrix.py</cmd>
+      <cmd>pytest -k "camera or uniform or tonemap or light" -q</cmd>
+      <cmd>python -c "import forge3d as f3d; assert hasattr(f3d,'camera_orthographic')"</cmd>
+      <cmd>python -c "import forge3d as f3d; print('OK: Workstream D implemented')" </cmd>
     </verify>
   </completion>
 </task>

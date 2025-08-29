@@ -21,7 +21,20 @@ device_probe = _ext.device_probe
 colormap_supported = _ext.colormap_supported
 camera_look_at = _ext.camera_look_at
 camera_perspective = _ext.camera_perspective
+camera_orthographic = _ext.camera_orthographic
 camera_view_proj = _ext.camera_view_proj
+# Transform functions for D4
+translate = _ext.translate
+rotate_x = _ext.rotate_x
+rotate_y = _ext.rotate_y
+rotate_z = _ext.rotate_z
+scale = _ext.scale
+scale_uniform = _ext.scale_uniform
+compose_trs = _ext.compose_trs
+look_at_transform = _ext.look_at_transform
+multiply_matrices = _ext.multiply_matrices
+invert_matrix = _ext.invert_matrix
+compute_normal_matrix = _ext.compute_normal_matrix
 # Test helper functions for Workstream C validation
 c5_build_framegraph_report = _ext.c5_build_framegraph_report
 c6_parallel_record_metrics = _ext.c6_parallel_record_metrics
