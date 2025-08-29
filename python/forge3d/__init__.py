@@ -22,6 +22,12 @@ colormap_supported = _ext.colormap_supported
 camera_look_at = _ext.camera_look_at
 camera_perspective = _ext.camera_perspective
 camera_view_proj = _ext.camera_view_proj
+# Test helper functions for Workstream C validation
+c5_build_framegraph_report = _ext.c5_build_framegraph_report
+c6_parallel_record_metrics = _ext.c6_parallel_record_metrics
+c7_run_compute_prepass = _ext.c7_run_compute_prepass
+c9_push_pop_roundtrip = _ext.c9_push_pop_roundtrip
+c10_parent_z90_child_unitx_world = _ext.c10_parent_z90_child_unitx_world
 __version__ = _ext.__version__
 # Convenience functions for backward compatibility
 def render_triangle_rgba(width: int, height: int):
@@ -150,6 +156,11 @@ __all__ = [
     "run_benchmark",
     "files",
     "__version__",
+    "c5_build_framegraph_report",
+    "c6_parallel_record_metrics",
+    "c7_run_compute_prepass",
+    "c9_push_pop_roundtrip",
+    "c10_parent_z90_child_unitx_world",
 ]
 
 # If TerrainSpike is compiled in, export it too
