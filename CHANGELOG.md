@@ -5,6 +5,30 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Workstream D – Camera & Uniforms
+
+- **D4 – Model transforms & math helpers**: Complete T/R/S transformation system with math utilities
+  - Added comprehensive transform functions: `translate()`, `rotate_x/y/z()`, `scale()`, `scale_uniform()`
+  - Implemented `compose_trs()` for T*R*S matrix composition with quaternion-based rotations
+  - Added matrix utilities: `multiply_matrices()`, `invert_matrix()`, `look_at_transform()`
+  - Created `src/transforms.rs` module with NumPy interop and proper column/row-major conversion
+  - 12 comprehensive tests in `tests/test_d4_transforms.py` including acceptance criterion validation
+- **D5 – Orthographic projection**: Pixel-aligned 2D camera mode for UI and precise rendering
+  - Added `camera_orthographic()` function with left/right/bottom/top/near/far parameters
+  - Implemented manual orthographic matrix construction with GL↔WGPU clip-space conversion
+  - Full support for both GL [-1,1] and WGPU [0,1] depth ranges via `clip_space` parameter
+  - 7 validation tests in `tests/test_d5_ortho_camera.py` with pixel-alignment verification
+- **D6 – Camera uniforms with viewWorldPosition**: Enhanced uniform system for specular lighting
+  - Extended `TerrainUniforms` with `view_world_position` field for camera world position
+  - Added `camera_world_position_from_view()` utility for automatic extraction from view matrices
+  - Updated WGSL shader to access camera position for distance-based lighting effects
+  - 8 comprehensive tests in `tests/test_d6_camera_uniforms.py` with matrix validation
+- **D7 – Normal matrix computation**: Proper normal transformation for non-uniform scaling
+  - Added `compute_normal_matrix()` function computing inverse-transpose for correct normal transformation
+  - Integrated normal matrix into terrain uniform buffer (64-byte mat4x4 field)
+  - Updated WGSL terrain shader to transform normals using normal matrix for accurate lighting
+  - 12 mathematical tests in `tests/test_d7_normal_matrix.py` validating transform properties
+
 ### Workstream C – Gap Fill
 
 - **C1 – Engine layout & error type**: Added centralized `RenderError` enum with PyErr conversion; created modular layout shims (`src/context.rs`, `src/core/framegraph.rs`, `src/core/gpu_types.rs`) for deliverable compliance
