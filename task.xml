@@ -1,166 +1,77 @@
-<Task>
-  <Title>Fix uniform buffer size mismatch & T31 lanes view so tests pass</Title>
+<task>
+  <title>Remediate failed criteria only</title>
+  <inputs>
+    <repoRoot>.</repoRoot>
+    <paths>
+      <!-- Ensure tests live under tests/ -->
+      <path>tests/test_c5_framegraph.py</path>
+      <path>tests/test_c8_tonemap_pass.py</path>
+    </paths>
+  </inputs>
+  <plan>
+    <step id="s1">
+      <desc>Create/ensure tests/ directory and place WS-C tests under tests/*.py (do not delete existing files; copy/move as needed).</desc>
+      <cmd>mkdir -p tests</cmd>
+    </step>
 
-  <Context>
-    <Summary>
-      Pytests and examples fail with wgpu validation errors. The terrain render pipeline binds a uniform buffer of 528 bytes, while the WGSL shader expects 592 bytes at group(0)/binding(0). In addition, the T31 tests expect a flattened "uniform lanes" debug view of 44 floats, but the current implementation returns 132 floats (the entire uniform), causing assertion failures. These two issues cascade into nearly all rendering tests.
-    </Summary>
-    <Evidence>
-      - wgpu validation: "Buffer is bound with size 528 where the shader expects 592 in group[0] compact index 0" (multiple tests).
-      - test_camera::TestTerrainSpikeIntegration::test_set_camera_look_at_updates_uniforms: "Expected 44 floats (176 bytes / 4), got 132".
-    </Evidence>
-    <Constraints>
-      - Keep PyO3 0.21 abi3 interface stable; do not change existing public Python signatures.
-      - Do not change test expectations.
-      - wgpu 0.19; uniform buffers must follow WGSL/std140 alignment (16-byte lanes).
-      - Avoid changes to shader semantics unless required to match CPU struct layout; prefer fixing CPU-side struct/size.
-      - Keep feature flag `terrain_spike` working.
-    </Constraints>
-  </Context>
+    <step id="s2">
+      <desc>Fix C5 test to assert booleans are True (not just present/non-None).</desc>
+      <edit file="tests/test_c5_framegraph.py">
+        Replace:
+          assert rpt.get('alias_reuse') is not None
+        With:
+          assert rpt.get('alias_reuse') is True
+        Replace:
+          assert rpt.get('barrier_ok') is not None
+        With:
+          assert rpt.get('barrier_ok') is True
+      </edit>
+    </step>
 
-  <Inputs>
-    <RepoRoot>.</RepoRoot>
-    <PathsToTouch>
-      <Path>src/terrain</Path>
-      <Path>src/terrain/pipeline.rs</Path>
-      <Path>src/terrain/uniforms.rs</Path>
-      <Path>src/terrain/shaders/terrain.wgsl</Path>
-      <Path>src/terrain/mod.rs</Path>
-      <Path>src/lib.rs</Path>
-    </PathsToTouch>
-  </Inputs>
+    <step id="s3">
+      <desc>Implement C8 exposure monotonicity properly by testing monotone increase across multiple exposure factors on the rendered image (no engine API changes).</desc>
+      <edit file="tests/test_c8_tonemap_pass.py">
+        <!-- Keep the existing ΔE ≤ 1.5 check intact. Update the monotonicity test: -->
+        Replace the body of test_c8_exposure_monotonicity() with code that:
+          - Renders a single RGBA image via forge3d.Renderer.
+          - Converts its RGB to linear (inverse sRGB gamma).
+          - For exposure factors [0.125, 0.25, 0.5, 1.0, 2.0, 4.0], scales the linear RGB by the factor,
+            re-encodes to sRGB, and records mean brightness.
+          - Asserts the sequence of means is non-decreasing: m[i] <= m[i+1] for all i.
+      </edit>
+    </step>
+  </plan>
 
-  <Plan>
-    <Step id="0">Create a working branch "fix/terrain-uniform-size-and-lanes".</Step>
+  <deliverables>
+    <item>tests/test_c5_framegraph.py with explicit True assertions for alias_reuse and barrier_ok.</item>
+    <item>tests/test_c8_tonemap_pass.py with a real exposure monotonicity test over ≥5 exposure factors.</item>
+    <item>All WS-C tests located under tests/*.py.</item>
+  </deliverables>
 
-    <Step id="1">Reproduce locally:
-      <Cmd>python -m pip install -U pip</Cmd>
-      <Cmd>python -m pip install -U maturin pytest numpy pillow</Cmd>
-      <Cmd>maturin develop --release --features terrain_spike</Cmd>
-      <Cmd>pytest -q</Cmd>
-    </Step>
+  <acceptanceCriteria>
+    <criterion>C5 test fails if alias_reuse != True or barrier_ok != True (asserts on booleans, not existence).</criterion>
+    <criterion>C8: ΔE check remains ≤ 1.5 vs reference (existing), AND exposure monotonicity test asserts non-decreasing mean brightness for exposures [0.125..4.0].</criterion>
+    <criterion>Repository contains tests at paths matching tests/test_*.py for WS-C.</criterion>
+  </acceptanceCriteria>
 
-    <Step id="2">Locate terrain uniform definitions:
-      <Action>Search for the WGSL uniform at @group(0) @binding(0) inside src/terrain/shaders/terrain.wgsl (often named UBO/Globals/TerrainUniforms).</Action>
-      <Action>Open the corresponding Rust struct (likely in src/terrain/uniforms.rs or src/terrain/pipeline.rs) used to fill the uniform buffer.</Action>
-    </Step>
+  <safety>
+    <branch>wsC-test-remediation</branch>
+    <commits>Small, focused commits per step (s1..s3).</commits>
+    <exclusions>Do not touch src/ or engine code; do not modify non-WS-C tests; exclude build artifacts (target/, .maturin/).</exclusions>
+    <noBlindSearchReplace>true</noBlindSearchReplace>
+  </safety>
 
-    <Step id="3">Make CPU struct match WGSL layout & size:
-      <Action>Ensure the Rust uniform struct uses <Code>#[repr(C, align(16))]</Code> and <Code>bytemuck::{Pod, Zeroable}</Code>.</Action>
-      <Action>Add/adjust explicit padding fields so that <Code>std::mem::size_of::&lt;TerrainUniforms&gt;() == 592</Code> bytes and <Code>align_of == 16</Code>.</Action>
-      <Action>Add a compile-time check (using <Code>static_assertions</Code> or a const assert) for 592 bytes to prevent regressions.</Action>
-      <Action>If the WGSL struct is larger than needed due to extra fields, keep the shader as-is and strictly match it on the CPU side to satisfy the validator.</Action>
-    </Step>
+  <constraints>
+    <platform>Python-based tests only (.py); no .rs tests.</platform>
+    <tools>pytest; no GPU runtime changes required for this remediation.</tools>
+  </constraints>
 
-    <Step id="4">Allocate/update the uniform buffer with the exact struct size:
-      <Action>In <File>src/terrain/pipeline.rs</File>, when creating the uniform buffer, use:
-        <Code>let sz = std::mem::size_of::<TerrainUniforms>() as wgpu::BufferAddress;</Code>
-      </Action>
-      <Action>Use <Code>wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST</Code>.</Action>
-      <Action>When writing, use <Code>queue.write_buffer(&uniform_buf, 0, bytemuck::bytes_of(&uniforms));</Code></Action>
-    </Step>
-
-    <Step id="5">Return the expected 44-float "lanes" view for tests:
-      <Action>Expose a method on the Python-facing terrain object (likely <Code>TerrainSpike</Code>) that returns exactly 44 <Code>f32</Code> values.</Action>
-      <Action>Build the 11 lanes (vec4-aligned) per the T31 contract the tests expect (camera/view rows etc.). Do NOT return the raw entire uniform; slice/pack into 44 floats in the expected order.</Action>
-      <Action>If a current function returns all 132 floats, change it to pack only the 44 floats the tests validate (consult <File>tests/test_t31_integration.py</File> and <File>tests/test_camera.py</File> for the required order).</Action>
-    </Step>
-
-    <Step id="6">Guardrails:
-      <Action>Add a runtime <Code>debug_assert_eq!(uniform_buffer_size, 592)</Code> right after creation (behind <Code>debug_assertions</Code> only).</Action>
-      <Action>Document the WGSL-&lt;-&gt;Rust layout mapping in comments in both files.</Action>
-    </Step>
-
-    <Step id="7">Rebuild & test:
-      <Cmd>maturin develop --release --features terrain_spike</Cmd>
-      <Cmd>pytest -q</Cmd>
-    </Step>
-
-    <Step id="8">If any tests still fail, dump the computed <Code>size_of&lt;TerrainUniforms&gt;</Code>, buffer.size(), and the count returned by the "lanes" method to the logs and fix accordingly.</Step>
-  </Plan>
-
-  <Edits>
-    <Edit file="src/terrain/uniforms.rs">
-      <Change>
-        - Ensure <Code>#[repr(C, align(16))]</Code> and derive <Code>Pod, Zeroable</Code>.
-        - Add explicit padding fields so size equals 592 bytes (16-byte lane alignment).
-        - Add:
-          <Code>
-          #[allow(dead_code)]
-          pub const TERRAIN_UNIF_SIZE: usize = 592;
-          const _: () = assert!(::std::mem::size_of::<TerrainUniforms>() == TERRAIN_UNIF_SIZE);
-          const _: () = assert!(::std::mem::align_of::<TerrainUniforms>() == 16);
-          </Code>
-      </Change>
-    </Edit>
-
-    <Edit file="src/terrain/pipeline.rs">
-      <Change>
-        - When creating the uniform buffer:
-          <Code>
-          let ub_size = std::mem::size_of::<TerrainUniforms>() as wgpu::BufferAddress;
-          let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
-              label: Some("vf.terrain.uniforms"),
-              size: ub_size,
-              usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-              mapped_at_creation: false,
-          });
-          debug_assert_eq!(ub_size, TERRAIN_UNIF_SIZE as u64);
-          </Code>
-        - When updating:
-          <Code>queue.write_buffer(&uniform_buf, 0, bytemuck::bytes_of(&uniforms));</Code>
-      </Change>
-    </Edit>
-
-    <Edit file="src/terrain/mod.rs">
-      <Change>
-        - On the Python-exposed struct (e.g., <Code>TerrainSpike</Code>), add/adjust a method:
-          <Code>
-          #[pyo3(text_signature = "($self)")]
-          pub fn uniform_lanes_debug<'py>(&self, py: Python<'py>) -> PyResult&lt;Bound&lt;'py, numpy::PyArray1&lt;f32&gt;&gt;&gt; {
-              let lanes: [f32; 44] = self.uniforms.to_debug_lanes_44(); // implement packing into 11 vec4 lanes
-              Ok(numpy::PyArray1::from_slice_bound(py, &lanes))
-          }
-          </Code>
-        - Implement <Code>to_debug_lanes_44()</Code> on <Code>TerrainUniforms</Code> to pack only the expected 44 floats in the precise order validated by <File>tests/test_t31_integration.py</File> and <File>tests/test_camera.py</File>.
-      </Change>
-    </Edit>
-
-    <Edit file="src/terrain/shaders/terrain.wgsl">
-      <Change>
-        - Verify the struct at <Code>@group(0) @binding(0)</Code> matches the Rust layout fields.
-        - If necessary, add explicit padding members to keep total size 592 bytes; do not shrink it below 592 (tests assume this pipeline).
-      </Change>
-    </Edit>
-  </Edits>
-
-  <Verification>
-    <Commands>
-      <Cmd>python -m pip install -U maturin pytest numpy pillow</Cmd>
-      <Cmd>maturin develop --release --features terrain_spike</Cmd>
-      <Cmd>python -c "import forge3d, numpy as np; print('OK', forge3d.__version__)"</Cmd>
-      <Cmd>pytest -q</Cmd>
-    </Commands>
-    <PassCriteria>
-      <Criterion>All tests listed in errors.txt pass without wgpu validation errors.</Criterion>
-      <Criterion>No "Buffer is bound with size 528 where the shader expects 592" appears in stderr.</Criterion>
-      <Criterion><Code>uniform_lanes_debug()</Code> returns length 44 and <File>tests/test_camera.py</File> expectations pass.</Criterion>
-      <Criterion>Build uses PyO3 0.21 abi3 and public Python API signatures remain unchanged.</Criterion>
-    </PassCriteria>
-  </Verification>
-
-  <Safety>
-    <Branch>fix/terrain-uniform-size-and-lanes</Branch>
-    <SmallCommits>true</SmallCommits>
-    <ExcludeGlobs>**/target/**, **/.venv/**, **/dist/**, **/*.so, **/*.dll, **/*.dylib</ExcludeGlobs>
-    <NoBlindSearchReplace>true</NoBlindSearchReplace>
-  </Safety>
-
-  <Completion>
-    <Summary>Uniform buffer now matches WGSL (592 bytes); lanes view returns 44 floats; all tests pass.</Summary>
-    <ExactVerify>
-      <Cmd>python -c "import forge3d; print('forge3d', forge3d.__version__)"</Cmd>
-      <Cmd>pytest -q</Cmd>
-    </ExactVerify>
-  </Completion>
-</Task>
+  <completion>
+    <summary>All WS-C Python tests live under tests/, C5 asserts booleans, and C8 has a proper exposure monotonicity test.</summary>
+    <verify>
+      <cmd>pytest -q</cmd>
+      <cmd>python -c "import forge3d; print('import ok')"</cmd>
+      <cmd>ls tests/test_c5_framegraph.py tests/test_c8_tonemap_pass.py</cmd>
+    </verify>
+  </completion>
+</task>
