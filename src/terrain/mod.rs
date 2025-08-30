@@ -187,29 +187,21 @@ impl ColormapLUT {
     }
 }
 
-// ---------- Uniforms (std140-compatible, 592 bytes to match WGSL) ----------
+// ---------- Uniforms (std140-compatible, 176 bytes to match WGSL) ----------
 
-// B16: Updated TerrainUniforms to match WGSL shader layout (592 bytes)
+// Updated TerrainUniforms to match WGSL shader layout (176 bytes)
 #[repr(C, align(16))]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TerrainUniforms {
-    pub view: [[f32; 4]; 4],           // 64 B
-    pub proj: [[f32; 4]; 4],           // 64 B  
-    pub sun_exposure: [f32; 4],        // (sun_dir.xyz, exposure) -> 16 B
-    pub spacing_h_exag_pad: [f32; 4],  // (spacing, h_range, exaggeration, 0) -> 16 B
-    pub light_counts: [f32; 4],        // (num_point_lights, num_spot_lights, 0, 0) -> 16 B
-    pub view_world_position: [f32; 4], // (view_world_pos.xyz, 0) -> 16 B (total 192 B so far)
-    pub point_lights: [PointLight; 4], // 4 * 48 = 192 B
-    pub spot_lights: [SpotLight; 2],   // 2 * 64 = 128 B
-    pub _pad_end: [f32; 4],            // 16 B padding (total 528 B)
-    pub normal_matrix: [[f32; 4]; 4],  // 64 B normal matrix for proper normal transformation
-    pub _final_pad: [f32; 16],         // 64 B additional padding to match shader expectations
+    pub view: [[f32; 4]; 4],          // 64 B
+    pub proj: [[f32; 4]; 4],          // 64 B
+    pub sun_exposure: [f32; 4],       // (sun_dir.x, sun_dir.y, sun_dir.z, exposure) (16 B)
+    pub spacing_h_exag_pad: [f32; 4], // (dx, dy, h_exag, 0.0) (16 B)  
+    pub _pad_tail: [f32; 4],          // keep total 176 bytes (16 B)
 }
 
 // Compile-time size and alignment checks
-#[allow(dead_code)]
-pub const TERRAIN_UNIF_SIZE: usize = 656; // 592 + 64 for additional padding to match shader
-const _: () = assert!(::std::mem::size_of::<TerrainUniforms>() == TERRAIN_UNIF_SIZE);
+const _: () = assert!(::std::mem::size_of::<TerrainUniforms>() == 176);
 const _: () = assert!(::std::mem::align_of::<TerrainUniforms>() == 16);
 
 impl TerrainUniforms {
@@ -222,60 +214,16 @@ impl TerrainUniforms {
         spacing: f32,
         h_range: f32,
         exaggeration: f32,
-        view_world_position: glam::Vec3,
-        model_matrix: Option<glam::Mat4>,
     ) -> Self {
         Self {
             view: view.to_cols_array_2d(),
             proj: proj.to_cols_array_2d(),
             sun_exposure: [sun_dir.x, sun_dir.y, sun_dir.z, exposure],
             spacing_h_exag_pad: [spacing, h_range, exaggeration, 0.0],
-            light_counts: [0.0, 0.0, 0.0, 0.0], // No lights by default
-            view_world_position: [view_world_position.x, view_world_position.y, view_world_position.z, 0.0],
-            point_lights: [PointLight::default(); 4],
-            spot_lights: [SpotLight::default(); 2], 
-            _pad_end: [0.0; 4],
-            normal_matrix: {
-                // Compute normal matrix from model matrix if provided, otherwise identity
-                let matrix = model_matrix.unwrap_or(glam::Mat4::IDENTITY);
-                let normal_3x3 = crate::transforms::normal_matrix3x3(matrix);
-                // Convert 3x3 to 4x4 (extend with [0,0,0,1] for homogeneous coordinates)
-                glam::Mat4::from_mat3(normal_3x3).to_cols_array_2d()
-            },
-            _final_pad: [0.0; 16], // Initialize final padding to zero
+            _pad_tail: [0.0; 4], // Initialize tail padding to zero
         }
     }
     
-    /// B16: Create TerrainUniforms with lighting data
-    pub fn with_lights(
-        view: glam::Mat4,
-        proj: glam::Mat4,
-        sun_dir: glam::Vec3,
-        exposure: f32,
-        spacing: f32,
-        h_range: f32,
-        exaggeration: f32,
-        view_world_position: glam::Vec3,
-        point_lights: &[PointLight],
-        spot_lights: &[SpotLight],
-        model_matrix: Option<glam::Mat4>,
-    ) -> Self {
-        let mut uniforms = Self::new(view, proj, sun_dir, exposure, spacing, h_range, exaggeration, view_world_position, model_matrix);
-        
-        // Copy point lights (up to 4)
-        let num_point = point_lights.len().min(4);
-        uniforms.point_lights[..num_point].copy_from_slice(&point_lights[..num_point]);
-        
-        // Copy spot lights (up to 2) 
-        let num_spot = spot_lights.len().min(2);
-        uniforms.spot_lights[..num_spot].copy_from_slice(&spot_lights[..num_spot]);
-        
-        // Update light counts
-        uniforms.light_counts = [num_point as f32, num_spot as f32, 0.0, 0.0];
-        
-        uniforms
-    }
-
     pub fn from_mvp_legacy(
         mvp: glam::Mat4,
         light: glam::Vec3,
@@ -285,8 +233,7 @@ impl TerrainUniforms {
     ) -> Self {
         let view = glam::Mat4::IDENTITY;
         let h_range = h_max - h_min;
-        let default_world_pos = glam::Vec3::new(0.0, 0.0, 5.0); // Default camera position
-        Self::new(view, mvp, light, 1.0, 1.0, h_range, exaggeration, default_world_pos, None)
+        Self::new(view, mvp, light, 1.0, 1.0, h_range, exaggeration)
     }
 
     pub fn for_rendering(
@@ -298,9 +245,6 @@ impl TerrainUniforms {
         height_range: f32,
         height_exaggeration: f32,
     ) -> Self {
-        // Extract camera world position from view matrix
-        let world_position = crate::camera::camera_world_position_from_view(view_matrix);
-        
         Self::new(
             view_matrix,
             proj_matrix,
@@ -309,8 +253,6 @@ impl TerrainUniforms {
             terrain_spacing,
             height_range,
             height_exaggeration,
-            world_position,
-            None, // No specific model matrix for terrain rendering
         )
     }
     
@@ -340,8 +282,8 @@ impl TerrainUniforms {
         // [36..39] = spacing_h_exag_pad (4 floats: spacing, h_range, exaggeration, 0)
         lanes[36..40].copy_from_slice(&self.spacing_h_exag_pad);
         
-        // [40..43] = pad (4 floats, zeroed)
-        lanes[40..44].copy_from_slice(&[0.0f32; 4]);
+        // [40..43] = _pad_tail (4 floats, zeroed)
+        lanes[40..44].copy_from_slice(&self._pad_tail);
         
         lanes
     }
@@ -378,9 +320,6 @@ impl Globals {
     pub fn to_uniforms(&self, view: glam::Mat4, proj: glam::Mat4) -> TerrainUniforms {
         let h_range = self.h_max - self.h_min;
         
-        // Extract camera world position from view matrix
-        let world_position = crate::camera::camera_world_position_from_view(view);
-        
         TerrainUniforms::new(
             view,
             proj,
@@ -389,8 +328,6 @@ impl Globals {
             self.spacing,
             h_range,
             self.exaggeration,
-            world_position,
-            None, // No specific model matrix by default
         )
     }
 }
@@ -516,9 +453,9 @@ impl TerrainSpike {
         let uniform_size = std::mem::size_of::<TerrainUniforms>() as u64;
         
         // Runtime debug assertion to ensure uniform buffer matches WGSL expectations
-        debug_assert_eq!(uniform_size, TERRAIN_UNIF_SIZE as u64, 
+        debug_assert_eq!(uniform_size, 176, 
                         "Uniform buffer size {} doesn't match WGSL expectation {}", 
-                        uniform_size, TERRAIN_UNIF_SIZE);
+                        uniform_size, 176);
         
         let ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("terrain-ubo"),

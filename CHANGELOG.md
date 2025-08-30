@@ -5,6 +5,15 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Fixed
+- **Terrain UBO size mismatch**: Fixed WGPU validation error "Buffer is bound with size X where shader expects Y"
+  - Reduced terrain uniform buffer from 656 bytes to 176 bytes (std140-compatible layout)
+  - Removed complex lighting data (point/spot lights, normal matrix) to simplify uniform structure  
+  - Updated WGSL shader to match simplified 176-byte layout with 5 fields: view(64B) + proj(64B) + sun_exposure(16B) + spacing_h_exag_pad(16B) + _pad_tail(16B)
+  - Added compile-time size assertions and runtime validation to prevent future drift
+  - Updated uniform debug interface to return exactly 44 floats (176 bytes / 4)
+  - Created comprehensive documentation in `docs/uniforms.rst` explaining the new layout
+
 ### Workstream D – Camera & Uniforms
 
 - **D4 – Model transforms & math helpers**: Complete T/R/S transformation system with math utilities
