@@ -87,7 +87,8 @@
       "Bash(VF_ENABLE_TERRAIN_TESTS=1 pytest tests/test_b14_contour_extract.py -v)",
       "Bash(VF_ENABLE_TERRAIN_TESTS=1 pytest tests/test_b13_slope_aspect.py tests/test_b14_contour_extract.py -v --tb=no)",
       "Bash(set VF_ENABLE_TERRAIN_TESTS=1)",
-      "Bash(src/ python/ examples/ tests/ docs/)"
+      "Bash(src/ python/ examples/ tests/ docs/)",
+      "Bash(git log:*)"
     ],
     "deny": [],
     "additionalDirectories": [
