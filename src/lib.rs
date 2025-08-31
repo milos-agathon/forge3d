@@ -1008,6 +1008,9 @@ pub mod camera;
 // T41-BEGIN:scene-export
 pub mod scene;
 // T41-END:scene-export
+// H-BEGIN:vector-export
+pub mod vector;
+// H-END:vector-export
 
 // T2.1 Infrastructure re-exports for easy access
 #[cfg(feature = "terrain_spike")]
@@ -1441,6 +1444,13 @@ fn _forge3d(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(c7_run_compute_prepass, m)?)?;
     m.add_function(wrap_pyfunction!(c9_push_pop_roundtrip, m)?)?;
     m.add_function(wrap_pyfunction!(c10_parent_z90_child_unitx_world, m)?)?;
+    // Vector API functions for H1
+    m.add_function(wrap_pyfunction!(vector::api::add_polygons_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::api::add_lines_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::api::add_points_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::api::add_graph_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::api::clear_vectors_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::api::get_vector_counts_py, m)?)?;
     // Export package version for Python: forge3d._forge3d.__version__
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())

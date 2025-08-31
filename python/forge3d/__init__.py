@@ -42,6 +42,9 @@ c7_run_compute_prepass = _ext.c7_run_compute_prepass
 c9_push_pop_roundtrip = _ext.c9_push_pop_roundtrip
 c10_parent_z90_child_unitx_world = _ext.c10_parent_z90_child_unitx_world
 __version__ = _ext.__version__
+
+# Import vector graphics API (H1)
+from . import vector
 # Convenience functions for backward compatibility
 def render_triangle_rgba(width: int, height: int):
     """Render a deterministic triangle and return (H, W, 4) uint8."""
@@ -174,6 +177,7 @@ __all__ = [
     "c7_run_compute_prepass",
     "c9_push_pop_roundtrip",
     "c10_parent_z90_child_unitx_world",
+    "vector",
 ]
 
 # If TerrainSpike is compiled in, export it too

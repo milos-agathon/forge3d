@@ -1,147 +1,247 @@
 <task>
-  <title>Implement & wire missing/partial items for Workstream D</title>
+  <id>fix-pyo3-numpy-signatures</id>
+  <owner>Claude Code</owner>
+  <priority>P0</priority>
+  <summary>Fix maturin build errors caused by using &PyReadonlyArray2<T> in #[pyfunction] signatures (pyo3 0.21 expects owned PyReadonlyArray2<'py, T> that implements FromPyObject).</summary>
 
-  <inputs>
-    <repoRoot>.</repoRoot>
-    <paths>
-      <path>src/</path>
-      <path>src/shaders/</path>
-      <path>python/forge3d/</path>
-      <path>tests/</path>
-      <path>docs/</path>
-    </paths>
-    <workstreamD>
-      <task id="D1">Camera math + uniform buffer (Present & Wired; no changes)</task>
-      <task id="D2">Sun direction & tonemap helpers (Present & Wired; no changes)</task>
-      <task id="D3">Light array uniforms (directional, point, spot) (Present & Wired; no changes)</task>
-      <task id="D4">Model transforms & math helpers (T/R/S)</task>
-      <task id="D5">Orthographic camera mode (pixel-aligned 2D)</task>
-      <task id="D6">Camera uniforms: viewWorldPosition + near/far/FOV policy</task>
-      <task id="D7">Normal matrix (inverse-transpose of model) uniform & tests</task>
-    </workstreamD>
-  </inputs>
+  <context>
+    <problem>
+      <![CDATA[
+      error[E0277]: the trait bound `&PyReadonlyArray<'_, f64, Dim<[usize; 2]>>: PyFunctionArgument<'_, '_>` is not satisfied
+      note: required for `&PyReadonlyArray<'_, f64, Dim<[usize; 2]>>` to implement `pyo3::FromPyObject<'_>`
+      ...
+      Similar errors for:
+        - holes: Option<Vec<&PyReadonlyArray2<f64>>>
+        - path_coords: &PyReadonlyArray2<f64>
+        - positions: &PyReadonlyArray2<f64>
+        - nodes: &PyReadonlyArray2<f64>
+        - edges: &PyReadonlyArray2<u32>
+      ]]>
+    </problem>
+    <root_cause>
+      <![CDATA[
+      In pyo3 0.21, function parameters extracted from Python must implement FromPyObject. The owned handle types (e.g., PyReadonlyArray2<'py, T>) implement this, but references to them (&PyReadonlyArray2<T>) do not (references only work for PyClass types). Hence, pyo3 cannot extract &PyReadonlyArray2<T> and compilation fails.
+      ]]>
+    </root_cause>
+    <goal>
+      <![CDATA[
+      Replace all &PyReadonlyArray2<T> parameters with owned PyReadonlyArray2<'py, T> (and Vec<&PyReadonlyArray2<T>> with Vec<PyReadonlyArray2<'py, T>>), add the required 'py lifetime, ensure proper imports, and make the crate compile with maturin.
+      ]]>
+    </goal>
+  </context>
 
-  <plan>
-    <!-- Audit-first & safety wrapper -->
-    <step>Create branch: feature/wsD-impl</step>
-    <step>Run quick audit: ensure D1–D3 symbols exist and tests pass to avoid regressions</step>
+  <changeset>
+    <!-- 1) Cargo.toml sanity (no version bumps if already present; only add missing bits) -->
+    <file path="Cargo.toml" action="patch">
+      <![CDATA[
+      *** Begin Patch
+      *** Update File: Cargo.toml
+      @@
+      [lib]
+      crate-type = ["cdylib"]
+      @@
+      [dependencies]
+      pyo3 = { version = "0.21", features = ["extension-module"] }
+      numpy = "0.21"
+      ndarray = "0.15"
+      *** End Patch
+      ]]>
+    </file>
 
-    <!-- Dependency-ordered implementation -->
-    <!-- D5 is smallest and unblocks 2D/UI use; D6 expands Globals UBO; D4 introduces model matrix; D7 depends on D4 -->
-    <step id="D5">
-      Implement orthographic projection in Rust and expose to Python.
-      Files: src/camera.rs, src/lib.rs (PyO3 export), python/forge3d/__init__.py, tests/test_d5_ortho_camera.py
-      Shader impact: none.
-    </step>
+    <!-- 2) Ensure correct imports in src/vector/api.rs -->
+    <file path="src/vector/api.rs" action="patch">
+      <![CDATA[
+      *** Begin Patch
+      *** Update File: src/vector/api.rs
+      @@
+      -use numpy::PyReadonlyArray2;
+      +use numpy::PyReadonlyArray2;
+      +use pyo3::prelude::*;
+      *** End Patch
+      ]]>
+    </file>
 
-    <step id="D6">
-      Extend camera/uniforms with viewWorldPosition and document near/far/FOV policy.
-      Files: src/terrain/mod.rs (Globals/Uniforms), src/camera.rs (extract world position), src/shaders/terrain.wgsl (UBO layout), tests/test_d6_camera_uniforms.py, docs/workstream_d/camera_uniforms.rst
-    </step>
+    <!-- 3) Fix all offending #[pyfunction] signatures in src/vector/api.rs -->
+    <!-- Use explicit patches for the reported line regions; if names differ, apply the same transformation pattern. -->
+    <file path="src/vector/api.rs" action="patch">
+      <![CDATA[
+      *** Begin Patch
+      *** Update File: src/vector/api.rs
+      @@
+     -#[pyfunction]
+     -pub fn <FUNCTION_AT_372>() -> Option<Vec<&PyReadonlyArray2<f64>>> { /* placeholder from error context */ }
+     +// NOTE: Replace references with owned PyReadonlyArray2<'py, T> and introduce the 'py lifetime.
+     +// For every #[pyfunction] that accepts numpy arrays, ensure the signature follows this pattern:
+     +//   #[pyfunction]
+     +//   pub fn func_name<'py>(/* optionally: _py: Python<'py>, */ arr: PyReadonlyArray2<'py, f64>, ...)
+     +// References (&PyReadonlyArray2<T>) must be removed.
+     *** End Patch
+      ]]>
+    </file>
 
-    <step id="D4">
-      Add transforms module with T/R/S helpers and per-object model matrix plumbing (CPU-side).
-      Files: src/transforms.rs (new), src/lib.rs (PyO3 wrappers), python/forge3d/__init__.py (exports), tests/test_d4_transforms.py
-      Hook a model matrix slot into render path where applicable (no scene rewrite; minimal integration).
-    </step>
+    <!-- 3a) Concrete replacements around the lines noted by the compiler (apply globally in this file). -->
+    <file path="src/vector/api.rs" action="regex-replace">
+      <pattern>&\s*PyReadonlyArray2\s*<\s*f64\s*></pattern>
+      <replacement>PyReadonlyArray2&lt;'py, f64&gt;</replacement>
+      <multiple>true</multiple>
+    </file>
+    <file path="src/vector/api.rs" action="regex-replace">
+      <pattern>&\s*PyReadonlyArray2\s*<\s*u32\s*></pattern>
+      <replacement>PyReadonlyArray2&lt;'py, u32&gt;</replacement>
+      <multiple>true</multiple>
+    </file>
+    <file path="src/vector/api.rs" action="regex-replace">
+      <pattern>Vec\s*<\s*&\s*PyReadonlyArray2\s*<\s*f64\s*>\s*></pattern>
+      <replacement>Vec&lt;PyReadonlyArray2&lt;'py, f64&gt;&gt;</replacement>
+      <multiple>true</multiple>
+    </file>
 
-    <step id="D7">
-      Compute and supply 3×3 normal matrix (inverse-transpose of model upper-left) to shaders.
-      Files: src/transforms.rs (normal matrix util), src/terrain/mod.rs (UBO add mat3x3), src/shaders/terrain.wgsl (use normal matrix), tests/test_d7_normal_matrix.py
-    </step>
+    <!-- 3b) Add 'py lifetime to any function using PyReadonlyArray2 that lacks it. -->
+    <!-- Heuristic: insert <'py> after fn name if a parameter uses PyReadonlyArray2<'py, -->
+    <file path="src/vector/api.rs" action="regex-replace">
+      <pattern>(#[ \t]*pyfunction[^\n]*\n[ \t]*(?:pub[ \t]+)?fn[ \t]+([A-Za-z0-9_]+)\s*\()</pattern>
+      <replacement>\1<'py>(</replacement>
+      <multiple>true</multiple>
+    </file>
 
-    <!-- Verification & wrap-up -->
-    <step>Rebuild (maturin develop --release)</step>
-    <step>Run targeted tests: pytest -q tests/test_d5_ortho_camera.py tests/test_d6_camera_uniforms.py tests/test_d4_transforms.py tests/test_d7_normal_matrix.py</step>
-    <step>Run regression subset (camera/uniforms/tonemap): pytest -k "camera or uniform or tonemap" -q</step>
-    <step>Update CHANGELOG and open PR</step>
-  </plan>
+    <!-- 3c) If any of those functions still lack a 'py source for lifetime inference, add an unused Python<'py> arg as first param. -->
+    <file path="src/vector/api.rs" action="regex-replace">
+      <pattern>(#[ \t]*pyfunction[^\n]*\n[ \t]*(?:pub[ \t]+)?fn[ \t]+[A-Za-z0-9_]+<'py>\s*\()</pattern>
+      <replacement>\0_py: Python<'py>, </replacement>
+      <multiple>true</multiple>
+    </file>
 
-  <deliverables>
-    <!-- D5 -->
-    <file>src/camera.rs  <!-- add fn camera_orthographic(left,right,bottom,top,near,far) --></file>
-    <file>python/forge3d/__init__.py  <!-- export camera_orthographic --></file>
-    <file>tests/test_d5_ortho_camera.py</file>
+    <!-- 3d) Concrete examples for the lines reported in the compiler errors (adjust names if different). -->
+    <file path="src/vector/api.rs" action="patch">
+      <![CDATA[
+      *** Begin Patch
+      *** Update File: src/vector/api.rs
+      @@
+     -// around line 372..376
+     -#[pyfunction]
+     -pub fn build_polygon(
+     -    exterior_coords: &PyReadonlyArray2<f64>,
+     -    holes: Option<Vec<&PyReadonlyArray2<f64>>>,
+     -) -> PyResult<PyObject> {
+     +#[pyfunction]
+     +pub fn build_polygon<'py>(
+     +    _py: Python<'py>,
+     +    exterior_coords: PyReadonlyArray2<'py, f64>,
+     +    holes: Option<Vec<PyReadonlyArray2<'py, f64>>>,
+     +) -> PyResult<PyObject> {
+          // body unchanged; use `exterior_coords.as_array()` etc.
+      }
+      @@
+     -// around line 419
+     -#[pyfunction]
+     -pub fn path_length(
+     -    path_coords: &PyReadonlyArray2<f64>,
+     -) -> PyResult<f64> {
+     +#[pyfunction]
+     +pub fn path_length<'py>(
+     +    _py: Python<'py>,
+     +    path_coords: PyReadonlyArray2<'py, f64>,
+     +) -> PyResult<f64> {
+          // body unchanged
+      }
+      @@
+     -// around line 476
+     -#[pyfunction]
+     -pub fn sample_along_path(
+     -    positions: &PyReadonlyArray2<f64>,
+     -) -> PyResult<Vec<f64>> {
+     +#[pyfunction]
+     +pub fn sample_along_path<'py>(
+     +    _py: Python<'py>,
+     +    positions: PyReadonlyArray2<'py, f64>,
+     +) -> PyResult<Vec<f64>> {
+          // body unchanged
+      }
+      @@
+     -// around line 533..534
+     -#[pyfunction]
+     -pub fn graph_from_nodes_edges(
+     -    nodes: &PyReadonlyArray2<f64>,
+     -    edges: &PyReadonlyArray2<u32>,
+     -) -> PyResult<Graph> {
+     +#[pyfunction]
+     +pub fn graph_from_nodes_edges<'py>(
+     +    _py: Python<'py>,
+     +    nodes: PyReadonlyArray2<'py, f64>,
+     +    edges: PyReadonlyArray2<'py, u32>,
+     +) -> PyResult<Graph> {
+          // body unchanged
+      }
+      *** End Patch
+      ]]>
+    </file>
 
-    <!-- D6 -->
-    <file>src/terrain/mod.rs  <!-- add viewWorldPosition (vec3 + pad) to Globals/UBO --></file>
-    <file>src/camera.rs  <!-- utility to compute camera world position from view --></file>
-    <file>src/shaders/terrain.wgsl  <!-- extend Globals/UBO and plumb through --></file>
-    <file>tests/test_d6_camera_uniforms.py</file>
-    <file>docs/workstream_d/camera_uniforms.rst</file>
+    <!-- 4) Optional: add brief doc hints to avoid misuse -->
+    <file path="src/vector/api.rs" action="patch">
+      <![CDATA[
+      *** Begin Patch
+      *** Update File: src/vector/api.rs
+      @@
+      /// NOTE: Numpy inputs must be 2D arrays shaped (N, 2). Parameters are accepted as
+      /// `PyReadonlyArray2<'py, T>` (owned pyo3 handles). Do not use `&PyReadonlyArray2<T>`
+      /// in #[pyfunction] signatures—pyo3 cannot extract references from Python call sites.
+      *** End Patch
+      ]]>
+    </file>
+  </changeset>
 
-    <!-- D4 -->
-    <file>src/transforms.rs  <!-- translate/rotateX/Y/Z/scale; compose_model(trs) --></file>
-    <file>src/lib.rs  <!-- PyO3 wrappers for transforms; optional Renderer.set_model(mat4) --></file>
-    <file>python/forge3d/__init__.py  <!-- export transform helpers --></file>
-    <file>tests/test_d4_transforms.py</file>
+  <acceptance_criteria>
+    <item>Project compiles successfully with <code>maturin develop --release</code> (no E0277 errors related to PyFunctionArgument / FromPyObject for numpy arrays).</item>
+    <item>All #[pyfunction] parameters previously typed as <code>&PyReadonlyArray2&lt;T&gt;</code> are now <code>PyReadonlyArray2&lt;'py, T&gt;</code>.</item>
+    <item>Any <code>Vec&lt;&amp;PyReadonlyArray2&lt;f64&gt;&gt;</code> is replaced with <code>Vec&lt;PyReadonlyArray2&lt;'py, f64&gt;&gt;</code>.</item>
+    <item>Functions using these types declare a <code>'py</code> lifetime. If needed, an unused <code>_py: Python&lt;'py&gt;</code> parameter is added to satisfy lifetime constraints.</item>
+    <item>Existing function bodies continue to operate via <code>.as_array()</code>/<code>.readonly()</code> without additional allocations.</item>
+  </acceptance_criteria>
 
-    <!-- D7 -->
-    <file>src/transforms.rs  <!-- normal_matrix3x3(model4x4) -> mat3 --></file>
-    <file>src/terrain/mod.rs  <!-- add normalMat3x3 to per-object uniforms/struct --></file>
-    <file>src/shaders/terrain.wgsl  <!-- use normalMat3x3 for lighting normal transform --></file>
-    <file>tests/test_d7_normal_matrix.py</file>
-  </deliverables>
+  <tests>
+    <instruction>
+      <![CDATA[
+      1) Build locally:
+         maturin develop --release
 
-  <acceptanceCriteria>
-    <!-- D5: Orthographic camera -->
-    <criterion>
-      Given width=800,height=600 and camera_orthographic(0,800,0,600,near=0.1,far=10),
-      mapping (0,0) pixel center -> NDC ≈ (-1,+1), (800,600) -> (+1,-1) within 1e-5.
-      Test: tests/test_d5_ortho_camera.py must pass.
-    </criterion>
+      2) Add a minimal smoke test (pytest) under tests/test_numpy_args.py:
+      ---------------------------------------------------------
+      import numpy as np
+      import forge3d  # replace with actual module name
 
-    <!-- D6: Camera uniforms -->
-    <criterion>
-      Uniforms expose viewWorldPosition matching the inverse of view matrix translation (within 1e-5).
-      Near/Far/FOV policy documented in docs/workstream_d/camera_uniforms.rst and asserted for defaults in tests/test_d6_camera_uniforms.py.
-    </criterion>
+      def test_signatures_roundtrip():
+          ext = np.array([[0.0, 0.0],[1.0, 0.0],[1.0, 1.0],[0.0, 1.0]], dtype=np.float64)
+          holes = [np.array([[0.2,0.2],[0.8,0.2],[0.8,0.8],[0.2,0.8]], dtype=np.float64)]
+          # functions below should reflect real exported names:
+          if hasattr(forge3d, "build_polygon"):
+              forge3d.build_polygon(ext, holes)
 
-    <!-- D4: Transforms -->
-    <criterion>
-      compose_model(T(1,2,3), Rz(90deg), S(2,1,1)) applied to unit x-axis yields world ≈ (1,2,3)+Rz(90)*(2,0,0) within 1e-5.
-      Python APIs for translate/rotate/scale/model_compose exported; tests/test_d4_transforms.py must pass.
-    </criterion>
+          path = np.stack([np.linspace(0,1,5), np.linspace(0,1,5)], axis=1).astype(np.float64)
+          if hasattr(forge3d, "path_length"):
+              forge3d.path_length(path)
 
-    <!-- D7: Normal matrix -->
-    <criterion>
-      For non-uniform scale S(2,1,3) with rotation, normal_matrix equals inverse-transpose(upper-left(model)) within 1e-5 and normals remain unit-length after transform (±1e-5).
-      WGSL uses normalMat3x3 in lighting path. tests/test_d7_normal_matrix.py must pass.
-    </criterion>
+          positions = path.astype(np.float64)
+          if hasattr(forge3d, "sample_along_path"):
+              forge3d.sample_along_path(positions)
 
-    <!-- Global/build -->
-    <criterion>Project builds on supported platforms via: maturin develop --release.</criterion>
-    <criterion>All new tests (Python .py files) pass: pytest -q tests/test_d4_transforms.py tests/test_d5_ortho_camera.py tests/test_d6_camera_uniforms.py tests/test_d7_normal_matrix.py.</criterion>
-    <criterion>No increase in host-visible heap above 512 MiB; add/update checks if needed.</criterion>
-    <criterion>Existing D1–D3 tests continue to pass (no regressions): pytest -k "camera or tonemap or light" -q.</criterion>
-  </acceptanceCriteria>
+          nodes = np.array([[0.0,0.0],[1.0,0.0],[1.0,1.0]], dtype=np.float64)
+          edges = np.array([[0,1],[1,2]], dtype=np.uint32)
+          if hasattr(forge3d, "graph_from_nodes_edges"):
+              forge3d.graph_from_nodes_edges(nodes, edges)
+      ---------------------------------------------------------
 
-  <safety>
-    <rule>Create branch feature/wsD-impl; small, isolated commits per task (D5, D6, D4, D7).</rule>
-    <rule>Audit-before-change: run current tests affecting camera/tonemap/lights to baseline.</rule>
-    <rule>Exclude binary/build dirs from edits: target/, build/, dist/, *.egg-info/.</rule>
-    <rule>No blind search/replace; limit diffs to listed files.</rule>
-    <rule>Respect PyO3 ABI and WGSL UBO alignment; pad structs to 16B multiples.</rule>
-    <rule>Keep host-visible allocations within 512 MiB budget.</rule>
-  </safety>
+      3) Run: pytest -q
+      ]]>
+    </instruction>
+  </tests>
 
-  <constraints>
-    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
-    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
-    <build>cmake ≥ 3.24; cargo/rustc; PyO3; VMA</build>
-    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
-    <docs>Sphinx preferred</docs>
-    <python>Python ≥ 3.8</python>
-  </constraints>
+  <risks>
+    <item>If any function returns views or borrows tied to Python memory, ensure returned values don't outlive 'py; prefer copying to Rust-owned buffers before returning if necessary.</item>
+    <item>Introducing <code>_py: Python&lt;'py&gt;</code> suppresses lifetime inference issues; keep the leading underscore to avoid unused warnings.</item>
+  </risks>
 
-  <completion>
-    <summary>All four missing Workstream D items (D4–D7) implemented and wired with tests and docs, without regressing D1–D3.</summary>
-    <verify>
-      <cmd>maturin develop --release</cmd>
-      <cmd>pytest -q tests/test_d5_ortho_camera.py tests/test_d6_camera_uniforms.py tests/test_d4_transforms.py tests/test_d7_normal_matrix.py</cmd>
-      <cmd>pytest -k "camera or uniform or tonemap or light" -q</cmd>
-      <cmd>python -c "import forge3d as f3d; assert hasattr(f3d,'camera_orthographic')"</cmd>
-      <cmd>python -c "import forge3d as f3d; print('OK: Workstream D implemented')" </cmd>
-    </verify>
-  </completion>
+  <roll_back_plan>
+    <step>Revert only the signature changes if any downstream code requires references (it shouldn’t for pyo3 extraction).</step>
+    <step>Confirm numpy/pyo3 versions align with the ABI flags in pyproject.toml if builds still fail.</step>
+  </roll_back_plan>
 </task>
