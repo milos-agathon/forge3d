@@ -1,247 +1,112 @@
-<task>
-  <id>fix-pyo3-numpy-signatures</id>
-  <owner>Claude Code</owner>
-  <priority>P0</priority>
-  <summary>Fix maturin build errors caused by using &PyReadonlyArray2<T> in #[pyfunction] signatures (pyo3 0.21 expects owned PyReadonlyArray2<'py, T> that implements FromPyObject).</summary>
+<prompt>
+  <system>
+    You are Claude Code acting as a meticulous docs editor and release-notes engineer. Your task is to update two files—CHANGELOG.md and README.md—so they accurately reflect what is available in the package today, convert “work on workstreams” into proper versioned releases after 0.0.1, include the latest update to Workstream H, and bump the project to version 0.5.0.
 
-  <context>
-    <problem>
-      <![CDATA[
-      error[E0277]: the trait bound `&PyReadonlyArray<'_, f64, Dim<[usize; 2]>>: PyFunctionArgument<'_, '_>` is not satisfied
-      note: required for `&PyReadonlyArray<'_, f64, Dim<[usize; 2]>>` to implement `pyo3::FromPyObject<'_>`
-      ...
-      Similar errors for:
-        - holes: Option<Vec<&PyReadonlyArray2<f64>>>
-        - path_coords: &PyReadonlyArray2<f64>
-        - positions: &PyReadonlyArray2<f64>
-        - nodes: &PyReadonlyArray2<f64>
-        - edges: &PyReadonlyArray2<u32>
-      ]]>
-    </problem>
-    <root_cause>
-      <![CDATA[
-      In pyo3 0.21, function parameters extracted from Python must implement FromPyObject. The owned handle types (e.g., PyReadonlyArray2<'py, T>) implement this, but references to them (&PyReadonlyArray2<T>) do not (references only work for PyClass types). Hence, pyo3 cannot extract &PyReadonlyArray2<T> and compilation fails.
-      ]]>
-    </root_cause>
-    <goal>
-      <![CDATA[
-      Replace all &PyReadonlyArray2<T> parameters with owned PyReadonlyArray2<'py, T> (and Vec<&PyReadonlyArray2<T>> with Vec<PyReadonlyArray2<'py, T>>), add the required 'py lifetime, ensure proper imports, and make the crate compile with maturin.
-      ]]>
-    </goal>
-  </context>
+    Rules:
+    - No scope creep: edit only the two target files.
+    - Preserve formatting, headings, and styles (Keep a Changelog + SemVer pre-1.0).
+    - Do not fabricate features; derive from repository code/tests and existing docs.
+    - Be precise, terse, and release-grade. Use past tense for released items.
+  </system>
 
-  <changeset>
-    <!-- 1) Cargo.toml sanity (no version bumps if already present; only add missing bits) -->
-    <file path="Cargo.toml" action="patch">
-      <![CDATA[
-      *** Begin Patch
-      *** Update File: Cargo.toml
-      @@
-      [lib]
-      crate-type = ["cdylib"]
-      @@
-      [dependencies]
-      pyo3 = { version = "0.21", features = ["extension-module"] }
-      numpy = "0.21"
-      ndarray = "0.15"
-      *** End Patch
-      ]]>
+  <inputs>
+    <file path="CHANGELOG.md" role="source-of-truth">
+      The changelog currently contains:
+      - Sections up to v0.1.0 (2025-08-19) and then a large “Unreleased” block with fixes plus Workstreams D, C, and M entries (D4–D7, C1–C4, M1–M2). :contentReference[oaicite:0]{index=0}
     </file>
+    <file path="README.md" role="surface-doc">
+      The README describes features and API, and shows the version mirror note with the current value “now 0.1.0”, plus “Features by ROADMAP (what's implemented so far)” organized by T-workstreams. :contentReference[oaicite:1]{index=1}
+    </file>
+    <evidence>
+      - CHANGELOG: Unreleased contains a “Fixed: Terrain UBO size mismatch … 176 bytes std140” and Workstreams D (camera/uniforms/normal matrix), C (gap fill items, diagnostics, tonemap), and M (Zero-Copy NumPy and 512 MiB budget). These must be converted into released versions. :contentReference[oaicite:2]{index=2}
+      - README: “Versioning” states __version__ mirrors the Rust crate and “now **0.1.0**” and feature lists by ROADMAP that need updating to reflect the new grouped releases and v0.5.0. :contentReference[oaicite:3]{index=3}
+    </evidence>
+  </inputs>
 
-    <!-- 2) Ensure correct imports in src/vector/api.rs -->
-    <file path="src/vector/api.rs" action="patch">
-      <![CDATA[
-      *** Begin Patch
-      *** Update File: src/vector/api.rs
-      @@
-      -use numpy::PyReadonlyArray2;
-      +use numpy::PyReadonlyArray2;
-      +use pyo3::prelude::*;
-      *** End Patch
-      ]]>
-    </file>
+  <goals>
+    <goal>Transform all “workstream” progress occurring after v0.0.1 into proper versioned releases, culminating in v0.5.0.</goal>
+    <goal>Include the latest change on Workstream H in v0.5.0 (derive from repo content: commits, docs, tests). If multiple H updates exist, summarize the most recent as a single bullet under v0.5.0.</goal>
+    <goal>Update README.md to reflect v0.5.0 as the current version and refresh feature/API sections so they match what is actually available now.</goal>
+    <goal>Keep an “Unreleased” section only for items that truly haven’t shipped; remove/relocate any shipped items from “Unreleased.”</goal>
+  </goals>
 
-    <!-- 3) Fix all offending #[pyfunction] signatures in src/vector/api.rs -->
-    <!-- Use explicit patches for the reported line regions; if names differ, apply the same transformation pattern. -->
-    <file path="src/vector/api.rs" action="patch">
-      <![CDATA[
-      *** Begin Patch
-      *** Update File: src/vector/api.rs
-      @@
-     -#[pyfunction]
-     -pub fn <FUNCTION_AT_372>() -> Option<Vec<&PyReadonlyArray2<f64>>> { /* placeholder from error context */ }
-     +// NOTE: Replace references with owned PyReadonlyArray2<'py, T> and introduce the 'py lifetime.
-     +// For every #[pyfunction] that accepts numpy arrays, ensure the signature follows this pattern:
-     +//   #[pyfunction]
-     +//   pub fn func_name<'py>(/* optionally: _py: Python<'py>, */ arr: PyReadonlyArray2<'py, f64>, ...)
-     +// References (&PyReadonlyArray2<T>) must be removed.
-     *** End Patch
-      ]]>
-    </file>
+  <editing_plan>
+    <step id="1">Scan repository for “Workstream H” mentions (code, docs/, tests/, commit messages). Extract the latest concrete, shippable change (title + one-line summary + any key flags, e.g., env toggles).</step>
+    <step id="2">Partition the existing “Unreleased” items in CHANGELOG.md (D*, C*, M*, the UBO fix) into logical, incremental releases after 0.1.0, e.g., 0.2.0 → 0.3.0 → 0.4.0 → 0.5.0. Order them chronologically if commit dates are available; otherwise, group by dependency flow (e.g., C before D if D depends on fixes in C; M may land as a separate minor bump).</step>
+    <step id="3">For each new version block, create Keep-a-Changelog sections: “### Added / Changed / Fixed / Removed.” Convert workstream phrasing into user-facing release notes (drop internal codes like D5/C3 unless helpful as parentheses).</step>
+    <step id="4">Ensure v0.5.0 includes “Workstream H – latest change” as an “Added” (or “Changed”) bullet, plus any finalization items (e.g., UBO layout finalization if it lands in that release).</step>
+    <step id="5">Update README.md:
+      - Replace “now 0.1.0” with “now 0.5.0” in the Versioning section.
+      - Replace the “Features by ROADMAP” framing with a concise “What’s new in v0.5.0” plus a short “Since v0.2.0 … v0.4.0” overview, while keeping the curated API list accurate and current.
+      - Do not remove helpful API examples/snippets; just ensure they align with current capabilities (camera helpers, terrain utils, NumPy↔PNG, Scene/Renderer usage). :contentReference[oaicite:4]{index=4}
+    </step>
+    <step id="6">Keep a minimal “Unreleased” section at top of CHANGELOG.md for future work only (empty or with TODO bullets).</step>
+  </editing_plan>
 
-    <!-- 3a) Concrete replacements around the lines noted by the compiler (apply globally in this file). -->
-    <file path="src/vector/api.rs" action="regex-replace">
-      <pattern>&\s*PyReadonlyArray2\s*<\s*f64\s*></pattern>
-      <replacement>PyReadonlyArray2&lt;'py, f64&gt;</replacement>
-      <multiple>true</multiple>
-    </file>
-    <file path="src/vector/api.rs" action="regex-replace">
-      <pattern>&\s*PyReadonlyArray2\s*<\s*u32\s*></pattern>
-      <replacement>PyReadonlyArray2&lt;'py, u32&gt;</replacement>
-      <multiple>true</multiple>
-    </file>
-    <file path="src/vector/api.rs" action="regex-replace">
-      <pattern>Vec\s*<\s*&\s*PyReadonlyArray2\s*<\s*f64\s*>\s*></pattern>
-      <replacement>Vec&lt;PyReadonlyArray2&lt;'py, f64&gt;&gt;</replacement>
-      <multiple>true</multiple>
-    </file>
+  <rewrite_specs>
+    <style>
+      - Follow https://keepachangelog.com/en/1.1.0/ formatting already referenced in the file. :contentReference[oaicite:5]{index=5}
+      - Use SemVer pre-1.0 guidance (breaking changes can happen in minor bumps).
+      - Keep bullets crisp; prefer active voice, past tense, and concrete nouns (APIs, file paths, struct names).
+      - When useful, keep parenthetical hints (e.g., “std140 176-byte UBO layout”) but avoid internal noise.
+    </style>
+    <versioning>
+      - New top released version: 0.5.0
+      - Intermediate versions after 0.1.0: create 0.2.0, 0.3.0, 0.4.0 as needed to house shipped items (D*, C*, M*, UBO fix) by logical order.
+      - Dates: insert ISO date placeholders (YYYY-MM-DD) if exact dates are unknown.
+    </versioning>
+  </rewrite_specs>
 
-    <!-- 3b) Add 'py lifetime to any function using PyReadonlyArray2 that lacks it. -->
-    <!-- Heuristic: insert <'py> after fn name if a parameter uses PyReadonlyArray2<'py, -->
-    <file path="src/vector/api.rs" action="regex-replace">
-      <pattern>(#[ \t]*pyfunction[^\n]*\n[ \t]*(?:pub[ \t]+)?fn[ \t]+([A-Za-z0-9_]+)\s*\()</pattern>
-      <replacement>\1<'py>(</replacement>
-      <multiple>true</multiple>
-    </file>
+  <edits>
+    <target file="CHANGELOG.md">
+      <transform>
+        - Move the following “Unreleased” items into released sections:
+          * “Terrain UBO size mismatch … 176 bytes std140” → place under the earliest version where it actually shipped (if unknown, 0.3.0 “Fixed”). :contentReference[oaicite:6]{index=6}
+          * Workstream C1–C4 → summarize under “Added/Changed” in 0.2.0 (engine layout/error type; off-screen target determinism; diagnostics; tonemap functions). :contentReference[oaicite:7]{index=7}
+          * Workstream D4–D7 → 0.3.0 “Added/Changed” (transforms, orthographic camera, camera uniforms with view position, normal matrix). :contentReference[oaicite:8]{index=8}
+          * Workstream M1–M2 → 0.4.0 “Added/Changed” (Zero-Copy NumPy interop; memory budget tracker 512 MiB; metrics API). :contentReference[oaicite:9]{index=9}
+        - Create v0.5.0 and include “Workstream H – latest change” (derived in step 1) plus any final polish needed to call 0.5.0 the current release.
+        - Retain the historical 0.0.x → 0.1.0 sections as-is.
+        - Keep the leading “Unreleased” section; clear it or leave it with TODO placeholders.
+      </transform>
+    </target>
 
-    <!-- 3c) If any of those functions still lack a 'py source for lifetime inference, add an unused Python<'py> arg as first param. -->
-    <file path="src/vector/api.rs" action="regex-replace">
-      <pattern>(#[ \t]*pyfunction[^\n]*\n[ \t]*(?:pub[ \t]+)?fn[ \t]+[A-Za-z0-9_]+<'py>\s*\()</pattern>
-      <replacement>\0_py: Python<'py>, </replacement>
-      <multiple>true</multiple>
-    </file>
-
-    <!-- 3d) Concrete examples for the lines reported in the compiler errors (adjust names if different). -->
-    <file path="src/vector/api.rs" action="patch">
-      <![CDATA[
-      *** Begin Patch
-      *** Update File: src/vector/api.rs
-      @@
-     -// around line 372..376
-     -#[pyfunction]
-     -pub fn build_polygon(
-     -    exterior_coords: &PyReadonlyArray2<f64>,
-     -    holes: Option<Vec<&PyReadonlyArray2<f64>>>,
-     -) -> PyResult<PyObject> {
-     +#[pyfunction]
-     +pub fn build_polygon<'py>(
-     +    _py: Python<'py>,
-     +    exterior_coords: PyReadonlyArray2<'py, f64>,
-     +    holes: Option<Vec<PyReadonlyArray2<'py, f64>>>,
-     +) -> PyResult<PyObject> {
-          // body unchanged; use `exterior_coords.as_array()` etc.
-      }
-      @@
-     -// around line 419
-     -#[pyfunction]
-     -pub fn path_length(
-     -    path_coords: &PyReadonlyArray2<f64>,
-     -) -> PyResult<f64> {
-     +#[pyfunction]
-     +pub fn path_length<'py>(
-     +    _py: Python<'py>,
-     +    path_coords: PyReadonlyArray2<'py, f64>,
-     +) -> PyResult<f64> {
-          // body unchanged
-      }
-      @@
-     -// around line 476
-     -#[pyfunction]
-     -pub fn sample_along_path(
-     -    positions: &PyReadonlyArray2<f64>,
-     -) -> PyResult<Vec<f64>> {
-     +#[pyfunction]
-     +pub fn sample_along_path<'py>(
-     +    _py: Python<'py>,
-     +    positions: PyReadonlyArray2<'py, f64>,
-     +) -> PyResult<Vec<f64>> {
-          // body unchanged
-      }
-      @@
-     -// around line 533..534
-     -#[pyfunction]
-     -pub fn graph_from_nodes_edges(
-     -    nodes: &PyReadonlyArray2<f64>,
-     -    edges: &PyReadonlyArray2<u32>,
-     -) -> PyResult<Graph> {
-     +#[pyfunction]
-     +pub fn graph_from_nodes_edges<'py>(
-     +    _py: Python<'py>,
-     +    nodes: PyReadonlyArray2<'py, f64>,
-     +    edges: PyReadonlyArray2<'py, u32>,
-     +) -> PyResult<Graph> {
-          // body unchanged
-      }
-      *** End Patch
-      ]]>
-    </file>
-
-    <!-- 4) Optional: add brief doc hints to avoid misuse -->
-    <file path="src/vector/api.rs" action="patch">
-      <![CDATA[
-      *** Begin Patch
-      *** Update File: src/vector/api.rs
-      @@
-      /// NOTE: Numpy inputs must be 2D arrays shaped (N, 2). Parameters are accepted as
-      /// `PyReadonlyArray2<'py, T>` (owned pyo3 handles). Do not use `&PyReadonlyArray2<T>`
-      /// in #[pyfunction] signatures—pyo3 cannot extract references from Python call sites.
-      *** End Patch
-      ]]>
-    </file>
-  </changeset>
+    <target file="README.md">
+      <transform>
+        - In “Versioning,” replace “now **0.1.0**” with “now **0.5.0**” and keep the mirroring explanation. :contentReference[oaicite:10]{index=10}
+        - Replace “Features by ROADMAP (what’s implemented so far)” with:
+          * “What’s new in v0.5.0” (bullets for the H update and any top-level improvements that matter to users).
+          * “Highlights since v0.2.0” (short bullets referencing C, D, M groupings, no internal codes needed).
+        - Ensure the curated API list (I/O, Rendering, Scene, Terrain utils, Colormaps, Mesh, Camera helpers, Diagnostics, Timing, Introspection) matches what’s actually available; update as needed without removing useful examples. :contentReference[oaicite:11]{index=11}
+      </transform>
+    </target>
+  </edits>
 
   <acceptance_criteria>
-    <item>Project compiles successfully with <code>maturin develop --release</code> (no E0277 errors related to PyFunctionArgument / FromPyObject for numpy arrays).</item>
-    <item>All #[pyfunction] parameters previously typed as <code>&PyReadonlyArray2&lt;T&gt;</code> are now <code>PyReadonlyArray2&lt;'py, T&gt;</code>.</item>
-    <item>Any <code>Vec&lt;&amp;PyReadonlyArray2&lt;f64&gt;&gt;</code> is replaced with <code>Vec&lt;PyReadonlyArray2&lt;'py, f64&gt;&gt;</code>.</item>
-    <item>Functions using these types declare a <code>'py</code> lifetime. If needed, an unused <code>_py: Python&lt;'py&gt;</code> parameter is added to satisfy lifetime constraints.</item>
-    <item>Existing function bodies continue to operate via <code>.as_array()</code>/<code>.readonly()</code> without additional allocations.</item>
+    <criterion>CHANGELOG.md top section is “[Unreleased]” followed by new sections: [0.5.0], [0.4.0], [0.3.0], [0.2.0], then existing history (down to 0.0.2).</criterion>
+    <criterion>v0.5.0 contains a bullet referencing the latest Workstream H change with a clear one-line summary (no placeholders).</criterion>
+    <criterion>All previously “Unreleased” C/D/M/UBO items are moved into released sections with appropriate “Added/Changed/Fixed” buckets and no duplication remains. :contentReference[oaicite:12]{index=12}</criterion>
+    <criterion>README.md states the current version as **0.5.0** in the Versioning section and surfaces a “What’s new in v0.5.0” block near the top Features section. :contentReference[oaicite:13]{index=13}</criterion>
+    <criterion>README examples (Renderer/Scene, PNG↔NumPy, camera helpers) remain valid and consistent with the API listed. :contentReference[oaicite:14]{index=14}</criterion>
+    <criterion>No references remain that suggest the latest version is 0.1.0.</criterion>
+    <criterion>Markdown renders cleanly (no broken headings, code fences, or links).</criterion>
   </acceptance_criteria>
 
-  <tests>
-    <instruction>
-      <![CDATA[
-      1) Build locally:
-         maturin develop --release
+  <constraints>
+    <constraint>Keep a Changelog 1.1.0 style; maintain SemVer semantics (pre-1.0 may break).</constraint>
+    <constraint>Do not invent features; base wording on code, tests, and the existing docs. Prefer concrete nouns (function names, struct names, paths).</constraint>
+    <constraint>Do not modify any files other than CHANGELOG.md and README.md.</constraint>
+  </constraints>
 
-      2) Add a minimal smoke test (pytest) under tests/test_numpy_args.py:
-      ---------------------------------------------------------
-      import numpy as np
-      import forge3d  # replace with actual module name
+  <deliverables>
+    <file_output>Updated CHANGELOG.md with 0.2.0 → 0.5.0 releases and Workstream H included in 0.5.0.</file_output>
+    <file_output>Updated README.md with current version 0.5.0 and refreshed features overview.</file_output>
+    <summary_output>A short “what changed” bullet list describing how items were re-bucketed from Unreleased and where Workstream H landed.</summary_output>
+  </deliverables>
 
-      def test_signatures_roundtrip():
-          ext = np.array([[0.0, 0.0],[1.0, 0.0],[1.0, 1.0],[0.0, 1.0]], dtype=np.float64)
-          holes = [np.array([[0.2,0.2],[0.8,0.2],[0.8,0.8],[0.2,0.8]], dtype=np.float64)]
-          # functions below should reflect real exported names:
-          if hasattr(forge3d, "build_polygon"):
-              forge3d.build_polygon(ext, holes)
-
-          path = np.stack([np.linspace(0,1,5), np.linspace(0,1,5)], axis=1).astype(np.float64)
-          if hasattr(forge3d, "path_length"):
-              forge3d.path_length(path)
-
-          positions = path.astype(np.float64)
-          if hasattr(forge3d, "sample_along_path"):
-              forge3d.sample_along_path(positions)
-
-          nodes = np.array([[0.0,0.0],[1.0,0.0],[1.0,1.0]], dtype=np.float64)
-          edges = np.array([[0,1],[1,2]], dtype=np.uint32)
-          if hasattr(forge3d, "graph_from_nodes_edges"):
-              forge3d.graph_from_nodes_edges(nodes, edges)
-      ---------------------------------------------------------
-
-      3) Run: pytest -q
-      ]]>
-    </instruction>
-  </tests>
-
-  <risks>
-    <item>If any function returns views or borrows tied to Python memory, ensure returned values don't outlive 'py; prefer copying to Rust-owned buffers before returning if necessary.</item>
-    <item>Introducing <code>_py: Python&lt;'py&gt;</code> suppresses lifetime inference issues; keep the leading underscore to avoid unused warnings.</item>
-  </risks>
-
-  <roll_back_plan>
-    <step>Revert only the signature changes if any downstream code requires references (it shouldn’t for pyo3 extraction).</step>
-    <step>Confirm numpy/pyo3 versions align with the ABI flags in pyproject.toml if builds still fail.</step>
-  </roll_back_plan>
-</task>
+  <notes_for_editor>
+    - If commit timestamps are available, order 0.2.0–0.5.0 by actual landing date; otherwise, keep the logical sequence (C → D → M → H).
+    - For the “Terrain UBO 176-byte std140” item, ensure it appears exactly once under the correct release with the 44-float note if relevant. :contentReference[oaicite:15]{index=15}
+    - Keep README’s curated API list intact but accurate; don’t remove it—users rely on those quick snippets. :contentReference[oaicite:16]{index=16}
+  </notes_for_editor>
+</prompt>

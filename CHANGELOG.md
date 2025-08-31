@@ -5,6 +5,43 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+<!-- Future work goes here -->
+
+## [0.5.0] - 2025-08-31
+
+### Added
+- **Workstream H – Vector & Graph Layers**: Complete vector graphics rendering pipeline with GPU acceleration
+  - Full vector graphics API with polygons, polylines, points, and graphs (`src/vector/api.rs`)
+  - Anti-aliased line rendering with caps and joins support (H8, H9)
+  - Instanced point rendering with texture atlas and debug modes (H11, H20, H21, H22)
+  - Order Independent Transparency (OIT) for proper alpha blending (H16)
+  - GPU culling and indirect drawing for large-scale rendering performance (H17, H19)
+  - Polygon fill pipeline with hole support and proper sRGB output (H5, H6)
+  - Graph rendering system with separate node/edge pipelines (H12, H13)
+  - Comprehensive batching and visibility culling with AABB computation (H4, H10)
+
+## [0.4.0] - 2025-08-30
+
+### Added
+- **Zero-Copy NumPy Interoperability**: Implemented zero-copy pathways between NumPy arrays and Rust GPU memory system
+  - Added test-only hooks for pointer validation: `render_triangle_rgba_with_ptr()`, `debug_last_height_src_ptr()`
+  - Float32 C-contiguous heightmap arrays processed without copying via direct memory access
+  - RGBA output buffers returned as NumPy arrays sharing memory with Rust allocations
+  - Comprehensive test suite in `tests/test_numpy_interop.py` with 13 validation tests
+  - Zero-copy profiler tool `python/tools/profile_copies.py` with "zero-copy OK" validation
+  - Added validation helpers in `python/forge3d/_validate.py` for compatibility checking
+  - Documentation: `docs/interop_zero_copy.rst` with usage patterns and troubleshooting
+- **Memory Budget Tracking**: Implemented 512 MiB host-visible memory budget enforcement
+  - Created memory tracker module `src/core/memory_tracker.rs` with atomic resource counters  
+  - Budget checking prevents out-of-memory errors with descriptive failure messages
+  - Real-time memory metrics via `get_memory_metrics()` API with utilization ratios
+  - Thread-safe tracking of buffer/texture allocations and deallocations
+  - Fixed readback buffer accounting in render methods with proper budget validation
+  - Memory budget test suite in `tests/test_memory_budget.py` with 15 validation tests
+  - Documentation: `docs/memory_budget.rst` with usage patterns and best practices
+
+## [0.3.0] - 2025-08-29
+
 ### Fixed
 - **Terrain UBO size mismatch**: Fixed WGPU validation error "Buffer is bound with size X where shader expects Y"
   - Reduced terrain uniform buffer from 656 bytes to 176 bytes (std140-compatible layout)
@@ -14,55 +51,36 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
   - Updated uniform debug interface to return exactly 44 floats (176 bytes / 4)
   - Created comprehensive documentation in `docs/uniforms.rst` explaining the new layout
 
-### Workstream D – Camera & Uniforms
-
-- **D4 – Model transforms & math helpers**: Complete T/R/S transformation system with math utilities
+### Added
+- **Model transforms & math helpers**: Complete T/R/S transformation system with math utilities
   - Added comprehensive transform functions: `translate()`, `rotate_x/y/z()`, `scale()`, `scale_uniform()`
   - Implemented `compose_trs()` for T*R*S matrix composition with quaternion-based rotations
   - Added matrix utilities: `multiply_matrices()`, `invert_matrix()`, `look_at_transform()`
   - Created `src/transforms.rs` module with NumPy interop and proper column/row-major conversion
   - 12 comprehensive tests in `tests/test_d4_transforms.py` including acceptance criterion validation
-- **D5 – Orthographic projection**: Pixel-aligned 2D camera mode for UI and precise rendering
+- **Orthographic projection**: Pixel-aligned 2D camera mode for UI and precise rendering
   - Added `camera_orthographic()` function with left/right/bottom/top/near/far parameters
   - Implemented manual orthographic matrix construction with GL↔WGPU clip-space conversion
   - Full support for both GL [-1,1] and WGPU [0,1] depth ranges via `clip_space` parameter
   - 7 validation tests in `tests/test_d5_ortho_camera.py` with pixel-alignment verification
-- **D6 – Camera uniforms with viewWorldPosition**: Enhanced uniform system for specular lighting
+- **Camera uniforms with viewWorldPosition**: Enhanced uniform system for specular lighting
   - Extended `TerrainUniforms` with `view_world_position` field for camera world position
   - Added `camera_world_position_from_view()` utility for automatic extraction from view matrices
   - Updated WGSL shader to access camera position for distance-based lighting effects
   - 8 comprehensive tests in `tests/test_d6_camera_uniforms.py` with matrix validation
-- **D7 – Normal matrix computation**: Proper normal transformation for non-uniform scaling
+- **Normal matrix computation**: Proper normal transformation for non-uniform scaling
   - Added `compute_normal_matrix()` function computing inverse-transpose for correct normal transformation
   - Integrated normal matrix into terrain uniform buffer (64-byte mat4x4 field)
   - Updated WGSL terrain shader to transform normals using normal matrix for accurate lighting
   - 12 mathematical tests in `tests/test_d7_normal_matrix.py` validating transform properties
 
-### Workstream C – Gap Fill
+## [0.2.0] - 2025-08-28
 
-- **C1 – Engine layout & error type**: Added centralized `RenderError` enum with PyErr conversion; created modular layout shims (`src/context.rs`, `src/core/framegraph.rs`, `src/core/gpu_types.rs`) for deliverable compliance
-- **C2 – Off-screen target preservation**: Added regression tests to ensure 512×512 PNG round-trip remains deterministic; existing row-padding and readback functionality preserved  
-- **C3 – Device diagnostics integration**: Added `Renderer.report_device()` method returning structured device capabilities including backend, limits, and MSAA support; MSAA automatically gated based on device capabilities
-- **C4 – Explicit tonemap functions**: Added `reinhard()` and `gamma_correct()` functions to `terrain.wgsl` with explicit gamma 2.2 correction; created comprehensive color management documentation
-
-### Workstream M – Zero-Copy NumPy Interop & Memory Budget
-
-- **M1 – Zero-Copy NumPy Interoperability**: Implemented zero-copy pathways between NumPy arrays and Rust GPU memory system
-  - Added test-only hooks for pointer validation: `render_triangle_rgba_with_ptr()`, `debug_last_height_src_ptr()`
-  - Float32 C-contiguous heightmap arrays processed without copying via direct memory access
-  - RGBA output buffers returned as NumPy arrays sharing memory with Rust allocations
-  - Comprehensive test suite in `tests/test_numpy_interop.py` with 13 validation tests
-  - Zero-copy profiler tool `python/tools/profile_copies.py` with "zero-copy OK" validation
-  - Added validation helpers in `python/forge3d/_validate.py` for compatibility checking
-  - Documentation: `docs/interop_zero_copy.rst` with usage patterns and troubleshooting
-- **M2 – Memory Budget Tracking**: Implemented 512 MiB host-visible memory budget enforcement
-  - Created memory tracker module `src/core/memory_tracker.rs` with atomic resource counters  
-  - Budget checking prevents out-of-memory errors with descriptive failure messages
-  - Real-time memory metrics via `get_memory_metrics()` API with utilization ratios
-  - Thread-safe tracking of buffer/texture allocations and deallocations
-  - Fixed readback buffer accounting in render methods with proper budget validation
-  - Memory budget test suite in `tests/test_memory_budget.py` with 15 validation tests
-  - Documentation: `docs/memory_budget.rst` with usage patterns and best practices
+### Added
+- **Engine layout & error type**: Added centralized `RenderError` enum with PyErr conversion; created modular layout shims (`src/context.rs`, `src/core/framegraph.rs`, `src/core/gpu_types.rs`) for deliverable compliance
+- **Off-screen target preservation**: Added regression tests to ensure 512×512 PNG round-trip remains deterministic; existing row-padding and readback functionality preserved  
+- **Device diagnostics integration**: Added `Renderer.report_device()` method returning structured device capabilities including backend, limits, and MSAA support; MSAA automatically gated based on device capabilities
+- **Explicit tonemap functions**: Added `reinhard()` and `gamma_correct()` functions to `terrain.wgsl` with explicit gamma 2.2 correction; created comprehensive color management documentation
 
 ## [0.1.0] - 2025-08-19
 

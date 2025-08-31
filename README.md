@@ -50,29 +50,21 @@ python examples/terrain_single_tile.py
 
 Runs anywhere wgpu supports: Vulkan / Metal / DX12 / GL (and Browser WebGPU for diagnostics). A discrete or integrated GPU is recommended. Examples/tests that need a GPU will skip if no compatible adapter is found.
 
-## Features by ROADMAP (what's implemented so far)
+## What's new in v0.5.0
 
-* **T2.x Infrastructure & exports**
+* **Complete Vector Graphics Pipeline**: Full vector rendering system with polygons, polylines, points, and graphs
+* **Anti-aliased Line Rendering**: Hardware-accelerated line rendering with caps and joins support
+* **Instanced Point Rendering**: High-performance point sprites with texture atlas and debug modes  
+* **Order Independent Transparency (OIT)**: Proper alpha blending for complex scenes
+* **GPU Culling & Indirect Drawing**: Large-scale rendering performance optimizations
 
-  * Curated Python surface with stable wrappers and `__version__` re-export.
-* **T3.x Geometry & scene prep**
+## Highlights since v0.2.0
 
-  * Grid generation primitives used by terrain rendering.
-* **T4.2 Packaging & Core Unification**
+* **v0.4.0**: Zero-Copy NumPy interoperability and 512 MiB memory budget tracking
+* **v0.3.0**: Enhanced camera system with transforms, orthographic projection, and uniform improvements  
+* **v0.2.0**: Engine foundation with error handling, diagnostics, and tonemap functions
 
-  * Shared GPU context (`gpu.rs`) and alignment helper (`align_copy_bpr()`).
-  * Uniform PathLike support for PNG I/O and render-to-PNG.
-  * Docstrings clarifying PNG↔NumPy parity & contiguity.
-  * Typing stubs + `py.typed`.
-* **T5.1 Synthetic DEM tests**
-
-  * Deterministic height fields for validation; GPU-aware test strategy.
-* **T5.2 Timing harness**
-
-  * API: `run_benchmark(...)`
-  * CLI: `vf-bench` for reproducible measurements (no perf pass/fail).
-
-Each item below links back to these features.
+The comprehensive API below provides access to all these features.
 
 ## Quickstart: PNG ↔ NumPy
 
@@ -106,10 +98,12 @@ assert arr.shape == (64, 64, 4)
   * `render_png(path)`, `render_rgba()`
 * Terrain utils: `terrain_stats()`, `set_height_range(min, max)`, `normalize_terrain(mode, range=None, eps=1e-8)`,
   `upload_height_r32f()`, `debug_read_height_patch(x,y,w,h)`, `read_full_height_texture()`
+* Vector graphics: `add_polygons(...)`, `add_lines(...)`, `add_points(...)`, `add_graph(...)`
 * Colormaps: `colormap_supported()`
 * Mesh: `grid_generate(nx, nz, spacing=(sx,sz), origin='center')`
 * Camera helpers: `camera_look_at(...)`, `camera_perspective(...)`, `camera_view_proj(...)`
-* Diagnostics: `enumerate_adapters()`, `device_probe(backend=None)`
+* Transform utilities: `translate(...)`, `rotate_x/y/z(...)`, `scale(...)`, `scale_uniform(...)`
+* Diagnostics: `enumerate_adapters()`, `device_probe(backend=None)`, `get_memory_metrics()`
 * Timing: `run_benchmark(operation, width, height, iters, ...)` and CLI `vf-bench`
 * Introspection: `__version__` (sourced from the Rust crate)
 
@@ -228,7 +222,7 @@ pytest -q
 
 ## Versioning
 
-`forge3d.__version__` mirrors the Rust crate version (`env!("CARGO_PKG_VERSION")`), now **0.1.0**.
+`forge3d.__version__` mirrors the Rust crate version (`env!("CARGO_PKG_VERSION")`), now **0.5.0**.
 
 ## Changelog
 
