@@ -4,7 +4,7 @@
 //! Measures frame times and bind group switching overhead.
 
 use std::time::Instant;
-use wgpu::*;
+use wgpu::{*, util::DeviceExt};
 use pollster;
 
 /// Configuration for the performance demo
@@ -247,7 +247,7 @@ impl SingleBindGroupTest {
                 ty: BindingType::Buffer {
                     ty: BufferBindingType::Uniform,
                     has_dynamic_offset: true,
-                    min_binding_size: Some(std::num::NonZeroU64::new(64).unwrap()),
+                    min_binding_size: Some(std::num::NonZeroU64::new(256).unwrap()),
                 },
                 count: None,
             }],
@@ -315,7 +315,7 @@ impl SingleBindGroupTest {
         });
 
         // Create single large uniform buffer for all objects
-        let uniform_size = 64 * ctx.config.objects as u64; // 64 bytes per object (aligned)
+        let uniform_size = 256 * ctx.config.objects as u64; // 256 bytes per object (GPU alignment requirement)
         let uniform_buffer = ctx.device.create_buffer(&BufferDescriptor {
             label: Some("SingleBG_LargeUniform"),
             size: uniform_size,
@@ -334,7 +334,7 @@ impl SingleBindGroupTest {
             
             ctx.queue.write_buffer(
                 &uniform_buffer,
-                i as u64 * 64,
+                i as u64 * 256,
                 bytemuck::cast_slice(&transform),
             );
         }
@@ -348,7 +348,7 @@ impl SingleBindGroupTest {
                 resource: BindingResource::Buffer(BufferBinding {
                     buffer: &uniform_buffer,
                     offset: 0,
-                    size: Some(std::num::NonZeroU64::new(64).unwrap()),
+                    size: Some(std::num::NonZeroU64::new(256).unwrap()),
                 }),
             }],
         });
@@ -389,7 +389,7 @@ impl SingleBindGroupTest {
 
             // Render all objects with dynamic offsets (single bind group, multiple offsets)
             for i in 0..ctx.config.objects {
-                let offset = i * 64; // 64-byte aligned offsets
+                let offset = i * 256; // 256-byte aligned offsets (GPU requirement)
                 render_pass.set_bind_group(0, &self.bind_group, &[offset]);
                 render_pass.draw_indexed(0..6, 0, i..i + 1);
             }

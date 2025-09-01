@@ -89,7 +89,9 @@
       "Bash(set VF_ENABLE_TERRAIN_TESTS=1)",
       "Bash(src/ python/ examples/ tests/ docs/)",
       "Bash(git log:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(RUST_LOG=info cargo run --example split_vs_single_bg --release -- --frames 600 --out artifacts/perf/I6_bg_churn.csv)",
+      "Bash(bash:*)"
     ],
     "deny": [],
     "additionalDirectories": [

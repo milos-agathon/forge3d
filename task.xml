@@ -1,180 +1,89 @@
 <task>
-  <title>Implement & wire missing/partial items for Workstream I</title>
-
+  <title>Remediate failed criteria only</title>
   <inputs>
     <repoRoot>.</repoRoot>
     <paths>
-      <path>src/</path>
-      <path>shaders/</path>
-      <path>python/forge3d/</path>
-      <path>examples/</path>
-      <path>docs/</path>
-      <path>bench/</path>
-      <path>ci/</path>
+      <path>examples/perf/split_vs_single_bg.rs</path>
+      <path>examples/perf/split_vs_single_bg.py</path>
+      <path>shaders/perf/single_bg.wgsl</path>
+      <path>shaders/perf/split_bg.wgsl</path>
+      <path>shaders/include/big_buffer.wgsl</path>
+      <path>src/core/big_buffer.rs</path>
+      <path>src/core/mod.rs</path>
+      <path>tests/wsI_i7_big_buffer.rs</path>
+      <path>bench/upload_policies/policies.rs</path>
+      <path>ci/run_benches.sh</path>
+      <path>docs/workstreams/I/I6_bg_churn.md</path>
+      <path>docs/workstreams/I/I9_upload_policies.md</path>
     </paths>
-    <workstream>Workstream I — WebGPU Fundamentals (Uniforms/Storage/Instancing)</workstream>
-    <tasks>
-      <task>I1: Minimal uniform buffer path</task>
-      <task>I2: Storage buffer feature parity</task>
-      <task>I3: Instancing via per-instance attributes</task>
-      <task>I4: Bind group layouts & lifetime policy</task>
-      <task>I5: Debug & validation toggles</task>
-      <task>I6: Split-buffers perf demo</task>
-      <task>I7: Per-frame big buffer for per-object data (dynamic offset/index addressing)</task>
-      <task>I8: Double-buffering per-frame uniform/storage data</task>
-      <task>I9: Upload policy benchmark: mappedAtCreation vs queue.writeBuffer vs staging ring</task>
-    </tasks>
+    <workstream>I – Bind Groups, Big Buffer, Double Buffering, Upload Policies</workstream>
+    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
   </inputs>
 
   <plan>
-    <!-- Audit-first guardrail -->
-    <step id="P0">Parse roadmap.csv (Workstream I rows) and audit_I.md to confirm I6/I7 are Partial, I8/I9 Absent; abort if mismatch.</step>
+    <!-- I6: Add minimal Python wrapper & doc to run the perf example and emit CSV -->
+    <step id="I6-1">Create <file>examples/perf/split_vs_single_bg.py</file> that parses args (--frames, --out), shells out to the Rust example via subprocess, and validates the resulting CSV exists and has required columns.</step>
+    <step id="I6-2">Author <file>docs/workstreams/I/I6_bg_churn.md</file> describing the experiment, exact run command, expected CSV schema (config, frame_ms, delta_ms), and interpretation.</step>
 
-    <!-- Branching and scaffolding -->
-    <step id="P1">Create branch: feat/ws-I-wire-missing; add skeleton dirs: bench/upload_policies/, examples/perf/, docs/workstreams/I/.</step>
+    <!-- I7: Add missing test implementing perf + visual parity -->
+    <step id="I7-1">Add <file>tests/wsI_i7_big_buffer.rs</file>: constructs a 10k-object scene; runs two paths (legacy per-object bind group vs BigBuffer under <feature>wsI_bigbuf</feature>); measures CPU time; renders the same frame(s) and compares pixels (exact match or SSIM≥0.99). Feature-detect to skip BigBuffer path if feature off, and run both modes in CI by toggling features.</step>
 
-    <!-- I7 depends on I3,I4,I5 (already Present & wired). Build the big-buffer first so I8 can reuse it. -->
-    <step id="P2" dependsOn="P1">Implement I7 “big buffer” pattern:
-      - Add src/core/big_buffer.rs: single large STORAGE buffer (ring/arena), 64-byte alignment, dynamic offset & index addressing helpers; RAII allocator.
-      - Expose safe API for per-object blocks; sample WGSL struct for indexing.
-      - Integrate path behind feature flag `wsI_bigbuf` in one existing draw path (e.g., vector/point or line) without regressing current path.
-      - Add unit tests for alignment/padding and offset math.
-      - Write docs/workstreams/I/I7_big_buffer.md explaining usage & pitfalls.
-    </step>
-
-    <!-- I8 depends on I7,M3 (M3 out-of-scope). We still implement ping-pong atop big-buffer; detect M3 at build-time and degrade gracefully. -->
-    <step id="P3" dependsOn="P2">Implement I8 double-buffering for per-frame data:
-      - Add src/core/double_buffer.rs: ping-pong wrapper for per-frame uniform/storage blocks (N=2, with optional N=3).
-      - Wire into one render path that updates per-frame globals; add 300-frame headless test to assert no validation hazards / contentions.
-      - Add docs/workstreams/I/I8_double_buffering.md incl. when triple-buffering helps.
-    </step>
-
-    <!-- I6 depends on I4. With I7 ready, we can measure split BG vs single BG (bind group churn). -->
-    <step id="P4" dependsOn="P1">Complete I6 split-buffers perf demo:
-      - Add examples/perf/split_vs_single_bg.rs (and python wrapper) that toggles split bind groups vs single bind group.
-      - Emit CSV to artifacts/perf/I6_bg_churn.csv and a short markdown summary docs/workstreams/I/I6_bg_churn.md.
-    </step>
-
-    <!-- I9 depends on M3,I7. We implement harness; if M3 features absent, gate sub-tests accordingly and still compare the policies we can run. -->
-    <step id="P5" dependsOn="P2">Implement I9 upload policy benchmark:
-      - Add bench/upload_policies/policies.rs comparing queue.writeBuffer, mappedAtCreation, staging ring (big_buffer-backed).
-      - Record throughput (MB/s) and CPU time; select default; support env override FORGE3D_UPLOAD_POLICY.
-      - Print report in stdout and write artifacts/perf/I9_upload_policies.md.</step>
-
-    <!-- Docs + CI -->
-    <step id="P6" dependsOn="P3,P4,P5">Sphinx docs: add docs/workstreams/I/index.rst including I6/I7/I8/I9 pages; wire into TOC; add CI job to run perf/bench (warn-only).</step>
-    <step id="P7" dependsOn="P6">Ensure memory tracker limits host-visible allocations ≤ 512 MiB in new paths; add asserts & counters.</step>
+    <!-- I9: Add CI bench script and doc; ensure artifact written -->
+    <step id="I9-1">Create <file>ci/run_benches.sh</file> (POSIX shell) that: (a) builds benches in release, (b) runs <code>bench/upload_policies/policies.rs</code> producing <file>artifacts/perf/I9_upload_policies.md</file>, (c) echoes the artifact path for CI upload, and (d) runs again with <env>FORGE3D_UPLOAD_POLICY=UseCopyEncoder</env> to verify env override is honored (different mode reported in MD).</step>
+    <step id="I9-2">Author <file>docs/workstreams/I/I9_upload_policies.md</file> summarizing policies, how to run the bench, and where CI publishes the MD.</step>
   </plan>
 
   <deliverables>
-    <!-- From CSV cells (original wording), mapped to concrete artifacts -->
-    <task id="I6">
-      <csvDeliverables>measure BG churn vs single BG</csvDeliverables>
-      <artifacts>
-        <file>examples/perf/split_vs_single_bg.rs</file>
-        <file>examples/perf/split_vs_single_bg.py</file>
-        <file>artifacts/perf/I6_bg_churn.csv</file>
-        <file>docs/workstreams/I/I6_bg_churn.md</file>
-      </artifacts>
-    </task>
-
-    <task id="I7">
-      <csvDeliverables>Implement big-buffer pattern: one bind group with ... via instance data or push-constant; document alignment/padding.</csvDeliverables>
-      <artifacts>
-        <file>src/core/big_buffer.rs</file>
-        <file>src/core/mod.rs</file>
-        <file>shaders/include/big_buffer.wgsl</file>
-        <file>tests/wsI_i7_big_buffer.rs</file>
-        <file>docs/workstreams/I/I7_big_buffer.md</file>
-      </artifacts>
-    </task>
-
-    <task id="I8">
-      <csvDeliverables>Introduce ping-pong buffers for per-frame data; fe...te vs in-flight; document when triple-buffering might be needed.</csvDeliverables>
-      <artifacts>
-        <file>src/core/double_buffer.rs</file>
-        <file>tests/wsI_i8_pingpong.rs</file>
-        <file>docs/workstreams/I/I8_double_buffering.md</file>
-      </artifacts>
-    </task>
-
-    <task id="I9">
-      <csvDeliverables>Benchmark harness comparing queue.writeBuffer, map...oughput (MB/s) and CPU time; pick defaults; expose env override.</csvDeliverables>
-      <artifacts>
-        <file>bench/upload_policies/policies.rs</file>
-        <file>artifacts/perf/I9_upload_policies.md</file>
-        <file>ci/run_benches.sh</file>
-        <file>docs/workstreams/I/I9_upload_policies.md</file>
-      </artifacts>
-    </task>
+    <item>I6: examples/perf/split_vs_single_bg.py</item>
+    <item>I6: docs/workstreams/I/I6_bg_churn.md</item>
+    <item>I7: tests/wsI_i7_big_buffer.rs</item>
+    <item>I9: ci/run_benches.sh</item>
+    <item>I9: docs/workstreams/I/I9_upload_policies.md</item>
   </deliverables>
 
   <acceptanceCriteria>
-    <!-- Lifted from CSV cells (original wording), plus measurable hooks -->
-    <task id="I6">
-      <csvAC>Perf deltas recorded</csvAC>
-      <checks>
-        <check>Running examples/perf/split_vs_single_bg produces artifacts/perf/I6_bg_churn.csv with ≥2 labeled configurations and frame-time delta columns.</check>
-      </checks>
-    </task>
+    <!-- I6 -->
+    <criterion id="I6-AC1">Running:
+      <code>RUST_LOG=info cargo run --example split_vs_single_bg --release -- --frames 600 --out artifacts/perf/I6_bg_churn.csv</code>
+      produces <file>artifacts/perf/I6_bg_churn.csv</file> with columns: <code>config, frame_ms, delta_ms</code>, ≥600 rows.</criterion>
 
-    <task id="I7">
-      <csvAC>Microbench: replacing N per-object bind gro...≥25% on a 10k-object scene; visuals unchanged; validation clean.</csvAC>
-      <checks>
-        <check>tests/wsI_i7_big_buffer.rs runs a 10k-object microbench and reports ≥25% improvement over per-object BG path on the same GPU.</check>
-        <check>WGSL path renders same pixels (hash/SSIM threshold) and passes validation without errors.</check>
-      </checks>
-    </task>
+    <!-- I7 -->
+    <criterion id="I7-AC1">With legacy path (default) vs BigBuffer (<code>--features wsI_bigbuf</code>), the test <file>tests/wsI_i7_big_buffer.rs</file> runs and reports ≥25% reduction in CPU submission time at 10k objects (median of ≥3 runs).</criterion>
+    <criterion id="I7-AC2">Visual parity: the test compares rendered outputs and either exact-matches or achieves SSIM ≥ 0.99 between legacy and BigBuffer paths.</criterion>
+    <criterion id="I7-AC3">Both builds compile: <code>cargo test --release</code> (legacy) and <code>cargo test --release --features wsI_bigbuf</code> succeed.</criterion>
 
-    <task id="I8">
-      <csvAC>No validation hazards; no stalls from contention in a 300-frame run; reduced CPU waits vs single buffer.</csvAC>
-      <checks>
-        <check>tests/wsI_i8_pingpong.rs executes 300 consecutive frames with validation layers enabled and reports 0 hazards, 0 queue stalls.</check>
-        <check>CPU wait time reduced vs single-buffer baseline by measurable margin (&gt;0 ms and reported in log).</check>
-      </checks>
-    </task>
-
-    <task id="I9">
-      <csvAC>Chosen default is ≥15% faster than slowest policy on mid-range GPU; report printed in examples/CI logs.</csvAC>
-      <checks>
-        <check>bench/upload_policies/policies.rs prints per-policy MB/s and CPU time; default policy recorded; env override FORGE3D_UPLOAD_POLICY respected.</check>
-        <check>CI artifacts include artifacts/perf/I9_upload_policies.md with the table and selected default.</check>
-      </checks>
-    </task>
-
-    <runbook>
-      <cmd>cargo build --locked --all-targets</cmd>
-      <cmd>cargo test --tests -- --nocapture</cmd>
-      <cmd>RUST_LOG=info cargo run --example split_vs_single_bg --release -- --frames 600 --out artifacts/perf/I6_bg_churn.csv</cmd>
-      <cmd>cargo bench --bench upload_policies -- --save-baseline wsI</cmd>
-      <cmd>make -C docs html</cmd>
-    </runbook>
+    <!-- I9 -->
+    <criterion id="I9-AC1"><code>ci/run_benches.sh</code> exits 0 and creates <file>artifacts/perf/I9_upload_policies.md</file> with MB/s and CPU time for each policy.</criterion>
+    <criterion id="I9-AC2">Running the script with <env>FORGE3D_UPLOAD_POLICY=UseCopyEncoder</env> shows this mode in the MD output.</criterion>
   </acceptanceCriteria>
 
   <safety>
-    <rule>Create dedicated branch; small, reviewable commits per task.</rule>
-    <rule>Audit-first check (P0) must pass before edits proceed.</rule>
-    <rule>No blind search/replace; limit diffs to listed files/paths.</rule>
-    <rule>Exclude binary/build dirs (target/, build/, .venv/, .mypy_cache/, node_modules/, *.png, *.bin) from edits.</rule>
-    <rule>Keep host-visible allocations &lt;= 512 MiB; add asserts & counters.</rule>
+    <branch>fix/ws-I-remediate-minimal</branch>
+    <commitStrategy>small, atomic commits per step (I6, I7, I9)</commitStrategy>
+    <excludeDirs>target/, dist/, build/, .venv/, __pycache__/</excludeDirs>
+    <searchReplacePolicy>No blind search/replace; only targeted edits in listed paths.</searchReplacePolicy>
+    <reviewGates>
+      <gate>Run rustfmt/clippy on touched Rust files.</gate>
+      <gate>Run a local Sphinx build for added docs pages only.</gate>
+    </reviewGates>
   </safety>
 
   <constraints>
-    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
-    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
-    <toolchain>cmake≥3.24, cargo/rustc, PyO3, VMA</toolchain>
+    <gpuHostVisibleBudgetMiB>512</gpuHostVisibleBudgetMiB>
+    <toolchain>cmake>=3.24, cargo/rustc, PyO3, VMA</toolchain>
     <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
-    <docs>Sphinx preferred</docs>
+    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
   </constraints>
 
   <completion>
-    <summary>All four targeted tasks (I6 partial → complete; I7 partial → complete; I8 absent → added; I9 absent → added) implemented, measured, documented, and tested without validation errors, within memory budget.</summary>
+    <summary>All missing Workstream I deliverables added; tests/docs/benches runnable; acceptance criteria validated locally.</summary>
     <verify>
-      <cmd>cargo build --locked --all-targets</cmd>
-      <cmd>cargo test -- --nocapture</cmd>
-      <cmd>RUST_LOG=info cargo run --example split_vs_single_bg --release -- --frames 600</cmd>
-      <cmd>cargo bench --bench upload_policies -- --quick</cmd>
-      <cmd>make -C docs html</cmd>
+      <cmd>I6: RUST_LOG=info cargo run --example split_vs_single_bg --release -- --frames 600 --out artifacts/perf/I6_bg_churn.csv</cmd>
+      <cmd>I7 (legacy): cargo test --release --test wsI_i7_big_buffer</cmd>
+      <cmd>I7 (BigBuffer): cargo test --release --features wsI_bigbuf --test wsI_i7_big_buffer</cmd>
+      <cmd>I9: bash ci/run_benches.sh</cmd>
+      <cmd>I9 (env override): FORGE3D_UPLOAD_POLICY=UseCopyEncoder bash ci/run_benches.sh</cmd>
+      <cmd>Docs (local): sphinx-build -b html docs/ docs/_build/html</cmd>
     </verify>
   </completion>
 </task>

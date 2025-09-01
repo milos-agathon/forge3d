@@ -157,7 +157,7 @@ impl UploadPolicy for StagingRingPolicy {
         self.staging_buffer = Some(device.create_buffer(&BufferDescriptor {
             label: Some("StagingRing_Buffer"),
             size: self.ring_size as u64,
-            usage: BufferUsages::COPY_SRC | BufferUsages::MAP_WRITE,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_WRITE,
             mapped_at_creation: true,
         }));
 
