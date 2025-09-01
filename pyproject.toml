@@ -1,26 +1,25 @@
 [build-system]
-requires = ["maturin>=1.9"]
+requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
 name = "forge3d"
-version = "0.5.0"
-description = "Rust-first wgpu/WebGPU renderer with a thin Python API"
+description = "forge3d: Rust/WebGPU core with PyO3 bindings"
+requires-python = ">=3.8"
 readme = "README.md"
-requires-python = ">=3.10"
-license = { text = "MIT" }
-authors = [{ name = "Your Name" }]
-
-# Add a console_script entry point for CLI
-[project.scripts]
-f3d-bench = "forge3d.bench:main"
+license = { text = "Apache-2.0 OR MIT" }
+authors = [{ name = "forge3d authors" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS"
+]
 
 [tool.maturin]
 bindings = "pyo3"
+# Put the native module inside the python package:
 python-source = "python"
 module-name = "forge3d._forge3d"
-features = ["terrain_spike"]
-strip = true
-
-[tool.setuptools.package-data]
-"forge3d" = ["py.typed", "__init__.pyi"]
+# (maturin reads version/metadata from Cargo.toml; this file defines the wheel.)

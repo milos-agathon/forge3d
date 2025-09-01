@@ -1,89 +1,211 @@
 <task>
-  <title>Remediate failed criteria only</title>
+  <title>Make forge3d importable: maturin packaging + pytest bootstrap (fixes No module named 'forge3d')</title>
+
   <inputs>
     <repoRoot>.</repoRoot>
     <paths>
-      <path>examples/perf/split_vs_single_bg.rs</path>
-      <path>examples/perf/split_vs_single_bg.py</path>
-      <path>shaders/perf/single_bg.wgsl</path>
-      <path>shaders/perf/split_bg.wgsl</path>
-      <path>shaders/include/big_buffer.wgsl</path>
-      <path>src/core/big_buffer.rs</path>
-      <path>src/core/mod.rs</path>
-      <path>tests/wsI_i7_big_buffer.rs</path>
-      <path>bench/upload_policies/policies.rs</path>
-      <path>ci/run_benches.sh</path>
-      <path>docs/workstreams/I/I6_bg_churn.md</path>
-      <path>docs/workstreams/I/I9_upload_policies.md</path>
+      <path>Cargo.toml</path>
+      <path>src/lib.rs</path>
+      <path>pyproject.toml</path>
+      <path>python/forge3d/__init__.py</path>
+      <path>tests/conftest.py</path>
+      <path>.gitignore</path>
     </paths>
-    <workstream>I – Bind Groups, Big Buffer, Double Buffering, Upload Policies</workstream>
-    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
+    <context>
+      <log>pytest fails at collection with ModuleNotFoundError: No module named 'forge3d' (user-provided errors.txt)</log>
+      <goal>Ensure `import forge3d` succeeds on win_amd64 / linux_x86_64 / macos_universal2 for Python ≥3.8..3.13; make `pytest -q` work from a fresh clone without a prior install.</goal>
+    </context>
   </inputs>
 
   <plan>
-    <!-- I6: Add minimal Python wrapper & doc to run the perf example and emit CSV -->
-    <step id="I6-1">Create <file>examples/perf/split_vs_single_bg.py</file> that parses args (--frames, --out), shells out to the Rust example via subprocess, and validates the resulting CSV exists and has required columns.</step>
-    <step id="I6-2">Author <file>docs/workstreams/I/I6_bg_churn.md</file> describing the experiment, exact run command, expected CSV schema (config, frame_ms, delta_ms), and interpretation.</step>
+    <!-- P1: Audit & adjust Rust crate for PyO3 -->
+    <step id="P1">
+      - Open Cargo.toml and ensure:
+        * [lib] crate-type includes "cdylib".
+        * pyo3 dependency has features ["extension-module","abi3-py38"] (or equivalent) and version ≥0.20.
+      - Open src/lib.rs:
+        * Confirm #[pymodule] name is "_forge3d" (or update to that).
+        * Ensure it adds __version__ from env!("CARGO_PKG_VERSION") if not already present.
+    </step>
 
-    <!-- I7: Add missing test implementing perf + visual parity -->
-    <step id="I7-1">Add <file>tests/wsI_i7_big_buffer.rs</file>: constructs a 10k-object scene; runs two paths (legacy per-object bind group vs BigBuffer under <feature>wsI_bigbuf</feature>); measures CPU time; renders the same frame(s) and compares pixels (exact match or SSIM≥0.99). Feature-detect to skip BigBuffer path if feature off, and run both modes in CI by toggling features.</step>
+    <!-- P2: Add maturin packaging so the native module lands under python package -->
+    <step id="P2" dependsOn="P1">
+      - Create/overwrite pyproject.toml with a maturin build:
+        [build-system] uses maturin; [project] name "forge3d".
+        [tool.maturin] bindings="pyo3", python-source="python", module-name="forge3d._forge3d".
+      - Update .gitignore to exclude /target, *.egg-info, build/, dist/, __pycache__/.
+    </step>
 
-    <!-- I9: Add CI bench script and doc; ensure artifact written -->
-    <step id="I9-1">Create <file>ci/run_benches.sh</file> (POSIX shell) that: (a) builds benches in release, (b) runs <code>bench/upload_policies/policies.rs</code> producing <file>artifacts/perf/I9_upload_policies.md</file>, (c) echoes the artifact path for CI upload, and (d) runs again with <env>FORGE3D_UPLOAD_POLICY=UseCopyEncoder</env> to verify env override is honored (different mode reported in MD).</step>
-    <step id="I9-2">Author <file>docs/workstreams/I/I9_upload_policies.md</file> summarizing policies, how to run the bench, and where CI publishes the MD.</step>
+    <!-- P3: Python package shim that re-exports the native module -->
+    <step id="P3" dependsOn="P2">
+      - Create/overwrite python/forge3d/__init__.py:
+        from ._forge3d import *  # re-export
+        try: from ._forge3d import __version__
+        except Exception: __version__ = "0.0.0"
+        __all__ = [n for n in dir() if not n.startswith("_")]
+    </step>
+
+    <!-- P4: Pytest bootstrap so `pytest -q` works without pre-install -->
+    <step id="P4" dependsOn="P3">
+      - Create tests/conftest.py that, at session start, tries `import forge3d`; on ModuleNotFoundError it:
+        * Ensures maturin is present: `python -m pip install -U maturin`.
+        * Runs `maturin develop --release` with cwd=repo root (one-time).
+        * Retries `import forge3d`, failing fast with a clear message if still unavailable.
+      - Keep it no-op when import already works.
+    </step>
+
+    <!-- P5: Quick smoke and docs note -->
+    <step id="P5" dependsOn="P4">
+      - Add a short comment block in tests/conftest.py explaining the bootstrap and how to opt out (set env FORGE3D_NO_BOOTSTRAP=1).
+      - Do not modify existing tests.
+    </step>
   </plan>
 
+  <changes>
+    <file path="pyproject.toml" action="upsert"><![CDATA[
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "forge3d"
+description = "forge3d: Rust/WebGPU core with PyO3 bindings"
+requires-python = ">=3.8"
+readme = "README.md"
+license = { text = "Apache-2.0 OR MIT" }
+authors = [{ name = "forge3d authors" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS"
+]
+
+[tool.maturin]
+bindings = "pyo3"
+# Put the native module inside the python package:
+python-source = "python"
+module-name = "forge3d._forge3d"
+# (maturin reads version/metadata from Cargo.toml; this file defines the wheel.)
+    ]]></file>
+
+    <file path="python/forge3d/__init__.py" action="upsert"><![CDATA[
+# Lightweight Python shim that re-exports the native PyO3 module
+# This file is intentionally tiny to keep cold-start fast.
+from ._forge3d import *  # noqa: F401,F403
+
+try:
+    from ._forge3d import __version__  # type: ignore[attr-defined]
+except Exception:  # pragma: no cover
+    __version__ = "0.0.0"
+
+__all__ = [n for n in dir() if not n.startswith("_")]
+    ]]></file>
+
+    <file path="tests/conftest.py" action="upsert"><![CDATA[
+# Auto-bootstrap forge3d native module for `pytest -q` from a fresh clone.
+# If `import forge3d` fails, we build it once via `maturin develop --release`.
+# Set FORGE3D_NO_BOOTSTRAP=1 to disable this behavior (e.g., in CI where the wheel is preinstalled).
+import os
+import sys
+import importlib
+import subprocess
+from pathlib import Path
+
+def _build_with_maturin():
+    repo = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    # Ensure maturin is available
+    subprocess.run([sys.executable, "-m", "pip", "install", "-U", "maturin"], check=True)
+    # Build & develop-install in the current venv
+    subprocess.run(["maturin", "develop", "--release"], cwd=str(repo), check=True, env=env)
+
+def pytest_sessionstart(session):
+    if os.environ.get("FORGE3D_NO_BOOTSTRAP") == "1":
+        return
+    try:
+        import forge3d  # noqa: F401
+        return
+    except ModuleNotFoundError:
+        _build_with_maturin()
+        importlib.invalidate_caches()
+        import forge3d  # noqa: F401
+    ]]></file>
+
+    <file path=".gitignore" action="patch"><![CDATA[
++ /target
++ /dist
++ /build
++ *.egg-info
++ __pycache__/
+    ]]></file>
+
+    <file path="Cargo.toml" action="patch"><![CDATA[
+# Ensure dynamic library + PyO3 settings
+# (Apply only if missing; do not duplicate existing keys.)
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Keep existing versions; only insert if not present.
+pyo3 = { version = ">=0.20,<0.22", features = ["extension-module", "abi3-py38"] }
+    ]]></file>
+
+    <file path="src/lib.rs" action="patch"><![CDATA[
++ // Ensure the PyO3 module name is `_forge3d` so Python package path is `forge3d._forge3d`
++ // and expose __version__ from Cargo.
++ use pyo3::prelude::*;
++ 
++ #[pymodule]
++ fn _forge3d(m: &Bound<'_, PyModule>) -> PyResult<()> {
++     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
++     // keep existing registrations...
++     Ok(())
++ }
+    ]]></file>
+  </changes>
+
   <deliverables>
-    <item>I6: examples/perf/split_vs_single_bg.py</item>
-    <item>I6: docs/workstreams/I/I6_bg_churn.md</item>
-    <item>I7: tests/wsI_i7_big_buffer.rs</item>
-    <item>I9: ci/run_benches.sh</item>
-    <item>I9: docs/workstreams/I/I9_upload_policies.md</item>
+    <item>pyproject.toml with maturin configuration placing the native module at forge3d._forge3d</item>
+    <item>python/forge3d/__init__.py re-exporting the native module</item>
+    <item>tests/conftest.py that bootstraps `maturin develop --release` on demand</item>
+    <item>Updated Cargo.toml / src/lib.rs ensuring PyO3 cdylib + module name + __version__</item>
+    <item>.gitignore entries for Rust/Python build artifacts</item>
   </deliverables>
 
   <acceptanceCriteria>
-    <!-- I6 -->
-    <criterion id="I6-AC1">Running:
-      <code>RUST_LOG=info cargo run --example split_vs_single_bg --release -- --frames 600 --out artifacts/perf/I6_bg_churn.csv</code>
-      produces <file>artifacts/perf/I6_bg_churn.csv</file> with columns: <code>config, frame_ms, delta_ms</code>, ≥600 rows.</criterion>
-
-    <!-- I7 -->
-    <criterion id="I7-AC1">With legacy path (default) vs BigBuffer (<code>--features wsI_bigbuf</code>), the test <file>tests/wsI_i7_big_buffer.rs</file> runs and reports ≥25% reduction in CPU submission time at 10k objects (median of ≥3 runs).</criterion>
-    <criterion id="I7-AC2">Visual parity: the test compares rendered outputs and either exact-matches or achieves SSIM ≥ 0.99 between legacy and BigBuffer paths.</criterion>
-    <criterion id="I7-AC3">Both builds compile: <code>cargo test --release</code> (legacy) and <code>cargo test --release --features wsI_bigbuf</code> succeed.</criterion>
-
-    <!-- I9 -->
-    <criterion id="I9-AC1"><code>ci/run_benches.sh</code> exits 0 and creates <file>artifacts/perf/I9_upload_policies.md</file> with MB/s and CPU time for each policy.</criterion>
-    <criterion id="I9-AC2">Running the script with <env>FORGE3D_UPLOAD_POLICY=UseCopyEncoder</env> shows this mode in the MD output.</criterion>
+    <checks>
+      <check>From a clean venv on Windows (Python 3.13): `pytest -q` runs without `ModuleNotFoundError: No module named 'forge3d'` and completes collection. Command: <code>python -m venv .venv &amp;&amp; .venv\\Scripts\\python -m pip install -U pip &amp;&amp; .venv\\Scripts\\pytest -q</code></check>
+      <check>From repo root on Linux/macOS: `maturin develop --release` succeeds, then `python -c "import forge3d; print(forge3d.__version__)"` prints the Cargo version.</check>
+      <check>`pip install -e .` works (PEP 517 build via maturin) and `python -c "import forge3d"` succeeds.</check>
+      <check>No changes to existing tests beyond adding `tests/conftest.py`.</check>
+    </checks>
   </acceptanceCriteria>
 
   <safety>
-    <branch>fix/ws-I-remediate-minimal</branch>
-    <commitStrategy>small, atomic commits per step (I6, I7, I9)</commitStrategy>
-    <excludeDirs>target/, dist/, build/, .venv/, __pycache__/</excludeDirs>
-    <searchReplacePolicy>No blind search/replace; only targeted edits in listed paths.</searchReplacePolicy>
-    <reviewGates>
-      <gate>Run rustfmt/clippy on touched Rust files.</gate>
-      <gate>Run a local Sphinx build for added docs pages only.</gate>
-    </reviewGates>
+    <rule>Create branch <code>fix/py-import-forge3d</code>; small commits per file.</rule>
+    <rule>Do not modify test logic or semantics; only add the bootstrap conftest.</rule>
+    <rule>No blind search/replace; preserve existing Cargo settings if already correct.</rule>
+    <rule>Exclude binary/large dirs from edits: <code>target/</code>, <code>dist/</code>, <code>build/</code>, <code>__pycache__/</code>.</rule>
   </safety>
 
   <constraints>
-    <gpuHostVisibleBudgetMiB>512</gpuHostVisibleBudgetMiB>
-    <toolchain>cmake>=3.24, cargo/rustc, PyO3, VMA</toolchain>
-    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
+    <toolchain>Rust/cargo + PyO3 + maturin; Python ≥3.8..3.13</toolchain>
+    <apis>None changed; packaging only</apis>
+    <memory>≤ 512 MiB host-visible heap (unchanged)</memory>
   </constraints>
 
   <completion>
-    <summary>All missing Workstream I deliverables added; tests/docs/benches runnable; acceptance criteria validated locally.</summary>
-    <verify>
-      <cmd>I6: RUST_LOG=info cargo run --example split_vs_single_bg --release -- --frames 600 --out artifacts/perf/I6_bg_churn.csv</cmd>
-      <cmd>I7 (legacy): cargo test --release --test wsI_i7_big_buffer</cmd>
-      <cmd>I7 (BigBuffer): cargo test --release --features wsI_bigbuf --test wsI_i7_big_buffer</cmd>
-      <cmd>I9: bash ci/run_benches.sh</cmd>
-      <cmd>I9 (env override): FORGE3D_UPLOAD_POLICY=UseCopyEncoder bash ci/run_benches.sh</cmd>
-      <cmd>Docs (local): sphinx-build -b html docs/ docs/_build/html</cmd>
-    </verify>
+    <summary>Packaging wired via maturin; Python shim added; pytest auto-builds if needed. Fix verified by importing and running tests without prior install.</summary>
+    <commands>
+      <cmd>git checkout -b fix/py-import-forge3d</cmd>
+      <cmd>python -m venv .venv</cmd>
+      <cmd>. .venv/bin/activate  # Windows: .venv\\Scripts\\activate</cmd>
+      <cmd>python -m pip install -U pip maturin pytest</cmd>
+      <cmd>pytest -q  # triggers bootstrap, then runs tests</cmd>
+      <cmd>python -c "import forge3d, sys; print('forge3d OK', forge3d.__version__)"</cmd>
+    </commands>
   </completion>
 </task>
