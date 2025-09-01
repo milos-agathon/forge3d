@@ -1,112 +1,180 @@
-<prompt>
-  <system>
-    You are Claude Code acting as a meticulous docs editor and release-notes engineer. Your task is to update two files—CHANGELOG.md and README.md—so they accurately reflect what is available in the package today, convert “work on workstreams” into proper versioned releases after 0.0.1, include the latest update to Workstream H, and bump the project to version 0.5.0.
-
-    Rules:
-    - No scope creep: edit only the two target files.
-    - Preserve formatting, headings, and styles (Keep a Changelog + SemVer pre-1.0).
-    - Do not fabricate features; derive from repository code/tests and existing docs.
-    - Be precise, terse, and release-grade. Use past tense for released items.
-  </system>
+<task>
+  <title>Implement & wire missing/partial items for Workstream I</title>
 
   <inputs>
-    <file path="CHANGELOG.md" role="source-of-truth">
-      The changelog currently contains:
-      - Sections up to v0.1.0 (2025-08-19) and then a large “Unreleased” block with fixes plus Workstreams D, C, and M entries (D4–D7, C1–C4, M1–M2). :contentReference[oaicite:0]{index=0}
-    </file>
-    <file path="README.md" role="surface-doc">
-      The README describes features and API, and shows the version mirror note with the current value “now 0.1.0”, plus “Features by ROADMAP (what's implemented so far)” organized by T-workstreams. :contentReference[oaicite:1]{index=1}
-    </file>
-    <evidence>
-      - CHANGELOG: Unreleased contains a “Fixed: Terrain UBO size mismatch … 176 bytes std140” and Workstreams D (camera/uniforms/normal matrix), C (gap fill items, diagnostics, tonemap), and M (Zero-Copy NumPy and 512 MiB budget). These must be converted into released versions. :contentReference[oaicite:2]{index=2}
-      - README: “Versioning” states __version__ mirrors the Rust crate and “now **0.1.0**” and feature lists by ROADMAP that need updating to reflect the new grouped releases and v0.5.0. :contentReference[oaicite:3]{index=3}
-    </evidence>
+    <repoRoot>.</repoRoot>
+    <paths>
+      <path>src/</path>
+      <path>shaders/</path>
+      <path>python/forge3d/</path>
+      <path>examples/</path>
+      <path>docs/</path>
+      <path>bench/</path>
+      <path>ci/</path>
+    </paths>
+    <workstream>Workstream I — WebGPU Fundamentals (Uniforms/Storage/Instancing)</workstream>
+    <tasks>
+      <task>I1: Minimal uniform buffer path</task>
+      <task>I2: Storage buffer feature parity</task>
+      <task>I3: Instancing via per-instance attributes</task>
+      <task>I4: Bind group layouts & lifetime policy</task>
+      <task>I5: Debug & validation toggles</task>
+      <task>I6: Split-buffers perf demo</task>
+      <task>I7: Per-frame big buffer for per-object data (dynamic offset/index addressing)</task>
+      <task>I8: Double-buffering per-frame uniform/storage data</task>
+      <task>I9: Upload policy benchmark: mappedAtCreation vs queue.writeBuffer vs staging ring</task>
+    </tasks>
   </inputs>
 
-  <goals>
-    <goal>Transform all “workstream” progress occurring after v0.0.1 into proper versioned releases, culminating in v0.5.0.</goal>
-    <goal>Include the latest change on Workstream H in v0.5.0 (derive from repo content: commits, docs, tests). If multiple H updates exist, summarize the most recent as a single bullet under v0.5.0.</goal>
-    <goal>Update README.md to reflect v0.5.0 as the current version and refresh feature/API sections so they match what is actually available now.</goal>
-    <goal>Keep an “Unreleased” section only for items that truly haven’t shipped; remove/relocate any shipped items from “Unreleased.”</goal>
-  </goals>
+  <plan>
+    <!-- Audit-first guardrail -->
+    <step id="P0">Parse roadmap.csv (Workstream I rows) and audit_I.md to confirm I6/I7 are Partial, I8/I9 Absent; abort if mismatch.</step>
 
-  <editing_plan>
-    <step id="1">Scan repository for “Workstream H” mentions (code, docs/, tests/, commit messages). Extract the latest concrete, shippable change (title + one-line summary + any key flags, e.g., env toggles).</step>
-    <step id="2">Partition the existing “Unreleased” items in CHANGELOG.md (D*, C*, M*, the UBO fix) into logical, incremental releases after 0.1.0, e.g., 0.2.0 → 0.3.0 → 0.4.0 → 0.5.0. Order them chronologically if commit dates are available; otherwise, group by dependency flow (e.g., C before D if D depends on fixes in C; M may land as a separate minor bump).</step>
-    <step id="3">For each new version block, create Keep-a-Changelog sections: “### Added / Changed / Fixed / Removed.” Convert workstream phrasing into user-facing release notes (drop internal codes like D5/C3 unless helpful as parentheses).</step>
-    <step id="4">Ensure v0.5.0 includes “Workstream H – latest change” as an “Added” (or “Changed”) bullet, plus any finalization items (e.g., UBO layout finalization if it lands in that release).</step>
-    <step id="5">Update README.md:
-      - Replace “now 0.1.0” with “now 0.5.0” in the Versioning section.
-      - Replace the “Features by ROADMAP” framing with a concise “What’s new in v0.5.0” plus a short “Since v0.2.0 … v0.4.0” overview, while keeping the curated API list accurate and current.
-      - Do not remove helpful API examples/snippets; just ensure they align with current capabilities (camera helpers, terrain utils, NumPy↔PNG, Scene/Renderer usage). :contentReference[oaicite:4]{index=4}
+    <!-- Branching and scaffolding -->
+    <step id="P1">Create branch: feat/ws-I-wire-missing; add skeleton dirs: bench/upload_policies/, examples/perf/, docs/workstreams/I/.</step>
+
+    <!-- I7 depends on I3,I4,I5 (already Present & wired). Build the big-buffer first so I8 can reuse it. -->
+    <step id="P2" dependsOn="P1">Implement I7 “big buffer” pattern:
+      - Add src/core/big_buffer.rs: single large STORAGE buffer (ring/arena), 64-byte alignment, dynamic offset & index addressing helpers; RAII allocator.
+      - Expose safe API for per-object blocks; sample WGSL struct for indexing.
+      - Integrate path behind feature flag `wsI_bigbuf` in one existing draw path (e.g., vector/point or line) without regressing current path.
+      - Add unit tests for alignment/padding and offset math.
+      - Write docs/workstreams/I/I7_big_buffer.md explaining usage & pitfalls.
     </step>
-    <step id="6">Keep a minimal “Unreleased” section at top of CHANGELOG.md for future work only (empty or with TODO bullets).</step>
-  </editing_plan>
 
-  <rewrite_specs>
-    <style>
-      - Follow https://keepachangelog.com/en/1.1.0/ formatting already referenced in the file. :contentReference[oaicite:5]{index=5}
-      - Use SemVer pre-1.0 guidance (breaking changes can happen in minor bumps).
-      - Keep bullets crisp; prefer active voice, past tense, and concrete nouns (APIs, file paths, struct names).
-      - When useful, keep parenthetical hints (e.g., “std140 176-byte UBO layout”) but avoid internal noise.
-    </style>
-    <versioning>
-      - New top released version: 0.5.0
-      - Intermediate versions after 0.1.0: create 0.2.0, 0.3.0, 0.4.0 as needed to house shipped items (D*, C*, M*, UBO fix) by logical order.
-      - Dates: insert ISO date placeholders (YYYY-MM-DD) if exact dates are unknown.
-    </versioning>
-  </rewrite_specs>
+    <!-- I8 depends on I7,M3 (M3 out-of-scope). We still implement ping-pong atop big-buffer; detect M3 at build-time and degrade gracefully. -->
+    <step id="P3" dependsOn="P2">Implement I8 double-buffering for per-frame data:
+      - Add src/core/double_buffer.rs: ping-pong wrapper for per-frame uniform/storage blocks (N=2, with optional N=3).
+      - Wire into one render path that updates per-frame globals; add 300-frame headless test to assert no validation hazards / contentions.
+      - Add docs/workstreams/I/I8_double_buffering.md incl. when triple-buffering helps.
+    </step>
 
-  <edits>
-    <target file="CHANGELOG.md">
-      <transform>
-        - Move the following “Unreleased” items into released sections:
-          * “Terrain UBO size mismatch … 176 bytes std140” → place under the earliest version where it actually shipped (if unknown, 0.3.0 “Fixed”). :contentReference[oaicite:6]{index=6}
-          * Workstream C1–C4 → summarize under “Added/Changed” in 0.2.0 (engine layout/error type; off-screen target determinism; diagnostics; tonemap functions). :contentReference[oaicite:7]{index=7}
-          * Workstream D4–D7 → 0.3.0 “Added/Changed” (transforms, orthographic camera, camera uniforms with view position, normal matrix). :contentReference[oaicite:8]{index=8}
-          * Workstream M1–M2 → 0.4.0 “Added/Changed” (Zero-Copy NumPy interop; memory budget tracker 512 MiB; metrics API). :contentReference[oaicite:9]{index=9}
-        - Create v0.5.0 and include “Workstream H – latest change” (derived in step 1) plus any final polish needed to call 0.5.0 the current release.
-        - Retain the historical 0.0.x → 0.1.0 sections as-is.
-        - Keep the leading “Unreleased” section; clear it or leave it with TODO placeholders.
-      </transform>
-    </target>
+    <!-- I6 depends on I4. With I7 ready, we can measure split BG vs single BG (bind group churn). -->
+    <step id="P4" dependsOn="P1">Complete I6 split-buffers perf demo:
+      - Add examples/perf/split_vs_single_bg.rs (and python wrapper) that toggles split bind groups vs single bind group.
+      - Emit CSV to artifacts/perf/I6_bg_churn.csv and a short markdown summary docs/workstreams/I/I6_bg_churn.md.
+    </step>
 
-    <target file="README.md">
-      <transform>
-        - In “Versioning,” replace “now **0.1.0**” with “now **0.5.0**” and keep the mirroring explanation. :contentReference[oaicite:10]{index=10}
-        - Replace “Features by ROADMAP (what’s implemented so far)” with:
-          * “What’s new in v0.5.0” (bullets for the H update and any top-level improvements that matter to users).
-          * “Highlights since v0.2.0” (short bullets referencing C, D, M groupings, no internal codes needed).
-        - Ensure the curated API list (I/O, Rendering, Scene, Terrain utils, Colormaps, Mesh, Camera helpers, Diagnostics, Timing, Introspection) matches what’s actually available; update as needed without removing useful examples. :contentReference[oaicite:11]{index=11}
-      </transform>
-    </target>
-  </edits>
+    <!-- I9 depends on M3,I7. We implement harness; if M3 features absent, gate sub-tests accordingly and still compare the policies we can run. -->
+    <step id="P5" dependsOn="P2">Implement I9 upload policy benchmark:
+      - Add bench/upload_policies/policies.rs comparing queue.writeBuffer, mappedAtCreation, staging ring (big_buffer-backed).
+      - Record throughput (MB/s) and CPU time; select default; support env override FORGE3D_UPLOAD_POLICY.
+      - Print report in stdout and write artifacts/perf/I9_upload_policies.md.</step>
 
-  <acceptance_criteria>
-    <criterion>CHANGELOG.md top section is “[Unreleased]” followed by new sections: [0.5.0], [0.4.0], [0.3.0], [0.2.0], then existing history (down to 0.0.2).</criterion>
-    <criterion>v0.5.0 contains a bullet referencing the latest Workstream H change with a clear one-line summary (no placeholders).</criterion>
-    <criterion>All previously “Unreleased” C/D/M/UBO items are moved into released sections with appropriate “Added/Changed/Fixed” buckets and no duplication remains. :contentReference[oaicite:12]{index=12}</criterion>
-    <criterion>README.md states the current version as **0.5.0** in the Versioning section and surfaces a “What’s new in v0.5.0” block near the top Features section. :contentReference[oaicite:13]{index=13}</criterion>
-    <criterion>README examples (Renderer/Scene, PNG↔NumPy, camera helpers) remain valid and consistent with the API listed. :contentReference[oaicite:14]{index=14}</criterion>
-    <criterion>No references remain that suggest the latest version is 0.1.0.</criterion>
-    <criterion>Markdown renders cleanly (no broken headings, code fences, or links).</criterion>
-  </acceptance_criteria>
-
-  <constraints>
-    <constraint>Keep a Changelog 1.1.0 style; maintain SemVer semantics (pre-1.0 may break).</constraint>
-    <constraint>Do not invent features; base wording on code, tests, and the existing docs. Prefer concrete nouns (function names, struct names, paths).</constraint>
-    <constraint>Do not modify any files other than CHANGELOG.md and README.md.</constraint>
-  </constraints>
+    <!-- Docs + CI -->
+    <step id="P6" dependsOn="P3,P4,P5">Sphinx docs: add docs/workstreams/I/index.rst including I6/I7/I8/I9 pages; wire into TOC; add CI job to run perf/bench (warn-only).</step>
+    <step id="P7" dependsOn="P6">Ensure memory tracker limits host-visible allocations ≤ 512 MiB in new paths; add asserts & counters.</step>
+  </plan>
 
   <deliverables>
-    <file_output>Updated CHANGELOG.md with 0.2.0 → 0.5.0 releases and Workstream H included in 0.5.0.</file_output>
-    <file_output>Updated README.md with current version 0.5.0 and refreshed features overview.</file_output>
-    <summary_output>A short “what changed” bullet list describing how items were re-bucketed from Unreleased and where Workstream H landed.</summary_output>
+    <!-- From CSV cells (original wording), mapped to concrete artifacts -->
+    <task id="I6">
+      <csvDeliverables>measure BG churn vs single BG</csvDeliverables>
+      <artifacts>
+        <file>examples/perf/split_vs_single_bg.rs</file>
+        <file>examples/perf/split_vs_single_bg.py</file>
+        <file>artifacts/perf/I6_bg_churn.csv</file>
+        <file>docs/workstreams/I/I6_bg_churn.md</file>
+      </artifacts>
+    </task>
+
+    <task id="I7">
+      <csvDeliverables>Implement big-buffer pattern: one bind group with ... via instance data or push-constant; document alignment/padding.</csvDeliverables>
+      <artifacts>
+        <file>src/core/big_buffer.rs</file>
+        <file>src/core/mod.rs</file>
+        <file>shaders/include/big_buffer.wgsl</file>
+        <file>tests/wsI_i7_big_buffer.rs</file>
+        <file>docs/workstreams/I/I7_big_buffer.md</file>
+      </artifacts>
+    </task>
+
+    <task id="I8">
+      <csvDeliverables>Introduce ping-pong buffers for per-frame data; fe...te vs in-flight; document when triple-buffering might be needed.</csvDeliverables>
+      <artifacts>
+        <file>src/core/double_buffer.rs</file>
+        <file>tests/wsI_i8_pingpong.rs</file>
+        <file>docs/workstreams/I/I8_double_buffering.md</file>
+      </artifacts>
+    </task>
+
+    <task id="I9">
+      <csvDeliverables>Benchmark harness comparing queue.writeBuffer, map...oughput (MB/s) and CPU time; pick defaults; expose env override.</csvDeliverables>
+      <artifacts>
+        <file>bench/upload_policies/policies.rs</file>
+        <file>artifacts/perf/I9_upload_policies.md</file>
+        <file>ci/run_benches.sh</file>
+        <file>docs/workstreams/I/I9_upload_policies.md</file>
+      </artifacts>
+    </task>
   </deliverables>
 
-  <notes_for_editor>
-    - If commit timestamps are available, order 0.2.0–0.5.0 by actual landing date; otherwise, keep the logical sequence (C → D → M → H).
-    - For the “Terrain UBO 176-byte std140” item, ensure it appears exactly once under the correct release with the 44-float note if relevant. :contentReference[oaicite:15]{index=15}
-    - Keep README’s curated API list intact but accurate; don’t remove it—users rely on those quick snippets. :contentReference[oaicite:16]{index=16}
-  </notes_for_editor>
-</prompt>
+  <acceptanceCriteria>
+    <!-- Lifted from CSV cells (original wording), plus measurable hooks -->
+    <task id="I6">
+      <csvAC>Perf deltas recorded</csvAC>
+      <checks>
+        <check>Running examples/perf/split_vs_single_bg produces artifacts/perf/I6_bg_churn.csv with ≥2 labeled configurations and frame-time delta columns.</check>
+      </checks>
+    </task>
+
+    <task id="I7">
+      <csvAC>Microbench: replacing N per-object bind gro...≥25% on a 10k-object scene; visuals unchanged; validation clean.</csvAC>
+      <checks>
+        <check>tests/wsI_i7_big_buffer.rs runs a 10k-object microbench and reports ≥25% improvement over per-object BG path on the same GPU.</check>
+        <check>WGSL path renders same pixels (hash/SSIM threshold) and passes validation without errors.</check>
+      </checks>
+    </task>
+
+    <task id="I8">
+      <csvAC>No validation hazards; no stalls from contention in a 300-frame run; reduced CPU waits vs single buffer.</csvAC>
+      <checks>
+        <check>tests/wsI_i8_pingpong.rs executes 300 consecutive frames with validation layers enabled and reports 0 hazards, 0 queue stalls.</check>
+        <check>CPU wait time reduced vs single-buffer baseline by measurable margin (&gt;0 ms and reported in log).</check>
+      </checks>
+    </task>
+
+    <task id="I9">
+      <csvAC>Chosen default is ≥15% faster than slowest policy on mid-range GPU; report printed in examples/CI logs.</csvAC>
+      <checks>
+        <check>bench/upload_policies/policies.rs prints per-policy MB/s and CPU time; default policy recorded; env override FORGE3D_UPLOAD_POLICY respected.</check>
+        <check>CI artifacts include artifacts/perf/I9_upload_policies.md with the table and selected default.</check>
+      </checks>
+    </task>
+
+    <runbook>
+      <cmd>cargo build --locked --all-targets</cmd>
+      <cmd>cargo test --tests -- --nocapture</cmd>
+      <cmd>RUST_LOG=info cargo run --example split_vs_single_bg --release -- --frames 600 --out artifacts/perf/I6_bg_churn.csv</cmd>
+      <cmd>cargo bench --bench upload_policies -- --save-baseline wsI</cmd>
+      <cmd>make -C docs html</cmd>
+    </runbook>
+  </acceptanceCriteria>
+
+  <safety>
+    <rule>Create dedicated branch; small, reviewable commits per task.</rule>
+    <rule>Audit-first check (P0) must pass before edits proceed.</rule>
+    <rule>No blind search/replace; limit diffs to listed files/paths.</rule>
+    <rule>Exclude binary/build dirs (target/, build/, .venv/, .mypy_cache/, node_modules/, *.png, *.bin) from edits.</rule>
+    <rule>Keep host-visible allocations &lt;= 512 MiB; add asserts & counters.</rule>
+  </safety>
+
+  <constraints>
+    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
+    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
+    <toolchain>cmake≥3.24, cargo/rustc, PyO3, VMA</toolchain>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
+    <docs>Sphinx preferred</docs>
+  </constraints>
+
+  <completion>
+    <summary>All four targeted tasks (I6 partial → complete; I7 partial → complete; I8 absent → added; I9 absent → added) implemented, measured, documented, and tested without validation errors, within memory budget.</summary>
+    <verify>
+      <cmd>cargo build --locked --all-targets</cmd>
+      <cmd>cargo test -- --nocapture</cmd>
+      <cmd>RUST_LOG=info cargo run --example split_vs_single_bg --release -- --frames 600</cmd>
+      <cmd>cargo bench --bench upload_policies -- --quick</cmd>
+      <cmd>make -C docs html</cmd>
+    </verify>
+  </completion>
+</task>
