@@ -98,7 +98,9 @@
       "Bash(FORGE3D_NO_BOOTSTRAP=1 \".venv/Scripts/python.exe\" -m pytest --collect-only -q)",
       "Bash(FORGE3D_NO_BOOTSTRAP=1 python -m pytest --collect-only -q)",
       "Read(C:\\Users\\milos/**)",
-      "Bash(FORGE3D_NO_BOOTSTRAP=1 python -m pytest tests/ --collect-only -q)"
+      "Bash(FORGE3D_NO_BOOTSTRAP=1 python -m pytest tests/ --collect-only -q)",
+      "Bash(timeout:*)",
+      "Read(C:\\/**)"
     ],
     "deny": [],
     "additionalDirectories": [
