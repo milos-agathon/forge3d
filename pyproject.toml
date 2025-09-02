@@ -9,17 +9,8 @@ requires-python = ">=3.8"
 readme = "README.md"
 license = { text = "Apache-2.0 OR MIT" }
 authors = [{ name = "forge3d authors" }]
-classifiers = [
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Rust",
-  "Operating System :: Microsoft :: Windows",
-  "Operating System :: POSIX :: Linux",
-  "Operating System :: MacOS"
-]
 
 [tool.maturin]
 bindings = "pyo3"
-# Put the native module inside the python package:
 python-source = "python"
 module-name = "forge3d._forge3d"
-# (maturin reads version/metadata from Cargo.toml; this file defines the wheel.)

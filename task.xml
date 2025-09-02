@@ -1,5 +1,5 @@
 <task>
-  <title>Make forge3d importable: maturin packaging + pytest bootstrap (fixes No module named 'forge3d')</title>
+  <title>Fix pytest import failure: make `forge3d` importable during session start (Windows Py3.13 compatible)</title>
 
   <inputs>
     <repoRoot>.</repoRoot>
@@ -10,58 +10,46 @@
       <path>python/forge3d/__init__.py</path>
       <path>tests/conftest.py</path>
       <path>.gitignore</path>
+      <path>pytest.ini</path>
     </paths>
     <context>
-      <log>pytest fails at collection with ModuleNotFoundError: No module named 'forge3d' (user-provided errors.txt)</log>
-      <goal>Ensure `import forge3d` succeeds on win_amd64 / linux_x86_64 / macos_universal2 for Python ≥3.8..3.13; make `pytest -q` work from a fresh clone without a prior install.</goal>
+      <log>pytest INTERNALERROR on Windows/Python 3.13 during session start: ModuleNotFoundError: No module named 'forge3d' (trace shows failure twice inside tests/conftest.py at import site).</log>
+      <goal>Ensure `import forge3d` succeeds from a fresh clone on win_amd64 / linux_x86_64 / macos_universal2 by (1) making the Python package path resolvable without prior install and (2) bootstrapping a native build via maturin if the extension is missing. Handle both `ModuleNotFoundError: forge3d` and `ImportError` for `forge3d._forge3d`.</goal>
     </context>
   </inputs>
 
   <plan>
-    <!-- P1: Audit & adjust Rust crate for PyO3 -->
-    <step id="P1">
-      - Open Cargo.toml and ensure:
-        * [lib] crate-type includes "cdylib".
-        * pyo3 dependency has features ["extension-module","abi3-py38"] (or equivalent) and version ≥0.20.
-      - Open src/lib.rs:
-        * Confirm #[pymodule] name is "_forge3d" (or update to that).
-        * Ensure it adds __version__ from env!("CARGO_PKG_VERSION") if not already present.
+    <!-- P0: Audit & normalize packaging -->
+    <step id="P0">
+      - Ensure PyO3 cdylib and module naming are correct so the native module is `forge3d._forge3d`:
+        * Cargo.toml: [lib] crate-type includes "cdylib".
+        * PyO3 dependency has features ["extension-module","abi3-py38"].
+        * src/lib.rs #[pymodule] is named `_forge3d` and adds `__version__ = env!("CARGO_PKG_VERSION")`.
+      - Ensure pyproject.toml uses maturin with python-source=python, module-name="forge3d._forge3d".
+      - Provide a minimal python/forge3d/__init__.py that re-exports the native module.
     </step>
 
-    <!-- P2: Add maturin packaging so the native module lands under python package -->
+    <!-- P1: Make the package discoverable for pytest without prior install -->
+    <step id="P1" dependsOn="P0">
+      - Create/patch tests/conftest.py to:
+        * Prepend the repository "python" directory to sys.path before any import, so `import forge3d` resolves the package even if not installed.
+        * On import failure, detect both cases:
+            (A) ModuleNotFoundError: 'forge3d' (package not on path)
+            (B) ImportError referencing 'forge3d._forge3d' (package found but native ext not built).
+        * If either case, install maturin if missing and run `maturin develop --release` in repo root, then re-attempt import.
+        * Provide an environment knob FORGE3D_NO_BOOTSTRAP=1 to disable autobuild for CI that preinstalls wheels.
+        * Emit a short, single-line status to help debug in CI (e.g., "forge3d bootstrap: built via maturin").
+    </step>
+
+    <!-- P2: Small quality-of-life -->
     <step id="P2" dependsOn="P1">
-      - Create/overwrite pyproject.toml with a maturin build:
-        [build-system] uses maturin; [project] name "forge3d".
-        [tool.maturin] bindings="pyo3", python-source="python", module-name="forge3d._forge3d".
-      - Update .gitignore to exclude /target, *.egg-info, build/, dist/, __pycache__/.
-    </step>
-
-    <!-- P3: Python package shim that re-exports the native module -->
-    <step id="P3" dependsOn="P2">
-      - Create/overwrite python/forge3d/__init__.py:
-        from ._forge3d import *  # re-export
-        try: from ._forge3d import __version__
-        except Exception: __version__ = "0.0.0"
-        __all__ = [n for n in dir() if not n.startswith("_")]
-    </step>
-
-    <!-- P4: Pytest bootstrap so `pytest -q` works without pre-install -->
-    <step id="P4" dependsOn="P3">
-      - Create tests/conftest.py that, at session start, tries `import forge3d`; on ModuleNotFoundError it:
-        * Ensures maturin is present: `python -m pip install -U maturin`.
-        * Runs `maturin develop --release` with cwd=repo root (one-time).
-        * Retries `import forge3d`, failing fast with a clear message if still unavailable.
-      - Keep it no-op when import already works.
-    </step>
-
-    <!-- P5: Quick smoke and docs note -->
-    <step id="P5" dependsOn="P4">
-      - Add a short comment block in tests/conftest.py explaining the bootstrap and how to opt out (set env FORGE3D_NO_BOOTSTRAP=1).
-      - Do not modify existing tests.
+      - Add pytest.ini to set testpaths and silence deprecation warnings; optional but helps consistent discovery.
+      - Update .gitignore to exclude /target, /dist, /build, *.egg-info, __pycache__/.
     </step>
   </plan>
 
   <changes>
+    <!-- Packaging guardrails -->
     <file path="pyproject.toml" action="upsert"><![CDATA[
 [build-system]
 requires = ["maturin>=1.5,<2.0"]
@@ -74,63 +62,118 @@ requires-python = ">=3.8"
 readme = "README.md"
 license = { text = "Apache-2.0 OR MIT" }
 authors = [{ name = "forge3d authors" }]
-classifiers = [
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Rust",
-  "Operating System :: Microsoft :: Windows",
-  "Operating System :: POSIX :: Linux",
-  "Operating System :: MacOS"
-]
 
 [tool.maturin]
 bindings = "pyo3"
-# Put the native module inside the python package:
 python-source = "python"
 module-name = "forge3d._forge3d"
-# (maturin reads version/metadata from Cargo.toml; this file defines the wheel.)
+    ]]></file>
+
+    <file path="Cargo.toml" action="patch"><![CDATA[
+# Ensure dynamic library + PyO3 settings (insert if missing; do not duplicate)
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = ">=0.20,<0.22", features = ["extension-module", "abi3-py38"] }
+    ]]></file>
+
+    <file path="src/lib.rs" action="patch"><![CDATA[
++ // Ensure PyO3 module is named `_forge3d` and exposes __version__.
++ use pyo3::prelude::*;
++ 
++ #[pymodule]
++ fn _forge3d(m: &Bound<'_, PyModule>) -> PyResult<()> {
++     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
++     // (keep existing function/class registrations here)
++     Ok(())
++ }
     ]]></file>
 
     <file path="python/forge3d/__init__.py" action="upsert"><![CDATA[
-# Lightweight Python shim that re-exports the native PyO3 module
-# This file is intentionally tiny to keep cold-start fast.
+# Python shim: expose the native PyO3 module as forge3d._forge3d
 from ._forge3d import *  # noqa: F401,F403
-
 try:
     from ._forge3d import __version__  # type: ignore[attr-defined]
 except Exception:  # pragma: no cover
     __version__ = "0.0.0"
-
 __all__ = [n for n in dir() if not n.startswith("_")]
     ]]></file>
 
+    <!-- The core fix: robust bootstrap + path insertion before first import -->
     <file path="tests/conftest.py" action="upsert"><![CDATA[
-# Auto-bootstrap forge3d native module for `pytest -q` from a fresh clone.
-# If `import forge3d` fails, we build it once via `maturin develop --release`.
-# Set FORGE3D_NO_BOOTSTRAP=1 to disable this behavior (e.g., in CI where the wheel is preinstalled).
+# Ensure `import forge3d` works from a fresh clone:
+# 1) Put repo/python on sys.path so the package is importable without prior install.
+# 2) If the native extension is missing, auto-build once via maturin develop --release.
+# Set FORGE3D_NO_BOOTSTRAP=1 to disable autobuild (e.g., in CI with preinstalled wheel).
 import os
 import sys
-import importlib
 import subprocess
+import importlib
 from pathlib import Path
 
-def _build_with_maturin():
-    repo = Path(__file__).resolve().parents[1]
-    env = os.environ.copy()
-    # Ensure maturin is available
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+def _ensure_python_path():
+    repo = _repo_root()
+    pkg_dir = repo / "python"
+    if str(pkg_dir) not in sys.path:
+        sys.path.insert(0, str(pkg_dir))
+
+def _install_maturin():
     subprocess.run([sys.executable, "-m", "pip", "install", "-U", "maturin"], check=True)
-    # Build & develop-install in the current venv
-    subprocess.run(["maturin", "develop", "--release"], cwd=str(repo), check=True, env=env)
+
+def _maturin_develop():
+    repo = _repo_root()
+    env = os.environ.copy()
+    # Keep output concise in CI logs
+    subprocess.run(
+        ["maturin", "develop", "--release"],
+        cwd=str(repo),
+        env=env,
+        check=True,
+    )
+
+def _needs_build_from_exc(exc: BaseException) -> bool:
+    msg = str(exc)
+    return (
+        isinstance(exc, ModuleNotFoundError) and "forge3d" in msg
+    ) or (
+        isinstance(exc, ImportError) and ("_forge3d" in msg or "forge3d._forge3d" in msg)
+    )
 
 def pytest_sessionstart(session):
     if os.environ.get("FORGE3D_NO_BOOTSTRAP") == "1":
         return
+    _ensure_python_path()
     try:
         import forge3d  # noqa: F401
         return
-    except ModuleNotFoundError:
-        _build_with_maturin()
-        importlib.invalidate_caches()
-        import forge3d  # noqa: F401
+    except Exception as exc:
+        if not _needs_build_from_exc(exc):
+            # Unexpected error - rethrow so pytest shows the real issue.
+            raise
+        try:
+            _install_maturin()
+            _maturin_develop()
+            importlib.invalidate_caches()
+            _ensure_python_path()
+            import forge3d  # noqa: F401
+            print("forge3d bootstrap: built via maturin", flush=True)
+        except Exception as build_exc:
+            # Provide a clear, actionable message then rethrow.
+            raise RuntimeError(
+                "forge3d bootstrap failed. Ensure Rust toolchain and (on Windows) "
+                "MSVC Build Tools are installed. Original error: {}".format(build_exc)
+            ) from build_exc
+    ]]></file>
+
+    <file path="pytest.ini" action="upsert"><![CDATA[
+[pytest]
+testpaths = tests
+filterwarnings =
+    ignore::DeprecationWarning
     ]]></file>
 
     <file path=".gitignore" action="patch"><![CDATA[
@@ -140,71 +183,46 @@ def pytest_sessionstart(session):
 + *.egg-info
 + __pycache__/
     ]]></file>
-
-    <file path="Cargo.toml" action="patch"><![CDATA[
-# Ensure dynamic library + PyO3 settings
-# (Apply only if missing; do not duplicate existing keys.)
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-# Keep existing versions; only insert if not present.
-pyo3 = { version = ">=0.20,<0.22", features = ["extension-module", "abi3-py38"] }
-    ]]></file>
-
-    <file path="src/lib.rs" action="patch"><![CDATA[
-+ // Ensure the PyO3 module name is `_forge3d` so Python package path is `forge3d._forge3d`
-+ // and expose __version__ from Cargo.
-+ use pyo3::prelude::*;
-+ 
-+ #[pymodule]
-+ fn _forge3d(m: &Bound<'_, PyModule>) -> PyResult<()> {
-+     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
-+     // keep existing registrations...
-+     Ok(())
-+ }
-    ]]></file>
   </changes>
 
   <deliverables>
-    <item>pyproject.toml with maturin configuration placing the native module at forge3d._forge3d</item>
-    <item>python/forge3d/__init__.py re-exporting the native module</item>
-    <item>tests/conftest.py that bootstraps `maturin develop --release` on demand</item>
-    <item>Updated Cargo.toml / src/lib.rs ensuring PyO3 cdylib + module name + __version__</item>
-    <item>.gitignore entries for Rust/Python build artifacts</item>
+    <item>tests/conftest.py that inserts repo/python on sys.path and bootstraps a maturin build when needed.</item>
+    <item>pyproject.toml configured for maturin with module-name forge3d._forge3d and python-source=python.</item>
+    <item>python/forge3d/__init__.py re-exporting the native module.</item>
+    <item>Cargo.toml/src/lib.rs ensuring cdylib + PyO3 module name `_forge3d` and `__version__` export.</item>
+    <item>pytest.ini and .gitignore hygiene.</item>
   </deliverables>
 
   <acceptanceCriteria>
     <checks>
-      <check>From a clean venv on Windows (Python 3.13): `pytest -q` runs without `ModuleNotFoundError: No module named 'forge3d'` and completes collection. Command: <code>python -m venv .venv &amp;&amp; .venv\\Scripts\\python -m pip install -U pip &amp;&amp; .venv\\Scripts\\pytest -q</code></check>
-      <check>From repo root on Linux/macOS: `maturin develop --release` succeeds, then `python -c "import forge3d; print(forge3d.__version__)"` prints the Cargo version.</check>
-      <check>`pip install -e .` works (PEP 517 build via maturin) and `python -c "import forge3d"` succeeds.</check>
-      <check>No changes to existing tests beyond adding `tests/conftest.py`.</check>
+      <check>On Windows (Python 3.13) from a clean venv and fresh clone: running <code>pytest -q</code> no longer raises <code>ModuleNotFoundError: No module named 'forge3d'</code> during session start; collection completes.</check>
+      <check>If the Python package directory (repo/python) is present but the native extension is missing, the first <code>pytest -q</code> run triggers a one-time <code>maturin develop --release</code> and then imports successfully.</check>
+      <check>After bootstrap, <code>python -c "import forge3d; print(forge3d.__version__)"</code> prints the Cargo version.</check>
+      <check>Setting <code>FORGE3D_NO_BOOTSTRAP=1</code> disables the builder and leaves behavior unchanged (useful for CI with prebuilt wheels).</check>
     </checks>
   </acceptanceCriteria>
 
   <safety>
-    <rule>Create branch <code>fix/py-import-forge3d</code>; small commits per file.</rule>
-    <rule>Do not modify test logic or semantics; only add the bootstrap conftest.</rule>
-    <rule>No blind search/replace; preserve existing Cargo settings if already correct.</rule>
-    <rule>Exclude binary/large dirs from edits: <code>target/</code>, <code>dist/</code>, <code>build/</code>, <code>__pycache__/</code>.</rule>
+    <rule>Create branch <code>fix/pytest-import-forge3d</code>; commit per logical change (conftest, pyproject, Cargo/lib patch).</rule>
+    <rule>No blind search/replace; only touch files listed above. Preserve existing Rust/Python APIs.</rule>
+    <rule>Exclude binary/large dirs: target/, dist/, build/, __pycache__/.</rule>
   </safety>
 
   <constraints>
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <toolchain>Rust/cargo + PyO3 + maturin; Python ≥3.8..3.13</toolchain>
-    <apis>None changed; packaging only</apis>
+    <apis>WebGPU/WGSL unaffected (packaging-only change)</apis>
     <memory>≤ 512 MiB host-visible heap (unchanged)</memory>
   </constraints>
 
   <completion>
-    <summary>Packaging wired via maturin; Python shim added; pytest auto-builds if needed. Fix verified by importing and running tests without prior install.</summary>
+    <summary>Fixes pytest INTERNALERROR by ensuring the package is on sys.path and automatically building the native extension when needed. Verified by a clean `pytest -q` run and a successful `import forge3d`.</summary>
     <commands>
-      <cmd>git checkout -b fix/py-import-forge3d</cmd>
+      <cmd>git checkout -b fix/pytest-import-forge3d</cmd>
       <cmd>python -m venv .venv</cmd>
       <cmd>. .venv/bin/activate  # Windows: .venv\\Scripts\\activate</cmd>
       <cmd>python -m pip install -U pip maturin pytest</cmd>
-      <cmd>pytest -q  # triggers bootstrap, then runs tests</cmd>
+      <cmd>pytest -q</cmd>
       <cmd>python -c "import forge3d, sys; print('forge3d OK', forge3d.__version__)"</cmd>
     </commands>
   </completion>
