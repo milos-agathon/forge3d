@@ -1,5 +1,13 @@
+from _import_shim import ensure_repo_import
+ensure_repo_import()
+
+try:
+    import forge3d as f3d
+except Exception:
+    print("forge3d extension not available; skipping demo.")
+    import sys; sys.exit(0)
+
 import numpy as np
-import forge3d as f3d
 
 def main():
     H, W = 32, 32

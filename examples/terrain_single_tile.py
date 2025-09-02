@@ -8,10 +8,21 @@ Designed for new developers to verify installation in <10 minutes.
 
 from __future__ import annotations
 import argparse
+import sys
 import time
 from pathlib import Path
 import numpy as np
-import forge3d as f3d
+
+# Add repo root to sys.path for forge3d import
+repo_root = Path(__file__).parent.parent
+sys.path.insert(0, str(repo_root / "python"))
+
+try:
+    import forge3d as f3d
+except ImportError as e:
+    print(f"Failed to import forge3d: {e}")
+    print("Make sure the package is installed or run 'maturin develop' first")
+    sys.exit(1)
 
 
 def create_procedural_heightmap(size: int) -> np.ndarray:

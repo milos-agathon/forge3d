@@ -209,6 +209,10 @@ __marimo__/
 
 # Vulkan Forge specific
 /target
+/dist
+/build
+*.egg-info
+__pycache__/
 /.venv
 *.pyd
 triangle.png

@@ -88,7 +88,19 @@
       "Bash(VF_ENABLE_TERRAIN_TESTS=1 pytest tests/test_b13_slope_aspect.py tests/test_b14_contour_extract.py -v --tb=no)",
       "Bash(set VF_ENABLE_TERRAIN_TESTS=1)",
       "Bash(src/ python/ examples/ tests/ docs/)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(find:*)",
+      "Bash(RUST_LOG=info cargo run --example split_vs_single_bg --release -- --frames 600 --out artifacts/perf/I6_bg_churn.csv)",
+      "Bash(bash:*)",
+      "Bash(C:Usersmilosforge3d.venvScriptspython.exe -c \"import forge3d; print(''Success:'', forge3d.__version__)\")",
+      "Bash(\".venv/Scripts/python.exe\" -c \"import forge3d; print(''Success:'', forge3d.__version__)\")",
+      "Bash(\".venv/Scripts/python.exe\" -m pytest --collect-only -q)",
+      "Bash(FORGE3D_NO_BOOTSTRAP=1 \".venv/Scripts/python.exe\" -m pytest --collect-only -q)",
+      "Bash(FORGE3D_NO_BOOTSTRAP=1 python -m pytest --collect-only -q)",
+      "Read(C:\\Users\\milos/**)",
+      "Bash(FORGE3D_NO_BOOTSTRAP=1 python -m pytest tests/ --collect-only -q)",
+      "Bash(timeout:*)",
+      "Read(C:\\/**)"
     ],
     "deny": [],
     "additionalDirectories": [
