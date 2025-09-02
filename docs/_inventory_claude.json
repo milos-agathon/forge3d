@@ -1,0 +1,156 @@
+{
+  "repository": {
+    "name": "forge3d",
+    "description": "Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu)",
+    "version": "0.5.0"
+  },
+  "components": {
+    "rust_workspace": {
+      "type": "rust_crate",
+      "path": "./",
+      "cargo_toml": "Cargo.toml",
+      "package_name": "forge3d",
+      "crate_type": ["cdylib", "lib"],
+      "features": {
+        "default": ["extension-module"],
+        "extension-module": ["pyo3/extension-module"],
+        "terrain_spike": [],
+        "weighted-oit": [],
+        "wsI_bigbuf": [],
+        "wsI_double_buf": []
+      },
+      "binaries": [
+        {
+          "name": "policies",
+          "path": "bench/upload_policies/policies.rs"
+        }
+      ],
+      "examples": [
+        {
+          "name": "split_vs_single_bg",
+          "path": "examples/perf/split_vs_single_bg.rs"
+        }
+      ]
+    },
+    "python_package": {
+      "type": "python_package",
+      "path": "python/",
+      "package_name": "forge3d",
+      "pyproject_toml": "pyproject.toml",
+      "build_backend": "maturin",
+      "python_source": "python",
+      "module_name": "forge3d._forge3d",
+      "min_python": "3.8"
+    },
+    "shaders": {
+      "type": "shader_directory",
+      "path": "src/shaders/",
+      "files": [
+        "culling_compute.wgsl",
+        "line_aa.wgsl",
+        "oit_compose.wgsl",
+        "point_instanced.wgsl",
+        "polygon_fill.wgsl",
+        "postprocess_tonemap.wgsl",
+        "terrain.wgsl",
+        "triangle.wgsl",
+        "perf/single_bg.wgsl",
+        "perf/split_bg.wgsl",
+        "include/big_buffer.wgsl"
+      ]
+    },
+    "tests": {
+      "type": "test_suite", 
+      "path": "tests/",
+      "framework": "pytest",
+      "config": "pytest.ini"
+    },
+    "examples": {
+      "type": "examples_directory",
+      "path": "examples/",
+      "python_examples": [
+        "diagnostics.py",
+        "grid_generate_demo.py",
+        "png_numpy_roundtrip.py",
+        "run_bench.py",
+        "scene_terrain_demo.py",
+        "terrain_normalize_demo.py",
+        "terrain_single_tile.py",
+        "triangle_png.py"
+      ]
+    },
+    "documentation": {
+      "type": "sphinx_docs",
+      "path": "docs/",
+      "build_file": "docs/Makefile",
+      "config": "docs/conf.py",
+      "index": "docs/index.rst"
+    },
+    "assets": {
+      "type": "assets_directory",
+      "path": "assets/",
+      "colormaps": [
+        "colormaps/magma_256x1.png",
+        "colormaps/terrain_256x1.png", 
+        "colormaps/viridis_256x1.png"
+      ],
+      "logos": [
+        "logo-2000-dark.png",
+        "logo-2000.png"
+      ]
+    }
+  },
+  "build_systems": {
+    "cargo": {
+      "workspace_root": "./",
+      "primary_commands": [
+        "cargo build --workspace",
+        "cargo test --workspace",
+        "cargo build --release",
+        "cargo doc"
+      ]
+    },
+    "maturin": {
+      "commands": [
+        "pip install -U maturin",
+        "maturin develop --release",
+        "maturin build --release"
+      ]
+    },
+    "pytest": {
+      "commands": [
+        "pytest -q",
+        "pytest tests/"
+      ]
+    }
+  },
+  "key_directories": {
+    "src/": "Main Rust source code including core, terrain, vector, and shaders",
+    "python/": "Python package with PyO3 bindings and tools",
+    "tests/": "Comprehensive test suite with pytest configuration",
+    "examples/": "Python example scripts demonstrating API usage",
+    "docs/": "Sphinx documentation with RST files",
+    "assets/": "Static assets including colormaps and logos",
+    "data/": "Color palette data files",
+    "ci/": "CI/CD scripts and configuration"
+  },
+  "toolchain": {
+    "rust": {
+      "toolchain_file": "rust-toolchain.toml"
+    },
+    "python": {
+      "min_version": "3.8",
+      "build_requires": ["maturin>=1.5,<2.0"]
+    },
+    "gpu": {
+      "backends": ["Vulkan", "Metal", "DX12", "GL", "WebGPU"],
+      "memory_budget": "≤ 512 MiB host-visible heap"
+    }
+  },
+  "entry_points": {
+    "python_module": "forge3d",
+    "rust_library": "forge3d",
+    "binaries": ["policies"],
+    "examples": ["split_vs_single_bg"]
+  }
+}
