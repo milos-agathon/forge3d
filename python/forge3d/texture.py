@@ -85,7 +85,8 @@ def generate_mipmaps(
     if width == 0 or height == 0:
         raise ValueError("image dimensions must be > 0")
     
-    if not np.iscontiguous(image):
+    # Ensure C-contiguous memory layout for efficient processing
+    if not image.flags['C_CONTIGUOUS']:
         image = np.ascontiguousarray(image)
     
     # Validate parameters

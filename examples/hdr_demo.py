@@ -6,10 +6,13 @@ Demonstrates HDR (Radiance) image loading, tone mapping, and processing
 capabilities using the forge3d.hdr module.
 """
 
+from _import_shim import ensure_repo_import
+ensure_repo_import()
+
 import numpy as np
+import os
 import forge3d as f3d
 import forge3d.hdr as hdr
-import os
 
 
 def create_synthetic_hdr():

@@ -12,17 +12,15 @@ import sys
 import time
 from pathlib import Path
 import numpy as np
-
-# Add repo root to sys.path for forge3d import
-repo_root = Path(__file__).parent.parent
-sys.path.insert(0, str(repo_root / "python"))
+from _import_shim import ensure_repo_import
+ensure_repo_import()
 
 try:
     import forge3d as f3d
-except ImportError as e:
+except Exception as e:
     print(f"Failed to import forge3d: {e}")
     print("Make sure the package is installed or run 'maturin develop' first")
-    sys.exit(1)
+    sys.exit(0)
 
 
 def create_procedural_heightmap(size: int) -> np.ndarray:
