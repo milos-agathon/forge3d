@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, sys, math
 from importlib.resources import files as files
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "__version__", "Renderer", "Scene", "TerrainSpike", "make_terrain",
@@ -15,7 +15,8 @@ __all__ = [
     "camera_look_at", "camera_orthographic", "camera_perspective", "camera_view_proj",
     "clear_vectors_py", "colormap_supported", "compose_trs", "compute_normal_matrix",
     "get_vector_counts_py", "invert_matrix", "look_at_transform", "multiply_matrices",
-    "rotate_x", "rotate_y", "rotate_z", "scale", "scale_uniform", "translate"
+    "rotate_x", "rotate_y", "rotate_z", "scale", "scale_uniform", "translate",
+    "make_sampler", "list_sampler_modes", "set_palette", "list_palettes", "get_current_palette"
 ]
 
 # Try to import compiled extension; allow running without it
@@ -154,3 +155,214 @@ def make_terrain(width: int, height: int, grid_size: int):
     if grid_size < 2:
         raise ValueError("grid_size must be >= 2")
     return TerrainSpike(width, height, grid_size)
+
+
+def make_sampler(mode: str, filter: str = "linear", mip: str = "linear"):
+    """Create a sampler configuration descriptor.
+    
+    Parameters
+    ----------
+    mode : str
+        Address mode: "clamp", "repeat", or "mirror"
+    filter : str, default "linear"
+        Magnification/minification filter: "linear" or "nearest"
+    mip : str, default "linear"
+        Mipmap filter: "linear" or "nearest"
+        
+    Returns
+    -------
+    dict
+        Sampler configuration dictionary with keys:
+        - address_mode: str
+        - mag_filter: str  
+        - min_filter: str
+        - mip_filter: str
+        - name: str (descriptive name)
+        
+    Examples
+    --------
+    >>> sampler = make_sampler("clamp", "linear", "nearest")
+    >>> print(sampler["name"])
+    clamp_linear_linear_nearest
+    
+    >>> # For pixel art
+    >>> pixel_sampler = make_sampler("clamp", "nearest", "nearest")
+    
+    >>> # For tiled textures
+    >>> tile_sampler = make_sampler("repeat", "linear", "linear")
+    """
+    # Validate address mode
+    valid_modes = ["clamp", "repeat", "mirror"]
+    if mode not in valid_modes:
+        raise ValueError(f"Invalid address mode '{mode}'. Must be one of: {', '.join(valid_modes)}")
+    
+    # Validate filters
+    valid_filters = ["linear", "nearest"]
+    if filter not in valid_filters:
+        raise ValueError(f"Invalid filter '{filter}'. Must be one of: {', '.join(valid_filters)}")
+        
+    if mip not in valid_filters:
+        raise ValueError(f"Invalid mip filter '{mip}'. Must be one of: {', '.join(valid_filters)}")
+    
+    return {
+        "address_mode": mode,
+        "mag_filter": filter,
+        "min_filter": filter,  # Use same filter for mag and min
+        "mip_filter": mip,
+        "name": f"{mode}_{filter}_{filter}_{mip}"
+    }
+
+
+def list_sampler_modes():
+    """List all available sampler mode combinations.
+    
+    Returns
+    -------
+    list of dict
+        List of all sampler configurations, where each dict contains:
+        - address_mode: str
+        - mag_filter: str
+        - min_filter: str
+        - mip_filter: str
+        - name: str
+        - description: str
+        
+    Examples
+    --------
+    >>> modes = list_sampler_modes()
+    >>> print(f"Available modes: {len(modes)}")
+    >>> for mode in modes[:3]:
+    ...     print(f"{mode['name']}: {mode['description']}")
+    """
+    modes = []
+    
+    address_modes = [
+        ("clamp", "Clamp to edge"),
+        ("repeat", "Repeat/tile"),
+        ("mirror", "Mirror repeat"),
+    ]
+    
+    filters = [
+        ("linear", "Linear filtering"),
+        ("nearest", "Nearest/point filtering"),
+    ]
+    
+    mip_filters = [
+        ("linear", "Linear mipmap interpolation"),
+        ("nearest", "Nearest mipmap level"),
+    ]
+    
+    for addr_mode, addr_desc in address_modes:
+        for filter_mode, filter_desc in filters:
+            for mip_mode, mip_desc in mip_filters:
+                config = {
+                    "address_mode": addr_mode,
+                    "mag_filter": filter_mode,
+                    "min_filter": filter_mode,
+                    "mip_filter": mip_mode,
+                    "name": f"{addr_mode}_{filter_mode}_{filter_mode}_{mip_mode}",
+                    "description": f"{addr_desc}, {filter_desc}, {mip_desc}"
+                }
+                modes.append(config)
+    
+    return modes
+
+
+# --- Palette API fixes -----------------------------------------------------
+# Accept dict | str | int; keep equality with list_palettes() items.
+
+def _palette_from_name_or_index(name_or_index):
+    palettes = list_palettes()
+    if isinstance(name_or_index, dict):
+        if "index" in name_or_index:
+            idx = int(name_or_index["index"])
+            if 0 <= idx < len(palettes):
+                return palettes[idx]
+        if "name" in name_or_index:
+            nm = str(name_or_index["name"])
+            for p in palettes:
+                if p.get("name") == nm:
+                    return p
+        raise ValueError("Invalid palette descriptor dict; expected keys 'name' or 'index'")
+    if isinstance(name_or_index, str):
+        for p in palettes:
+            if p.get("name") == name_or_index:
+                return p
+        raise ValueError(f"Unknown palette '{name_or_index}'. Available: {[p['name'] for p in palettes]}")
+    if isinstance(name_or_index, int):
+        if 0 <= name_or_index < len(palettes):
+            return palettes[name_or_index]
+        raise ValueError(f"Palette index out of range: {name_or_index}")
+    raise ValueError("name_or_index must be dict, str, or int")
+
+# Bridge to native module-level setter (exported from _forge3d)
+try:
+    from ._forge3d import _set_global_palette_index as _native_set_palette_index  # type: ignore
+except Exception:
+    _native_set_palette_index = None
+
+_CURRENT_PALETTE = None
+
+def set_palette(name_or_index):
+    """Set active palette (dict | str | int)."""
+    global _CURRENT_PALETTE
+    chosen = _palette_from_name_or_index(name_or_index)
+    _CURRENT_PALETTE = chosen
+    if _native_set_palette_index is not None:
+        _native_set_palette_index(int(chosen["index"]))
+    return chosen
+
+
+def list_palettes():
+    """List all available palettes for terrain rendering.
+    
+    Returns
+    -------
+    list of dict
+        List of available palettes, where each dict contains:
+        - name: str (palette name)
+        - index: int (0-based index)  
+        - description: str (human-readable description)
+        - type: str (palette type/category)
+        
+    Examples
+    --------
+    >>> palettes = list_palettes()
+    >>> print(f"Available palettes: {len(palettes)}")
+    >>> for palette in palettes:
+    ...     print(f"{palette['index']}: {palette['name']} - {palette['description']}")
+    """
+    # Default palettes that should be available in forge3d
+    palettes = [
+        {
+            "name": "viridis",
+            "index": 0,
+            "description": "Perceptually uniform colormap from purple to yellow",
+            "type": "scientific"
+        },
+        {
+            "name": "magma", 
+            "index": 1,
+            "description": "Perceptually uniform colormap from black to white through purple",
+            "type": "scientific"
+        },
+        {
+            "name": "terrain",
+            "index": 2, 
+            "description": "Natural terrain colors from blue (low) to white (high)",
+            "type": "geographic"
+        }
+    ]
+    
+    return palettes
+
+
+def get_current_palette():
+    """Return current palette descriptor dict (matches list_palettes() items)."""
+    global _CURRENT_PALETTE
+    # Fall back to first available palette if none chosen yet
+    if _CURRENT_PALETTE is None:
+        pals = list_palettes()
+        if pals:
+            _CURRENT_PALETTE = pals[0]
+    return _CURRENT_PALETTE

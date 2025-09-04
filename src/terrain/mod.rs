@@ -185,6 +185,113 @@ impl ColormapLUT {
         });
         Ok((Self { texture: tex, view, sampler, format }, format_name))
     }
+
+    /// Create a multi-palette LUT supporting runtime palette selection
+    /// Creates a 256×N texture where N is the number of palettes
+    pub fn new_multi_palette(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        adapter: &wgpu::Adapter,
+        palette_names: &[&str],
+    ) -> Result<(Self, &'static str), Box<dyn std::error::Error>> {
+        if palette_names.is_empty() {
+            return Err("At least one palette must be specified".into());
+        }
+
+        // R2a: Runtime format selection
+        let force_unorm = std::env::var_os("VF_FORCE_LUT_UNORM").is_some();
+        let srgb_ok = adapter.get_texture_format_features(wgpu::TextureFormat::Rgba8UnormSrgb)
+                           .allowed_usages.contains(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
+        let use_srgb = !force_unorm && srgb_ok;
+
+        let height = palette_names.len() as u32;
+        let format = if use_srgb {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        } else {
+            wgpu::TextureFormat::Rgba8Unorm
+        };
+        let format_name = if use_srgb { "Rgba8UnormSrgb" } else { "Rgba8Unorm" };
+
+        // Create 256×N texture for N palettes
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("colormap-lut-multi"),
+            size: wgpu::Extent3d {
+                width: 256,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        // Create combined palette data
+        let mut combined_data = Vec::with_capacity(256 * height as usize * 4);
+        
+        for &palette_name in palette_names {
+            let palette_type = map_name_to_type(palette_name)?;
+            
+            let palette_data = if use_srgb {
+                // Use sRGB format with PNG bytes as-is
+                decode_png_rgba8(palette_name)
+                    .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?
+            } else {
+                // Use UNORM format with CPU-linearized bytes
+                let srgb_palette = decode_png_rgba8(palette_name)
+                    .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+                to_linear_u8_rgba(&srgb_palette)
+            };
+            
+            if palette_data.len() != 256 * 4 {
+                return Err(format!("Invalid palette size for {}: expected 1024 bytes, got {}", palette_name, palette_data.len()).into());
+            }
+            
+            combined_data.extend_from_slice(&palette_data);
+        }
+
+        // Upload all palette rows at once
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &combined_data,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(NonZeroU32::new(256 * 4).unwrap().into()),
+                rows_per_image: Some(NonZeroU32::new(height).unwrap().into()),
+            },
+            wgpu::Extent3d {
+                width: 256,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("colormap-lut-multi-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        Ok((Self { texture: tex, view, sampler, format }, format_name))
+    }
+
+    /// Get the number of palette rows in this LUT
+    pub fn palette_count(&self) -> u32 {
+        self.texture.height()
+    }
 }
 
 // ---------- Uniforms (std140-compatible, 176 bytes to match WGSL) ----------
@@ -196,7 +303,7 @@ pub struct TerrainUniforms {
     pub view: [[f32; 4]; 4],          // 64 B
     pub proj: [[f32; 4]; 4],          // 64 B
     pub sun_exposure: [f32; 4],       // (sun_dir.x, sun_dir.y, sun_dir.z, exposure) (16 B)
-    pub spacing_h_exag_pad: [f32; 4], // (dx, dy, h_exag, 0.0) (16 B)  
+    pub spacing_h_exag_pad: [f32; 4], // (dx, dy, h_exag, palette_index) (16 B)  
     pub _pad_tail: [f32; 4],          // keep total 176 bytes (16 B)
 }
 
@@ -219,7 +326,27 @@ impl TerrainUniforms {
             view: view.to_cols_array_2d(),
             proj: proj.to_cols_array_2d(),
             sun_exposure: [sun_dir.x, sun_dir.y, sun_dir.z, exposure],
-            spacing_h_exag_pad: [spacing, h_range, exaggeration, 0.0],
+            spacing_h_exag_pad: [spacing, h_range, exaggeration, 0.0], // Default palette_index = 0
+            _pad_tail: [0.0; 4], // Initialize tail padding to zero
+        }
+    }
+
+    /// Create TerrainUniforms with explicit palette selection
+    pub fn new_with_palette(
+        view: glam::Mat4,
+        proj: glam::Mat4,
+        sun_dir: glam::Vec3,
+        exposure: f32,
+        spacing: f32,
+        h_range: f32,
+        exaggeration: f32,
+        palette_index: u32,
+    ) -> Self {
+        Self {
+            view: view.to_cols_array_2d(),
+            proj: proj.to_cols_array_2d(),
+            sun_exposure: [sun_dir.x, sun_dir.y, sun_dir.z, exposure],
+            spacing_h_exag_pad: [spacing, h_range, exaggeration, palette_index as f32],
             _pad_tail: [0.0; 4], // Initialize tail padding to zero
         }
     }
@@ -299,6 +426,7 @@ pub struct Globals {
     pub h_max: f32,
     pub exaggeration: f32,
     pub view_world_position: glam::Vec3,
+    pub palette_index: u32, // L2: Palette selection index
 }
 
 impl Default for Globals {
@@ -312,6 +440,7 @@ impl Default for Globals {
             h_max: 0.5,
             exaggeration: 1.0,
             view_world_position: glam::Vec3::new(0.0, 0.0, 5.0), // Default camera position
+            palette_index: 0, // Default to first palette
         }
     }
 }
@@ -320,7 +449,7 @@ impl Globals {
     pub fn to_uniforms(&self, view: glam::Mat4, proj: glam::Mat4) -> TerrainUniforms {
         let h_range = self.h_max - self.h_min;
         
-        TerrainUniforms::new(
+        TerrainUniforms::new_with_palette(
             view,
             proj,
             self.sun_dir,
@@ -328,6 +457,7 @@ impl Globals {
             self.spacing,
             h_range,
             self.exaggeration,
+            self.palette_index,
         )
     }
 }

@@ -1,6 +1,6 @@
-// T3.3 Terrain shader — compatible with Rust pipeline bind group layouts.
-// Layout: 0=Globals UBO, 1=height R32Float + NonFiltering sampler, 2=LUT RGBA8 + Filtering sampler.
-// This version adds a deterministic analytic height fallback to avoid uniform output with a 1×1 dummy height.
+// T3.3 Terrain shader with descriptor indexing — texture array variant.
+// Layout: 0=Globals UBO, 1=height R32Float + NonFiltering sampler, 2=LUT texture array + Filtering sampler.
+// This version uses texture arrays for descriptor indexing when available.
 
 // ---------- Globals UBO (176 bytes total, must match Rust) ----------
 // std140-compatible layout: 176 bytes total
@@ -25,7 +25,8 @@ struct Globals {
 @group(1) @binding(0) var height_tex  : texture_2d<f32>;  // R32Float, non-filterable
 @group(1) @binding(1) var height_samp : sampler;          // NonFiltering at pipeline level
 
-@group(2) @binding(0) var lut_tex  : texture_2d<f32>;     // RGBA8 (sRGB/UNORM), filterable, 256×N multi-palette
+// Descriptor indexing: texture array instead of single texture
+@group(2) @binding(0) var lut_textures : binding_array<texture_2d<f32>>;  // RGBA8 texture array
 @group(2) @binding(1) var lut_samp : sampler;
 
 // ---------- IO ----------
@@ -50,40 +51,41 @@ fn analytic_height(x: f32, z: f32) -> f32 {
 // ---------- Vertex ----------
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
-  let spacing      = max(globals.spacing_h_exag_pad.x, 1e-8);
-  let exaggeration = globals.spacing_h_exag_pad.z;
+  var out: VsOut;
 
-  // Sample height with a NonFiltering sampler; level 0 to avoid filtering.
-  let h_tex = textureSampleLevel(height_tex, height_samp, in.uv, 0.0).r;
+  // Read height from texture first, fall back to analytic if texture is flat
+  let sampled_h = textureSampleLevel(height_tex, height_samp, in.uv, 0.0).r;
+  
+  // If the sampled height is exactly 0.0, assume it's uninitialized and use analytic fallback
+  let use_analytic = (sampled_h == 0.0);
+  let final_height = select(sampled_h, analytic_height(in.pos_xy.x, in.pos_xy.y), use_analytic);
+  
+  // Apply height exaggeration
+  let height_exag = globals.spacing_h_exag_pad.z;
+  let world_z = final_height * height_exag;
 
-  // Deterministic analytic fallback guarantees variation even if height_tex is 1x1.
-  let h_ana = analytic_height(in.pos_xy.x, in.pos_xy.y);
+  // Construct world position
+  let world_pos = vec4<f32>(in.pos_xy.x, world_z, in.pos_xy.y, 1.0);
 
-  let h = h_tex + h_ana;
+  // Transform to clip space
+  out.clip_pos = globals.proj * globals.view * world_pos;
+  out.uv = in.uv;
+  out.height = final_height;
+  out.xz = in.pos_xy;
 
-  // Build world position (XY are plane coords, Y is height).
-  let world = vec3<f32>(in.pos_xy.x * spacing, h * exaggeration, in.pos_xy.y * spacing);
-
-  var out : VsOut;
-  out.clip_pos = globals.proj * (globals.view * vec4<f32>(world, 1.0));
-  out.uv       = in.uv;
-  out.height   = h;
-  out.xz       = in.pos_xy;
   return out;
 }
 
 // ---------- Fragment ----------
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-  // Map height into [0,1] using h_range stored in spacing_h_exag_pad.y (avoid div by 0).
-  let h_range = max(globals.spacing_h_exag_pad.y, 1e-8);
+  // Height-based colormap: normalize height to [0, 1] assuming range ±1.0 (as per T2).
+  let h_range = 1.0;
   let t = clamp(0.5 + in.height / (2.0 * h_range), 0.0, 1.0);
 
-  // 256×N LUT: sample along X, select row based on palette_index
-  let palette_index = globals.spacing_h_exag_pad.w;
-  let lut_dimensions = vec2<f32>(textureDimensions(lut_tex, 0));
-  let v_coord = (palette_index + 0.5) / lut_dimensions.y; // Center of selected palette row
-  let lut_color = textureSampleLevel(lut_tex, lut_samp, vec2<f32>(t, v_coord), 0.0);
+  // Descriptor indexing: directly sample from texture array using palette index
+  let palette_index = u32(globals.spacing_h_exag_pad.w);
+  let lut_color = textureSampleLevel(lut_textures[palette_index], lut_samp, vec2<f32>(t, 0.5), 0.0);
 
   // Calculate normal from analytic slope (adds spatial variation even with flat height_tex).
   let dhdx = 1.3 * cos(in.xz.x * 1.3) * 0.25;

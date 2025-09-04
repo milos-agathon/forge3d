@@ -1,268 +1,340 @@
-<prompt>
-  <system>
-    You are Claude Code acting as a senior maintainer for a mixed Rust/Python project (PyO3 + maturin). Fix all attached test failures in one atomic pass. Apply focused code edits (no test changes), keep public API where tests expect it, and ensure Windows/Python 3.13 works. Prefer minimal diffs.
-  </system>
+<task id="forge3d-fix-errors-batch" version="1.0">
+  <title>Fix palette dict handling, zero-arg upload_height_r32f, row-padding, and metrics wiring</title>
+
+  <role>
+    You are Claude Code in <b>Implementation Mode</b>, acting as a senior Rust/PyO3 + WebGPU engineer.
+    Make the smallest, surgical code changes so all failures in the attached test log pass without modifying tests.
+  </role>
+
+  <constraints>
+    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
+    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
+    <build>cmake≥3.24, cargo/rustc, maturin, PyO3, VMA</build>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2–compatible design</apis>
+    <docs>Sphinx preferred (no doc edits required for this batch)</docs>
+    <safety>
+      - Create branch <code>fix/batch-upload-palette-rowpad</code>.
+      - Small, reviewable commits per subfix; no blind search/replace.
+      - Do not modify tests or their marks; code-only fixes.
+      - Exclude generated/binary dirs from diffs.
+    </safety>
+    <exclusions>.git, dist, build, target, .venv, venv, __pycache__, node_modules, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz</exclusions>
+  </constraints>
 
   <inputs>
-    <file path="errors.txt" role="failing-test-log">
-      Use these failures as ground truth for requirements:
-      - dem_normalize() must accept keyword arg <code>out_range</code>. :contentReference[oaicite:0]{index=0}
-      - device_diagnostics.py returns non-zero exit if compiled extension missing; must exit 0 and (when --json) still write output. :contentReference[oaicite:1]{index=1}
-      - Example scripts cannot import <code>forge3d</code> when run via subprocess; add robust repo-root import shim. :contentReference[oaicite:2]{index=2}
-      - <code>forge3d.TerrainSpike</code> missing at package root; export it. :contentReference[oaicite:3]{index=3}
-      - <code>run_benchmark(...)</code> must return a dict containing at least key <code>"pixels"</code> (and other fields) for several ops. :contentReference[oaicite:4]{index=4}
-      - Renderer lacks <code>set_exposure</code> method expected by tests. :contentReference[oaicite:5]{index=5}
-      - <code>__version__</code> must be present in <code>forge3d.__all__</code>. :contentReference[oaicite:6]{index=6}
-    </file>
+    <repoRoot>./</repoRoot>
+    <paths>
+      <shaders>shaders/</shaders>
+      <src>src/</src>
+      <python>python/forge3d/</python>
+      <tests>tests/</tests>
+    </paths>
+    <failLog path="errors.txt">
+      - <b>Palette switching:</b> <code>set_palette()</code> rejects dict palette descriptors returned by <code>list_palettes()</code>, causing failure in <code>tests/test_descriptor_indexing.py::test_palette_switching_compatibility</code>.
+      - <b>Height upload:</b> Tests call <code>Renderer.upload_height_r32f()</code> with <i>no arguments</i>; current binding requires <code>heights</code>, causing many TypeErrors across height/memory tests.
+      - <b>Row padding:</b> Some tests exercise non-256-aligned row widths—upload must pad rows to COPY_BYTES_PER_ROW_ALIGNMENT (256) for R32Float textures.
+      - <b>Metrics wiring:</b> After successful upload/readback, memory metrics must update consistently (used in memory_budget tests).
+    </failLog>
   </inputs>
 
-  <goals>
-    <goal>Make all tests in the fail log pass without modifying tests.</goal>
-    <goal>Add dem_normalize(out_range=...) with correct behavior and dtype/shape handling.</goal>
-    <goal>Ensure tools/examples run from repo via subprocess on Windows: import works and GPU-missing paths exit 0.</goal>
-    <goal>Export TerrainSpike at root and implement Renderer.set_exposure().</goal>
-    <goal>run_benchmark returns required keys (including "pixels") for CPU+GPU ops, even with GPU unavailable.</goal>
-    <goal>Expose __version__ in __all__ and keep version consistent (0.5.0).</goal>
-  </goals>
-
   <plan>
-    <step id="1">Python API: implement dem_normalize(out_range=(lo,hi), dtype=...) preserving shape; clamp/scale to range.</step>
-    <step id="2">Diagnostics tool: add repo-root import shim; if compiled extension import fails, print a friendly note, produce minimal JSON to path, and exit(0).</step>
-    <step id="3">Examples: add the same repo-root import shim + graceful GPU-missing skip (exit 0).</step>
-    <step id="4">Public surface: in __init__.py export TerrainSpike, __version__, run_benchmark, etc. Ensure __all__ includes "__version__".</step>
-    <step id="5">Renderer: implement set_exposure(self, exposure: float) in Rust bindings; update uniforms/UBO as needed.</step>
-    <step id="6">Timing harness: implement run_benchmark(op, repeats, width=64, height=64) to return dict with keys: op, iterations, width, height, ms_mean, ms_std, pixels (width*height). Provide CPU fallback when GPU not available.</step>
-    <step id="7">Version/meta: set __version__="0.5.0"; ensure importlib.resources.files is exported as files; keep py.typed shipped (if not already).</step>
+    1) <b>Python palette API</b>
+       - Update <python/forge3d/__init__.py>:
+         * Make <code>set_palette()</code> accept: dict (with keys <code>name</code>/<code>index</code>), str (name), or int (index).
+         * Ensure <code>get_current_palette()</code> returns the same dict shape as from <code>list_palettes()</code> so equality checks pass.
+         * Delegate the selected index into the native layer via a new PyO3 function (module-level) <code>_set_global_palette_index(u32)</code>; add <code>_get_current_palette()</code> if needed.
+       - Ensure no pipeline rebuild is required merely to change palette index; only a uniform/bind update.
+
+    2) <b>Rust: global palette index plumbing</b>
+       - Add module-level palette state:
+         * Expose <code>#[pyfunction] fn _set_global_palette_index(idx: u32)</code> and (optionally) <code>_get_current_palette_descriptor() -&gt; PyDict</code>.
+         * Wire the palette index into the terrain UBO (already present in WGSL as <code>spacing_h_exag_pad.w</code>) when issuing draws.
+         * Ensure <code>Renderer::render_terrain_rgba()</code> refreshes the UBO with current palette index before encoding commands.
+
+    3) <b>upload_height_r32f: optional argument + zero-copy + row padding</b>
+       - Change PyO3 signature to accept an optional ndarray:
+         * <code>#[pyo3(signature = (heights=None))]</code> with <code>Option&lt;&amp;PyAny&gt;</code> param.
+         * If <code>None</code>, use the terrain height source previously supplied via <code>add_terrain(...)</code> (float32 preferred; accept float64 by converting).
+         * Keep zero-copy for C-contiguous <code>float32</code>; copy otherwise.
+       - Implement row padding for arbitrary widths:
+         * Compute <code>bytes_per_row = width * 4</code>; <code>padded_bpr = align_up(bytes_per_row, 256)</code>.
+         * Stage into a padded <code>Vec&lt;u8&gt;</code> and call <code>queue.write_texture</code> with <code>bytes_per_row=padded_bpr</code>.
+       - Enforce <code>≤ 512 MiB</code> limit and error clearly when exceeded.
+       - On success, update the renderer’s height texture/view, dirties as needed, and refresh bind groups.
+
+    4) <b>Metrics wiring</b>
+       - Ensure creation of the height texture increments texture byte counts; readbacks increment I/O counters; all exposed via <code>get_memory_metrics()</code>.
+       - Ensure <code>read_full_height_texture()</code> is already present; otherwise add a minimal implementation returning R32Float contents.
+
+    5) Build & run
+       - <code>maturin develop --release</code>, then run <code>pytest -q</code> and ensure all previously failing tests now pass.
   </plan>
 
   <edits>
     <python file="python/forge3d/__init__.py">
       <![CDATA[
-from __future__ import annotations
-import os, sys, math
-from importlib.resources import files as files
+# --- Palette API fixes -----------------------------------------------------
+# Accept dict | str | int; keep equality with list_palettes() items.
 
-__version__ = "0.5.0"
+def _palette_from_name_or_index(name_or_index):
+    palettes = list_palettes()
+    if isinstance(name_or_index, dict):
+        if "index" in name_or_index:
+            idx = int(name_or_index["index"])
+            if 0 <= idx < len(palettes):
+                return palettes[idx]
+        if "name" in name_or_index:
+            nm = str(name_or_index["name"])
+            for p in palettes:
+                if p.get("name") == nm:
+                    return p
+        raise ValueError("Invalid palette descriptor dict; expected keys 'name' or 'index'")
+    if isinstance(name_or_index, str):
+        for p in palettes:
+            if p.get("name") == name_or_index:
+                return p
+        raise ValueError(f"Unknown palette '{name_or_index}'. Available: {[p['name'] for p in palettes]}")
+    if isinstance(name_or_index, int):
+        if 0 <= name_or_index < len(palettes):
+            return palettes[name_or_index]
+        raise ValueError(f"Palette index out of range: {name_or_index}")
+    raise ValueError("name_or_index must be dict, str, or int")
 
-__all__ = [
-    "__version__", "Renderer", "Scene", "TerrainSpike",
-    "dem_stats", "dem_normalize", "run_benchmark", "files"
-]
-
-# Try to import compiled extension; allow running without it
+# Bridge to native module-level setter (exported from _forge3d)
 try:
-    from ._forge3d import Renderer, Scene, TerrainSpike  # type: ignore
-    _HAVE_EXT = True
+    from ._forge3d import _set_global_palette_index as _native_set_palette_index  # type: ignore
 except Exception:
-    _HAVE_EXT = False
+    _native_set_palette_index = None
 
-import numpy as _np
+_CURRENT_PALETTE = None
 
-def dem_stats(arr: _np.ndarray):
-    a = _np.asarray(arr)
-    return float(_np.nanmin(a)), float(_np.nanmax(a))
+def set_palette(name_or_index):
+    """Set active palette (dict | str | int)."""
+    global _CURRENT_PALETTE
+    chosen = _palette_from_name_or_index(name_or_index)
+    _CURRENT_PALETTE = chosen
+    if _native_set_palette_index is not None:
+        _native_set_palette_index(int(chosen["index"]))
+    return chosen
 
-def dem_normalize(arr: _np.ndarray, vmin=None, vmax=None, out_range=(0.0, 1.0), dtype=_np.float32):
-    """
-    Normalize DEM values to a target range.
-    out_range: (low, high). Keeps shape; returns dtype.
-    """
-    a = _np.asarray(arr, dtype=_np.float32)
-    lo, hi = map(float, out_range)
-    mn = float(_np.nanmin(a) if vmin is None else vmin)
-    mx = float(_np.nanmax(a) if vmax is None else vmax)
-    denom = (mx - mn) if mx > mn else 1.0
-    scaled = (a - mn) / denom
-    out = lo + scaled * (hi - lo)
-    return out.astype(dtype, copy=False)
-
-def run_benchmark(op: str, repeats: int = 3, width: int = 64, height: int = 64):
-    """
-    Minimal timing harness. Always returns the required keys.
-    When GPU features are unavailable, returns zeros but valid structure.
-    """
-    import time
-    pixels = int(width * height)
-    times = []
-    for _ in range(max(1, repeats)):
-        t0 = time.perf_counter()
-        # Optional: exercise a tiny CPU path based on op
-        _ = pixels  # placeholder workload
-        t1 = time.perf_counter()
-        times.append((t1 - t0) * 1000.0)
-    ms_mean = float(_np.mean(times)) if times else 0.0
-    ms_std = float(_np.std(times)) if times else 0.0
-    return {
-        "op": op,
-        "iterations": int(repeats),
-        "width": int(width),
-        "height": int(height),
-        "pixels": pixels,
-        "ms_mean": ms_mean,
-        "ms_std": ms_std,
-    }
+def get_current_palette():
+    """Return current palette descriptor dict (matches list_palettes() items)."""
+    global _CURRENT_PALETTE
+    # Fall back to first available palette if none chosen yet
+    if _CURRENT_PALETTE is None:
+        pals = list_palettes()
+        if pals:
+            _CURRENT_PALETTE = pals[0]
+    return _CURRENT_PALETTE
       ]]>
     </python>
 
-    <python file="python/tools/device_diagnostics.py">
-      <![CDATA[
-#!/usr/bin/env python
-import sys, os, json
-from pathlib import Path
-
-# Repo-root import shim so `import forge3d` works when run from repo
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-def main():
-    out_json = None
-    args = sys.argv[1:]
-    if "--json" in args:
-        out_json = Path(args[args.index("--json") + 1])
-
-    try:
-        import forge3d as f3d  # noqa: F401
-        have_gpu = getattr(f3d, "Renderer", None) is not None
-        info = {"ok": True, "have_gpu": bool(have_gpu)}
-    except Exception as e:
-        # Graceful: still emit JSON and exit 0 so tests pass on CPU-only
-        info = {"ok": False, "have_gpu": False, "error": str(e)}
-
-    if out_json:
-        out_json.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_json, "w", encoding="utf-8") as f:
-            json.dump(info, f, indent=2)
-
-    # Always succeed for enumeration/probe tests
-    return 0
-
-if __name__ == "__main__":
-    sys.exit(main())
-      ]]>
-    </python>
-
-    <python file="examples/_import_shim.py">
-      <![CDATA[
-# Shared import shim: put "from _import_shim import ensure_repo_import" at top of examples
-import sys
-from pathlib import Path
-
-def ensure_repo_import():
-    repo_root = Path(__file__).resolve().parents[1]
-    if str(repo_root) not in sys.path:
-        sys.path.insert(0, str(repo_root))
-      ]]>
-    </python>
-
-    <python file="examples/scene_terrain_demo.py" patch="prepend">
-      <![CDATA[
-from _import_shim import ensure_repo_import
-ensure_repo_import()
-
-try:
-    import forge3d as f3d
-except Exception:
-    print("forge3d extension not available; skipping demo.")
-    import sys; sys.exit(0)
-      ]]>
-    </python>
-
-    <python file="examples/terrain_normalize_demo.py" patch="prepend">
-      <![CDATA[
-from _import_shim import ensure_repo_import
-ensure_repo_import()
-
-try:
-    import forge3d as f3d
-except Exception:
-    print("forge3d extension not available; skipping demo.")
-    import sys; sys.exit(0)
-      ]]>
-    </python>
-
-    <rust file="src/lib.rs (or bindings module)">
+    <rust file="src/terrain/palette.rs (new) or src/lib.rs (module section)">
       <![CDATA[
 use pyo3::prelude::*;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-#[pyclass]
-pub struct Renderer {
-    // ...
-    exposure: f32,
+static GLOBAL_PALETTE_INDEX: AtomicU32 = AtomicU32::new(0);
+
+#[pyfunction]
+pub fn _set_global_palette_index(idx: u32) {
+    GLOBAL_PALETTE_INDEX.store(idx, Ordering::Relaxed);
 }
 
-#[pymethods]
-impl Renderer {
-    /// Set tonemapping exposure value
-    #[pyo3(text_signature = "(self, exposure, /)")]
-    pub fn set_exposure(&mut self, exposure: f32) -> PyResult<()> {
-        self.exposure = exposure;
-        // mark uniforms dirty if applicable
-        Ok(())
-    }
-}
-
-// Ensure TerrainSpike is exposed at crate root if defined elsewhere
-#[pyclass]
-pub struct TerrainSpike {
-    // ...
-}
-
-#[pymethods]
-impl TerrainSpike {
-    #[new]
-    fn new() -> Self { Self { /* ... */ } }
+// Helper used by render path to read current index
+pub fn current_palette_index() -> u32 {
+    GLOBAL_PALETTE_INDEX.load(Ordering::Relaxed)
 }
       ]]>
     </rust>
 
-    <packaging>
+    <rust file="src/renderer/mod.rs or src/lib.rs (Renderer methods)">
       <![CDATA[
-- Ensure python/forge3d/py.typed exists and is included in pyproject.
-- Keep __version__ = "0.5.0" and include "__version__" in __all__.
-- Export `files` from importlib.resources in __init__.py for typing stubs tests.
+use pyo3::prelude::*;
+use numpy::PyReadonlyArray2;
+use crate::terrain::palette::current_palette_index;
+
+#[pymethods]
+impl Renderer {
+    /// Upload float32 heightmap as R32Float texture. If `heights` is None, use the last array supplied via add_terrain().
+    #[pyo3(signature = (heights=None))]
+    pub fn upload_height_r32f(&mut self, py: Python<'_>, heights: Option<&PyAny>) -> PyResult<()> {
+        // Resolve source array
+        let arr_f32: Vec<f32>;
+        let (w, h): (u32, u32);
+        if let Some(hs) = heights {
+            // Accept (H,W) or (H,W,1); allow float64->float32 conversion
+            let np = py.import("numpy")?;
+            let squeezed = np.getattr("squeeze")?.call1((hs,))?;
+            let dtype = squeezed.getattr("dtype")?.to_string();
+            let shape: (usize, usize) = squeezed.getattr("shape")?.extract::<(usize, usize)>()?;
+            w = shape.1 as u32; h = shape.0 as u32;
+            if dtype.contains("float32") {
+                let a: PyReadonlyArray2<f32> = squeezed.extract()?;
+                if let Some(slice) = a.as_array().as_slice() {
+                    arr_f32 = slice.to_vec(); // zero-copy friendly; to_vec() is fine for upload
+                } else {
+                    arr_f32 = a.as_array().to_owned().into_raw_vec();
+                }
+            } else {
+                // Convert to float32
+                let a32 = np.getattr("asarray")?.call1((squeezed, "float32"))?;
+                let a: PyReadonlyArray2<f32> = a32.extract()?;
+                arr_f32 = a.as_array().to_owned().into_raw_vec();
+            }
+        } else {
+            // Use previously added terrain source
+            let src = self.terrain.source_heights().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
+                "no terrain uploaded; call add_terrain() first"
+            ))?;
+            w = src.width(); h = src.height();
+            arr_f32 = src.as_slice().to_vec();
+        }
+
+        // Memory budget guard
+        let bytes = (w as u64) * (h as u64) * 4;
+        let limit = 512u64 * 1024 * 1024;
+        if bytes > limit {
+            return Err(pyo3::exceptions::PyMemoryError::new_err(format!(
+                "height texture {}x{} exceeds 512 MiB ({} bytes)", w, h, bytes
+            )));
+        }
+
+        // Upload with row padding
+        let (tex, view) = crate::core::texture_upload::create_r32f_height_texture_padded(
+            &self.device, &self.queue, &arr_f32, w, h
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("height upload failed: {}", e)))?;
+
+        self.terrain.set_height_texture(tex, view);
+        self.terrain.rebind_height_resources(&self.device)?;
+
+        // Update metrics
+        self.metrics.on_height_uploaded(bytes as usize);
+
+        Ok(())
+    }
+
+    pub fn render_terrain_rgba(&mut self) -> PyResult<Py<PyAny>> {
+        // ... existing setup ...
+        let palette_idx = crate::terrain::palette::current_palette_index();
+        self.terrain.update_palette_index(palette_idx, &self.queue)?;
+        // proceed with rendering
+        // ...
+        #![allow(unused)]
+        Ok(Python::with_gil(|py| py.None()))
+    }
+}
       ]]>
-    </packaging>
+    </rust>
+
+    <rust file="src/core/texture_upload.rs">
+      <![CDATA[
+pub fn create_r32f_height_texture_padded(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    data: &[f32],
+    width: u32,
+    height: u32,
+) -> anyhow::Result<(wgpu::Texture, wgpu::TextureView)> {
+    use anyhow::Context;
+
+    let expected = (width as usize) * (height as usize);
+    anyhow::ensure!(data.len() == expected, "data length {} != {} (width*height)", data.len(), expected);
+
+    let bytes_per_row = (width * 4) as usize;
+    let padded_bpr = ((bytes_per_row + 255) / 256) * 256;
+    let mut staged = vec![0u8; padded_bpr * (height as usize)];
+    let src = bytemuck::cast_slice::<f32, u8>(data);
+
+    for row in 0..height as usize {
+        let src_off = row * bytes_per_row;
+        let dst_off = row * padded_bpr;
+        staged[dst_off..dst_off + bytes_per_row].copy_from_slice(&src[src_off..src_off + bytes_per_row]);
+    }
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("height_r32f"),
+        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+
+    queue.write_texture(
+        wgpu::ImageCopyTexture {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &staged,
+        wgpu::ImageDataLayout {
+            offset: 0,
+            bytes_per_row: Some(std::num::NonZeroU32::new(padded_bpr as u32).unwrap()),
+            rows_per_image: Some(std::num::NonZeroU32::new(height).unwrap()),
+        },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+    );
+
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    Ok((texture, view))
+}
+      ]]>
+    </rust>
+
+    <rust file="src/terrain/pipeline.rs">
+      <![CDATA[
+impl TerrainPipeline {
+    pub fn update_palette_index(&mut self, idx: u32, queue: &wgpu::Queue) -> anyhow::Result<()> {
+        self.globals.spacing_h_exag_pad.w = idx as f32;
+        queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&self.globals));
+        Ok(())
+    }
+    pub fn set_height_texture(&mut self, tex: wgpu::Texture, view: wgpu::TextureView) {
+        self.height_tex = Some(tex);
+        self.height_view = Some(view);
+    }
+    pub fn rebind_height_resources(&mut self, device: &wgpu::Device) -> anyhow::Result<()> {
+        // Recreate bind group(s) using self.height_view
+        self.bind_groups.recreate_with_height(device, self.height_view.as_ref().expect("height view"))?;
+        Ok(())
+    }
+}
+      ]]>
+    </rust>
   </edits>
 
-  <validation>
+  <acceptanceCriteria>
+    <ac id="P1">Palette switching test passes: <code>tests/test_descriptor_indexing.py::test_palette_switching_compatibility</code>. Passing means <code>set_palette()</code> accepts dicts from <code>list_palettes()</code>, <code>get_current_palette()</code> returns an equal dict, and renders differ between two palettes.</ac>
+    <ac id="U1">All <code>TypeError: Renderer.upload_height_r32f() missing 1 required positional argument: 'heights'</code> failures are resolved—method works with zero args by using the previously provided terrain source.</ac>
+    <ac id="U2">Row-padding tests involving non-256-aligned widths pass (exact parity roundtrip for R32Float), covering cases like widths 61, 63, 257.</ac>
+    <ac id="M1">Memory metrics increment appropriately on upload and readback in <code>tests/test_memory_budget.py</code> suite.</ac>
+    <ac id="G0"><code>pytest -q</code> completes with 0 failures for all previously failing tests listed in the log.</ac>
+  </acceptanceCriteria>
+
+  <runbook>
     <commands>
-      <![CDATA[
-python -m pip install -U pip maturin
-maturin develop --release
-python -c "import forge3d as f3d; print(f3d.__version__, '__version__' in getattr(f3d,'__all__',[]))"
-python -m pytest -q
-      ]]>
+      - git checkout -b fix/batch-upload-palette-rowpad
+      - cargo build --workspace --release
+      - pip install -U pip maturin
+      - maturin develop --release
+      - python - <<'PY'
+import numpy as np, forge3d as f
+r=f.Renderer(32,32)
+h=np.random.rand(8,9).astype(np.float32)
+r.add_terrain(h,(1.0,1.0),1.0,colormap="viridis")
+r.upload_height_r32f()  # zero-arg path
+print("zero-arg OK")
+PY
+      - pytest -q
     </commands>
-    <expected_fixes>
-      - dem_normalize accepts out_range and returns correct type/shape. :contentReference[oaicite:7]{index=7}
-      - device_diagnostics.py exits 0 and writes JSON even if extension missing. :contentReference[oaicite:8]{index=8}
-      - Example scripts import forge3d or skip gracefully (exit 0). :contentReference[oaicite:9]{index=9}
-      - forge3d exposes TerrainSpike. :contentReference[oaicite:10]{index=10}
-      - run_benchmark returns dict with "pixels" and other keys. :contentReference[oaicite:11]{index=11}
-      - Renderer.set_exposure exists and is callable. :contentReference[oaicite:12]{index=12}
-      - "__version__" present in __all__. :contentReference[oaicite:13]{index=13}
-    </expected_fixes>
-  </validation>
-
-  <acceptance_criteria>
-    <criterion>pytest exits 0 on Windows/Python 3.13 with repo-root run.</criterion>
-    <criterion>All failures listed in errors.txt are resolved without changing tests. :contentReference[oaicite:14]{index=14}</criterion>
-    <criterion>Public API surface includes TerrainSpike, set_exposure, run_benchmark, dem_normalize(out_range=...).</criterion>
-    <criterion>Examples/tools behave deterministically and exit 0 when GPU extension is unavailable.</criterion>
-    <criterion>__version__ == "0.5.0" and appears in __all__.</criterion>
-  </acceptance_criteria>
-
-  <constraints>
-    <constraint>No test modifications.</constraint>
-    <constraint>Minimal, well-commented changes; no broad refactors.</constraint>
-    <constraint>Preserve existing behavior except where tests require additions.</constraint>
-  </constraints>
-
-  <deliverables>
-    <item>Patched Python API (__init__.py) with dem_normalize(out_range), run_benchmark, exports, and versioning.</item>
-    <item>Patched device_diagnostics.py and examples with repo-root import shim and graceful GPU-missing handling.</item>
-    <item>Patched Rust bindings exposing TerrainSpike and Renderer.set_exposure.</item>
-    <item>Packaging tweaks (py.typed, __all__, files export) as needed to satisfy typing/tests.</item>
-  </deliverables>
-</prompt>
+    <completion>
+      Post the <code>pytest -q</code> summary showing previous failures now passing, and a short note confirming:
+      (1) dict-accepting <code>set_palette()</code> behavior, (2) zero-arg <code>upload_height_r32f()</code>, and
+      (3) row-padding correctness for non-256-aligned widths.
+    </completion>
+  </runbook>
+</task>

@@ -2,9 +2,11 @@
 //! Terrain pipeline state & bindings (T3.3).
 //! Creates bind group layouts (0: Globals UBO, 1: height+sampler, 2: LUT+sampler)
 //! and a render pipeline targeting Rgba8UnormSrgb. No integration/draw in this task.
+//! Supports optional descriptor indexing for texture arrays when available.
 
 use std::borrow::Cow;
 use wgpu::*;
+use crate::device_caps::DeviceCaps;
 
 pub struct TerrainPipeline {
     pub layout: PipelineLayout,
@@ -12,11 +14,38 @@ pub struct TerrainPipeline {
     pub bgl_globals: BindGroupLayout,
     pub bgl_height: BindGroupLayout,
     pub bgl_lut: BindGroupLayout,
+    pub descriptor_indexing: bool,
+    pub max_palette_textures: u32,
 }
 
 impl TerrainPipeline {
     /// Create the terrain pipeline. Does **not** record commands or create bind groups.
     pub fn create(device: &Device, color_format: TextureFormat) -> Self {
+        // Detect descriptor indexing capabilities
+        let device_caps = DeviceCaps::from_current_device().unwrap_or_else(|_| {
+            // Fallback if capability detection fails
+            DeviceCaps {
+                backend: "unknown".to_string(),
+                adapter_name: "unknown".to_string(),
+                device_name: "unknown".to_string(),
+                max_texture_dimension_2d: 4096,
+                max_buffer_size: 128 * 1024 * 1024,
+                msaa_supported: false,
+                max_samples: 1,
+                device_type: "unknown".to_string(),
+                descriptor_indexing: false,
+                max_texture_array_layers: 16,
+                max_sampler_array_size: 8,
+                vertex_shader_array_support: false,
+            }
+        });
+        
+        let descriptor_indexing = device_caps.descriptor_indexing;
+        let max_palette_textures = if descriptor_indexing {
+            device_caps.max_texture_array_layers.min(64) // Reasonable limit for palettes
+        } else {
+            1 // Single texture mode
+        };
         // ---- Bind group layouts -------------------------------------------------
         // group(0) — Globals UBO (@group(0) @binding(0) var<uniform> globals : Globals)
         let bgl_globals = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -59,27 +88,52 @@ impl TerrainPipeline {
         });
 
         // group(2) — LUT RGBA8UnormSrgb texture + sampler
-        let bgl_lut = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("vf.Terrain.bgl.lut"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
+        // Support texture arrays when descriptor indexing is available
+        let bgl_lut = if descriptor_indexing {
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("vf.Terrain.bgl.lut.array"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Float { filterable: true },
+                            view_dimension: TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: Some(std::num::NonZeroU32::new(max_palette_textures).unwrap()),
                     },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            })
+        } else {
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("vf.Terrain.bgl.lut.single"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Float { filterable: true },
+                            view_dimension: TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            })
+        };
 
         let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("vf.Terrain.pipelineLayout"),
@@ -88,11 +142,18 @@ impl TerrainPipeline {
         });
 
         // ---- Shader module ------------------------------------------------------
-        // NOTE: this path is relative to this file (src/terrain/pipeline.rs)
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("vf.Terrain.shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/terrain.wgsl"))),
-        });
+        // Choose shader variant based on descriptor indexing support
+        let shader = if descriptor_indexing {
+            device.create_shader_module(ShaderModuleDescriptor {
+                label: Some("vf.Terrain.shader.descriptor_indexing"),
+                source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/terrain_descriptor_indexing.wgsl"))),
+            })
+        } else {
+            device.create_shader_module(ShaderModuleDescriptor {
+                label: Some("vf.Terrain.shader.fallback"),
+                source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/terrain.wgsl"))),
+            })
+        };
 
         // ---- Vertex buffer layout ----------------------------------------------
         // Matches T3.1: location0 = position.xy (Float32x2), location1 = uv (Float32x2)
@@ -139,7 +200,15 @@ impl TerrainPipeline {
             multiview: None,
         });
 
-        Self { layout, pipeline, bgl_globals, bgl_height, bgl_lut }
+        Self { 
+            layout, 
+            pipeline, 
+            bgl_globals, 
+            bgl_height, 
+            bgl_lut, 
+            descriptor_indexing,
+            max_palette_textures,
+        }
     }
 
     // ---------- Bind-group helpers (builders) ----------
@@ -171,6 +240,35 @@ impl TerrainPipeline {
                 BindGroupEntry { binding: 1, resource: BindingResource::Sampler(samp) },
             ],
         })
+    }
+    
+    /// Create bind group with texture array for descriptor indexing mode
+    pub fn make_bg_lut_array(&self, device: &Device, views: &[&TextureView], samp: &Sampler) -> BindGroup {
+        if !self.descriptor_indexing {
+            panic!("make_bg_lut_array called but descriptor indexing is not available");
+        }
+        
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some("vf.Terrain.bg.lut.array"),
+            layout: &self.bgl_lut,
+            entries: &[
+                BindGroupEntry { 
+                    binding: 0, 
+                    resource: BindingResource::TextureViewArray(views),
+                },
+                BindGroupEntry { binding: 1, resource: BindingResource::Sampler(samp) },
+            ],
+        })
+    }
+    
+    /// Check if descriptor indexing is supported
+    pub fn supports_descriptor_indexing(&self) -> bool {
+        self.descriptor_indexing
+    }
+    
+    /// Get maximum number of palette textures supported
+    pub fn max_palette_textures(&self) -> u32 {
+        self.max_palette_textures
     }
 }
 
