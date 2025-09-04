@@ -100,7 +100,9 @@
       "Read(C:\\Users\\milos/**)",
       "Bash(FORGE3D_NO_BOOTSTRAP=1 python -m pytest tests/ --collect-only -q)",
       "Bash(timeout:*)",
-      "Read(C:\\/**)"
+      "Read(C:\\/**)",
+      "Bash(export VIRTUAL_ENV=)",
+      "Bash(export CONDA_PREFIX=)"
     ],
     "deny": [],
     "additionalDirectories": [

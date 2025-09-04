@@ -7,6 +7,32 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 <!-- Future work goes here -->
 
+## [0.6.0] - 2025-09-03
+
+### Added
+- **Workstream I – WebGPU Fundamentals**: Advanced GPU memory management and performance optimization
+  - I6: Split-buffers performance benchmarking with bind group churn comparison (`examples/perf/split_vs_single_bg.rs`)
+  - I7: Big buffer pattern implementation with 64-byte aligned ring allocator (`src/core/big_buffer.rs`)
+  - I8: Double-buffering for per-frame data with ping-pong buffer support (`src/core/double_buffer.rs`)
+  - I9: Upload policy benchmark harness comparing multiple upload strategies (`bench/upload_policies/policies.rs`)
+  - Feature flags (`wsI_bigbuf`, `wsI_double_buf`) for optional adoption
+  - Comprehensive performance validation and memory tracking integration
+- **Workstream L – Advanced Rendering**: Texture processing and descriptor indexing enhancements
+  - L3: Descriptor indexing capability detection and terrain pipeline texture array support
+  - HDR (Radiance) image loading and processing utilities (`python/forge3d/hdr.py`)
+  - Texture processing and mipmap generation utilities (`python/forge3d/texture.py`)
+  - Advanced sampler modes and texture filtering (`src/core/sampler_modes.rs`)
+  - GPU-based mipmap generation with gamma-aware downsampling (`src/core/mipmap.rs`)
+  - Terrain palette switching with both descriptor indexing and fallback support
+
+### Changed
+- Enhanced terrain rendering pipeline to support dynamic palette switching without pipeline rebuilds
+- Improved device capability reporting to include descriptor indexing and texture array limits
+
+### Fixed
+- Terrain palette switching now produces visually distinct colors when changing palettes
+- Memory budget compliance maintained across all new big buffer and double-buffer implementations
+
 ## [0.5.0] - 2025-08-31
 
 ### Added

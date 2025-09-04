@@ -31,3 +31,12 @@ pub mod big_buffer;
 // I8: Double-buffering for per-frame data
 #[cfg(any(feature = "wsI_bigbuf", feature = "wsI_double_buf"))]
 pub mod double_buffer;
+
+// L4: Mipmap generation utilities
+pub mod mipmap;
+
+// L5: Sampler mode matrix and policy utilities
+pub mod sampler_modes;
+
+// L6: Texture upload helpers for HDR formats
+pub mod texture_upload;

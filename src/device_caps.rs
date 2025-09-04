@@ -33,6 +33,18 @@ pub struct DeviceCaps {
     
     /// Device type (integrated, discrete, virtual, cpu, other)
     pub device_type: String,
+    
+    /// Descriptor indexing support (bindless textures)
+    pub descriptor_indexing: bool,
+    
+    /// Maximum textures in descriptor array
+    pub max_texture_array_layers: u32,
+    
+    /// Maximum samplers in descriptor array
+    pub max_sampler_array_size: u32,
+    
+    /// Vertex shader texture array support
+    pub vertex_shader_array_support: bool,
 }
 
 impl DeviceCaps {
@@ -59,6 +71,15 @@ impl DeviceCaps {
             1
         };
         
+        // Detect descriptor indexing capabilities
+        let device_features = g.device.features();
+        let descriptor_indexing = device_features.contains(wgpu::Features::TEXTURE_BINDING_ARRAY) 
+            && device_features.contains(wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING);
+        
+        // Backend-specific array limits
+        let (max_texture_array_layers, max_sampler_array_size, vertex_shader_array_support) = 
+            Self::detect_array_limits(&adapter_info.backend, &device_limits);
+        
         Ok(DeviceCaps {
             backend: format!("{:?}", adapter_info.backend).to_lowercase(),
             adapter_name: adapter_info.name.clone(),
@@ -68,7 +89,51 @@ impl DeviceCaps {
             msaa_supported,
             max_samples,
             device_type: format!("{:?}", adapter_info.device_type).to_lowercase(),
+            descriptor_indexing,
+            max_texture_array_layers,
+            max_sampler_array_size,
+            vertex_shader_array_support,
         })
+    }
+    
+    /// Detect backend-specific array limits
+    fn detect_array_limits(backend: &wgpu::Backend, limits: &wgpu::Limits) -> (u32, u32, bool) {
+        match backend {
+            wgpu::Backend::Vulkan => {
+                // Vulkan has generous limits for descriptor arrays
+                // Based on typical Vulkan 1.2 implementations
+                let max_textures = limits.max_texture_array_layers.min(2048);
+                let max_samplers = 32; // Conservative limit for samplers
+                let vertex_support = true; // Vulkan supports arrays in vertex shaders
+                (max_textures, max_samplers, vertex_support)
+            },
+            wgpu::Backend::Metal => {
+                // Metal has more restrictive limits
+                // Based on Metal argument buffer limitations
+                let max_textures = limits.max_texture_array_layers.min(512);
+                let max_samplers = 16; // Metal sampler limits
+                let vertex_support = true; // Metal supports texture arrays in vertex shaders
+                (max_textures, max_samplers, vertex_support)
+            },
+            wgpu::Backend::Dx12 => {
+                // DX12 has variable support depending on feature level
+                let max_textures = limits.max_texture_array_layers.min(1024);
+                let max_samplers = 32; // DX12 descriptor heap limits
+                let vertex_support = true; // DX12 supports arrays in vertex shaders
+                (max_textures, max_samplers, vertex_support)
+            },
+            wgpu::Backend::Gl => {
+                // OpenGL has more limited support, especially older versions
+                let max_textures = limits.max_texture_array_layers.min(256);
+                let max_samplers = 8; // Conservative GL limit
+                let vertex_support = false; // GL often lacks vertex shader array support
+                (max_textures, max_samplers, vertex_support)
+            },
+            _ => {
+                // Unknown backend - use conservative limits
+                (32, 8, false)
+            }
+        }
     }
     
     /// Convert to Python dictionary
@@ -83,6 +148,10 @@ impl DeviceCaps {
         dict.set_item("msaa_supported", self.msaa_supported)?;
         dict.set_item("max_samples", self.max_samples)?;
         dict.set_item("device_type", &self.device_type)?;
+        dict.set_item("descriptor_indexing", self.descriptor_indexing)?;
+        dict.set_item("max_texture_array_layers", self.max_texture_array_layers)?;
+        dict.set_item("max_sampler_array_size", self.max_sampler_array_size)?;
+        dict.set_item("vertex_shader_array_support", self.vertex_shader_array_support)?;
         
         Ok(dict.into())
     }

@@ -1,3 +1,0 @@
-Configuration,TotalTimeMs,AvgFrameTimeMs,MinFrameTimeMs,MaxFrameTimeMs,BindGroupSwitches,DrawCalls
-SplitBindGroups,202.395,0.337,0.321,2.101,600000,600000
-SingleBindGroup,166.053,0.277,0.264,1.390,600,600000

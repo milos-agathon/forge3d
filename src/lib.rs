@@ -35,6 +35,21 @@ const CLEAR_COLOR: wgpu::Color = wgpu::Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
 mod gpu;
 use crate::gpu::{ctx, align_copy_bpr};
 
+// Global palette index state
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static GLOBAL_PALETTE_INDEX: AtomicU32 = AtomicU32::new(0);
+
+#[pyfunction]
+pub fn _set_global_palette_index(idx: u32) {
+    GLOBAL_PALETTE_INDEX.store(idx, Ordering::Relaxed);
+}
+
+// Helper used by render path to read current index
+pub fn current_palette_index() -> u32 {
+    GLOBAL_PALETTE_INDEX.load(Ordering::Relaxed)
+}
+
 // ---------- Geometry & pipeline ----------
 
 #[repr(C)]
@@ -237,6 +252,18 @@ pub struct Renderer {
     debug_last_height_src_ptr: usize,
     // Simple exposure value for set_exposure method
     exposure: f32,
+    // Terrain rendering infrastructure
+    terrain_pipeline: Option<TerrainPipeline>,
+    terrain_ubo: Option<wgpu::Buffer>,
+    terrain_vbuf: Option<wgpu::Buffer>,
+    terrain_ibuf: Option<wgpu::Buffer>,
+    terrain_icount: u32,
+    colormap_lut: Option<terrain::ColormapLUT>,
+    // For descriptor indexing: individual LUT textures
+    individual_luts: Vec<terrain::ColormapLUT>,
+    bg0_globals: Option<wgpu::BindGroup>,
+    bg1_height: Option<wgpu::BindGroup>,
+    bg2_lut: Option<wgpu::BindGroup>,
 }
 
 #[pymethods]
@@ -282,6 +309,17 @@ impl Renderer {
             debug_last_height_src_ptr: 0,
             // Simple exposure value for set_exposure method
             exposure: 1.0,
+            // Terrain rendering infrastructure - initialize as None, will be created on first use
+            terrain_pipeline: None,
+            terrain_ubo: None,
+            terrain_vbuf: None,
+            terrain_ibuf: None,
+            terrain_icount: 0,
+            colormap_lut: None,
+            individual_luts: Vec::new(),
+            bg0_globals: None,
+            bg1_height: None,
+            bg2_lut: None,
         }
     }
 
@@ -594,42 +632,66 @@ impl Renderer {
         Ok(())
     }
 
-    #[pyo3(text_signature = "($self)")]
-    pub fn upload_height_r32f(&mut self) -> pyo3::PyResult<()> {
+    /// Upload float32 heightmap as R32Float texture. If `heights` is None, use the last array supplied via add_terrain().
+    #[pyo3(signature = (heights=None))]
+    pub fn upload_height_r32f(&mut self, py: Python<'_>, heights: Option<&PyAny>) -> PyResult<()> {
+        // Resolve source array
+        let arr_f32: Vec<f32>;
+        let (w, h): (u32, u32);
+        if let Some(hs) = heights {
+            // Accept (H,W) or (H,W,1); allow float64->float32 conversion
+            let np = py.import("numpy")?;
+            let squeezed = np.getattr("squeeze")?.call1((hs,))?;
+            let dtype = squeezed.getattr("dtype")?.to_string();
+            let shape: (usize, usize) = squeezed.getattr("shape")?.extract::<(usize, usize)>()?;
+            w = shape.1 as u32; h = shape.0 as u32;
+            if dtype.contains("float32") {
+                let a: PyReadonlyArray2<f32> = squeezed.extract()?;
+                if let Some(slice) = a.as_array().as_slice() {
+                    arr_f32 = slice.to_vec(); // zero-copy friendly; to_vec() is fine for upload
+                } else {
+                    arr_f32 = a.as_array().to_owned().into_raw_vec();
+                }
+            } else {
+                // Convert to float32
+                let a32 = np.getattr("asarray")?.call1((squeezed, "float32"))?;
+                let a: PyReadonlyArray2<f32> = a32.extract()?;
+                arr_f32 = a.as_array().to_owned().into_raw_vec();
+            }
+        } else {
+            // Use previously added terrain source
+            let terr = self.terrain.as_ref().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
+                "no terrain uploaded; call add_terrain() first"
+            ))?;
+            w = terr.width;
+            h = terr.height;
+            arr_f32 = terr.heights.clone();
+        }
+
+        // Memory budget guard
+        let bytes = (w as u64) * (h as u64) * 4;
+        let limit = 512u64 * 1024 * 1024;
+        if bytes > limit {
+            return Err(pyo3::exceptions::PyMemoryError::new_err(format!(
+                "height texture {}x{} exceeds 512 MiB ({} bytes)", w, h, bytes
+            )));
+        }
+
         let g = ctx();
 
-        let terr = self.terrain.as_ref()
-            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("no terrain uploaded; call add_terrain() first"))?;
-            
-        // Check budget before allocating height texture
-        let tracker = global_tracker();
-        let texture_bytes = (terr.width as u64) * (terr.height as u64) * 4; // R32Float = 4 bytes per pixel
-        if let Err(e) = tracker.check_budget(texture_bytes) { // Preflight upcoming allocation
-            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("{}", e)));
-        }
+        // Upload with row padding
+        let (tex, view_tex) = crate::core::texture_upload::create_r32f_height_texture_padded(
+            &g.device, &g.queue, &arr_f32, w, h
+        ).map_err(|e| {
+            match &e {
+                crate::error::RenderError::Upload(msg) if msg.contains("512 MiB") => {
+                    pyo3::exceptions::PyMemoryError::new_err(msg.clone())
+                }
+                _ => pyo3::exceptions::PyRuntimeError::new_err(format!("Height upload failed: {}", e))
+            }
+        })?;
 
-        let width = terr.width;
-        let height = terr.height;
-        if width == 0 || height == 0 {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err("terrain dimensions are zero"));
-        }
-
-        let tex = g.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain-height-r32f"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        
-        // Track height texture allocation
-        let registry = crate::core::memory_tracker::global_tracker();
-        registry.track_texture_allocation(width, height, wgpu::TextureFormat::R32Float);
-        
-        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        // Create sampler for height texture
         let samp = g.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("terrain-height-sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -641,47 +703,70 @@ impl Renderer {
             ..Default::default()
         });
 
-        // Build temporary padded upload buffer for 256-byte row alignment
-        let row_bytes = width * 4;
-        let padded_bpr = align_copy_bpr(row_bytes);
-        
-        // Create padded buffer
-        let padded_data = {
-            let mut data = vec![0u8; (padded_bpr * height) as usize];
-            let input_data = bytemuck::cast_slice::<f32, u8>(&terr.heights);
-            
-            for y in 0..height {
-                let src_offset = (y * row_bytes) as usize;
-                let dst_offset = (y * padded_bpr) as usize;
-                let src_end = src_offset + row_bytes as usize;
-                let dst_end = dst_offset + row_bytes as usize;
-                
-                data[dst_offset..dst_end].copy_from_slice(&input_data[src_offset..src_end]);
-            }
-            data
-        };
-
-        g.queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &tex,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &padded_data,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(NonZeroU32::new(padded_bpr).unwrap().into()),
-                rows_per_image: Some(NonZeroU32::new(height).unwrap().into()),
-            },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-        );
-        g.device.poll(wgpu::Maintain::Wait);
-
+        // Store texture, view, and sampler
         self.height_tex = Some(tex);
-        self.height_view = Some(view);
+        self.height_view = Some(view_tex);
         self.height_sampler = Some(samp);
+
+        // Update metrics
+        let registry = crate::core::memory_tracker::global_tracker();
+        registry.track_texture_allocation(w, h, wgpu::TextureFormat::R32Float);
+
         Ok(())
+    }
+
+    /// Render terrain using uploaded height texture (requires prior upload_height_r32f call).
+    /// Returns RGBA image as uint8 array with shape (height, width, 4).
+    #[pyo3(text_signature = "($self)")]
+    pub fn render_terrain_rgba<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyArray3<u8>>> {
+        // Check if height texture was uploaded
+        if self.height_tex.is_none() || self.height_view.is_none() {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "no height texture uploaded; call upload_height_r32f() first"
+            ));
+        }
+
+        let g = ctx();
+        
+        // Update palette index before rendering
+        let palette_idx = current_palette_index();
+        // Note: In a full terrain implementation, this would update terrain uniforms
+        // For now, we just store it for future use
+        
+        self.render_terrain_into_offscreen(g)?;
+
+        // Reuse readback buffer setup from render_triangle_rgba
+        let need = (align_copy_bpr(self.width * 4) as u64) * (self.height as u64);
+        if need > self.readback_size {
+            // Check budget before allocation
+            let registry = crate::core::memory_tracker::global_tracker();
+            registry.check_budget(need).map_err(|e| RenderError::device(e))?;
+            
+            // Free old buffer allocation
+            if self.readback_size > 0 {
+                registry.free_buffer_allocation(self.readback_size, true); // host-visible
+            }
+            
+            let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
+            self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("readback-buffer"),
+                size: need,
+                usage,
+                mapped_at_creation: false,
+            });
+            
+            // Register new allocation
+            registry.track_buffer_allocation(need, true); // host-visible
+            self.readback_size = need;
+        }
+
+        let pixels = copy_texture_to_rgba_unpadded(
+            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
+
+        let arr3 = Array3::from_shape_vec(
+            (self.height as usize, self.width as usize, 4), pixels
+        ).map_err(|e| RenderError::render(e.to_string()))?;
+        Ok(arr3.into_pyarray_bound(py))
     }
 
     #[pyo3(text_signature = "($self, x, y, w, h)")]
@@ -908,6 +993,272 @@ impl Renderer {
         g.queue.submit([encoder.finish()]);
         Ok(())
     }
+
+    // Ensure terrain rendering infrastructure is initialized
+    fn ensure_terrain_infrastructure(&mut self, g: &crate::gpu::GpuContext) -> PyResult<()> {
+        if self.terrain_pipeline.is_some() {
+            return Ok(()); // Already initialized
+        }
+
+        // Create terrain pipeline
+        let terrain_pipeline = TerrainPipeline::create(&g.device, TEXTURE_FORMAT);
+        
+        // Create LUT texture(s) based on descriptor indexing support
+        let (colormap_lut, individual_luts) = if terrain_pipeline.supports_descriptor_indexing() {
+            // For descriptor indexing, create individual textures for each palette
+            let palette_types = [
+                crate::colormap::ColormapType::Viridis,
+                crate::colormap::ColormapType::Magma, 
+                crate::colormap::ColormapType::Terrain,
+            ];
+            
+            let mut luts = Vec::new();
+            for palette_type in &palette_types {
+                let (lut, _format) = terrain::ColormapLUT::new(
+                    &g.device, &g.queue, &g.adapter, *palette_type
+                ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                luts.push(lut);
+            }
+            
+            // Use the first one as the main colormap_lut (for compatibility)
+            let main_lut = terrain::ColormapLUT::new(
+                &g.device, &g.queue, &g.adapter, crate::colormap::ColormapType::Viridis
+            ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?.0;
+            
+            (main_lut, luts)
+        } else {
+            // For fallback, create multi-palette LUT with all supported colormaps  
+            let palette_names = &["viridis", "magma", "terrain"];
+            let (lut, _format) = terrain::ColormapLUT::new_multi_palette(
+                &g.device, &g.queue, &g.adapter, palette_names
+            ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            (lut, Vec::new())
+        };
+        
+        // Create terrain geometry (simple 2×2 grid, same as Scene)
+        let grid_size = 2;
+        let scale = 1.0f32;
+        let step = (2.0 * scale) / (grid_size as f32 - 1.0);
+        let mut verts = Vec::<f32>::with_capacity(grid_size * grid_size * 4);
+        
+        // Generate vertex data: [x, z, u, v] per vertex
+        for j in 0..grid_size {
+            for i in 0..grid_size {
+                let x = -scale + i as f32 * step;
+                let z = -scale + j as f32 * step;
+                let u = i as f32 / (grid_size as f32 - 1.0);
+                let v = j as f32 / (grid_size as f32 - 1.0);
+                verts.extend_from_slice(&[x, z, u, v]);
+            }
+        }
+        
+        // Generate indices for two triangles per quad
+        let mut idx = Vec::<u32>::with_capacity((grid_size - 1) * (grid_size - 1) * 6);
+        for j in 0..grid_size - 1 {
+            for i in 0..grid_size - 1 {
+                let a = (j * grid_size + i) as u32;
+                let b = (j * grid_size + i + 1) as u32;
+                let c = ((j + 1) * grid_size + i) as u32;
+                let d = ((j + 1) * grid_size + i + 1) as u32;
+                idx.extend_from_slice(&[a, c, b, b, c, d]);
+            }
+        }
+        
+        let terrain_vbuf = g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain-vbuf"),
+            contents: bytemuck::cast_slice(&verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let terrain_ibuf = g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain-ibuf"),
+            contents: bytemuck::cast_slice(&idx),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        let terrain_icount = idx.len() as u32;
+
+        // Create globals UBO
+        let aspect = self.width as f32 / self.height as f32;
+        let view = glam::Mat4::look_at_rh(
+            glam::Vec3::new(0.0, 2.0, 2.0), // eye
+            glam::Vec3::new(0.0, 0.0, 0.0), // target
+            glam::Vec3::new(0.0, 1.0, 0.0), // up
+        );
+        let proj = crate::camera::perspective_wgpu(45f32.to_radians(), aspect, 0.1, 100.0);
+        
+        // Set the current palette index from global state  
+        let palette_index = current_palette_index();
+        let mut globals = terrain::Globals::default();
+        globals.palette_index = palette_index;
+        
+        let uniforms = globals.to_uniforms(view, proj);
+        let terrain_ubo = g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain-ubo"),
+            contents: bytemuck::cast_slice(&[uniforms]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Ensure we have a height texture (create a simple one if needed)
+        if self.height_tex.is_none() {
+            let tex = g.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("default-height"),
+                size: wgpu::Extent3d { width: 2, height: 2, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            
+            // Upload simple height data with variety
+            let height_data = [0.0f32, 0.5f32, 0.8f32, 1.0f32];
+            let row_bytes = 2 * 4; // 2 pixels * 4 bytes per pixel
+            let padded_bpr = crate::gpu::align_copy_bpr(row_bytes);
+            let src_bytes = bytemuck::cast_slice(&height_data);
+            let mut padded = vec![0u8; (padded_bpr * 2) as usize];
+            for y in 0..2 {
+                let s = y * row_bytes as usize;
+                let d = y * padded_bpr as usize;
+                padded[d..d + row_bytes as usize].copy_from_slice(&src_bytes[s..s + row_bytes as usize]);
+            }
+            
+            g.queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &padded,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(std::num::NonZeroU32::new(padded_bpr).unwrap().into()),
+                    rows_per_image: Some(std::num::NonZeroU32::new(2).unwrap().into()),
+                },
+                wgpu::Extent3d { width: 2, height: 2, depth_or_array_layers: 1 },
+            );
+            
+            let view = tex.create_view(&Default::default());
+            let sampler = g.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("height-sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            });
+            
+            self.height_tex = Some(tex);
+            self.height_view = Some(view);
+            self.height_sampler = Some(sampler);
+        }
+
+        // Create bind groups
+        let bg0_globals = terrain_pipeline.make_bg_globals(&g.device, &terrain_ubo);
+        let bg1_height = terrain_pipeline.make_bg_height(
+            &g.device,
+            self.height_view.as_ref().unwrap(),
+            self.height_sampler.as_ref().unwrap(),
+        );
+        
+        let bg2_lut = if terrain_pipeline.supports_descriptor_indexing() {
+            // Use texture array approach with individual LUT views
+            let views: Vec<_> = individual_luts.iter().map(|lut| &lut.view).collect();
+            terrain_pipeline.make_bg_lut_array(&g.device, &views, &individual_luts[0].sampler)
+        } else {
+            // Use single texture approach 
+            terrain_pipeline.make_bg_lut(&g.device, &colormap_lut.view, &colormap_lut.sampler)
+        };
+
+        // Store all the initialized infrastructure
+        self.terrain_pipeline = Some(terrain_pipeline);
+        self.terrain_ubo = Some(terrain_ubo);
+        self.terrain_vbuf = Some(terrain_vbuf);
+        self.terrain_ibuf = Some(terrain_ibuf);
+        self.terrain_icount = terrain_icount;
+        self.colormap_lut = Some(colormap_lut);
+        self.individual_luts = individual_luts;
+        self.bg0_globals = Some(bg0_globals);
+        self.bg1_height = Some(bg1_height);
+        self.bg2_lut = Some(bg2_lut);
+
+        Ok(())
+    }
+
+    fn render_terrain_into_offscreen(&mut self, g: &crate::gpu::GpuContext) -> PyResult<()> {
+        // Ensure color texture matches current size
+        let size = self.color_tex.size();
+        if size.width != self.width || size.height != self.height || self.color_tex.format() != TEXTURE_FORMAT {
+            let (tex, view) = create_offscreen(&g.device, self.width, self.height, TEXTURE_FORMAT);
+            self.color_tex = tex;
+            self.color_view = view;
+        }
+
+        // Initialize terrain infrastructure if needed
+        self.ensure_terrain_infrastructure(g)?;
+
+        // Update globals UBO with current palette index
+        let palette_index = current_palette_index();
+        let mut globals = terrain::Globals::default();
+        globals.palette_index = palette_index;
+        
+        // Update the UBO with current palette index
+        let aspect = self.width as f32 / self.height as f32;
+        let view = glam::Mat4::look_at_rh(
+            glam::Vec3::new(0.0, 2.0, 2.0), // eye
+            glam::Vec3::new(0.0, 0.0, 0.0), // target  
+            glam::Vec3::new(0.0, 1.0, 0.0), // up
+        );
+        let proj = crate::camera::perspective_wgpu(45f32.to_radians(), aspect, 0.1, 100.0);
+        let uniforms = globals.to_uniforms(view, proj);
+        
+        g.queue.write_buffer(
+            self.terrain_ubo.as_ref().unwrap(),
+            0,
+            bytemuck::bytes_of(&uniforms),
+        );
+
+        // Real terrain rendering pass
+        let mut encoder = g.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("terrain-render-encoder"),
+        });
+
+        {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terrain-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.02,
+                            g: 0.02,
+                            b: 0.03,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            
+            // Set terrain pipeline and draw terrain geometry
+            let terrain_pipeline = self.terrain_pipeline.as_ref().unwrap();
+            rpass.set_pipeline(&terrain_pipeline.pipeline);
+            rpass.set_bind_group(0, self.bg0_globals.as_ref().unwrap(), &[]);
+            rpass.set_bind_group(1, self.bg1_height.as_ref().unwrap(), &[]);
+            rpass.set_bind_group(2, self.bg2_lut.as_ref().unwrap(), &[]);
+            rpass.set_vertex_buffer(0, self.terrain_vbuf.as_ref().unwrap().slice(..));
+            rpass.set_index_buffer(self.terrain_ibuf.as_ref().unwrap().slice(..), wgpu::IndexFormat::Uint32);
+            rpass.draw_indexed(0..self.terrain_icount, 0, 0..1);
+        }
+        
+        g.queue.submit([encoder.finish()]);
+        Ok(())
+    }
 }
 
 fn backend_str(b: wgpu::Backend) -> &'static str {
@@ -1049,6 +1400,10 @@ pub mod scene;
 // H-BEGIN:vector-export
 pub mod vector;
 // H-END:vector-export
+
+// L6-BEGIN:formats-export
+pub mod formats;
+// L6-END:formats-export
 
 // T2.1 Infrastructure re-exports for easy access
 #[cfg(feature = "terrain_spike")]
@@ -1518,6 +1873,7 @@ fn _forge3d(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<scene::Scene>()?;
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
+    m.add_function(wrap_pyfunction!(_set_global_palette_index, m)?)?;
     m.add_function(wrap_pyfunction!(grid_generate, m)?)?;
     m.add_function(wrap_pyfunction!(render_triangle_rgba, m)?)?;
     m.add_function(wrap_pyfunction!(render_triangle_png, m)?)?;
