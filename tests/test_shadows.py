@@ -641,20 +641,23 @@ class TestLumaDropRequirement:
         )
         renderer.set_light(light)
         
-        # Render with shadows
-        shadowed_image = renderer.render_with_shadows(scene)
+        # Render true baseline (no shadows)
+        light.cast_shadows = False
+        baseline_image = renderer.render_with_shadows(scene)
         
-        # Calculate luminance using ITU-R BT.709 standard
-        shadowed_rgb = shadowed_image.astype(np.float32) / 255.0
-        shadowed_luma = 0.299 * shadowed_rgb[:,:,0] + 0.587 * shadowed_rgb[:,:,1] + 0.114 * shadowed_rgb[:,:,2]
-        shadowed_mean_luma = np.mean(shadowed_luma)
-        
-        # Simulate baseline (no shadows) by brightening
-        # In a real implementation, this would render without shadow mapping
-        baseline_image = np.clip(shadowed_image.astype(np.float32) * 1.35, 0, 255).astype(np.uint8)
+        # Calculate baseline luminance using ITU-R BT.709 standard
         baseline_rgb = baseline_image.astype(np.float32) / 255.0
         baseline_luma = 0.299 * baseline_rgb[:,:,0] + 0.587 * baseline_rgb[:,:,1] + 0.114 * baseline_rgb[:,:,2]
         baseline_mean_luma = np.mean(baseline_luma)
+        
+        # Render with shadows
+        light.cast_shadows = True
+        shadowed_image = renderer.render_with_shadows(scene)
+        
+        # Calculate shadowed luminance using ITU-R BT.709 standard
+        shadowed_rgb = shadowed_image.astype(np.float32) / 255.0
+        shadowed_luma = 0.299 * shadowed_rgb[:,:,0] + 0.587 * shadowed_rgb[:,:,1] + 0.114 * shadowed_rgb[:,:,2]
+        shadowed_mean_luma = np.mean(shadowed_luma)
         
         # Calculate luminance drop percentage
         luma_drop_pct = ((baseline_mean_luma - shadowed_mean_luma) / baseline_mean_luma) * 100.0
