@@ -1,22 +1,21 @@
-<task id="forge3d-fix-errors-batch" version="1.0">
-  <title>Fix palette dict handling, zero-arg upload_height_r32f, row-padding, and metrics wiring</title>
+<task id="forge3d-workstream-N-remediation" version="1.0">
+  <title>Remediate failed criteria only</title>
 
   <role>
-    You are Claude Code in <b>Implementation Mode</b>, acting as a senior Rust/PyO3 + WebGPU engineer.
-    Make the smallest, surgical code changes so all failures in the attached test log pass without modifying tests.
+    You are Claude Code in <b>Implementation Mode</b>. Fix only unmet deliverables/ACs for Workstream N in minimal, dependency-ordered steps.
   </role>
 
   <constraints>
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
-    <build>cmake≥3.24, cargo/rustc, maturin, PyO3, VMA</build>
-    <apis>WebGPU/WGSL primary; Vulkan 1.2–compatible design</apis>
-    <docs>Sphinx preferred (no doc edits required for this batch)</docs>
+    <build>cmake>=3.24, cargo/rustc, PyO3, VMA</build>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2-compatible design</apis>
+    <docs>Sphinx preferred</docs>
     <safety>
-      - Create branch <code>fix/batch-upload-palette-rowpad</code>.
-      - Small, reviewable commits per subfix; no blind search/replace.
-      - Do not modify tests or their marks; code-only fixes.
-      - Exclude generated/binary dirs from diffs.
+      - Create branch <code>ws-N-remediation</code>.
+      - Read code first; make small commits mapped 1:1 to fixes.
+      - No blind search/replace; exclude binaries/large assets.
+      - Keep existing APIs stable; gate new paths with feature flags (see Cargo features already declared).
     </safety>
     <exclusions>.git, dist, build, target, .venv, venv, __pycache__, node_modules, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz</exclusions>
   </constraints>
@@ -24,317 +23,151 @@
   <inputs>
     <repoRoot>./</repoRoot>
     <paths>
-      <shaders>shaders/</shaders>
       <src>src/</src>
+      <shaders>shaders/</shaders>
       <python>python/forge3d/</python>
+      <examples>examples/</examples>
+      <docs>docs/</docs>
       <tests>tests/</tests>
     </paths>
-    <failLog path="errors.txt">
-      - <b>Palette switching:</b> <code>set_palette()</code> rejects dict palette descriptors returned by <code>list_palettes()</code>, causing failure in <code>tests/test_descriptor_indexing.py::test_palette_switching_compatibility</code>.
-      - <b>Height upload:</b> Tests call <code>Renderer.upload_height_r32f()</code> with <i>no arguments</i>; current binding requires <code>heights</code>, causing many TypeErrors across height/memory tests.
-      - <b>Row padding:</b> Some tests exercise non-256-aligned row widths—upload must pad rows to COPY_BYTES_PER_ROW_ALIGNMENT (256) for R32Float textures.
-      - <b>Metrics wiring:</b> After successful upload/readback, memory metrics must update consistently (used in memory_budget tests).
-    </failLog>
+    <failedItems>
+      <!-- N6 (partial): missing docs and bind validation proof -->
+      <item task="N6">docs/tbn.md</item>
+
+      <!-- N7 (partial): missing pipeline, example, docs -->
+      <item task="N7">src/pipeline/normal_mapping.rs</item>
+      <item task="N7">examples/normal_mapping_demo.py</item>
+      <item task="N7">docs/normal_mapping.md</item>
+
+      <!-- N5 (absent) -->
+      <item task="N5">src/core/envmap.rs</item>
+      <item task="N5">shaders/env_map.wgsl</item>
+      <item task="N5">python/forge3d/envmap.py</item>
+      <item task="N5">examples/environment_mapping.py</item>
+      <item task="N5">tests/test_envmap.py</item>
+      <item task="N5">docs/environment_mapping.md</item>
+
+      <!-- N8 (absent): off-screen HDR + tonemap enforcement -->
+      <item task="N8">src/pipeline/hdr_offscreen.rs</item>
+      <item task="N8">shaders/postprocess_tonemap.wgsl</item>
+      <item task="N8">examples/hdr_pipeline_demo.py</item>
+      <item task="N8">tests/test_hdr_offscreen_pipeline.py</item>
+      <item task="N8">docs/hdr_offscreen.md</item>
+
+      <!-- N1 (absent): PBR -->
+      <item task="N1">shaders/pbr.wgsl</item>
+      <item task="N1">src/core/material.rs</item>
+      <item task="N1">src/pipeline/pbr.rs</item>
+      <item task="N1">python/forge3d/materials.py</item>
+      <item task="N1">examples/pbr_spheres.py</item>
+      <item task="N1">tests/test_pbr_pipeline.py</item>
+      <item task="N1">docs/pbr.md</item>
+
+      <!-- N2 (absent): CSM + PCF -->
+      <item task="N2">shaders/shadow_map.wgsl</item>
+      <item task="N2">shaders/shadow_sample.wgsl</item>
+      <item task="N2">src/core/shadow_mapping.rs</item>
+      <item task="N2">src/core/cascade_split.rs</item>
+      <item task="N2">python/forge3d/shadows.py</item>
+      <item task="N2">examples/shadow_demo.py</item>
+      <item task="N2">tests/test_shadows.py</item>
+      <item task="N2">docs/shadows.md</item>
+
+      <!-- N4 (absent): Render bundles -->
+      <item task="N4">src/core/render_bundles.rs</item>
+      <item task="N4">python/forge3d/bundles.py</item>
+      <item task="N4">tests/test_render_bundles.py</item>
+      <item task="N4">docs/render_bundles.md</item>
+    </failedItems>
   </inputs>
 
   <plan>
-    1) <b>Python palette API</b>
-       - Update <python/forge3d/__init__.py>:
-         * Make <code>set_palette()</code> accept: dict (with keys <code>name</code>/<code>index</code>), str (name), or int (index).
-         * Ensure <code>get_current_palette()</code> returns the same dict shape as from <code>list_palettes()</code> so equality checks pass.
-         * Delegate the selected index into the native layer via a new PyO3 function (module-level) <code>_set_global_palette_index(u32)</code>; add <code>_get_current_palette()</code> if needed.
-       - Ensure no pipeline rebuild is required merely to change palette index; only a uniform/bind update.
+    0) Preflight
+       - Confirm existing features in Cargo.toml (enable-tbn, enable-normal-mapping, enable-pbr, enable-ibl, enable-csm, enable-render-bundles, enable-hdr-offscreen) and guard new code accordingly.
+       - Add minimal flags if missing, but prefer using existing ones.
 
-    2) <b>Rust: global palette index plumbing</b>
-       - Add module-level palette state:
-         * Expose <code>#[pyfunction] fn _set_global_palette_index(idx: u32)</code> and (optionally) <code>_get_current_palette_descriptor() -&gt; PyDict</code>.
-         * Wire the palette index into the terrain UBO (already present in WGSL as <code>spacing_h_exag_pad.w</code>) when issuing draws.
-         * Ensure <code>Renderer::render_terrain_rgba()</code> refreshes the UBO with current palette index before encoding commands.
+    1) N6 (docs + bind validation)
+       - Add <docs>/tbn.md with description, API refs, and validation steps.
+       - In a small test harness (Rust or Python), create a pipeline using vertices with tangent/bitangent to ensure no wgpu validation errors (log output in tests).
 
-    3) <b>upload_height_r32f: optional argument + zero-copy + row padding</b>
-       - Change PyO3 signature to accept an optional ndarray:
-         * <code>#[pyo3(signature = (heights=None))]</code> with <code>Option&lt;&amp;PyAny&gt;</code> param.
-         * If <code>None</code>, use the terrain height source previously supplied via <code>add_terrain(...)</code> (float32 preferred; accept float64 by converting).
-         * Keep zero-copy for C-contiguous <code>float32</code>; copy otherwise.
-       - Implement row padding for arbitrary widths:
-         * Compute <code>bytes_per_row = width * 4</code>; <code>padded_bpr = align_up(bytes_per_row, 256)</code>.
-         * Stage into a padded <code>Vec&lt;u8&gt;</code> and call <code>queue.write_texture</code> with <code>bytes_per_row=padded_bpr</code>.
-       - Enforce <code>≤ 512 MiB</code> limit and error clearly when exceeded.
-       - On success, update the renderer’s height texture/view, dirties as needed, and refresh bind groups.
+    2) N7 (wire normal mapping)
+       - Implement <src>/pipeline/normal_mapping.rs (bind group layouts; normal map sampler/texture; use existing WGSL).
+       - Add <examples>/normal_mapping_demo.py (headless) to render flat vs normal-mapped and print mean-luminance diff.
+       - Document usage in <docs>/normal_mapping.md.
 
-    4) <b>Metrics wiring</b>
-       - Ensure creation of the height texture increments texture byte counts; readbacks increment I/O counters; all exposed via <code>get_memory_metrics()</code>.
-       - Ensure <code>read_full_height_texture()</code> is already present; otherwise add a minimal implementation returning R32Float contents.
+    3) N5 (Environment/IBL minimal)
+       - Implement CPU-side envmap loader/plumbing in <src>/core/envmap.rs>; WGSL <shaders>/env_map.wgsl with diffuse/specular sampling and roughness-based mip LOD.
+       - Python wrapper <python>/forge3d/envmap.py; example + tests asserting roughness monotonicity and histogram change.
 
-    5) Build & run
-       - <code>maturin develop --release</code>, then run <code>pytest -q</code> and ensure all previously failing tests now pass.
+    4) N8 (HDR off-screen + tonemap)
+       - Add <src>/pipeline/hdr_offscreen.rs>: RGBA16F target, resolve path, and post tonemap pass using <shaders>/postprocess_tonemap.wgsl.
+       - Example + test: save PNG, compute clamp-rate & memory metrics.
+
+    5) N1 (PBR minimal)
+       - Provide <shaders>/pbr.wgsl (Cook–Torrance GGX), material structs, Python bindings, example spheres, and tests checking specular luma ordering.
+
+    6) N2 (CSM + PCF)
+       - Implement cascaded shadow map generation, PCF sampling WGSL, example, and tests with luminance drop metric.
+
+    7) N4 (Render bundles)
+       - Add optional bundle recording path and test comparing SSIM against direct encoding; include simple CPU timing.
+
+    8) Validation & Docs
+       - Ensure examples write PNGs to ./out, tests run under `pytest -q`, and Sphinx builds clean.
   </plan>
 
-  <edits>
-    <python file="python/forge3d/__init__.py">
-      <![CDATA[
-# --- Palette API fixes -----------------------------------------------------
-# Accept dict | str | int; keep equality with list_palettes() items.
-
-def _palette_from_name_or_index(name_or_index):
-    palettes = list_palettes()
-    if isinstance(name_or_index, dict):
-        if "index" in name_or_index:
-            idx = int(name_or_index["index"])
-            if 0 <= idx < len(palettes):
-                return palettes[idx]
-        if "name" in name_or_index:
-            nm = str(name_or_index["name"])
-            for p in palettes:
-                if p.get("name") == nm:
-                    return p
-        raise ValueError("Invalid palette descriptor dict; expected keys 'name' or 'index'")
-    if isinstance(name_or_index, str):
-        for p in palettes:
-            if p.get("name") == name_or_index:
-                return p
-        raise ValueError(f"Unknown palette '{name_or_index}'. Available: {[p['name'] for p in palettes]}")
-    if isinstance(name_or_index, int):
-        if 0 <= name_or_index < len(palettes):
-            return palettes[name_or_index]
-        raise ValueError(f"Palette index out of range: {name_or_index}")
-    raise ValueError("name_or_index must be dict, str, or int")
-
-# Bridge to native module-level setter (exported from _forge3d)
-try:
-    from ._forge3d import _set_global_palette_index as _native_set_palette_index  # type: ignore
-except Exception:
-    _native_set_palette_index = None
-
-_CURRENT_PALETTE = None
-
-def set_palette(name_or_index):
-    """Set active palette (dict | str | int)."""
-    global _CURRENT_PALETTE
-    chosen = _palette_from_name_or_index(name_or_index)
-    _CURRENT_PALETTE = chosen
-    if _native_set_palette_index is not None:
-        _native_set_palette_index(int(chosen["index"]))
-    return chosen
-
-def get_current_palette():
-    """Return current palette descriptor dict (matches list_palettes() items)."""
-    global _CURRENT_PALETTE
-    # Fall back to first available palette if none chosen yet
-    if _CURRENT_PALETTE is None:
-        pals = list_palettes()
-        if pals:
-            _CURRENT_PALETTE = pals[0]
-    return _CURRENT_PALETTE
-      ]]>
-    </python>
-
-    <rust file="src/terrain/palette.rs (new) or src/lib.rs (module section)">
-      <![CDATA[
-use pyo3::prelude::*;
-use std::sync::atomic::{AtomicU32, Ordering};
-
-static GLOBAL_PALETTE_INDEX: AtomicU32 = AtomicU32::new(0);
-
-#[pyfunction]
-pub fn _set_global_palette_index(idx: u32) {
-    GLOBAL_PALETTE_INDEX.store(idx, Ordering::Relaxed);
-}
-
-// Helper used by render path to read current index
-pub fn current_palette_index() -> u32 {
-    GLOBAL_PALETTE_INDEX.load(Ordering::Relaxed)
-}
-      ]]>
-    </rust>
-
-    <rust file="src/renderer/mod.rs or src/lib.rs (Renderer methods)">
-      <![CDATA[
-use pyo3::prelude::*;
-use numpy::PyReadonlyArray2;
-use crate::terrain::palette::current_palette_index;
-
-#[pymethods]
-impl Renderer {
-    /// Upload float32 heightmap as R32Float texture. If `heights` is None, use the last array supplied via add_terrain().
-    #[pyo3(signature = (heights=None))]
-    pub fn upload_height_r32f(&mut self, py: Python<'_>, heights: Option<&PyAny>) -> PyResult<()> {
-        // Resolve source array
-        let arr_f32: Vec<f32>;
-        let (w, h): (u32, u32);
-        if let Some(hs) = heights {
-            // Accept (H,W) or (H,W,1); allow float64->float32 conversion
-            let np = py.import("numpy")?;
-            let squeezed = np.getattr("squeeze")?.call1((hs,))?;
-            let dtype = squeezed.getattr("dtype")?.to_string();
-            let shape: (usize, usize) = squeezed.getattr("shape")?.extract::<(usize, usize)>()?;
-            w = shape.1 as u32; h = shape.0 as u32;
-            if dtype.contains("float32") {
-                let a: PyReadonlyArray2<f32> = squeezed.extract()?;
-                if let Some(slice) = a.as_array().as_slice() {
-                    arr_f32 = slice.to_vec(); // zero-copy friendly; to_vec() is fine for upload
-                } else {
-                    arr_f32 = a.as_array().to_owned().into_raw_vec();
-                }
-            } else {
-                // Convert to float32
-                let a32 = np.getattr("asarray")?.call1((squeezed, "float32"))?;
-                let a: PyReadonlyArray2<f32> = a32.extract()?;
-                arr_f32 = a.as_array().to_owned().into_raw_vec();
-            }
-        } else {
-            // Use previously added terrain source
-            let src = self.terrain.source_heights().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
-                "no terrain uploaded; call add_terrain() first"
-            ))?;
-            w = src.width(); h = src.height();
-            arr_f32 = src.as_slice().to_vec();
-        }
-
-        // Memory budget guard
-        let bytes = (w as u64) * (h as u64) * 4;
-        let limit = 512u64 * 1024 * 1024;
-        if bytes > limit {
-            return Err(pyo3::exceptions::PyMemoryError::new_err(format!(
-                "height texture {}x{} exceeds 512 MiB ({} bytes)", w, h, bytes
-            )));
-        }
-
-        // Upload with row padding
-        let (tex, view) = crate::core::texture_upload::create_r32f_height_texture_padded(
-            &self.device, &self.queue, &arr_f32, w, h
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("height upload failed: {}", e)))?;
-
-        self.terrain.set_height_texture(tex, view);
-        self.terrain.rebind_height_resources(&self.device)?;
-
-        // Update metrics
-        self.metrics.on_height_uploaded(bytes as usize);
-
-        Ok(())
-    }
-
-    pub fn render_terrain_rgba(&mut self) -> PyResult<Py<PyAny>> {
-        // ... existing setup ...
-        let palette_idx = crate::terrain::palette::current_palette_index();
-        self.terrain.update_palette_index(palette_idx, &self.queue)?;
-        // proceed with rendering
-        // ...
-        #![allow(unused)]
-        Ok(Python::with_gil(|py| py.None()))
-    }
-}
-      ]]>
-    </rust>
-
-    <rust file="src/core/texture_upload.rs">
-      <![CDATA[
-pub fn create_r32f_height_texture_padded(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    data: &[f32],
-    width: u32,
-    height: u32,
-) -> anyhow::Result<(wgpu::Texture, wgpu::TextureView)> {
-    use anyhow::Context;
-
-    let expected = (width as usize) * (height as usize);
-    anyhow::ensure!(data.len() == expected, "data length {} != {} (width*height)", data.len(), expected);
-
-    let bytes_per_row = (width * 4) as usize;
-    let padded_bpr = ((bytes_per_row + 255) / 256) * 256;
-    let mut staged = vec![0u8; padded_bpr * (height as usize)];
-    let src = bytemuck::cast_slice::<f32, u8>(data);
-
-    for row in 0..height as usize {
-        let src_off = row * bytes_per_row;
-        let dst_off = row * padded_bpr;
-        staged[dst_off..dst_off + bytes_per_row].copy_from_slice(&src[src_off..src_off + bytes_per_row]);
-    }
-
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("height_r32f"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-
-    queue.write_texture(
-        wgpu::ImageCopyTexture {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        &staged,
-        wgpu::ImageDataLayout {
-            offset: 0,
-            bytes_per_row: Some(std::num::NonZeroU32::new(padded_bpr as u32).unwrap()),
-            rows_per_image: Some(std::num::NonZeroU32::new(height).unwrap()),
-        },
-        wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-    );
-
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    Ok((texture, view))
-}
-      ]]>
-    </rust>
-
-    <rust file="src/terrain/pipeline.rs">
-      <![CDATA[
-impl TerrainPipeline {
-    pub fn update_palette_index(&mut self, idx: u32, queue: &wgpu::Queue) -> anyhow::Result<()> {
-        self.globals.spacing_h_exag_pad.w = idx as f32;
-        queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&self.globals));
-        Ok(())
-    }
-    pub fn set_height_texture(&mut self, tex: wgpu::Texture, view: wgpu::TextureView) {
-        self.height_tex = Some(tex);
-        self.height_view = Some(view);
-    }
-    pub fn rebind_height_resources(&mut self, device: &wgpu::Device) -> anyhow::Result<()> {
-        // Recreate bind group(s) using self.height_view
-        self.bind_groups.recreate_with_height(device, self.height_view.as_ref().expect("height view"))?;
-        Ok(())
-    }
-}
-      ]]>
-    </rust>
-  </edits>
+  <deliverables>
+    <!-- Only missing items per Inputs.failedItems (see above) -->
+    <filesFromInputs>true</filesFromInputs>
+  </deliverables>
 
   <acceptanceCriteria>
-    <ac id="P1">Palette switching test passes: <code>tests/test_descriptor_indexing.py::test_palette_switching_compatibility</code>. Passing means <code>set_palette()</code> accepts dicts from <code>list_palettes()</code>, <code>get_current_palette()</code> returns an equal dict, and renders differ between two palettes.</ac>
-    <ac id="U1">All <code>TypeError: Renderer.upload_height_r32f() missing 1 required positional argument: 'heights'</code> failures are resolved—method works with zero args by using the previously provided terrain source.</ac>
-    <ac id="U2">Row-padding tests involving non-256-aligned widths pass (exact parity roundtrip for R32Float), covering cases like widths 61, 63, 257.</ac>
-    <ac id="M1">Memory metrics increment appropriately on upload and readback in <code>tests/test_memory_budget.py</code> suite.</ac>
-    <ac id="G0"><code>pytest -q</code> completes with 0 failures for all previously failing tests listed in the log.</ac>
+    <!-- Restate only unmet ACs as pass conditions -->
+    <task id="N6">
+      <ac>Vertex layouts with tangent/bitangent bind without wgpu validation errors; log captured in tests.</ac>
+      <ac>Docs page <code>docs/tbn.md</code> added with API and validation steps.</ac>
+    </task>
+    <task id="N7">
+      <ac>Mean-luminance diff (normal-mapped vs flat) ≥ 10% printed by example; test asserts threshold.</ac>
+      <ac>No NaNs detected in intermediate buffers (assert or check) on all 3 OS targets (CI or local matrix).</ac>
+    </task>
+    <task id="N5">
+      <ac>Roughness monotonicity holds: L(0.1) &gt; L(0.5) &gt; L(0.9) within 5% tolerance (test).</ac>
+      <ac>Irradiance rotation causes significant histogram change (χ² p&lt;0.01) (test).</ac>
+    </task>
+    <task id="N8">
+      <ac>Off-screen RGBA16F path tonemaps to sRGB8 PNG; clamp-rate &lt; 1%; VRAM ≤ 512 MiB logged.</ac>
+    </task>
+    <task id="N1">
+      <ac>GGX PBR compiles and runs; Python params exposed; specular luma ordering verified with ≥10% gaps (test).</ac>
+    </task>
+    <task id="N2">
+      <ac>CSM atlases (≥3 cascades) generated; mean luma drop ≥10% vs no-shadow; PCF artifact thresholds met.</ac>
+    </task>
+    <task id="N4">
+      <ac>Render-bundle output SSIM ≥ 0.995 vs direct; timing captured; no validation warnings.</ac>
+    </task>
+    <global>
+      <ac>All new examples write PNGs to <code>./out/</code>; <code>pytest -q</code> exits 0; Sphinx builds without warnings.</ac>
+    </global>
   </acceptanceCriteria>
 
   <runbook>
     <commands>
-      - git checkout -b fix/batch-upload-palette-rowpad
+      - git checkout -b ws-N-remediation
       - cargo build --workspace --release
       - pip install -U pip maturin
       - maturin develop --release
-      - python - <<'PY'
-import numpy as np, forge3d as f
-r=f.Renderer(32,32)
-h=np.random.rand(8,9).astype(np.float32)
-r.add_terrain(h,(1.0,1.0),1.0,colormap="viridis")
-r.upload_height_r32f()  # zero-arg path
-print("zero-arg OK")
-PY
       - pytest -q
+      - python examples/normal_mapping_demo.py --headless --out out/normal_map.png
+      - python examples/environment_mapping.py --headless --out out/envmap.png
+      - python examples/pbr_spheres.py --headless --out out/pbr_mr.png
+      - python examples/shadow_demo.py --headless --out out/shadows.png
+      - python examples/hdr_pipeline_demo.py --headless --out out/hdr_tonemap.png
+      - (cd docs && make html)
     </commands>
     <completion>
-      Post the <code>pytest -q</code> summary showing previous failures now passing, and a short note confirming:
-      (1) dict-accepting <code>set_palette()</code> behavior, (2) zero-arg <code>upload_height_r32f()</code>, and
-      (3) row-padding correctness for non-256-aligned widths.
+      Summarize: files added/modified; feature flags used; test pass summary; paths to generated PNGs; memory metrics for HDR pass; SSIM & luminance metrics; logs for wgpu validation checks.
     </completion>
   </runbook>
 </task>
