@@ -40,3 +40,21 @@ pub mod sampler_modes;
 
 // L6: Texture upload helpers for HDR formats
 pub mod texture_upload;
+
+// N5: Environment mapping and IBL
+pub mod envmap;
+
+// N8: HDR rendering and tone mapping
+pub mod hdr;
+
+// N1: PBR materials
+pub mod material;
+pub mod pbr;
+
+// N2: Shadow mapping
+pub mod cascade_split;
+pub mod shadow_mapping;
+pub mod shadows;
+
+// N4: Render bundles
+pub mod bundles;
