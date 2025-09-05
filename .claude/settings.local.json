@@ -102,7 +102,9 @@
       "Bash(timeout:*)",
       "Read(C:\\/**)",
       "Bash(export VIRTUAL_ENV=)",
-      "Bash(export CONDA_PREFIX=)"
+      "Bash(export CONDA_PREFIX=)",
+      "Bash(git rev-parse:*)",
+      "Bash(dir C:Usersmilosforge3dsrc)"
     ],
     "deny": [],
     "additionalDirectories": [

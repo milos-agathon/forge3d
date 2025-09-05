@@ -15,6 +15,14 @@ terrain_spike = []
 weighted-oit = []
 wsI_bigbuf = []
 wsI_double_buf = []
+# Workstream N: Advanced Rendering Systems
+enable-pbr = []
+enable-ibl = []
+enable-csm = []
+enable-tbn = []
+enable-normal-mapping = ["enable-tbn"]
+enable-hdr-offscreen = []
+enable-render-bundles = []
 # A2-END:cargo-features
 
 [dependencies]

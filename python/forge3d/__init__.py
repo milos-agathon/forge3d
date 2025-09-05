@@ -34,8 +34,25 @@ try:
         rotate_x, rotate_y, rotate_z, scale, scale_uniform, translate
     )
     _HAVE_EXT = True
+    
+    # Try to import TBN mesh functions if available (feature-gated)
+    try:
+        from . import mesh
+        _HAVE_MESH = True
+    except ImportError:
+        _HAVE_MESH = False
+        
+    # Try to import normal mapping functions if available (feature-gated)
+    try:
+        from . import normalmap
+        _HAVE_NORMALMAP = True
+    except ImportError:
+        _HAVE_NORMALMAP = False
+        
 except Exception:
     _HAVE_EXT = False
+    _HAVE_MESH = False
+    _HAVE_NORMALMAP = False
     
     # Provide fallback stubs when extension is not available
     class _Stub:

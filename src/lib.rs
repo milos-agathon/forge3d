@@ -12,6 +12,9 @@ mod context;
 pub mod core;  // Make core public for tests
 mod device_caps;
 mod transforms;
+pub mod mesh;  // Make mesh public for TBN utilities
+#[cfg(any(feature = "enable-normal-mapping", feature = "enable-pbr", feature = "enable-ibl", feature = "enable-csm"))]
+pub mod pipeline; // Advanced rendering pipelines
 
 // Import memory tracking
 use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
@@ -26,6 +29,7 @@ use ndarray::Array3;
 use wgpu::util::DeviceExt;
 use pyo3::types::{PyDict, PyList};
 use pyo3::wrap_pyfunction;
+use pyo3::exceptions::PyValueError;
 use std::path::PathBuf;
 
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -1865,6 +1869,84 @@ fn c10_parent_z90_child_unitx_world(_py: Python<'_>) -> PyResult<(f32, f32, f32)
     Ok((world_pos.x, world_pos.y, world_pos.z))
 }
 
+/// Generate TBN data for a unit cube (Python binding for N6)
+#[cfg(feature = "enable-tbn")]
+#[pyfunction]
+#[pyo3(text_signature = "()")]
+fn mesh_generate_cube_tbn(py: Python<'_>) -> PyResult<PyObject> {
+    use crate::mesh::{generate_cube_tbn};
+    
+    let (vertices, indices, tbn_data) = generate_cube_tbn();
+    
+    let dict = PyDict::new_bound(py);
+    
+    // Convert vertices to Python list
+    let py_vertices = PyList::new_bound(py, vertices.iter().map(|v| {
+        let vertex_dict = PyDict::new_bound(py);
+        vertex_dict.set_item("position", (v.position.x, v.position.y, v.position.z)).unwrap();
+        vertex_dict.set_item("normal", (v.normal.x, v.normal.y, v.normal.z)).unwrap();
+        vertex_dict.set_item("uv", (v.uv.x, v.uv.y)).unwrap();
+        vertex_dict
+    }));
+    
+    // Convert TBN data to Python list
+    let py_tbn = PyList::new_bound(py, tbn_data.iter().map(|tbn| {
+        let tbn_dict = PyDict::new_bound(py);
+        tbn_dict.set_item("tangent", (tbn.tangent.x, tbn.tangent.y, tbn.tangent.z)).unwrap();
+        tbn_dict.set_item("bitangent", (tbn.bitangent.x, tbn.bitangent.y, tbn.bitangent.z)).unwrap();
+        tbn_dict.set_item("normal", (tbn.normal.x, tbn.normal.y, tbn.normal.z)).unwrap();
+        tbn_dict.set_item("handedness", tbn.handedness).unwrap();
+        tbn_dict
+    }));
+    
+    dict.set_item("vertices", py_vertices)?;
+    dict.set_item("indices", PyList::new_bound(py, indices.iter()))?;
+    dict.set_item("tbn_data", py_tbn)?;
+    
+    Ok(dict.into_any().unbind())
+}
+
+/// Generate TBN data for a planar grid (Python binding for N6)
+#[cfg(feature = "enable-tbn")]
+#[pyfunction]
+#[pyo3(text_signature = "(width, height)")]
+fn mesh_generate_plane_tbn(py: Python<'_>, width: u32, height: u32) -> PyResult<PyObject> {
+    use crate::mesh::{generate_plane_tbn};
+    
+    if width < 2 || height < 2 {
+        return Err(PyValueError::new_err("Width and height must be >= 2"));
+    }
+    
+    let (vertices, indices, tbn_data) = generate_plane_tbn(width, height);
+    
+    let dict = PyDict::new_bound(py);
+    
+    // Convert vertices to Python list
+    let py_vertices = PyList::new_bound(py, vertices.iter().map(|v| {
+        let vertex_dict = PyDict::new_bound(py);
+        vertex_dict.set_item("position", (v.position.x, v.position.y, v.position.z)).unwrap();
+        vertex_dict.set_item("normal", (v.normal.x, v.normal.y, v.normal.z)).unwrap();
+        vertex_dict.set_item("uv", (v.uv.x, v.uv.y)).unwrap();
+        vertex_dict
+    }));
+    
+    // Convert TBN data to Python list
+    let py_tbn = PyList::new_bound(py, tbn_data.iter().map(|tbn| {
+        let tbn_dict = PyDict::new_bound(py);
+        tbn_dict.set_item("tangent", (tbn.tangent.x, tbn.tangent.y, tbn.tangent.z)).unwrap();
+        tbn_dict.set_item("bitangent", (tbn.bitangent.x, tbn.bitangent.y, tbn.bitangent.z)).unwrap();
+        tbn_dict.set_item("normal", (tbn.normal.x, tbn.normal.y, tbn.normal.z)).unwrap();
+        tbn_dict.set_item("handedness", tbn.handedness).unwrap();
+        tbn_dict
+    }));
+    
+    dict.set_item("vertices", py_vertices)?;
+    dict.set_item("indices", PyList::new_bound(py, indices.iter()))?;
+    dict.set_item("tbn_data", py_tbn)?;
+    
+    Ok(dict.into_any().unbind())
+}
+
 #[allow(deprecated)]
 #[pymodule]
 fn _forge3d(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
@@ -1910,6 +1992,14 @@ fn _forge3d(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(vector::api::add_graph_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector::api::clear_vectors_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector::api::get_vector_counts_py, m)?)?;
+    
+    // TBN generation functions for N6 (gated by feature)
+    #[cfg(feature = "enable-tbn")]
+    {
+        m.add_function(wrap_pyfunction!(mesh_generate_cube_tbn, m)?)?;
+        m.add_function(wrap_pyfunction!(mesh_generate_plane_tbn, m)?)?;
+    }
+    
     // Export package version for Python: forge3d._forge3d.__version__
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
