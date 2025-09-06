@@ -57,4 +57,4 @@ pub mod shadow_mapping;
 pub mod shadows;
 
 // N4: Render bundles
-pub mod bundles;
+pub mod render_bundles;
