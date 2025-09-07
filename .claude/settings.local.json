@@ -104,7 +104,10 @@
       "Bash(export VIRTUAL_ENV=)",
       "Bash(export CONDA_PREFIX=)",
       "Bash(git rev-parse:*)",
-      "Bash(dir C:Usersmilosforge3dsrc)"
+      "Bash(dir C:Usersmilosforge3dsrc)",
+      "Bash(git reset:*)",
+      "Bash(rustc:*)",
+      "Bash(git mv:*)"
     ],
     "deny": [],
     "additionalDirectories": [
