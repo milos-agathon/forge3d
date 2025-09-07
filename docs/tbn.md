@@ -114,6 +114,8 @@ let vertex_layout = VertexBufferLayout {
 };
 ```
 
+See `tests/test_tbn_bind_validation.py` for automated validation testing.
+
 ## Memory Layout
 
 TBN vertices use a compact memory layout:
