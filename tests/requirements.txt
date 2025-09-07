@@ -6,3 +6,8 @@ scipy>=1.7.0
 
 # Enhanced numerical operations
 numpy>=1.20.0
+
+# WebGPU Python bindings for TBN vertex layout validation testing
+wgpu>=0.14
+pytest
+pytest-asyncio
