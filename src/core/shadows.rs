@@ -5,10 +5,8 @@
  * using cascaded shadow maps with percentage-closer filtering for soft edges.
  */
 
-use wgpu::util::DeviceExt;
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3};
 use bytemuck::Zeroable;
-use std::f32::consts::PI;
 
 /// Configuration for cascaded shadow maps
 #[derive(Debug, Clone)]
@@ -198,6 +196,7 @@ pub struct CsmShadowMap {
     /// Directional light
     light: DirectionalLight,
     /// Shadow map texture array
+    #[allow(dead_code)]
     shadow_maps: wgpu::Texture,
     /// Shadow map depth views (one per cascade)
     shadow_depth_views: Vec<wgpu::TextureView>,

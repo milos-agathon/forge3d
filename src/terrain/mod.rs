@@ -232,7 +232,7 @@ impl ColormapLUT {
         let mut combined_data = Vec::with_capacity(256 * height as usize * 4);
         
         for &palette_name in palette_names {
-            let palette_type = map_name_to_type(palette_name)?;
+            let _palette_type = map_name_to_type(palette_name)?;
             
             let palette_data = if use_srgb {
                 // Use sRGB format with PNG bytes as-is

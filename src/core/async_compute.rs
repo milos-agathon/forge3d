@@ -300,7 +300,7 @@ impl AsyncComputeScheduler {
         }
         
         // Create a command encoder for barriers
-        let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
+        let encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("compute_barriers"),
         });
         
@@ -454,10 +454,10 @@ pub mod patterns {
     
     /// Create a simple buffer copy compute pass
     pub fn create_buffer_copy_pass(
-        device: &Device,
-        src_buffer: Arc<Buffer>,
-        dst_buffer: Arc<Buffer>,
-        size: u64,
+        _device: &Device,
+        _src_buffer: Arc<Buffer>,
+        _dst_buffer: Arc<Buffer>,
+        _size: u64,
     ) -> RenderResult<ComputePassDescriptor> {
         // This would typically require a compute shader for buffer copying
         // For now, return a placeholder
@@ -466,10 +466,10 @@ pub mod patterns {
     
     /// Create a parallel reduction compute pass
     pub fn create_reduction_pass(
-        device: &Device,
-        input_buffer: Arc<Buffer>,
-        output_buffer: Arc<Buffer>,
-        element_count: u32,
+        _device: &Device,
+        _input_buffer: Arc<Buffer>,
+        _output_buffer: Arc<Buffer>,
+        _element_count: u32,
     ) -> RenderResult<ComputePassDescriptor> {
         // This would typically require a reduction compute shader
         Err(RenderError::render("Reduction compute shader not implemented"))
@@ -477,10 +477,10 @@ pub mod patterns {
     
     /// Create a parallel prefix sum (scan) compute pass
     pub fn create_scan_pass(
-        device: &Device,
-        input_buffer: Arc<Buffer>,
-        output_buffer: Arc<Buffer>,
-        element_count: u32,
+        _device: &Device,
+        _input_buffer: Arc<Buffer>,
+        _output_buffer: Arc<Buffer>,
+        _element_count: u32,
     ) -> RenderResult<ComputePassDescriptor> {
         // This would typically require a scan compute shader
         Err(RenderError::render("Scan compute shader not implemented"))

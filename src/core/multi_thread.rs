@@ -77,6 +77,7 @@ struct ThreadPool {
 }
 
 struct Worker {
+    #[allow(dead_code)]
     id: usize,
     handle: Option<thread::JoinHandle<()>>,
 }
@@ -378,7 +379,7 @@ impl CommandTask for ClearTask {
     fn execute(&self, encoder: &mut CommandEncoder, _device: &Device, _queue: &Queue) -> Result<usize, Self::Error> {
         let view = self.texture.create_view(&TextureViewDescriptor::default());
         
-        let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+        let render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
             label: Some(&format!("clear_pass_{}", self.name)),
             color_attachments: &[Some(RenderPassColorAttachment {
                 view: &view,

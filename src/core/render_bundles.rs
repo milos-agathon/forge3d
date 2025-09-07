@@ -145,6 +145,7 @@ pub struct BundleStats {
 /// Render bundle encoder for building bundles
 pub struct RenderBundleBuilder {
     device: Arc<wgpu::Device>,
+    #[allow(dead_code)]
     queue: Arc<wgpu::Queue>,
     config: RenderBundleConfig,
     buffers: Vec<wgpu::Buffer>,

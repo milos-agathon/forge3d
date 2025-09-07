@@ -3,7 +3,7 @@
 //! Provides a tree-based scene representation where nodes can have parent-child 
 //! relationships with automatic transform inheritance.
 
-use glam::{Mat4, Vec3, Quat, Vec4Swizzles};
+use glam::{Mat4, Vec3, Quat};
 use crate::core::matrix_stack::MatrixStack;
 use crate::error::{RenderError, RenderResult};
 use std::collections::{HashMap, HashSet};

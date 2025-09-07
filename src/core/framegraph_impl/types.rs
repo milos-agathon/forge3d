@@ -3,7 +3,6 @@
 //! This module defines the core types for the framegraph system including
 //! resources, passes, and their relationships.
 
-use std::collections::HashMap;
 use wgpu::{TextureFormat, TextureUsages, Extent3d};
 
 /// Unique identifier for a resource in the framegraph

@@ -1,11 +1,12 @@
 //! Headless renderer for a deterministic triangle with off-screen target + readback.
 //! Rust: wgpu 0.19, PyO3 0.21 (abi3). Returns (H,W,4) u8 arrays via numpy.
+#![allow(deprecated)]
 
 use std::num::NonZeroU32;
 
 // Import central error handling
 mod error;
-use error::{RenderError, RenderResult};
+use error::RenderError;
 
 // Import modular components
 mod context;
@@ -20,16 +21,15 @@ pub mod pipeline; // Advanced rendering pipelines
 use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
 
 use bytemuck::{Pod, Zeroable};
-use image::{ImageBuffer, GenericImageView};
+use image::ImageBuffer;
 use pyo3::prelude::*;
 use pyo3::Bound;
-use numpy::{PyArray3, IntoPyArray, PyArray2, PyReadonlyArray2, PyArray1, PyReadonlyArray3, PyArrayMethods};
+use numpy::{PyArray3, IntoPyArray, PyArray2, PyReadonlyArray2, PyArray1};
 use numpy::PyUntypedArrayMethods; // needed for contiguous checks
 use ndarray::Array3;
 use wgpu::util::DeviceExt;
 use pyo3::types::{PyDict, PyList};
 use pyo3::wrap_pyfunction;
-use pyo3::exceptions::PyValueError;
 use std::path::PathBuf;
 
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -367,7 +367,7 @@ impl Renderer {
                 registry.free_buffer_allocation(self.readback_size, true); // host-visible
             }
             
-            let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
+            let _usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
             self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
@@ -411,7 +411,7 @@ impl Renderer {
                 registry.free_buffer_allocation(self.readback_size, true); // host-visible
             }
             
-            let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
+            let _usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
             self.readback_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("readback-buffer"),
                 size: need,
@@ -733,7 +733,7 @@ impl Renderer {
         let g = ctx();
         
         // Update palette index before rendering
-        let palette_idx = current_palette_index();
+        let _palette_idx = current_palette_index();
         // Note: In a full terrain implementation, this would update terrain uniforms
         // For now, we just store it for future use
         
@@ -809,7 +809,7 @@ impl Renderer {
         let row_bytes = (w * 4) as u32;
         let padded_bpr = align_copy_bpr(row_bytes);
         let buf_size = padded_bpr as u64 * h as u64;
-        let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
+            let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
         let readback = g.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("height-patch-readback"),
             size: buf_size,
@@ -1734,7 +1734,7 @@ fn c5_build_framegraph_report(py: Python<'_>) -> PyResult<PyObject> {
     let alias_reuse = result.is_ok(); // Simple check for successful compilation
     
     // Check barrier planning
-    let barrier_ok = if let Ok((_passes, barriers)) = result {
+    let barrier_ok = if let Ok((_passes, _barriers)) = result {
         // Simple barrier validation - accept both empty and non-empty barriers
         true // If compilation succeeds, barrier planning is working
     } else {

@@ -4,8 +4,7 @@
 
 use crate::gpu::ctx;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyString};
-use std::collections::HashMap;
+use pyo3::types::PyDict;
 
 /// Device capabilities structure
 #[derive(Debug, Clone)]

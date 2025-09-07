@@ -3,7 +3,7 @@
 //! Provides a dedicated post-processing pass for tone mapping from HDR linear color
 //! to sRGB output with exposure control.
 
-use crate::error::{RenderError, RenderResult};
+use crate::error::RenderResult;
 use wgpu::*;
 use std::borrow::Cow;
 

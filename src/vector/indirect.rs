@@ -5,7 +5,7 @@ use crate::error::RenderError;
 use crate::vector::batch::{AABB, Frustum, PrimitiveType};
 use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3};
 
 /// Indirect draw command for GPU execution
 #[repr(C)]
@@ -57,6 +57,7 @@ struct CullingUniforms {
 pub struct IndirectRenderer {
     // Draw command buffers
     draw_commands_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
     draw_commands_capacity: usize,
     
     // Instance data for culling

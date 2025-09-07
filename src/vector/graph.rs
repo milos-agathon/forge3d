@@ -2,14 +2,12 @@
 //! Separate pipelines for node points and edge lines
 
 use crate::error::RenderError;
-use crate::vector::data::{GraphNode, GraphEdge, PointInstance};
-use crate::vector::api::{GraphDef, VectorId};
+use crate::vector::data::PointInstance;
+use crate::vector::api::GraphDef;
 use crate::vector::layer::Layer;
 use crate::vector::point::PointRenderer;
 use crate::vector::line::{LineRenderer, LineInstance, LineCap, LineJoin};
 use glam::Vec2;
-use wgpu::util::DeviceExt;
-use bytemuck::{Pod, Zeroable};
 
 /// Graph renderer with separate node and edge pipelines
 pub struct GraphRenderer {

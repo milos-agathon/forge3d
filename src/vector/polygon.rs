@@ -3,10 +3,8 @@
 
 use crate::error::RenderError;
 use crate::vector::data::{PolygonVertex, PackedPolygon, validate_polygon_vertices};
-use crate::vector::api::{PolygonDef, VectorId};
+use crate::vector::api::PolygonDef;
 use crate::vector::layer::Layer;
-use glam::{Vec2, Vec3};
-use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 
 /// Polygon renderer with GPU tessellation

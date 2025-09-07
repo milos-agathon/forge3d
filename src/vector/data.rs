@@ -2,7 +2,7 @@
 //! Reuse packed formats to limit Python overhead and ensure validation
 
 use crate::error::RenderError;
-use glam::{Vec2, Vec3, Vec4};
+use glam::Vec2;
 use std::mem;
 
 /// Packed vertex data for polygons (position + UV)
