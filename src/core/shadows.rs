@@ -7,6 +7,7 @@
 
 use wgpu::util::DeviceExt;
 use glam::{Mat4, Vec3, Vec4};
+use bytemuck::Zeroable;
 use std::f32::consts::PI;
 
 /// Configuration for cascaded shadow maps
@@ -215,6 +216,7 @@ pub struct CsmShadowMap {
 impl CsmShadowMap {
     /// Create new CSM shadow map system
     pub fn new(device: &wgpu::Device, config: CsmConfig) -> Self {
+        let cascade_count = config.cascade_count as usize;
         // Create shadow map texture array
         let shadow_maps = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("CSM Shadow Maps"),
@@ -288,7 +290,7 @@ impl CsmShadowMap {
             shadow_array_view,
             shadow_sampler,
             uniform_buffer,
-            cascades: vec![ShadowCascade::zeroed(); config.cascade_count as usize],
+            cascades: vec![ShadowCascade::zeroed(); cascade_count],
             debug_visualization: false,
         }
     }
@@ -333,8 +335,8 @@ impl CsmShadowMap {
         } else {
             Vec3::Y
         };
-        let light_right = light_dir.cross(&light_up).normalize();
-        let light_up = light_right.cross(&light_dir).normalize();
+        let light_right = light_dir.cross(light_up).normalize();
+        let light_up = light_right.cross(light_dir).normalize();
         
         // Update each cascade
         for (cascade_idx, cascade) in self.cascades.iter_mut().enumerate() {
@@ -409,7 +411,7 @@ impl CsmShadowMap {
             let light_projection = ortho_projection * light_view;
             
             // Update cascade data
-            cascade.light_projection = light_projection.into();
+            cascade.light_projection = light_projection.to_cols_array_2d();
             cascade.near_distance = near_dist;
             cascade.far_distance = far_dist;
             cascade.texel_size = texel_size;
@@ -472,7 +474,9 @@ impl CsmShadowMap {
     
     /// Get light-space projection matrix for cascade
     pub fn cascade_projection(&self, cascade_idx: usize) -> Option<Mat4> {
-        self.cascades.get(cascade_idx).map(|c| c.light_projection)
+        self.cascades
+            .get(cascade_idx)
+            .map(|c| Mat4::from_cols_array_2d(&c.light_projection))
     }
     
     /// Get shadow map resolution

@@ -4,6 +4,7 @@
 //! using a combination of uniform and logarithmic distributions controlled by lambda parameter.
 
 use glam::{Mat4, Vec3, Vec4};
+use glam::Vec4Swizzles;
 
 /// Configuration for cascade splitting
 #[derive(Debug, Clone)]
