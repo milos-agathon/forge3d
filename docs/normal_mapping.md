@@ -271,6 +271,8 @@ Verify shader binding without errors:
 pytest tests/test_tbn_gpu_validation.py -v -s
 ```
 
+See `tests/test_normal_mapping.py` for automated validation testing of luminance differences and NaN detection.
+
 ## Performance Considerations
 
 ### Memory Usage
