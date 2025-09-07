@@ -343,7 +343,7 @@ impl HdrOffscreenPipeline {
         // Fullscreen pass binding hdr texture + sampler to tonemap shader
         render_pass.set_pipeline(&self.tonemap_pipeline);
         render_pass.set_bind_group(0, &self.tonemap_bind_group, &[]);
-        render_pass.draw(0..3, 0..1); // Full-screen triangle
+        render_pass.draw(3, 1, 0, 0); // Full-screen triangle
     }
 
     /// Get estimated VRAM usage in bytes
