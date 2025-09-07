@@ -8,7 +8,13 @@ pub mod normal_mapping;
 
 pub mod pbr;
 
+#[cfg(feature = "enable-hdr-offscreen")]
+pub mod hdr_offscreen;
+
 #[cfg(feature = "enable-normal-mapping")]
 pub use normal_mapping::{NormalMappingPipeline, NormalMappingUniforms, compute_normal_matrix, create_checkerboard_normal_texture};
 
 pub use pbr::{PbrTextures, PbrMaterialGpu, create_pbr_sampler};
+
+#[cfg(feature = "enable-hdr-offscreen")]
+pub use hdr_offscreen::{HdrOffscreenPipeline, HdrOffscreenConfig, ToneMappingOperator, ToneMappingUniforms};
