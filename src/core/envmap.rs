@@ -153,8 +153,8 @@ impl EnvironmentMap {
         
         // Monte Carlo sampling over hemisphere
         for i in 0..sample_count {
-            let xi = generate_hammersley_sample(i, sample_count);
-            let sample_dir = sample_cosine_hemisphere(xi.x, xi.y);
+            let (u1, u2) = generate_hammersley_sample(i, sample_count);
+            let sample_dir = sample_cosine_hemisphere(u1, u2);
             
             // Transform to world space aligned with normal
             let tangent = if normal.y.abs() < 0.9 {
@@ -221,8 +221,8 @@ impl EnvironmentMap {
         
         // Importance sampling using GGX distribution
         for i in 0..sample_count {
-            let xi = generate_hammersley_sample(i, sample_count);
-            let half_vector = sample_ggx_hemisphere(xi.x, xi.y, roughness);
+            let (u1, u2) = generate_hammersley_sample(i, sample_count);
+            let half_vector = sample_ggx_hemisphere(u1, u2, roughness);
             
             // Transform to world space
             let tangent = if reflection_dir.y.abs() < 0.9 {

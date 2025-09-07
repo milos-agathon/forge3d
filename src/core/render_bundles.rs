@@ -138,6 +138,8 @@ pub struct BundleStats {
     pub compile_time_ms: f32,
     /// Last execution time in milliseconds
     pub execution_time_ms: f32,
+    /// Number of times this bundle executed
+    pub execution_count: u32,
 }
 
 /// Render bundle encoder for building bundles
@@ -262,6 +264,7 @@ impl RenderBundleBuilder {
             memory_usage: 0,
             compile_time_ms: 0.0,
             execution_time_ms: 0.0,
+            execution_count: 0,
         };
         
         // Execute draw calls
@@ -402,14 +405,8 @@ impl RenderBundleManager {
     /// Execute multiple bundles in sequence
     pub fn execute_bundles<'a>(&'a mut self, render_pass: &mut wgpu::RenderPass<'a>, bundle_names: &[&str]) -> Result<(), String> {
         for &bundle_name in bundle_names {
-            let start_time = std::time::Instant::now();
-            
-            if let Some(bundle) = self.bundles.get_mut(bundle_name) {
-                render_pass.execute_bundles([&bundle.bundle]);
-                
-                let execution_time = start_time.elapsed().as_secs_f32() * 1000.0;
-                bundle.stats.execution_time_ms = execution_time;
-                bundle.stats.execution_count += 1;
+            if let Some(bundle_ref) = self.bundles.get(bundle_name) {
+                render_pass.execute_bundles([&bundle_ref.bundle]);
             } else {
                 return Err(format!("Bundle '{}' not found", bundle_name));
             }

@@ -1,173 +1,156 @@
-<task id="forge3d-workstream-N-remediation" version="1.0">
-  <title>Remediate failed criteria only</title>
+<task id="forge3d-workstream-audit" version="1.1">
+  <title>Audit repo against roadmap.csv for a specified workstream (presence, readiness, evidence; no code edits)</title>
 
   <role>
-    You are Claude Code in <b>Implementation Mode</b>. Fix only unmet deliverables/ACs for Workstream N in minimal, dependency-ordered steps.
+    You are Claude Code in <b>Audit Mode</b>. Act as an elite graphics/runtime engineer (Vulkan ≥1.2, WebGPU/WGSL, RAII, Rust, Python ≥3.8, CMake ≥3.24, VMA, Sphinx).
+    Project: forge3d — Rust backend + Python frontend (PyO3), targeting interactive/offline 3D visualization.
   </role>
 
   <constraints>
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
     <build>cmake>=3.24, cargo/rustc, PyO3, VMA</build>
-    <apis>WebGPU/WGSL primary; Vulkan 1.2-compatible design</apis>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
     <docs>Sphinx preferred</docs>
+    <uncertainRule>If essential CSV fields or feature details are missing/ambiguous, reply <b>UNCERTAIN</b> and list the exact headers/rows/paths needed.</uncertainRule>
     <safety>
-      - Create branch <code>ws-N-remediation</code>.
-      - Read code first; make small commits mapped 1:1 to fixes.
-      - No blind search/replace; exclude binaries/large assets.
-      - Keep existing APIs stable; gate new paths with feature flags (see Cargo features already declared).
+      - <b>Audit-only:</b> Do not modify repository contents.
+      - No third-party code changes; skip binaries/large assets.
+      - Prefer structured searches and header-aware CSV parsing.
     </safety>
-    <exclusions>.git, dist, build, target, .venv, venv, __pycache__, node_modules, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz</exclusions>
+    <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz</exclusions>
   </constraints>
 
   <inputs>
     <repoRoot>./</repoRoot>
-    <paths>
-      <src>src/</src>
-      <shaders>shaders/</shaders>
-      <python>python/forge3d/</python>
-      <examples>examples/</examples>
-      <docs>docs/</docs>
-      <tests>tests/</tests>
-    </paths>
-    <failedItems>
-      <!-- N6 (partial): missing docs and bind validation proof -->
-      <item task="N6">docs/tbn.md</item>
-
-      <!-- N7 (partial): missing pipeline, example, docs -->
-      <item task="N7">src/pipeline/normal_mapping.rs</item>
-      <item task="N7">examples/normal_mapping_demo.py</item>
-      <item task="N7">docs/normal_mapping.md</item>
-
-      <!-- N5 (absent) -->
-      <item task="N5">src/core/envmap.rs</item>
-      <item task="N5">shaders/env_map.wgsl</item>
-      <item task="N5">python/forge3d/envmap.py</item>
-      <item task="N5">examples/environment_mapping.py</item>
-      <item task="N5">tests/test_envmap.py</item>
-      <item task="N5">docs/environment_mapping.md</item>
-
-      <!-- N8 (absent): off-screen HDR + tonemap enforcement -->
-      <item task="N8">src/pipeline/hdr_offscreen.rs</item>
-      <item task="N8">shaders/postprocess_tonemap.wgsl</item>
-      <item task="N8">examples/hdr_pipeline_demo.py</item>
-      <item task="N8">tests/test_hdr_offscreen_pipeline.py</item>
-      <item task="N8">docs/hdr_offscreen.md</item>
-
-      <!-- N1 (absent): PBR -->
-      <item task="N1">shaders/pbr.wgsl</item>
-      <item task="N1">src/core/material.rs</item>
-      <item task="N1">src/pipeline/pbr.rs</item>
-      <item task="N1">python/forge3d/materials.py</item>
-      <item task="N1">examples/pbr_spheres.py</item>
-      <item task="N1">tests/test_pbr_pipeline.py</item>
-      <item task="N1">docs/pbr.md</item>
-
-      <!-- N2 (absent): CSM + PCF -->
-      <item task="N2">shaders/shadow_map.wgsl</item>
-      <item task="N2">shaders/shadow_sample.wgsl</item>
-      <item task="N2">src/core/shadow_mapping.rs</item>
-      <item task="N2">src/core/cascade_split.rs</item>
-      <item task="N2">python/forge3d/shadows.py</item>
-      <item task="N2">examples/shadow_demo.py</item>
-      <item task="N2">tests/test_shadows.py</item>
-      <item task="N2">docs/shadows.md</item>
-
-      <!-- N4 (absent): Render bundles -->
-      <item task="N4">src/core/render_bundles.rs</item>
-      <item task="N4">python/forge3d/bundles.py</item>
-      <item task="N4">tests/test_render_bundles.py</item>
-      <item task="N4">docs/render_bundles.md</item>
-    </failedItems>
+    <roadmapPath>./roadmap.csv</roadmapPath>
+    <!-- Provide either Workstream ID (e.g., "A") or exact Workstream Title -->
+    <workstreamSelector>
+      <![CDATA[
+      ID: O
+      Title: Resource & Memory Management
+      ]]>
+    </workstreamSelector>
   </inputs>
 
+  <!-- Exact structure of your roadmap.csv -->
+  <csvSchema>
+    <encoding>utf-8</encoding>
+    <delimiter>comma</delimiter>
+    <columns order="fixed">
+      <col index="0">Workstream ID</col>
+      <col index="1">Workstream Title</col>
+      <col index="2">Task ID</col>
+      <col index="3">Task Title</col>
+      <col index="4">Rationale</col>
+      <col index="5">Deliverables</col>
+      <col index="6">Acceptance Criteria</col>
+      <col index="7">Priority</col>
+      <col index="8">Phase</col>
+      <col index="9">Missing Features</col>
+      <col index="10">Dependencies</col>
+      <col index="11">Risks/Mitigations</col>
+      <!-- Trailing column observed in file; treat as ignorable/empty -->
+      <col index="12" optional="true" ignore="true">Unnamed: 12</col>
+    </columns>
+    <cellConventions>
+      <!-- Inside some cells, items are separated by semicolons; DO NOT split columns by this; use only for keyword extraction -->
+      <listSeparator>semicolon-inside-cell</listSeparator>
+      <markdownInline>allowed (e.g., backticks)</markdownInline>
+      <emptyTrailingColumn>ignore if entirely blank</emptyTrailingColumn>
+    </cellConventions>
+    <validation>
+      <!-- Expected controlled vocabularies; report anomalies in hygiene output (do not mutate file) -->
+      <priorityAllowed>High,Medium,Low</priorityAllowed>
+      <phaseAllowed>MVP,Beyond MVP</phaseAllowed>
+    </validation>
+  </csvSchema>
+
   <plan>
-    0) Preflight
-       - Confirm existing features in Cargo.toml (enable-tbn, enable-normal-mapping, enable-pbr, enable-ibl, enable-csm, enable-render-bundles, enable-hdr-offscreen) and guard new code accordingly.
-       - Add minimal flags if missing, but prefer using existing ones.
+    1) Validate & Load CSV
+       - Open <roadmapPath> with UTF-8; delimiter comma.
+       - Confirm exact header names and order per <csvSchema>. If mismatch → <b>UNCERTAIN</b> listing differences.
+       - Drop/ignore column "Unnamed: 13" if entirely empty.
+       - Produce a brief CSV hygiene report:
+         * Rows with Priority not in {High, Medium, Low}.
+         * Rows with Phase not in {MVP, Beyond MVP}.
+         * Missing Task ID/Title/Deliverables/Acceptance Criteria.
 
-    1) N6 (docs + bind validation)
-       - Add <docs>/tbn.md with description, API refs, and validation steps.
-       - In a small test harness (Rust or Python), create a pipeline using vertices with tangent/bitangent to ensure no wgpu validation errors (log output in tests).
+    2) Select Workstream
+       - Filter rows where Workstream ID == provided ID OR Workstream Title == provided Title (case-insensitive).
+       - If none match → <b>UNCERTAIN</b> and list discovered workstreams (ID → Title).
 
-    2) N7 (wire normal mapping)
-       - Implement <src>/pipeline/normal_mapping.rs (bind group layouts; normal map sampler/texture; use existing WGSL).
-       - Add <examples>/normal_mapping_demo.py (headless) to render flat vs normal-mapped and print mean-luminance diff.
-       - Document usage in <docs>/normal_mapping.md.
+    3) Derive Audit Keywords per Task
+       - From Deliverables/Acceptance Criteria/Dependencies, extract filenames (e.g., *.wgsl), symbols (create_render_pipeline, bind_group), Python API entry points (forge3d.*), example script names, and doc page slugs.
+       - Use semicolon-separated items inside cells as hints; do not alter CSV.
 
-    3) N5 (Environment/IBL minimal)
-       - Implement CPU-side envmap loader/plumbing in <src>/core/envmap.rs>; WGSL <shaders>/env_map.wgsl with diffuse/specular sampling and roughness-based mip LOD.
-       - Python wrapper <python>/forge3d/envmap.py; example + tests asserting roughness monotonicity and histogram change.
+    4) Repository Scan (read-only)
+       - Search src/, shaders/, python/forge3d/, examples/, docs/ with ripgrep.
+       - Collect evidence per task: file paths + line numbers/snippets that match expected artifacts and wiring (e.g., shader referenced by pipeline; Python API exposed; example present).
 
-    4) N8 (HDR off-screen + tonemap)
-       - Add <src>/pipeline/hdr_offscreen.rs>: RGBA16F target, resolve path, and post tonemap pass using <shaders>/postprocess_tonemap.wgsl.
-       - Example + test: save PNG, compute clamp-rate & memory metrics.
+    5) Readiness Classification (per task)
+       - <b>Present & Wired</b>: artifacts exist and appear integrated (pipeline + API + example/test/doc).
+       - <b>Present but Partial</b>: artifacts exist but missing wiring/exposure/tests/docs.
+       - <b>Absent</b>: no meaningful artifacts found.
 
-    5) N1 (PBR minimal)
-       - Provide <shaders>/pbr.wgsl (Cook–Torrance GGX), material structs, Python bindings, example spheres, and tests checking specular luma ordering.
+    6) Minimal Change Plan (No Edits)
+       - For Partial/Absent: list the minimal file-level actions (paths/symbols) needed to reach “Present & Wired,” respecting platform/build/memory constraints.
 
-    6) N2 (CSM + PCF)
-       - Implement cascaded shadow map generation, PCF sampling WGSL, example, and tests with luminance drop metric.
-
-    7) N4 (Render bundles)
-       - Add optional bundle recording path and test comparing SSIM against direct encoding; include simple CPU timing.
-
-    8) Validation & Docs
-       - Ensure examples write PNGs to ./out, tests run under `pytest -q`, and Sphinx builds clean.
+    7) Outputs
+       - Emit a Markdown audit report and a machine-readable audit matrix CSV. Include CSV hygiene observations.
   </plan>
 
   <deliverables>
-    <!-- Only missing items per Inputs.failedItems (see above) -->
-    <filesFromInputs>true</filesFromInputs>
+    - <b>reports/audit_&lt;workstream&gt;.md</b> — Markdown:
+      1) Scope (workstream, matched rows count) & CSV Hygiene summary
+      2) Readiness Verdict per task (Present & Wired / Partial / Absent)
+      3) Evidence Map (file paths + line refs/snippets)
+      4) Blocking Gaps
+      5) Minimal Change Plan (file-level)
+      6) Validation Runbook (commands to verify after implementation)
+    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b> — Columns:
+      <code>Workstream ID,Workstream Title,Task ID,Task Title,Readiness,Evidence Paths,Missing Pieces,Minimal Changes,Priority,Phase,Dependencies,Risks/Mitigations,Original Ref</code>
+    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b> — Detected anomalies (Priority/Phase out-of-vocab, missing required cells).
   </deliverables>
 
   <acceptanceCriteria>
-    <!-- Restate only unmet ACs as pass conditions -->
-    <task id="N6">
-      <ac>Vertex layouts with tangent/bitangent bind without wgpu validation errors; log captured in tests.</ac>
-      <ac>Docs page <code>docs/tbn.md</code> added with API and validation steps.</ac>
-    </task>
-    <task id="N7">
-      <ac>Mean-luminance diff (normal-mapped vs flat) ≥ 10% printed by example; test asserts threshold.</ac>
-      <ac>No NaNs detected in intermediate buffers (assert or check) on all 3 OS targets (CI or local matrix).</ac>
-    </task>
-    <task id="N5">
-      <ac>Roughness monotonicity holds: L(0.1) &gt; L(0.5) &gt; L(0.9) within 5% tolerance (test).</ac>
-      <ac>Irradiance rotation causes significant histogram change (χ² p&lt;0.01) (test).</ac>
-    </task>
-    <task id="N8">
-      <ac>Off-screen RGBA16F path tonemaps to sRGB8 PNG; clamp-rate &lt; 1%; VRAM ≤ 512 MiB logged.</ac>
-    </task>
-    <task id="N1">
-      <ac>GGX PBR compiles and runs; Python params exposed; specular luma ordering verified with ≥10% gaps (test).</ac>
-    </task>
-    <task id="N2">
-      <ac>CSM atlases (≥3 cascades) generated; mean luma drop ≥10% vs no-shadow; PCF artifact thresholds met.</ac>
-    </task>
-    <task id="N4">
-      <ac>Render-bundle output SSIM ≥ 0.995 vs direct; timing captured; no validation warnings.</ac>
-    </task>
-    <global>
-      <ac>All new examples write PNGs to <code>./out/</code>; <code>pytest -q</code> exits 0; Sphinx builds without warnings.</ac>
-    </global>
+    - AC-001: Exact headers match those specified (including ignorable "Unnamed: 13"); else returns <b>UNCERTAIN</b> with diffs.
+    - AC-002: Report states selected workstream and matched tasks count.
+    - AC-003: Each audited task has a single Readiness Verdict and at least one evidence reference (or explicit “no evidence found”).
+    - AC-004: Minimal Change Plan lists concrete file paths/symbols for all Partial/Absent items.
+    - AC-005: Validation Runbook includes build, headless demo/test, and docs build commands if applicable.
+    - AC-006: No repository modifications were made (audit-only).
   </acceptanceCriteria>
 
-  <runbook>
+  <execution>
     <commands>
-      - git checkout -b ws-N-remediation
-      - cargo build --workspace --release
-      - pip install -U pip maturin
-      - maturin develop --release
-      - pytest -q
-      - python examples/normal_mapping_demo.py --headless --out out/normal_map.png
-      - python examples/environment_mapping.py --headless --out out/envmap.png
-      - python examples/pbr_spheres.py --headless --out out/pbr_mr.png
-      - python examples/shadow_demo.py --headless --out out/shadows.png
-      - python examples/hdr_pipeline_demo.py --headless --out out/hdr_tonemap.png
-      - (cd docs && make html)
+      - python - <<'PY'
+import csv, sys, pathlib, codecs
+p = pathlib.Path("{{roadmapPath}}")
+if not p.exists():
+    print("UNCERTAIN: roadmap.csv not found at", p, file=sys.stderr); sys.exit(2)
+with codecs.open(p, "r", "utf-8-sig") as f:
+    reader = csv.reader(f)
+    headers = next(reader, [])
+print("CSV_HEADERS:", headers)
+PY
+      - rg --version
+      - rg -n --stats --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node_modules' -g '!__pycache__' \
+        '(wgsl|create_render_pipeline|bind_group|sampler|texture|queue\\.write_(buffer|texture)|forge3d|import +forge3d|from +forge3d +import)' \
+        src/ shaders/ python/ examples/ docs/ || true
     </commands>
-    <completion>
-      Summarize: files added/modified; feature flags used; test pass summary; paths to generated PNGs; memory metrics for HDR pass; SSIM & luminance metrics; logs for wgpu validation checks.
-    </completion>
-  </runbook>
+    <notes>
+      - Build keyword sets from Deliverables/Acceptance Criteria/Dependencies; use semicolons inside cells as list separators for extraction only.
+      - Document multiple candidate implementations if found; pick the best match by AC phrasing.
+      - Do not mutate or re-save the CSV.
+    </notes>
+  </execution>
+
+  <completion>
+    Provide:
+    - <b>reports/audit_&lt;workstream&gt;.md</b>
+    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b>
+    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b>
+    If headers or the workstream filter are invalid, reply <b>UNCERTAIN</b> with exact corrections needed.
+  </completion>
 </task>
