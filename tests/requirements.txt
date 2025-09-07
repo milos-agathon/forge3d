@@ -1,0 +1,8 @@
+# Optional test dependencies for enhanced functionality
+# These are not required for basic testing but provide additional features
+
+# Scientific computing for chi-square tests and statistical analysis
+scipy>=1.7.0
+
+# Enhanced numerical operations
+numpy>=1.20.0

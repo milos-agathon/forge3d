@@ -204,14 +204,61 @@ def validate_environment_map(envmap: EnvironmentMap) -> Dict[str, Any]:
     return results
 
 
+def _halton_sequence(index: int, base: int) -> float:
+    """Generate Halton low-discrepancy sequence value."""
+    result = 0.0
+    f = 1.0 / base
+    i = index
+    while i > 0:
+        result += f * (i % base)
+        i //= base
+        f /= base
+    return result
+
+
+def _generate_hammersley_directions(count: int, seed: int = 42) -> List[np.ndarray]:
+    """
+    Generate deterministic low-discrepancy sample directions using Hammersley sequence.
+    
+    Args:
+        count: Number of directions to generate  
+        seed: Random seed for deterministic generation
+        
+    Returns:
+        List of normalized 3D direction vectors
+    """
+    np.random.seed(seed)  # Fixed seed for deterministic sampling
+    directions = []
+    
+    for i in range(count):
+        # Use Hammersley sequence for better distribution
+        u1 = (i + 0.5) / count  # Stratified sampling
+        u2 = _halton_sequence(i + 1, 3)  # Halton base-3
+        
+        # Convert to spherical coordinates (uniform distribution on sphere)
+        theta = np.arccos(1.0 - 2.0 * u1)  # Elevation
+        phi = 2.0 * np.pi * u2            # Azimuth
+        
+        # Convert to Cartesian coordinates
+        direction = np.array([
+            np.sin(theta) * np.cos(phi),
+            np.cos(theta), 
+            np.sin(theta) * np.sin(phi)
+        ], dtype=np.float32)
+        
+        directions.append(direction)
+    
+    return directions
+
+
 def compute_roughness_luminance_series(envmap: EnvironmentMap, 
                                      roughness_values: List[float]) -> List[float]:
     """
-    Compute luminance values for different roughness levels.
+    Compute luminance values for different roughness levels using deterministic sampling.
     
     This demonstrates the effect of roughness on environment lighting.
-    Higher roughness should generally produce lower luminance due to
-    increased scattering.
+    Higher roughness should produce lower luminance due to increased scattering.
+    Uses low-discrepancy Hammersley sequence for consistent, high-quality sampling.
     
     Args:
         envmap: Environment map to sample
@@ -223,36 +270,65 @@ def compute_roughness_luminance_series(envmap: EnvironmentMap,
     if not roughness_values:
         return []
     
-    # Sample in a consistent direction for comparison
-    sample_direction = np.array([0.0, 1.0, 0.0], dtype=np.float32)  # Upward
+    # Use fixed seed for deterministic results and ≥256 samples for 5% tolerance target
+    base_sample_count = 256
     
     luminances = []
     for roughness in roughness_values:
-        # Simple roughness simulation - blur the environment sample
-        # In a full implementation, this would use prefiltered environment maps
+        # Increase sample count for higher roughness to maintain quality
+        sample_count = max(base_sample_count, int(base_sample_count * (1.0 + roughness)))
         
-        # Sample multiple directions around the main direction
+        # Generate deterministic sample directions using Hammersley sequence
+        directions = _generate_hammersley_directions(sample_count, seed=42)
+        
+        # Sample environment with roughness-based perturbation
         samples = []
-        sample_count = max(16, int(64 * roughness))  # More samples for higher roughness
-        
-        for i in range(sample_count):
-            # Generate random directions around the main direction
-            # This is a simplified version of importance sampling
-            theta = np.random.uniform(0, roughness * np.pi * 0.5)
-            phi = np.random.uniform(0, 2 * np.pi)
-            
-            # Convert to cartesian
-            perturbed_dir = np.array([
-                sample_direction[0] + np.sin(theta) * np.cos(phi) * roughness,
-                sample_direction[1] + np.cos(theta),
-                sample_direction[2] + np.sin(theta) * np.sin(phi) * roughness
-            ])
-            
-            # Normalize
-            perturbed_dir = perturbed_dir / np.linalg.norm(perturbed_dir)
+        for base_direction in directions:
+            if roughness < 0.01:
+                # Very low roughness - direct sampling
+                sampled_dir = base_direction
+            else:
+                # Apply roughness-based perturbation using cosine-weighted distribution
+                # Generate perturbation in local coordinate system
+                
+                # Create local coordinate system around base direction
+                up = np.array([0.0, 1.0, 0.0])
+                if abs(np.dot(base_direction, up)) > 0.9:
+                    up = np.array([1.0, 0.0, 0.0])  # Use different up if parallel
+                
+                tangent = np.cross(base_direction, up)
+                tangent = tangent / np.linalg.norm(tangent)
+                bitangent = np.cross(base_direction, tangent)
+                
+                # Generate cosine-weighted sample within roughness cone
+                # Use deterministic sequence based on direction index
+                dir_seed = hash(tuple(base_direction)) % 10000
+                np.random.seed(dir_seed)
+                
+                # Cosine-weighted hemisphere sampling with roughness scaling
+                xi1 = np.random.uniform(0, 1)
+                xi2 = np.random.uniform(0, 1)
+                
+                # Scale sampling cone by roughness
+                cos_theta = np.sqrt((1.0 - xi1 * roughness))
+                sin_theta = np.sqrt(1.0 - cos_theta * cos_theta)
+                phi = 2.0 * np.pi * xi2
+                
+                # Convert to local coordinates
+                local_dir = np.array([
+                    sin_theta * np.cos(phi),
+                    sin_theta * np.sin(phi), 
+                    cos_theta
+                ])
+                
+                # Transform to world coordinates
+                sampled_dir = (local_dir[0] * tangent + 
+                              local_dir[1] * bitangent + 
+                              local_dir[2] * base_direction)
+                sampled_dir = sampled_dir / np.linalg.norm(sampled_dir)
             
             # Sample environment
-            color = envmap.sample_direction(perturbed_dir)
+            color = envmap.sample_direction(sampled_dir)
             samples.append(color)
         
         # Average the samples

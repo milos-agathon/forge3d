@@ -169,7 +169,7 @@ class TestRoughnessMonotonicity:
         assert all(l >= 0.0 for l in luminances)
     
     def test_roughness_monotonicity_trend(self):
-        """Test that roughness generally decreases luminance (AC requirement)."""
+        """Test that roughness strictly decreases luminance: L(0.1) > L(0.5) > L(0.9) with ±5% tolerance (AC-N5-1)."""
         env = envmap.EnvironmentMap.create_test_envmap(256)
         
         # Test specific roughness values from AC requirement
@@ -178,30 +178,26 @@ class TestRoughnessMonotonicity:
         
         l_01, l_05, l_09 = luminances
         
-        print(f"\nRoughness monotonicity test:")
+        print(f"\nRoughness monotonicity test (AC-N5-1):")
         print(f"  L(0.1) = {l_01:.6f}")
         print(f"  L(0.5) = {l_05:.6f}")
         print(f"  L(0.9) = {l_09:.6f}")
         
-        # AC requirement: assert L(0.1) > L(0.5) > L(0.9)
-        # Allow some tolerance for the Monte Carlo sampling
-        tolerance = 0.8  # 80% tolerance for simplified implementation
+        # AC-N5-1 requirement: enforce L(0.1) > L(0.5) > L(0.9) with ±5% tolerance
+        # Use ratio ≥0.95 as lower bound (5% tolerance)
+        tolerance_ratio = 0.95
         
-        condition1 = l_01 > l_05 * tolerance
-        condition2 = l_05 > l_09 * tolerance
+        condition1 = l_01 > l_05 * tolerance_ratio
+        condition2 = l_05 > l_09 * tolerance_ratio
         
-        print(f"  L(0.1) > L(0.5) * {tolerance}: {condition1} ({l_01:.6f} > {l_05 * tolerance:.6f})")
-        print(f"  L(0.5) > L(0.9) * {tolerance}: {condition2} ({l_05:.6f} > {l_09 * tolerance:.6f})")
+        print(f"  L(0.1) > L(0.5) * {tolerance_ratio}: {condition1} ({l_01:.6f} > {l_05 * tolerance_ratio:.6f})")
+        print(f"  L(0.5) > L(0.9) * {tolerance_ratio}: {condition2} ({l_05:.6f} > {l_09 * tolerance_ratio:.6f})")
         
-        # Log the result for AC requirement
-        if condition1 and condition2:
-            print("  PASS: Roughness monotonicity satisfied")
-        else:
-            print("  INFO: Roughness monotonicity not satisfied (expected with simplified sampling)")
+        # Strict assertions with ±5% tolerance
+        assert l_01 > l_05 * tolerance_ratio, f"L(0.1) {l_01:.6f} must be > L(0.5) * {tolerance_ratio} = {l_05 * tolerance_ratio:.6f}"
+        assert l_05 > l_09 * tolerance_ratio, f"L(0.5) {l_05:.6f} must be > L(0.9) * {tolerance_ratio} = {l_09 * tolerance_ratio:.6f}"
         
-        # For the test, we'll be lenient since this is a simplified implementation
-        # In production, this would be a strict assertion
-        assert l_01 >= 0 and l_05 >= 0 and l_09 >= 0  # At least check non-negative
+        print("  PASS: Roughness monotonicity satisfied with ±5% tolerance")
     
     def test_roughness_empty_list(self):
         """Test roughness computation with empty input."""
@@ -281,6 +277,103 @@ class TestHistogramChanges:
         # AC requirement: histograms should be different
         assert histogram_difference > 0, "Histograms should differ between roughness values"
         print("  PASS: Histogram changes detected with different roughness values")
+    
+    def test_luminance_histogram_chisquare_rotation(self):
+        """Test chi-square goodness-of-fit between original and rotated environment histograms (AC-N5-2)."""
+        env = envmap.EnvironmentMap.create_test_envmap(256)
+        
+        # Create rotated copy by rolling along U by 25% width
+        roll_amount = int(env.width * 0.25)
+        rotated_data = np.roll(env.data, roll_amount, axis=1)  # Roll along width dimension
+        rotated_env = envmap.EnvironmentMap(env.width, env.height, rotated_data)
+        
+        print(f"\nChi-square histogram test (AC-N5-2):")
+        print(f"  Environment size: {env.width}x{env.height}")
+        print(f"  Rotation: {roll_amount} pixels ({roll_amount/env.width:.1%} of width)")
+        
+        # Sample both environments to create luminance histograms
+        num_samples = 1000
+        bins = 20
+        
+        # Generate consistent sample directions for both environments
+        np.random.seed(42)  # Fixed seed for reproducibility
+        directions = []
+        for i in range(num_samples):
+            # Generate random directions on sphere
+            u = np.random.uniform(0, 1)
+            v = np.random.uniform(0, 1)
+            
+            theta = np.arccos(2*u - 1)  # Uniform distribution on sphere
+            phi = 2 * np.pi * v
+            
+            direction = np.array([
+                np.sin(theta) * np.cos(phi),
+                np.cos(theta),
+                np.sin(theta) * np.sin(phi)
+            ])
+            directions.append(direction)
+        
+        # Sample luminances from both environments
+        original_luminances = []
+        rotated_luminances = []
+        
+        for direction in directions:
+            # Sample original environment
+            color_orig = env.sample_direction(direction)
+            lum_orig = 0.299 * color_orig[0] + 0.587 * color_orig[1] + 0.114 * color_orig[2]
+            original_luminances.append(lum_orig)
+            
+            # Sample rotated environment
+            color_rot = rotated_env.sample_direction(direction)
+            lum_rot = 0.299 * color_rot[0] + 0.587 * color_rot[1] + 0.114 * color_rot[2]
+            rotated_luminances.append(lum_rot)
+        
+        # Create histograms with same binning
+        lum_range = (0, max(max(original_luminances), max(rotated_luminances)))
+        hist_orig, bin_edges = np.histogram(original_luminances, bins=bins, range=lum_range)
+        hist_rot, _ = np.histogram(rotated_luminances, bins=bins, range=lum_range)
+        
+        # Perform chi-square goodness-of-fit test
+        try:
+            # Try to use scipy.stats.chisquare if available
+            import scipy.stats
+            
+            # Chi-square test expects frequency data; add small constant to avoid zero expected values
+            expected = hist_orig + 1e-6
+            observed = hist_rot + 1e-6
+            
+            chi2_stat, p_value = scipy.stats.chisquare(observed, expected)
+            dof = bins - 1
+            
+            print(f"  Chi-square statistic: {chi2_stat:.6f}")
+            print(f"  Degrees of freedom: {dof}")
+            print(f"  p-value: {p_value:.6f}")
+            
+        except ImportError:
+            # Fallback implementation using critical value comparison
+            print("  SciPy not available, using critical value comparison")
+            
+            # Calculate chi-square statistic manually
+            expected = hist_orig + 1e-6
+            observed = hist_rot + 1e-6
+            chi2_stat = np.sum((observed - expected)**2 / expected)
+            dof = bins - 1
+            
+            # Critical value for df=19, alpha=0.01 is approximately 36.19
+            critical_values = {19: 36.19, 18: 34.81, 20: 37.57, 15: 30.58, 9: 21.67}
+            critical_value = critical_values.get(dof, 30.0)  # Conservative fallback
+            
+            p_value = 1.0 if chi2_stat < critical_value else 0.005  # Approximate
+            
+            print(f"  Chi-square statistic: {chi2_stat:.6f}")
+            print(f"  Degrees of freedom: {dof}")
+            print(f"  Critical value (alpha=0.01): {critical_value:.6f}")
+            print(f"  Approximate p-value: {'<0.01' if p_value <= 0.01 else '>0.01'}")
+        
+        # AC-N5-2 requirement: chi-square p < 0.01 (significant difference between histograms)
+        assert p_value < 0.01, f"Chi-square test p-value {p_value:.6f} must be < 0.01 for rotated histograms to differ significantly"
+        
+        print(f"  PASS: Chi-square test p-value {p_value:.6f} < 0.01 (significant histogram difference)")
 
 
 class TestUtilityFunctions:
