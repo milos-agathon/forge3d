@@ -74,8 +74,8 @@ pub fn screen_space_error(
     
     // Convert to NDC then to screen coordinates
     let ndc_pos = clip_pos.xyz() / clip_pos.w;
-    let screen_x = (ndc_pos.x + 1.0) * 0.5 * config.viewport_width as f32;
-    let screen_y = (1.0 - ndc_pos.y) * 0.5 * config.viewport_height as f32;
+    let _screen_x = (ndc_pos.x + 1.0) * 0.5 * config.viewport_width as f32;
+    let _screen_y = (1.0 - ndc_pos.y) * 0.5 * config.viewport_height as f32;
     
     // Calculate distance from camera
     let camera_pos_2d = Vec2::new(camera_pos.x, camera_pos.z);

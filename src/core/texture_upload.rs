@@ -4,9 +4,8 @@
 //! with proper memory budget checking and alignment handling.
 
 use crate::error::{RenderError, RenderResult};
-use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
+use crate::core::memory_tracker::global_tracker;
 use crate::gpu::ctx;
-use wgpu::util::DeviceExt;
 use std::num::NonZeroU32;
 
 /// Configuration for HDR texture creation
@@ -239,7 +238,7 @@ fn create_hdr_texture_internal(
 
 /// Upload texture data with proper alignment
 fn upload_texture_data(
-    device: &wgpu::Device,
+    _device: &wgpu::Device,
     queue: &wgpu::Queue,
     texture: &wgpu::Texture,
     data: &[u8],

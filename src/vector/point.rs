@@ -3,10 +3,9 @@
 
 use crate::error::RenderError;
 use crate::vector::data::{PointInstance, validate_point_instances};
-use crate::vector::api::{PointDef, VectorId};
+use crate::vector::api::PointDef;
 use crate::vector::layer::Layer;
 use glam::Vec2;
-use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 
 /// Instanced point renderer with H20,H21,H22 enhancements

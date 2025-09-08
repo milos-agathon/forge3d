@@ -105,7 +105,6 @@ pub fn calculate_cascade_splits(config: &CascadeSplitConfig) -> Vec<f32> {
     if config.boundary_padding > 1.0 {
         for i in 1..splits.len() - 1 {
             let padding_factor = config.boundary_padding;
-            let range = splits[i + 1] - splits[i - 1];
             let center = (splits[i + 1] + splits[i - 1]) * 0.5;
             
             // Extend the split boundary

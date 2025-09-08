@@ -4,8 +4,7 @@
 //! Measures throughput (MB/s) and CPU time to select optimal defaults.
 
 use std::time::Instant;
-use wgpu::{Device, Queue, Buffer, BufferDescriptor, BufferUsages, util::DeviceExt};
-use pollster;
+use wgpu::{Device, Queue, Buffer, BufferDescriptor, BufferUsages};
 
 /// Configuration for upload policy benchmarks
 #[derive(Debug, Clone)]
@@ -214,7 +213,7 @@ fn benchmark_policy(
     let bench_start = Instant::now();
     
     for i in 0..config.iterations {
-        let upload_start = Instant::now();
+        let _upload_start = Instant::now();
         policy.upload(device, queue, &test_data)?;
         
         if i % 20 == 0 {

@@ -1,4 +1,5 @@
 //! Transform utilities for T/R/S operations and model matrix composition
+#![allow(deprecated)]
 //! 
 //! Provides helper functions for translation, rotation, scaling, and matrix composition
 //! following right-handed coordinate conventions.
@@ -228,7 +229,7 @@ fn mat4_to_numpy<'py>(py: Python<'py>, mat: Mat4) -> PyResult<Bound<'py, PyArray
 
 /// Convert a NumPy array to a Mat4
 fn numpy_to_mat4(array: &pyo3::types::PyAny) -> PyResult<Mat4> {
-    use numpy::{PyArrayMethods, PyReadonlyArray2};
+    use numpy::PyReadonlyArray2;
     use numpy::PyUntypedArrayMethods;
     
     // Try to convert to readonly array

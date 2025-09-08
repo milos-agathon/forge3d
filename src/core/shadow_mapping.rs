@@ -8,11 +8,8 @@ use wgpu::{
     Device, Queue, Texture, TextureDescriptor, TextureUsages, TextureDimension, TextureFormat,
     Extent3d, TextureView, TextureViewDescriptor, Sampler, SamplerDescriptor, FilterMode,
     AddressMode, CompareFunction, Buffer, BufferDescriptor, BufferUsages, BindGroup, 
-    BindGroupDescriptor, BindGroupEntry, BindingResource, RenderPassDescriptor,
-    RenderPassColorAttachment, RenderPassDepthStencilAttachment, CommandEncoder,
-    Operations, LoadOp, StoreOp,
+    BindGroupDescriptor, BindGroupEntry, BindingResource,
 };
-use std::collections::HashMap;
 use crate::core::cascade_split::{ShadowCascade, CascadeSplitConfig, generate_cascades};
 
 /// PCF quality settings

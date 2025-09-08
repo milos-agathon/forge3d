@@ -6,8 +6,6 @@
 //! in #[pyfunction] signatures—pyo3 cannot extract references from Python call sites.
 
 use crate::error::RenderError;
-use crate::vector::data::*;
-use crate::vector::layer::Layer;
 use glam::Vec2;
 use pyo3::prelude::*;
 use numpy::{PyReadonlyArray2, PyUntypedArrayMethods};

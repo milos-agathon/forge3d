@@ -3,7 +3,7 @@
 //! Provides high dynamic range rendering to floating-point textures with
 //! tone mapping operators for converting HDR to LDR display output.
 
-use glam::{Vec3, Vec4, Mat4};
+use glam::Vec3;
 use wgpu::{
     Device, Queue, Texture, TextureDescriptor, TextureUsages, TextureDimension, TextureFormat,
     Extent3d, TextureView, TextureViewDescriptor, TextureViewDimension, TextureAspect,

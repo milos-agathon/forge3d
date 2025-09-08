@@ -2,8 +2,7 @@
 //! GPU-based line segment expansion for smooth anti-aliased lines
 
 use crate::error::RenderError;
-use crate::vector::data::{LineVertex, PackedPolyline, pack_lines};
-use crate::vector::api::{PolylineDef, VectorId};
+use crate::vector::api::PolylineDef;
 use crate::vector::layer::Layer;
 use glam::Vec2;
 use wgpu::util::DeviceExt;

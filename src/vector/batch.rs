@@ -2,11 +2,9 @@
 //! AABB computation, frustum culling, and bucketed batching with performance counters
 
 use crate::error::RenderError;
-use crate::vector::data::{PolygonVertex, LineVertex, PointInstance};
 use crate::vector::api::{PolygonDef, PolylineDef, PointDef, VectorId};
 use crate::vector::layer::Layer;
 use glam::{Vec2, Vec3, Vec4, Mat4};
-use std::collections::HashMap;
 
 /// Axis-aligned bounding box
 #[derive(Debug, Clone, Copy)]

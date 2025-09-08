@@ -3,7 +3,7 @@
 //! This module provides backward compatibility for the old framegraph API
 //! while redirecting to the new full implementation.
 
-use crate::error::{RenderError, RenderResult};
+use crate::error::RenderResult;
 
 // Re-export main types from the new implementation
 pub use super::framegraph_impl::{FrameGraph as NewFrameGraph, PassType, ResourceDesc, ResourceType};

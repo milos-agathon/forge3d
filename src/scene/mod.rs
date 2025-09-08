@@ -1,5 +1,6 @@
 // T41-BEGIN:scene-module
 #![allow(dead_code)]
+#![allow(deprecated)]
 use numpy::{IntoPyArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use std::path::PathBuf;

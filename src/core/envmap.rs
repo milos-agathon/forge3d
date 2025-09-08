@@ -4,11 +4,11 @@
 //! realistic environment-based lighting using cubemap textures and roughness-based 
 //! mip sampling for physically-based rendering.
 
-use glam::{Vec3, Mat3, Mat4};
+use glam::Vec3;
 use std::f32::consts::PI;
 use wgpu::{
     Device, Queue, Texture, TextureDescriptor, TextureUsages, TextureDimension, TextureFormat,
-    Extent3d, TextureViewDescriptor, TextureViewDimension, ImageCopyTexture, Origin3d, 
+    Extent3d, ImageCopyTexture, Origin3d, 
     ImageDataLayout, TextureAspect,
 };
 
