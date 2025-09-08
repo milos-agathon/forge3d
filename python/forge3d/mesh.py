@@ -49,11 +49,45 @@ def generate_cube_tbn() -> Tuple[List[Dict[str, Any]], List[int], List[Dict[str,
     RuntimeError
         If TBN generation feature is not enabled
     """
-    if not _HAS_TBN:
-        raise RuntimeError("TBN generation not available - enable-tbn feature required")
-    
-    result = _forge3d.mesh_generate_cube_tbn()
-    return result['vertices'], result['indices'], result['tbn_data']
+    if _HAS_TBN:
+        result = _forge3d.mesh_generate_cube_tbn()
+        return result['vertices'], result['indices'], result['tbn_data']
+    # Pure-Python fallback: 6 faces, 4 vertices per face (no sharing)
+    vertices: List[Dict[str, Any]] = []
+    indices: List[int] = []
+    tbn_data: List[Dict[str, Any]] = []
+    # Define faces with normal and tangent/binormal axes
+    faces = [
+        # +X
+        (np.array([1, 0, 0], np.float32), np.array([0, 0, -1], np.float32), np.array([0, 1, 0], np.float32),
+         [np.array([1, -1, -1]), np.array([1, -1, 1]), np.array([1, 1, 1]), np.array([1, 1, -1])]),
+        # -X
+        (np.array([-1, 0, 0], np.float32), np.array([0, 0, 1], np.float32), np.array([0, 1, 0], np.float32),
+         [np.array([-1, -1, 1]), np.array([-1, -1, -1]), np.array([-1, 1, -1]), np.array([-1, 1, 1])]),
+        # +Y
+        (np.array([0, 1, 0], np.float32), np.array([1, 0, 0], np.float32), np.array([0, 0, 1], np.float32),
+         [np.array([-1, 1, -1]), np.array([1, 1, -1]), np.array([1, 1, 1]), np.array([-1, 1, 1])]),
+        # -Y
+        (np.array([0, -1, 0], np.float32), np.array([1, 0, 0], np.float32), np.array([0, 0, -1], np.float32),
+         [np.array([-1, -1, 1]), np.array([1, -1, 1]), np.array([1, -1, -1]), np.array([-1, -1, -1])]),
+        # +Z
+        (np.array([0, 0, 1], np.float32), np.array([1, 0, 0], np.float32), np.array([0, 1, 0], np.float32),
+         [np.array([-1, -1, 1]), np.array([-1, 1, 1]), np.array([1, 1, 1]), np.array([1, -1, 1])]),
+        # -Z
+        (np.array([0, 0, -1], np.float32), np.array([-1, 0, 0], np.float32), np.array([0, 1, 0], np.float32),
+         [np.array([1, -1, -1]), np.array([1, 1, -1]), np.array([-1, 1, -1]), np.array([-1, -1, -1])]),
+    ]
+    for face_idx, (n, t, b, corners) in enumerate(faces):
+        base = len(vertices)
+        uvs = [np.array([0, 0]), np.array([1, 0]), np.array([1, 1]), np.array([0, 1])]
+        for i in range(4):
+            pos = corners[i].astype(np.float32) * 0.5
+            vertices.append({'position': pos.tolist(), 'normal': n.tolist(), 'uv': uvs[i].tolist()})
+            handedness = float(np.sign(np.dot(np.cross(t, b), n)))
+            tbn_data.append({'tangent': t.tolist(), 'bitangent': b.tolist(), 'normal': n.tolist(), 'handedness': handedness})
+        # Two triangles per face
+        indices.extend([base + 0, base + 1, base + 2, base + 0, base + 2, base + 3])
+    return vertices, indices, tbn_data
 
 
 def generate_plane_tbn(width: int, height: int) -> Tuple[List[Dict[str, Any]], List[int], List[Dict[str, Any]]]:
@@ -95,11 +129,39 @@ def generate_plane_tbn(width: int, height: int) -> Tuple[List[Dict[str, Any]], L
     RuntimeError
         If TBN generation feature is not enabled
     """
-    if not _HAS_TBN:
-        raise RuntimeError("TBN generation not available - enable-tbn feature required")
-        
-    result = _forge3d.mesh_generate_plane_tbn(width, height)
-    return result['vertices'], result['indices'], result['tbn_data']
+    if _HAS_TBN:
+        result = _forge3d.mesh_generate_plane_tbn(width, height)
+        return result['vertices'], result['indices'], result['tbn_data']
+    if width < 2 or height < 2:
+        raise ValueError("width and height must be >= 2")
+    vertices: List[Dict[str, Any]] = []
+    indices: List[int] = []
+    tbn_data: List[Dict[str, Any]] = []
+    # Grid in XZ plane, Y up
+    for j in range(height):
+        v = j / (height - 1)
+        z = -0.5 + v
+        for i in range(width):
+            u = i / (width - 1)
+            x = -0.5 + u
+            pos = np.array([x, 0.0, z], np.float32)
+            n = np.array([0.0, 1.0, 0.0], np.float32)
+            t = np.array([1.0, 0.0, 0.0], np.float32)
+            b = np.array([0.0, 0.0, 1.0], np.float32)
+            vertices.append({'position': pos.tolist(), 'normal': n.tolist(), 'uv': [u, v]})
+            handedness = float(np.sign(np.dot(np.cross(t, b), n)))
+            tbn_data.append({'tangent': t.tolist(), 'bitangent': b.tolist(), 'normal': n.tolist(), 'handedness': handedness})
+    # Indices (two triangles per cell)
+    def idx(ii, jj):
+        return jj * width + ii
+    for j in range(height - 1):
+        for i in range(width - 1):
+            a = idx(i, j)
+            b = idx(i + 1, j)
+            c = idx(i, j + 1)
+            d = idx(i + 1, j + 1)
+            indices.extend([a, c, b, b, c, d])
+    return vertices, indices, tbn_data
 
 
 def validate_tbn_data(tbn_data: List[Dict[str, Any]], tolerance: float = 1e-3) -> Dict[str, Any]:

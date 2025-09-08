@@ -269,13 +269,18 @@ class HdrRenderer:
         # Compute luminance
         luminance = 0.299 * hdr_data[:, :, 0] + 0.587 * hdr_data[:, :, 1] + 0.114 * hdr_data[:, :, 2]
         
+        max_l = float(np.max(luminance))
+        # Use smallest positive luminance for dynamic range to avoid zero bias
+        positive = luminance[luminance > 0]
+        min_positive = float(np.min(positive)) if positive.size > 0 else float(np.min(luminance))
+        dyn_range = max_l / max(min_positive, 1e-6)
         return {
             'min_luminance': float(np.min(luminance)),
-            'max_luminance': float(np.max(luminance)), 
+            'max_luminance': max_l, 
             'mean_luminance': float(np.mean(luminance)),
             'median_luminance': float(np.median(luminance)),
             'std_luminance': float(np.std(luminance)),
-            'dynamic_range': float(np.max(luminance) / max(np.min(luminance), 1e-6)),
+            'dynamic_range': float(dyn_range),
             'pixels_above_1': int(np.sum(luminance > 1.0)),
             'pixels_above_10': int(np.sum(luminance > 10.0)),
             'pixels_above_100': int(np.sum(luminance > 100.0)),

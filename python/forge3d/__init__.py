@@ -16,7 +16,7 @@ __all__ = [
     "clear_vectors_py", "colormap_supported", "compose_trs", "compute_normal_matrix",
     "get_vector_counts_py", "invert_matrix", "look_at_transform", "multiply_matrices",
     "rotate_x", "rotate_y", "rotate_z", "scale", "scale_uniform", "translate",
-    "make_sampler", "list_sampler_modes", "set_palette", "list_palettes", "get_current_palette"
+    "make_sampler", "list_sampler_modes", "set_palette", "list_palettes", "get_current_palette", "has_gpu"
 ]
 
 # Try to import compiled extension; allow running without it
@@ -164,6 +164,10 @@ def run_benchmark(op: str, width: int = 64, height: int = 64, iterations: int = 
             "have_gpu": _HAVE_EXT,
         }
     }
+
+def has_gpu() -> bool:
+    """Return True if GPU-accelerated extension is available."""
+    return bool(_HAVE_EXT)
 
 def make_terrain(width: int, height: int, grid_size: int):
     """

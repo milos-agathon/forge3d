@@ -55,8 +55,9 @@ class RenderBundle:
             bundle_type: Type of rendering this bundle performs
             name: Optional name for debugging
         """
+        # Allow pure-Python fallback when native support is unavailable
         if not has_bundles_support():
-            raise RuntimeError("Render bundles not supported - missing native implementation")
+            warnings.warn("Render bundles running in pure-Python fallback mode", RuntimeWarning)
         
         self.bundle_type = bundle_type
         self.name = name or f"{bundle_type.value}_bundle"
@@ -215,8 +216,9 @@ class BundleManager:
     
     def __init__(self):
         """Create new bundle manager."""
+        # Allow manager in pure-Python fallback mode as well
         if not has_bundles_support():
-            raise RuntimeError("Render bundles not supported")
+            warnings.warn("BundleManager running in pure-Python fallback mode", RuntimeWarning)
         
         self.bundles: Dict[str, RenderBundle] = {}
         self.execution_stats: Dict[str, List[float]] = {}
