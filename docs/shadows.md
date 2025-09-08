@@ -187,7 +187,7 @@ PRESET_CONFIGS = {
     ),
     'ultra_quality': CsmConfig(
         cascade_count=4,
-        shadow_map_size=4096,
+        shadow_map_size=3072,  # Maximum within 256 MiB constraint
         pcf_kernel_size=7
     )
 }

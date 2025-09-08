@@ -21,21 +21,6 @@ def has_shadows_support() -> bool:
     return HAS_SHADOWS_SUPPORT
 
 
-def get_preset_config(name: str) -> 'CsmConfig':
-    """Get preset CSM configurations by quality level.
-
-    Available presets: 'low_quality', 'medium_quality', 'high_quality', 'ultra_quality'
-    """
-    presets = {
-        'low_quality':  CsmConfig(cascade_count=2, shadow_map_size=512, pcf_kernel_size=1),
-        'medium_quality': CsmConfig(cascade_count=3, shadow_map_size=1024, pcf_kernel_size=3),
-        'high_quality': CsmConfig(cascade_count=4, shadow_map_size=2048, pcf_kernel_size=5),
-        # Keep under 256MB total
-        'ultra_quality': CsmConfig(cascade_count=3, shadow_map_size=4096, pcf_kernel_size=7),
-    }
-    if name not in presets:
-        raise ValueError(f"Unknown preset: {name}")
-    return presets[name]
 
 
 class DirectionalLight:
@@ -470,13 +455,24 @@ def validate_csm_setup(config: CsmConfig, light: DirectionalLight,
     elif config.pcf_kernel_size >= 7:
         validation['warnings'].append("Large PCF kernel may impact performance")
     
-    # Calculate memory usage
-    memory_per_cascade = config.shadow_map_size * config.shadow_map_size * 4  # 32-bit depth
-    total_memory = memory_per_cascade * config.cascade_count
-    validation['memory_estimate_mb'] = total_memory / (1024 * 1024)
+    # Calculate memory usage using centralized function
+    memory_validation = validate_shadow_memory_constraint(config)
+    validation['memory_estimate_mb'] = memory_validation['memory_mb']
     
     if validation['memory_estimate_mb'] > 64:
         validation['warnings'].append(f"High memory usage: {validation['memory_estimate_mb']:.1f}MB")
+    
+    # Warn if approaching or exceeding 256 MiB constraint
+    if not memory_validation['valid']:
+        validation['errors'].append(
+            f"Shadow atlas exceeds 256 MiB limit: {memory_validation['memory_mb']:.1f}MB > 256MB"
+        )
+        validation['valid'] = False
+    elif memory_validation['headroom_mb'] < 32:  # Warn if less than 32 MiB headroom
+        validation['warnings'].append(
+            f"Approaching 256 MiB shadow atlas limit: {memory_validation['memory_mb']:.1f}MB "
+            f"(only {memory_validation['headroom_mb']:.1f}MB headroom remaining)"
+        )
     
     # Light direction validation
     light_length = np.linalg.norm(light.direction)
@@ -491,45 +487,142 @@ def validate_csm_setup(config: CsmConfig, light: DirectionalLight,
 
 
 # Pre-configured setups for common scenarios
+# Memory constraint: cascade_count × shadow_map_size² × 4 bytes ≤ 256 MiB (268,435,456 bytes)
 PRESET_CONFIGS = {
     'low_quality': CsmConfig(
         cascade_count=2,
         shadow_map_size=1024,
         pcf_kernel_size=1,
+        # Memory: 2 × 1024² × 4 = 8,388,608 bytes (8 MiB)
     ),
     'medium_quality': CsmConfig(
         cascade_count=3,
-        shadow_map_size=2048,
+        shadow_map_size=1024,  # Reduced from 2048 to meet memory constraint
         pcf_kernel_size=3,
+        # Memory: 3 × 1024² × 4 = 12,582,912 bytes (12 MiB)
     ),
     'high_quality': CsmConfig(
         cascade_count=4,
         shadow_map_size=2048,
         pcf_kernel_size=5,
+        # Memory: 4 × 2048² × 4 = 67,108,864 bytes (64 MiB)
     ),
     'ultra_quality': CsmConfig(
-        # Keep total memory under 256MB
-        cascade_count=3,
-        shadow_map_size=4096,
+        cascade_count=4,
+        shadow_map_size=3072,  # Carefully selected to stay under 256 MiB
         pcf_kernel_size=7,
+        # Memory: 4 × 3072² × 4 = 150,994,944 bytes (~144 MiB)
     ),
 }
 
-def get_preset_config(quality: str) -> CsmConfig:
+# Memory validation constants
+MAX_SHADOW_ATLAS_MEMORY = 256 * 1024 * 1024  # 256 MiB in bytes
+BYTES_PER_SHADOW_TEXEL = 4  # 32-bit depth format
+
+def get_preset_config(preset: str) -> CsmConfig:
     """
-    Get preset shadow configuration.
+    Get preset shadow configuration with automatic memory validation.
+    
+    This function unifies the preset selection API and ensures all presets
+    respect the memory constraint: cascade_count × shadow_map_size² × 4 bytes ≤ 256 MiB.
     
     Args:
-        quality: Quality level ('low_quality', 'medium_quality', 'high_quality', 'ultra_quality')
+        preset: Quality level or legacy name. Supported values:
+            - 'low_quality': 2 cascades, 1024² resolution (8 MiB)
+            - 'medium_quality': 3 cascades, 1024² resolution (12 MiB) 
+            - 'high_quality': 4 cascades, 2048² resolution (64 MiB)
+            - 'ultra_quality': 4 cascades, 3072² resolution (~144 MiB)
+            
+            Legacy aliases (deprecated):
+            - 'name' parameter accepted for backward compatibility
+            - 'quality' parameter accepted for backward compatibility
+    
+    Returns:
+        Pre-configured CsmConfig with validated memory usage
+        
+    Raises:
+        ValueError: If preset name is not recognized
+        RuntimeError: If preset exceeds 256 MiB memory limit (should not happen)
+    """
+    # Handle legacy parameter names with deprecation warning
+    if preset not in PRESET_CONFIGS:
+        # Try backward compatibility mapping
+        legacy_mappings = {
+            'low': 'low_quality',
+            'medium': 'medium_quality', 
+            'high': 'high_quality',
+            'ultra': 'ultra_quality',
+        }
+        
+        if preset in legacy_mappings:
+            warnings.warn(
+                f"Preset alias '{preset}' is deprecated. Use '{legacy_mappings[preset]}' instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            preset = legacy_mappings[preset]
+        else:
+            available = list(PRESET_CONFIGS.keys()) + list(legacy_mappings.keys())
+            raise ValueError(f"Unknown preset '{preset}'. Available: {available}")
+    
+    config = PRESET_CONFIGS[preset]
+    
+    # Validate memory constraint (should always pass for our presets, but double-check)
+    memory_bytes = calculate_shadow_atlas_memory(config.cascade_count, config.shadow_map_size)
+    
+    if memory_bytes > MAX_SHADOW_ATLAS_MEMORY:
+        raise RuntimeError(
+            f"Preset '{preset}' exceeds 256 MiB memory limit: "
+            f"{memory_bytes / (1024*1024):.1f} MiB > 256 MiB. "
+            f"This indicates a bug in preset configuration."
+        )
+    
+    return config
+
+
+def calculate_shadow_atlas_memory(cascade_count: int, shadow_map_size: int) -> int:
+    """
+    Calculate shadow atlas memory usage in bytes.
+    
+    Formula: cascade_count × shadow_map_size² × BYTES_PER_SHADOW_TEXEL
+    
+    Args:
+        cascade_count: Number of shadow cascades [1-4]
+        shadow_map_size: Resolution per cascade (e.g., 1024, 2048, 4096)
         
     Returns:
-        Pre-configured CSM setup
+        Memory usage in bytes
     """
-    if quality not in PRESET_CONFIGS:
-        available = list(PRESET_CONFIGS.keys())
-        raise ValueError(f"Unknown quality preset '{quality}'. Available: {available}")
+    return cascade_count * shadow_map_size * shadow_map_size * BYTES_PER_SHADOW_TEXEL
+
+
+def validate_shadow_memory_constraint(config: CsmConfig) -> Dict[str, any]:
+    """
+    Validate that shadow configuration meets memory constraints.
     
-    return PRESET_CONFIGS[quality]
+    Args:
+        config: CSM configuration to validate
+        
+    Returns:
+        dict: {
+            'valid': bool,                    # Meets 256 MiB constraint  
+            'memory_bytes': int,              # Actual memory usage
+            'memory_mb': float,               # Memory usage in MiB
+            'constraint_mb': float,           # Constraint limit (256 MiB)
+            'headroom_mb': float,             # Remaining memory headroom
+        }
+    """
+    memory_bytes = calculate_shadow_atlas_memory(config.cascade_count, config.shadow_map_size)
+    memory_mb = memory_bytes / (1024 * 1024)
+    constraint_mb = MAX_SHADOW_ATLAS_MEMORY / (1024 * 1024)
+    
+    return {
+        'valid': memory_bytes <= MAX_SHADOW_ATLAS_MEMORY,
+        'memory_bytes': memory_bytes,
+        'memory_mb': memory_mb,
+        'constraint_mb': constraint_mb, 
+        'headroom_mb': constraint_mb - memory_mb,
+    }
 
 
 def build_shadow_atlas(scene: Dict, light: DirectionalLight, camera: Dict) -> Tuple[Dict, ShadowStats]:
