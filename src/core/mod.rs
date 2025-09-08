@@ -5,6 +5,7 @@
 pub mod framegraph;  // Legacy compatibility layer
 pub mod gpu_types;
 pub mod memory_tracker;
+pub mod resource_tracker;
 
 // New framegraph implementation
 pub mod framegraph_impl;
