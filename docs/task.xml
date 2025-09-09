@@ -1,239 +1,261 @@
 <task>
-  <system>
-    You are Claude Code. Apply the following changes to the repo in the current working directory in ONE PR with logically grouped commits. Prioritize correctness, reproducibility, and cross-platform safety.
-  </system>
+  <Title>Implement & wire missing/partial items for Workstream O</Title>
 
-  <context>
-    <project>forge3d — Rust (wgpu/WGSL, VMA, RAII) core with PyO3 Python frontend for interactive/offline 3D visualization.</project>
-    <constraints>
-      <platforms>win_amd64; linux_x86_64; macos_universal2</platforms>
-      <gpu_budget>≤ 512 MiB host-visible heap</gpu_budget>
-      <build>Rust + maturin (abi3-py38). Provide optional CMake≥3.24 wrapper.</build>
-      <style>
-        Keep files &lt;= 1000 LOC (target &lt; 500); early returns; tight error handling; typed Python API; no panics across FFI.
-      </style>
-    </constraints>
-    <evidence>
-      Duplicate function definitions in python/forge3d/shadows.py (two get_preset_config overloads). 
-      Host-visible memory tracker lacks Drop-based decrements; stale metrics risk at shutdown.
-      Compiled .pyd artifacts tracked in VCS; should be ignored/removed.
-      WGSL pipelines lack bind group layout documentation.
-      Readback path uses .expect and Maintain::Wait synchronously.
-      CPU PBR BRDF diverges (perceptual gain) from WGSL; needs parity policy + tests.
-      Sphinx/API docs and GPU memory guide incomplete.
-    </evidence>
-  </context>
+  <Context>
+    <RepoRoot>.</RepoRoot>
+    <Paths>
+      <Path>src/</Path>
+      <Path>shaders/</Path>
+      <Path>python/forge3d/</Path>
+      <Path>examples/</Path>
+      <Path>docs/</Path>
+      <Path>tests/</Path>
+    </Paths>
+    <Workstream id="O" title="Resource &amp; Memory Management">
+      <Task id="O1" title="Staging buffer rings"/>
+      <Task id="O2" title="GPU memory pools"/>
+      <Task id="O3" title="Compressed texture pipeline"/>
+      <Task id="O4" title="Virtual texture streaming"/>
+    </Workstream>
+    <Constraints>
+      <OS>win_amd64</OS>
+      <OS>linux_x86_64</OS>
+      <OS>macos_universal2</OS>
+      <GpuBudget>&lt;= 512 MiB host-visible heap</GpuBudget>
+      <Toolchain>cmake &gt;= 3.24, cargo/rustc, PyO3, VMA, Sphinx</Toolchain>
+      <APIs>WebGPU/WGSL primary; Vulkan 1.2 compatible design</APIs>
+    </Constraints>
+    <DependenciesNote>
+      O1 depends on M3; O2 depends on M5 and O1; O3 depends on L1; O4 depends on O3 and B11.
+      Validate presence only; do not implement non-O tasks.
+    </DependenciesNote>
+  </Context>
 
-  <goals>
-    <goal>Implement the complete refactor/cleanup plan R1–R12 (see &lt;changesets&gt;), plus examples and CI/docs required by the audit.</goal>
-    <goal>Maintain existing public API where feasible; add compatible shims and clear deprecations when reorganizing.</goal>
-  </goals>
+  <Plan>
+    <Step index="0" title="Audit-first & branch setup">
+      <Action>git checkout -b feat/workstream-O</Action>
+      <Action>Inventory current files: src/core/*, python/forge3d/*, examples/*, docs/*, tests/*</Action>
+      <Action>Confirm absence/partial status for O1–O4 and presence of external deps (M3,M5,L1,B11) references.</Action>
+      <Action>Set feature flags: enable-memory-pools, enable-staging-rings (Cargo features or cfg flags as needed).</Action>
+    </Step>
 
-  <assumptions>
-    <item>If a module is unused (e.g., python/forge3d/materials.py), merge its public surface into a maintained module (pbr.py) and re-export to avoid breakage. Otherwise, expose it via __init__.py consistently with type stubs.</item>
-    <item>CPU PBR: default to shader-parity mode; keep the “perceptual_gain” behavior behind a documented flag.</item>
-    <item>Async readback is opt-in via a feature flag and/or environment toggle; keep current synchronous path as default for tests.</item>
-  </assumptions>
+    <Step index="1" title="O1 — Staging buffer rings (blocking prerequisite)">
+      <CreateFile>src/core/staging_rings.rs</CreateFile>
+      <CreateFile>src/core/fence_tracker.rs</CreateFile>
+      <ModifyFile>src/lib.rs</ModifyFile>
+      <ModifyFile>python/forge3d/memory.py</ModifyFile>
+      <Design>
+        <Item>Implement 3-ring staging buffers with automatic wrap-around.</Item>
+        <Item>Fence-backed synchronization; CPU-visible checks before reuse.</Item>
+        <Item>Usage statistics (bytes in-flight, ring index, stalls) exposed via Python.</Item>
+      </Design>
+      <PublicAPI>
+        <Rust>StagingRing::new(device, ring_count, buffer_size)</Rust>
+        <Rust>&amp;StagingRing::current()</Rust>
+        <Rust>StagingRing::advance(fence)</Rust>
+        <Python>forge3d.memory.staging_stats()</Python>
+      </PublicAPI>
+      <Tests>
+        <Create>tests/test_staging_rings.rs</Create>
+        <Create>tests/test_staging_performance.py</Create>
+        <Example>examples/staging_ring_demo.py</Example>
+      </Tests>
+      <Docs>
+        <Create>docs/memory/staging_rings.md</Create>
+      </Docs>
+    </Step>
 
-  <changesets>
+    <Step index="2" title="O2 — GPU memory pools (complete partial implementation)">
+      <ModifyFile>src/core/memory_tracker.rs</ModifyFile>
+      <ModifyFile>src/core/big_buffer.rs</ModifyFile>
+      <ModifyFile>python/forge3d/memory.py</ModifyFile>
+      <Design>
+        <Item>Introduce size-bucket allocation (power-of-two buckets with 64B alignment).</Item>
+        <Item>Reference counting (add_ref/release) with pool block recycling.</Item>
+        <Item>Defragmentation pass with relocation tables; minimize stalls by time-slicing moves.</Item>
+      </Design>
+      <PublicAPI>
+        <Rust>MemoryPool::allocate_bucket(size: u32) -&gt; PoolBlock</Rust>
+        <Rust>PoolBlock::add_ref(), PoolBlock::release()</Rust>
+        <Rust>MemoryPool::defragment() -&gt; DefragStats</Rust>
+        <Python>forge3d.memory.pool_stats()</Python>
+      </PublicAPI>
+      <Tests>
+        <Create>tests/test_memory_pools.rs</Create>
+        <Create>tests/test_memory_fragmentation.py</Create>
+        <Example>examples/memory_pool_demo.py</Example>
+      </Tests>
+      <Docs>
+        <Create>docs/memory/memory_pools.md</Create>
+      </Docs>
+    </Step>
 
-    <!-- R1 -->
-    <change id="R1" title="Deduplicate shadows.get_preset_config and test presets" severity="P2" risk="low">
-      <files>python/forge3d/shadows.py; tests/test_shadows.py; docs/shadows.md</files>
-      <actions>
-        <action>Unify duplicate get_preset_config into a single API that accepts either alias (name/quality). Keep backward-compat shims and deprecation warnings.</action>
-        <action>Add explicit preset table and ensure cascade_count × size^2 × 4 B keeps shadow atlas &lt;= 256 MiB (device-local depth textures not counted as host-visible).</action>
-        <action>Add unit tests asserting memory thresholds and preset resolution/cascade correctness.</action>
-        <action>Document presets and memory math in docs/shadows.md and in code docstrings.</action>
-      </actions>
-      <validation>pytest -q -k shadows</validation>
-    </change>
+    <Step index="3" title="O3 — Compressed texture pipeline">
+      <CreateFile>src/core/texture_format.rs</CreateFile>
+      <CreateFile>src/core/compressed_textures.rs</CreateFile>
+      <CreateFile>src/loaders/ktx2.rs</CreateFile>
+      <ModifyFile>src/colormap/mod.rs</ModifyFile>
+      <Design>
+        <Item>Detect compressed formats; support BC1–BC7 and ETC2.</Item>
+        <Item>Implement KTX2 container loading; integrate transcoding/decoder path.</Item>
+        <Item>Plumb into texture upload path, preserving device budget constraints.</Item>
+      </Design>
+      <PublicAPI>
+        <Rust>CompressedImage::from_ktx2(path)</Rust>
+        <Rust>CompressedImage::decode_to_gpu()</Rust>
+      </PublicAPI>
+      <Tests>
+        <Create>tests/test_compressed_quality.py</Create>
+        <Example>examples/compressed_texture_demo.py</Example>
+      </Tests>
+      <Docs>
+        <Create>docs/memory/compressed_textures.md</Create>
+      </Docs>
+    </Step>
 
-    <!-- R2 -->
-    <change id="R2" title="Implement Drop to reconcile memory tracker counters" severity="P2" risk="medium">
-      <files>src/lib.rs; src/core/memory_tracker.rs; src/error.rs; tests/</files>
-      <actions>
-        <action>Add Drop impl(s) (or equivalent resource-finalization path) to decrement tracked host-visible allocations for buffers/textures when Renderer or owning structs are dropped.</action>
-        <action>Expose safe helpers in memory_tracker to register/unregister resources; ensure thread-safe atomics.</action>
-        <action>Add Rust test(s) verifying counters return to zero after render lifecycle.</action>
-      </actions>
-      <validation>cargo test -q --all-targets --features "default"</validation>
-    </change>
+    <Step index="4" title="O4 — Virtual texture streaming">
+      <CreateFile>src/core/virtual_texture.rs</CreateFile>
+      <CreateFile>src/core/feedback_buffer.rs</CreateFile>
+      <CreateFile>src/core/tile_cache.rs</CreateFile>
+      <CreateFile>python/forge3d/streaming.py</CreateFile>
+      <Design>
+        <Item>Page table management with mip-level addressing.</Item>
+        <Item>GPU feedback buffer to gather visible tiles.</Item>
+        <Item>LRU tile cache; async upload via O1 staging rings.</Item>
+      </Design>
+      <PublicAPI>
+        <Python>forge3d.streaming.VirtualTexture(width, height, tile_size)</Python>
+        <Python>vt.update(camera) / vt.stats()</Python>
+      </PublicAPI>
+      <Tests>
+        <Create>tests/test_virtual_texture.py</Create>
+        <Example>examples/virtual_texture_demo.py</Example>
+      </Tests>
+      <Docs>
+        <Create>docs/memory/virtual_texturing.md</Create>
+      </Docs>
+    </Step>
 
-    <!-- R3 -->
-    <change id="R3" title="Replace readback .expect with RenderError across FFI" severity="P3" risk="low">
-      <files>src/lib.rs; src/error.rs; python/forge3d/__init__.pyi</files>
-      <actions>
-        <action>Map map_async and device.poll failures to RenderError and propagate Result through the FFI boundary so Python receives a friendly RuntimeError.</action>
-        <action>Audit panics in the readback path and replace with error returns; update type stubs if signatures change.</action>
-      </actions>
-      <validation>pytest -q -k readback && python -c "import forge3d; print('import-ok')"</validation>
-    </change>
+    <Step index="5" title="Docs (Sphinx) & index updates">
+      <ModifyFile>docs/index.rst</ModifyFile>
+      <Action>Add new pages to ToC under “Memory Management”.</Action>
+    </Step>
 
-    <!-- R4 -->
-    <change id="R4" title="Document WGSL bind group layouts per pipeline" severity="P2" risk="low">
-      <files>src/shaders/*.wgsl</files>
-      <actions>
-        <action>Add header block comments per WGSL file listing bind groups, binding indices, expected formats, and coordinate space conventions.</action>
-        <action>Grep verify @group/@binding consistency across Rust pipeline creation and WGSL declarations.</action>
-      </actions>
-      <validation>rg -n "@group\\(|@binding\\(" src/shaders && cargo test -q</validation>
-    </change>
+    <Step index="6" title="CI matrix & packaging">
+      <Action>Add/extend CI to build &amp; test across win/linux/macos.</Action>
+      <Action>Ensure maturin build succeeds and Python wheels import memory APIs.</Action>
+    </Step>
 
-    <!-- R5 -->
-    <change id="R5" title="Align CPU PBR with WGSL or clearly mark differences" severity="P2" risk="medium">
-      <files>python/forge3d/pbr.py; src/shaders/pbr.wgsl; tests/test_pbr_parity.py</files>
-      <actions>
-        <action>Add a parity mode (default) matching WGSL BRDF math and texture channel usage; gate current perceptual gain under a documented flag (e.g., use_perceptual_gain=False by default).</action>
-        <action>Add deterministic parity tests comparing CPU vs WGSL on fixed inputs (angles/materials); allow small epsilon.</action>
-        <action>Extend docstrings explaining the rationale and when to enable the alternate behavior.</action>
-      </actions>
-      <validation>pytest -q -k pbr_parity</validation>
-    </change>
+    <Step index="7" title="Final validation & cleanup">
+      <Action>Run performance tests and record metrics in docs as badges/tables.</Action>
+      <Action>Open PR with summary of deliverables and AC evidence.</Action>
+    </Step>
+  </Plan>
 
-    <!-- R6 -->
-    <change id="R6" title="Exclude compiled artifacts and improve packaging flow" severity="P2" risk="low">
-      <files>.gitignore; docs/packaging.md</files>
-      <actions>
-        <action>Add patterns to .gitignore: python/forge3d/_forge3d*.pyd, python/forge3d/_vulkan_forge*.pyd, target/, .pytest_cache/, .benchmarks/, out/, diag_out/, dist/, build/, *.egg-info, .venv/.</action>
-        <action>Remove checked-in .pyd files from VCS.</action>
-        <action>Add docs/packaging.md explaining maturin build, wheel verification, and clean tree expectations.</action>
-      </actions>
-      <validation>git status is clean after fresh build; maturin build --release succeeds</validation>
-    </change>
+  <Deliverables>
+    <ByTask id="O1">
+      <Files>
+        <File>src/core/staging_rings.rs</File>
+        <File>src/core/fence_tracker.rs</File>
+        <File>python/forge3d/memory.py</File>
+        <File>docs/memory/staging_rings.md</File>
+        <File>examples/staging_ring_demo.py</File>
+        <File>tests/test_staging_rings.rs</File>
+        <File>tests/test_staging_performance.py</File>
+      </Files>
+      <Feature>3-ring buffer with fences; automatic wrap; usage stats</Feature>
+    </ByTask>
+    <ByTask id="O2">
+      <Files>
+        <File>src/core/memory_tracker.rs</File>
+        <File>src/core/big_buffer.rs</File>
+        <File>python/forge3d/memory.py</File>
+        <File>docs/memory/memory_pools.md</File>
+        <File>examples/memory_pool_demo.py</File>
+        <File>tests/test_memory_pools.rs</File>
+        <File>tests/test_memory_fragmentation.py</File>
+      </Files>
+      <Feature>Pool allocator with size buckets; reference counting; defrag strategy</Feature>
+    </ByTask>
+    <ByTask id="O3">
+      <Files>
+        <File>src/core/texture_format.rs</File>
+        <File>src/core/compressed_textures.rs</File>
+        <File>src/loaders/ktx2.rs</File>
+        <File>docs/memory/compressed_textures.md</File>
+        <File>examples/compressed_texture_demo.py</File>
+        <File>tests/test_compressed_quality.py</File>
+      </Files>
+      <Feature>Format detection; BC1–7 decoder; ETC2 support; KTX2 loading</Feature>
+    </ByTask>
+    <ByTask id="O4">
+      <Files>
+        <File>src/core/virtual_texture.rs</File>
+        <File>src/core/feedback_buffer.rs</File>
+        <File>src/core/tile_cache.rs</File>
+        <File>python/forge3d/streaming.py</File>
+        <File>docs/memory/virtual_texturing.md</File>
+        <File>examples/virtual_texture_demo.py</File>
+        <File>tests/test_virtual_texture.py</File>
+      </Files>
+      <Feature>Page table management; feedback buffer; tile cache; Python API</Feature>
+    </ByTask>
+  </Deliverables>
 
-    <!-- R7 -->
-    <change id="R7" title="Add optional CMake wrapper" severity="P3" risk="low">
-      <files>CMakeLists.txt; docs/build.md</files>
-      <actions>
-        <action>Create minimal CMakeLists.txt (cmake_minimum_required(VERSION 3.24)) that exposes targets to invoke maturin/cargo and handles RPATH/DLL install hints per-OS.</action>
-        <action>Document usage and environment requirements in docs/build.md.</action>
-      </actions>
-      <validation>cmake -S . -B build && cmake --build build (non-destructive)</validation>
-    </change>
+  <AcceptanceCriteria>
+    <ByTask id="O1">
+      <Criterion>&lt; 2 ms CPU overhead for 100 MB transfers (median over 100 runs).</Criterion>
+      <Criterion>Zero buffer reuse before fence signal (validated in tests).</Criterion>
+      <Criterion>Python staging stats report ring index and in-flight bytes.</Criterion>
+    </ByTask>
+    <ByTask id="O2">
+      <Criterion>&gt;= 50% reduction in allocation calls vs baseline (pool_stats).</Criterion>
+      <Criterion>&lt; 5% fragmentation after 1 hour synthetic load.</Criterion>
+      <Criterion>No leaks: all PoolBlock refcounts return to zero in tests.</Criterion>
+    </ByTask>
+    <ByTask id="O3">
+      <Criterion>30–70% texture memory reduction vs PNG path for same assets.</Criterion>
+      <Criterion>Objective quality PSNR &gt; 35 dB for decompressed GPU images.</Criterion>
+      <Criterion>KTX2 assets load and render without crashes in examples.</Criterion>
+    </ByTask>
+    <ByTask id="O4">
+      <Criterion>16k×16k terrain with resident memory &lt;= 256 MB under camera sweep.</Criterion>
+      <Criterion>No visible popping during tile streaming (visual + timing thresholds in test).</Criterion>
+      <Criterion>Python API exposes vt.stats() with cache hits/misses.</Criterion>
+    </ByTask>
 
-    <!-- R8 -->
-    <change id="R8" title="Expand texture size accounting formats" severity="P3" risk="low">
-      <files>src/core/memory_tracker.rs; tests/</files>
-      <actions>
-        <action>Add cases for common formats (e.g., R16F, RG16F, RGBA16F, BC1–BC7 if applicable) to calculate_texture_size with unit tests per format.</action>
-      </actions>
-      <validation>cargo test -q -p forge3d -- memory_tracker</validation>
-    </change>
+    <BuildAndTest>
+      <Command>cargo build --features enable-memory-pools,enable-staging-rings --release</Command>
+      <Command>maturin develop --release</Command>
+      <Command>pytest -q</Command>
+    </BuildAndTest>
+    <Docs>
+      <Command>cd docs &amp;&amp; make html</Command>
+    </Docs>
+  </AcceptanceCriteria>
 
-    <!-- R9 -->
-    <change id="R9" title="Optional async/double-buffered readback" severity="P3" risk="medium">
-      <files>src/lib.rs; bench/; docs/performance.md</files>
-      <actions>
-        <action>Introduce an opt-in double-buffered staging path (feature flag/env var) to avoid blocking Maintain::Wait in interactive flows; keep current default for tests.</action>
-        <action>Add microbench in bench/ with before/after timings; document tradeoffs in docs/performance.md.</action>
-      </actions>
-      <validation>cargo bench (or timing harness) shows non-regressive behavior; default tests still pass</validation>
-    </change>
+  <Safety>
+    <Rule>Create a feature branch; small logically-scoped commits with clear messages.</Rule>
+    <Rule>No blind search/replace; constrain edits to listed files/paths.</Rule>
+    <Rule>Exclude binary and build dirs (target/, dist/, build/, *.png, *.ktx2) from code ops.</Rule>
+    <Rule>Add tests alongside features; do not reduce existing test coverage.</Rule>
+    <Rule>Respect 512 MiB host-visible budget; fail fast if exceeded.</Rule>
+  </Safety>
 
-    <!-- R10 -->
-    <change id="R10" title="Sphinx API reference + GPU memory guide" severity="P2" risk="low">
-      <files>docs/conf.py; docs/index.rst (or .md); docs/api/; python/forge3d/*.py</files>
-      <actions>
-        <action>Enable autodoc for Python modules; link to Rust concepts where relevant; add a “GPU setup/backends” page.</action>
-        <action>Add a “Memory Accounting” page explaining host-visible vs device-local and how the tracker reports totals.</action>
-      </actions>
-      <validation>sphinx-build -b html docs _build/html (no warnings-as-errors)</validation>
-    </change>
-
-    <!-- R11 -->
-    <change id="R11" title="Clarify shadows preset memory policy" severity="P2" risk="low">
-      <files>python/forge3d/shadows.py; docs/shadows.md; tests/test_shadows.py</files>
-      <actions>
-        <action>Add asserts and comments documenting shadow atlas memory cost, formulas, and safe defaults.</action>
-      </actions>
-      <validation>pytest -q -k shadows</validation>
-    </change>
-
-    <!-- R12 -->
-    <change id="R12" title="Harden Python input validation across APIs" severity="P2" risk="low">
-      <files>python/forge3d/*.py; python/forge3d/_validate.py; tests/test_inputs.py</files>
-      <actions>
-        <action>Audit public Python APIs for dtype/shape/contiguity checks; add type hints and consistent exceptions via centralized _validate helpers.</action>
-      </actions>
-      <validation>pytest -q -k inputs</validation>
-    </change>
-
-    <!-- Added per REPORT: Advanced Examples -->
-    <change id="R13" title="Add 10 advanced examples showcasing current capabilities" severity="P3" risk="low">
-      <files>examples/*; examples/README.md</files>
-      <actions>
-        <action>Add 10 Python example scripts reflecting the audit’s list (terrain+shadows+PBR, contour overlay, HDR tonemap comparison, vector OIT layering, normal mapping on terrain, IBL env lighting, multi-threaded command recording, async compute prepass, large texture upload policies, device capability probe). Ensure they use only existing APIs.</action>
-        <action>Provide a minimal README with run instructions and expected outputs.</action>
-      </actions>
-      <validation>Each script runs headless with fallback where needed; images written to out/ (gitignored)</validation>
-    </change>
-
-    <!-- Added per REPORT: API surface & materials.py decision -->
-    <change id="R14" title="Finalize public API exports and materials module policy" severity="P3" risk="low">
-      <files>python/forge3d/__init__.py; python/forge3d/materials.py; python/forge3d/pbr.py; python/forge3d/__init__.pyi</files>
-      <actions>
-        <action>If materials.py is unused, merge its types into pbr.py and add re-exports in __init__.py (and/or a thin materials.py shim). Otherwise, ensure imports and stubs expose it consistently.</action>
-        <action>Update type stubs and __all__ accordingly; add unit tests importing the public API.</action>
-      </actions>
-      <validation>python -c "import forge3d as f; print(sorted(dir(f))[:5])"</validation>
-    </change>
-
-    <!-- Added per REPORT: CI -->
-    <change id="R15" title="Add CI workflow for fmt/clippy/pytest/docs/wheel" severity="P2" risk="low">
-      <files>.github/workflows/ci.yml</files>
-      <actions>
-        <action>Create a matrix CI (ubuntu-latest, windows-latest, macos-latest) running: cargo fmt --check; cargo clippy --all-targets --all-features -D warnings; pytest -q (GPU-aware tests default to safe fallback); sphinx-build; maturin sdist/wheel (no publish).</action>
-      </actions>
-      <validation>All jobs green on PR</validation>
-    </change>
-
-    <!-- Housekeeping -->
-    <change id="R16" title="Docs and CHANGELOG updates" severity="P3" risk="low">
-      <files>README.md; CHANGELOG.md</files>
-      <actions>
-        <action>Update README with memory policy, examples index, and build options (maturin/CMake).</action>
-        <action>Add CHANGELOG entry summarizing all changes.</action>
-      </actions>
-      <validation>Markdown lint passes; links valid</validation>
-    </change>
-
-  </changesets>
-
-  <execution>
-    <steps>
-      <step>Create feature branch: feat/audit-remediation</step>
-      <step>Apply changeset groups in order R1 → R16. Keep commits small and labeled.</step>
-      <step>Run validation suite locally:
-        cargo fmt -- --check;
-        cargo clippy --all-targets --all-features -D warnings;
-        cargo test -q;
-        pytest -q;
-        sphinx-build -b html docs _build/html;
-        maturin build --release;
-        cmake -S . -B build && cmake --build build
-      </step>
-      <step>Open a single PR summarizing rationale and linking to docs.</step>
-    </steps>
-  </execution>
-
-  <acceptance_criteria>
-    <ac>All validations pass on Linux/macOS/Windows (CI green).</ac>
-    <ac>Shadows presets: no duplicates; memory assertions documented and tested.</ac>
-    <ac>Memory tracker counters return to zero post-drop; tests cover it.</ac>
-    <ac>No panic .expect paths in readback; Python receives meaningful exceptions.</ac>
-    <ac>WGSL files include bind group layout headers; grep shows consistency.</ac>
-    <ac>CPU PBR parity tests pass in default mode; alternate mode documented.</ac>
-    <ac>.pyd artifacts removed and gitignored; packaging doc present; fresh clone builds a wheel.</ac>
-    <ac>CMake wrapper configures and builds the wrapper target without errors.</ac>
-    <ac>Texture size accounting expanded with unit tests for new formats.</ac>
-    <ac>Optional async readback path implemented and documented; default behavior unchanged.</ac>
-    <ac>Sphinx builds with API reference and memory guide; README/CHANGELOG updated.</ac>
-    <ac>10 advanced examples added and runnable headless.</ac>
-    <ac>Public API imports stable; materials policy resolved with re-exports and stubs.</ac>
-  </acceptance_criteria>
-
-  <notes>
-    Where behavior choices existed in QUESTIONS.md (e.g., CPU PBR parity, materials.py usage, CMake wrapper desirability), this task adopts conservative, documented defaults and preserves backward compatibility via shims and flags.
-  </notes>
+  <Completion>
+    <Summary>All O1–O4 features implemented/wired; tests green; docs built; examples runnable; memory budget respected.</Summary>
+    <Commands>
+      <Command>cargo clean &amp;&amp; cargo build --release --features enable-memory-pools,enable-staging-rings</Command>
+      <Command>maturin develop --release</Command>
+      <Command>pytest tests/test_staging_performance.py -q</Command>
+      <Command>pytest tests/test_memory_fragmentation.py -q</Command>
+      <Command>pytest tests/test_compressed_quality.py -q</Command>
+      <Command>pytest tests/test_virtual_texture.py -q</Command>
+      <Command>python examples/staging_ring_demo.py</Command>
+      <Command>python examples/memory_pool_demo.py</Command>
+      <Command>python examples/compressed_texture_demo.py</Command>
+      <Command>python examples/virtual_texture_demo.py</Command>
+      <Command>cd docs &amp;&amp; make html</Command>
+    </Commands>
+  </Completion>
 </task>

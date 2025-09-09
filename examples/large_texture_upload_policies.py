@@ -469,7 +469,7 @@ def main():
         
         # Calculate total texture memory
         total_memory = sum(
-            len(tex[0].data) for tex, _, _ in textures
+            getattr(tex[0], 'nbytes', 0) for tex, _, _ in textures
         )
         print(f"Generated {len(textures)} textures, total size: {total_memory / (1024*1024):.1f} MB")
         
@@ -508,7 +508,14 @@ def main():
                             texture_data = texture_data[np.ix_(indices_y, indices_x)]
                         
                         sample_path = out_dir / f"texture_upload_{policy_name_safe}_{upload_result['texture_id']}.png"
-                        f3d.numpy_to_png(str(sample_path), texture_data)
+                        # Ensure C-contiguous and RGBA for writer
+                        if texture_data.ndim == 2:
+                            tex_rgb = np.stack([texture_data]*3, axis=2).astype(np.uint8)
+                        else:
+                            tex_rgb = texture_data.astype(np.uint8, copy=False)
+                        tex_rgb = np.ascontiguousarray(tex_rgb)
+                        if tex_rgb.shape[0] > 0 and tex_rgb.shape[1] > 0:
+                            f3d.numpy_to_png(str(sample_path), tex_rgb)
                         
                         if policy_name_safe not in saved_paths:
                             saved_paths[policy_name_safe] = []

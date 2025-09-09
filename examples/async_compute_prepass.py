@@ -470,8 +470,18 @@ def main():
         # Save metrics
         import json
         metrics_path = out_dir / "prepass_metrics.json"
+        # Ensure NumPy types/arrays are serializable
+        def _to_json(o):
+            import numpy as _np
+            if isinstance(o, (_np.integer,)):
+                return int(o)
+            if isinstance(o, (_np.floating,)):
+                return float(o)
+            if isinstance(o, _np.ndarray):
+                return o.tolist()
+            return str(o)
         with open(metrics_path, 'w') as f:
-            json.dump(metrics, f, indent=2)
+            json.dump(metrics, f, indent=2, default=_to_json)
         print(f"Saved metrics: {metrics_path}")
         
         print("\nExample completed successfully!")

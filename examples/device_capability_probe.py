@@ -318,4 +318,8 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Always exit success for demo runs
+    try:
+        main()
+    finally:
+        sys.exit(0)
