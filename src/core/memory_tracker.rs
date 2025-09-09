@@ -121,16 +121,119 @@ impl ResourceRegistry {
 }
 
 /// Calculate texture size in bytes based on dimensions and format
+/// 
+/// Supports all WebGPU texture formats with accurate byte-per-pixel calculations.
+/// For compressed formats, this calculates uncompressed size as an approximation.
 fn calculate_texture_size(width: u32, height: u32, format: TextureFormat) -> u64 {
     let bytes_per_pixel = match format {
-        TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb | TextureFormat::R32Float => 4,
-        TextureFormat::Rg8Unorm => 2,
-        TextureFormat::R8Unorm => 1,
-        // Add more formats as needed
-        _ => 4, // Conservative estimate
+        // 8-bit formats
+        TextureFormat::R8Unorm | TextureFormat::R8Snorm | TextureFormat::R8Uint | TextureFormat::R8Sint => 1,
+        
+        // 16-bit formats (2 bytes)
+        TextureFormat::Rg8Unorm | TextureFormat::Rg8Snorm | TextureFormat::Rg8Uint | TextureFormat::Rg8Sint => 2,
+        TextureFormat::R16Uint | TextureFormat::R16Sint | TextureFormat::R16Float => 2,
+        TextureFormat::Depth16Unorm => 2,
+        
+        // 32-bit formats (4 bytes) 
+        TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb | TextureFormat::Rgba8Snorm 
+        | TextureFormat::Rgba8Uint | TextureFormat::Rgba8Sint => 4,
+        TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb => 4,
+        TextureFormat::Rgb10a2Unorm | TextureFormat::Rgb10a2Uint => 4,
+        TextureFormat::Rg11b10Float => 4,
+        TextureFormat::Rg16Uint | TextureFormat::Rg16Sint | TextureFormat::Rg16Float => 4,
+        TextureFormat::R32Uint | TextureFormat::R32Sint | TextureFormat::R32Float => 4,
+        TextureFormat::Depth32Float => 4,
+        TextureFormat::Depth24Plus => 4, // Usually 32-bit internally
+        TextureFormat::Depth24PlusStencil8 => 4, // 24-bit depth + 8-bit stencil
+        
+        // 64-bit formats (8 bytes)
+        TextureFormat::Rgba16Uint | TextureFormat::Rgba16Sint | TextureFormat::Rgba16Float => 8,
+        TextureFormat::Rg32Uint | TextureFormat::Rg32Sint | TextureFormat::Rg32Float => 8,
+        TextureFormat::Depth32FloatStencil8 => 8, // 32-bit depth + 8-bit stencil + padding
+        
+        // 128-bit formats (16 bytes)
+        TextureFormat::Rgba32Uint | TextureFormat::Rgba32Sint | TextureFormat::Rgba32Float => 16,
+        
+        // Compressed formats (approximate uncompressed size for memory estimation)
+        // BC1 (DXT1) - 4:1 compression ratio, 4x4 blocks with 8 bytes per block
+        TextureFormat::Bc1RgbaUnorm | TextureFormat::Bc1RgbaUnormSrgb => {
+            return calculate_compressed_texture_size(width, height, 8, 4);
+        },
+        
+        // BC2 (DXT3) - 2:1 compression ratio, 4x4 blocks with 16 bytes per block  
+        TextureFormat::Bc2RgbaUnorm | TextureFormat::Bc2RgbaUnormSrgb => {
+            return calculate_compressed_texture_size(width, height, 16, 4);
+        },
+        
+        // BC3 (DXT5) - 2:1 compression ratio, 4x4 blocks with 16 bytes per block
+        TextureFormat::Bc3RgbaUnorm | TextureFormat::Bc3RgbaUnormSrgb => {
+            return calculate_compressed_texture_size(width, height, 16, 4);
+        },
+        
+        // BC4 - Single channel, 4x4 blocks with 8 bytes per block
+        TextureFormat::Bc4RUnorm | TextureFormat::Bc4RSnorm => {
+            return calculate_compressed_texture_size(width, height, 8, 4);
+        },
+        
+        // BC5 - Two channel, 4x4 blocks with 16 bytes per block
+        TextureFormat::Bc5RgUnorm | TextureFormat::Bc5RgSnorm => {
+            return calculate_compressed_texture_size(width, height, 16, 4);
+        },
+        
+        // BC6H - HDR compression, 4x4 blocks with 16 bytes per block
+        TextureFormat::Bc6hRgbUfloat | TextureFormat::Bc6hRgbFloat => {
+            return calculate_compressed_texture_size(width, height, 16, 4);
+        },
+        
+        // BC7 - High quality compression, 4x4 blocks with 16 bytes per block
+        TextureFormat::Bc7RgbaUnorm | TextureFormat::Bc7RgbaUnormSrgb => {
+            return calculate_compressed_texture_size(width, height, 16, 4);
+        },
+        
+        // ETC2 compression formats - 4x4 blocks
+        TextureFormat::Etc2Rgb8Unorm | TextureFormat::Etc2Rgb8UnormSrgb => {
+            return calculate_compressed_texture_size(width, height, 8, 4);
+        },
+        TextureFormat::Etc2Rgb8A1Unorm | TextureFormat::Etc2Rgb8A1UnormSrgb => {
+            return calculate_compressed_texture_size(width, height, 8, 4);
+        },
+        TextureFormat::Etc2Rgba8Unorm | TextureFormat::Etc2Rgba8UnormSrgb => {
+            return calculate_compressed_texture_size(width, height, 16, 4);
+        },
+        TextureFormat::EacR11Unorm | TextureFormat::EacR11Snorm => {
+            return calculate_compressed_texture_size(width, height, 8, 4);
+        },
+        TextureFormat::EacRg11Unorm | TextureFormat::EacRg11Snorm => {
+            return calculate_compressed_texture_size(width, height, 16, 4);
+        },
+        
+        // ASTC compression formats - variable block sizes (using most common 4x4 blocks)
+        TextureFormat::Astc { .. } => {
+            // ASTC block size varies, but 4x4 with 16 bytes per block is most common
+            return calculate_compressed_texture_size(width, height, 16, 4);
+        },
+        
+        // Fallback for any formats not explicitly handled
+        _ => {
+            // Conservative estimate: assume 4 bytes per pixel for unknown formats
+            // This prevents underestimating memory usage
+            4
+        },
     };
     
     (width as u64) * (height as u64) * bytes_per_pixel
+}
+
+/// Calculate compressed texture size in bytes
+/// 
+/// # Parameters
+/// - `width`, `height`: Texture dimensions in pixels
+/// - `bytes_per_block`: Number of bytes per compression block
+/// - `block_size`: Size of compression block (e.g., 4 for 4x4 blocks)
+fn calculate_compressed_texture_size(width: u32, height: u32, bytes_per_block: u64, block_size: u32) -> u64 {
+    let blocks_x = (width + block_size - 1) / block_size;
+    let blocks_y = (height + block_size - 1) / block_size;
+    (blocks_x as u64) * (blocks_y as u64) * bytes_per_block
 }
 
 /// Check if buffer usage indicates host-visible memory
@@ -193,5 +296,97 @@ mod tests {
         assert!(is_host_visible_usage(BufferUsages::COPY_DST | BufferUsages::MAP_READ));
         assert!(!is_host_visible_usage(BufferUsages::VERTEX));
         assert!(!is_host_visible_usage(BufferUsages::INDEX));
+    }
+
+    #[test]
+    fn test_texture_format_sizes() {
+        use super::calculate_texture_size;
+        
+        // Test 8-bit formats (1 byte per pixel)
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::R8Unorm), 16 * 16 * 1);
+        
+        // Test 16-bit formats (2 bytes per pixel) 
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Rg8Unorm), 16 * 16 * 2);
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::R16Float), 16 * 16 * 2);
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Depth16Unorm), 16 * 16 * 2);
+        
+        // Test 32-bit formats (4 bytes per pixel)
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Rgba8Unorm), 16 * 16 * 4);
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Rgba8UnormSrgb), 16 * 16 * 4);
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Bgra8Unorm), 16 * 16 * 4);
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::R32Float), 16 * 16 * 4);
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Depth32Float), 16 * 16 * 4);
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Depth24Plus), 16 * 16 * 4);
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Depth24PlusStencil8), 16 * 16 * 4);
+        
+        // Test 64-bit formats (8 bytes per pixel)
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Rgba16Float), 16 * 16 * 8);
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Rg32Float), 16 * 16 * 8);
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Depth32FloatStencil8), 16 * 16 * 8);
+        
+        // Test 128-bit formats (16 bytes per pixel)
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Rgba32Float), 16 * 16 * 16);
+    }
+
+    #[test]
+    fn test_compressed_texture_sizes() {
+        use super::calculate_texture_size;
+        
+        // Test BC1 (8 bytes per 4x4 block)
+        // 16x16 = 4x4 blocks total, each block is 8 bytes
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Bc1RgbaUnorm), 4 * 4 * 8);
+        
+        // Test BC3/BC5 (16 bytes per 4x4 block)  
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Bc3RgbaUnorm), 4 * 4 * 16);
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Bc5RgUnorm), 4 * 4 * 16);
+        
+        // Test non-aligned size (17x17 requires 5x5 blocks)
+        assert_eq!(calculate_texture_size(17, 17, TextureFormat::Bc1RgbaUnorm), 5 * 5 * 8);
+        
+        // Test ETC2 formats
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Etc2Rgb8Unorm), 4 * 4 * 8);
+        assert_eq!(calculate_texture_size(16, 16, TextureFormat::Etc2Rgba8Unorm), 4 * 4 * 16);
+    }
+    
+    #[test]
+    fn test_compressed_texture_size_calculation() {
+        use super::calculate_compressed_texture_size;
+        
+        // Perfect alignment: 16x16 with 4x4 blocks
+        assert_eq!(calculate_compressed_texture_size(16, 16, 8, 4), 4 * 4 * 8);
+        
+        // Non-aligned: 15x15 should round up to 4x4 blocks (16x16)
+        assert_eq!(calculate_compressed_texture_size(15, 15, 8, 4), 4 * 4 * 8);
+        
+        // Non-aligned: 17x17 should round up to 5x5 blocks (20x20)
+        assert_eq!(calculate_compressed_texture_size(17, 17, 8, 4), 5 * 5 * 8);
+        
+        // Different block size: 8x8 blocks
+        assert_eq!(calculate_compressed_texture_size(16, 16, 16, 8), 2 * 2 * 16);
+    }
+
+    #[test]
+    fn test_memory_accounting_accuracy() {
+        let registry = ResourceRegistry::new();
+        
+        // Test various texture formats for accurate accounting
+        let test_cases = [
+            (TextureFormat::R8Unorm, 1024, 1024, 1024 * 1024 * 1),
+            (TextureFormat::Rg8Unorm, 512, 512, 512 * 512 * 2), 
+            (TextureFormat::Rgba8Unorm, 256, 256, 256 * 256 * 4),
+            (TextureFormat::R16Float, 512, 512, 512 * 512 * 2),
+            (TextureFormat::Rgba16Float, 128, 128, 128 * 128 * 8),
+            (TextureFormat::R32Float, 256, 256, 256 * 256 * 4),
+            (TextureFormat::Rgba32Float, 64, 64, 64 * 64 * 16),
+        ];
+        
+        let mut expected_total = 0;
+        for (format, width, height, expected_size) in test_cases.iter() {
+            registry.track_texture_allocation(*width, *height, *format);
+            expected_total += expected_size;
+            
+            let metrics = registry.get_metrics();
+            assert_eq!(metrics.texture_bytes, expected_total);
+        }
     }
 }

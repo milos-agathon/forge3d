@@ -1,0 +1,85 @@
+# MANIFEST.in - Controls what gets included in source distributions (sdist)
+# This file works with setuptools/maturin to control package contents
+
+# Include core project files
+include README.md
+include LICENSE
+include CHANGELOG.md
+include pyproject.toml
+include Cargo.toml
+include Cargo.lock
+include rust-toolchain.toml
+
+# Include source code
+recursive-include src *.rs *.wgsl *.md
+recursive-include python *.py *.pyi
+recursive-include tests *.py
+recursive-include examples *.py
+
+# Include data files needed for the library
+recursive-include data *.rgba *.txt
+recursive-include assets *.png *.json *.md
+
+# Include configuration files
+include pytest.ini
+include conftest.py
+
+# Include shader files
+recursive-include shaders *.wgsl *.spv
+
+# Include documentation source (but not built docs)
+recursive-include docs *.rst *.md *.py *.toml *.txt *.yml *.yaml
+exclude docs/_build
+exclude docs/build
+prune docs/_build/
+prune docs/build/
+
+# Exclude build artifacts and generated files
+exclude build.log
+exclude test_output.json
+prune target/
+prune out/
+prune diag_out/
+prune .benchmarks/
+prune artifacts/
+
+# Exclude development and CI files
+prune .git/
+prune .pytest_cache/
+prune __pycache__/
+prune .venv/
+prune .maturin/
+exclude .gitignore
+exclude *.tmp
+exclude *.temp
+exclude *.log
+exclude *.whl
+exclude *.tar.gz
+
+# Exclude generated image outputs
+exclude *.png
+exclude *.jpg
+exclude *.jpeg
+exclude *.tiff
+exclude *.bmp
+exclude *.exr
+exclude *.hdr
+
+# Exclude IDE and system files
+exclude .DS_Store
+exclude Thumbs.db
+exclude *.swp
+exclude *.swo
+prune .vscode/
+prune .idea/
+
+# Exclude profiling data
+exclude *.prof
+exclude perf.data*
+exclude flamegraph*.svg
+
+# Exclude CI artifacts (but include CI scripts)
+prune ci/artifacts/
+include ci/*.sh
+include ci/*.yml
+include ci/*.yaml

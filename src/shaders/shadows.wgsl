@@ -1,4 +1,12 @@
 // Cascaded Shadow Maps with PCF filtering
+// Bind Groups and Layouts:
+// - @group(2) Shadow resources
+//   - @binding(0): uniform buffer `CsmUniforms`
+//   - @binding(1): texture_depth_2d_array `shadow_maps`
+//   - @binding(2): sampler_comparison `shadow_sampler`
+// Formats:
+// - Depth maps: D32Float
+// Address Space: `uniform`, `fragment`
 // Provides high-quality shadows for directional lights
 
 // Shadow cascade data

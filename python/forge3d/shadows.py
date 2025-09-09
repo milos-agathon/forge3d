@@ -3,6 +3,20 @@ Cascaded Shadow Maps (CSM) implementation for directional lighting.
 
 Provides high-quality shadow mapping with multiple cascade levels and 
 Percentage-Closer Filtering (PCF) for soft shadow edges.
+
+🏗️ SUBMODULE API STATUS: STABLE
+This module provides shadow mapping functionality as a stable submodule.
+Import explicitly: `import forge3d.shadows as shadows`
+
+🔧 KEY FEATURES:
+- Memory-validated shadow configurations (≤256 MiB atlas constraint)
+- High-quality presets with automatic parameter validation  
+- Cascaded shadow mapping with PCF filtering
+- GPU memory management and resource cleanup
+
+⚖️ MEMORY POLICY:
+All shadow configurations are validated against the 256 MiB host-visible
+GPU memory budget using the formula: cascade_count × shadow_map_size² × 4 bytes
 """
 
 import numpy as np
@@ -16,9 +30,63 @@ except (ImportError, AttributeError):
     HAS_SHADOWS_SUPPORT = False
 
 
+# ============================================================================
+# MEMORY VALIDATION CONSTANTS - DO NOT MODIFY WITHOUT AUDIT
+# ============================================================================
+
+# Maximum shadow atlas memory: 256 MiB hard limit from host-visible GPU budget
+MAX_SHADOW_ATLAS_MEMORY = 256 * 1024 * 1024  # 268,435,456 bytes exactly
+
+# Shadow texel format: 32-bit depth (D32_SFLOAT)
+BYTES_PER_SHADOW_TEXEL = 4
+
+# Critical assertion to prevent configuration bugs
+assert MAX_SHADOW_ATLAS_MEMORY == 268435456, "Shadow memory limit must be exactly 256 MiB"
+assert BYTES_PER_SHADOW_TEXEL == 4, "Shadow texel format must be 32-bit depth (4 bytes)"
+
+
 def has_shadows_support() -> bool:
     """Check if shadow mapping functionality is available."""
     return HAS_SHADOWS_SUPPORT
+
+
+def calculate_shadow_atlas_memory(cascade_count: int, shadow_map_size: int) -> int:
+    """
+    Calculate shadow atlas memory usage in bytes using the canonical formula.
+    
+    CRITICAL FORMULA: cascade_count × shadow_map_size² × BYTES_PER_SHADOW_TEXEL
+    
+    This function implements the core memory calculation that determines whether
+    a shadow configuration can fit within the 256 MiB host-visible GPU budget.
+    
+    Memory Layout:
+    - Each cascade is a 2D depth texture: shadow_map_size × shadow_map_size
+    - Each texel is 32-bit depth: BYTES_PER_SHADOW_TEXEL = 4 bytes
+    - Total memory: sum across all cascades
+    
+    Args:
+        cascade_count: Number of shadow cascades [1-4]
+        shadow_map_size: Resolution per cascade (e.g., 512, 1024, 2048, 3072, 4096)
+        
+    Returns:
+        Memory usage in bytes (must be ≤ MAX_SHADOW_ATLAS_MEMORY)
+        
+    Example:
+        calculate_shadow_atlas_memory(4, 2048) = 4 × 2048² × 4 = 67,108,864 bytes (64 MiB)
+    """
+    # Input validation to prevent invalid calculations
+    assert 1 <= cascade_count <= 4, f"Invalid cascade_count: {cascade_count} (must be 1-4)"
+    assert shadow_map_size > 0, f"Invalid shadow_map_size: {shadow_map_size} (must be > 0)"
+    assert shadow_map_size <= 8192, f"Shadow map size too large: {shadow_map_size} (practical limit 8192)"
+    
+    # Core memory calculation using exact formula
+    memory_bytes = cascade_count * shadow_map_size * shadow_map_size * BYTES_PER_SHADOW_TEXEL
+    
+    # Defensive assertion to catch calculation overflow/errors
+    assert memory_bytes >= 0, f"Memory calculation overflow: {memory_bytes} bytes"
+    assert memory_bytes < 2**31, f"Memory calculation too large: {memory_bytes} bytes (>2GB)"
+    
+    return memory_bytes
 
 
 
@@ -100,6 +168,45 @@ class CsmConfig:
         # Validate PCF kernel size
         valid_kernels = [1, 3, 5, 7]
         self.pcf_kernel_size = min(valid_kernels, key=lambda x: abs(x - pcf_kernel_size))
+        
+        # CRITICAL MEMORY POLICY ENFORCEMENT
+        # Validate that this configuration respects the 256 MiB constraint
+        memory_bytes = calculate_shadow_atlas_memory(self.cascade_count, self.shadow_map_size)
+        
+        if memory_bytes > MAX_SHADOW_ATLAS_MEMORY:
+            memory_mb = memory_bytes / (1024 * 1024)
+            constraint_mb = MAX_SHADOW_ATLAS_MEMORY / (1024 * 1024)
+            
+            # Auto-correct by reducing parameters while preserving aspect ratio
+            original_cascade_count = self.cascade_count
+            original_shadow_map_size = self.shadow_map_size
+            
+            # Strategy: reduce shadow map size first, then cascade count
+            while memory_bytes > MAX_SHADOW_ATLAS_MEMORY and self.shadow_map_size > 512:
+                self.shadow_map_size = max(512, self.shadow_map_size // 2)
+                memory_bytes = calculate_shadow_atlas_memory(self.cascade_count, self.shadow_map_size)
+            
+            while memory_bytes > MAX_SHADOW_ATLAS_MEMORY and self.cascade_count > 1:
+                self.cascade_count = self.cascade_count - 1
+                memory_bytes = calculate_shadow_atlas_memory(self.cascade_count, self.shadow_map_size)
+            
+            # Final validation - if still over limit, this is a critical error
+            if memory_bytes > MAX_SHADOW_ATLAS_MEMORY:
+                raise RuntimeError(
+                    f"Cannot create valid shadow configuration within 256 MiB limit. "
+                    f"Requested: {original_cascade_count} cascades × {original_shadow_map_size}² = {memory_mb:.1f} MiB. "
+                    f"Even minimal config (1 cascade × 512²) would exceed budget."
+                )
+            
+            # Warn about auto-correction
+            corrected_memory_mb = memory_bytes / (1024 * 1024)
+            warnings.warn(
+                f"Shadow configuration auto-corrected to fit 256 MiB budget. "
+                f"Original: {original_cascade_count} cascades × {original_shadow_map_size}² = {memory_mb:.1f} MiB. "
+                f"Corrected: {self.cascade_count} cascades × {self.shadow_map_size}² = {corrected_memory_mb:.1f} MiB.",
+                RuntimeWarning,
+                stacklevel=2
+            )
         
     def __repr__(self) -> str:
         return (f"CsmConfig(cascade_count={self.cascade_count}, "
@@ -486,38 +593,66 @@ def validate_csm_setup(config: CsmConfig, light: DirectionalLight,
     return validation
 
 
-# Pre-configured setups for common scenarios
-# Memory constraint: cascade_count × shadow_map_size² × 4 bytes ≤ 256 MiB (268,435,456 bytes)
+# ============================================================================
+# SHADOW ATLAS MEMORY POLICY - CRITICAL CONSTRAINTS
+# ============================================================================
+#
+# MEMORY CONSTRAINT: cascade_count × shadow_map_size² × 4 bytes ≤ 256 MiB
+#
+# This is a HARD LIMIT enforced by the host-visible GPU memory budget.
+# All shadow atlas configurations MUST respect this constraint.
+#
+# FORMULA: Memory = cascade_count × (shadow_map_size²) × BYTES_PER_SHADOW_TEXEL
+# WHERE:   BYTES_PER_SHADOW_TEXEL = 4 (32-bit depth format)
+#          MAX_SHADOW_ATLAS_MEMORY = 268,435,456 bytes (256 MiB)
+#
+# SAFE DEFAULTS by quality level:
+# - low_quality:    2 cascades × 1024² × 4 = 8 MiB    (mobile/integrated GPU)
+# - medium_quality: 3 cascades × 1024² × 4 = 12 MiB   (standard desktop)
+# - high_quality:   4 cascades × 2048² × 4 = 64 MiB   (high-end desktop)
+# - ultra_quality:  4 cascades × 3072² × 4 = ~144 MiB (maximum safe allocation)
+#
+# ============================================================================
 PRESET_CONFIGS = {
     'low_quality': CsmConfig(
         cascade_count=2,
         shadow_map_size=1024,
         pcf_kernel_size=1,
-        # Memory: 2 × 1024² × 4 = 8,388,608 bytes (8 MiB)
+        # MEMORY: 2 × 1024² × 4 = 8,388,608 bytes (8.0 MiB) - SAFE
     ),
     'medium_quality': CsmConfig(
         cascade_count=3,
         shadow_map_size=1024,  # Reduced from 2048 to meet memory constraint
         pcf_kernel_size=3,
-        # Memory: 3 × 1024² × 4 = 12,582,912 bytes (12 MiB)
+        # MEMORY: 3 × 1024² × 4 = 12,582,912 bytes (12.0 MiB) - SAFE
     ),
     'high_quality': CsmConfig(
         cascade_count=4,
         shadow_map_size=2048,
         pcf_kernel_size=5,
-        # Memory: 4 × 2048² × 4 = 67,108,864 bytes (64 MiB)
+        # MEMORY: 4 × 2048² × 4 = 67,108,864 bytes (64.0 MiB) - SAFE
     ),
     'ultra_quality': CsmConfig(
         cascade_count=4,
         shadow_map_size=3072,  # Carefully selected to stay under 256 MiB
         pcf_kernel_size=7,
-        # Memory: 4 × 3072² × 4 = 150,994,944 bytes (~144 MiB)
+        # MEMORY: 4 × 3072² × 4 = 150,994,944 bytes (144.0 MiB) - SAFE (MAX)
     ),
 }
 
-# Memory validation constants
-MAX_SHADOW_ATLAS_MEMORY = 256 * 1024 * 1024  # 256 MiB in bytes
-BYTES_PER_SHADOW_TEXEL = 4  # 32-bit depth format
+# ============================================================================
+# MEMORY VALIDATION CONSTANTS - DO NOT MODIFY WITHOUT AUDIT
+# ============================================================================
+
+# Maximum shadow atlas memory: 256 MiB hard limit from host-visible GPU budget
+MAX_SHADOW_ATLAS_MEMORY = 256 * 1024 * 1024  # 268,435,456 bytes exactly
+
+# Shadow texel format: 32-bit depth (D32_SFLOAT)
+BYTES_PER_SHADOW_TEXEL = 4
+
+# Critical assertion to prevent configuration bugs
+assert MAX_SHADOW_ATLAS_MEMORY == 268435456, "Shadow memory limit must be exactly 256 MiB"
+assert BYTES_PER_SHADOW_TEXEL == 4, "Shadow texel format must be 32-bit depth (4 bytes)"
 
 def get_preset_config(preset: str) -> CsmConfig:
     """
@@ -567,14 +702,24 @@ def get_preset_config(preset: str) -> CsmConfig:
     
     config = PRESET_CONFIGS[preset]
     
-    # Validate memory constraint (should always pass for our presets, but double-check)
+    # CRITICAL MEMORY VALIDATION: All presets MUST respect the 256 MiB constraint
+    # This assertion prevents runtime GPU allocation failures
     memory_bytes = calculate_shadow_atlas_memory(config.cascade_count, config.shadow_map_size)
     
+    # Assert memory constraint compliance (this should NEVER fail for valid presets)
+    assert memory_bytes <= MAX_SHADOW_ATLAS_MEMORY, (
+        f"PRESET MEMORY VIOLATION: '{preset}' exceeds 256 MiB limit. "
+        f"Calculated: {memory_bytes / (1024*1024):.1f} MiB > 256 MiB limit. "
+        f"Formula: {config.cascade_count} cascades × {config.shadow_map_size}² × {BYTES_PER_SHADOW_TEXEL} bytes. "
+        f"This is a configuration bug that MUST be fixed."
+    )
+    
+    # Additional runtime check with user-friendly error
     if memory_bytes > MAX_SHADOW_ATLAS_MEMORY:
         raise RuntimeError(
-            f"Preset '{preset}' exceeds 256 MiB memory limit: "
-            f"{memory_bytes / (1024*1024):.1f} MiB > 256 MiB. "
-            f"This indicates a bug in preset configuration."
+            f"Shadow preset '{preset}' memory allocation failed: "
+            f"{memory_bytes / (1024*1024):.1f} MiB exceeds 256 MiB GPU memory budget. "
+            f"Try a lower quality preset or reduce cascade count/resolution manually."
         )
     
     return config
@@ -582,47 +727,99 @@ def get_preset_config(preset: str) -> CsmConfig:
 
 def calculate_shadow_atlas_memory(cascade_count: int, shadow_map_size: int) -> int:
     """
-    Calculate shadow atlas memory usage in bytes.
+    Calculate shadow atlas memory usage in bytes using the canonical formula.
     
-    Formula: cascade_count × shadow_map_size² × BYTES_PER_SHADOW_TEXEL
+    CRITICAL FORMULA: cascade_count × shadow_map_size² × BYTES_PER_SHADOW_TEXEL
+    
+    This function implements the core memory calculation that determines whether
+    a shadow configuration can fit within the 256 MiB host-visible GPU budget.
+    
+    Memory Layout:
+    - Each cascade is a 2D depth texture: shadow_map_size × shadow_map_size
+    - Each texel is 32-bit depth: BYTES_PER_SHADOW_TEXEL = 4 bytes
+    - Total memory: sum across all cascades
     
     Args:
         cascade_count: Number of shadow cascades [1-4]
-        shadow_map_size: Resolution per cascade (e.g., 1024, 2048, 4096)
+        shadow_map_size: Resolution per cascade (e.g., 512, 1024, 2048, 3072, 4096)
         
     Returns:
-        Memory usage in bytes
+        Memory usage in bytes (must be ≤ MAX_SHADOW_ATLAS_MEMORY)
+        
+    Example:
+        calculate_shadow_atlas_memory(4, 2048) = 4 × 2048² × 4 = 67,108,864 bytes (64 MiB)
     """
-    return cascade_count * shadow_map_size * shadow_map_size * BYTES_PER_SHADOW_TEXEL
+    # Input validation to prevent invalid calculations
+    assert 1 <= cascade_count <= 4, f"Invalid cascade_count: {cascade_count} (must be 1-4)"
+    assert shadow_map_size > 0, f"Invalid shadow_map_size: {shadow_map_size} (must be > 0)"
+    assert shadow_map_size <= 8192, f"Shadow map size too large: {shadow_map_size} (practical limit 8192)"
+    
+    # Core memory calculation using exact formula
+    memory_bytes = cascade_count * shadow_map_size * shadow_map_size * BYTES_PER_SHADOW_TEXEL
+    
+    # Defensive assertion to catch calculation overflow/errors
+    assert memory_bytes >= 0, f"Memory calculation overflow: {memory_bytes} bytes"
+    assert memory_bytes < 2**31, f"Memory calculation too large: {memory_bytes} bytes (>2GB)"
+    
+    return memory_bytes
 
 
 def validate_shadow_memory_constraint(config: CsmConfig) -> Dict[str, any]:
     """
-    Validate that shadow configuration meets memory constraints.
+    Validate that shadow configuration meets the critical 256 MiB memory constraint.
+    
+    This function is the authoritative memory policy validator for shadow atlas
+    configurations. It MUST be used before creating any shadow system to prevent
+    GPU allocation failures at runtime.
+    
+    POLICY ENFORCEMENT:
+    - All shadow configurations MUST pass validation before use
+    - Memory usage MUST be ≤ 256 MiB (MAX_SHADOW_ATLAS_MEMORY)
+    - Headroom calculation helps prevent edge-case allocation failures
     
     Args:
-        config: CSM configuration to validate
+        config: CSM configuration to validate against memory policy
         
     Returns:
         dict: {
-            'valid': bool,                    # Meets 256 MiB constraint  
-            'memory_bytes': int,              # Actual memory usage
-            'memory_mb': float,               # Memory usage in MiB
-            'constraint_mb': float,           # Constraint limit (256 MiB)
-            'headroom_mb': float,             # Remaining memory headroom
+            'valid': bool,                    # True if config meets 256 MiB constraint
+            'memory_bytes': int,              # Actual memory usage (raw bytes)
+            'memory_mb': float,               # Memory usage in MiB for display
+            'constraint_mb': float,           # Policy limit: 256.0 MiB
+            'headroom_mb': float,             # Remaining budget (negative = over limit)
         }
+        
+    Example:
+        config = CsmConfig(cascade_count=4, shadow_map_size=2048)
+        result = validate_shadow_memory_constraint(config)
+        if not result['valid']:
+            raise RuntimeError(f"Config exceeds memory limit: {result['memory_mb']:.1f} MiB")
     """
+    # Use canonical memory calculation with all assertions enabled
     memory_bytes = calculate_shadow_atlas_memory(config.cascade_count, config.shadow_map_size)
     memory_mb = memory_bytes / (1024 * 1024)
     constraint_mb = MAX_SHADOW_ATLAS_MEMORY / (1024 * 1024)
+    headroom_mb = constraint_mb - memory_mb
     
-    return {
-        'valid': memory_bytes <= MAX_SHADOW_ATLAS_MEMORY,
+    # Policy enforcement: check against hard limit
+    is_valid = memory_bytes <= MAX_SHADOW_ATLAS_MEMORY
+    
+    # Construct detailed validation result
+    validation_result = {
+        'valid': is_valid,
         'memory_bytes': memory_bytes,
         'memory_mb': memory_mb,
-        'constraint_mb': constraint_mb, 
-        'headroom_mb': constraint_mb - memory_mb,
+        'constraint_mb': constraint_mb,
+        'headroom_mb': headroom_mb,
     }
+    
+    # Log validation result for debugging (only if debugging enabled)
+    if memory_mb > 128.0:  # Log high memory usage configs
+        import logging
+        logging.debug(f"Shadow memory validation: {config.cascade_count}×{config.shadow_map_size}² = "
+                     f"{memory_mb:.1f}MB (limit: {constraint_mb:.1f}MB, valid: {is_valid})")
+    
+    return validation_result
 
 
 def build_shadow_atlas(scene: Dict, light: DirectionalLight, camera: Dict) -> Tuple[Dict, ShadowStats]:

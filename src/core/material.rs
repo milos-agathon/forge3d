@@ -6,6 +6,9 @@
 use glam::{Vec3, Vec4};
 
 /// PBR material properties using metallic-roughness workflow
+/// 
+/// Memory layout is binary-compatible with WGSL PbrMaterial struct.
+/// See docs/pbr_cpu_gpu_alignment.md for CPU-GPU implementation details.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PbrMaterial {
@@ -63,6 +66,9 @@ pub mod texture_flags {
 }
 
 /// PBR lighting environment
+///
+/// Memory layout is binary-compatible with WGSL PbrLighting struct.
+/// See docs/pbr_cpu_gpu_alignment.md for CPU-GPU implementation details.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PbrLighting {

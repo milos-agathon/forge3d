@@ -25,6 +25,10 @@ pub mod multi_thread;
 // C7: Async compute prepasses
 pub mod async_compute;
 
+// R9: Async and double-buffered readback system (opt-in)
+#[cfg(feature = "async_readback")]
+pub mod async_readback;
+
 // I7: Big buffer pattern for per-object data
 #[cfg(feature = "wsI_bigbuf")]
 pub mod big_buffer;

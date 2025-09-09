@@ -1,6 +1,6 @@
 [package]
 name = "forge3d"
-version = "0.6.0"
+version = "0.8.0"
 edition = "2021"
 
 [lib]
@@ -11,6 +11,8 @@ crate-type = ["cdylib", "lib"]
 [features]
 default = ["extension-module"]
 extension-module = ["pyo3/extension-module"]
+# Optional async/double-buffered readback (R9)
+async_readback = ["dep:tokio"]
 terrain_spike = []
 weighted-oit = []
 wsI_bigbuf = []
@@ -41,7 +43,7 @@ once_cell = "1"
 half = "2.3"
 lyon_tessellation = "1.0"
 lyon_path = "1.0"
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"], optional = true }
 env_logger = "0.10"
 
 [dev-dependencies]
@@ -59,3 +61,11 @@ path = "bench/upload_policies/policies.rs"
 [profile.release]
 codegen-units = 1
 lto = "thin"
+
+# Optimized profile for Python wheel builds
+[profile.release-lto]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

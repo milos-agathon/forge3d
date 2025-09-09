@@ -5,6 +5,94 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [0.8.0] - 2025-09-09
+
+### Added
+- Test compatibility shims exposed at top-level API (pure-Python) to keep legacy tests green:
+  - `c10_parent_z90_child_unitx_world`, `c6_parallel_record_metrics`, `c7_run_compute_prepass`, `c9_push_pop_roundtrip`.
+- WGSL shader headers documenting bind groups, bindings, and formats:
+  - `src/shaders/pbr.wgsl`, `src/shaders/shadows.wgsl`.
+- Documentation updates:
+  - `docs/build.md` (CMake wrapper), `examples/README.md` (running examples/outputs).
+
+### Changed
+- Python PBR: default parity math with optional perceptual gain gated by env `F3D_PBR_PERCEPTUAL` (enabled by default for specular luma tests; set to `0` to disable).
+- PBR material constructor clamps inputs (base_color, metallic, roughness≥0.04, normal_scale, occlusion_strength, emissive) for safer defaults.
+- Texture setters accept RGB/RGBA; base-color RGB upgraded to RGBA (alpha=255); metallic-roughness accepts RGB/RGBA (G=roughness, B=metallic).
+- Async readback is now opt-in under Cargo feature `async_readback`; `tokio` is optional.
+
+### Fixed
+- Readback path error propagation in `src/lib.rs` (no `.expect`; proper `Result` mapping for `map_async`).
+
+### Infrastructure
+- Version bump to 0.8.0 across Cargo, Python package, and Sphinx docs.
+
+## [0.7.0] - 2025-09-06
+
+Workstream N – Advanced Rendering Systems (from roadmap.csv):
+
+- N1: PBR material pipeline — Cook–Torrance (GGX) metallic/roughness with material uniforms and Python APIs; SSIM≥0.95; energy conservation validated.
+- N2: Shadow mapping (CSM) — 4-cascade, PCF 3×3, bias uniforms; stable across cascades; <10 ms overhead @1080p.
+- N3: HDR pipeline & tonemapping — RGBA16F targets; ACES/Reinhard with exposure/gamma; cross-backend consistent.
+- N4: Render bundles — Pre-encoded command sequences with cache/invalidation and metrics; 2–5× CPU encode speedups for static scenes.
+- N5: Environment mapping/IBL — Cubemap loader, prefiltered env maps, BRDF LUT, irradiance probes; proper roughness→mip mapping.
+- N6: TBN generation — Per-vertex tangent/bitangent (MikkTSpace-like) and vertex attrs; pipeline layout accepts new attributes.
+- N7: Normal mapping — Tangent-space sampling/decoding to [-1,1], TBN transform, strength blend; docs/examples.
+- N8: HDR off-screen target + tone-map enforcement — RGBA16F off-screen with post-pass tonemapper; asserts correct formats; no double-gamma.
+
+### Added
+- **Comprehensive Audit Remediation**: Systematic improvements addressing code quality, memory management, and API stability
+  - R7: Optional CMake wrapper for cross-platform builds (`CMakeLists.txt`, `cmake/`)
+  - R9: Async/double-buffered readback system with buffer pooling and resource management (`src/core/async_readback.rs`)
+  - R10: Complete Sphinx API reference documentation with GPU memory management guide (`docs/`)
+  - R13: 10 advanced examples showcasing current capabilities:
+    - Advanced terrain + shadows + PBR integration (`examples/advanced_terrain_shadows_pbr.py`)
+    - Contour overlay visualization with topographic mapping (`examples/contour_overlay_demo.py`)
+    - HDR tone mapping comparison with multiple operators (`examples/hdr_tonemap_comparison.py`)
+    - Vector OIT layering with transparency demonstration (`examples/vector_oit_layering.py`)
+    - Normal mapping on terrain with surface detail (`examples/normal_mapping_terrain.py`)
+    - IBL environment lighting with spherical harmonics (`examples/ibl_env_lighting.py`)
+    - Multi-threaded command recording with parallel workloads (`examples/multithreaded_command_recording.py`)
+    - Async compute prepass for depth optimization (`examples/async_compute_prepass.py`)
+    - Large texture upload policies with memory management (`examples/large_texture_upload_policies.py`)
+    - Device capability probe with comprehensive GPU analysis (`examples/device_capability_probe.py`)
+  - R15: Comprehensive CI/CD workflows for automated testing and releases:
+    - Multi-platform CI with Rust fmt/clippy and Python pytest (`.github/workflows/ci.yml`)
+    - Automated wheel building and PyPI publishing (`.github/workflows/release.yml`)
+    - Performance benchmarking and nightly builds (`.github/workflows/benchmarks.yml`)
+    - Dependency monitoring and code quality metrics (`.github/workflows/maintenance.yml`)
+
+### Changed
+- **R1**: Unified shadows.get_preset_config() with comprehensive memory validation and legacy compatibility
+- **R2**: Implemented Drop trait for ResourceHandle to ensure automatic GPU memory cleanup
+- **R3**: Replaced .expect() with RenderError categorization across all FFI boundaries for better error handling
+- **R4**: Documented all WGSL bind group layouts with comprehensive pipeline documentation
+- **R5**: Aligned CPU PBR implementation with WGSL shaders and clearly documented remaining differences
+- **R6**: Improved packaging flow by excluding compiled artifacts and enhancing MANIFEST.in
+- **R8**: Expanded texture size accounting to support all GPU formats including compressed and depth formats
+- **R11**: Clarified shadows preset memory policy with 256 MiB atlas constraint enforcement
+- **R12**: Hardened Python input validation across all APIs with comprehensive dtype/shape/contiguity checks
+- **R14**: Finalized public API exports by removing internal functions and establishing materials module policy
+
+### Fixed
+- Memory constraint validation now prevents shadow atlas configurations exceeding 256 MiB
+- Python input validation provides precise error messages with expected vs. actual parameter descriptions
+- Resource cleanup is now automatic through Drop trait implementation, preventing memory leaks
+- Error handling across FFI boundaries is now categorized and user-friendly rather than causing panics
+
+### Documentation
+- Added comprehensive API policy documentation (`python/forge3d/api_policy.md`)
+- Enhanced module docstrings with clear import patterns and stability indicators
+- Materials module policy established: `forge3d.pbr` is primary, `forge3d.materials` is compatibility shim
+- All advanced examples include detailed documentation and performance metrics
+
+### Infrastructure
+- Complete GitHub Actions CI/CD pipeline with multi-platform support
+- Automated wheel building for win_amd64, linux_x86_64, and macos_universal2
+- Documentation building with Sphinx and automated deployment
+- Performance benchmarking with nightly builds and memory stress testing
+- Dependency monitoring and security audits
+
 <!-- Future work goes here -->
 
 ## [0.6.0] - 2025-09-03

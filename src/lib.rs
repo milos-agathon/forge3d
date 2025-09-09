@@ -209,7 +209,11 @@ fn copy_texture_to_rgba_unpadded(
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |res| { let _ = tx.send(res); });
     device.poll(wgpu::Maintain::Wait);
-    let map_result = rx.recv().map_err(|_| RenderError::Readback("map_async channel closed".to_string()))?;\n    map_result.map_err(|e| RenderError::Readback(format!("MapAsync failed: {:?}", e)))?;
+    let map_result = rx
+        .recv()
+        .map_err(|_| RenderError::Readback("map_async channel closed".to_string()))?;
+    map_result
+        .map_err(|e| RenderError::Readback(format!("MapAsync failed: {:?}", e)))?;
 
     let data = slice.get_mapped_range();
 
@@ -224,7 +228,7 @@ fn copy_texture_to_rgba_unpadded(
 
     drop(data);
     readback_buf.unmap();
-    out
+    Ok(out)
 }
 
 // ---------- Python class ----------
@@ -381,7 +385,8 @@ impl Renderer {
         }
 
         let pixels = copy_texture_to_rgba_unpadded(
-            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
+            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height
+        )?;
 
         let arr3 = Array3::from_shape_vec(
             (self.height as usize, self.width as usize, 4), pixels
@@ -425,7 +430,8 @@ impl Renderer {
         }
 
         let pixels = copy_texture_to_rgba_unpadded(
-            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
+            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height
+        )?;
 
         let img: ImageBuffer<image::Rgba<u8>, _> = ImageBuffer::from_raw(self.width, self.height, pixels)
             .ok_or_else(|| RenderError::readback("ImageBuffer::from_raw failed"))?;
@@ -765,7 +771,8 @@ impl Renderer {
         }
 
         let pixels = copy_texture_to_rgba_unpadded(
-            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
+            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height
+        )?;
 
         let arr3 = Array3::from_shape_vec(
             (self.height as usize, self.width as usize, 4), pixels
@@ -850,7 +857,11 @@ impl Renderer {
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |res| { let _ = tx.send(res); });
         g.device.poll(wgpu::Maintain::Wait);
-        let map_result = rx.recv().map_err(|_| RenderError::Readback("map_async channel closed".to_string()))?;\n    map_result.map_err(|e| RenderError::Readback(format!("MapAsync failed: {:?}", e)))?;
+        let map_result = rx
+            .recv()
+            .map_err(|_| RenderError::Readback("map_async channel closed".to_string()))?;
+        map_result
+            .map_err(|e| RenderError::Readback(format!("MapAsync failed: {:?}", e)))?;
         let data = slice.get_mapped_range();
 
         let mut out = vec![0u8; (row_bytes * h) as usize];
@@ -922,7 +933,8 @@ impl Renderer {
         }
 
         let pixels = copy_texture_to_rgba_unpadded(
-            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height);
+            &g.device, &g.queue, &self.color_tex, &self.readback_buf, self.width, self.height
+        )?;
 
         let arr3 = Array3::from_shape_vec(
             (self.height as usize, self.width as usize, 4), pixels

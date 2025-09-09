@@ -1,9 +1,20 @@
-//! PBR (Physically-Based Rendering) shaders
-//! 
-//! Implements metallic-roughness workflow with support for:
-//! - Base color, metallic, roughness, normal, occlusion, emissive textures
-//! - Direct and indirect lighting (IBL)
-//! - Standard PBR BRDF (GGX + Lambertian)
+//! PBR (Physically-Based Rendering)
+//! Bind Groups and Layouts:
+//! - @group(0): Per-draw uniforms
+//!   - @binding(0): uniform buffer `Uniforms`
+//!   - @binding(1): storage/uniform buffer `PbrMaterial`
+//! - @group(1): Material textures/samplers (if used)
+//!   - @binding(0): sampled texture (base color)
+//!   - @binding(1): sampled texture (metallic-roughness)
+//!   - @binding(2): sampled texture (normal)
+//!   - @binding(3): sampled texture (occlusion)
+//!   - @binding(4): sampled texture (emissive)
+//!   - @binding(5): sampler (filtering)
+//! Render Target Formats:
+//! - Color: RGBA8UnormSrgb (matches CPU expectations)
+//! Address Space: `uniform`, `fragment`, `vertex`
+//!
+//! Implements metallic-roughness workflow with GGX + Lambertian BRDF.
 
 struct Uniforms {
     model_matrix: mat4x4<f32>,
@@ -21,16 +32,17 @@ struct PbrMaterial {
     emissive: vec3<f32>,
     alpha_cutoff: f32,
     texture_flags: u32,
-    // padding aligns to 16 bytes
+    // Implicit padding to 64 bytes total (matches CPU struct)
+    // See docs/pbr_cpu_gpu_alignment.md for details
 }
 
 struct PbrLighting {
     light_direction: vec3<f32>,
-    // padding: f32,
+    _padding1: f32,                  // Explicit padding for std140 alignment
     light_color: vec3<f32>,
     light_intensity: f32,
     camera_position: vec3<f32>,
-    // padding: f32,
+    _padding2: f32,                  // Explicit padding for std140 alignment
     ibl_intensity: f32,
     ibl_rotation: f32,
     exposure: f32,

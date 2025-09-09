@@ -347,19 +347,43 @@ config = shadows.CsmConfig(
 
 ### Memory Management
 
-```python
-# Calculate memory usage before creating system
-def estimate_shadow_memory(config):
-    bytes_per_texel = 4  # 32-bit depth
-    texels_per_cascade = config.shadow_map_size ** 2
-    total_bytes = bytes_per_texel * texels_per_cascade * config.cascade_count
-    return total_bytes / (1024 * 1024)  # Convert to MB
+**CRITICAL: 256 MiB Shadow Atlas Constraint**
 
-memory_mb = estimate_shadow_memory(config)
-if memory_mb > gpu_memory_limit:
-    # Reduce resolution or cascade count
-    config.shadow_map_size = min(config.shadow_map_size // 2, 1024)
+All shadow configurations MUST respect the hard 256 MiB memory limit for shadow atlas allocation. This constraint is enforced by the host-visible GPU memory budget and prevents allocation failures at runtime.
+
+**Formula:** `cascade_count × shadow_map_size² × 4 bytes ≤ 268,435,456 bytes (256 MiB)`
+
+```python
+# ALWAYS validate memory before creating shadow systems
+def validate_shadow_config(config):
+    memory_bytes = shadows.calculate_shadow_atlas_memory(
+        config.cascade_count, 
+        config.shadow_map_size
+    )
+    memory_mb = memory_bytes / (1024 * 1024)
+    
+    if memory_bytes > shadows.MAX_SHADOW_ATLAS_MEMORY:
+        raise RuntimeError(f"Config exceeds 256 MiB limit: {memory_mb:.1f} MiB")
+    
+    return memory_mb
+
+# Example usage with automatic validation
+try:
+    config = shadows.CsmConfig(cascade_count=4, shadow_map_size=4096)
+    memory_mb = validate_shadow_config(config)
+    print(f"Memory usage: {memory_mb:.1f} MiB")
+except RuntimeError as e:
+    print(f"Configuration invalid: {e}")
+    # Use a smaller configuration
+    config = shadows.get_preset_config("high_quality")  # Safe alternative
 ```
+
+**Built-in Memory Policy Enforcement:**
+
+- `CsmConfig()` constructor automatically validates memory constraints
+- Invalid configurations are auto-corrected with warnings
+- All preset configurations are guaranteed to be within limits
+- Runtime validation prevents GPU allocation failures
 
 ### Light Setup
 
@@ -390,16 +414,28 @@ dramatic_light = shadows.DirectionalLight(
 
 ### GPU Memory Usage
 
-CSM memory usage scales with cascade count and resolution:
+CSM memory usage scales with cascade count and resolution using the critical formula:
 
 ```
-Memory = cascade_count × (shadow_map_size²) × 4 bytes
+Memory = cascade_count × (shadow_map_size²) × 4 bytes ≤ 256 MiB (HARD LIMIT)
 ```
 
-Examples:
-- 4 cascades × 2048² × 4 bytes = 64 MB
-- 3 cascades × 1024² × 4 bytes = 12 MB  
-- 2 cascades × 4096² × 4 bytes = 128 MB
+**Preset Memory Usage (All Guaranteed Safe):**
+- `low_quality`: 2 cascades × 1024² × 4 = 8.0 MiB (mobile/integrated GPU)
+- `medium_quality`: 3 cascades × 1024² × 4 = 12.0 MiB (standard desktop)
+- `high_quality`: 4 cascades × 2048² × 4 = 64.0 MiB (high-end desktop)
+- `ultra_quality`: 4 cascades × 3072² × 4 = 144.0 MiB (maximum safe allocation)
+
+**Memory Constraint Examples:**
+- ✅ **SAFE**: 4 cascades × 2048² × 4 bytes = 64.0 MiB (well under limit)
+- ✅ **SAFE**: 4 cascades × 4096² × 4 bytes = 256.0 MiB (exactly at limit)
+- ❌ **INVALID**: 4 cascades × 5120² × 4 bytes = 409.6 MiB (exceeds limit)
+
+**Critical Policy Notes:**
+- All configurations are validated automatically at creation time
+- The 256 MiB limit is enforced by host-visible GPU memory budget
+- Exceeding this limit causes GPU allocation failures at runtime
+- Use `shadows.validate_shadow_memory_constraint()` for pre-validation
 
 ### Rendering Performance
 
