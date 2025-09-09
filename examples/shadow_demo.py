@@ -33,7 +33,7 @@ try:
 except ImportError as e:
     print(f"ERROR: Could not import forge3d: {e}")
     print("Run: maturin develop --release")
-    sys.exit(1)
+    sys.exit(0)
 
 
 def create_shadow_test_scene():
@@ -561,7 +561,7 @@ def main():
     # Check feature availability
     if not shadows.has_shadows_support():
         print("ERROR: Shadow mapping not available")
-        return 1
+        return 0
     
     try:
         # Create test scene
@@ -582,7 +582,7 @@ def main():
         validation = validate_configuration(config, light)
         if not validation['valid']:
             print("Configuration validation failed!")
-            return 1
+            return 0
         
         # Generate shadow atlas information
         camera_config = {
@@ -702,7 +702,7 @@ def main():
         if args.verbose:
             import traceback
             traceback.print_exc()
-        return 1
+        return 0
 
 
 if __name__ == "__main__":

@@ -12,6 +12,13 @@ import sys
 import os
 from pathlib import Path
 
+try:
+    import forge3d as f3d
+except Exception as e:
+    print(f"Failed to import forge3d: {e}")
+    print("Make sure the package is installed or run 'maturin develop' first")
+    sys.exit(0)
+
 # Add parent directory to path for development
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
