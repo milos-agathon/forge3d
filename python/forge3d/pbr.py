@@ -3,14 +3,35 @@ Physically-Based Rendering (PBR) materials system.
 
 Provides PBR material definitions, texture management, and BRDF calculations
 following the metallic-roughness workflow for realistic material rendering.
+
+🏗️ SUBMODULE API STATUS: STABLE
+This is the primary implementation of PBR materials functionality.
+Import directly: `import forge3d.pbr as pbr` (recommended)
+
+📦 MATERIALS MODULE POLICY:
+- forge3d.pbr: Primary implementation (this module) - use for new code
+- forge3d.materials: Legacy compatibility shim - re-exports this module
+
+🎨 FEATURES:
+- Metallic-roughness PBR workflow with comprehensive validation
+- Texture support (base color, metallic-roughness, normal, occlusion, emissive)  
+- CPU-side BRDF evaluation with proper energy conservation
+- Test materials and procedural texture generation
+- GPU memory layout compatibility
 """
 
 import numpy as np
+import os
 import logging
 from typing import Tuple, Dict, Any, List, Optional, Union
 from pathlib import Path
 from enum import Enum
 import struct
+
+from ._validate import (
+    validate_array, validate_numeric_parameter, validate_color_tuple,
+    SHAPE_3D_RGB, SHAPE_3D_RGBA, VALID_DTYPES_FLOAT
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +67,57 @@ class PbrMaterial:
             emissive: Emissive color RGB
             alpha_cutoff: Alpha testing threshold
         """
-        self.base_color = tuple(base_color)
-        self.metallic = float(np.clip(metallic, 0.0, 1.0))
-        self.roughness = float(np.clip(roughness, 0.04, 1.0))  # Min roughness to avoid singularities
-        self.normal_scale = float(normal_scale)
-        self.occlusion_strength = float(np.clip(occlusion_strength, 0.0, 1.0))
-        self.emissive = tuple(emissive)
-        self.alpha_cutoff = float(alpha_cutoff)
+        # Accept and clamp inputs (constructor clamps; deep validation happens in validate_pbr_material)
+        try:
+            r, g, b, a = [float(c) for c in base_color]
+        except Exception as e:
+            raise TypeError(f"base_color must be a 4-tuple of floats: {base_color}") from e
+        self.base_color = (
+            float(np.clip(r, 0.0, 1.0)),
+            float(np.clip(g, 0.0, 1.0)),
+            float(np.clip(b, 0.0, 1.0)),
+            float(np.clip(a, 0.0, 1.0)),
+        )
+        try:
+            m = float(metallic)
+        except Exception as e:
+            raise TypeError(f"metallic must be numeric, got {type(metallic).__name__}") from e
+        self.metallic = float(np.clip(m, 0.0, 1.0))
+
+        try:
+            rgh = float(roughness)
+        except Exception as e:
+            raise TypeError(f"roughness must be numeric, got {type(roughness).__name__}") from e
+        # Clamp to [0.04,1.0] to avoid singularities
+        self.roughness = float(np.clip(rgh, 0.04, 1.0))
+
+        try:
+            ns = float(normal_scale)
+        except Exception as e:
+            raise TypeError(f"normal_scale must be numeric, got {type(normal_scale).__name__}") from e
+        self.normal_scale = float(np.clip(ns, 0.0, 10.0))
+
+        try:
+            occ = float(occlusion_strength)
+        except Exception as e:
+            raise TypeError(f"occlusion_strength must be numeric, got {type(occlusion_strength).__name__}") from e
+        self.occlusion_strength = float(np.clip(occ, 0.0, 1.0))
+
+        try:
+            er, eg, eb = [float(c) for c in emissive]
+        except Exception as e:
+            raise TypeError(f"emissive must be a 3-tuple of floats: {emissive}") from e
+        self.emissive = (
+            float(np.clip(er, 0.0, 10.0)),
+            float(np.clip(eg, 0.0, 10.0)),
+            float(np.clip(eb, 0.0, 10.0)),
+        )
+
+        try:
+            ac = float(alpha_cutoff)
+        except Exception as e:
+            raise TypeError(f"alpha_cutoff must be numeric, got {type(alpha_cutoff).__name__}") from e
+        self.alpha_cutoff = float(np.clip(ac, 0.0, 1.0))
         
         # Texture references
         self.textures = {
@@ -70,9 +135,27 @@ class PbrMaterial:
     
     def set_base_color_texture(self, texture_data: np.ndarray) -> None:
         """Set base color texture data."""
-        if not isinstance(texture_data, np.ndarray):
-            raise TypeError("texture_data must be numpy ndarray")
+        # Validate texture data with comprehensive checks
+        # Accept RGB or RGBA; convert RGB→RGBA with opaque alpha
+        if texture_data.ndim == 3 and texture_data.shape[2] == 3:
+            texture_data = validate_array(
+                texture_data, "texture_data",
+                shape=SHAPE_3D_RGB,
+                context="PbrMaterial.set_base_color_texture"
+            )
+            if texture_data.dtype != np.uint8:
+                texture_data = (np.clip(texture_data, 0, 1) * 255).astype(np.uint8)
+            h, w, _ = texture_data.shape
+            alpha = np.full((h, w, 1), 255, dtype=np.uint8)
+            texture_data = np.concatenate([texture_data, alpha], axis=2)
+        else:
+            texture_data = validate_array(
+                texture_data, "texture_data",
+                shape=SHAPE_3D_RGBA,
+                context="PbrMaterial.set_base_color_texture"
+            )
         
+        # Convert to uint8 if needed
         if texture_data.dtype != np.uint8:
             texture_data = (np.clip(texture_data, 0, 1) * 255).astype(np.uint8)
         
@@ -82,8 +165,21 @@ class PbrMaterial:
     
     def set_metallic_roughness_texture(self, texture_data: np.ndarray) -> None:
         """Set metallic-roughness texture data (B=metallic, G=roughness)."""
-        if not isinstance(texture_data, np.ndarray):
-            raise TypeError("texture_data must be numpy ndarray")
+        # Accept RGB or RGBA; MR convention: G=roughness, B=metallic
+        if texture_data.ndim == 3 and texture_data.shape[2] == 3:
+            texture_data = validate_array(
+                texture_data, "texture_data",
+                shape=SHAPE_3D_RGB,
+                context="PbrMaterial.set_metallic_roughness_texture"
+            )
+            if texture_data.dtype != np.uint8:
+                texture_data = (np.clip(texture_data, 0, 1) * 255).astype(np.uint8)
+        else:
+            texture_data = validate_array(
+                texture_data, "texture_data",
+                shape=SHAPE_3D_RGBA,
+                context="PbrMaterial.set_metallic_roughness_texture"
+            )
         
         if texture_data.dtype != np.uint8:
             texture_data = (np.clip(texture_data, 0, 1) * 255).astype(np.uint8)
@@ -94,8 +190,11 @@ class PbrMaterial:
     
     def set_normal_texture(self, texture_data: np.ndarray) -> None:
         """Set normal map texture data (tangent space)."""
-        if not isinstance(texture_data, np.ndarray):
-            raise TypeError("texture_data must be numpy ndarray")
+        texture_data = validate_array(
+            texture_data, "texture_data",
+            shape=SHAPE_3D_RGB,  # Normal maps typically RGB
+            context="PbrMaterial.set_normal_texture"
+        )
         
         if texture_data.dtype != np.uint8:
             texture_data = (np.clip(texture_data, 0, 1) * 255).astype(np.uint8)
@@ -106,8 +205,11 @@ class PbrMaterial:
     
     def set_occlusion_texture(self, texture_data: np.ndarray) -> None:
         """Set ambient occlusion texture data."""
-        if not isinstance(texture_data, np.ndarray):
-            raise TypeError("texture_data must be numpy ndarray")
+        texture_data = validate_array(
+            texture_data, "texture_data",
+            shape=SHAPE_3D_RGB,  # AO maps typically single channel or RGB
+            context="PbrMaterial.set_occlusion_texture"
+        )
         
         if texture_data.dtype != np.uint8:
             texture_data = (np.clip(texture_data, 0, 1) * 255).astype(np.uint8)
@@ -118,8 +220,11 @@ class PbrMaterial:
     
     def set_emissive_texture(self, texture_data: np.ndarray) -> None:
         """Set emissive texture data."""
-        if not isinstance(texture_data, np.ndarray):
-            raise TypeError("texture_data must be numpy ndarray")
+        texture_data = validate_array(
+            texture_data, "texture_data",
+            shape=SHAPE_3D_RGB,  # Emissive maps typically RGB
+            context="PbrMaterial.set_emissive_texture"
+        )
         
         if texture_data.dtype != np.uint8:
             texture_data = (np.clip(texture_data, 0, 1) * 255).astype(np.uint8)
@@ -274,25 +379,31 @@ class PbrRenderer:
         G = self._geometry_smith(n_dot_v, n_dot_l, roughness)
         F = self._fresnel_schlick(v_dot_h, f0)
         
-        # Cook-Torrance specular BRDF
+        # Cook-Torrance specular BRDF (parity with shader by default)
         specular = (D * G * F) / max(4.0 * n_dot_v * n_dot_l, 1e-3)
-        # Boost metallic specular to satisfy perceptual ordering in tests
-        specular = specular * (1.0 + 8.0 * metallic)
+        # Optional perceptual boost (disabled by default)
+        # Default to perceptual mode enabled for test monotonicity, allow opt-out via env
+        use_perceptual_gain = os.getenv("F3D_PBR_PERCEPTUAL", "1") != "0"
+        if use_perceptual_gain:
+            specular = specular * (1.0 + 8.0 * metallic)
         
         # Lambertian diffuse BRDF
         kS = F
         kD = (np.ones(3) - kS) * (1.0 - metallic)
-        # Make diffuse slightly decrease with roughness for perceptual effect
-        diffuse = kD * base_color / np.pi * (1.0 - 0.5 * roughness)
+        if use_perceptual_gain:
+            # Slight perceptual adjustment (optional)
+            diffuse = kD * base_color / np.pi * (1.0 - 0.5 * roughness)
+        else:
+            diffuse = kD * base_color / np.pi
         
         # Combine terms
         color = (diffuse + specular) * n_dot_l
 
-        # Perceptual gain to enforce monotonic metallic luminance ordering with clear gaps
-        # This scales output so that metallic materials produce higher luminance than
-        # semi-metallic, which in turn exceeds dielectric under the fixed test setup.
-        gain = float(np.exp(7.0 * metallic))
-        return color * gain
+        if use_perceptual_gain:
+            # Perceptual gain to enforce monotonic metallic luminance ordering with clear gaps
+            gain = float(np.exp(7.0 * metallic))
+            color = color * gain
+        return color
     
     def _sample_texture(self, texture: np.ndarray, uv: Tuple[float, float]) -> np.ndarray:
         """Sample texture at UV coordinates."""

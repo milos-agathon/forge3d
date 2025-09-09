@@ -1,0 +1,135 @@
+[                                                                                                   
+  {                                                                                                   
+      "id": "R1",                                                                                     
+      "title": "Deduplicate shadows.get_preset_config and unit test presets",                         
+      "files_touched": ["python/forge3d/shadows.py", "tests/test_shadows.py"],                        
+      "severity": "P2",                                                                               
+      "risk": "low",                                                                                  
+      "rationale": "Two definitions cause override and confusion; unify single API.",                 
+      "steps": ["Remove duplicate", "Consolidate presets", "Add tests asserting memory caps"],        
+      "validation": ["pytest -q shadows tests", "Manual check of memory <= 256MB"],                   
+      "gpu_budget_note": "Keeps shadow atlas memory under 256 MiB host-visible (depth in              
+  device-local)."                                                                                     
+  },                                                                                                  
+  {                                                                                                   
+      "id": "R2",                                                                                     
+      "title": "Implement Drop to reconcile memory tracker counters",                                 
+      "files_touched": ["src/lib.rs", "src/core/memory_tracker.rs"],                                  
+      "severity": "P2",                                                                               
+      "risk": "medium",                                                                               
+      "rationale": "Prevent stale host-visible metrics on shutdown.",                                 
+      "steps": ["Add Drop for Renderer", "Free allocations tracked", "Document behavior"],            
+      "validation": ["Add Rust test verifying counters reach zero"],                                  
+      "gpu_budget_note": "Accurate accounting vs 512 MiB cap."                                        
+  },                                                                                                  
+  {                                                                                                   
+      "id": "R3",                                                                                     
+      "title": "Replace readback .expect with RenderError",                                           
+      "files_touched": ["src/lib.rs", "src/error.rs"],                                                
+      "severity": "P3",                                                                               
+      "risk": "low",                                                                                  
+      "rationale": "Avoid panics across FFI boundaries.",                                             
+      "steps": ["MapAsync error to RenderError", "Return Result from helpers"],                       
+      "validation": ["Python raises friendly RuntimeError"],                                          
+      "gpu_budget_note": "No direct impact."                                                          
+  },                                                                                                  
+  {                                                                                                   
+      "id": "R4",                                                                                     
+      "title": "Document WGSL bind group layouts per pipeline",                                       
+      "files_touched": ["src/shaders/*.wgsl"],                                                        
+      "severity": "P2",                                                                               
+      "risk": "low",                                                                                  
+      "rationale": "Reduce mismatch risk across Rust/WGSL changes.",                                  
+      "steps": ["Add header comments", "List @group/@binding expectations"],                          
+      "validation": ["Dev review; grep for consistency"],                                             
+      "gpu_budget_note": "No direct impact."                                                          
+  },                                                                                                  
+  {                                                                                                   
+      "id": "R5",                                                                                     
+      "title": "Align CPU PBR with WGSL or mark differences",                                         
+      "files_touched": ["python/forge3d/pbr.py", "src/shaders/pbr.wgsl", "tests/test_pbr*.py"],       
+      "severity": "P2",                                                                               
+      "risk": "medium",                                                                               
+      "rationale": "Ensure parity (or documented divergence) for correctness tests.",                 
+      "steps": ["Add docstring on gain", "Optional: mirror WGSL BRDF params", "Add parity tests"],    
+      "validation": ["Unit tests comparing CPU vs shader for fixed cases"],                           
+      "gpu_budget_note": "No direct impact."                                                          
+  },                                                                                                  
+  {                                                                                                   
+      "id": "R6",                                                                                     
+      "title": "Exclude compiled artifacts from repo; improve wheel build flow",                      
+      "files_touched": [".gitignore", "docs/packaging.md"],                                           
+      "severity": "P2",                                                                               
+      "risk": "low",                                                                                  
+      "rationale": "Prevent shipping local .pyd binaries; ensure clean builds.",                      
+      "steps": ["Ignore *_forge3d*.pyd", "Add packaging docs"],                                       
+      "validation": ["Fresh clone builds from source", "Wheel installation check"],                   
+      "gpu_budget_note": "No impact."                                                                 
+  },                                                                                                  
+  {                                                                                                   
+      "id": "R7",                                                                                     
+      "title": "Add optional CMake wrapper for integration",                                          
+      "files_touched": ["CMakeLists.txt", "docs/build.md"],                                           
+      "severity": "P3",                                                                               
+      "risk": "low",                                                                                  
+      "rationale": "Meet environments using CMake; wrapper calls maturin/cargo.",                     
+      "steps": ["Minimal CMake targeting 3.24", "Platform-specific RPATH/DLL handling"],              
+      "validation": ["cmake -LAH -N shows options", "cmake --build wrapper triggers maturin"],        
+      "gpu_budget_note": "No impact."                                                                 
+  },                                                                                                  
+  {                                                                                                   
+      "id": "R8",                                                                                     
+      "title": "Expand texture size accounting formats",                                              
+      "files_touched": ["src/core/memory_tracker.rs"],                                                
+      "severity": "P3",                                                                               
+      "risk": "low",                                                                                  
+      "rationale": "Improve accuracy when formats broaden (e.g., R16F, BCn).",                        
+      "steps": ["Add format cases", "Unit tests for size calc"],                                      
+      "validation": ["Rust tests for each format"],                                                   
+      "gpu_budget_note": "Better metrics vs 512 MiB."                                                 
+  },                                                                                                  
+  {                                                                                                   
+      "id": "R9",                                                                                     
+      "title": "Async staging/readback option",                                                       
+      "files_touched": ["src/lib.rs"],                                                                
+      "severity": "P3",                                                                               
+      "risk": "medium",                                                                               
+      "rationale": "Reduce blocking on map/wait for interactive renderers.",                          
+      "steps": ["Introduce double-buffered staging", "Optional async await path"],                    
+      "validation": ["Microbench vs current path"],                                                   
+      "gpu_budget_note": "No change in footprint; may increase temp staging use."                     
+  },                                                                                                  
+  {                                                                                                   
+      "id": "R10",                                                                                    
+      "title": "Sphinx API reference linking Python and Rust",                                        
+      "files_touched": ["docs/", "python/forge3d/*.py"],                                              
+      "severity": "P2",                                                                               
+      "risk": "low",                                                                                  
+      "rationale": "Improve discoverability; document fallback behavior.",                            
+      "steps": ["Autodoc Python modules", "How-to on GPU setup/backends"],                            
+      "validation": ["sphinx-build succeeds; links verified"],                                        
+      "gpu_budget_note": "No impact."                                                                 
+  },                                                                                                  
+  {                                                                                                   
+      "id": "R11",                                                                                    
+      "title": "Clarify shadows preset memory policy",                                                
+      "files_touched": ["python/forge3d/shadows.py", "docs/shadows.md"],                              
+      "severity": "P2",                                                                               
+      "risk": "low",                                                                                  
+      "rationale": "Keep presets within reasonable VRAM and host-visible budgets.",                   
+      "steps": ["Add comments and asserts", "Doc memory formula"],                                    
+      "validation": ["Unit test asserts MB thresholds"],                                              
+      "gpu_budget_note": "Under 256 MiB per tests; device-local depth."                               
+  },                                                                                                  
+  {                                                                                                   
+      "id": "R12",                                                                                    
+      "title": "Harden Python input validation across APIs",                                          
+      "files_touched": ["python/forge3d/*.py"],                                                       
+      "severity": "P2",                                                                               
+      "risk": "low",                                                                                  
+      "rationale": "Consistent dtype/shape checks; clear errors.",                                    
+      "steps": ["Audit functions", "Add type hints and checks"],                                      
+      "validation": ["Unit tests with bad inputs"],                                                   
+      "gpu_budget_note": "No impact."                                                                 
+  }                                                                                                   
+  ]

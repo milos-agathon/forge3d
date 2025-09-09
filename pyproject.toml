@@ -4,14 +4,62 @@ build-backend = "maturin"
 
 [project]
 name = "forge3d"
-version = "0.6.0"
+version = "0.8.0"
 description = "forge3d: Rust/WebGPU core with PyO3 bindings"
 requires-python = ">=3.8"
 readme = "README.md"
 license = { text = "Apache-2.0 OR MIT" }
 authors = [{ name = "forge3d authors" }]
+keywords = ["graphics", "rendering", "webgpu", "rust", "3d", "terrain", "visualization"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10", 
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Multimedia :: Graphics :: 3D Rendering",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/example/forge3d"  # Update with actual URL
+Repository = "https://github.com/example/forge3d" # Update with actual URL
+Documentation = "https://forge3d.readthedocs.io"  # Update with actual URL
+"Bug Tracker" = "https://github.com/example/forge3d/issues"  # Update with actual URL
 
 [tool.maturin]
-bindings = "pyo3"
+bindings = "pyo3" 
 python-source = "python"
 module-name = "forge3d._forge3d"
+# Optimize for size and performance in release builds
+cargo-extra-args = "--profile release-lto"
+# Strip debug symbols for smaller wheel size
+strip = true
+# Generate abi3 wheels for broader compatibility
+compatibility = "linux"  # Add other platforms as needed
+
+# Note: Cargo profiles are defined in Cargo.toml
+
+[tool.setuptools]
+# Exclude unwanted files from wheels
+zip-safe = false
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["python"]
+include = ["forge3d*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+# Include data files in Python package
+"forge3d" = ["data/*.rgba", "assets/*.png"]

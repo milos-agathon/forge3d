@@ -8,6 +8,7 @@ PCF filtering, and integration with the rendering system.
 
 import pytest
 import numpy as np
+import warnings
 import sys
 from pathlib import Path
 
@@ -513,6 +514,145 @@ class TestShadowValidation:
         # Should warn about precision issues
         warning_text = ' '.join(validation['warnings'])
         assert 'precision' in warning_text or 'ratio' in warning_text
+
+
+class TestMemoryConstraintValidation:
+    """Test memory constraint validation for shadow atlas."""
+    
+    def test_calculate_shadow_atlas_memory(self):
+        """Test shadow atlas memory calculation function."""
+        # Test known configurations
+        test_cases = [
+            (2, 1024, 2 * 1024 * 1024 * 4),  # 2 cascades, 1024x1024 = 8,388,608 bytes
+            (4, 2048, 4 * 2048 * 2048 * 4),  # 4 cascades, 2048x2048 = 67,108,864 bytes
+            (3, 4096, 3 * 4096 * 4096 * 4),  # 3 cascades, 4096x4096 = 201,326,592 bytes
+        ]
+        
+        for cascade_count, shadow_map_size, expected_bytes in test_cases:
+            actual_bytes = shadows.calculate_shadow_atlas_memory(cascade_count, shadow_map_size)
+            assert actual_bytes == expected_bytes, \
+                f"Memory calculation mismatch: got {actual_bytes}, expected {expected_bytes}"
+    
+    def test_preset_memory_constraint_compliance(self):
+        """Test that all presets comply with 256 MiB constraint."""
+        constraint_bytes = 256 * 1024 * 1024  # 256 MiB
+        
+        for preset_name in ['low_quality', 'medium_quality', 'high_quality', 'ultra_quality']:
+            config = shadows.get_preset_config(preset_name)
+            memory_bytes = shadows.calculate_shadow_atlas_memory(config.cascade_count, config.shadow_map_size)
+            memory_mb = memory_bytes / (1024 * 1024)
+            
+            # Critical requirement: must not exceed 256 MiB
+            assert memory_bytes <= constraint_bytes, \
+                f"Preset '{preset_name}' exceeds 256 MiB constraint: {memory_mb:.1f} MB"
+            
+            # Verify specific preset expectations based on task requirements
+            expected_memory_ranges = {
+                'low_quality': (0, 16),      # Should be very efficient
+                'medium_quality': (8, 32),   # Moderate usage  
+                'high_quality': (32, 128),   # Higher usage allowed
+                'ultra_quality': (64, 256),  # Can use significant memory
+            }
+            
+            min_mb, max_mb = expected_memory_ranges[preset_name]
+            assert min_mb <= memory_mb <= max_mb, \
+                f"Preset '{preset_name}' memory {memory_mb:.1f}MB outside expected range [{min_mb}, {max_mb}]"
+            
+            print(f"OK {preset_name}: {config.cascade_count} cascades x {config.shadow_map_size}^2 = {memory_mb:.1f} MB")
+    
+    def test_validate_shadow_memory_constraint_function(self):
+        """Test the memory constraint validation function."""
+        # Test valid configuration
+        valid_config = shadows.CsmConfig(cascade_count=2, shadow_map_size=1024)
+        validation = shadows.validate_shadow_memory_constraint(valid_config)
+        
+        assert validation['valid'] is True
+        assert validation['memory_bytes'] == 2 * 1024 * 1024 * 4
+        assert validation['memory_mb'] == 8.0
+        assert validation['constraint_mb'] == 256.0
+        assert validation['headroom_mb'] == 248.0
+        
+        # Test configuration that would exceed constraint (theoretical)
+        # Note: We can't create such a config easily due to size limits in CsmConfig constructor,
+        # but we can test the validation function directly with a mock config
+        oversized_config = shadows.CsmConfig(cascade_count=4, shadow_map_size=4096)
+        oversized_validation = shadows.validate_shadow_memory_constraint(oversized_config)
+        
+        # This config: 4 × 4096² × 4 = 268,435,456 bytes = 256 MB exactly
+        # Should be valid (at the limit)
+        assert oversized_validation['valid'] is True
+        assert oversized_validation['memory_mb'] == 256.0
+        assert oversized_validation['headroom_mb'] == 0.0
+    
+    def test_memory_constraint_integration_with_validation(self):
+        """Test that validate_csm_setup integrates memory constraints."""
+        config = shadows.CsmConfig(cascade_count=4, shadow_map_size=2048)
+        light = shadows.DirectionalLight()
+        
+        validation = shadows.validate_csm_setup(config, light, 0.1, 1000.0)
+        
+        # Should include memory validation results
+        assert 'memory_estimate_mb' in validation
+        assert validation['memory_estimate_mb'] > 0
+        
+        # Memory should be reasonable for this config (4 × 2048² × 4 = 64 MB)
+        expected_memory = (4 * 2048 * 2048 * 4) / (1024 * 1024)
+        assert abs(validation['memory_estimate_mb'] - expected_memory) < 0.1
+
+
+class TestPresetConfigDeprecationAndCompatibility:
+    """Test backward compatibility and deprecation handling."""
+    
+    def test_legacy_preset_aliases(self):
+        """Test that legacy preset aliases work with deprecation warnings."""
+        legacy_mappings = {
+            'low': 'low_quality',
+            'medium': 'medium_quality',
+            'high': 'high_quality', 
+            'ultra': 'ultra_quality',
+        }
+        
+        for legacy_name, expected_name in legacy_mappings.items():
+            with warnings.catch_warnings(record=True) as warning_list:
+                warnings.simplefilter("always")
+                
+                config = shadows.get_preset_config(legacy_name)
+                expected_config = shadows.get_preset_config(expected_name)
+                
+                # Should get same config
+                assert config.cascade_count == expected_config.cascade_count
+                assert config.shadow_map_size == expected_config.shadow_map_size
+                assert config.pcf_kernel_size == expected_config.pcf_kernel_size
+                
+                # Should emit deprecation warning
+                assert len(warning_list) == 1
+                assert issubclass(warning_list[0].category, DeprecationWarning)
+                assert legacy_name in str(warning_list[0].message)
+                assert expected_name in str(warning_list[0].message)
+    
+    def test_unknown_preset_error(self):
+        """Test that unknown preset names raise appropriate errors."""
+        with pytest.raises(ValueError) as exc_info:
+            shadows.get_preset_config('nonexistent_preset')
+        
+        error_msg = str(exc_info.value)
+        assert 'nonexistent_preset' in error_msg
+        assert 'Available:' in error_msg
+        
+        # Should list both current and legacy options
+        assert 'low_quality' in error_msg
+        assert 'low' in error_msg  # legacy alias
+    
+    def test_preset_memory_validation_integration(self):
+        """Test that get_preset_config validates memory constraints."""
+        # All current presets should pass validation 
+        for preset in ['low_quality', 'medium_quality', 'high_quality', 'ultra_quality']:
+            config = shadows.get_preset_config(preset)
+            
+            # Should not raise any errors (all presets designed to be valid)
+            memory_validation = shadows.validate_shadow_memory_constraint(config)
+            assert memory_validation['valid'], \
+                f"Preset '{preset}' should be valid but failed validation"
 
 
 class TestUtilityFunctions:

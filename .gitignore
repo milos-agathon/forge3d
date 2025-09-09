@@ -215,4 +215,54 @@ __marimo__/
 __pycache__/
 /.venv
 *.pyd
-triangle.png
+
+# Generated outputs and artifacts
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.bmp
+*.exr
+*.hdr
+/out/
+/diag_out/
+/artifacts/
+/.benchmarks/
+build.log
+test_output.json
+*.log
+
+# Rust/Cargo specific
+Cargo.lock  # Keep for applications, ignore for libraries - this is an app so keep it
+.cargo/
+
+# maturin build artifacts
+*.whl
+*.tar.gz
+.maturin/
+
+# IDE and editor files
+.vscode/settings.json
+.vscode/launch.json
+*.swp
+*.swo
+*~
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Profiling and performance data
+*.prof
+perf.data*
+flamegraph*.svg
+
+# Documentation builds
+/docs/_build/
+/docs/build/

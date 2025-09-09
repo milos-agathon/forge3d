@@ -5,6 +5,7 @@
 pub mod framegraph;  // Legacy compatibility layer
 pub mod gpu_types;
 pub mod memory_tracker;
+pub mod resource_tracker;
 
 // New framegraph implementation
 pub mod framegraph_impl;
@@ -23,6 +24,10 @@ pub mod multi_thread;
 
 // C7: Async compute prepasses
 pub mod async_compute;
+
+// R9: Async and double-buffered readback system (opt-in)
+#[cfg(feature = "async_readback")]
+pub mod async_readback;
 
 // I7: Big buffer pattern for per-object data
 #[cfg(feature = "wsI_bigbuf")]
