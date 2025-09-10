@@ -1,261 +1,156 @@
-<task>
-  <Title>Implement & wire missing/partial items for Workstream O</Title>
+<task id="forge3d-workstream-audit" version="1.1">
+  <title>Audit repo against roadmap.csv for a specified workstream (presence, readiness, evidence; no code edits)</title>
 
-  <Context>
-    <RepoRoot>.</RepoRoot>
-    <Paths>
-      <Path>src/</Path>
-      <Path>shaders/</Path>
-      <Path>python/forge3d/</Path>
-      <Path>examples/</Path>
-      <Path>docs/</Path>
-      <Path>tests/</Path>
-    </Paths>
-    <Workstream id="O" title="Resource &amp; Memory Management">
-      <Task id="O1" title="Staging buffer rings"/>
-      <Task id="O2" title="GPU memory pools"/>
-      <Task id="O3" title="Compressed texture pipeline"/>
-      <Task id="O4" title="Virtual texture streaming"/>
-    </Workstream>
-    <Constraints>
-      <OS>win_amd64</OS>
-      <OS>linux_x86_64</OS>
-      <OS>macos_universal2</OS>
-      <GpuBudget>&lt;= 512 MiB host-visible heap</GpuBudget>
-      <Toolchain>cmake &gt;= 3.24, cargo/rustc, PyO3, VMA, Sphinx</Toolchain>
-      <APIs>WebGPU/WGSL primary; Vulkan 1.2 compatible design</APIs>
-    </Constraints>
-    <DependenciesNote>
-      O1 depends on M3; O2 depends on M5 and O1; O3 depends on L1; O4 depends on O3 and B11.
-      Validate presence only; do not implement non-O tasks.
-    </DependenciesNote>
-  </Context>
+  <role>
+    You are Claude Code in <b>Audit Mode</b>. Act as an elite graphics/runtime engineer (Vulkan ≥1.2, WebGPU/WGSL, RAII, Rust, Python ≥3.8, CMake ≥3.24, VMA, Sphinx).
+    Project: forge3d — Rust backend + Python frontend (PyO3), targeting interactive/offline 3D visualization.
+  </role>
 
-  <Plan>
-    <Step index="0" title="Audit-first & branch setup">
-      <Action>git checkout -b feat/workstream-O</Action>
-      <Action>Inventory current files: src/core/*, python/forge3d/*, examples/*, docs/*, tests/*</Action>
-      <Action>Confirm absence/partial status for O1–O4 and presence of external deps (M3,M5,L1,B11) references.</Action>
-      <Action>Set feature flags: enable-memory-pools, enable-staging-rings (Cargo features or cfg flags as needed).</Action>
-    </Step>
+  <constraints>
+    <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
+    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
+    <build>cmake>=3.24, cargo/rustc, PyO3, VMA</build>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
+    <docs>Sphinx preferred</docs>
+    <uncertainRule>If essential CSV fields or feature details are missing/ambiguous, reply <b>UNCERTAIN</b> and list the exact headers/rows/paths needed.</uncertainRule>
+    <safety>
+      - <b>Audit-only:</b> Do not modify repository contents.
+      - No third-party code changes; skip binaries/large assets.
+      - Prefer structured searches and header-aware CSV parsing.
+    </safety>
+    <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz</exclusions>
+  </constraints>
 
-    <Step index="1" title="O1 — Staging buffer rings (blocking prerequisite)">
-      <CreateFile>src/core/staging_rings.rs</CreateFile>
-      <CreateFile>src/core/fence_tracker.rs</CreateFile>
-      <ModifyFile>src/lib.rs</ModifyFile>
-      <ModifyFile>python/forge3d/memory.py</ModifyFile>
-      <Design>
-        <Item>Implement 3-ring staging buffers with automatic wrap-around.</Item>
-        <Item>Fence-backed synchronization; CPU-visible checks before reuse.</Item>
-        <Item>Usage statistics (bytes in-flight, ring index, stalls) exposed via Python.</Item>
-      </Design>
-      <PublicAPI>
-        <Rust>StagingRing::new(device, ring_count, buffer_size)</Rust>
-        <Rust>&amp;StagingRing::current()</Rust>
-        <Rust>StagingRing::advance(fence)</Rust>
-        <Python>forge3d.memory.staging_stats()</Python>
-      </PublicAPI>
-      <Tests>
-        <Create>tests/test_staging_rings.rs</Create>
-        <Create>tests/test_staging_performance.py</Create>
-        <Example>examples/staging_ring_demo.py</Example>
-      </Tests>
-      <Docs>
-        <Create>docs/memory/staging_rings.md</Create>
-      </Docs>
-    </Step>
+  <inputs>
+    <repoRoot>./</repoRoot>
+    <roadmapPath>./roadmap.csv</roadmapPath>
+    <!-- Provide either Workstream ID (e.g., "A") or exact Workstream Title -->
+    <workstreamSelector>
+      <![CDATA[
+      ID: Q
+      Title: Production Features
+      ]]>
+    </workstreamSelector>
+  </inputs>
 
-    <Step index="2" title="O2 — GPU memory pools (complete partial implementation)">
-      <ModifyFile>src/core/memory_tracker.rs</ModifyFile>
-      <ModifyFile>src/core/big_buffer.rs</ModifyFile>
-      <ModifyFile>python/forge3d/memory.py</ModifyFile>
-      <Design>
-        <Item>Introduce size-bucket allocation (power-of-two buckets with 64B alignment).</Item>
-        <Item>Reference counting (add_ref/release) with pool block recycling.</Item>
-        <Item>Defragmentation pass with relocation tables; minimize stalls by time-slicing moves.</Item>
-      </Design>
-      <PublicAPI>
-        <Rust>MemoryPool::allocate_bucket(size: u32) -&gt; PoolBlock</Rust>
-        <Rust>PoolBlock::add_ref(), PoolBlock::release()</Rust>
-        <Rust>MemoryPool::defragment() -&gt; DefragStats</Rust>
-        <Python>forge3d.memory.pool_stats()</Python>
-      </PublicAPI>
-      <Tests>
-        <Create>tests/test_memory_pools.rs</Create>
-        <Create>tests/test_memory_fragmentation.py</Create>
-        <Example>examples/memory_pool_demo.py</Example>
-      </Tests>
-      <Docs>
-        <Create>docs/memory/memory_pools.md</Create>
-      </Docs>
-    </Step>
+  <!-- Exact structure of your roadmap.csv -->
+  <csvSchema>
+    <encoding>utf-8</encoding>
+    <delimiter>comma</delimiter>
+    <columns order="fixed">
+      <col index="0">Workstream ID</col>
+      <col index="1">Workstream Title</col>
+      <col index="2">Task ID</col>
+      <col index="3">Task Title</col>
+      <col index="4">Rationale</col>
+      <col index="5">Deliverables</col>
+      <col index="6">Acceptance Criteria</col>
+      <col index="7">Priority</col>
+      <col index="8">Phase</col>
+      <col index="9">Missing Features</col>
+      <col index="10">Dependencies</col>
+      <col index="11">Risks/Mitigations</col>
+      <!-- Trailing column observed in file; treat as ignorable/empty -->
+      <col index="12" optional="true" ignore="true">Unnamed: 12</col>
+    </columns>
+    <cellConventions>
+      <!-- Inside some cells, items are separated by semicolons; DO NOT split columns by this; use only for keyword extraction -->
+      <listSeparator>semicolon-inside-cell</listSeparator>
+      <markdownInline>allowed (e.g., backticks)</markdownInline>
+      <emptyTrailingColumn>ignore if entirely blank</emptyTrailingColumn>
+    </cellConventions>
+    <validation>
+      <!-- Expected controlled vocabularies; report anomalies in hygiene output (do not mutate file) -->
+      <priorityAllowed>High,Medium,Low</priorityAllowed>
+      <phaseAllowed>MVP,Beyond MVP</phaseAllowed>
+    </validation>
+  </csvSchema>
 
-    <Step index="3" title="O3 — Compressed texture pipeline">
-      <CreateFile>src/core/texture_format.rs</CreateFile>
-      <CreateFile>src/core/compressed_textures.rs</CreateFile>
-      <CreateFile>src/loaders/ktx2.rs</CreateFile>
-      <ModifyFile>src/colormap/mod.rs</ModifyFile>
-      <Design>
-        <Item>Detect compressed formats; support BC1–BC7 and ETC2.</Item>
-        <Item>Implement KTX2 container loading; integrate transcoding/decoder path.</Item>
-        <Item>Plumb into texture upload path, preserving device budget constraints.</Item>
-      </Design>
-      <PublicAPI>
-        <Rust>CompressedImage::from_ktx2(path)</Rust>
-        <Rust>CompressedImage::decode_to_gpu()</Rust>
-      </PublicAPI>
-      <Tests>
-        <Create>tests/test_compressed_quality.py</Create>
-        <Example>examples/compressed_texture_demo.py</Example>
-      </Tests>
-      <Docs>
-        <Create>docs/memory/compressed_textures.md</Create>
-      </Docs>
-    </Step>
+  <plan>
+    1) Validate & Load CSV
+       - Open <roadmapPath> with UTF-8; delimiter comma.
+       - Confirm exact header names and order per <csvSchema>. If mismatch → <b>UNCERTAIN</b> listing differences.
+       - Drop/ignore column "Unnamed: 13" if entirely empty.
+       - Produce a brief CSV hygiene report:
+         * Rows with Priority not in {High, Medium, Low}.
+         * Rows with Phase not in {MVP, Beyond MVP}.
+         * Missing Task ID/Title/Deliverables/Acceptance Criteria.
 
-    <Step index="4" title="O4 — Virtual texture streaming">
-      <CreateFile>src/core/virtual_texture.rs</CreateFile>
-      <CreateFile>src/core/feedback_buffer.rs</CreateFile>
-      <CreateFile>src/core/tile_cache.rs</CreateFile>
-      <CreateFile>python/forge3d/streaming.py</CreateFile>
-      <Design>
-        <Item>Page table management with mip-level addressing.</Item>
-        <Item>GPU feedback buffer to gather visible tiles.</Item>
-        <Item>LRU tile cache; async upload via O1 staging rings.</Item>
-      </Design>
-      <PublicAPI>
-        <Python>forge3d.streaming.VirtualTexture(width, height, tile_size)</Python>
-        <Python>vt.update(camera) / vt.stats()</Python>
-      </PublicAPI>
-      <Tests>
-        <Create>tests/test_virtual_texture.py</Create>
-        <Example>examples/virtual_texture_demo.py</Example>
-      </Tests>
-      <Docs>
-        <Create>docs/memory/virtual_texturing.md</Create>
-      </Docs>
-    </Step>
+    2) Select Workstream
+       - Filter rows where Workstream ID == provided ID OR Workstream Title == provided Title (case-insensitive).
+       - If none match → <b>UNCERTAIN</b> and list discovered workstreams (ID → Title).
 
-    <Step index="5" title="Docs (Sphinx) & index updates">
-      <ModifyFile>docs/index.rst</ModifyFile>
-      <Action>Add new pages to ToC under “Memory Management”.</Action>
-    </Step>
+    3) Derive Audit Keywords per Task
+       - From Deliverables/Acceptance Criteria/Dependencies, extract filenames (e.g., *.wgsl), symbols (create_render_pipeline, bind_group), Python API entry points (forge3d.*), example script names, and doc page slugs.
+       - Use semicolon-separated items inside cells as hints; do not alter CSV.
 
-    <Step index="6" title="CI matrix & packaging">
-      <Action>Add/extend CI to build &amp; test across win/linux/macos.</Action>
-      <Action>Ensure maturin build succeeds and Python wheels import memory APIs.</Action>
-    </Step>
+    4) Repository Scan (read-only)
+       - Search src/, shaders/, python/forge3d/, examples/, docs/ with ripgrep.
+       - Collect evidence per task: file paths + line numbers/snippets that match expected artifacts and wiring (e.g., shader referenced by pipeline; Python API exposed; example present).
 
-    <Step index="7" title="Final validation & cleanup">
-      <Action>Run performance tests and record metrics in docs as badges/tables.</Action>
-      <Action>Open PR with summary of deliverables and AC evidence.</Action>
-    </Step>
-  </Plan>
+    5) Readiness Classification (per task)
+       - <b>Present & Wired</b>: artifacts exist and appear integrated (pipeline + API + example/test/doc).
+       - <b>Present but Partial</b>: artifacts exist but missing wiring/exposure/tests/docs.
+       - <b>Absent</b>: no meaningful artifacts found.
 
-  <Deliverables>
-    <ByTask id="O1">
-      <Files>
-        <File>src/core/staging_rings.rs</File>
-        <File>src/core/fence_tracker.rs</File>
-        <File>python/forge3d/memory.py</File>
-        <File>docs/memory/staging_rings.md</File>
-        <File>examples/staging_ring_demo.py</File>
-        <File>tests/test_staging_rings.rs</File>
-        <File>tests/test_staging_performance.py</File>
-      </Files>
-      <Feature>3-ring buffer with fences; automatic wrap; usage stats</Feature>
-    </ByTask>
-    <ByTask id="O2">
-      <Files>
-        <File>src/core/memory_tracker.rs</File>
-        <File>src/core/big_buffer.rs</File>
-        <File>python/forge3d/memory.py</File>
-        <File>docs/memory/memory_pools.md</File>
-        <File>examples/memory_pool_demo.py</File>
-        <File>tests/test_memory_pools.rs</File>
-        <File>tests/test_memory_fragmentation.py</File>
-      </Files>
-      <Feature>Pool allocator with size buckets; reference counting; defrag strategy</Feature>
-    </ByTask>
-    <ByTask id="O3">
-      <Files>
-        <File>src/core/texture_format.rs</File>
-        <File>src/core/compressed_textures.rs</File>
-        <File>src/loaders/ktx2.rs</File>
-        <File>docs/memory/compressed_textures.md</File>
-        <File>examples/compressed_texture_demo.py</File>
-        <File>tests/test_compressed_quality.py</File>
-      </Files>
-      <Feature>Format detection; BC1–7 decoder; ETC2 support; KTX2 loading</Feature>
-    </ByTask>
-    <ByTask id="O4">
-      <Files>
-        <File>src/core/virtual_texture.rs</File>
-        <File>src/core/feedback_buffer.rs</File>
-        <File>src/core/tile_cache.rs</File>
-        <File>python/forge3d/streaming.py</File>
-        <File>docs/memory/virtual_texturing.md</File>
-        <File>examples/virtual_texture_demo.py</File>
-        <File>tests/test_virtual_texture.py</File>
-      </Files>
-      <Feature>Page table management; feedback buffer; tile cache; Python API</Feature>
-    </ByTask>
-  </Deliverables>
+    6) Minimal Change Plan (No Edits)
+       - For Partial/Absent: list the minimal file-level actions (paths/symbols) needed to reach “Present & Wired,” respecting platform/build/memory constraints.
 
-  <AcceptanceCriteria>
-    <ByTask id="O1">
-      <Criterion>&lt; 2 ms CPU overhead for 100 MB transfers (median over 100 runs).</Criterion>
-      <Criterion>Zero buffer reuse before fence signal (validated in tests).</Criterion>
-      <Criterion>Python staging stats report ring index and in-flight bytes.</Criterion>
-    </ByTask>
-    <ByTask id="O2">
-      <Criterion>&gt;= 50% reduction in allocation calls vs baseline (pool_stats).</Criterion>
-      <Criterion>&lt; 5% fragmentation after 1 hour synthetic load.</Criterion>
-      <Criterion>No leaks: all PoolBlock refcounts return to zero in tests.</Criterion>
-    </ByTask>
-    <ByTask id="O3">
-      <Criterion>30–70% texture memory reduction vs PNG path for same assets.</Criterion>
-      <Criterion>Objective quality PSNR &gt; 35 dB for decompressed GPU images.</Criterion>
-      <Criterion>KTX2 assets load and render without crashes in examples.</Criterion>
-    </ByTask>
-    <ByTask id="O4">
-      <Criterion>16k×16k terrain with resident memory &lt;= 256 MB under camera sweep.</Criterion>
-      <Criterion>No visible popping during tile streaming (visual + timing thresholds in test).</Criterion>
-      <Criterion>Python API exposes vt.stats() with cache hits/misses.</Criterion>
-    </ByTask>
+    7) Outputs
+       - Emit a Markdown audit report and a machine-readable audit matrix CSV. Include CSV hygiene observations.
+  </plan>
 
-    <BuildAndTest>
-      <Command>cargo build --features enable-memory-pools,enable-staging-rings --release</Command>
-      <Command>maturin develop --release</Command>
-      <Command>pytest -q</Command>
-    </BuildAndTest>
-    <Docs>
-      <Command>cd docs &amp;&amp; make html</Command>
-    </Docs>
-  </AcceptanceCriteria>
+  <deliverables>
+    - <b>reports/audit_&lt;workstream&gt;.md</b> — Markdown:
+      1) Scope (workstream, matched rows count) & CSV Hygiene summary
+      2) Readiness Verdict per task (Present & Wired / Partial / Absent)
+      3) Evidence Map (file paths + line refs/snippets)
+      4) Blocking Gaps
+      5) Minimal Change Plan (file-level)
+      6) Validation Runbook (commands to verify after implementation)
+    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b> — Columns:
+      <code>Workstream ID,Workstream Title,Task ID,Task Title,Readiness,Evidence Paths,Missing Pieces,Minimal Changes,Priority,Phase,Dependencies,Risks/Mitigations,Original Ref</code>
+    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b> — Detected anomalies (Priority/Phase out-of-vocab, missing required cells).
+  </deliverables>
 
-  <Safety>
-    <Rule>Create a feature branch; small logically-scoped commits with clear messages.</Rule>
-    <Rule>No blind search/replace; constrain edits to listed files/paths.</Rule>
-    <Rule>Exclude binary and build dirs (target/, dist/, build/, *.png, *.ktx2) from code ops.</Rule>
-    <Rule>Add tests alongside features; do not reduce existing test coverage.</Rule>
-    <Rule>Respect 512 MiB host-visible budget; fail fast if exceeded.</Rule>
-  </Safety>
+  <acceptanceCriteria>
+    - AC-001: Exact headers match those specified (including ignorable "Unnamed: 13"); else returns <b>UNCERTAIN</b> with diffs.
+    - AC-002: Report states selected workstream and matched tasks count.
+    - AC-003: Each audited task has a single Readiness Verdict and at least one evidence reference (or explicit “no evidence found”).
+    - AC-004: Minimal Change Plan lists concrete file paths/symbols for all Partial/Absent items.
+    - AC-005: Validation Runbook includes build, headless demo/test, and docs build commands if applicable.
+    - AC-006: No repository modifications were made (audit-only).
+  </acceptanceCriteria>
 
-  <Completion>
-    <Summary>All O1–O4 features implemented/wired; tests green; docs built; examples runnable; memory budget respected.</Summary>
-    <Commands>
-      <Command>cargo clean &amp;&amp; cargo build --release --features enable-memory-pools,enable-staging-rings</Command>
-      <Command>maturin develop --release</Command>
-      <Command>pytest tests/test_staging_performance.py -q</Command>
-      <Command>pytest tests/test_memory_fragmentation.py -q</Command>
-      <Command>pytest tests/test_compressed_quality.py -q</Command>
-      <Command>pytest tests/test_virtual_texture.py -q</Command>
-      <Command>python examples/staging_ring_demo.py</Command>
-      <Command>python examples/memory_pool_demo.py</Command>
-      <Command>python examples/compressed_texture_demo.py</Command>
-      <Command>python examples/virtual_texture_demo.py</Command>
-      <Command>cd docs &amp;&amp; make html</Command>
-    </Commands>
-  </Completion>
+  <execution>
+    <commands>
+      - python - <<'PY'
+import csv, sys, pathlib, codecs
+p = pathlib.Path("{{roadmapPath}}")
+if not p.exists():
+    print("UNCERTAIN: roadmap.csv not found at", p, file=sys.stderr); sys.exit(2)
+with codecs.open(p, "r", "utf-8-sig") as f:
+    reader = csv.reader(f)
+    headers = next(reader, [])
+print("CSV_HEADERS:", headers)
+PY
+      - rg --version
+      - rg -n --stats --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node_modules' -g '!__pycache__' \
+        '(wgsl|create_render_pipeline|bind_group|sampler|texture|queue\\.write_(buffer|texture)|forge3d|import +forge3d|from +forge3d +import)' \
+        src/ shaders/ python/ examples/ docs/ || true
+    </commands>
+    <notes>
+      - Build keyword sets from Deliverables/Acceptance Criteria/Dependencies; use semicolons inside cells as list separators for extraction only.
+      - Document multiple candidate implementations if found; pick the best match by AC phrasing.
+      - Do not mutate or re-save the CSV.
+    </notes>
+  </execution>
+
+  <completion>
+    Provide:
+    - <b>reports/audit_&lt;workstream&gt;.md</b>
+    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b>
+    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b>
+    If headers or the workstream filter are invalid, reply <b>UNCERTAIN</b> with exact corrections needed.
+  </completion>
 </task>
