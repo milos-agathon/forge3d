@@ -17,6 +17,9 @@ pub mod mesh;  // Make mesh public for TBN utilities
 #[cfg(any(feature = "enable-normal-mapping", feature = "enable-pbr", feature = "enable-ibl", feature = "enable-csm"))]
 pub mod pipeline; // Advanced rendering pipelines
 
+// O3: Compressed texture loaders
+pub mod loaders;
+
 // Import memory tracking
 use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
 

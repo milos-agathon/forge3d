@@ -233,4 +233,21 @@ pytest -q
 
 ## Versioning
 
-`forge3d.__version__` mirrors the Rust crate version (`env!("CARGO_PKG_VERSION")`), now **0.6.0**.
+`forge3d.__version__` mirrors the Rust crate version (`env!("CARGO_PKG_VERSION")`), now **0.9.0**.
+
+## What's new in v0.9.0
+
+- Version bump and packaging alignment: Rust crate, Python package metadata, and type stubs now report 0.9.0 consistently.
+- Documentation refresh: README/CHANGELOG updated, quickstart clarified, and notes on GPU backends and C-contiguous arrays reiterated.
+- Build profiles: maturin uses the `release-lto` Cargo profile for smaller/faster wheels; strip settings confirmed.
+
+## What's new in v0.6.0
+
+- **Workstream I** — Advanced GPU memory management with big buffer patterns, double-buffering, and performance benchmarking tools for optimal resource utilization.
+- **Workstream L** — Enhanced texture processing with HDR support, mipmap generation, descriptor indexing capabilities, and dynamic terrain palette switching.
+
+_You're on version **0.6.0**. The Python `__version__` mirrors the Rust crate and distribution metadata._
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).

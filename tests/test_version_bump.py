@@ -3,7 +3,7 @@ import pytest
 
 def test_version_reports_current():
     import forge3d as f3d
-    expected = "0.8.0"
+    expected = "0.9.0"
     assert f3d.__version__ == expected
     # compiled module should match if available
     try:
