@@ -7,6 +7,15 @@ pub mod gpu_types;
 pub mod memory_tracker;
 pub mod resource_tracker;
 
+// Q3: GPU profiling and timing
+pub mod gpu_timing;
+
+// Q1: Post-processing compute pipeline
+pub mod postfx;
+
+// Q5: Bloom post-processing effect
+pub mod bloom;
+
 // Workstream O: Resource & Memory Management
 pub mod staging_rings;        // O1: Staging buffer rings with fence synchronization
 pub mod fence_tracker;        // O1: Fence tracking for staging buffers

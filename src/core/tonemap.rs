@@ -260,4 +260,63 @@ impl TonemapProcessor {
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }
+    
+    /// Create compute-based tone mapping effect for post-processing chain
+    /// 
+    /// This method creates a compute-based version of the tone mapping effect
+    /// that can be integrated into the post-processing pipeline.
+    pub fn create_compute_effect(&self, device: &Device) -> RenderResult<ComputePipeline> {
+        // Create compute shader for tone mapping
+        let shader = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("tonemap_compute_shader"),
+            source: ShaderSource::Wgsl(r#"
+                @group(0) @binding(0) var<uniform> uniforms: TonemapUniforms;
+                @group(0) @binding(1) var input_texture: texture_2d<f32>;
+                @group(0) @binding(2) var output_texture: texture_storage_2d<rgba8unorm, write>;
+                
+                struct TonemapUniforms {
+                    exposure: f32,
+                    _pad: vec3<f32>,
+                };
+                
+                @compute @workgroup_size(16, 16)
+                fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+                    let dimensions = textureDimensions(input_texture);
+                    let coord = global_id.xy;
+                    
+                    if (coord.x >= dimensions.x || coord.y >= dimensions.y) {
+                        return;
+                    }
+                    
+                    let hdr_color = textureLoad(input_texture, coord, 0);
+                    
+                    // Apply exposure
+                    let exposed = hdr_color.rgb * uniforms.exposure;
+                    
+                    // Simple Reinhard tone mapping
+                    let tone_mapped = exposed / (exposed + vec3<f32>(1.0));
+                    
+                    // Gamma correction (sRGB approximation)
+                    let gamma_corrected = pow(tone_mapped, vec3<f32>(1.0 / 2.2));
+                    
+                    textureStore(output_texture, coord, vec4<f32>(gamma_corrected, hdr_color.a));
+                }
+            "#.into()),
+        });
+        
+        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("tonemap_compute_pipeline_layout"),
+            bind_group_layouts: &[&self.bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        
+        let compute_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("tonemap_compute_pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "main",
+        });
+        
+        Ok(compute_pipeline)
+    }
 }

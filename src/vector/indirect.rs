@@ -3,6 +3,7 @@
 
 use crate::error::RenderError;
 use crate::vector::batch::{AABB, Frustum, PrimitiveType};
+use crate::core::gpu_timing::GpuTimingManager;
 use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -286,6 +287,20 @@ impl IndirectRenderer {
         frustum: &Frustum,
         instance_count: u32,
     ) -> Result<(), RenderError> {
+        self.cull_gpu_with_timing(device, queue, view_proj, camera_pos, frustum, instance_count, None)
+    }
+    
+    /// Perform GPU culling with optional timing
+    pub fn cull_gpu_with_timing(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view_proj: &Mat4,
+        camera_pos: Vec3,
+        frustum: &Frustum,
+        instance_count: u32,
+        mut timing_manager: Option<&mut GpuTimingManager>,
+    ) -> Result<(), RenderError> {
         // Create culling uniforms
         let mut frustum_planes = [[0.0f32; 4]; 6];
         // Copy available planes (2D frustum has 4 planes, 3D needs 6)
@@ -351,6 +366,12 @@ impl IndirectRenderer {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("vf.Vector.Indirect.CullingDispatch"),
         });
+        
+        let timing_scope = if let Some(timer) = timing_manager.as_mut() {
+            Some(timer.begin_scope(&mut encoder, "vector_indirect_culling"))
+        } else {
+            None
+        };
 
         {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -375,6 +396,11 @@ impl IndirectRenderer {
             0,
             16,
         );
+        
+        // End GPU timing scope
+        if let (Some(timer), Some(scope_id)) = (timing_manager, timing_scope) {
+            timer.end_scope(&mut encoder, scope_id);
+        }
 
         queue.submit(Some(encoder.finish()));
 

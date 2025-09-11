@@ -5,6 +5,8 @@
 
 use glam::{Vec2, Vec3, Mat4, Vec4Swizzles};
 use crate::terrain::tiling::{TileId, TileBounds};
+use crate::core::gpu_timing::GpuTimingManager;
+use wgpu::CommandEncoder;
 
 /// Configuration for LOD selection
 #[derive(Debug, Clone)]
@@ -188,6 +190,45 @@ pub fn create_view_matrix(eye: Vec3, target: Vec3, up: Vec3) -> Mat4 {
 /// Utility function to create projection matrix
 pub fn create_projection_matrix(fov_y: f32, aspect: f32, near: f32, far: f32) -> Mat4 {
     Mat4::perspective_rh(fov_y, aspect, near, far)
+}
+
+/// Update terrain LOD levels with GPU timing support
+/// 
+/// This function would be used in a complete implementation to update
+/// terrain mesh LOD levels based on camera position and view frustum.
+pub fn update_terrain_lod_with_timing(
+    encoder: &mut CommandEncoder,
+    mut timing_manager: Option<&mut GpuTimingManager>,
+    camera_pos: Vec3,
+    view_matrix: Mat4,
+    proj_matrix: Mat4,
+    config: &LodConfig,
+) -> Vec<TileId> {
+    let timing_scope = if let Some(timer) = timing_manager.as_mut() {
+        Some(timer.begin_scope(encoder, "terrain_lod_update"))
+    } else {
+        None
+    };
+    
+    // In a complete implementation, this would:
+    // 1. Perform frustum culling on GPU
+    // 2. Calculate screen-space error for visible tiles
+    // 3. Select appropriate LOD levels
+    // 4. Update mesh buffers with new geometry
+    
+    // For now, return a placeholder result
+    let updated_tiles = vec![
+        TileId::new(0, 0, 0),
+        TileId::new(1, 0, 0),
+        TileId::new(2, 0, 0),
+    ];
+    
+    // End GPU timing scope
+    if let (Some(timer), Some(scope_id)) = (timing_manager, timing_scope) {
+        timer.end_scope(encoder, scope_id);
+    }
+    
+    updated_tiles
 }
 
 #[cfg(test)]

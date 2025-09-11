@@ -50,19 +50,15 @@ python examples/terrain_single_tile.py
 
 Runs anywhere wgpu supports: Vulkan / Metal / DX12 / GL (and Browser WebGPU for diagnostics). A discrete or integrated GPU is recommended. Examples/tests that need a GPU will skip if no compatible adapter is found.
 
-## What's new in v0.5.0
+## What's new in v0.10.0
 
-* **Complete Vector Graphics Pipeline**: Full vector rendering system with polygons, polylines, points, and graphs
-* **Anti-aliased Line Rendering**: Hardware-accelerated line rendering with caps and joins support
-* **Instanced Point Rendering**: High-performance point sprites with texture atlas and debug modes  
-* **Order Independent Transparency (OIT)**: Proper alpha blending for complex scenes
-* **GPU Culling & Indirect Drawing**: Large-scale rendering performance optimizations
-
-## Highlights since v0.2.0
-
-* **v0.4.0**: Zero-Copy NumPy interoperability and 512 MiB memory budget tracking
-* **v0.3.0**: Enhanced camera system with transforms, orthographic projection, and uniform improvements  
-* **v0.2.0**: Engine foundation with error handling, diagnostics, and tonemap functions
+- Workstream Q deliverables (initial cut):
+  - Q1: Post-Processing effect chain (Python API enable/disable/list, presets) with HDR pipeline and tonemap integration.
+  - Q5: Bloom passes scaffolded and wired — bright-pass + separable blur (H/V) + composite into HDR chain output prior to tonemap.
+  - Q3: GPU profiling surfaces present (timestamp markers/types), Python `gpu_metrics` accessors and indirect culling metric exposure.
+  - Q2: LOD impostors scaffolding and sweep demo; basic triangle-reduction performance test added.
+  - Demos/artifacts: `examples/postfx_chain_demo.py`, `examples/bloom_demo.py`, `examples/lod_impostors_demo.py` write outputs under `reports/`.
+  - Docs: PostFX page added and Sphinx build enabled.
 
 The comprehensive API below provides access to all these features.
 
@@ -222,21 +218,34 @@ pytest -q
 
 ## Versioning
 
-`forge3d.__version__` mirrors the Rust crate version (`env!("CARGO_PKG_VERSION")`), now **0.9.0**.
-
-## What's new in v0.9.0
-
-- Version bump and packaging alignment: Rust crate, Python package metadata, and type stubs now report 0.9.0 consistently.
-- Documentation refresh: README/CHANGELOG updated, quickstart clarified, and notes on GPU backends and C-contiguous arrays reiterated.
-- Build profiles: maturin uses the `release-lto` Cargo profile for smaller/faster wheels; strip settings confirmed.
-
-## What's new in v0.6.0
-
-- **Workstream I** — Advanced GPU memory management with big buffer patterns, double-buffering, and performance benchmarking tools for optimal resource utilization.
-- **Workstream L** — Enhanced texture processing with HDR support, mipmap generation, descriptor indexing capabilities, and dynamic terrain palette switching.
-
-_You're on version **0.6.0**. The Python `__version__` mirrors the Rust crate and distribution metadata._
+`forge3d.__version__` mirrors the Rust crate version (`env!("CARGO_PKG_VERSION")`), now **0.10.0**.
 
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md).
+
+## PostFX & Renderer Toggle
+
+- Control PostFX at runtime from Python:
+
+```python
+import forge3d as f3d
+import forge3d.postfx as postfx
+
+r = f3d.Renderer(512, 512)
+
+# Enable PostFX for this renderer (Python helper works even without rebuilding)
+postfx.set_renderer_postfx_enabled(r, True)
+assert postfx.is_renderer_postfx_enabled(r)
+
+# Configure effects
+postfx.enable("bloom", threshold=1.0, strength=0.6)
+postfx.enable("tonemap", exposure=1.1, gamma=2.2)
+
+# Render as usual (renderer will apply the PostFX chain when enabled)
+r.render_triangle_png("triangle_postfx.png")
+```
+
+- Native toggle methods (available after rebuilding the extension):
+  - `Renderer.set_postfx_enabled(True|False)`
+  - `Renderer.is_postfx_enabled()`

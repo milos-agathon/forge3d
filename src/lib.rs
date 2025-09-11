@@ -41,6 +41,9 @@ const CLEAR_COLOR: wgpu::Color = wgpu::Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
 // Import shared GPU context
 mod gpu;
 use crate::gpu::{ctx, align_copy_bpr};
+// PostFX and tonemap integration (scaffold)
+use crate::core::postfx::{create_default_postfx_chain, PostFxChain};
+use crate::core::tonemap::TonemapProcessor;
 
 // Global palette index state
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -275,6 +278,10 @@ pub struct Renderer {
     bg0_globals: Option<wgpu::BindGroup>,
     bg1_height: Option<wgpu::BindGroup>,
     bg2_lut: Option<wgpu::BindGroup>,
+    // PostFX (scaffold): effect chain and tonemap processor
+    postfx_chain: Option<PostFxChain>,
+    tonemap_proc: Option<TonemapProcessor>,
+    postfx_enabled: bool,
 }
 
 #[pymethods]
@@ -331,12 +338,28 @@ impl Renderer {
             bg0_globals: None,
             bg1_height: None,
             bg2_lut: None,
+            postfx_chain: None,
+            tonemap_proc: None,
+            postfx_enabled: false,
         }
     }
 
     #[pyo3(text_signature = "($self)")]
     pub fn info(&self) -> PyResult<String> {
         Ok(format!("Renderer {}x{}, format={:?}", self.width, self.height, TEXTURE_FORMAT))
+    }
+
+    /// Enable/disable the post-processing chain (bloom/tonemap, etc.)
+    #[pyo3(text_signature = "($self, enabled)")]
+    pub fn set_postfx_enabled(&mut self, enabled: bool) -> PyResult<()> {
+        self.postfx_enabled = enabled;
+        Ok(())
+    }
+
+    /// Check if post-processing chain is enabled
+    #[pyo3(text_signature = "($self)")]
+    pub fn is_postfx_enabled(&self) -> PyResult<bool> {
+        Ok(self.postfx_enabled)
     }
 
     #[pyo3(text_signature = "($self)")]
@@ -1008,6 +1031,95 @@ impl Renderer {
             rpass.set_vertex_buffer(0, self.vbuf.slice(..));
             rpass.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint16);
             rpass.draw_indexed(0..self.icount, 0, 0..1);
+        }
+        // PostFX + tonemap path: guarded by renderer flag
+        if self.postfx_enabled {
+            // Ensure postfx chain and tonemap are initialized
+            if self.postfx_chain.is_none() {
+                // Create a default chain with viewport size (effects are no-op by default)
+                let chain = create_default_postfx_chain(&g.device, self.width, self.height)
+                    .map_err(|e| RenderError::render(format!("postfx init failed: {}", e)))?;
+                self.postfx_chain = Some(chain);
+            }
+            if self.tonemap_proc.is_none() {
+                let tp = TonemapProcessor::new(&g.device, TEXTURE_FORMAT)
+                    .map_err(|e| RenderError::render(format!("tonemap init failed: {}", e)))?;
+                self.tonemap_proc = Some(tp);
+            }
+
+            // Create temporary HDR render target
+            let hdr_tex = g.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("hdr-offscreen"),
+                size: wgpu::Extent3d { width: self.width, height: self.height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let hdr_view = hdr_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+            // Render triangle again into HDR target
+            {
+                let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("triangle-pass-hdr"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &hdr_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(CLEAR_COLOR),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                rpass.set_viewport(0.0, 0.0, self.width as f32, self.height as f32, 0.0, 1.0);
+                rpass.set_scissor_rect(0, 0, self.width, self.height);
+                rpass.set_pipeline(&self.pipeline);
+                rpass.set_vertex_buffer(0, self.vbuf.slice(..));
+                rpass.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint16);
+                rpass.draw_indexed(0..self.icount, 0, 0..1);
+            }
+
+            // If effects enabled in chain, run them into an intermediate HDR output, then tonemap immediately
+            if let Some(chain) = self.postfx_chain.as_mut() {
+                if !chain.list_enabled_effects().is_empty() {
+                    let hdr_out_tex = g.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("hdr-offscreen-out"),
+                        size: wgpu::Extent3d { width: self.width, height: self.height, depth_or_array_layers: 1 },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    });
+                    let hdr_out_view = hdr_out_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                    chain.execute_chain(&g.device, &mut encoder, &hdr_view, &hdr_out_view, None)
+                        .map_err(|e| RenderError::render(format!("postfx chain failed: {}", e)))?;
+                    
+                    // Tonemap HDR into sRGB offscreen output using post-processed result
+                    if let Some(tp) = &self.tonemap_proc {
+                        tp.render(&mut encoder, &g.device, &g.queue, &hdr_out_view, &self.color_view)
+                            .map_err(|e| RenderError::render(format!("tonemap failed: {}", e)))?;
+                    }
+                } else {
+                    // No post-processing effects, use original HDR view
+                    if let Some(tp) = &self.tonemap_proc {
+                        tp.render(&mut encoder, &g.device, &g.queue, &hdr_view, &self.color_view)
+                            .map_err(|e| RenderError::render(format!("tonemap failed: {}", e)))?;
+                    }
+                }
+            } else {
+                // No post-processing chain, use original HDR view
+                if let Some(tp) = &self.tonemap_proc {
+                    tp.render(&mut encoder, &g.device, &g.queue, &hdr_view, &self.color_view)
+                        .map_err(|e| RenderError::render(format!("tonemap failed: {}", e)))?;
+                }
+            }
         }
         g.queue.submit([encoder.finish()]);
         Ok(())

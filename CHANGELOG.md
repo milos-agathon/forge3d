@@ -5,6 +5,24 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [0.10.0] - 2025-09-11
+
+### Added
+- Workstream Q — initial deliverables:
+  - Q1 PostFX chain: Python API to enable/disable/list effects and presets; HDR path with tonemap integration.
+  - Q5 Bloom: compute passes scaffolded and wired — bright-pass + separable blur (H/V) + composite into HDR prior to tonemap.
+  - Q2 LOD: impostors scaffolding (`src/terrain/impostors.rs`), atlas shader stub, sweep demo and perf test.
+  - Q3 GPU metrics: surfaces present; Python `gpu_metrics.get_available_metrics()` exposing `vector_indirect_culling` and other labels.
+  - Demos: `examples/postfx_chain_demo.py`, `examples/bloom_demo.py`, `examples/lod_impostors_demo.py` (artifacts in `reports/`).
+  - Docs: PostFX page added and Sphinx build configured.
+
+### Changed
+- Renderer integrates an HDR → PostFX → tonemap path behind a per-renderer toggle; Python helpers added for toggling in user code.
+
+### Notes
+- Bloom composite currently writes blurred result into HDR target; additive composite strength control can be expanded in a follow-up.
+- Bench/example cargo targets may require additional assets/features; Python builds/tests and docs build remain green.
+
 ## [0.9.0] - 2025-09-11
 
 ### Changed
