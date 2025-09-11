@@ -77,3 +77,109 @@ pub fn to_linear_u8_rgba(src_srgb_rgba8: &[u8]) -> Vec<u8> {
     
     result
 }
+
+/// O3: Compressed texture integration for colormaps
+use crate::core::compressed_textures::{CompressedImage, CompressionOptions};
+use crate::core::texture_format::{TextureUseCase, CompressionQuality};
+
+/// Create compressed colormap texture from name
+pub fn create_compressed_colormap(
+    name: &str,
+    device: &wgpu::Device,
+    quality: CompressionQuality,
+) -> Result<CompressedImage, String> {
+    // Get raw RGBA data
+    let rgba_data = decode_png_rgba8(name)?;
+    
+    // Colormaps are 256x1, so let's create a larger texture for better compression
+    let expanded_data = expand_colormap_for_compression(&rgba_data, 256, 256)?;
+    
+    // Configure compression options for colormap use case
+    let options = CompressionOptions {
+        target_format: None, // Auto-select
+        quality,
+        generate_mipmaps: true,
+        use_case: TextureUseCase::Albedo, // Colormaps are like albedo textures
+        max_size: 256,
+        force_power_of_2: true,
+    };
+    
+    // Create compressed image
+    CompressedImage::from_rgba_data(&expanded_data, 256, 256, device, &options)
+}
+
+/// Expand 256x1 colormap to 256x256 for better compression efficiency
+fn expand_colormap_for_compression(
+    colormap_data: &[u8],
+    target_width: u32,
+    target_height: u32,
+) -> Result<Vec<u8>, String> {
+    if colormap_data.len() != 256 * 4 {
+        return Err("Invalid colormap data size".to_string());
+    }
+    
+    let mut expanded = vec![0u8; (target_width * target_height * 4) as usize];
+    
+    // Replicate the 1D colormap vertically to create a 2D texture
+    for y in 0..target_height {
+        for x in 0..target_width {
+            let src_offset = (x * 4) as usize;
+            let dst_offset = ((y * target_width + x) * 4) as usize;
+            
+            if src_offset + 3 < colormap_data.len() && dst_offset + 3 < expanded.len() {
+                expanded[dst_offset..dst_offset + 4]
+                    .copy_from_slice(&colormap_data[src_offset..src_offset + 4]);
+            }
+        }
+    }
+    
+    Ok(expanded)
+}
+
+/// Get compression statistics for a colormap
+pub fn get_colormap_compression_stats(name: &str) -> Result<String, String> {
+    let original_data = decode_png_rgba8(name)?;
+    let original_size = original_data.len();
+    
+    // Estimate compression ratio for different formats
+    let bc1_ratio = 4.0; // BC1 has ~4:1 compression
+    let bc7_ratio = 2.0; // BC7 has ~2:1 compression
+    let etc2_ratio = 3.0; // ETC2 has ~3:1 compression
+    
+    Ok(format!(
+        "Colormap '{}' compression estimates:\n\
+         Original size: {} bytes\n\
+         BC1 compressed: ~{} bytes ({:.1}:1 ratio)\n\
+         BC7 compressed: ~{} bytes ({:.1}:1 ratio)\n\
+         ETC2 compressed: ~{} bytes ({:.1}:1 ratio)",
+        name, original_size,
+        original_size as f32 / bc1_ratio, bc1_ratio,
+        original_size as f32 / bc7_ratio, bc7_ratio,
+        original_size as f32 / etc2_ratio, etc2_ratio,
+    ))
+}
+
+/// Check if compressed texture formats are available for colormaps
+pub fn check_compressed_colormap_support(device: &wgpu::Device) -> Vec<String> {
+    use crate::core::texture_format::global_format_registry;
+    
+    let registry = global_format_registry();
+    let features = device.features();
+    
+    let mut supported_formats = Vec::new();
+    
+    // Check BC formats
+    if registry.is_format_supported(wgpu::TextureFormat::Bc1RgbaUnorm, &features) {
+        supported_formats.push("BC1 (4:1 compression)".to_string());
+    }
+    if registry.is_format_supported(wgpu::TextureFormat::Bc7RgbaUnorm, &features) {
+        supported_formats.push("BC7 (high quality)".to_string());
+    }
+    
+    // Check ETC2 formats
+    if registry.is_format_supported(wgpu::TextureFormat::Etc2Rgba8Unorm, &features) {
+        supported_formats.push("ETC2 (mobile optimized)".to_string());
+    }
+    
+    supported_formats
+}

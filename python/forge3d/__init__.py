@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, sys, math
 from importlib.resources import files as files
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 # Public API exports - organized by functionality
 __all__ = [
@@ -22,7 +22,7 @@ __all__ = [
     "png_to_numpy", "numpy_to_png",
     
     # Device & Diagnostics
-    "device_probe", "enumerate_adapters", "run_benchmark",
+    "device_probe", "enumerate_adapters", "run_benchmark", "get_device",
     
     # Math Utilities
     "camera_look_at", "camera_orthographic", "camera_perspective", "camera_view_proj",
@@ -89,10 +89,18 @@ try:
     except ImportError:
         _HAVE_NORMALMAP = False
         
+    # Try to import colormap compression functions if available
+    try:
+        from . import colormap
+        _HAVE_COLORMAP = True
+    except ImportError:
+        _HAVE_COLORMAP = False
+        
 except Exception:
     _HAVE_EXT = False
     _HAVE_MESH = False
     _HAVE_NORMALMAP = False
+    _HAVE_COLORMAP = False
     
     # Provide fallback stubs when extension is not available
     class _Stub:
@@ -302,6 +310,45 @@ def make_terrain(width: int, height: int, grid_size: int):
     if grid_size < 2:
         raise ValueError("grid_size must be >= 2")
     return TerrainSpike(width, height, grid_size)
+
+
+def get_device():
+    """
+    Get a GPU device for advanced operations like virtual textures.
+    
+    Returns:
+        Device object that can be used with virtual texture and streaming systems.
+        
+    Note:
+        This is a stub implementation for testing virtual texture functionality.
+        In a full implementation, this would return an actual GPU device handle.
+    """
+    # Get device information from device_probe
+    probe_info = device_probe()
+    
+    # Create a simple device object for testing
+    class MockDevice:
+        def __init__(self, probe_info):
+            self.adapter_name = probe_info.get('adapter_name', 'Unknown')
+            self.backend = probe_info.get('backend', 'AUTO')
+            self.device_type = probe_info.get('device_type', 'Unknown')
+            self.limits = probe_info.get('limits', {})
+            self.features = probe_info.get('features', '')
+            
+        def __repr__(self):
+            return f"MockDevice(adapter={self.adapter_name}, backend={self.backend})"
+            
+        def get_info(self):
+            return {
+                'adapter_name': self.adapter_name,
+                'backend': self.backend,
+                'device_type': self.device_type,
+            }
+            
+        def is_available(self):
+            return True
+            
+    return MockDevice(probe_info)
 
 
 def make_sampler(mode: str, filter: str = "linear", mip: str = "linear"):

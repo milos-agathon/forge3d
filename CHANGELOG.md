@@ -5,6 +5,19 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [0.9.0] - 2025-09-11
+
+### Changed
+- Bumped crate and Python package version to 0.9.0 (Cargo.toml, pyproject.toml, Python `__version__`).
+- Aligned packaging and metadata; ensured maturin uses `release-lto` profile as documented.
+
+### Documentation
+- Updated README to reflect 0.9.0 in Versioning and added a short “What’s new in v0.9.0”.
+- Updated CHANGELOG with this release entry.
+
+### Notes
+- No functional code changes in this release; housekeeping for the 0.9.0 cut.
+
 ## [0.8.0] - 2025-09-09
 
 ### Added

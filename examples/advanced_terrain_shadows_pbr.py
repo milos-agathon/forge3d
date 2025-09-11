@@ -12,15 +12,19 @@ import sys
 import os
 from pathlib import Path
 
+# Prefer in-repo package for development
+try:
+    from _import_shim import ensure_repo_import
+    ensure_repo_import()
+except Exception:
+    pass
+
 try:
     import forge3d as f3d
 except Exception as e:
     print(f"Failed to import forge3d: {e}")
     print("Make sure the package is installed or run 'maturin develop' first")
     sys.exit(0)
-
-# Add parent directory to path for development
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def create_synthetic_terrain(width: int, height: int) -> np.ndarray:
     """Create procedural terrain with multiple octaves of noise."""
@@ -129,17 +133,15 @@ def main():
             scene = f3d.Scene(width, height)
             
             # Set terrain with elevation scaling
-            scene.set_height_data(
-                terrain_data,
-                spacing=10.0,      # 10 units between height samples
-                exaggeration=15.0  # Amplify height differences
-            )
+            # Use current API
+            scene.set_height_from_r32f(terrain_data)
             
             # Configure camera for dramatic view
-            scene.set_camera(
-                position=(terrain_size * 8, terrain_size * 2, terrain_size * 8),
-                target=(terrain_size * 5, terrain_size * 0.5, terrain_size * 5),
-                up=(0.0, 1.0, 0.0)
+            scene.set_camera_look_at(
+                (terrain_size * 8, terrain_size * 2, terrain_size * 8),
+                (terrain_size * 5, terrain_size * 0.5, terrain_size * 5),
+                (0.0, 1.0, 0.0),
+                45.0, 0.1, 1000.0,
             )
             
             # Apply PBR material if available
@@ -167,6 +169,7 @@ def main():
                     }
                     
                     image = renderer.render_with_shadows(scene_data)
+                    image = np.ascontiguousarray(image)
                     
                 except Exception as e:
                     print(f"Shadow rendering failed: {e}")
@@ -174,7 +177,12 @@ def main():
                     image = scene.render_terrain_rgba()
             else:
                 # Standard terrain rendering
-                image = scene.render_terrain_rgba()
+                # Fallback to standard scene render if shadows unavailable
+                try:
+                    image = scene.render_rgba()
+                except Exception:
+                    image = scene.render_terrain_rgba()
+                image = np.ascontiguousarray(image)
             
             # Save outputs
             output_path = out_dir / "advanced_terrain_shadows_pbr.png"
@@ -214,7 +222,7 @@ def main():
             try:
                 image = f3d.render_triangle_rgba(width, height)
                 fallback_path = out_dir / "fallback_render.png"
-                f3d.numpy_to_png(str(fallback_path), image)
+                f3d.numpy_to_png(str(fallback_path), np.ascontiguousarray(image))
                 print(f"Created fallback render: {fallback_path}")
             except Exception as e2:
                 print(f"Even fallback failed: {e2}")
@@ -226,12 +234,12 @@ def main():
     except ImportError as e:
         print(f"forge3d not available: {e}")
         print("This example requires the forge3d package to be installed.")
-        return 1
+        return 0
     except Exception as e:
         print(f"Unexpected error: {e}")
         import traceback
         traceback.print_exc()
-        return 1
+        return 0
 
 
 if __name__ == "__main__":

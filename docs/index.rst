@@ -20,6 +20,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    interop_zero_copy
    memory_budget
    gpu_memory_management
+   memory/index
 
 .. toctree::
    :maxdepth: 2
@@ -50,6 +51,7 @@ forge3d provides:
 * **PBR Materials**: Physically-Based Rendering with metallic-roughness workflow and texture support
 * **Shadow Mapping**: Cascaded Shadow Maps (CSM) with Percentage-Closer Filtering (PCF)
 * **Async Operations**: Double-buffered readback and multi-threaded command recording
+* **Memory Management**: Advanced memory systems including staging rings, GPU memory pools, compressed textures, and virtual texture streaming
 
 **Developer Experience**
 
@@ -112,11 +114,36 @@ Vector graphics::
     colors = np.array([[1.0, 0.0, 0.0, 1.0]], dtype=np.float32)
     f3d.add_points_py(points, colors=colors, sizes=np.array([10.0]))
 
+Memory management::
+
+    import forge3d.memory as memory
+    import forge3d.streaming as streaming
+    
+    # Initialize advanced memory systems
+    memory.init_memory_system(
+        staging_memory_mb=64,    # O1: Staging buffer rings
+        pool_memory_mb=128,      # O2: GPU memory pools
+        compressed_textures=True, # O3: Compressed texture support
+        virtual_textures=True    # O4: Virtual texture streaming
+    )
+    
+    # Create virtual texture system for large textures
+    device = f3d.get_device()
+    vt_system = streaming.VirtualTextureSystem(device, max_memory_mb=256)
+    
+    # Load and stream large texture
+    texture = vt_system.load_texture("large_world_texture.ktx2")
+    result = vt_system.update_streaming(camera_pos=(1000, 2000, 500))
+
 For comprehensive examples, see the ``examples/`` directory including:
 
 * ``terrain_single_tile.py`` - Basic terrain rendering
 * ``advanced_terrain_shadows_pbr.py`` - Full-featured terrain with PBR and shadows
 * ``device_capability_probe.py`` - GPU capability detection and analysis
+* ``staging_rings_demo.py`` - O1 staging buffer ring operations
+* ``memory_pools_demo.py`` - O2 GPU memory pool management
+* ``compressed_texture_demo.py`` - O3 compressed texture pipeline
+* ``virtual_texture_demo.py`` - O4 virtual texture streaming
 
 API Reference
 =============
@@ -127,6 +154,9 @@ API Reference
 * :doc:`forge3d.pbr <pbr_materials>` - PBR materials system
 * :doc:`forge3d.shadows <shadow_mapping>` - Shadow mapping functionality
 * :doc:`forge3d.materials <pbr_materials>` - Legacy compatibility shim
+* :doc:`forge3d.memory <memory/staging_rings>` - Memory management systems (O1-O2)
+* :doc:`forge3d.compressed <memory/compressed_textures>` - Compressed texture pipeline (O3)
+* :doc:`forge3d.streaming <memory/virtual_texturing>` - Virtual texture streaming (O4)
 
 **Submodule Import Pattern**
 
@@ -139,6 +169,11 @@ Advanced functionality requires explicit imports::
     import forge3d.pbr as pbr
     import forge3d.shadows as shadows
     import forge3d.materials as mat  # Legacy compatibility
+    
+    # Memory management systems (Workstream O)
+    import forge3d.memory as memory        # O1-O2: Staging rings & memory pools
+    import forge3d.compressed as compressed # O3: Compressed texture pipeline
+    import forge3d.streaming as streaming   # O4: Virtual texture streaming
 
 **Feature Detection**
 
@@ -157,6 +192,22 @@ Advanced functionality requires explicit imports::
             print("Shadow mapping available")
     except ImportError:
         print("Shadow mapping not available")
+    
+    # Check for memory management features (Workstream O)
+    try:
+        import forge3d.memory as memory
+        result = memory.init_memory_system()
+        if result['success']:
+            print("Advanced memory management available")
+    except ImportError:
+        print("Memory management systems not available")
+    
+    try:
+        import forge3d.streaming as streaming
+        if hasattr(f3d, 'create_virtual_texture_system'):
+            print("Virtual texture streaming available")
+    except ImportError:
+        print("Virtual texture streaming not available")
 
 Indices and tables
 ==================

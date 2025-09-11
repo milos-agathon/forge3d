@@ -46,7 +46,7 @@ def create_layered_vector_scene(width: int, height: int):
         if bg_polygons:
             coords = np.array(bg_polygons, dtype=np.float32)
             colors = np.array(bg_colors, dtype=np.float32)
-            f3d.add_polygons(coords, colors=colors)
+            f3d.add_polygons(coords, colors)
             layers.append("background_polygons")
         
         # Layer 2: Mid-layer lines (medium transparency)
@@ -81,7 +81,7 @@ def create_layered_vector_scene(width: int, height: int):
             coords = np.array(line_coords, dtype=np.float32)
             colors = np.array(line_colors, dtype=np.float32)
             widths = np.array(line_widths, dtype=np.float32)
-            f3d.add_lines_py(coords, colors=colors, widths=widths)
+            f3d.add_lines_py(coords, colors, widths)
             layers.append("curved_lines")
         
         # Layer 3: Foreground points (most transparent)
@@ -110,7 +110,7 @@ def create_layered_vector_scene(width: int, height: int):
             coords = np.array(point_coords, dtype=np.float32)
             colors = np.array(point_colors, dtype=np.float32)
             sizes = np.array(point_sizes, dtype=np.float32)
-            f3d.add_points_py(coords, colors=colors, sizes=sizes)
+            f3d.add_points_py(coords, colors, sizes)
             layers.append("scattered_points")
         
         return layers
