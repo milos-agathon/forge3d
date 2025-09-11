@@ -16,6 +16,7 @@ use wgpu::{
     BindingType, BufferBindingType, SamplerBindingType, TextureSampleType, ShaderStages,
     SamplerDescriptor, AddressMode, FilterMode,
 };
+use crate::core::gpu_timing::{GpuTimingManager, TimingScopeId};
 
 /// HDR tone mapping operators
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -325,6 +326,17 @@ impl HdrOffscreenPipeline {
 
     /// Apply tone mapping from HDR to LDR texture - post-process fullscreen pass
     pub fn apply_tone_mapping(&self, encoder: &mut CommandEncoder) {
+        self.apply_tone_mapping_with_timing(encoder, None);
+    }
+    
+    /// Apply tone mapping with optional GPU timing
+    pub fn apply_tone_mapping_with_timing(&self, encoder: &mut CommandEncoder, timing_manager: Option<&mut GpuTimingManager>) {
+        let timing_scope = if let Some(timer) = timing_manager {
+            Some(timer.begin_scope(encoder, "hdr_offscreen_tonemap"))
+        } else {
+            None
+        };
+        
         let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
             label: Some("tone_mapping_pass"),
             color_attachments: &[Some(RenderPassColorAttachment {
@@ -344,6 +356,14 @@ impl HdrOffscreenPipeline {
         render_pass.set_pipeline(&self.tonemap_pipeline);
         render_pass.set_bind_group(0, &self.tonemap_bind_group, &[]);
         render_pass.draw(3, 1, 0, 0); // Full-screen triangle
+        
+        // End render pass before ending timing scope
+        drop(render_pass);
+        
+        // End GPU timing scope
+        if let (Some(timer), Some(scope_id)) = (timing_manager, timing_scope) {
+            timer.end_scope(encoder, scope_id);
+        }
     }
 
     /// Get estimated VRAM usage in bytes

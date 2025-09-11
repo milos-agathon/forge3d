@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, sys, math
 from importlib.resources import files as files
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 # Public API exports - organized by functionality
 __all__ = [

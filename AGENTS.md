@@ -44,3 +44,45 @@ Tips: set `RUST_LOG=info` for debug logs; force a backend with `WGPU_BACKEND=dx1
 ## Security & Configuration Tips
 - Validate shapes/dtypes and ranges at boundaries; avoid panics in FFI.
 - Respect memory budget utilities; don’t check in large binaries; keep assets in `assets/`/`data/`.
+
+# HEADER COMMENTS
+- EVERY file HAS TO start with 4 lines of comments!
+1. exact file location in codebase
+2. clear description of what this file does
+3. clear description of WHY this file exists
+4. RELEVANT FILES:comma-separated list of 2-4 most relevant files
+- NEVER delete these "header comments" from the files you're editing.
+
+# SIMPLICITY
+- Always prioritize writing clean, simple, and modular code.
+- do not add unnecessary complications. SIMPLE = GOOD, COMPLEX = BAD.
+- Implement precisely what the user asks for, without additional features or complexity.
+- the fewer lines of code, the better.
+
+# READING FILES
+- always read the file in full, do not be lazy
+- before making any code changes, start by finding & reading ALL of the relevant files
+- never make changes without reading the entire file
+
+# EGO
+- do not make assumption. do not jump to conclusions.
+- you are just a Large Language Model, you are very limited.
+- always consider multiple different approaches, just like a Senior Developer would
+
+# CUSTOM CODE
+- in general, I prefer to write custom code rather than adding external dependencies
+- especially for the core functionality of the app (backend, infra, core business logic)
+- it's fine to use some libraries / packages in the frontend, for complex things
+- however as our codebase, userbase and company grows, we should seek to write everything custom
+
+# WRITING STYLE
+- each long sentence should be followed by two newline characters
+- avoid long bullet lists
+- write in natural, plain English. be conversational.
+- avoid using overly complex language, and super long sentences
+- use simple & easy-to-understand language. be concise.
+
+# OUTPUT STYLE
+- write in complete, clear sentences. like a Senior Developer when talking to a junior engineer
+- always provide enough context for the user to understand -- in a simple & short way
+- make sure to clearly explain your assumptions, and your conclusions

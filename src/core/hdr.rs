@@ -11,6 +11,7 @@ use wgpu::{
     CommandEncoder, RenderPass, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource,
     Buffer, BufferDescriptor, BufferUsages, ImageCopyTexture, Origin3d, ImageDataLayout,
 };
+use crate::core::gpu_timing::GpuTimingManager;
 
 /// HDR tone mapping operators
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -285,6 +286,17 @@ impl HdrRenderTarget {
 
     /// Apply tone mapping from HDR to LDR texture
     pub fn apply_tone_mapping(&self, encoder: &mut CommandEncoder) {
+        self.apply_tone_mapping_with_timing(encoder, None);
+    }
+    
+    /// Apply tone mapping with optional GPU timing
+    pub fn apply_tone_mapping_with_timing(&self, encoder: &mut CommandEncoder, mut timing_manager: Option<&mut GpuTimingManager>) {
+        let timing_scope = if let Some(timer) = timing_manager.as_mut() {
+            Some(timer.begin_scope(encoder, "hdr_tonemap"))
+        } else {
+            None
+        };
+        
         let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
             label: Some("tone_mapping_pass"),
             color_attachments: &[Some(RenderPassColorAttachment {
@@ -308,6 +320,14 @@ impl HdrRenderTarget {
         // 1. Set the tone mapping render pipeline
         // 2. Draw a fullscreen triangle
         // 3. The fragment shader would sample HDR and apply tone mapping
+        
+        // End render pass before ending timing scope
+        drop(render_pass);
+        
+        // End GPU timing scope
+        if let (Some(timer), Some(scope_id)) = (timing_manager, timing_scope) {
+            timer.end_scope(encoder, scope_id);
+        }
     }
 
     /// Read HDR data from texture

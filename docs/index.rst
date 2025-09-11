@@ -26,6 +26,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    :maxdepth: 2
    :caption: Advanced Features:
 
+   postfx/index
    pbr_materials
    shadow_mapping
    vector_graphics
@@ -46,10 +47,12 @@ forge3d provides:
 
 **Advanced Features**
 
+* **Post-Processing Effects**: GPU compute-based pipeline with bloom, tone mapping, FXAA, and temporal anti-aliasing
 * **Terrain Rendering**: Height field visualization with DEM processing, LOD, and colormaps
 * **Vector Graphics**: Anti-aliased polygons, lines, and points with Order-Independent Transparency (OIT)
 * **PBR Materials**: Physically-Based Rendering with metallic-roughness workflow and texture support
 * **Shadow Mapping**: Cascaded Shadow Maps (CSM) with Percentage-Closer Filtering (PCF)
+* **GPU Profiling**: Comprehensive timing markers and timestamp queries for performance analysis
 * **Async Operations**: Double-buffered readback and multi-threaded command recording
 * **Memory Management**: Advanced memory systems including staging rings, GPU memory pools, compressed textures, and virtual texture streaming
 

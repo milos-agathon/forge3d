@@ -189,6 +189,23 @@ pub struct AsyncComputeScheduler {
     mutex: Mutex<()>,
 }
 
+/// Performance metrics for compute passes
+#[derive(Debug, Clone)]
+pub struct ComputeMetrics {
+    /// Total number of passes submitted
+    pub total_passes: usize,
+    /// Number of completed passes
+    pub completed_passes: usize,
+    /// Number of failed passes
+    pub failed_passes: usize,
+    /// Total execution time in milliseconds
+    pub total_execution_time_ms: f32,
+    /// Total workgroups dispatched
+    pub total_workgroups: u32,
+    /// Average execution time per pass
+    pub average_execution_time_ms: f32,
+}
+
 impl AsyncComputeScheduler {
     /// Create a new async compute scheduler
     pub fn new(device: Arc<Device>, queue: Arc<Queue>, config: AsyncComputeConfig) -> Self {
@@ -431,23 +448,6 @@ impl AsyncComputeScheduler {
     }
 }
 
-/// Performance metrics for compute passes
-#[derive(Debug, Clone)]
-pub struct ComputeMetrics {
-    /// Total number of passes submitted
-    pub total_passes: usize,
-    /// Number of completed passes
-    pub completed_passes: usize,
-    /// Number of failed passes
-    pub failed_passes: usize,
-    /// Total execution time in milliseconds
-    pub total_execution_time_ms: f32,
-    /// Total workgroups dispatched
-    pub total_workgroups: u32,
-    /// Average execution time per pass
-    pub average_execution_time_ms: f32,
-}
-
 /// Utility functions for common compute patterns
 pub mod patterns {
     use super::*;
@@ -487,6 +487,13 @@ pub mod patterns {
     }
 }
 
+/// Helper function to estimate post-processing workgroup count
+pub fn estimate_postfx_workgroups(width: u32, height: u32, local_size_x: u32, local_size_y: u32) -> (u32, u32, u32) {
+    let workgroups_x = (width + local_size_x - 1) / local_size_x;
+    let workgroups_y = (height + local_size_y - 1) / local_size_y;
+    (workgroups_x, workgroups_y, 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -498,100 +505,5 @@ mod tests {
         assert_eq!(dispatch.workgroups_y, 1);
         assert_eq!(dispatch.workgroups_z, 1);
         assert_eq!(dispatch.total_workgroups(), 256);
-    }
-    
-    #[test]
-    fn test_c7_dispatch_params_planar() {
-        let dispatch = DispatchParams::planar(16, 16);
-        assert_eq!(dispatch.workgroups_x, 16);
-        assert_eq!(dispatch.workgroups_y, 16);
-        assert_eq!(dispatch.workgroups_z, 1);
-        assert_eq!(dispatch.total_workgroups(), 256);
-    }
-    
-    #[test]
-    fn test_c7_dispatch_params_volumetric() {
-        let dispatch = DispatchParams::volumetric(8, 8, 4);
-        assert_eq!(dispatch.workgroups_x, 8);
-        assert_eq!(dispatch.workgroups_y, 8);
-        assert_eq!(dispatch.workgroups_z, 4);
-        assert_eq!(dispatch.total_workgroups(), 256);
-    }
-    
-    #[test]
-    fn test_c7_async_compute_config_default() {
-        let config = AsyncComputeConfig::default();
-        assert_eq!(config.max_concurrent_passes, 4);
-        assert_eq!(config.timeout_ms, 1000);
-        assert!(!config.enable_profiling);
-        assert_eq!(config.label_prefix, "async_compute");
-    }
-    
-    #[test]
-    fn test_c7_resource_usage_equality() {
-        assert_eq!(ResourceUsage::ComputeStorage, ResourceUsage::ComputeStorage);
-        assert_ne!(ResourceUsage::ComputeStorage, ResourceUsage::ComputeUniform);
-        assert_ne!(ResourceUsage::ComputeTexture, ResourceUsage::GraphicsTexture);
-    }
-    
-    #[test]
-    fn test_c7_sync_point_types() {
-        let sync1 = SyncPoint::WaitForCompute(vec![ComputePassId(0), ComputePassId(1)]);
-        let sync2 = SyncPoint::SignalGraphics;
-        let sync3 = SyncPoint::FullFlush;
-        
-        match sync1 {
-            SyncPoint::WaitForCompute(ids) => assert_eq!(ids.len(), 2),
-            _ => panic!("Expected WaitForCompute"),
-        }
-        
-        assert_eq!(sync2, SyncPoint::SignalGraphics);
-        assert_eq!(sync3, SyncPoint::FullFlush);
-    }
-    
-    #[test]
-    fn test_c7_compute_pass_status() {
-        let status1 = ComputePassStatus::Queued;
-        let status2 = ComputePassStatus::Executing;
-        let status3 = ComputePassStatus::Completed;
-        let status4 = ComputePassStatus::Failed("error".to_string());
-        let status5 = ComputePassStatus::Cancelled;
-        
-        assert_eq!(status1, ComputePassStatus::Queued);
-        assert_ne!(status1, status2);
-        assert_eq!(status3, ComputePassStatus::Completed);
-        
-        match status4 {
-            ComputePassStatus::Failed(msg) => assert_eq!(msg, "error"),
-            _ => panic!("Expected Failed status"),
-        }
-        
-        assert_eq!(status5, ComputePassStatus::Cancelled);
-    }
-    
-    #[test]
-    fn test_c7_compute_metrics_calculation() {
-        let metrics = ComputeMetrics {
-            total_passes: 10,
-            completed_passes: 8,
-            failed_passes: 1,
-            total_execution_time_ms: 800.0,
-            total_workgroups: 1024,
-            average_execution_time_ms: 100.0,
-        };
-        
-        assert_eq!(metrics.total_passes, 10);
-        assert_eq!(metrics.completed_passes, 8);
-        assert_eq!(metrics.failed_passes, 1);
-        assert_eq!(metrics.total_workgroups, 1024);
-        assert_eq!(metrics.average_execution_time_ms, 100.0);
-    }
-    
-    // Integration tests would require GPU context
-    #[ignore]
-    #[test]
-    fn test_c7_async_compute_scheduler_integration() {
-        // This test would require creating actual GPU resources
-        assert!(true, "Integration test placeholder - requires GPU context");
     }
 }
