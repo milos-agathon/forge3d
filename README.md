@@ -50,6 +50,17 @@ python examples/terrain_single_tile.py
 
 Runs anywhere wgpu supports: Vulkan / Metal / DX12 / GL (and Browser WebGPU for diagnostics). A discrete or integrated GPU is recommended. Examples/tests that need a GPU will skip if no compatible adapter is found.
 
+## What's new in v0.6.0
+
+- **Workstream I** — Advanced GPU memory management with big buffer patterns, double-buffering, and performance benchmarking tools for optimal resource utilization.
+- **Workstream L** — Enhanced texture processing with HDR support, mipmap generation, descriptor indexing capabilities, and dynamic terrain palette switching.
+
+_You're on version **0.6.0**. The Python `__version__` mirrors the Rust crate and distribution metadata._
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## What's new in v0.5.0
 
 * **Complete Vector Graphics Pipeline**: Full vector rendering system with polygons, polylines, points, and graphs
