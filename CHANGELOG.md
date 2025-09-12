@@ -5,6 +5,33 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [0.11.0] - 2025-09-12
+
+### Added
+- Workstream R — Matplotlib & Array Interop
+  - R1: Matplotlib colormap interop and linear Normalize support
+    - Accepts Matplotlib colormap names and `Colormap` objects; produces RGBA LUTs suitable for forge3d
+    - Linear Normalize parity with Matplotlib (per-channel max abs diff ≤ 1e-7 on randomized arrays)
+    - Ramp image RGBA parity vs Matplotlib reference (SSIM ≥ 0.999; fallback PSNR ≥ 45 dB)
+    - Optional dependency handling with clear ImportError hint when Matplotlib is absent
+  - R3: Normalization presets interop (LogNorm, PowerNorm, BoundaryNorm)
+    - Parity vs Matplotlib within 1e-7 on representative inputs
+    - Unit tests cover common branches and edge cases
+  - R4: Display helpers `imshow_rgba(ax, rgba, extent=None, dpi=None)`
+    - Correct orientation/aspect; honors extent and DPI
+    - Zero-copy path for C-contiguous `uint8` inputs (no pre-copy by helper)
+  - Demos and docs
+    - Examples: `examples/mpl_cmap_demo.py`, `examples/mpl_norms_demo.py`, `examples/mpl_imshow_demo.py`
+    - Docs: `docs/integration/matplotlib.md`
+
+### Changed
+- Bumped version to 0.11.0 across Python, Cargo, and packaging metadata
+- Simplified Matplotlib backend setup to avoid deprecated internals, improving compatibility
+
+### Tests
+- Added `tests/test_mpl_cmap.py`, `tests/test_mpl_norms.py`, and `tests/test_mpl_display.py`
+- All tests pass locally; GPU-dependent tests auto-skip without an adapter
+
 ## [0.10.0] - 2025-09-11
 
 ### Added

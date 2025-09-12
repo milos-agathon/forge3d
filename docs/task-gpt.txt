@@ -1,0 +1,187 @@
+<codex-job>
+  <Role>
+    You are a senior code auditor + implementer. Verify whether Claude Code fulfilled the Workstream R spec, then fix any gaps yourself with minimal, dependency-ordered changes until all items are Present &amp; Wired with measurable Acceptance Criteria (AC) evidence.
+  </Role>
+
+  <Constraints>
+    <OS>win_amd64, linux_x86_64, macos_universal2</OS>
+    <GpuBudget>&lt;= 512 MiB host-visible heap</GpuBudget>
+    <Toolchain>cmake &gt;= 3.24; cargo/rustc; PyO3/maturin; Sphinx</Toolchain>
+    <APIs>Primary WebGPU/WGSL; Vulkan 1.2-compatible design</APIs>
+    <Safety>
+      - Create a feature branch; keep commits small and logically scoped.
+      - No blind search/replace; limit edits to files listed for Workstream R.
+      - Matplotlib must be an optional dependency; graceful degradation when absent.
+      - Respect memory budget; avoid unnecessary copies; prefer zero-copy paths.
+      - Add/update tests with each feature; never reduce existing coverage.
+    </Safety>
+  </Constraints>
+
+  <Repo>
+    <Root>.</Root>
+    <Paths>
+      <Path>src/</Path>
+      <Path>python/forge3d/</Path>
+      <Path>shaders/</Path>
+      <Path>examples/</Path>
+      <Path>tests/</Path>
+      <Path>docs/</Path>
+      <Path>reports/</Path>
+    </Paths>
+    <Branch>
+      <Create>audit/workstream-R</Create>
+    </Branch>
+  </Repo>
+
+  <SpecOfRecord name="Workstream R — Matplotlib &amp; Array Interop">
+    <!-- Treat this section as the authoritative contract to verify against. -->
+    <Task id="R1" title="Matplotlib colormap + Normalize support">
+      <Deliverables>
+        <File>python/forge3d/adapters/__init__.py</File>
+        <File>python/forge3d/adapters/mpl_cmap.py</File>
+        <File>tests/test_mpl_cmap.py</File>
+        <File>docs/integration/matplotlib.md</File>
+        <File>examples/mpl_cmap_demo.py</File>
+      </Deliverables>
+      <Acceptance>
+        <Criterion>Accepts Matplotlib colormap names and Colormap objects.</Criterion>
+        <Criterion>Linear Normalize parity: per-channel max abs diff ≤ 1e-7 on 10 randomized arrays.</Criterion>
+        <Criterion>Ramp image RGBA parity vs Matplotlib reference: SSIM ≥ 0.999 (fallback to PSNR ≥ 45 dB if SSIM lib unavailable).</Criterion>
+        <Criterion>Optional-dep behavior: importing forge3d without Matplotlib succeeds; adapter functions raise a clear, actionable hint.</Criterion>
+      </Acceptance>
+      <Dependencies>Validate-only: B5,B2 (do not implement non-R items).</Dependencies>
+    </Task>
+
+    <Task id="R2" title="Zero-copy NumPy ingestion (buffer protocol) — validation only">
+      <Deliverables>Validation evidence only (no new files required).</Deliverables>
+      <Acceptance>
+        <Criterion>Zero-copy path exercised for C-contiguous uint8/float32 (shares_memory=True or buffer pointer equality where applicable).</Criterion>
+        <Criterion>Non-contiguous inputs either reject with helpful error or copy exactly once (documented).</Criterion>
+      </Acceptance>
+      <Dependencies>Validate-only: B1,B4.</Dependencies>
+    </Task>
+
+    <Task id="R3" title="Matplotlib normalization presets (Log/Power/Boundary)">
+      <Deliverables>
+        <File>tests/test_mpl_norms.py</File>
+        <File>examples/mpl_norms_demo.py</File>
+        <!-- Implementation likely extends adapters/mpl_cmap.py or adds a sibling module -->
+      </Deliverables>
+      <Acceptance>
+        <Criterion>LogNorm/PowerNorm/BoundaryNorm parity vs Matplotlib mapping within 1e-7 on representative inputs (filter negatives/zeros for LogNorm).</Criterion>
+        <Criterion>Unit tests cover ≥ 90% of adapter branches for these norms.</Criterion>
+      </Acceptance>
+      <Dependencies>Validate-only: N1,B5.</Dependencies>
+    </Task>
+
+    <Task id="R4" title="Matplotlib display helpers (imshow_rgba)">
+      <Deliverables>
+        <File>python/forge3d/helpers/__init__.py</File>
+        <File>python/forge3d/helpers/mpl_display.py</File>
+        <File>tests/test_mpl_display.py</File>
+        <File>examples/mpl_imshow_demo.py</File>
+      </Deliverables>
+      <Acceptance>
+        <Criterion>imshow_rgba(ax, rgba, extent=None, dpi=None) displays a forge3d RGBA buffer with correct orientation/aspect; extent/dpi honored.</Criterion>
+        <Criterion>No extra copies on C-contiguous uint8 inputs (validated via numpy.shares_memory or equivalent).</Criterion>
+      </Acceptance>
+      <Dependencies>Validate-only: B10,E1.</Dependencies>
+    </Task>
+  </SpecOfRecord>
+
+  <AuditPlan>
+    <Step>Enumerate repo and assert presence of every Deliverables file per task.</Step>
+    <Step>Static checks for key symbols/APIs:
+      - R1: adapter that accepts Colormap objects and names; linear normalize; optional-dep guard.
+      - R3: LogNorm/PowerNorm/BoundaryNorm mapping paths present.
+      - R4: helpers/mpl_display.py with imshow_rgba signature and extent/dpi handling.
+      - R2: zero-copy path reachable (imports, buffer protocol usage).
+    </Step>
+    <Step>Build &amp; test:
+      - maturin develop --release
+      - cargo build --release
+      - pytest -q tests/test_mpl_cmap.py tests/test_mpl_norms.py tests/test_mpl_display.py
+    </Step>
+    <Step>Run demos headless and write artifacts:
+      - python examples/mpl_cmap_demo.py --out reports/r1_cmap.png
+      - python examples/mpl_norms_demo.py --out reports/r3_norms.png
+      - python examples/mpl_imshow_demo.py --out reports/r4_imshow.png
+    </Step>
+    <Step>Compute metrics for AC:
+      - For R1: generate a 1024x32 ramp; compare adapter RGBA vs Matplotlib via SSIM (fallback PSNR) and per-channel max abs diff.
+      - For R2: verify zero-copy via numpy.shares_memory or buffer pointer equality; log results.
+      - For R3: evaluate norms parity on randomized arrays and edge cases; record max abs diff.
+      - For R4: verify no-copy on uint8 inputs and pixel correctness with extent/dpi.
+    </Step>
+    <Step>Produce WORKSTREAM_R_AUDIT.md with a PASS/FAIL matrix per task: Deliverables/AC → evidence (paths, numbers, screenshots).</Step>
+  </AuditPlan>
+
+  <ImplementationPlan condition="If any Deliverable/Acceptance FAILS">
+    <Branch>
+      <Create>fix/workstream-R</Create>
+      <Base>audit/workstream-R</Base>
+    </Branch>
+
+    <Order>R1 → R3 → R4 (R2 is validation-only unless defects are found)</Order>
+
+    <R1>
+      <Action>Create python/forge3d/adapters/__init__.py if missing.</Action>
+      <Action>Implement python/forge3d/adapters/mpl_cmap.py:
+        - Accept Colormap instances and names; build RGBA LUTs.
+        - Linear Normalize (min/max) mapping consistent with Matplotlib.
+        - Optional-dep guard: import matplotlib lazily; raise clear hint if unavailable.
+      </Action>
+      <Action>Add tests/test_mpl_cmap.py to validate names/objects, normalize parity, and optional-dep behavior.</Action>
+      <Action>Add examples/mpl_cmap_demo.py and docs/integration/matplotlib.md with usage.</Action>
+    </R1>
+
+    <R3 dependsOn="R1">
+      <Action>Extend adapters module to add LogNorm/PowerNorm/BoundaryNorm equivalents mirroring matplotlib.colors semantics.</Action>
+      <Action>Add tests/test_mpl_norms.py with randomized and edge-case arrays; ensure ≤ 1e-7 max abs diff.</Action>
+      <Action>Add examples/mpl_norms_demo.py.</Action>
+    </R3>
+
+    <R4>
+      <Action>Create python/forge3d/helpers/mpl_display.py with imshow_rgba(ax, rgba, extent=None, dpi=None) and shape/dtype validation.</Action>
+      <Action>Add tests/test_mpl_display.py to verify orientation/aspect, extent/dpi, and no-copy on C-contiguous uint8.</Action>
+      <Action>Add examples/mpl_imshow_demo.py.</Action>
+    </R4>
+
+    <R2>
+      <Action>If validation shows defects: fix zero-copy ingestion paths; add assertions and minimal docs note. Otherwise, record evidence only.</Action>
+    </R2>
+
+    <Common>
+      <Action>Update Sphinx ToC (Integration → Matplotlib); ensure docs build cleanly.</Action>
+      <Action>Re-run the full AuditPlan after changes; update WORKSTREAM_R_AUDIT.md to PASS with evidence.</Action>
+      <Action>Open a PR titled "Workstream R — Verification &amp; Gap Closure" mapping each Deliverable/AC to commits and artifacts.</Action>
+    </Common>
+  </ImplementationPlan>
+
+  <Commands>
+    <Build>
+      <Cmd>maturin develop --release</Cmd>
+      <Cmd>cargo build --release</Cmd>
+    </Build>
+    <Test>
+      <Cmd>pytest -q tests/test_mpl_cmap.py tests/test_mpl_norms.py tests/test_mpl_display.py</Cmd>
+    </Test>
+    <Docs>
+      <Cmd>cd docs &amp;&amp; make html</Cmd>
+    </Docs>
+    <Demos>
+      <Cmd>python examples/mpl_cmap_demo.py --out reports/r1_cmap.png</Cmd>
+      <Cmd>python examples/mpl_norms_demo.py --out reports/r3_norms.png</Cmd>
+      <Cmd>python examples/mpl_imshow_demo.py --out reports/r4_imshow.png</Cmd>
+    </Demos>
+  </Commands>
+
+  <Outputs>
+    <File>WORKSTREAM_R_AUDIT.md</File>
+    <Dir>reports/ (png, json, logs)</Dir>
+    <PR>
+      <Title>Workstream R — Verification &amp; Gap Closure</Title>
+      <Body>Includes PASS/FAIL matrix, metrics tables, screenshots, and links to code changes proving each Deliverable/AC.</Body>
+    </PR>
+  </Outputs>
+</codex-job>
