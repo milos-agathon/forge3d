@@ -1,0 +1,30 @@
+{
+  "scene_size": [
+    512,
+    384
+  ],
+  "backend": "Agg",
+  "test_results": {
+    "basic_display": {
+      "available": false
+    },
+    "subplot_functionality": {
+      "available": false
+    },
+    "validation_handling": {
+      "available": false
+    }
+  },
+  "environment": {
+    "backend_request": "AUTO",
+    "adapter_name": "NVIDIA GeForce RTX 3070",
+    "backend": "VULKAN",
+    "device_type": "DiscreteGpu",
+    "vendor_id": 4318,
+    "device_id": 9348,
+    "features": "Features(DEPTH_CLIP_CONTROL | TIMESTAMP_QUERY | INDIRECT_FIRST_INSTANCE | SHADER_F16 | BGRA8UNORM_STORAGE | FLOAT32_FILTERABLE | RG11B10UFLOAT_RENDERABLE | DEPTH32FLOAT_STENCIL8 | TEXTURE_COMPRESSION_BC | TEXTURE_FORMAT_16BIT_NORM | TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | PIPELINE_STATISTICS_QUERY | TIMESTAMP_QUERY_INSIDE_PASSES | MAPPABLE_PRIMARY_BUFFERS | TEXTURE_BINDING_ARRAY | BUFFER_BINDING_ARRAY | STORAGE_RESOURCE_BINDING_ARRAY | SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING | UNIFORM_BUFFER_AND_STORAGE_TEXTURE_ARRAY_NON_UNIFORM_INDEXING | PARTIALLY_BOUND_BINDING_ARRAY | MULTI_DRAW_INDIRECT | MULTI_DRAW_INDIRECT_COUNT | PUSH_CONSTANTS | ADDRESS_MODE_CLAMP_TO_ZERO | ADDRESS_MODE_CLAMP_TO_BORDER | POLYGON_MODE_LINE | POLYGON_MODE_POINT | CONSERVATIVE_RASTERIZATION | VERTEX_WRITABLE_STORAGE | CLEAR_TEXTURE | SPIRV_SHADER_PASSTHROUGH | MULTIVIEW | SHADER_UNUSED_VERTEX_OUTPUT | TEXTURE_FORMAT_NV12 | RAY_TRACING_ACCELERATION_STRUCTURE | RAY_QUERY | SHADER_F64 | SHADER_I16 | SHADER_PRIMITIVE_INDEX | DUAL_SOURCE_BLENDING)",
+    "limits": "Limits { max_texture_dimension_1d: 32768, max_texture_dimension_2d: 32768, max_texture_dimension_3d: 16384, max_texture_array_layers: 2048, max_bind_groups: 8, max_bindings_per_bind_group: 1000, max_dynamic_uniform_buffers_per_pipeline_layout: 15, max_dynamic_storage_buffers_per_pipeline_layout: 16, max_sampled_textures_per_shader_stage: 1048576, max_samplers_per_shader_stage: 1048576, max_storage_buffers_per_shader_stage: 1048576, max_storage_textures_per_shader_stage: 1048576, max_uniform_buffers_per_shader_stage: 1048576, max_uniform_buffer_binding_size: 65536, max_storage_buffer_binding_size: 2147483648, max_vertex_buffers: 16, max_buffer_size: 18446744073709551615, max_vertex_attributes: 32, max_vertex_buffer_array_stride: 2048, min_uniform_buffer_offset_alignment: 64, min_storage_buffer_offset_alignment: 32, max_inter_stage_shader_components: 128, max_compute_workgroup_storage_size: 49152, max_compute_invocations_per_workgroup: 1024, max_compute_workgroup_size_x: 1024, max_compute_workgroup_size_y: 1024, max_compute_workgroup_size_z: 64, max_compute_workgroups_per_dimension: 65535, max_push_constant_size: 256, max_non_sampler_bindings: 4294967295 }",
+    "status": "ok",
+    "millis": 162.4199
+  }
+}

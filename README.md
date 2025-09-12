@@ -50,6 +50,14 @@ python examples/terrain_single_tile.py
 
 Runs anywhere wgpu supports: Vulkan / Metal / DX12 / GL (and Browser WebGPU for diagnostics). A discrete or integrated GPU is recommended. Examples/tests that need a GPU will skip if no compatible adapter is found.
 
+## What's new in v0.11.0
+
+- Workstream R — Matplotlib & Array Interop:
+  - R1: Matplotlib colormap interop and linear Normalize parity (accepts names and `Colormap` objects; SSIM ≥ 0.999 on ramp; optional dependency handling)
+  - R3: Normalization presets (LogNorm, PowerNorm, BoundaryNorm) mapped with ≤1e-7 parity
+  - R4: Display helpers `imshow_rgba` with correct extent/DPI handling and zero-copy for `uint8` inputs
+  - Demos: `examples/mpl_cmap_demo.py`, `examples/mpl_norms_demo.py`, `examples/mpl_imshow_demo.py`
+
 ## What's new in v0.10.0
 
 - Workstream Q deliverables (initial cut):
