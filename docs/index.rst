@@ -40,6 +40,13 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    tiles/xyz_wmts
    integration/cartopy
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Library Integrations:
+
+   integration/matplotlib
+   user/datashader_interop
+
 Overview
 --------
 

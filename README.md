@@ -50,6 +50,17 @@ python examples/terrain_single_tile.py
 
 Runs anywhere wgpu supports: Vulkan / Metal / DX12 / GL (and Browser WebGPU for diagnostics). A discrete or integrated GPU is recommended. Examples/tests that need a GPU will skip if no compatible adapter is found.
 
+## What's new in v0.14.0
+
+- Workstream V – Datashader Interop:
+  - V1: Datashader adapter for zero-copy RGBA overlays, alignment validation, and simple conversion helpers.
+  - V2: Performance + fidelity tests over Z0/Z4/Z8/Z12 with SSIM vs goldens and frame-time/memory metrics; CI workflow uploads artifacts and guards regressions.
+  - Demo: `examples/datashader_overlay_demo.py` produces `examples/output/datashader_overlay_demo.png` and prints `OK`.
+  - Optional dependency handling: functions skip gracefully when Datashader isn’t installed.
+
+Docs:
+- `docs/user/datashader_interop.rst` (in ToC)
+
 ## What's new in v0.13.0
 
 - Workstream U – Basemaps & Tiles:
