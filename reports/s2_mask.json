@@ -1,0 +1,6 @@
+{
+  "demo_name": "S2: Nodata/Mask to Alpha Propagation Demo",
+  "description": "Demonstration of mask extraction and alpha channel synthesis",
+  "mask_statistics": {
+    "total_pixels": 262144,
+    "valid_pixels": 

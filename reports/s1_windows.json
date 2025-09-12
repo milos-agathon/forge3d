@@ -1,0 +1,53 @@
+{
+  "demo_name": "S1: Rasterio Windowed Reads Demo",
+  "description": "Demonstration of windowed reading and block iteration concepts",
+  "synthetic_data": {
+    "bands": 3,
+    "height": 1024,
+    "width": 1024,
+    "data_type": "float32"
+  },
+  "windows_tested": 3,
+  "window_results": [
+    {
+      "name": "Top-left",
+      "shape": [
+        3,
+        256,
+        256
+      ],
+      "mean": 0.752474308013916,
+      "std": 0.25689318776130676,
+      "min": 2.354386197112035e-06,
+      "max": 1.0,
+      "window": "(0:256, 0:256)"
+    },
+    {
+      "name": "Center",
+      "shape": [
+        3,
+        256,
+        256
+      ],
+      "mean": 0.3781847655773163,
+      "std": 0.3670056164264679,
+      "min": 0.0,
+      "max": 1.0,
+      "window": "(384:640, 384:640)"
+    },
+    {
+      "name": "Bottom-right",
+      "shape": [
+        3,
+        256,
+        256
+      ],
+      "mean": 0.7524743676185608,
+      "std": 0.2568931579589844,
+      "min": 0.0,
+      "max": 1.0,
+      "window": "(768:1024, 768:1024)"
+    }
+  ],
+  "timestamp": "2025-09-12T10:50:47.529162"
+}
