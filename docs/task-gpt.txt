@@ -1,6 +1,6 @@
 <codex-job>
   <Role>
-    You are a senior code auditor + implementer. Verify whether Claude Code fulfilled the Workstream R spec, then fix any gaps yourself with minimal, dependency-ordered changes until all items are Present &amp; Wired with measurable Acceptance Criteria (AC) evidence.
+    You are a senior code auditor + implementer. First VERIFY whether the repo satisfies the full Workstream S spec (files, APIs, docs, tests, demos, measurable ACs). If any item is missing or partial, IMPLEMENT the smallest set of changes to bring that item to "Present &amp; Wired" and make ACs pass, without altering unrelated workstreams.
   </Role>
 
   <Constraints>
@@ -9,11 +9,11 @@
     <Toolchain>cmake &gt;= 3.24; cargo/rustc; PyO3/maturin; Sphinx</Toolchain>
     <APIs>Primary WebGPU/WGSL; Vulkan 1.2-compatible design</APIs>
     <Safety>
-      - Create a feature branch; keep commits small and logically scoped.
-      - No blind search/replace; limit edits to files listed for Workstream R.
-      - Matplotlib must be an optional dependency; graceful degradation when absent.
-      - Respect memory budget; avoid unnecessary copies; prefer zero-copy paths.
-      - Add/update tests with each feature; never reduce existing coverage.
+      - Create a feature branch; keep commits small and scoped to Workstream S.
+      - No blind search/replace; restrict edits to explicitly listed files/paths.
+      - Add/extend tests alongside features; never reduce existing coverage.
+      - Treat rasterio/xarray/dask/pyproj as OPTIONAL extras; import lazily and degrade gracefully when absent.
+      - Respect memory budget; prefer windowed I/O, overviews, and chunked compute; avoid full materialization.
     </Safety>
   </Constraints>
 
@@ -22,139 +22,190 @@
     <Paths>
       <Path>src/</Path>
       <Path>python/forge3d/</Path>
-      <Path>shaders/</Path>
+      <Path>python/forge3d/adapters/</Path>
+      <Path>python/forge3d/ingest/</Path>
       <Path>examples/</Path>
       <Path>tests/</Path>
+      <Path>tests/fixtures/</Path>
       <Path>docs/</Path>
       <Path>reports/</Path>
     </Paths>
     <Branch>
-      <Create>audit/workstream-R</Create>
+      <Create>audit/workstream-S</Create>
     </Branch>
   </Repo>
 
-  <SpecOfRecord name="Workstream R — Matplotlib &amp; Array Interop">
-    <!-- Treat this section as the authoritative contract to verify against. -->
-    <Task id="R1" title="Matplotlib colormap + Normalize support">
+  <SpecOfRecord name="Workstream S — Raster IO &amp; Streaming">
+    <!-- This is the authoritative contract to audit against. -->
+
+    <Task id="S1" title="Rasterio windowed reads + block iterator">
       <Deliverables>
-        <File>python/forge3d/adapters/__init__.py</File>
-        <File>python/forge3d/adapters/mpl_cmap.py</File>
-        <File>tests/test_mpl_cmap.py</File>
-        <File>docs/integration/matplotlib.md</File>
-        <File>examples/mpl_cmap_demo.py</File>
+        <File>python/forge3d/adapters/rasterio_tiles.py</File>
+        <File>tests/test_rasterio_adapter.py</File>
+        <File>examples/raster_window_demo.py</File>
+        <File>docs/ingest/rasterio_tiles.md</File>
       </Deliverables>
+      <APIs>windowed_read(dataset, window, out_shape, resampling); block_iterator(dataset, blocksize)</APIs>
       <Acceptance>
-        <Criterion>Accepts Matplotlib colormap names and Colormap objects.</Criterion>
-        <Criterion>Linear Normalize parity: per-channel max abs diff ≤ 1e-7 on 10 randomized arrays.</Criterion>
-        <Criterion>Ramp image RGBA parity vs Matplotlib reference: SSIM ≥ 0.999 (fallback to PSNR ≥ 45 dB if SSIM lib unavailable).</Criterion>
-        <Criterion>Optional-dep behavior: importing forge3d without Matplotlib succeeds; adapter functions raise a clear, actionable hint.</Criterion>
+        <Criterion>Windowed reads match requested window/out_shape; total pixel count across a scripted sweep equals expected.</Criterion>
+        <Criterion>Block iterator yields block-aligned windows covering the dataset with no gaps/overlap (count &amp; extent verified).</Criterion>
+        <Criterion>Resampling mode honored; parity vs rasterio reference for sample windows.</Criterion>
       </Acceptance>
-      <Dependencies>Validate-only: B5,B2 (do not implement non-R items).</Dependencies>
     </Task>
 
-    <Task id="R2" title="Zero-copy NumPy ingestion (buffer protocol) — validation only">
-      <Deliverables>Validation evidence only (no new files required).</Deliverables>
+    <Task id="S2" title="Nodata/mask → alpha propagation">
+      <Deliverables>
+        <File>tests/test_mask_alpha.py</File>
+        <File>examples/mask_to_alpha_demo.py</File>
+        <File>docs/ingest/rasterio_tiles.md</File>
+      </Deliverables>
+      <APIs>extract_masks(dataset); RGBA alpha synthesis</APIs>
       <Acceptance>
-        <Criterion>Zero-copy path exercised for C-contiguous uint8/float32 (shares_memory=True or buffer pointer equality where applicable).</Criterion>
-        <Criterion>Non-contiguous inputs either reject with helpful error or copy exactly once (documented).</Criterion>
+        <Criterion>Masked areas map to alpha=0; color channels preserved (parity w/ rasterio masks).</Criterion>
+        <Criterion>Golden-image tests pass at SSIM ≥ 0.99 for mask→alpha overlays.</Criterion>
       </Acceptance>
-      <Dependencies>Validate-only: B1,B4.</Dependencies>
     </Task>
 
-    <Task id="R3" title="Matplotlib normalization presets (Log/Power/Boundary)">
+    <Task id="S3" title="CRS normalization via WarpedVRT + pyproj">
       <Deliverables>
-        <File>tests/test_mpl_norms.py</File>
-        <File>examples/mpl_norms_demo.py</File>
-        <!-- Implementation likely extends adapters/mpl_cmap.py or adds a sibling module -->
+        <File>python/forge3d/adapters/reproject.py</File>
+        <File>tests/test_reproject_window.py</File>
+        <File>examples/reproject_window_demo.py</File>
+        <File>docs/ingest/reprojection.md</File>
       </Deliverables>
+      <APIs>WarpedVRTWrapper(...); reproject_window(src_dataset, dst_crs, window)</APIs>
       <Acceptance>
-        <Criterion>LogNorm/PowerNorm/BoundaryNorm parity vs Matplotlib mapping within 1e-7 on representative inputs (filter negatives/zeros for LogNorm).</Criterion>
-        <Criterion>Unit tests cover ≥ 90% of adapter branches for these norms.</Criterion>
+        <Criterion>Reprojected windows align with target CRS within ≤ 0.5 px georef error; SSIM ≥ 0.99 vs WarpedVRT reference.</Criterion>
+        <Criterion>CRS string preserved; transform near-equality within 1e-6.</Criterion>
       </Acceptance>
-      <Dependencies>Validate-only: N1,B5.</Dependencies>
     </Task>
 
-    <Task id="R4" title="Matplotlib display helpers (imshow_rgba)">
+    <Task id="S4" title="xarray/rioxarray DataArray ingestion">
       <Deliverables>
-        <File>python/forge3d/helpers/__init__.py</File>
-        <File>python/forge3d/helpers/mpl_display.py</File>
-        <File>tests/test_mpl_display.py</File>
-        <File>examples/mpl_imshow_demo.py</File>
+        <File>python/forge3d/ingest/xarray_adapter.py</File>
+        <File>tests/test_xarray_ingestion.py</File>
+        <File>examples/xarray_ingest_demo.py</File>
+        <File>docs/ingest/xarray.md</File>
       </Deliverables>
+      <APIs>ingest_dataarray(da: xarray.DataArray)</APIs>
       <Acceptance>
-        <Criterion>imshow_rgba(ax, rgba, extent=None, dpi=None) displays a forge3d RGBA buffer with correct orientation/aspect; extent/dpi honored.</Criterion>
-        <Criterion>No extra copies on C-contiguous uint8 inputs (validated via numpy.shares_memory or equivalent).</Criterion>
+        <Criterion>Preserves CRS/transform (via rioxarray), dims order (y,x[,band]), and attrs.</Criterion>
+        <Criterion>Zero unnecessary copies for C-contiguous uint8/float32 inputs (validated via numpy.shares_memory).</Criterion>
       </Acceptance>
-      <Dependencies>Validate-only: B10,E1.</Dependencies>
+    </Task>
+
+    <Task id="S5" title="Dask-chunked raster ingestion">
+      <Deliverables>
+        <File>python/forge3d/ingest/dask_adapter.py</File>
+        <File>tests/test_dask_ingestion.py</File>
+        <File>examples/dask_ingest_demo.py</File>
+        <File>docs/ingest/dask.md</File>
+      </Deliverables>
+      <APIs>ingest_dask_array(a: dask.array.Array)</APIs>
+      <Acceptance>
+        <Criterion>No full materialization; peak host memory ≤ 1.5× tile size along streaming path (measured).</Criterion>
+        <Criterion>Chunk plan aligns with tile grid; ingest succeeds on synthetic multi-GB virtual dataset.</Criterion>
+      </Acceptance>
+    </Task>
+
+    <Task id="S6" title="Overview/LOD selection">
+      <Deliverables>
+        <File>tests/test_overview_selection.py</File>
+        <File>examples/overview_selection_demo.py</File>
+        <File>docs/ingest/overviews.md</File>
+      </Deliverables>
+      <APIs>select_overview_level(dataset, target_resolution)</APIs>
+      <Acceptance>
+        <Criterion>At 1/8 effective resolution, bytes read reduced by ≥ 60% vs full-res read.</Criterion>
+        <Criterion>SSIM ≥ 0.99 vs full-res downsample rendered to same output size.</Criterion>
+      </Acceptance>
     </Task>
   </SpecOfRecord>
 
   <AuditPlan>
-    <Step>Enumerate repo and assert presence of every Deliverables file per task.</Step>
-    <Step>Static checks for key symbols/APIs:
-      - R1: adapter that accepts Colormap objects and names; linear normalize; optional-dep guard.
-      - R3: LogNorm/PowerNorm/BoundaryNorm mapping paths present.
-      - R4: helpers/mpl_display.py with imshow_rgba signature and extent/dpi handling.
-      - R2: zero-copy path reachable (imports, buffer protocol usage).
+    <Step>Create small deterministic fixtures in tests/fixtures/ with rasterio (e.g., GeoTIFF with internal masks, nodata, overviews) to avoid network access.</Step>
+    <Step>Assert presence of every Deliverables file; if any file is missing, flag FAIL.</Step>
+    <Step>Static checks for required symbols:
+      - S1: windowed_read, block_iterator; correct signatures; resampling path.
+      - S2: mask extraction and alpha synthesis path; no unintended channel mutation.
+      - S3: WarpedVRT use; reproject_window returns array + transform/CRS.
+      - S4: ingest_dataarray reading rioxarray attrs (crs, transform).
+      - S5: ingestion accepts dask.array; no compute() on full array; chunk→tile planning.
+      - S6: overview level selection using dataset.overviews(); fewer bytes at low zoom.
     </Step>
     <Step>Build &amp; test:
       - maturin develop --release
       - cargo build --release
-      - pytest -q tests/test_mpl_cmap.py tests/test_mpl_norms.py tests/test_mpl_display.py
+      - pytest -q tests/test_rasterio_adapter.py tests/test_mask_alpha.py tests/test_reproject_window.py tests/test_overview_selection.py tests/test_xarray_ingestion.py tests/test_dask_ingestion.py
     </Step>
-    <Step>Run demos headless and write artifacts:
-      - python examples/mpl_cmap_demo.py --out reports/r1_cmap.png
-      - python examples/mpl_norms_demo.py --out reports/r3_norms.png
-      - python examples/mpl_imshow_demo.py --out reports/r4_imshow.png
+    <Step>Run demos headless; write artifacts:
+      - python examples/raster_window_demo.py --out reports/s1_windows.png
+      - python examples/mask_to_alpha_demo.py --out reports/s2_mask.png
+      - python examples/reproject_window_demo.py --out reports/s3_reproject.png
+      - python examples/overview_selection_demo.py --out reports/s6_overviews.png
+      - python examples/xarray_ingest_demo.py --out reports/s4_xarray.png
+      - python examples/dask_ingest_demo.py --out reports/s5_dask.png
     </Step>
-    <Step>Compute metrics for AC:
-      - For R1: generate a 1024x32 ramp; compare adapter RGBA vs Matplotlib via SSIM (fallback PSNR) and per-channel max abs diff.
-      - For R2: verify zero-copy via numpy.shares_memory or buffer pointer equality; log results.
-      - For R3: evaluate norms parity on randomized arrays and edge cases; record max abs diff.
-      - For R4: verify no-copy on uint8 inputs and pixel correctness with extent/dpi.
+    <Step>Compute AC metrics and log to reports/ (JSON/MD):
+      - Pixel coverage/counts; resampling parity vs rasterio reference.
+      - SSIM/PSNR for mask→alpha, reprojection, overviews.
+      - shares_memory checks; peak memory tracking for Dask path.
     </Step>
-    <Step>Produce WORKSTREAM_R_AUDIT.md with a PASS/FAIL matrix per task: Deliverables/AC → evidence (paths, numbers, screenshots).</Step>
+    <Step>Produce WORKSTREAM_S_AUDIT.md with a PASS/FAIL matrix (tasks × Deliverables × ACs) including file paths and metric values.</Step>
   </AuditPlan>
 
   <ImplementationPlan condition="If any Deliverable/Acceptance FAILS">
     <Branch>
-      <Create>fix/workstream-R</Create>
-      <Base>audit/workstream-R</Base>
+      <Create>fix/workstream-S</Create>
+      <Base>audit/workstream-S</Base>
     </Branch>
 
-    <Order>R1 → R3 → R4 (R2 is validation-only unless defects are found)</Order>
+    <Order>S1 → S2 → S3 → S6 → S4 → S5</Order>
 
-    <R1>
-      <Action>Create python/forge3d/adapters/__init__.py if missing.</Action>
-      <Action>Implement python/forge3d/adapters/mpl_cmap.py:
-        - Accept Colormap instances and names; build RGBA LUTs.
-        - Linear Normalize (min/max) mapping consistent with Matplotlib.
-        - Optional-dep guard: import matplotlib lazily; raise clear hint if unavailable.
+    <S1>
+      <Action>Create/complete python/forge3d/adapters/rasterio_tiles.py with windowed_read and block_iterator; avoid extra copies.</Action>
+      <Action>Add tests/test_rasterio_adapter.py with fixture-based windows and resampling checks.</Action>
+      <Action>Add examples/raster_window_demo.py and docs/ingest/rasterio_tiles.md.</Action>
+    </S1>
+
+    <S2>
+      <Action>Extend rasterio_tiles to propagate masks to alpha; keep color channels intact.</Action>
+      <Action>Add tests/test_mask_alpha.py and examples/mask_to_alpha_demo.py; update docs.</Action>
+    </S2>
+
+    <S3>
+      <Action>Create python/forge3d/adapters/reproject.py using rasterio.vrt.WarpedVRT and pyproj; implement reproject_window.</Action>
+      <Action>Add tests/test_reproject_window.py, examples/reproject_window_demo.py, docs/ingest/reprojection.md.</Action>
+    </S3>
+
+    <S6>
+      <Action>Implement select_overview_level using dataset.overviews(); integrate into reads to reduce bytes at low zoom.</Action>
+      <Action>Add tests/test_overview_selection.py, examples/overview_selection_demo.py, docs/ingest/overviews.md.</Action>
+    </S6>
+
+    <S4>
+      <Action>Create python/forge3d/ingest/xarray_adapter.py with ingest_dataarray; validate dims, dtype, CRS/transform via rioxarray.</Action>
+      <Action>Add tests/test_xarray_ingestion.py, examples/xarray_ingest_demo.py, docs/ingest/xarray.md.</Action>
+    </S4>
+
+    <S5>
+      <Action>Create python/forge3d/ingest/dask_adapter.py with chunk→tile planning; ensure no full materialization; add peak memory guardrails.</Action>
+      <Action>Add tests/test_dask_ingestion.py, examples/dask_ingest_demo.py, docs/ingest/dask.md.</Action>
+    </S5>
+
+    <Packaging>
+      <Action>If missing, add optional extras to pyproject.toml:
+        [project.optional-dependencies]
+        raster = ["rasterio", "pyproj"]
+        xarray = ["xarray", "rioxarray"]
+        dask = ["dask[array]"]
       </Action>
-      <Action>Add tests/test_mpl_cmap.py to validate names/objects, normalize parity, and optional-dep behavior.</Action>
-      <Action>Add examples/mpl_cmap_demo.py and docs/integration/matplotlib.md with usage.</Action>
-    </R1>
-
-    <R3 dependsOn="R1">
-      <Action>Extend adapters module to add LogNorm/PowerNorm/BoundaryNorm equivalents mirroring matplotlib.colors semantics.</Action>
-      <Action>Add tests/test_mpl_norms.py with randomized and edge-case arrays; ensure ≤ 1e-7 max abs diff.</Action>
-      <Action>Add examples/mpl_norms_demo.py.</Action>
-    </R3>
-
-    <R4>
-      <Action>Create python/forge3d/helpers/mpl_display.py with imshow_rgba(ax, rgba, extent=None, dpi=None) and shape/dtype validation.</Action>
-      <Action>Add tests/test_mpl_display.py to verify orientation/aspect, extent/dpi, and no-copy on C-contiguous uint8.</Action>
-      <Action>Add examples/mpl_imshow_demo.py.</Action>
-    </R4>
-
-    <R2>
-      <Action>If validation shows defects: fix zero-copy ingestion paths; add assertions and minimal docs note. Otherwise, record evidence only.</Action>
-    </R2>
+      <Action>Ensure imports are lazy/guarded with clear error hints when extras are not installed.</Action>
+    </Packaging>
 
     <Common>
-      <Action>Update Sphinx ToC (Integration → Matplotlib); ensure docs build cleanly.</Action>
-      <Action>Re-run the full AuditPlan after changes; update WORKSTREAM_R_AUDIT.md to PASS with evidence.</Action>
-      <Action>Open a PR titled "Workstream R — Verification &amp; Gap Closure" mapping each Deliverable/AC to commits and artifacts.</Action>
+      <Action>Re-run the full AuditPlan; update WORKSTREAM_S_AUDIT.md to PASS with evidence.</Action>
+      <Action>Open a PR titled "Workstream S — Verification &amp; Gap Closure (S1–S6)" mapping each Deliverable/AC to commits and artifacts.</Action>
     </Common>
   </ImplementationPlan>
 
@@ -164,24 +215,27 @@
       <Cmd>cargo build --release</Cmd>
     </Build>
     <Test>
-      <Cmd>pytest -q tests/test_mpl_cmap.py tests/test_mpl_norms.py tests/test_mpl_display.py</Cmd>
+      <Cmd>pytest -q tests/test_rasterio_adapter.py tests/test_mask_alpha.py tests/test_reproject_window.py tests/test_overview_selection.py tests/test_xarray_ingestion.py tests/test_dask_ingestion.py</Cmd>
     </Test>
     <Docs>
       <Cmd>cd docs &amp;&amp; make html</Cmd>
     </Docs>
     <Demos>
-      <Cmd>python examples/mpl_cmap_demo.py --out reports/r1_cmap.png</Cmd>
-      <Cmd>python examples/mpl_norms_demo.py --out reports/r3_norms.png</Cmd>
-      <Cmd>python examples/mpl_imshow_demo.py --out reports/r4_imshow.png</Cmd>
+      <Cmd>python examples/raster_window_demo.py --out reports/s1_windows.png</Cmd>
+      <Cmd>python examples/mask_to_alpha_demo.py --out reports/s2_mask.png</Cmd>
+      <Cmd>python examples/reproject_window_demo.py --out reports/s3_reproject.png</Cmd>
+      <Cmd>python examples/overview_selection_demo.py --out reports/s6_overviews.png</Cmd>
+      <Cmd>python examples/xarray_ingest_demo.py --out reports/s4_xarray.png</Cmd>
+      <Cmd>python examples/dask_ingest_demo.py --out reports/s5_dask.png</Cmd>
     </Demos>
   </Commands>
 
   <Outputs>
-    <File>WORKSTREAM_R_AUDIT.md</File>
-    <Dir>reports/ (png, json, logs)</Dir>
+    <File>WORKSTREAM_S_AUDIT.md</File>
+    <Dir>reports/ (images, JSON metrics, logs)</Dir>
     <PR>
-      <Title>Workstream R — Verification &amp; Gap Closure</Title>
-      <Body>Includes PASS/FAIL matrix, metrics tables, screenshots, and links to code changes proving each Deliverable/AC.</Body>
+      <Title>Workstream S — Verification &amp; Gap Closure</Title>
+      <Body>Matrix of Deliverables/AC → PASS evidence with artifact links and metrics.</Body>
     </PR>
   </Outputs>
 </codex-job>

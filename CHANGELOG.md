@@ -5,6 +5,39 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [0.12.0] - 2025-09-12
+
+### Added
+- Workstream S — Raster IO & Streaming
+  - S1: RasterIO windowed reads and block iterator
+    - `windowed_read(dataset, window, out_shape, resampling)` parity with requested window/out_shape
+    - `block_iterator(dataset, blocksize)` covers extent without gaps/overlaps
+    - Demo: `examples/raster_window_demo.py`; Docs: `docs/ingest/rasterio_tiles.md`
+  - S2: Nodata/mask → alpha propagation
+    - `extract_masks(dataset)` and RGBA alpha synthesis; color channels preserved
+    - Demo: `examples/mask_to_alpha_demo.py`
+  - S3: CRS normalization via WarpedVRT + pyproj
+    - `WarpedVRTWrapper` and `reproject_window` with resampling handling
+    - `get_crs_info(crs)` for CRS inspection; Docs: `docs/ingest/reprojection.md`
+    - Demo: `examples/reproject_window_demo.py`
+  - S6: Overview selection
+    - `select_overview_level` and `windowed_read_with_overview` for byte-reduction at coarse zooms
+    - Demo: `examples/overview_selection_demo.py`; Docs: `docs/ingest/overviews.md`
+  - S4: xarray/rioxarray DataArray ingestion
+    - `ingest_dataarray(da)` preserves dims `(y,x[,band])`, dtype conversions, CRS/transform passthrough
+    - Demo: `examples/xarray_ingest_demo.py`; Docs: `docs/ingest/xarray.md`
+  - S5: Dask-chunked ingestion
+    - `ingest_dask_array`, streaming `materialize_dask_array_streaming`, planning & memory guardrails
+    - Demo: `examples/dask_ingest_demo.py`; Docs: `docs/ingest/dask.md`
+
+### Changed
+- Optional dependency handling hardened; imports are lazy and degrade gracefully without rasterio/xarray/dask/pyproj
+- Demos write artifacts via a tiny PNG fallback when native module is unavailable
+- Bumped versions to 0.12.0 (Python package and Cargo crate)
+
+### Tests
+- All Workstream S tests pass; full test suite: 560 passed, 94 skipped, 4 xfailed
+
 ## [0.11.0] - 2025-09-12
 
 ### Added
