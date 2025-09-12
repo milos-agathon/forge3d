@@ -141,8 +141,12 @@ def save_outputs(data, results, output_path):
             data_uint8 = (np.clip(data, 0, 1) * 255).astype(np.uint8)
             forge3d.numpy_to_png(str(output_path), data_uint8)
             print(f"Saved chunked visualization to {output_path}")
-    except:
-        print("Could not save PNG")
+    except Exception:
+        if data is not None:
+            from ._png import write_png
+            data_uint8 = (np.clip(data, 0, 1) * 255).astype(np.uint8)
+            write_png(str(output_path), data_uint8)
+            print(f"Saved chunked visualization to {output_path} via fallback")
     
     import json
     report = {

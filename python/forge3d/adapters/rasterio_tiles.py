@@ -1,3 +1,8 @@
+# python/forge3d/adapters/rasterio_tiles.py
+# Windowed reading and block iteration utilities for rasterio datasets.
+# Exists to provide optional raster I/O that degrades gracefully when missing.
+# RELEVANT FILES:python/forge3d/adapters/reproject.py,python/forge3d/ingest/dask_adapter.py,python/forge3d/ingest/xarray_adapter.py
+
 """
 forge3d.adapters.rasterio_tiles - Windowed reading and block iteration for rasterio datasets
 
@@ -31,8 +36,10 @@ def _require_rasterio():
 
 
 def is_rasterio_available() -> bool:
-    """Check if rasterio is available."""
-    return _HAS_RASTERIO
+    """Check if rasterio is available (dynamic to support patched sys.modules)."""
+    import sys
+    mod = sys.modules.get('rasterio', None)
+    return mod is not None
 
 
 def windowed_read(

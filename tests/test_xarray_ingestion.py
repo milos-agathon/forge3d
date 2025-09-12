@@ -151,7 +151,6 @@ def test_dataarray_ingestion():
         # Mock transpose method
         mock_transposed = Mock()
         mock_transposed.values = test_data.transpose(0, 1, 2)  # Same order
-        mock_transposed.values.flags.c_contiguous = True
         mock_da.transpose.return_value = mock_transposed
         
         # Mock rio accessor
@@ -160,7 +159,6 @@ def test_dataarray_ingestion():
         mock_rio.transform.return_value = Mock()
         mock_da.rio = mock_rio
         mock_da.values = test_data
-        mock_da.values.flags.c_contiguous = True
         
         # Mock validation function
         def mock_validate(da):

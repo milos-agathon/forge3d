@@ -277,16 +277,13 @@ def save_demo_output(rgba_data, stats, output_path):
     try:
         import forge3d
         print(f"\nSaving mask demo output to {output_path}...")
-        
-        # Save RGBA data directly
         forge3d.numpy_to_png(str(output_path), rgba_data)
         print(f"Saved RGBA visualization to {output_path}")
         print(f"Transparent areas will show as checkerboard in image viewers")
-        
-    except ImportError:
-        print("forge3d not available for saving PNG output")
-    except Exception as e:
-        print(f"Error saving output: {e}")
+    except Exception:
+        from ._png import write_png
+        write_png(str(output_path), rgba_data)
+        print(f"Saved {output_path} via fallback")
 
 
 def save_report(stats, mask_types_results, output_path):

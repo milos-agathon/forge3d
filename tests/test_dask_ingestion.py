@@ -31,7 +31,7 @@ def test_memory_estimation():
         import forge3d.ingest.dask_adapter as da_mod
         
         # Mock dask array
-        mock_da = Mock()
+        mock_da = MagicMock()
         mock_da.nbytes = 1024 * 1024 * 100  # 100MB total
         mock_da.dtype.itemsize = 4  # float32
         mock_da.shape = (1000, 1000)
@@ -61,7 +61,7 @@ def test_chunk_processing_plan():
         import forge3d.ingest.dask_adapter as da_mod
         
         # Mock dask array
-        mock_da = Mock()
+        mock_da = MagicMock()
         mock_da.shape = (512, 1024)  # 2D array
         mock_da.dtype.itemsize = 1  # uint8
         
@@ -94,7 +94,7 @@ def test_memory_limit_adjustment():
     with patch('forge3d.ingest.dask_adapter._HAS_DASK', True):
         import forge3d.ingest.dask_adapter as da_mod
         
-        mock_da = Mock()
+        mock_da = MagicMock()
         mock_da.shape = (2048, 2048, 4)  # Large 4-band array
         mock_da.dtype.itemsize = 4  # float32
         
@@ -123,7 +123,7 @@ def test_dask_array_ingestion():
     with patch('forge3d.ingest.dask_adapter._HAS_DASK', True):
         import forge3d.ingest.dask_adapter as da_mod
         
-        mock_da = Mock()
+        mock_da = MagicMock()
         mock_da.shape = (256, 256)  # Small 2D array
         
         # Mock processing plan
@@ -176,7 +176,7 @@ def test_progress_callback():
     with patch('forge3d.ingest.dask_adapter._HAS_DASK', True):
         import forge3d.ingest.dask_adapter as da_mod
         
-        mock_da = Mock()
+        mock_da = MagicMock()
         mock_da.shape = (100, 100)
         
         # Mock simple plan with one tile
@@ -212,7 +212,7 @@ def test_memory_error_handling():
     with patch('forge3d.ingest.dask_adapter._HAS_DASK', True):
         import forge3d.ingest.dask_adapter as da_mod
         
-        mock_da = Mock()
+        mock_da = MagicMock()
         mock_da.shape = (10000, 10000)  # Very large array
         
         # Mock plan that doesn't fit in memory
@@ -233,7 +233,7 @@ def test_streaming_materialization():
     with patch('forge3d.ingest.dask_adapter._HAS_DASK', True):
         import forge3d.ingest.dask_adapter as da_mod
         
-        mock_da = Mock()
+        mock_da = MagicMock()
         mock_da.shape = (100, 200)
         mock_da.dtype = np.float32
         
@@ -264,7 +264,7 @@ def test_output_array_size_limit():
     with patch('forge3d.ingest.dask_adapter._HAS_DASK', True):
         import forge3d.ingest.dask_adapter as da_mod
         
-        mock_da = Mock()
+        mock_da = MagicMock()
         mock_da.shape = (10000, 10000)  # Would be ~400MB as float32
         mock_da.dtype = np.float32
         
@@ -282,7 +282,7 @@ def test_rechunk_optimization():
     with patch('forge3d.ingest.dask_adapter._HAS_DASK', True):
         import forge3d.ingest.dask_adapter as da_mod
         
-        mock_da = Mock()
+        mock_da = MagicMock()
         mock_da.shape = (1000, 2000, 3)  # 3-band image
         mock_da.dtype.itemsize = 4  # float32
         mock_da.chunks = ((100, 100, 100, 100, 100, 100, 100, 100, 100, 100),
@@ -333,7 +333,7 @@ def test_3d_array_handling():
     with patch('forge3d.ingest.dask_adapter._HAS_DASK', True):
         import forge3d.ingest.dask_adapter as da_mod
         
-        mock_da = Mock()
+        mock_da = MagicMock()
         mock_da.shape = (4, 100, 200)  # 4-band array
         
         # Mock plan for 3D array

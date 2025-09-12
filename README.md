@@ -50,6 +50,17 @@ python examples/terrain_single_tile.py
 
 Runs anywhere wgpu supports: Vulkan / Metal / DX12 / GL (and Browser WebGPU for diagnostics). A discrete or integrated GPU is recommended. Examples/tests that need a GPU will skip if no compatible adapter is found.
 
+## What's new in v0.12.0
+
+- Workstream S — Raster IO & Streaming:
+  - S1: RasterIO windowed reads + block iterator (`windowed_read`, `block_iterator`) with window/out_shape parity.
+  - S2: Nodata/mask → alpha propagation (`extract_masks`, RGBA alpha synthesis) with color fidelity.
+  - S3: CRS normalization via WarpedVRT + pyproj (`WarpedVRTWrapper`, `reproject_window`, `get_crs_info`).
+  - S6: Overview selection (`select_overview_level`, `windowed_read_with_overview`) to reduce bytes at low zoom.
+  - S4: xarray/rioxarray DataArray ingestion (`ingest_dataarray`) preserving dims and CRS/transform.
+  - S5: Dask-chunked ingestion (`ingest_dask_array`, streaming materialization) with memory guardrails.
+  - Demos: `examples/raster_window_demo.py`, `examples/mask_to_alpha_demo.py`, `examples/reproject_window_demo.py`, `examples/overview_selection_demo.py`, `examples/xarray_ingest_demo.py`, `examples/dask_ingest_demo.py`.
+
 ## What's new in v0.11.0
 
 - Workstream R — Matplotlib & Array Interop:
