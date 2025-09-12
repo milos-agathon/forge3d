@@ -1,156 +1,135 @@
-<task id="forge3d-workstream-audit" version="1.1">
-  <title>Audit repo against roadmap.csv for a specified workstream (presence, readiness, evidence; no code edits)</title>
+<task>
+  <title>Implement & wire missing/partial items for Workstream V</title>
 
-  <role>
-    You are Claude Code in <b>Audit Mode</b>. Act as an elite graphics/runtime engineer (Vulkan ≥1.2, WebGPU/WGSL, RAII, Rust, Python ≥3.8, CMake ≥3.24, VMA, Sphinx).
-    Project: forge3d — Rust backend + Python frontend (PyO3), targeting interactive/offline 3D visualization.
-  </role>
+  <inputs>
+    <repoRoot>./</repoRoot>
+    <paths>
+      <path>src/</path>
+      <path>shaders/</path>
+      <path>python/forge3d/</path>
+      <path>python/forge3d/adapters/</path>
+      <path>examples/</path>
+      <path>tests/</path>
+      <path>docs/</path>
+      <path>.github/workflows/</path>
+    </paths>
+    <workstream id="V" title="Datashader Interop">
+      <item id="V1" title="Datashader pipeline → RGBA overlay"/>
+      <item id="V2" title="Datashader performance stress &amp; goldens"/>
+    </workstream>
+  </inputs>
 
   <constraints>
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
-    <build>cmake>=3.24, cargo/rustc, PyO3, VMA</build>
-    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
-    <docs>Sphinx preferred</docs>
-    <uncertainRule>If essential CSV fields or feature details are missing/ambiguous, reply <b>UNCERTAIN</b> and list the exact headers/rows/paths needed.</uncertainRule>
-    <safety>
-      - <b>Audit-only:</b> Do not modify repository contents.
-      - No third-party code changes; skip binaries/large assets.
-      - Prefer structured searches and header-aware CSV parsing.
-    </safety>
-    <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz</exclusions>
+    <build>cmake≥3.24, cargo/rustc, PyO3, VMA</build>
+    <apis>Primary: WebGPU/WGSL; Vulkan 1.2-compatible design</apis>
+    <docs>Sphinx</docs>
+    <scope>Only Workstream V tasks; do not modify other workstreams</scope>
   </constraints>
 
-  <inputs>
-    <repoRoot>./</repoRoot>
-    <roadmapPath>./roadmap.csv</roadmapPath>
-    <!-- Provide either Workstream ID (e.g., "A") or exact Workstream Title -->
-    <workstreamSelector>
-      <![CDATA[
-      ID: V
-      Title: Datashader Interop
-      ]]>
-    </workstreamSelector>
-  </inputs>
-
-  <!-- Exact structure of your roadmap.csv -->
-  <csvSchema>
-    <encoding>utf-8</encoding>
-    <delimiter>comma</delimiter>
-    <columns order="fixed">
-      <col index="0">Workstream ID</col>
-      <col index="1">Workstream Title</col>
-      <col index="2">Task ID</col>
-      <col index="3">Task Title</col>
-      <col index="4">Rationale</col>
-      <col index="5">Deliverables</col>
-      <col index="6">Acceptance Criteria</col>
-      <col index="7">Priority</col>
-      <col index="8">Phase</col>
-      <col index="9">Missing Features</col>
-      <col index="10">Dependencies</col>
-      <col index="11">Risks/Mitigations</col>
-      <!-- Trailing column observed in file; treat as ignorable/empty -->
-      <col index="12" optional="true" ignore="true">Unnamed: 12</col>
-    </columns>
-    <cellConventions>
-      <!-- Inside some cells, items are separated by semicolons; DO NOT split columns by this; use only for keyword extraction -->
-      <listSeparator>semicolon-inside-cell</listSeparator>
-      <markdownInline>allowed (e.g., backticks)</markdownInline>
-      <emptyTrailingColumn>ignore if entirely blank</emptyTrailingColumn>
-    </cellConventions>
-    <validation>
-      <!-- Expected controlled vocabularies; report anomalies in hygiene output (do not mutate file) -->
-      <priorityAllowed>High,Medium,Low</priorityAllowed>
-      <phaseAllowed>MVP,Beyond MVP</phaseAllowed>
-    </validation>
-  </csvSchema>
+  <safety>
+    <step>Create branch: <code>git checkout -b feat/workstream-v-datashader</code></step>
+    <step>Audit-first: list and diff only files under <code>python/forge3d/adapters</code>, <code>examples</code>, <code>tests</code>, <code>docs</code>, <code>.github/workflows</code>.</step>
+    <step>No blind search/replace; avoid binary directories; small, reviewable commits.</step>
+    <step>Treat Datashader as optional dependency; gate imports with availability checks.</step>
+  </safety>
 
   <plan>
-    1) Validate & Load CSV
-       - Open <roadmapPath> with UTF-8; delimiter comma.
-       - Confirm exact header names and order per <csvSchema>. If mismatch → <b>UNCERTAIN</b> listing differences.
-       - Drop/ignore column "Unnamed: 13" if entirely empty.
-       - Produce a brief CSV hygiene report:
-         * Rows with Priority not in {High, Medium, Low}.
-         * Rows with Phase not in {MVP, Beyond MVP}.
-         * Missing Task ID/Title/Deliverables/Acceptance Criteria.
+    <!-- Dependency awareness from roadmap.csv -->
+    <!-- V1 depends on N2;O3 (advanced rendering systems, resource mgmt) – preflight only. -->
+    <!-- V2 depends on R1;G7 (matplotlib interop, perf testing) – preflight only. -->
+    <step id="P0">Preflight checks:
+      <item>Verify adapter framework present (e.g., <code>python/forge3d/adapters/__init__.py</code>).</item>
+      <item>Non-blocking asserts that referenced deps (N2,O3,R1,G7) exist; if missing, proceed with V work using internal shims/tests only.</item>
+      <item>Add dev extra: <code>pip install datashader</code> documented, but keep core package import-safe without datashader installed.</item>
+    </step>
 
-    2) Select Workstream
-       - Filter rows where Workstream ID == provided ID OR Workstream Title == provided Title (case-insensitive).
-       - If none match → <b>UNCERTAIN</b> and list discovered workstreams (ID → Title).
+    <step id="V1-1">Implement adapter:
+      <item>Create <code>python/forge3d/adapters/datashader_adapter.py</code> with class <code>DatashaderAdapter</code>.</item>
+      <item>Functions: <code>is_datashader_available()</code>, <code>rgba_view_from_agg(agg_or_img)</code> (zero-copy numpy RGBA view), <code>validate_alignment(extent, transform, width, height)</code>, <code>to_overlay_texture(rgba, extent)</code>.</item>
+      <item>Zero-copy contract: ensure <code>np.shares_memory</code> true where possible; fallback path allowed with explicit copy counter.</item>
+    </step>
 
-    3) Derive Audit Keywords per Task
-       - From Deliverables/Acceptance Criteria/Dependencies, extract filenames (e.g., *.wgsl), symbols (create_render_pipeline, bind_group), Python API entry points (forge3d.*), example script names, and doc page slugs.
-       - Use semicolon-separated items inside cells as hints; do not alter CSV.
+    <step id="V1-2">Wire exports:
+      <item>Update <code>python/forge3d/adapters/__init__.py</code> to export adapter + availability probe.</item>
+      <item>Update <code>python/forge3d/__init__.py</code> to expose entry points under a stable namespace (e.g., <code>forge3d.adapters.datashader_adapter</code>).</item>
+    </step>
 
-    4) Repository Scan (read-only)
-       - Search src/, shaders/, python/forge3d/, examples/, docs/ with ripgrep.
-       - Collect evidence per task: file paths + line numbers/snippets that match expected artifacts and wiring (e.g., shader referenced by pipeline; Python API exposed; example present).
+    <step id="V1-3">Examples:
+      <item>Add <code>examples/datashader_overlay_demo.py</code> demonstrating millions-of-points pipeline producing an RGBA overlay aligned to geographic extent and composited in forge3d.</item>
+      <item>Output assets: <code>examples/output/datashader_overlay_demo.png</code>, JSON metadata for extent.</item>
+    </step>
 
-    5) Readiness Classification (per task)
-       - <b>Present & Wired</b>: artifacts exist and appear integrated (pipeline + API + example/test/doc).
-       - <b>Present but Partial</b>: artifacts exist but missing wiring/exposure/tests/docs.
-       - <b>Absent</b>: no meaningful artifacts found.
+    <step id="V1-4">Unit &amp; integration tests:
+      <item>Create <code>tests/test_datashader_adapter.py</code> with:
+        <subitem>Zero-copy assertion using <code>np.shares_memory</code> for RGBA buffer.</subitem>
+        <subitem>Alignment validation: pixel center offset ≤ 0.5 px over synthetic extents.</subitem>
+        <subitem>Adapter works when Datashader missing (skipped tests) and when present.</subitem>
+      </item>
+    </step>
 
-    6) Minimal Change Plan (No Edits)
-       - For Partial/Absent: list the minimal file-level actions (paths/symbols) needed to reach “Present & Wired,” respecting platform/build/memory constraints.
+    <step id="V2-1">Perf infra &amp; goldens:
+      <item>Create <code>tests/perf/</code> and <code>tests/goldens/</code>.</item>
+      <item>Add <code>tests/perf/test_datashader_zoom.py</code>:
+        <subitem>Generate deterministic synthetic data with fixed seed.</subitem>
+        <subitem>Render at zoom levels Z0,Z4,Z8,Z12 to images; compare to goldens via SSIM.</subitem>
+        <subitem>Measure frame time per zoom; collect peak RSS; assert thresholds.</subitem>
+      </item>
+      <item>Generate initial goldens: <code>tests/goldens/datashader_Z*.png</code> + sidecar JSON (params, hash).</item>
+    </step>
 
-    7) Outputs
-       - Emit a Markdown audit report and a machine-readable audit matrix CSV. Include CSV hygiene observations.
+    <step id="V2-2">CI wiring:
+      <item>Add <code>.github/workflows/datashader-perf.yml</code> (linux_x86_64 runner) to run perf tests on push/PR; upload diffs on regression.</item>
+      <item>Matrix pin Datashader version(s) to control drift; cache build artifacts.</item>
+    </step>
+
+    <step id="DOCS">Docs:
+      <item>Add Sphinx page <code>docs/user/datashader_interop.rst</code> with usage, zero-copy notes, limits, and memory guidance.</item>
+      <item>Link from docs TOC; include code snippets from the example.</item>
+    </step>
+
+    <step id="FINAL">Finalization:
+      <item>Run full test subset: <code>pytest -k "datashader" -v</code>.</item>
+      <item>Build docs: <code>cd docs &amp;&amp; make html</code>.</item>
+      <item>Open PR with summary, perf table, and goldens diff preview.</item>
+    </step>
   </plan>
 
   <deliverables>
-    - <b>reports/audit_&lt;workstream&gt;.md</b> — Markdown:
-      1) Scope (workstream, matched rows count) & CSV Hygiene summary
-      2) Readiness Verdict per task (Present & Wired / Partial / Absent)
-      3) Evidence Map (file paths + line refs/snippets)
-      4) Blocking Gaps
-      5) Minimal Change Plan (file-level)
-      6) Validation Runbook (commands to verify after implementation)
-    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b> — Columns:
-      <code>Workstream ID,Workstream Title,Task ID,Task Title,Readiness,Evidence Paths,Missing Pieces,Minimal Changes,Priority,Phase,Dependencies,Risks/Mitigations,Original Ref</code>
-    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b> — Detected anomalies (Priority/Phase out-of-vocab, missing required cells).
+    <item>python/forge3d/adapters/datashader_adapter.py</item>
+    <item>python/forge3d/adapters/__init__.py (updated)</item>
+    <item>python/forge3d/__init__.py (updated exports)</item>
+    <item>examples/datashader_overlay_demo.py</item>
+    <item>examples/output/datashader_overlay_demo.png</item>
+    <item>tests/test_datashader_adapter.py</item>
+    <item>tests/perf/test_datashader_zoom.py</item>
+    <item>tests/goldens/datashader_Z{0,4,8,12}.png + metadata JSON</item>
+    <item>.github/workflows/datashader-perf.yml</item>
+    <item>docs/user/datashader_interop.rst</item>
   </deliverables>
 
   <acceptanceCriteria>
-    - AC-001: Exact headers match those specified (including ignorable "Unnamed: 13"); else returns <b>UNCERTAIN</b> with diffs.
-    - AC-002: Report states selected workstream and matched tasks count.
-    - AC-003: Each audited task has a single Readiness Verdict and at least one evidence reference (or explicit “no evidence found”).
-    - AC-004: Minimal Change Plan lists concrete file paths/symbols for all Partial/Absent items.
-    - AC-005: Validation Runbook includes build, headless demo/test, and docs build commands if applicable.
-    - AC-006: No repository modifications were made (audit-only).
+    <!-- From roadmap.csv (lightly normalized to be measurable) -->
+    <item>V1: Datashader RGBA arrays accepted without copy: unit test asserts <code>np.shares_memory(adapter_rgba, src_rgba) == True</code> for shaded output shapes (H,W,4) uint8.</item>
+    <item>V1: Overlay aligns with coordinates: alignment error ≤ 0.5 px over provided extent/transform; test passes across two synthetic extents.</item>
+    <item>V1: Example renders: running <code>python examples/datashader_overlay_demo.py</code> writes <code>examples/output/datashader_overlay_demo.png</code> and prints "OK".</item>
+    <item>V2: SSIM ≥ 0.98 vs goldens across zoom levels Z0,Z4,Z8,Z12 using <code>skimage.metrics.structural_similarity</code>.</item>
+    <item>V2: Frame time ≤ 33 ms at Z8 on linux_x86_64 (reference runner) for the synthetic 1e6-point scene; trend captured for other zooms.</item>
+    <item>V2: CI uploads diff images on regression and fails the job when SSIM &lt; 0.98 or frame time target exceeded.</item>
+    <item>All: Peak RSS during tests ≤ 512 MiB; tests skip gracefully if datashader is not installed.</item>
+    <item>Docs build without warnings and new page appears in the TOC.</item>
   </acceptanceCriteria>
 
-  <execution>
-    <commands>
-      - python - <<'PY'
-import csv, sys, pathlib, codecs
-p = pathlib.Path("{{roadmapPath}}")
-if not p.exists():
-    print("UNCERTAIN: roadmap.csv not found at", p, file=sys.stderr); sys.exit(2)
-with codecs.open(p, "r", "utf-8-sig") as f:
-    reader = csv.reader(f)
-    headers = next(reader, [])
-print("CSV_HEADERS:", headers)
-PY
-      - rg --version
-      - rg -n --stats --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node_modules' -g '!__pycache__' \
-        '(wgsl|create_render_pipeline|bind_group|sampler|texture|queue\\.write_(buffer|texture)|forge3d|import +forge3d|from +forge3d +import)' \
-        src/ shaders/ python/ examples/ docs/ || true
-    </commands>
-    <notes>
-      - Build keyword sets from Deliverables/Acceptance Criteria/Dependencies; use semicolons inside cells as list separators for extraction only.
-      - Document multiple candidate implementations if found; pick the best match by AC phrasing.
-      - Do not mutate or re-save the CSV.
-    </notes>
-  </execution>
-
   <completion>
-    Provide:
-    - <b>reports/audit_&lt;workstream&gt;.md</b>
-    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b>
-    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b>
-    If headers or the workstream filter are invalid, reply <b>UNCERTAIN</b> with exact corrections needed.
+    <summary>Implements Workstream V by adding a Datashader adapter, examples, tests, goldens, and CI to ensure correctness and performance within memory budget.</summary>
+    <commands>
+      <cmd>pip install -e .[dev] datashader</cmd>
+      <cmd>maturin develop --release</cmd>
+      <cmd>pytest tests/test_datashader_adapter.py -v</cmd>
+      <cmd>pytest tests/perf/test_datashader_zoom.py -v</cmd>
+      <cmd>python examples/datashader_overlay_demo.py</cmd>
+      <cmd>cd docs &amp;&amp; make html</cmd>
+    </commands>
   </completion>
 </task>
