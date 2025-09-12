@@ -33,6 +33,13 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    terrain_rendering
    async_operations
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Basemaps & Tiles:
+
+   tiles/xyz_wmts
+   integration/cartopy
+
 Overview
 --------
 

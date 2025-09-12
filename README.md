@@ -50,6 +50,21 @@ python examples/terrain_single_tile.py
 
 Runs anywhere wgpu supports: Vulkan / Metal / DX12 / GL (and Browser WebGPU for diagnostics). A discrete or integrated GPU is recommended. Examples/tests that need a GPU will skip if no compatible adapter is found.
 
+## What's new in v0.13.0
+
+- Workstream U – Basemaps & Tiles:
+  - U1: XYZ/WMTS tile fetch client with on-disk cache, offline mode, and conditional GET handling; mosaic composition to RGBA via Pillow.
+  - U2: Attribution overlay utility with DPI-aware text/logo rendering and TL/TR/BL/BR presets.
+  - U3: Cartopy interop example (Agg backend) with correct extent matching and attribution.
+  - Provider policy compliance: polite `User-Agent` and `Referer` supported (env: `FORGE3D_TILE_USER_AGENT`, `FORGE3D_TILE_REFERER`); OSM attribution uses “© OpenStreetMap contributors”.
+
+Examples:
+- `examples/xyz_tile_compose_demo.py` → `reports/u1_tiles.png`
+- `examples/cartopy_overlay.py` → `reports/u3_cartopy.png`
+
+Docs:
+- `docs/tiles/xyz_wmts.md`, `docs/integration/cartopy.md`
+
 ## What's new in v0.12.0
 
 - Workstream S — Raster IO & Streaming:
