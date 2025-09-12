@@ -5,6 +5,23 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [0.13.0] - 2025-09-12
+
+### Added
+- Workstream U – Basemaps & Tiles
+  - U1: XYZ/WMTS tile client with on-disk cache, offline mode, and conditional GET (ETag/Last-Modified). Mosaic composition to RGBA via Pillow.
+  - U2: Attribution overlay utility with readable text/logo, DPI-aware placement, and TL/TR/BL/BR presets.
+  - U3: Cartopy GeoAxes interop example (Agg backend), overlaying forge3d tile mosaic with extent alignment.
+- Provider policy support: polite `User-Agent` and `Referer` on requests, configurable via env (`FORGE3D_TILE_USER_AGENT`, `FORGE3D_TILE_REFERER`). OSM attribution defaults to “© OpenStreetMap contributors”.
+- Optional extras: `tiles` (Pillow) and `cartopy` (Cartopy + Matplotlib) added to `pyproject.toml`.
+- Docs: `docs/tiles/xyz_wmts.md` and `docs/integration/cartopy.md` added; Sphinx ToC updated.
+
+### Tests
+- Added `tests/test_tiles_client.py` and `tests/test_tiles_overlay.py` with mocked HTTP; 7 tests pass locally.
+
+### Artifacts
+- Demo outputs saved to `reports/u1_tiles.png` and `reports/u3_cartopy.png`.
+
 ## [0.12.0] - 2025-09-12
 
 ### Added
