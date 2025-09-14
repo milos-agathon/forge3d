@@ -291,6 +291,19 @@ postfx.enable("tonemap", exposure=1.1, gamma=2.2)
 r.render_triangle_png("triangle_postfx.png")
 ```
 
+## A1: GPU Path Tracer (MVP)
+
+Use the minimal path tracing API for a single-sphere scene.
+
+```python
+from forge3d.path_tracing import PathTracer, make_sphere, make_camera
+
+tracer = PathTracer(1, 1)
+scene = [make_sphere(center=(0,0,-3), radius=1.0, albedo=(0.8,0.2,0.2))]
+cam   = make_camera(origin=(0,0,0), look_at=(0,0,-1), up=(0,1,0), fov_y=45.0, aspect=1.0)
+img   = tracer.render_rgba(64,64,scene,cam,seed=123,frames=1,use_gpu=True)  # (64,64,4) uint8
+```
+
 - Native toggle methods (available after rebuilding the extension):
   - `Renderer.set_postfx_enabled(True|False)`
   - `Renderer.is_postfx_enabled()`

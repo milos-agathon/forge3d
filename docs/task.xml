@@ -1,33 +1,26 @@
-<task id="forge3d-workstream-verify-and-implement" version="2.0">
-  <title>Verify a workstream exists, audit readiness, and implement missing items in one branch/PR</title>
+<task id="ws-A1-pathtracer-gpu" version="1.0">
+  <title>Implement A1: Compute Path Tracer MVP — GPU Kernel (WGSL) + Rust backend + Python bridge</title>
 
   <role>
-    You are Codex CLI in <b>Verification → Implementation Mode</b>, acting as a senior graphics/runtime engineer
-    (Vulkan ≥1.2, WebGPU/WGSL, RAII, Rust, Python ≥3.8, PyO3, CMake ≥3.24, VMA, Sphinx).
+    You are OpenAI Codex CLI operating as a senior graphics/runtime engineer.
+    Stack: Vulkan ≥1.2 (design-compat), WebGPU/wgpu + WGSL, Rust, Python ≥3.8 (PyO3/maturin abi3), CMake ≥3.24, VMA, Sphinx.
     Project: forge3d — Rust backend + Python frontend for interactive/offline 3D visualization.
   </role>
 
   <switches>
-    <!-- Set WRITE_CHANGES=false to do verification only -->
     <WRITE_CHANGES>true</WRITE_CHANGES>
-    <!-- When true, generate and run tests where feasible -->
     <USE_TESTS>true</USE_TESTS>
-    <!-- When true, add/adjust CI to run fmt/clippy/pytest/docs/wheel (no publish) -->
     <ENSURE_CI>true</ENSURE_CI>
   </switches>
 
   <constraints>
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
-    <build>cargo/rustc, maturin abi3 (py≥3.8), optional CMake≥3.24 wrapper</build>
-    <apis>WebGPU/WGSL primary; Vulkan 1.2-compatible design</apis>
-    <docs>Sphinx preferred; README/CHANGELOG kept accurate</docs>
     <safety>
-      - Work in a feature branch. Keep commits small and scoped to a single task.
-      - Prefer minimal edits; do not remove user content unless obviously generated artifacts.
-      - If an operation would delete or overwrite code, create a backup copy first.
-      - If essential information is missing, reply <b>UNCERTAIN</b> and list exact needs.
-      - If a tool is unavailable, mark the check as SKIPPED with the command to run.
+      - Make only the minimal changes needed for the A1 MVP.
+      - Never delete custom user code; only add .gitignore entries for generated artifacts.
+      - Keep commits small and scoped: one logical commit per subtask.
+      - If a tool is missing, mark the step SKIPPED with the exact command to run.
     </safety>
     <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz, out, diag_out</exclusions>
   </constraints>
@@ -37,67 +30,175 @@
     <roadmapPath>./roadmap2.csv</roadmapPath>
     <workstreamSelector>
       <![CDATA[
-      ID: A
-      Title: Path Tracing (WebGPU Compute, Offline HQ)
+      ID: A1
+      Title: Compute Path Tracer MVP - GPU Kernel Implementation
       ]]>
+    </workstreamSelector>
   </inputs>
 
-  <csvSchema>
-    <encoding>utf-8</encoding>
-    <delimiter>comma</delimiter>
-    <columns order="fixed">
-      <col index="0">Workstream ID</col>
-      <col index="1">Workstream Title</col>
-      <col index="2">Task ID</col>
-      <col index="3">Task Title</col>
-      <col index="4">Rationale</col>
-      <col index="5">Deliverables</col>
-      <col index="6">Acceptance Criteria</col>
-      <col index="7">Priority</col>
-      <col index="8">Phase</col>
-      <col index="9">Missing Features</col>
-      <col index="10">Dependencies</col>
-      <col index="11">Risks/Mitigations</col>
-      <col index="12" optional="true" ignore="true">Unnamed: 12</col>
-    </columns>
-    <cellConventions>
-      <listSeparator>semicolon-inside-cell</listSeparator>
-      <markdownInline>allowed</markdownInline>
-      <emptyTrailingColumn>ignore if entirely blank</emptyTrailingColumn>
-    </cellConventions>
-  </csvSchema>
+  <acceptanceCriteria>
+    <ac id="AC-1">roadmap2.csv contains a row with Workstream ID "A1" (case-insensitive) whose Title contains "Compute Path Tracer MVP". If not found → UNCERTAIN (list discovered workstreams), STOP.</ac>
+    <ac id="AC-2">WGSL compute kernel exists at src/shaders/pt_kernel.wgsl with: (a) uniforms (width, height, frame_index), camera params, scene buffer; (b) xorshift64* RNG matching CPU sequence; (c) jittered primary rays; (d) ray–sphere intersections; (e) HDR accumulation and Reinhard tonemap; (f) documented bind groups/bindings in file header.</ac>
+    <ac id="AC-3">Rust backend implements PathTracerGPU (src/path_tracing/mod.rs) with compute pipeline creation, bind group layout, buffers (uniforms/scene/accum/output), tiling dispatch, and GPU→CPU readback producing RGBA output.</ac>
+    <ac id="AC-4">Python bridge (python/forge3d/path_tracing.py) uses GPU when available, falls back to CPU otherwise, preserves determinism with fixed seeds, and exposes render_rgba(width,height,scene,camera,seed,frames=1,use_gpu=True).</ac>
+    <ac id="AC-5">Unit test tests/test_path_tracing_gpu.py verifies: (a) adapter detection + skip if none; (b) 64×64 single-sphere render runs on GPU; (c) deterministic RNG with fixed seed (first N samples match CPU to tolerance); (d) fallback to CPU if GPU disabled.</ac>
+    <ac id="AC-6">Docs updated: brief section in README.md and docs/api (if Sphinx present) describing A1 GPU tracer usage and limitations.</ac>
+    <ac id="AC-7">Code compiles/lints/tests on all platforms (fmt/clippy/pytest/docs/wheel OK). CI updated/ensured if missing.</ac>
+  </acceptanceCriteria>
+
+  <prechecks>
+    <!-- Verify roadmap row exists -->
+    <command>
+      <![CDATA[
+python - <<'PY'
+import csv, sys, codecs
+ws_id="A1".lower()
+found=False
+rows=[]
+try:
+  with codecs.open("roadmap2.csv","r","utf-8-sig") as f:
+    rdr=csv.DictReader(f)
+    for r in rdr:
+      rows.append((r.get("Workstream ID",""), r.get("Workstream Title","")))
+      if (r.get("Workstream ID","").lower()==ws_id) or ("compute path tracer mvp" in r.get("Workstream Title","").lower()):
+        found=True
+except FileNotFoundError:
+  print("UNCERTAIN: roadmap2.csv not found", file=sys.stderr); sys.exit(2)
+if not found:
+  print("UNCERTAIN: A1 not found. Workstreams:", sorted(set(rows))[:50]); sys.exit(3)
+print("WORKSTREAM_FOUND:A1")
+PY
+      ]]>
+    </command>
+  </prechecks>
+
+  <design>
+    <wgslBindings>
+      <![CDATA[
+# src/shaders/pt_kernel.wgsl — header doc (required)
+Bind Group 0:
+  @binding(0) uniform Uniforms {
+    width: u32; height: u32; frame_index: u32; _pad: u32;
+    cam_origin: vec3<f32>; cam_fov_y: f32;
+    cam_right: vec3<f32>; cam_aspect: f32;
+    cam_up: vec3<f32>;    cam_exposure: f32;
+    cam_forward: vec3<f32>; seed_hi: u32; seed_lo: u32;
+  };
+Bind Group 1:
+  @binding(0) readonly storage buffer Scene { spheres: array<Sphere>; };
+  // MVP sphere only
+  struct Sphere { center: vec3<f32>; radius: f32; albedo: vec3<f32>; _pad0: f32; }
+Bind Group 2:
+  @binding(0) storage buffer Accum { hdr: array<vec4<f32>>; }; // linear HDR accumulation
+Bind Group 3:
+  @binding(0) storage texture2D<rgba16float, write>; // tonemapped output
+Workgroup: @workgroup_size(8,8,1)
+RNG: xorshift64* emulated with vec2<u32> (hi,lo) to match CPU sequence (constant 0x2545F4914F6CDD1D).
+Jitter: tent filter applied via two RNG calls, mapped to [-0.5,+0.5] pixels.
+Tonemap: Reinhard: c/(1+c), then apply exposure; write to RGBA16F storage texture.
+      ]]>
+    </wgslBindings>
+    <rustAPI>
+      <![CDATA[
+pub struct PathTracerGPU {
+  device: Arc<wgpu::Device>,
+  queue: Arc<wgpu::Queue>,
+  pipeline: wgpu::ComputePipeline,
+  bgl0: wgpu::BindGroupLayout, bgl1: wgpu::BindGroupLayout, bgl2: wgpu::BindGroupLayout, bgl3: wgpu::BindGroupLayout,
+  uniforms: wgpu::Buffer,
+  scene_buf: wgpu::Buffer,
+  accum_buf: wgpu::Buffer,
+  out_tex: wgpu::Texture, out_view: wgpu::TextureView,
+  bind0: wgpu::BindGroup, bind1: wgpu::BindGroup, bind2: wgpu::BindGroup, bind3: wgpu::BindGroup,
+  width: u32, height: u32, frame_index: u32,
+}
+impl PathTracerGPU {
+  pub fn new(device:&Arc<wgpu::Device>, queue:&Arc<wgpu::Queue>, width:u32, height:u32, scene:&[SphereCPU], cam:&CameraCPU) -> anyhow::Result<Self> { /* create buffers/pipeline/binds */ }
+  pub fn dispatch(&mut self, tiles:Option<(u32,u32)>) -> anyhow::Result<()> { /* encode compute pass, dispatch ceil_div(width,8) */ }
+  pub fn read_rgba(&self) -> anyhow::Result<Vec<u8>> { /* copy out_tex -> buffer -> map -> RGBA8 via conversion */ }
+}
+      ]]>
+    </rustAPI>
+    <pythonAPI>
+      <![CDATA[
+# python/forge3d/path_tracing.py
+class PathTracer:
+    def render_rgba(self, width:int, height:int, scene, camera, seed:int=1, frames:int=1, use_gpu:bool=True) -> "np.ndarray[H,W,4] uint8":
+        """
+        Uses GPU if available and allowed; falls back to CPU implementation.
+        Deterministic for fixed seed + frames=1. For frames>1, progressive accumulation with fixed per-frame seeds.
+        """
+      ]]>
+    </pythonAPI>
+  </design>
+
+  <changes>
+    <createOrModify>
+      <file path="src/path_tracing/mod.rs" kind="new"/>
+      <file path="src/path_tracing/compute.rs" kind="new"/>
+      <file path="src/shaders/pt_kernel.wgsl" kind="modify-or-new"/>
+      <file path="python/forge3d/path_tracing.py" kind="modify"/>
+      <file path="tests/test_path_tracing_gpu.py" kind="new"/>
+      <file path=".gitignore" kind="modify-append"/>
+      <file path="README.md" kind="modify-append"/>
+      <file path="docs/api/path_tracing.md" kind="new-optional"/>
+    </createOrModify>
+
+    <implNotes>
+      <![CDATA[
+- WGSL: Implement xorshift64* with vec2<u32> (hi,lo):
+    fn rotl64(x: vec2<u32>, n:u32) -> vec2<u32> { /* 64-bit rotate via (hi,lo) */ }
+    fn shl64(x: vec2<u32>, n:u32) -> vec2<u32> { /* 64-bit shift */ }
+    fn shr64(x: vec2<u32>, n:u32) -> vec2<u32> { /* 64-bit shift */ }
+    fn mul64(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { /* 128-bit -> low64 using u32 math */ }
+    const C: vec2<u32> = vec2<u32>(0x4F6CDD1D, 0x2545F491); // lo, hi of 0x2545F4914F6CDD1D
+    // x ^= x >> 12; x ^= x << 25; x ^= x >> 27; x * C;
+- Scene MVP: array<Sphere>; compute nearest hit and simple lambert shading with constant light dir or white albedo.
+- Accumulation: hdr[idx] = mix(hdr[idx], sample, 1.0 / f32(frame_index+1u)); then reinhard + exposure, write to out texture.
+- Rust: ensure bind group layouts reflect WGSL; use storage texture format rgba16float for out.
+- Tiling: default tile 256×256 if width*height large; loop dispatch over tiles; keep memory usage ≤512 MiB host-visible.
+- Readback: copy texture to a temp RGBA16F buffer, map, convert to u8 RGBA in Rust (or do a tonemap/output-to-RGBA8 in kernel).
+- Determinism: base RNG seed on (seed ^ frame_index) and per-pixel hashed coords (e.g., Wang hash) but keep sequence identical to CPU baseline for first draw; validate with tests.
+      ]]>
+    </implNotes>
+  </changes>
+
+  <tests>
+    <python path="tests/test_path_tracing_gpu.py">
+      <![CDATA[
+import os, pytest, numpy as np
+from forge3d.path_tracing import PathTracer, make_sphere, make_camera
+
+def _gpu_available():
+    try:
+        # import internal probe if exists; else attempt to construct tracer
+        return True
+    except Exception:
+        return False
+
+@pytest.mark.skipif(not _gpu_available(), reason="No compatible GPU adapter")
+def test_gpu_single_sphere_64x64_deterministic(tmp_path):
+    tracer = PathTracer()
+    scene = [make_sphere(center=(0,0,-3), radius=1.0, albedo=(0.8,0.2,0.2))]
+    cam   = make_camera(origin=(0,0,0), look_at=(0,0,-1), up=(0,1,0), fov_y=45.0, aspect=1.0, exposure=1.0)
+    img1 = tracer.render_rgba(64,64,scene,cam,seed=123,frames=1,use_gpu=True)
+    img2 = tracer.render_rgba(64,64,scene,cam,seed=123,frames=1,use_gpu=True)
+    assert img1.shape == (64,64,4)
+    assert np.all(img1 == img2), "deterministic for 1 frame with fixed seed"
+
+def test_fallback_cpu(tmp_path):
+    tracer = PathTracer()
+    scene = [make_sphere(center=(0,0,-3), radius=1.0, albedo=(1,1,1))]
+    cam   = make_camera(origin=(0,0,0), look_at=(0,0,-1), up=(0,1,0), fov_y=45.0, aspect=1.0, exposure=1.0)
+    img = tracer.render_rgba(32,32,scene,cam,seed=1,frames=1,use_gpu=False)
+    assert img.shape == (32,32,4)
+      ]]>
+    </python>
+  </tests>
 
   <plan>
-    1) Validate & Load CSV
-       - Read <roadmapPath> with UTF-8; verify headers match <csvSchema>.
-       - If headers differ → <b>UNCERTAIN</b> with a diff table and stop.
-       - Produce CSV Hygiene: rows with out-of-vocab Priority/Phase; rows missing Task ID/Title/Deliverables/Acceptance Criteria.
-
-    2) Select Workstream (Existence Check)
-       - Case-insensitive match by Workstream ID OR Title.
-       - If none match → <b>UNCERTAIN</b> and list discovered workstreams (ID → Title), then stop.
-       - If matched, print “WORKSTREAM_FOUND” with count of tasks.
-
-    3) Derive Task Intents
-       - For each matched task (respecting priority/phase filters), parse Deliverables & Acceptance Criteria into concrete artifacts:
-         * probable file paths (e.g., src/shaders/*.wgsl, python/forge3d/*.py, docs/*, examples/*)
-         * symbols/APIs (create_render_pipeline, bind_group, class/func names)
-         * tests/docs/CI hooks
-       - Build a per-task keyword set from cell contents (split semicolons inside cells).
-
-    4) Repository Audit (Read-only)
-       - For each task, scan src/, shaders/, python/, examples/, docs/ with ripgrep.
-       - Classify readiness:
-         <b>Present & Wired</b> (artifacts exist + integrated)
-         <b>Present but Partial</b> (exists but missing wiring/tests/docs)
-         <b>Absent</b> (no meaningful artifacts)
-       - Capture evidence: file:line refs + brief snippet.
-
-    5) Minimal Change Plan (Per Task)
-       - For Partial/Absent, list the exact minimal file-level changes needed to meet Acceptance Criteria and constraints (platforms/build/GPU budget).
-       - If unclear → mark the task <b>BLOCKED</b> and specify exactly what artifact/decision is needed.
-
-    6) Implementation (Write mode only if <WRITE_CHANGES>true</WRITE_CHANGES>)
+    <!-- EXACTLY INCLUDE THESE STEPS -->
+    5) Implementation (Write mode only if &lt;WRITE_CHANGES&gt;true&lt;/WRITE_CHANGES&gt;)
        - Create branch: <code>git checkout -b ws-&lt;ID-or-slug&gt;-implementation</code>
        - For each task in deterministic order (by Priority then Task ID):
          * Apply minimal changes.
@@ -107,7 +208,7 @@
          * Keep one commit per task: <code>git commit -am "WS&lt;ID&gt; &lt;TaskID&gt;: &lt;short summary&gt;"</code>
        - Maintain safety: never delete custom user code; only remove generated artifacts (.pyd/.so, build/ etc.) when explicitly required by AC; otherwise add .gitignore entries.
 
-    7) Validation Run
+    6) Validation Run
        - Commands (skip gracefully if tool missing; record SKIPPED):
          * <code>cargo fmt -- --check</code>
          * <code>cargo clippy --all-targets --all-features -D warnings</code>
@@ -119,109 +220,38 @@
        - Re-run the audit matrix; all tasks should now be <b>Present & Wired</b>.
        - If any still failing → fix or mark explicitly BLOCKED with reason.
 
-    8) PR Preparation
+    7) PR Preparation
        - Generate <b>PR_BODY.md</b> summarizing: scope, tasks addressed, evidence, risks/mitigations, and validation output.
        - Print final change summary: <code>git status -s</code>, <code>git log --oneline -n 50</code>.
-
   </plan>
 
-  <deliverables>
-    <!-- Always produced -->
-    <file>reports/ws_audit.md</file>
-    <file>reports/ws_matrix.csv</file>
-    <file>reports/csv_hygiene.md</file>
-    <!-- Produced in write mode -->
-    <file optional="true">PR_BODY.md</file>
-    <file optional="true">PATCHPLAN.md</file>
-  </deliverables>
-
-  <acceptanceCriteria>
-    <ac id="AC-001">Workstream existence is verified; if not found, returns <b>UNCERTAIN</b> listing available IDs/Titles.</ac>
-    <ac id="AC-002">Each selected task has a single readiness verdict with at least one evidence reference or “no evidence found”.</ac>
-    <ac id="AC-003">For every Partial/Absent task, a concrete minimal change list exists (paths/symbols).</ac>
-    <ac id="AC-004" when="WRITE_CHANGES=true">All feasible tasks are implemented with one commit per task on a feature branch.</ac>
-    <ac id="AC-005" when="WRITE_CHANGES=true">Validation run completes; failures are either fixed or explicitly BLOCKED with reasons and next steps.</ac>
-    <ac id="AC-006">Deliverables (reports and, if applicable, PR docs) are generated and printed.</ac>
-  </acceptanceCriteria>
-
   <execution>
-    <commands>
-      <!-- CSV header check -->
-      - python - <<'PY'
-import csv, sys, codecs, os
-p = os.environ.get("ROADMAP","{{roadmapPath}}")
-try:
-    with codecs.open(p, "r", "utf-8-sig") as f:
-        rdr = csv.reader(f); hdr = next(rdr, [])
-    print("CSV_HEADERS_OK" if hdr[:13]==[
-        "Workstream ID","Workstream Title","Task ID","Task Title","Rationale",
-        "Deliverables","Acceptance Criteria","Priority","Phase","Missing Features",
-        "Dependencies","Risks/Mitigations","Unnamed: 12"
-    ] else "CSV_HEADERS_DIFF", hdr)
-except FileNotFoundError:
-    print("UNCERTAIN: roadmap.csv not found at", p); sys.exit(2)
-PY
-
-      <!-- Discover candidate workstreams -->
-      - python - <<'PY'
-import csv, codecs
-with codecs.open("{{roadmapPath}}","r","utf-8-sig") as f:
-    rdr = csv.DictReader(f)
-    ws = sorted({(r["Workstream ID"].strip(), r["Workstream Title"].strip()) for r in rdr})
-print("WORKSTREAMS:", ws[:50])
-PY
-
-      <!-- Ripgrep presence scan (read-only audit) -->
-      - rg --version
-      - rg -n --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node_modules' -g '!__pycache__' \
-        '(wgsl|@group\\(|@binding\\(|bind_group|create_render_pipeline|queue\\.write_(buffer|texture)|forge3d|from +forge3d +import|sphinx|maturin|CMakeLists\\.txt)' \
-        src/ shaders/ python/ examples/ docs/ || true
-
-      <!-- Optional: quick env snapshot -->
-      - rustc --version || true
-      - cargo --version || true
-      - python -V || true
-      - cmake --version || true
-      - sphinx-build --version || true
-      - maturin --version || true
-    </commands>
-
-    <notes>
-      - Build per-task keyword sets from Deliverables/Acceptance Criteria/Dependencies; split semicolons inside those cells only.
-      - Use conservative defaults for platform-specific paths (Windows DLL search, macOS rpaths, Linux SONAME).
-      - Respect the ≤512 MiB host-visible budget when adding examples/buffers; prefer small fixtures.
-    </notes>
-  </execution>
-
-  <implementation when="WRITE_CHANGES=true">
     <steps>
-      <step>git checkout -b ws-&lt;slug-from-ID-or-Title&gt;-implementation</step>
-      <step>For each <b>Partial/Absent</b> task:
-        <ul>
-          <li>Apply minimal code/doc/test edits per the task’s Acceptance Criteria.</li>
-          <li>If a required artifact is ambiguous, create a thin, documented placeholder and mark the exact TODO in code + reports.</li>
-          <li>Update or add tests when <USE_TESTS>true</USE_TESTS>; prefer deterministic image/array checks where applicable.</li>
-          <li>Update Sphinx/README/CHANGELOG when docs are part of AC.</li>
-          <li>Commit: <code>git commit -am "WS&lt;ID&gt; &lt;TaskID&gt;: &lt;concise change&gt;"</code></li>
-        </ul>
-      </step>
-      <step when="ENSURE_CI=true">If CI workflow missing, add <code>.github/workflows/ci.yml</code> to run fmt/clippy/pytest/docs/wheel on linux/macos/windows (no publish).</step>
-      <step>Run validation commands; fix non-flaky failures; otherwise mark BLOCKED with reason and a single command the maintainer should run to unblock.</step>
-      <step>Generate <b>PR_BODY.md</b> summarizing changes, risks, mitigations, and validation outputs; print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
+      <step>Create feature branch: <code>git checkout -b ws-A1-implementation</code></step>
+      <step>Expand/create <code>src/shaders/pt_kernel.wgsl</code> with the documented header, uniforms, scene, RNG (xorshift64*), jittered primary rays, ray–sphere hit, HDR accumulation, Reinhard tonemap, and storage texture write.</step>
+      <step>Add Rust backend files: <code>src/path_tracing/mod.rs</code>, <code>src/path_tracing/compute.rs</code> implementing <code>PathTracerGPU</code>, pipeline creation, buffers, bind groups, tiling dispatch, and readback.</step>
+      <step>Modify Python bridge: <code>python/forge3d/path_tracing.py</code> to expose <code>render_rgba(..., use_gpu=True)</code>, with GPU detection/selection and deterministic seeding; fallback to CPU path if GPU unavailable.</step>
+      <step>Create tests: <code>tests/test_path_tracing_gpu.py</code> per above; mark GPU dependency with a skip guard.</step>
+      <step>Append <code>.gitignore</code> with <code>out/</code>, <code>diag_out/</code>, build artifacts as needed; keep user code untouched.</step>
+      <step>Docs: add a short usage section to <code>README.md</code>; if docs/ exists, add <code>docs/api/path_tracing.md</code> and link from index.</step>
+      <step>Run Validation Run commands; fix non-flaky failures. Record any SKIPPED with the command to run locally.</step>
+      <step>Generate <code>PR_BODY.md</code> summarizing changes and results. Print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
     </steps>
-  </implementation>
+  </execution>
 
   <completion>
     <print>
-      - reports/ws_audit.md
-      - reports/ws_matrix.csv
-      - reports/csv_hygiene.md
-      - PR_BODY.md (if WRITE_CHANGES=true)
-      - PATCHPLAN.md (if WRITE_CHANGES=true)
+      - src/shaders/pt_kernel.wgsl (expanded)
+      - src/path_tracing/mod.rs
+      - src/path_tracing/compute.rs
+      - python/forge3d/path_tracing.py
+      - tests/test_path_tracing_gpu.py
+      - README.md (updated)
+      - docs/api/path_tracing.md (if Sphinx present)
+      - PR_BODY.md
     </print>
     <fallback>
-      If headers mismatch or workstream not found, stop with <b>UNCERTAIN</b> and list:
-      (a) expected vs actual headers, (b) discovered workstreams (ID → Title), and (c) exact fixes required.
+      If A1 is not found in roadmap2.csv, respond <b>UNCERTAIN</b> with discovered workstreams (ID→Title) and STOP without changes.
     </fallback>
   </completion>
 </task>

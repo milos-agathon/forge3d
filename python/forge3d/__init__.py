@@ -36,6 +36,9 @@ __all__ = [
     # Mesh Generation
     "grid_generate",
     
+    # Advanced (explicit import recommended)
+    # "path_tracing" module provides PathTracer skeleton for Workstream A
+    
     # Legacy test helpers (compatibility shims)
     "c10_parent_z90_child_unitx_world",
     "c6_parallel_record_metrics",
@@ -571,6 +574,7 @@ def get_current_palette():
 # import forge3d.pbr as pbr          # PBR materials system
 # import forge3d.shadows as shadows  # Shadow mapping (if available)
 # import forge3d.materials as mat    # Legacy compatibility for PBR
+# import forge3d.path_tracing as pt  # Workstream A: Path Tracing (skeleton API)
 # 
 # These modules are not imported by default to keep the core API lightweight.
 # ============================================================================
