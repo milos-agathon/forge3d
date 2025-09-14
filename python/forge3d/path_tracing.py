@@ -298,7 +298,7 @@ def create_path_tracer(width: int, height: int, *, max_bounces: int = 1, seed: i
     return PathTracer(width, height, max_bounces=max_bounces, seed=seed)
 
 
-def render_rgba(width: int, height: int, scene, camera, seed: int, frames: int = 1, use_gpu: bool = True, engine: Optional[TracerEngine] = None):
+def render_rgba(width: int, height: int, scene, camera, seed: int, frames: int = 1, use_gpu: bool = True, engine: Optional[TracerEngine] = None, mesh=None):
     """Render RGBA image using GPU when available, else CPU fallback.
 
     Args:
@@ -310,19 +310,25 @@ def render_rgba(width: int, height: int, scene, camera, seed: int, frames: int =
         frames: Number of samples per pixel
         use_gpu: Whether to use GPU rendering
         engine: Path tracing engine (MEGAKERNEL or WAVEFRONT), defaults to MEGAKERNEL
+        mesh: Optional MeshHandle from mesh.upload_mesh() for triangle mesh rendering
 
     Returns:
         RGBA image as numpy array (H, W, 4) uint8
 
-    Matches the A1 bridge signature for deterministic smoke testing.
+    Matches the A1 bridge signature for deterministic smoke testing with mesh support.
     """
     if use_gpu:
         try:
             from . import _forge3d as _f  # type: ignore
             from . import enumerate_adapters  # type: ignore
-            # Only use native GPU path when adapter exists and we have a non-empty scene
-            if enumerate_adapters() and bool(scene):
-                return _f._pt_render_gpu(int(width), int(height), scene, camera, int(seed), int(frames))
+            # Only use native GPU path when adapter exists and we have a non-empty scene or mesh
+            if enumerate_adapters() and (bool(scene) or mesh is not None):
+                if mesh is not None:
+                    # Call GPU path tracer with mesh support
+                    return _f._pt_render_gpu_mesh(int(width), int(height), scene or [], camera, int(seed), int(frames), mesh)
+                else:
+                    # Original GPU path for spheres only
+                    return _f._pt_render_gpu(int(width), int(height), scene, camera, int(seed), int(frames))
         except Exception:
             pass
     # CPU fallback
@@ -330,6 +336,20 @@ def render_rgba(width: int, height: int, scene, camera, seed: int, frames: int =
     for sp in scene or []:
         c = sp.get('center', (0.0, 0.0, 0.0)); r = float(sp.get('radius', 1.0)); mat = sp.get('albedo', (1.0, 1.0, 1.0))
         t.add_sphere(tuple(c), float(r), mat)
+
+    # Add mesh triangles if provided
+    if mesh is not None:
+        from .mesh import MeshHandle  # Import here to avoid circular imports
+        if isinstance(mesh, MeshHandle):
+            vertices = mesh._mesh['vertices']
+            indices = mesh._mesh['indices']
+            # Convert to individual triangles for CPU PathTracer
+            for tri_indices in indices:
+                v0 = tuple(vertices[tri_indices[0]])
+                v1 = tuple(vertices[tri_indices[1]])
+                v2 = tuple(vertices[tri_indices[2]])
+                t.add_triangle(v0, v1, v2, (0.7, 0.7, 0.8))  # Default mesh color
+
     return t.render_rgba(spp=int(frames))
 
 
@@ -344,6 +364,7 @@ def render_aovs(
     frames: int = 1,
     use_gpu: bool = True,
     engine: Optional[TracerEngine] = None,
+    mesh=None,
 ):
     """Render AOVs on GPU when available, else CPU fallback.
 
@@ -357,6 +378,7 @@ def render_aovs(
         frames: Number of samples per pixel
         use_gpu: Whether to use GPU rendering
         engine: Path tracing engine (MEGAKERNEL or WAVEFRONT), defaults to MEGAKERNEL
+        mesh: Optional MeshHandle from mesh.upload_mesh() for triangle mesh rendering
 
     Returns:
         Dict of numpy arrays keyed by canonical AOV names.
@@ -367,6 +389,20 @@ def render_aovs(
     for sp in scene or []:
         c = sp.get('center', (0.0, 0.0, 0.0)); r = float(sp.get('radius', 1.0)); mat = sp.get('albedo', (1.0, 1.0, 1.0))
         t.add_sphere(tuple(c), float(r), mat)
+
+    # Add mesh triangles if provided
+    if mesh is not None:
+        from .mesh import MeshHandle  # Import here to avoid circular imports
+        if isinstance(mesh, MeshHandle):
+            vertices = mesh._mesh['vertices']
+            indices = mesh._mesh['indices']
+            # Convert to individual triangles for CPU PathTracer
+            for tri_indices in indices:
+                v0 = tuple(vertices[tri_indices[0]])
+                v1 = tuple(vertices[tri_indices[1]])
+                v2 = tuple(vertices[tri_indices[2]])
+                t.add_triangle(v0, v1, v2, (0.7, 0.7, 0.8))  # Default mesh color
+
     return t.render_aovs_cpu(tuple(aovs), spp=int(frames))
 
 

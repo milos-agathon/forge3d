@@ -194,7 +194,6 @@ impl WavefrontPipelines {
             layout: Some(&pipeline_layout),
             module: shader,
             entry_point: "main",
-            compilation_options: Default::default(),
         });
         
         Ok(pipeline)
@@ -291,7 +290,6 @@ impl WavefrontPipelines {
             layout: Some(&pipeline_layout),
             module: shader,
             entry_point: "main",
-            compilation_options: Default::default(),
         });
         
         Ok(pipeline)
@@ -367,7 +365,6 @@ impl WavefrontPipelines {
             layout: Some(&pipeline_layout),
             module: shader,
             entry_point: "main",
-            compilation_options: Default::default(),
         });
         
         Ok(pipeline)
@@ -464,7 +461,6 @@ impl WavefrontPipelines {
             layout: Some(&pipeline_layout),
             module: shader,
             entry_point: "main",
-            compilation_options: Default::default(),
         });
         
         Ok(pipeline)
@@ -548,7 +544,6 @@ impl WavefrontPipelines {
             layout: Some(&pipeline_layout),
             module: shader,
             entry_point: "compact_rays_simple",  // Use simple compaction for MVP
-            compilation_options: Default::default(),
         });
         
         Ok(pipeline)

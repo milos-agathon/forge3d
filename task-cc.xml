@@ -1,5 +1,5 @@
-<task id="ws-A2-auto" version="1.0">
-  <title>Workstream A · Task A2 — Implement per roadmap2.csv (auto-derive deliverables → code/tests/docs)</title>
+<task id="ws-A3-mesh-pt-traversal" version="1.0">
+  <title>Workstream A · Task A3 — Triangle Mesh Path Tracing with CPU BVH Build & GPU Traversal</title>
 
   <role>
     You are OpenAI Codex CLI in <b>Verification → Implementation Mode</b>, acting as a senior graphics/runtime engineer.
@@ -17,9 +17,10 @@
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
     <safety>
-      - Minimal, additive changes guided strictly by roadmap2.csv A2 row; do not remove user code.
+      - Minimal, additive changes; do not break existing sphere-path tracer.
+      - Never delete custom user code; only add .gitignore entries for generated artifacts.
       - If a tool is missing, mark step SKIPPED with the exact command to run locally.
-      - If A2 is ambiguous, reply <b>UNCERTAIN</b> with the precise missing fields/rows and STOP without changes.
+      - If roadmap data is missing/ambiguous, reply <b>UNCERTAIN</b> listing the exact CSV headers/rows needed.
     </safety>
     <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz, out, diag_out</exclusions>
   </constraints>
@@ -30,106 +31,206 @@
     <workstreamSelector>
       <![CDATA[
       Workstream ID: A
-      Task ID: A2
+      Task ID: A3
+      Title contains: Triangle Mesh + BVH
       ]]>
     </workstreamSelector>
   </inputs>
 
-  <!-- 1) Verify A2 exists and extract Title/Deliverables/Acceptance -->
+  <!-- Verify A3 exists in roadmap2.csv and capture its meta -->
   <prechecks>
     <command>
       <![CDATA[
 python - <<'PY'
-import csv, codecs, sys, json, re
+import csv, codecs, sys, json
 row=None
 try:
   with codecs.open("roadmap2.csv","r","utf-8-sig") as f:
     rdr=csv.DictReader(f)
     for r in rdr:
-      if (r.get("Workstream ID","").strip().lower()=="a" and
-          (r.get("Task ID","").strip().lower()=="a2" or "a2" in (r.get("Task Title","") or "").strip().lower())):
+      wid=(r.get("Workstream ID","") or "").strip().lower()
+      tid=(r.get("Task ID","") or "").strip().lower()
+      ttl=(r.get("Task Title","") or "").strip().lower()
+      if wid=="a" and (tid=="a3" or "a3" in ttl):
         row=r; break
 except FileNotFoundError:
   print("UNCERTAIN: roadmap2.csv not found", file=sys.stderr); sys.exit(2)
 if not row:
-  print("UNCERTAIN: A2 not found in roadmap2.csv (Workstream A). Provide exact row with headers.", file=sys.stderr); sys.exit(3)
-
-meta={
-  "Title": row.get("Task Title","").strip(),
-  "Rationale": row.get("Rationale","").strip(),
-  "Deliverables": row.get("Deliverables","").strip(),
-  "Acceptance": row.get("Acceptance Criteria","").strip(),
-  "Priority": row.get("Priority","").strip(),
-  "Phase": row.get("Phase","").strip()
-}
-print("WORKSTREAM_TASK_FOUND:A2")
-print("A2_META:"+json.dumps(meta, ensure_ascii=False))
+  print("UNCERTAIN: A3 not found in roadmap2.csv (Workstream A). Please confirm the exact row/headers.", file=sys.stderr); sys.exit(3)
+meta={"Title":row.get("Task Title",""),"Rationale":row.get("Rationale",""),
+      "Deliverables":row.get("Deliverables",""),"Acceptance":row.get("Acceptance Criteria",""),
+      "Priority":row.get("Priority",""),"Phase":row.get("Phase","")}
+print("WORKSTREAM_TASK_FOUND:A3")
+print("A3_META:"+json.dumps(meta, ensure_ascii=False))
 PY
       ]]>
     </command>
   </prechecks>
 
-  <!-- 2) Heuristic mapping rules turn Deliverables text into concrete artifacts -->
-  <design>
-    <mappingRules>
-      <![CDATA[
-Mapping keywords → files (prefix-rooted):
-- "WGSL", "compute", "kernel", "shader" → src/shaders/<derived_name>.wgsl
-- "BVH", "accel", "traversal" → src/accel/*.rs and/or src/path_tracing/accel.rs
-- "intersection", "ray-triangle", "ray-sphere" → src/path_tracing/intersect.rs (or existing module), plus WGSL if GPU.
-- "materials", "BSDF", "PBR", "BRDF" → src/pbr/*.rs, python/forge3d/pbr.py, shaders/pbr_*.wgsl
-- "camera", "DOF", "thin lens" → src/camera/*.rs, python/forge3d/camera.py
-- "HDR", "tonemap", "ACES", "Reinhard" → src/post/tonemap.rs, src/shaders/tonemap.wgsl, python bridge
-- "IBL", "environment", "cubemap" → src/lighting/ibl.rs, src/shaders/ibl_*.wgsl
-- "Python API" → python/forge3d/<feature>.py (public functions/classes + type hints)
-- "docs" → README.md section and docs/api/<feature>.md (if Sphinx present)
-- "tests" → tests/<feature>_*.rs or tests/test_<feature>*.py (GPU tests @skip if no adapter)
-If Deliverables specify exact filenames, use those paths verbatim.
-      ]]>
-    </mappingRules>
-    <acceptanceStrategy>
-      <![CDATA[
-For each bullet/line in the Deliverables cell:
-  1) Infer feature kind by keywords; choose target file paths.
-  2) Implement the smallest viable code for MVP that satisfies the Acceptance Criteria cell.
-  3) If ambiguity remains (no keywords matched), mark UNCERTAIN with the exact deliverable text.
-      ]]>
-    </acceptanceStrategy>
-  </design>
-
   <acceptanceCriteria>
-    <ac id="AC-0">A2 row is present; meta printed as A2_META JSON.</ac>
-    <ac id="AC-1">Every concrete deliverable item from A2’s Deliverables cell is implemented as code/docs/tests artifacts, with header/inline docs for bind groups and public APIs where applicable.</ac>
-    <ac id="AC-2">Python public API exposes the functions/classes required by Acceptance Criteria (A2 row); type hints and deterministic behavior notes included.</ac>
-    <ac id="AC-3">Unit/integration tests exist for all implemented deliverables; GPU-dependent tests are skipped when no compatible adapter is available.</ac>
-    <ac id="AC-4">Docs updated: README + docs/api/<feature>.md (if Sphinx present) clearly describing usage and limitations.</ac>
-    <ac id="AC-5">Validation run passes: fmt, clippy -D warnings, cargo test, pytest, sphinx-build (if docs), maturin build; CI ensured if missing.</ac>
+    <ac id="AC-1">A watertight triangle intersection is implemented (Möller–Trumbore variant or equivalent) with robust epsilon handling and consistent barycentric outputs.</ac>
+    <ac id="AC-2">A CPU BVH builder exists (SAH or median-split MVP) producing a <b>flattened BVH layout</b> suitable for GPU traversal (AoS or SoA documented).</ac>
+    <ac id="AC-3">GPU traversal is integrated into the path tracer compute path, walking the uploaded BVH + triangle buffers to produce hits for shading.</ac>
+    <ac id="AC-4">Public APIs allow creating a mesh from vertices/indices, building the BVH on CPU, uploading to GPU, and rendering via the existing path tracer.</ac>
+    <ac id="AC-5">Correctness tests: renders of a small triangle scene succeed on GPU; CPU fallback path functions; results are deterministic at frames=1 and fixed seed.</ac>
+    <ac id="AC-6">Performance note: document a smoke benchmark; target “Bunny renders correctly; ~≥20 Mray/s on a mid-tier GPU” (if no compatible adapter, mark PERF SKIPPED with command to run).</ac>
+    <ac id="AC-7">Documentation updated: BVH layout, WGSL bind group layout, mesh API usage, and limitations.</ac>
+    <ac id="AC-8">Validation runs pass: <code>cargo fmt</code>, <code>cargo clippy -D warnings</code>, <code>cargo test</code>, <code>pytest</code>, <code>sphinx-build</code> (if docs), <code>maturin build</code>.</ac>
   </acceptanceCriteria>
+
+  <design>
+    <dataModel>
+      <![CDATA[
+Triangle buffers:
+  - vertices: array<vec3<f32>> (aligned to 16 bytes; pad) or array<vec4<f32>> with w unused.
+  - indices:  array<u32> (3 per triangle; CCW).
+BVH layout (flattened array):
+  struct Aabb { min: vec3<f32>; max: vec3<f32>; }
+  struct BvhNode {
+    aabb_min: vec3<f32>;  left:u32;   // if leaf: first index
+    aabb_max: vec3<f32>;  right:u32;  // if leaf: count
+    flags:u32;                          // bit0: leaf
+    _pad:u32;
+  }
+CPU builder: median-split or SAH MVP; emits nodes + leaf (first,count) over triangle index array.
+GPU expects the same packing (little-endian, 16-byte alignment).
+      ]]>
+    </dataModel>
+
+    <wgslKernels>
+      <![CDATA[
+Files:
+  src/shaders/pt_intersect_mesh.wgsl   // BVH traversal + watertight MT test
+  (extend) src/shaders/pt_kernel.wgsl  // hook intersection callable
+Headers (required):
+  Bind Group 0: Uniforms { width, height, frame_index, camera params, seed_hi/lo }
+  Bind Group 1: Scene (readonly) — vertices[], indices[], bvh_nodes[]
+  Bind Group 2: Output/Accum — HDR accum or storage texture (existing)
+Traversal:
+  - Iterative stack in local memory (small fixed-size per-thread stack) or short stack in global buffer for MVP.
+  - Near-first child order using ray dir sign to reduce steps.
+  - Watertight MT with edge tests; return t, bary, tri_id on hit.
+      ]]>
+    </wgslKernels>
+
+    <rustBackend>
+      <![CDATA[
+New/updated modules:
+  src/accel/cpu_bvh.rs        // CPU BVH builder (median/SFH MVP)
+  src/path_tracing/mesh.rs    // mesh upload, buffer creation, BVH upload, helper types
+  src/path_tracing/mod.rs     // integrate mesh + intersect into PT path (feature-flag or runtime scene switch)
+
+Key structs/APIs:
+  pub struct MeshCPU { pub vertices: Vec<[f32;3]>, pub indices: Vec<[u32;3]> }
+  pub struct BvhCPU { pub nodes: Vec<BvhNode>, pub tri_indices: Vec<u32> }
+  pub fn build_bvh_cpu(mesh:&MeshCPU, opts:&BuildOptions) -> anyhow::Result<BvhCPU>;
+  pub fn upload_mesh_and_bvh(device:&wgpu::Device, queue:&wgpu::Queue, mesh:&MeshCPU, bvh:&BvhCPU) -> GpuMesh;
+  // Path tracer consumes GpuMesh when present for triangle intersections.
+      ]]>
+    </rustBackend>
+
+    <pythonAPI>
+      <![CDATA[
+python/forge3d/mesh.py (new):
+  def make_mesh(vertices: "np.ndarray[N,3] float32", indices: "np.ndarray[M,3] uint32") -> dict: ...
+  def build_bvh_cpu(mesh: dict, method:str="median") -> dict: ...
+  def upload_mesh(mesh: dict, bvh: dict) -> "MeshHandle": ...
+
+python/forge3d/path_tracing.py (modify):
+  def render_rgba(..., mesh: "MeshHandle|None"=None, use_gpu:bool=True, seed:int=1, frames:int=1) -> np.ndarray:
+     - If mesh provided: use triangle intersection path (GPU if available; else CPU fallback).
+     - Deterministic for frames==1 with fixed seed.
+      ]]>
+    </pythonAPI>
+
+    <risksMitigations>
+      <![CDATA[
+- Stack overflow risk: keep traversal stack small; fallback to loop with short stack + restart (MVP).
+- Precision issues: watertight MT + robust epsilon; clamp t near 0; backface policy documented.
+- Memory budget: reuse buffers; support tiling for very large meshes; document limits.
+      ]]>
+    </risksMitigations>
+  </design>
 
   <changes>
     <createOrModify>
-      <!-- The actual files are derived from A2 deliverables; these are typical targets -->
-      <file path="src/shaders/" kind="modify-or-new"/>
-      <file path="src/path_tracing/" kind="modify-or-new"/>
-      <file path="src/accel/" kind="modify-or-new"/>
-      <file path="src/post/" kind="modify-or-new"/>
-      <file path="src/lighting/" kind="modify-or-new"/>
-      <file path="python/forge3d/" kind="modify-or-new"/>
-      <file path="tests/" kind="modify-or-new"/>
+      <!-- Rust -->
+      <file path="src/accel/cpu_bvh.rs" kind="new"/>
+      <file path="src/path_tracing/mesh.rs" kind="new"/>
+      <file path="src/path_tracing/mod.rs" kind="modify"/>
+
+      <!-- WGSL -->
+      <file path="src/shaders/pt_intersect_mesh.wgsl" kind="new"/>
+      <file path="src/shaders/pt_kernel.wgsl" kind="modify"/>
+
+      <!-- Python -->
+      <file path="python/forge3d/mesh.py" kind="new"/>
+      <file path="python/forge3d/path_tracing.py" kind="modify"/>
+
+      <!-- Tests -->
+      <file path="tests/test_mesh_tracing_gpu.py" kind="new"/>
+      <file path="tests/test_cpu_bvh_layout.rs" kind="new"/>
+
+      <!-- Docs & housekeeping -->
       <file path="README.md" kind="modify-append"/>
-      <file path="docs/api/" kind="modify-or-new-optional"/>
+      <file path="docs/api/mesh_bvh.md" kind="new-optional"/>
       <file path=".gitignore" kind="modify-append"/>
+      <file path="bench/mesh_tracing_bench.py" kind="new-optional"/>
     </createOrModify>
+
+    <implNotes>
+      <![CDATA[
+- WGSL watertight MT: edge tests using barycentrics; handle nearly parallel rays; conservative epsilon.
+- Child order heuristic: use ray direction signs to traverse near child first.
+- BVH upload: pack nodes exactly as Rust layout; validate sizes with assert_eq!(size_of::<BvhNode>(), ...).
+- Python: validate dtypes/shapes; convert arrays to C-contiguous; raise clear errors.
+- Bench: optional timing comparing sphere-only vs mesh path at 256×256 spp=1.
+      ]]>
+    </implNotes>
   </changes>
 
   <tests>
-    <templates>
+    <python path="tests/test_mesh_tracing_gpu.py">
       <![CDATA[
-- GPU feature: create pytest with skip-if-no-adapter; assert shape/dtype, determinism for frames=1 with fixed seed.
-- CPU feature: assert outputs match GPU within epsilon where defined; else assert contract (e.g., function raises on invalid input).
-- Doc build: sphinx-build must succeed without warnings (or warnings logged & test passes if docs absent).
+import numpy as np, pytest
+from forge3d.mesh import make_mesh, build_bvh_cpu, upload_mesh
+from forge3d.path_tracing import PathTracer, make_camera
+
+def tiny_cube():
+    # 12 tris, 8 verts (unit cube)
+    v = np.array([
+      [0,0,0],[1,0,0],[1,1,0],[0,1,0],
+      [0,0,1],[1,0,1],[1,1,1],[0,1,1]
+    ], dtype=np.float32)
+    f = np.array([
+      [0,1,2],[0,2,3],[1,5,6],[1,6,2],
+      [5,4,7],[5,7,6],[4,0,3],[4,3,7],
+      [3,2,6],[3,6,7],[4,5,1],[4,1,0]
+    ], dtype=np.uint32)
+    return v,f
+
+@pytest.mark.skipif(False, reason="Inject GPU skip in CI if needed")
+def test_gpu_mesh_render_64x64():
+    v,f = tiny_cube()
+    m = make_mesh(v,f)
+    b = build_bvh_cpu(m, method="median")
+    handle = upload_mesh(m,b)
+    cam = make_camera(origin=(2,2,2), look_at=(0.5,0.5,0.5), up=(0,1,0), fov_y=45.0, aspect=1.0, exposure=1.0)
+    tr = PathTracer()
+    img = tr.render_rgba(64,64, mesh=handle, seed=7, frames=1, use_gpu=True)
+    assert img.shape==(64,64,4)
+    assert img.mean() > 0.0
       ]]>
-    </templates>
+    </python>
+
+    <rust path="tests/test_cpu_bvh_layout.rs">
+      <![CDATA[
+#[test]
+fn cpu_bvh_layout_matches_gpu_pack() {
+    // Build a tiny BVH; verify node packing size/offsets and leaf spans; spot-check root AABB covers mesh.
+}
+      ]]>
+    </rust>
   </tests>
 
   <!-- EXACTLY INCLUDE THESE STEPS -->
@@ -163,32 +264,36 @@ For each bullet/line in the Deliverables cell:
 
   <execution>
     <steps>
-      <step>Create feature branch: <code>git checkout -b ws-A2-implementation</code></step>
-      <step>Parse A2_META (printed above) to list deliverable bullets; write a small <code>reports/a2_plan.json</code> mapping each bullet → target files via the mapping rules.</step>
-      <step>For each mapped deliverable:
-        <ul>
-          <li>Implement minimal, correct code in WGSL/Rust/Python as indicated.</li>
-          <li>Add or modify tests (Rust/Python) covering success path and a simple failure path.</li>
-          <li>Update README and docs/api/&lt;feature&gt;.md (if Sphinx present) with usage and limitations.</li>
-        </ul>
-      </step>
-      <step>Append <code>.gitignore</code> for out/, diag_out/, build artifacts if needed.</step>
-      <step>Run the Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent.</step>
-      <step>Create <code>PR_BODY.md</code> summarizing A2 implementation with references to lines/files changed; print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
+      <step>Create feature branch: <code>git checkout -b ws-A3-implementation</code></step>
+      <step>Implement CPU BVH builder and layout in <code>src/accel/cpu_bvh.rs</code>; add packing asserts and docs.</step>
+      <step>Add GPU intersection kernel <code>src/shaders/pt_intersect_mesh.wgsl</code> with header docs; extend <code>pt_kernel.wgsl</code> to call it.</step>
+      <step>Wire Rust path tracer to upload mesh + BVH buffers and route intersections when a mesh is present.</step>
+      <step>Add Python mesh API (<code>python/forge3d/mesh.py</code>) and extend <code>path_tracing.py</code> to accept a mesh handle.</step>
+      <step>Create tests for GPU render and BVH layout; add optional bench harness for a small scene.</step>
+      <step>Docs & housekeeping: update <code>README.md</code>, add <code>docs/api/mesh_bvh.md</code> (if Sphinx), append <code>.gitignore</code> entries.</step>
+      <step>Run Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent.</step>
+      <step>Generate <code>PR_BODY.md</code> and print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
     </steps>
   </execution>
 
   <completion>
     <print>
-      - reports/a2_plan.json
-      - All created/modified source files per mapping (WGSL/Rust/Python)
-      - tests/* for implemented features
-      - README.md (updated)
-      - docs/api/* (if Sphinx present)
+      - src/accel/cpu_bvh.rs
+      - src/path_tracing/mesh.rs
+      - src/path_tracing/mod.rs
+      - src/shaders/pt_intersect_mesh.wgsl
+      - src/shaders/pt_kernel.wgsl
+      - python/forge3d/mesh.py
+      - python/forge3d/path_tracing.py
+      - tests/test_mesh_tracing_gpu.py
+      - tests/test_cpu_bvh_layout.rs
+      - README.md
+      - docs/api/mesh_bvh.md (if Sphinx present)
+      - bench/mesh_tracing_bench.py (optional)
       - PR_BODY.md
     </print>
     <fallback>
-      If A2 is not found or the Deliverables cell is empty/ambiguous, respond <b>UNCERTAIN</b> listing the exact missing fields and STOP without changes.
+      If A3 is not found in roadmap2.csv, respond <b>UNCERTAIN</b> with the list of detected Workstream A tasks and STOP without changes.
     </fallback>
   </completion>
 </task>

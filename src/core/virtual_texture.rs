@@ -5,6 +5,7 @@
 
 use crate::core::feedback_buffer::FeedbackBuffer;
 use crate::core::tile_cache::{TileCache, TileId, TileData};
+#[cfg(feature = "enable-staging-rings")]
 use crate::core::staging_rings::StagingRing;
 use wgpu::{Device, Queue, Texture, TextureDescriptor, TextureDimension, TextureFormat, 
            TextureUsages, Extent3d, ImageCopyTexture,
@@ -125,6 +126,7 @@ pub struct VirtualTexture {
     stats: VirtualTextureStats,
     
     /// Staging ring for async tile uploads
+    #[cfg(feature = "enable-staging-rings")]
     staging_ring: Option<Arc<Mutex<StagingRing>>>,
 }
 
@@ -134,6 +136,7 @@ impl VirtualTexture {
         device: &Device,
         _queue: &Queue,
         config: VirtualTextureConfig,
+        #[cfg(feature = "enable-staging-rings")]
         staging_ring: Option<Arc<Mutex<StagingRing>>>,
     ) -> Result<Self, String> {
         // Calculate page table dimensions
@@ -204,6 +207,7 @@ impl VirtualTexture {
             tile_cache,
             requested_tiles: HashSet::new(),
             stats,
+            #[cfg(feature = "enable-staging-rings")]
             staging_ring,
         })
     }
@@ -380,6 +384,7 @@ impl VirtualTexture {
         };
         
         // Use staging ring if available for async upload
+        #[cfg(feature = "enable-staging-rings")]
         if let Some(ref staging_ring) = self.staging_ring {
             if let Ok(mut ring) = staging_ring.lock() {
                 if let Some((buffer, offset)) = ring.allocate(tile_data.data.len() as u64) {

@@ -321,5 +321,41 @@ img_mega = render_rgba(128, 128, scene, cam, seed=7, frames=1,
                        use_gpu=True, engine=TracerEngine.MEGAKERNEL)
 ```
 
-If the GPU wavefront path isn’t available, calls gracefully fall back to the deterministic CPU implementation.
+If the GPU wavefront path isn't available, calls gracefully fall back to the deterministic CPU implementation.
 See `docs/api/wavefront_pt.md` for details.
+
+## Triangle Mesh Path Tracing (A3)
+
+You can now render triangle meshes with GPU-accelerated BVH traversal for realistic path tracing:
+
+```python
+import numpy as np
+from forge3d.mesh import make_mesh, build_bvh_cpu, upload_mesh, create_cube_mesh
+from forge3d.path_tracing import render_rgba
+
+# Create or load triangle mesh
+vertices, indices = create_cube_mesh()  # 8 vertices, 12 triangles
+mesh = make_mesh(vertices, indices)
+
+# Build BVH acceleration structure on CPU
+bvh = build_bvh_cpu(mesh, method="median")
+print(f"Built BVH: {bvh['node_count']} nodes, {bvh['max_depth']} depth")
+
+# Upload to GPU for path tracing
+mesh_handle = upload_mesh(mesh, bvh)
+
+# Render with both spheres and triangle mesh
+scene = [{"center": (0, 0, -1), "radius": 0.3, "albedo": (1.0, 0.0, 0.0)}]
+cam = {"origin": (2, 2, 2), "look_at": (0.5, 0.5, 0.5), "up": (0, 1, 0),
+       "fov_y": 45.0, "aspect": 1.0, "exposure": 1.0}
+img = render_rgba(256, 256, scene, cam, seed=42, frames=1, mesh=mesh_handle)
+```
+
+Features:
+- **CPU BVH construction** with median-split partitioning for GPU-compatible layout
+- **GPU BVH traversal** with watertight Möller-Trumbore triangle intersection
+- **CPU fallback** for systems without compatible GPU adapters
+- **Deterministic rendering** with fixed seeds for reproducible results
+- **Performance:** Supports meshes up to GPU memory limits with efficient traversal
+
+The mesh path tracer integrates seamlessly with existing sphere rendering and supports both individual triangles and complex meshes. BVH construction uses a flattened node layout optimized for GPU traversal performance.

@@ -1,0 +1,1547 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Post-Processing Effects &mdash; forge3d Documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="_static/custom.css" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=9e420a66"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            forge3d
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#basic-triangle-rendering">Basic Triangle Rendering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#terrain-visualization">Terrain Visualization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#vector-graphics">Vector Graphics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#device-detection">Device Detection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#what-s-next">What’s Next?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#quick-installation">Quick Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#system-requirements">System Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#installation-from-source">Installation from Source</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#virtual-environment-setup">Virtual Environment Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#verification">Verification</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#development-setup">Development Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#docker-installation">Docker Installation</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="examples_guide.html">Examples Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#basic-examples">Basic Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#diagnostic-examples">Diagnostic Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#advanced-examples-r13">Advanced Examples (R13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#performance-examples">Performance Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#running-examples">Running Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#understanding-example-output">Understanding Example Output</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#example-development-guidelines">Example Development Guidelines</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Core Documentation:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api_reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#core-classes">Core Classes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#renderer">Renderer</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.Renderer"><code class="docutils literal notranslate"><span class="pre">Renderer</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#scene">Scene</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.Scene"><code class="docutils literal notranslate"><span class="pre">Scene</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#vector-graphics">Vector Graphics</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#polygons">Polygons</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#lines">Lines</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#points">Points</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#terrain-rendering">Terrain Rendering</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#height-data-processing">Height Data Processing</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#memory-management">Memory Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#gpu-memory-tracking">GPU Memory Tracking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#budget-management">Budget Management</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#advanced-features">Advanced Features</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#module-forge3d.shadows">Shadow Mapping</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.has_shadows_support"><code class="docutils literal notranslate"><span class="pre">has_shadows_support()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.DirectionalLight"><code class="docutils literal notranslate"><span class="pre">DirectionalLight</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.CsmConfig"><code class="docutils literal notranslate"><span class="pre">CsmConfig</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.ShadowStats"><code class="docutils literal notranslate"><span class="pre">ShadowStats</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.CsmShadowMap"><code class="docutils literal notranslate"><span class="pre">CsmShadowMap</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.ShadowRenderer"><code class="docutils literal notranslate"><span class="pre">ShadowRenderer</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.create_test_scene"><code class="docutils literal notranslate"><span class="pre">create_test_scene()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.compare_shadow_techniques"><code class="docutils literal notranslate"><span class="pre">compare_shadow_techniques()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.validate_csm_setup"><code class="docutils literal notranslate"><span class="pre">validate_csm_setup()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.get_preset_config"><code class="docutils literal notranslate"><span class="pre">get_preset_config()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.calculate_shadow_atlas_memory"><code class="docutils literal notranslate"><span class="pre">calculate_shadow_atlas_memory()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.validate_shadow_memory_constraint"><code class="docutils literal notranslate"><span class="pre">validate_shadow_memory_constraint()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.build_shadow_atlas"><code class="docutils literal notranslate"><span class="pre">build_shadow_atlas()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.sample_shadow"><code class="docutils literal notranslate"><span class="pre">sample_shadow()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#pbr-materials">PBR Materials</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#module-forge3d.async_readback">Async Readback</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncReadbackConfig"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackConfig</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncReadbackHandle"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackHandle</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncReadbackManager"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackManager</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncRenderer"><code class="docutils literal notranslate"><span class="pre">AsyncRenderer</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncReadbackContext"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackContext</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.batch_readback"><code class="docutils literal notranslate"><span class="pre">batch_readback()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.benchmark_readback_performance"><code class="docutils literal notranslate"><span class="pre">benchmark_readback_performance()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#utilities">Utilities</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#device-information">Device Information</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#environment-reporting">Environment Reporting</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#module-forge3d.colormap">Color Management</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.decode_png_rgba8"><code class="docutils literal notranslate"><span class="pre">decode_png_rgba8()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.get_colormap_compression_stats"><code class="docutils literal notranslate"><span class="pre">get_colormap_compression_stats()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.check_compressed_colormap_support"><code class="docutils literal notranslate"><span class="pre">check_compressed_colormap_support()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.get_supported_compression_formats"><code class="docutils literal notranslate"><span class="pre">get_supported_compression_formats()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.estimate_compression_quality"><code class="docutils literal notranslate"><span class="pre">estimate_compression_quality()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.calculate_memory_savings"><code class="docutils literal notranslate"><span class="pre">calculate_memory_savings()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#configuration">Configuration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#environment-variables">Environment Variables</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#gpu-backend-selection">GPU Backend Selection</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#common-exceptions">Common Exceptions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#debugging-tips">Debugging Tips</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#performance-tips">Performance Tips</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#type-annotations">Type Annotations</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="color_management.html">Color Management &amp; Tonemap Pipeline</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#pipeline-details">Pipeline Details</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#linear-scene-lighting">1. Linear Scene Lighting</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#tone-mapping-reinhard">2. Tone Mapping (Reinhard)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#gamma-correction">3. Gamma Correction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#output-format">4. Output Format</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#format-choices-rationale">Format Choices &amp; Rationale</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#why-rgba8unormsrgb">Why Rgba8UnormSrgb?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#when-to-use-linear-vs-srgb-targets">When to Use Linear vs sRGB Targets</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#implementation-notes">Implementation Notes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#shader-integration">Shader Integration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#cpu-reference-implementation">CPU Reference Implementation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#future-extensions">Future Extensions</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="interop_zero_copy.html">Zero-Copy NumPy Interoperability</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#guaranteed-zero-copy-pathways">Guaranteed Zero-Copy Pathways</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#rgba-output">RGBA Output</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#height-input">Height Input</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#data-type-and-layout-requirements">Data Type and Layout Requirements</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#supported-input-types">Supported Input Types</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#output-guarantees">Output Guarantees</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#validation-and-debugging">Validation and Debugging</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#using-validation-helpers">Using Validation Helpers</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#pointer-validation">Pointer Validation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#performance-profiling">Performance Profiling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#common-pitfalls-and-solutions">Common Pitfalls and Solutions</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#non-contiguous-arrays">Non-Contiguous Arrays</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#wrong-data-types">Wrong Data Types</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#memory-layout-assumptions">Memory Layout Assumptions</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#testing-zero-copy-behavior">Testing Zero-Copy Behavior</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#writing-zero-copy-tests">Writing Zero-Copy Tests</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#implementation-notes">Implementation Notes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#buffer-reuse">Buffer Reuse</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#memory-alignment">Memory Alignment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#cross-platform-consistency">Cross-Platform Consistency</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#common-error-messages">Common Error Messages</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#debugging-tips">Debugging Tips</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#for-application-developers">For Application Developers</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#for-library-integration">For Library Integration</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="memory_budget.html">Memory Budget Management</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#budget-limits">Budget Limits</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#default-budget-512-mib">Default Budget: 512 MiB</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#what-counts-towards-the-budget">What Counts Towards the Budget</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#memory-metrics-api">Memory Metrics API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#getting-memory-metrics">Getting Memory Metrics</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#metrics-dictionary-structure">Metrics Dictionary Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#example-metrics-output">Example Metrics Output</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#budget-enforcement">Budget Enforcement</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#automatic-checking">Automatic Checking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#error-messages">Error Messages</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#monitoring-memory-usage">Monitoring Memory Usage</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#real-time-monitoring">Real-Time Monitoring</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#performance-impact-monitoring">Performance Impact Monitoring</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#memory-budget-scenarios">Memory Budget Scenarios</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#normal-usage-patterns">Normal Usage Patterns</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#high-memory-scenarios">High Memory Scenarios</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#budget-friendly-practices">Budget-Friendly Practices</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#debugging-memory-issues">Debugging Memory Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#investigating-budget-violations">Investigating Budget Violations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#common-memory-issues">Common Memory Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#implementation-details">Implementation Details</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#thread-safety">Thread Safety</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#global-vs-per-renderer-tracking">Global vs. Per-Renderer Tracking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#memory-alignment">Memory Alignment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#performance-impact">Performance Impact</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="memory/index.html">Memory Management</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="memory/staging_rings.html">O1: Staging Buffer Rings</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#architecture">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#core-components">Core Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#buffer-states">Buffer States</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#rust-api">Rust API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#python-api">Python API</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#performance-characteristics">Performance Characteristics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#typical-performance">Typical Performance</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#ring-count">Ring Count</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#buffer-size">Buffer Size</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#memory-budget">Memory Budget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#integration">Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#with-memory-pools-o2">With Memory Pools (O2)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#with-texture-compression-o3">With Texture Compression (O3)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#testing">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#unit-tests">Unit Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#performance-tests">Performance Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#high-buffer-stalls">High Buffer Stalls</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#memory-usage-issues">Memory Usage Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#platform-differences">Platform Differences</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory/memory_pools.html">O2: GPU Memory Pools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#architecture">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#core-components">Core Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#size-buckets">Size Buckets</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#rust-api">Rust API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#python-api">Python API</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#performance-characteristics">Performance Characteristics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#allocation-performance">Allocation Performance</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#fragmentation-mitigation">Fragmentation Mitigation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#size-bucket-tuning">Size Bucket Tuning</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#pool-sizing">Pool Sizing</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#memory-budget">Memory Budget</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#reference-counting">Reference Counting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#lifecycle-management">Lifecycle Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#thread-safety">Thread Safety</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#defragmentation">Defragmentation</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#automatic-defragmentation">Automatic Defragmentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#defragmentation-strategy">Defragmentation Strategy</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#integration">Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#with-staging-rings-o1">With Staging Rings (O1)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#with-big-buffers">With Big Buffers</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#testing">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#unit-tests">Unit Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#performance-tests">Performance Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#high-fragmentation">High Fragmentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#memory-leaks">Memory Leaks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#performance-issues">Performance Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#platform-differences">Platform Differences</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory/compressed_textures.html">O3: Compressed Texture Pipeline</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#architecture">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#core-components">Core Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#supported-formats">Supported Formats</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#rust-api">Rust API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#python-api">Python API</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#performance-characteristics">Performance Characteristics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#compression-performance">Compression Performance</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#memory-usage">Memory Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#compression-quality-levels">Compression Quality Levels</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#use-case-optimization">Use Case Optimization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#format-selection-algorithm">Format Selection Algorithm</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#memory-budget-compliance">Memory Budget Compliance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#ktx2-container-support">KTX2 Container Support</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#supported-features">Supported Features</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#transcoding-pipeline">Transcoding Pipeline</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#current-limitations">Current Limitations</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#integration">Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#with-memory-pools-o2">With Memory Pools (O2)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#with-virtual-texturing-o4">With Virtual Texturing (O4)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#testing">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#unit-tests">Unit Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#quality-tests">Quality Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#poor-compression-quality">Poor Compression Quality</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#high-memory-usage">High Memory Usage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#loading-failures">Loading Failures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#platform-differences">Platform Differences</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory/virtual_texturing.html">Virtual Texture Streaming</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#key-components">Key Components</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#virtualtexturesystem">VirtualTextureSystem</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#tile-management">Tile Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#camera-based-streaming">Camera-Based Streaming</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#memory-budget">Memory Budget</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#tile-size">Tile Size</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#quality-settings">Quality Settings</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#usage-patterns">Usage Patterns</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#basic-streaming-setup">Basic Streaming Setup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#prefetching">Prefetching</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#multiple-textures">Multiple Textures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#performance-monitoring">Performance Monitoring</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#statistics-tracking">Statistics Tracking</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#memory-analysis">Memory Analysis</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#performance-estimation">Performance Estimation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#integration-with-other-systems">Integration with Other Systems</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#staging-rings-integration">Staging Rings Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#compressed-texture-support">Compressed Texture Support</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#shader-integration">Shader Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#wgsl-shader-code">WGSL Shader Code</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#c-integration">C++ Integration</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#memory-budget-guidelines">Memory Budget Guidelines</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#tile-size-selection">Tile Size Selection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#streaming-strategy">Streaming Strategy</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#performance-optimization">Performance Optimization</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#api-reference">API Reference</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#memory-monitoring">Memory Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#integration-examples">Integration Examples</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api/path_tracing.html">A1: GPU Path Tracer (MVP)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/path_tracing.html#gpu-usage">GPU Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/path_tracing.html#cpu-reference">CPU Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/path_tracing.html#limitations">Limitations</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Advanced Features:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="postfx/index.html">Post-Processing Effect Chain</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="postfx/index.html#features">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="postfx/index.html#python-api">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="postfx/index.html#notes">Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="postfx/index.html#demo">Demo</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="pbr_materials.html">PBR Materials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#api-reference">API Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#texture-support">Texture Support</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#brdf-evaluation">BRDF Evaluation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#predefined-materials">Predefined Materials</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#material-validation">Material Validation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#gpu-integration">GPU Integration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#lighting-configuration">Lighting Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#feature-detection">Feature Detection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#legacy-compatibility">Legacy Compatibility</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="shadow_mapping.html">Shadow Mapping</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#memory-management">Memory Management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#shadow-configuration">Shadow Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#directional-lighting">Directional Lighting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#shadow-rendering">Shadow Rendering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#quality-vs-performance">Quality vs Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#pcf-filtering">PCF Filtering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#integration-examples">Integration Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#performance-monitoring">Performance Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#legacy-support">Legacy Support</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="user/path_tracing.html">Path Tracing (Workstream A)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="user/path_tracing.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/path_tracing.html#api">API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/path_tracing.html#roadmap">Roadmap</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="vector_graphics.html">Vector Graphics</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#vector-types">Vector Types</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#data-format-requirements">Data Format Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#performance-considerations">Performance Considerations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#integration-with-3d-rendering">Integration with 3D Rendering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#use-cases">Use Cases</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#advanced-examples">Advanced Examples</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="terrain_rendering.html">Terrain Rendering</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#height-data-processing">Height Data Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#scene-configuration">Scene Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#colormap-system">Colormap System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#level-of-detail-lod">Level of Detail (LOD)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#terrain-analysis">Terrain Analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#integration-with-other-systems">Integration with Other Systems</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#performance-optimization">Performance Optimization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#real-world-applications">Real-World Applications</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#example-applications">Example Applications</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="async_operations.html">Async Operations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#async-readback-system">Async Readback System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#multi-threaded-command-recording">Multi-threaded Command Recording</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#async-compute-operations">Async Compute Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#non-blocking-gpu-operations">Non-blocking GPU Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#performance-monitoring">Performance Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#memory-management-for-async-operations">Memory Management for Async Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#example-applications">Example Applications</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Basemaps &amp; Tiles:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="tiles/xyz_wmts.html">docs/tiles/xyz_wmts.md</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tiles/xyz_wmts.html#basemap-tile-fetching-caching-and-composition-xyz-wmts-in-forge3d">Basemap tile fetching, caching, and composition (XYZ/WMTS) in forge3d.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tiles/xyz_wmts.html#documents-the-python-tiles-api-cache-layout-and-attribution-requirements">Documents the Python tiles API, cache layout, and attribution requirements.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tiles/xyz_wmts.html#relevant-files-python-forge3d-tiles-client-py-python-forge3d-tiles-overlay-py-examples-xyz-tile-compose-demo-py">RELEVANT FILES:python/forge3d/tiles/client.py,python/forge3d/tiles/overlay.py,examples/xyz_tile_compose_demo.py</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#api">API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#cache-layout">Cache layout</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#attribution">Attribution</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="integration/cartopy.html">docs/integration/cartopy.md</a></li>
+<li class="toctree-l1"><a class="reference internal" href="integration/cartopy.html#cartopy-integration-example-using-forge3d-tiles-as-a-background">Cartopy integration example using forge3d tiles as a background.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="integration/cartopy.html#shows-headless-agg-rendering-and-extent-alignment-with-geoaxes">Shows headless (Agg) rendering and extent alignment with GeoAxes.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="integration/cartopy.html#relevant-files-examples-cartopy-overlay-py-python-forge3d-tiles-client-py-python-forge3d-tiles-overlay-py">RELEVANT FILES:examples/cartopy_overlay.py,python/forge3d/tiles/client.py,python/forge3d/tiles/overlay.py</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="integration/cartopy.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/cartopy.html#requirements">Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/cartopy.html#example">Example</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Library Integrations:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="integration/matplotlib.html">Matplotlib Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#colormap-integration">Colormap Integration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#supported-colormaps">Supported Colormaps</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#custom-colormap-objects">Custom Colormap Objects</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#data-normalization">Data Normalization</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#linear-normalization">Linear Normalization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#logarithmic-normalization">Logarithmic Normalization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#power-law-normalization">Power Law Normalization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#boundary-normalization">Boundary Normalization</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#display-helpers">Display Helpers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#basic-display">Basic Display</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#custom-extents-and-dpi">Custom Extents and DPI</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#subplot-comparisons">Subplot Comparisons</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#saving-comparisons">Saving Comparisons</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#accuracy-and-performance">Accuracy and Performance</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#colormap-accuracy">Colormap Accuracy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#normalization-accuracy">Normalization Accuracy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#zero-copy-display">Zero-Copy Display</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#error-handling-and-validation">Error Handling and Validation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#optional-dependency-handling">Optional Dependency Handling</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#array-validation">Array Validation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#supported-formats">Supported Formats</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#examples">Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#complete-terrain-visualization">Complete Terrain Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#performance-comparison">Performance Comparison</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#memory-efficiency">Memory Efficiency</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#colormap-selection">Colormap Selection</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#api-reference">API Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#forge3d-adapters-mpl-cmap">forge3d.adapters.mpl_cmap</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#forge3d-helpers-mpl-display">forge3d.helpers.mpl_display</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#common-issues">Common Issues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#performance-issues">Performance Issues</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="integration/external_images.html">External Image Import Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#webgpu-parity">WebGPU Parity</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#what-we-match">What We Match</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#key-similarities">Key Similarities</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#native-vs-browser-differences">Native vs Browser Differences</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#input-sources">Input Sources</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#operational-differences">Operational Differences</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#format-support">Format Support</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#implementation-architecture">Implementation Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#core-components">Core Components</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#processing-pipeline">Processing Pipeline</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#usage-examples">Usage Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#basic-image-import">Basic Image Import</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#advanced-configuration">Advanced Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#constraints-and-limitations">Constraints and Limitations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#memory-budget">Memory Budget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#texture-size-limits">Texture Size Limits</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#format-constraints">Format Constraints</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#threading-model">Threading Model</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#performance-considerations">Performance Considerations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#decode-performance">Decode Performance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#upload-performance">Upload Performance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#memory-usage-patterns">Memory Usage Patterns</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#common-pitfalls-and-solutions">Common Pitfalls and Solutions</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#file-path-issues">1. File Path Issues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#memory-budget-exceeded">2. Memory Budget Exceeded</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#format-assumptions">3. Format Assumptions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#color-space-expectations">4. Color Space Expectations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#synchronous-blocking">5. Synchronous Blocking</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#migration-from-browser-code">Migration from Browser Code</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#replace-dom-image-loading">1. Replace DOM Image Loading</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#handle-synchronous-model">2. Handle Synchronous Model</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#adapt-error-handling">3. Adapt Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#future-enhancements">Future Enhancements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#testing">Testing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="user/datashader_interop.html">Datashader Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#api-reference">API Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#availability-check">Availability Check</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.is_datashader_available"><code class="docutils literal notranslate"><span class="pre">is_datashader_available()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#core-functions">Core Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.rgba_view_from_agg"><code class="docutils literal notranslate"><span class="pre">rgba_view_from_agg()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.validate_alignment"><code class="docutils literal notranslate"><span class="pre">validate_alignment()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.to_overlay_texture"><code class="docutils literal notranslate"><span class="pre">to_overlay_texture()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#convenience-functions">Convenience Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.shade_to_overlay"><code class="docutils literal notranslate"><span class="pre">shade_to_overlay()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#adapter-class">Adapter Class</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.DatashaderAdapter"><code class="docutils literal notranslate"><span class="pre">DatashaderAdapter</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#information-functions">Information Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.get_datashader_info"><code class="docutils literal notranslate"><span class="pre">get_datashader_info()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#memory-management">Memory Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#memory-optimization-strategies">Memory Optimization Strategies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#memory-budget-guidelines">Memory Budget Guidelines</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#performance-considerations">Performance Considerations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#zoom-level-performance">Zoom Level Performance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#performance-monitoring">Performance Monitoring</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#coordinate-systems">Coordinate Systems</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#supported-coordinate-systems">Supported Coordinate Systems</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#alignment-validation">Alignment Validation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#data-preparation">Data Preparation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#canvas-configuration">Canvas Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#common-issues-and-solutions">Common Issues and Solutions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#debugging-tools">Debugging Tools</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#examples">Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">CI &amp; Testing:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="ci/notebook_integration.html">Running Notebooks in CI</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#ci-integration-architecture">CI Integration Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#notebook-execution-workflow">Notebook Execution Workflow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#execution-pipeline">Execution Pipeline</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#configuration">Configuration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#github-actions-workflow">GitHub Actions Workflow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#execution-requirements">Execution Requirements</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#notebook-structure">Notebook Structure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#standard-cell-organization">Standard Cell Organization</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#introduction-setup">1. Introduction &amp; Setup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#device-information">2. Device Information</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#data-generation-loading">3. Data Generation/Loading</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#adapter-integration">4. Adapter Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#processing-rendering">5. Processing &amp; Rendering</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#output-generation">6. Output Generation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#performance-metrics">7. Performance Metrics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#validation-cleanup">8. Validation &amp; Cleanup</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#dependency-management">Dependency Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#optional-dependencies">Optional Dependencies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#fallback-strategies">Fallback Strategies</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#ci-validation">CI Validation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#success-criteria">Success Criteria</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#failure-analysis">Failure Analysis</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#timeout-failures">Timeout Failures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#memory-failures">Memory Failures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#dependency-failures">Dependency Failures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#gpu-failures">GPU Failures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#quality-metrics">Quality Metrics</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#performance-monitoring">Performance Monitoring</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#timing-benchmarks">Timing Benchmarks</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#memory-tracking">Memory Tracking</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#development-guidelines">Development Guidelines</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#testing-locally">Testing Locally</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#debugging-failed-runs">Debugging Failed Runs</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">forge3d</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Post-Processing Effects</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/forge3d/forge3d/blob/main/docs/postfx.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="post-processing-effects">
+<h1>Post-Processing Effects<a class="headerlink" href="#post-processing-effects" title="Link to this heading"></a></h1>
+<p>The post-processing system in forge3d provides a flexible compute-based pipeline for applying visual effects to rendered images. This system supports effect chaining, parameter control, and GPU timing integration.</p>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>The post-processing pipeline consists of:</p>
+<ul class="simple">
+<li><p><strong>Effect Chain Management</strong>: Automatically handles effect ordering and resource allocation</p></li>
+<li><p><strong>Compute-Based Effects</strong>: GPU compute shaders for optimal performance</p></li>
+<li><p><strong>Temporal Effects</strong>: Support for effects that require previous frame data</p></li>
+<li><p><strong>Parameter Control</strong>: Real-time adjustment of effect parameters</p></li>
+<li><p><strong>GPU Timing Integration</strong>: Performance monitoring for each effect</p></li>
+</ul>
+</section>
+<section id="quick-start">
+<h2>Quick Start<a class="headerlink" href="#quick-start" title="Link to this heading"></a></h2>
+<p>Basic post-processing usage:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">forge3d.postfx</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">postfx</span>
+
+<span class="c1"># Enable post-processing effects</span>
+<span class="n">postfx</span><span class="o">.</span><span class="n">enable</span><span class="p">(</span><span class="s2">&quot;bloom&quot;</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="mf">1.2</span><span class="p">,</span> <span class="n">strength</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
+<span class="n">postfx</span><span class="o">.</span><span class="n">enable</span><span class="p">(</span><span class="s2">&quot;tonemap&quot;</span><span class="p">,</span> <span class="n">exposure</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">gamma</span><span class="o">=</span><span class="mf">2.2</span><span class="p">)</span>
+
+<span class="c1"># Check enabled effects (returns in execution order)</span>
+<span class="n">enabled</span> <span class="o">=</span> <span class="n">postfx</span><span class="o">.</span><span class="n">list</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Enabled effects: </span><span class="si">{</span><span class="n">enabled</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Adjust parameters</span>
+<span class="n">postfx</span><span class="o">.</span><span class="n">set_parameter</span><span class="p">(</span><span class="s2">&quot;bloom&quot;</span><span class="p">,</span> <span class="s2">&quot;strength&quot;</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+
+<span class="c1"># Apply a preset configuration</span>
+<span class="n">postfx</span><span class="o">.</span><span class="n">apply_preset</span><span class="p">(</span><span class="s2">&quot;cinematic&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="available-effects">
+<h2>Available Effects<a class="headerlink" href="#available-effects" title="Link to this heading"></a></h2>
+<section id="bloom-effect">
+<h3>Bloom Effect<a class="headerlink" href="#bloom-effect" title="Link to this heading"></a></h3>
+<p>The bloom effect creates a luminous glow around bright areas of the image using a three-pass pipeline:</p>
+<ol class="arabic simple">
+<li><p><strong>Bright-pass extraction</strong>: Identifies pixels above a brightness threshold</p></li>
+<li><p><strong>Horizontal blur</strong>: Applies Gaussian blur horizontally</p></li>
+<li><p><strong>Vertical blur</strong>: Applies Gaussian blur vertically for the final bloom</p></li>
+</ol>
+<p>Parameters:
+* <code class="docutils literal notranslate"><span class="pre">threshold</span></code> (0.0 - 5.0): Brightness threshold for bloom extraction
+* <code class="docutils literal notranslate"><span class="pre">strength</span></code> (0.0 - 2.0): Intensity of the bloom effect
+* <code class="docutils literal notranslate"><span class="pre">radius</span></code> (0.1 - 3.0): Blur radius for the bloom</p>
+<p>Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">postfx</span><span class="o">.</span><span class="n">enable</span><span class="p">(</span><span class="s2">&quot;bloom&quot;</span><span class="p">,</span>
+              <span class="n">threshold</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>  <span class="c1"># Only pixels brighter than 1.0 bloom</span>
+              <span class="n">strength</span><span class="o">=</span><span class="mf">0.6</span><span class="p">,</span>   <span class="c1"># Moderate bloom intensity</span>
+              <span class="n">radius</span><span class="o">=</span><span class="mf">1.5</span><span class="p">)</span>     <span class="c1"># Medium blur radius</span>
+</pre></div>
+</div>
+</section>
+<section id="tone-mapping">
+<h3>Tone Mapping<a class="headerlink" href="#tone-mapping" title="Link to this heading"></a></h3>
+<p>Tone mapping converts HDR (High Dynamic Range) images to displayable LDR (Low Dynamic Range) with gamma correction.</p>
+<p>Parameters:
+* <code class="docutils literal notranslate"><span class="pre">exposure</span></code> (0.1 - 10.0): Exposure multiplier for tone mapping
+* <code class="docutils literal notranslate"><span class="pre">gamma</span></code> (1.0 - 4.0): Gamma correction value</p>
+<p>Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">postfx</span><span class="o">.</span><span class="n">enable</span><span class="p">(</span><span class="s2">&quot;tonemap&quot;</span><span class="p">,</span>
+              <span class="n">exposure</span><span class="o">=</span><span class="mf">1.2</span><span class="p">,</span>  <span class="c1"># Slightly brighter exposure</span>
+              <span class="n">gamma</span><span class="o">=</span><span class="mf">2.2</span><span class="p">)</span>     <span class="c1"># Standard sRGB gamma</span>
+</pre></div>
+</div>
+</section>
+<section id="other-effects">
+<h3>Other Effects<a class="headerlink" href="#other-effects" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><strong>FXAA</strong>: Fast Approximate Anti-Aliasing for edge smoothing</p></li>
+<li><p><strong>Temporal AA</strong>: Temporal anti-aliasing using previous frame data</p></li>
+<li><p><strong>Blur</strong>: Simple box blur effect</p></li>
+<li><p><strong>Sharpen</strong>: Unsharp mask sharpening</p></li>
+</ul>
+</section>
+</section>
+<section id="presets">
+<h2>Presets<a class="headerlink" href="#presets" title="Link to this heading"></a></h2>
+<p>Pre-configured effect combinations for common use cases:</p>
+<section id="cinematic-preset">
+<h3>Cinematic Preset<a class="headerlink" href="#cinematic-preset" title="Link to this heading"></a></h3>
+<p>Optimized for cinematic rendering with warm bloom and balanced exposure:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">postfx</span><span class="o">.</span><span class="n">apply_preset</span><span class="p">(</span><span class="s2">&quot;cinematic&quot;</span><span class="p">)</span>
+<span class="c1"># Equivalent to:</span>
+<span class="c1"># postfx.enable(&quot;bloom&quot;, threshold=1.2, strength=0.6)</span>
+<span class="c1"># postfx.enable(&quot;tonemap&quot;, exposure=1.1, gamma=2.2)</span>
+</pre></div>
+</div>
+</section>
+<section id="quality-preset">
+<h3>Quality Preset<a class="headerlink" href="#quality-preset" title="Link to this heading"></a></h3>
+<p>High-quality rendering with temporal anti-aliasing:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">postfx</span><span class="o">.</span><span class="n">apply_preset</span><span class="p">(</span><span class="s2">&quot;quality&quot;</span><span class="p">)</span>
+<span class="c1"># Enables: temporal_aa, bloom, tonemap</span>
+</pre></div>
+</div>
+</section>
+<section id="performance-preset">
+<h3>Performance Preset<a class="headerlink" href="#performance-preset" title="Link to this heading"></a></h3>
+<p>Optimized for performance with minimal effects:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">postfx</span><span class="o">.</span><span class="n">apply_preset</span><span class="p">(</span><span class="s2">&quot;performance&quot;</span><span class="p">)</span>
+<span class="c1"># Enables: fxaa (low quality), tonemap</span>
+</pre></div>
+</div>
+</section>
+<section id="sharp-preset">
+<h3>Sharp Preset<a class="headerlink" href="#sharp-preset" title="Link to this heading"></a></h3>
+<p>Enhanced sharpness for technical visualization:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">postfx</span><span class="o">.</span><span class="n">apply_preset</span><span class="p">(</span><span class="s2">&quot;sharp&quot;</span><span class="p">)</span>
+<span class="c1"># Enables: sharpen, fxaa, tonemap</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="advanced-usage">
+<h2>Advanced Usage<a class="headerlink" href="#advanced-usage" title="Link to this heading"></a></h2>
+<section id="effect-chain-control">
+<h3>Effect Chain Control<a class="headerlink" href="#effect-chain-control" title="Link to this heading"></a></h3>
+<p>The post-processing chain can be enabled/disabled globally:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Disable entire post-processing chain</span>
+<span class="n">postfx</span><span class="o">.</span><span class="n">set_chain_enabled</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span>
+
+<span class="c1"># Re-enable the chain</span>
+<span class="n">postfx</span><span class="o">.</span><span class="n">set_chain_enabled</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># Check if chain is enabled</span>
+<span class="k">if</span> <span class="n">postfx</span><span class="o">.</span><span class="n">is_chain_enabled</span><span class="p">():</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Post-processing is active&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="parameter-introspection">
+<h3>Parameter Introspection<a class="headerlink" href="#parameter-introspection" title="Link to this heading"></a></h3>
+<p>Get information about available effects and their parameters:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># List all available effects</span>
+<span class="n">available</span> <span class="o">=</span> <span class="n">postfx</span><span class="o">.</span><span class="n">list_available</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Available effects: </span><span class="si">{</span><span class="n">available</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Get detailed information about an effect</span>
+<span class="n">bloom_info</span> <span class="o">=</span> <span class="n">postfx</span><span class="o">.</span><span class="n">get_effect_info</span><span class="p">(</span><span class="s2">&quot;bloom&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Bloom description: </span><span class="si">{</span><span class="n">bloom_info</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Bloom parameters: </span><span class="si">{</span><span class="n">bloom_info</span><span class="p">[</span><span class="s1">&#39;parameters&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Check current parameter values</span>
+<span class="n">threshold</span> <span class="o">=</span> <span class="n">postfx</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="s2">&quot;bloom&quot;</span><span class="p">,</span> <span class="s2">&quot;threshold&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Current bloom threshold: </span><span class="si">{</span><span class="n">threshold</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="performance-monitoring">
+<h3>Performance Monitoring<a class="headerlink" href="#performance-monitoring" title="Link to this heading"></a></h3>
+<p>Monitor GPU timing for each effect:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Get timing statistics</span>
+<span class="n">stats</span> <span class="o">=</span> <span class="n">postfx</span><span class="o">.</span><span class="n">get_timing_stats</span><span class="p">()</span>
+<span class="k">for</span> <span class="n">effect_name</span><span class="p">,</span> <span class="n">time_ms</span> <span class="ow">in</span> <span class="n">stats</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">effect_name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">time_ms</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> ms&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="custom-presets">
+<h3>Custom Presets<a class="headerlink" href="#custom-presets" title="Link to this heading"></a></h3>
+<p>Create and apply custom preset configurations:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Create a custom preset</span>
+<span class="n">custom_preset</span> <span class="o">=</span> <span class="n">postfx</span><span class="o">.</span><span class="n">create_preset</span><span class="p">(</span><span class="s2">&quot;custom_hdr&quot;</span><span class="p">,</span> <span class="p">[</span>
+    <span class="p">{</span><span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;bloom&#39;</span><span class="p">,</span> <span class="s1">&#39;parameters&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;threshold&#39;</span><span class="p">:</span> <span class="mf">2.0</span><span class="p">,</span> <span class="s1">&#39;strength&#39;</span><span class="p">:</span> <span class="mf">0.4</span><span class="p">}},</span>
+    <span class="p">{</span><span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;tonemap&#39;</span><span class="p">,</span> <span class="s1">&#39;parameters&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;exposure&#39;</span><span class="p">:</span> <span class="mf">1.5</span><span class="p">,</span> <span class="s1">&#39;gamma&#39;</span><span class="p">:</span> <span class="mf">2.4</span><span class="p">}}</span>
+<span class="p">])</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="performance-considerations">
+<h2>Performance Considerations<a class="headerlink" href="#performance-considerations" title="Link to this heading"></a></h2>
+<p>The post-processing system is designed for high performance:</p>
+<ul class="simple">
+<li><p><strong>GPU Compute</strong>: All effects run on GPU compute shaders</p></li>
+<li><p><strong>Resource Pooling</strong>: Textures and buffers are reused across frames</p></li>
+<li><p><strong>Effect Ordering</strong>: Effects are automatically ordered by priority for optimal GPU utilization</p></li>
+<li><p><strong>Timing Integration</strong>: Built-in GPU timing helps identify performance bottlenecks</p></li>
+</ul>
+<p>Performance targets:
+* 60 FPS &#64; 1080p with three enabled effects in the chain
+* &lt;1% GPU time overhead for timing and resource management</p>
+</section>
+<section id="integration-with-renderer">
+<h2>Integration with Renderer<a class="headerlink" href="#integration-with-renderer" title="Link to this heading"></a></h2>
+<p>Post-processing integrates seamlessly with the forge3d rendering pipeline:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">forge3d</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">f3d</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">forge3d.postfx</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">postfx</span>
+
+<span class="c1"># Set up renderer</span>
+<span class="n">renderer</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">Renderer</span><span class="p">(</span><span class="mi">1920</span><span class="p">,</span> <span class="mi">1080</span><span class="p">)</span>
+
+<span class="c1"># Configure post-processing</span>
+<span class="n">postfx</span><span class="o">.</span><span class="n">apply_preset</span><span class="p">(</span><span class="s2">&quot;quality&quot;</span><span class="p">)</span>
+<span class="n">postfx</span><span class="o">.</span><span class="n">set_parameter</span><span class="p">(</span><span class="s2">&quot;bloom&quot;</span><span class="p">,</span> <span class="s2">&quot;strength&quot;</span><span class="p">,</span> <span class="mf">0.8</span><span class="p">)</span>
+
+<span class="c1"># Render with post-processing applied</span>
+<span class="n">image</span> <span class="o">=</span> <span class="n">renderer</span><span class="o">.</span><span class="n">render_with_postfx</span><span class="p">()</span>
+
+<span class="c1"># Check performance</span>
+<span class="n">stats</span> <span class="o">=</span> <span class="n">postfx</span><span class="o">.</span><span class="n">get_timing_stats</span><span class="p">()</span>
+<span class="n">total_postfx_time</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">stats</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Post-processing took </span><span class="si">{</span><span class="n">total_postfx_time</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> ms&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="module-forge3d.postfx">
+<span id="api-reference"></span><h2>API Reference<a class="headerlink" href="#module-forge3d.postfx" title="Link to this heading"></a></h2>
+<p>Post-processing effects API for forge3d.</p>
+<p>This module provides high-level Python access to the post-processing compute pipeline,
+allowing applications to enable, configure, and chain GPU-based post-processing effects.</p>
+<p>The post-processing system provides:
+- Effect chain management with automatic resource handling
+- Compute-based effects with optimal GPU utilization
+- Temporal effects with ping-pong buffer management
+- Parameter control and real-time adjustment
+- Integration with GPU timing for performance monitoring</p>
+<dl>
+<dt>Usage:</dt><dd><p>import forge3d.postfx as postfx</p>
+<p># Enable post-processing for a renderer
+postfx.enable_postfx_chain(renderer)</p>
+<p># Enable specific effects
+postfx.enable(“bloom”, strength=0.6, threshold=1.0)
+postfx.enable(“tonemap”, exposure=1.2, gamma=2.2)</p>
+<p># Configure effect parameters
+postfx.set_parameter(“bloom”, “strength”, 0.8)</p>
+<p># List available effects
+effects = postfx.list_available_effects()</p>
+<p># Disable effects
+postfx.disable(“bloom”)</p>
+</dd>
+</dl>
+<dl class="py class">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxConfig">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">PostFxConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">enabled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameters</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><span class="pre">Dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">priority</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><span class="pre">int</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">temporal</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxConfig"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxConfig" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>Configuration for a post-processing effect.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxConfig.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">enabled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameters</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><span class="pre">Dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">priority</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><span class="pre">int</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">temporal</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxConfig.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxConfig.__init__" title="Link to this definition"></a></dt>
+<dd><p>Initialize post-processing effect configuration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> – Effect name/identifier</p></li>
+<li><p><strong>enabled</strong> – Whether the effect is enabled</p></li>
+<li><p><strong>parameters</strong> – Effect-specific parameters</p></li>
+<li><p><strong>priority</strong> – Priority for effect ordering (higher = later)</p></li>
+<li><p><strong>temporal</strong> – Whether this effect needs temporal data</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxConfig.to_dict">
+<span class="sig-name descname"><span class="pre">to_dict</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><span class="pre">Dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxConfig.to_dict"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxConfig.to_dict" title="Link to this definition"></a></dt>
+<dd><p>Convert to dictionary for native interface.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxConfig.from_dict">
+<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_dict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><span class="pre">Dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#forge3d.postfx.PostFxConfig" title="forge3d.postfx.PostFxConfig"><span class="pre">PostFxConfig</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxConfig.from_dict"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxConfig.from_dict" title="Link to this definition"></a></dt>
+<dd><p>Create from dictionary.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">PostFxChainManager</span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>Manager for post-processing effect chains.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.__init__" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.enable">
+<span class="sig-name descname"><span class="pre">enable</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.enable"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.enable" title="Link to this definition"></a></dt>
+<dd><p>Enable a post-processing effect with parameters.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> – Name of the effect to enable</p></li>
+<li><p><strong>**kwargs</strong> – Effect-specific parameters</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if effect was enabled successfully</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.disable">
+<span class="sig-name descname"><span class="pre">disable</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.disable"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.disable" title="Link to this definition"></a></dt>
+<dd><p>Disable a post-processing effect.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name</strong> – Name of the effect to disable</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if effect was disabled successfully</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.set_parameter">
+<span class="sig-name descname"><span class="pre">set_parameter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">effect_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">param_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.set_parameter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.set_parameter" title="Link to this definition"></a></dt>
+<dd><p>Set parameter for an enabled effect.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>effect_name</strong> – Name of the effect</p></li>
+<li><p><strong>param_name</strong> – Name of the parameter</p></li>
+<li><p><strong>value</strong> – New parameter value</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if parameter was set successfully</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.get_parameter">
+<span class="sig-name descname"><span class="pre">get_parameter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">effect_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">param_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.get_parameter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.get_parameter" title="Link to this definition"></a></dt>
+<dd><p>Get parameter value for an enabled effect.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>effect_name</strong> – Name of the effect</p></li>
+<li><p><strong>param_name</strong> – Name of the parameter</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Parameter value or None if not found</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.list_enabled_effects">
+<span class="sig-name descname"><span class="pre">list_enabled_effects</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><span class="pre">List</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.list_enabled_effects"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.list_enabled_effects" title="Link to this definition"></a></dt>
+<dd><p>Get list of enabled effects in execution order.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List of effect names sorted by priority</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.list_available_effects">
+<span class="sig-name descname"><span class="pre">list_available_effects</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><span class="pre">List</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.list_available_effects"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.list_available_effects" title="Link to this definition"></a></dt>
+<dd><p>Get list of all available effects.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List of available effect names</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.get_effect_info">
+<span class="sig-name descname"><span class="pre">get_effect_info</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><span class="pre">Dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.get_effect_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.get_effect_info" title="Link to this definition"></a></dt>
+<dd><p>Get information about an available effect.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name</strong> – Effect name</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Effect information dictionary or None if not found</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.set_chain_enabled">
+<span class="sig-name descname"><span class="pre">set_chain_enabled</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">enabled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.set_chain_enabled"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.set_chain_enabled" title="Link to this definition"></a></dt>
+<dd><p>Enable or disable the entire post-processing chain.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>enabled</strong> – Whether to enable the chain</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.is_chain_enabled">
+<span class="sig-name descname"><span class="pre">is_chain_enabled</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.is_chain_enabled"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.is_chain_enabled" title="Link to this definition"></a></dt>
+<dd><p>Check if post-processing chain is enabled.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>True if chain is enabled</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.get_timing_stats">
+<span class="sig-name descname"><span class="pre">get_timing_stats</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><span class="pre">Dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.get_timing_stats"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.get_timing_stats" title="Link to this definition"></a></dt>
+<dd><p>Get timing statistics for effects.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Dictionary mapping effect names to GPU time in milliseconds</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.update_timing_stats">
+<span class="sig-name descname"><span class="pre">update_timing_stats</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stats</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><span class="pre">Dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.update_timing_stats"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.update_timing_stats" title="Link to this definition"></a></dt>
+<dd><p>Update timing statistics (called by native code).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>stats</strong> – New timing statistics</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="forge3d.postfx.PostFxChainManager.get_chain_config">
+<span class="sig-name descname"><span class="pre">get_chain_config</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><span class="pre">Dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#PostFxChainManager.get_chain_config"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.PostFxChainManager.get_chain_config" title="Link to this definition"></a></dt>
+<dd><p>Get complete chain configuration for native interface.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Chain configuration dictionary</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.enable">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">enable</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#enable"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.enable" title="Link to this definition"></a></dt>
+<dd><p>Enable a post-processing effect with parameters.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> – Name of the effect to enable</p></li>
+<li><p><strong>**kwargs</strong> – Effect-specific parameters</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if effect was enabled successfully</p>
+</dd>
+</dl>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">postfx</span><span class="o">.</span><span class="n">enable</span><span class="p">(</span><span class="s2">&quot;bloom&quot;</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="mf">1.2</span><span class="p">,</span> <span class="n">strength</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">postfx</span><span class="o">.</span><span class="n">enable</span><span class="p">(</span><span class="s2">&quot;tonemap&quot;</span><span class="p">,</span> <span class="n">exposure</span><span class="o">=</span><span class="mf">1.5</span><span class="p">,</span> <span class="n">gamma</span><span class="o">=</span><span class="mf">2.2</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.disable">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">disable</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#disable"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.disable" title="Link to this definition"></a></dt>
+<dd><p>Disable a post-processing effect.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name</strong> – Name of the effect to disable</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if effect was disabled successfully</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.set_parameter">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">set_parameter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">effect_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">param_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#set_parameter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.set_parameter" title="Link to this definition"></a></dt>
+<dd><p>Set parameter for an enabled effect.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>effect_name</strong> – Name of the effect</p></li>
+<li><p><strong>param_name</strong> – Name of the parameter</p></li>
+<li><p><strong>value</strong> – New parameter value</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if parameter was set successfully</p>
+</dd>
+</dl>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">postfx</span><span class="o">.</span><span class="n">set_parameter</span><span class="p">(</span><span class="s2">&quot;bloom&quot;</span><span class="p">,</span> <span class="s2">&quot;strength&quot;</span><span class="p">,</span> <span class="mf">1.2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">postfx</span><span class="o">.</span><span class="n">set_parameter</span><span class="p">(</span><span class="s2">&quot;tonemap&quot;</span><span class="p">,</span> <span class="s2">&quot;exposure&quot;</span><span class="p">,</span> <span class="mf">0.8</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.get_parameter">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">get_parameter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">effect_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">param_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#get_parameter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.get_parameter" title="Link to this definition"></a></dt>
+<dd><p>Get parameter value for an enabled effect.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>effect_name</strong> – Name of the effect</p></li>
+<li><p><strong>param_name</strong> – Name of the parameter</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Parameter value or None if not found</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.list">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">list</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><span class="pre">List</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#list"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.list" title="Link to this definition"></a></dt>
+<dd><p>Get list of enabled effects in execution order.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List of effect names sorted by priority</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.list_available">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">list_available</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><span class="pre">List</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#list_available"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.list_available" title="Link to this definition"></a></dt>
+<dd><p>Get list of all available effects.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List of available effect names</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.get_effect_info">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">get_effect_info</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><span class="pre">Dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#get_effect_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.get_effect_info" title="Link to this definition"></a></dt>
+<dd><p>Get information about an available effect.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>name</strong> – Effect name</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Effect information dictionary or None if not found</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.set_chain_enabled">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">set_chain_enabled</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">enabled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/forge3d/postfx.html#set_chain_enabled"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.set_chain_enabled" title="Link to this definition"></a></dt>
+<dd><p>Enable or disable the entire post-processing chain.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>enabled</strong> – Whether to enable the chain</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.is_chain_enabled">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">is_chain_enabled</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#is_chain_enabled"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.is_chain_enabled" title="Link to this definition"></a></dt>
+<dd><p>Check if post-processing chain is enabled.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>True if chain is enabled</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.get_timing_stats">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">get_timing_stats</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><span class="pre">Dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#get_timing_stats"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.get_timing_stats" title="Link to this definition"></a></dt>
+<dd><p>Get timing statistics for effects.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Dictionary mapping effect names to GPU time in milliseconds</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.create_preset">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">create_preset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">effects</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><span class="pre">List</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><span class="pre">Dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><span class="pre">Dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#create_preset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.create_preset" title="Link to this definition"></a></dt>
+<dd><p>Create a post-processing preset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> – Preset name</p></li>
+<li><p><strong>effects</strong> – List of effect configurations</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Preset configuration dictionary</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.apply_preset">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">apply_preset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">preset_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#apply_preset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.apply_preset" title="Link to this definition"></a></dt>
+<dd><p>Apply a built-in post-processing preset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>preset_name</strong> – Name of the preset to apply</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if preset was applied successfully</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.list_presets">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">list_presets</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><span class="pre">List</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#list_presets"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.list_presets" title="Link to this definition"></a></dt>
+<dd><p>Get list of available presets.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List of preset names</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.set_renderer_postfx_enabled">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">set_renderer_postfx_enabled</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">renderer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><span class="pre">Any</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">enabled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#set_renderer_postfx_enabled"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.set_renderer_postfx_enabled" title="Link to this definition"></a></dt>
+<dd><p>Enable/disable PostFX chain for a renderer (Python-side helper).</p>
+<p>If the native method exists (Renderer.set_postfx_enabled), it is used.
+Otherwise a Python attribute is set for higher-level tools to inspect.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="forge3d.postfx.is_renderer_postfx_enabled">
+<span class="sig-prename descclassname"><span class="pre">forge3d.postfx.</span></span><span class="sig-name descname"><span class="pre">is_renderer_postfx_enabled</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">renderer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><span class="pre">Any</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/forge3d/postfx.html#is_renderer_postfx_enabled"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#forge3d.postfx.is_renderer_postfx_enabled" title="Link to this definition"></a></dt>
+<dd><p>Check if PostFX is enabled on a renderer (Python-side helper).</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, forge3d contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

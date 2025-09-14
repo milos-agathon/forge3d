@@ -207,7 +207,9 @@ impl QueueBuffers {
     /// Reset all queue counters for new frame
     pub fn reset_counters(&self, queue: &Queue, encoder: &mut CommandEncoder) {
         let zero_header = QueueHeader::new(self.capacity);
-        let header_data = bytemuck::cast_slice(&[zero_header]);
+        // Avoid borrowing a temporary slice; bind the array first to satisfy borrow checker
+        let header_arr = [zero_header];
+        let header_data = bytemuck::cast_slice(&header_arr);
         
         // Reset all queue headers
         queue.write_buffer(&self.ray_queue_header, 0, header_data);

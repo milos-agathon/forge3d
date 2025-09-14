@@ -17,8 +17,7 @@ pub mod postfx;
 pub mod bloom;
 
 // Workstream O: Resource & Memory Management
-pub mod staging_rings;        // O1: Staging buffer rings with fence synchronization
-pub mod fence_tracker;        // O1: Fence tracking for staging buffers
+// staging_rings and fence_tracker are declared below with feature flags
 pub mod compressed_textures;  // O3: Compressed texture pipeline
 pub mod texture_format;       // O3: Texture format registry and detection
 pub mod virtual_texture;      // O4: Virtual texture streaming system
