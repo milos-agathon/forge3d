@@ -3,9 +3,9 @@
 //! Compares bind group churn (multiple bind groups) vs single bind group performance.
 //! Measures frame times and bind group switching overhead.
 
-use std::time::Instant;
-use wgpu::{*, util::DeviceExt};
 use pollster;
+use std::time::Instant;
+use wgpu::{util::DeviceExt, *};
 
 /// Configuration for the performance demo
 struct PerfConfig {
@@ -55,7 +55,11 @@ impl TestContext {
             .request_device(&DeviceDescriptor::default(), None)
             .await?;
 
-        Ok(Self { device, queue, config })
+        Ok(Self {
+            device,
+            queue,
+            config,
+        })
     }
 }
 
@@ -71,66 +75,75 @@ struct SplitBindGroupTest {
 impl SplitBindGroupTest {
     fn new(ctx: &TestContext) -> Result<Self, Box<dyn std::error::Error>> {
         // Create bind group layout for per-object uniforms
-        let bind_group_layout = ctx.device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("SplitBG_PerObject"),
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::VERTEX_FRAGMENT,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
+        let bind_group_layout = ctx
+            .device
+            .create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("SplitBG_PerObject"),
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
 
         // Create render pipeline
-        let pipeline_layout = ctx.device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("SplitBG_Pipeline"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout = ctx
+            .device
+            .create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some("SplitBG_Pipeline"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         let shader = ctx.device.create_shader_module(ShaderModuleDescriptor {
             label: Some("SplitBG_Shader"),
             source: ShaderSource::Wgsl(include_str!("../../shaders/perf/split_bg.wgsl").into()),
         });
 
-        let render_pipeline = ctx.device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("SplitBG_Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[VertexBufferLayout {
-                    array_stride: 12, // 3 floats
-                    step_mode: VertexStepMode::Vertex,
-                    attributes: &[VertexAttribute {
-                        offset: 0,
-                        shader_location: 0,
-                        format: VertexFormat::Float32x3,
+        let render_pipeline = ctx
+            .device
+            .create_render_pipeline(&RenderPipelineDescriptor {
+                label: Some("SplitBG_Pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[VertexBufferLayout {
+                        array_stride: 12, // 3 floats
+                        step_mode: VertexStepMode::Vertex,
+                        attributes: &[VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: VertexFormat::Float32x3,
+                        }],
                     }],
-                }],
-            },
-            fragment: Some(FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState {
-                    format: TextureFormat::Rgba8UnormSrgb,
-                    blend: Some(BlendState::REPLACE),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            primitive: PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: MultisampleState::default(),
-            multiview: None,
-        });
+                },
+                fragment: Some(FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(ColorTargetState {
+                        format: TextureFormat::Rgba8UnormSrgb,
+                        blend: Some(BlendState::REPLACE),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                primitive: PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: MultisampleState::default(),
+                multiview: None,
+            });
 
         // Create vertex and index buffers (simple quad)
         let vertices = [
-            [-0.1f32, -0.1, 0.0], [0.1, -0.1, 0.0], [0.1, 0.1, 0.0], [-0.1, 0.1, 0.0]
+            [-0.1f32, -0.1, 0.0],
+            [0.1, -0.1, 0.0],
+            [0.1, 0.1, 0.0],
+            [-0.1, 0.1, 0.0],
         ];
         let indices = [0u16, 1, 2, 2, 3, 0];
 
@@ -188,9 +201,11 @@ impl SplitBindGroupTest {
     }
 
     fn render_frame(&self, ctx: &TestContext, target: &TextureView) -> u32 {
-        let mut encoder = ctx.device.create_command_encoder(&CommandEncoderDescriptor {
-            label: Some("SplitBG_Encoder"),
-        });
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("SplitBG_Encoder"),
+            });
 
         let mut bind_group_switches = 0;
 
@@ -239,66 +254,75 @@ struct SingleBindGroupTest {
 impl SingleBindGroupTest {
     fn new(ctx: &TestContext) -> Result<Self, Box<dyn std::error::Error>> {
         // Create bind group layout with dynamic offset
-        let bind_group_layout = ctx.device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("SingleBG_Layout"),
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::VERTEX_FRAGMENT,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: true,
-                    min_binding_size: Some(std::num::NonZeroU64::new(256).unwrap()),
-                },
-                count: None,
-            }],
-        });
+        let bind_group_layout = ctx
+            .device
+            .create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("SingleBG_Layout"),
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: Some(std::num::NonZeroU64::new(256).unwrap()),
+                    },
+                    count: None,
+                }],
+            });
 
         // Create render pipeline
-        let pipeline_layout = ctx.device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("SingleBG_Pipeline"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout = ctx
+            .device
+            .create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some("SingleBG_Pipeline"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         let shader = ctx.device.create_shader_module(ShaderModuleDescriptor {
             label: Some("SingleBG_Shader"),
             source: ShaderSource::Wgsl(include_str!("../../shaders/perf/single_bg.wgsl").into()),
         });
 
-        let render_pipeline = ctx.device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("SingleBG_Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[VertexBufferLayout {
-                    array_stride: 12,
-                    step_mode: VertexStepMode::Vertex,
-                    attributes: &[VertexAttribute {
-                        offset: 0,
-                        shader_location: 0,
-                        format: VertexFormat::Float32x3,
+        let render_pipeline = ctx
+            .device
+            .create_render_pipeline(&RenderPipelineDescriptor {
+                label: Some("SingleBG_Pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[VertexBufferLayout {
+                        array_stride: 12,
+                        step_mode: VertexStepMode::Vertex,
+                        attributes: &[VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: VertexFormat::Float32x3,
+                        }],
                     }],
-                }],
-            },
-            fragment: Some(FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState {
-                    format: TextureFormat::Rgba8UnormSrgb,
-                    blend: Some(BlendState::REPLACE),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            primitive: PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: MultisampleState::default(),
-            multiview: None,
-        });
+                },
+                fragment: Some(FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(ColorTargetState {
+                        format: TextureFormat::Rgba8UnormSrgb,
+                        blend: Some(BlendState::REPLACE),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                primitive: PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: MultisampleState::default(),
+                multiview: None,
+            });
 
         // Create vertex and index buffers (same as split approach)
         let vertices = [
-            [-0.1f32, -0.1, 0.0], [0.1, -0.1, 0.0], [0.1, 0.1, 0.0], [-0.1, 0.1, 0.0]
+            [-0.1f32, -0.1, 0.0],
+            [0.1, -0.1, 0.0],
+            [0.1, 0.1, 0.0],
+            [-0.1, 0.1, 0.0],
         ];
         let indices = [0u16, 1, 2, 2, 3, 0];
 
@@ -331,7 +355,7 @@ impl SingleBindGroupTest {
                 [0.0, 0.0, 1.0, 0.0],
                 [0.0, 0.0, 0.0, 1.0],
             ];
-            
+
             ctx.queue.write_buffer(
                 &uniform_buffer,
                 i as u64 * 256,
@@ -363,9 +387,11 @@ impl SingleBindGroupTest {
     }
 
     fn render_frame(&self, ctx: &TestContext, target: &TextureView) -> u32 {
-        let mut encoder = ctx.device.create_command_encoder(&CommandEncoderDescriptor {
-            label: Some("SingleBG_Encoder"),
-        });
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("SingleBG_Encoder"),
+            });
 
         {
             let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -410,7 +436,11 @@ fn run_test<T>(
     // Create render target
     let texture = ctx.device.create_texture(&TextureDescriptor {
         label: Some("PerfTest_Target"),
-        size: Extent3d { width: 512, height: 512, depth_or_array_layers: 1 },
+        size: Extent3d {
+            width: 512,
+            height: 512,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: TextureDimension::D2,
@@ -423,29 +453,38 @@ fn run_test<T>(
     let mut frame_times = Vec::new();
     let mut total_bind_group_switches = 0;
 
-    println!("Running {} test with {} frames, {} objects...", name, ctx.config.frames, ctx.config.objects);
-    
+    println!(
+        "Running {} test with {} frames, {} objects...",
+        name, ctx.config.frames, ctx.config.objects
+    );
+
     let test_start = Instant::now();
 
     for frame in 0..ctx.config.frames {
         let frame_start = Instant::now();
-        
+
         let bind_group_switches = render_fn(test, ctx, &target_view);
         ctx.device.poll(Maintain::Wait); // Ensure completion
-        
+
         let frame_time = frame_start.elapsed().as_secs_f64() * 1000.0;
         frame_times.push(frame_time);
         total_bind_group_switches += bind_group_switches;
 
         if frame % 100 == 0 {
-            println!("  Frame {}/{} - {:.3}ms", frame, ctx.config.frames, frame_time);
+            println!(
+                "  Frame {}/{} - {:.3}ms",
+                frame, ctx.config.frames, frame_time
+            );
         }
     }
 
     let total_time = test_start.elapsed().as_secs_f64() * 1000.0;
     let avg_frame_time = frame_times.iter().sum::<f64>() / frame_times.len() as f64;
     let min_frame_time = frame_times.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max_frame_time = frame_times.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let max_frame_time = frame_times
+        .iter()
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
 
     Ok(PerfMetrics {
         config_name: name.to_string(),
@@ -464,18 +503,21 @@ fn write_csv(metrics: &[PerfMetrics], path: &str) -> Result<(), Box<dyn std::err
     use std::io::Write;
 
     let mut file = File::create(path)?;
-    
+
     writeln!(file, "Configuration,TotalTimeMs,AvgFrameTimeMs,MinFrameTimeMs,MaxFrameTimeMs,BindGroupSwitches,DrawCalls")?;
-    
+
     for metric in metrics {
-        writeln!(file, "{},{:.3},{:.3},{:.3},{:.3},{},{}", 
-                 metric.config_name,
-                 metric.total_time_ms,
-                 metric.avg_frame_time_ms,
-                 metric.min_frame_time_ms,
-                 metric.max_frame_time_ms,
-                 metric.bind_group_switches,
-                 metric.draw_calls)?;
+        writeln!(
+            file,
+            "{},{:.3},{:.3},{:.3},{:.3},{},{}",
+            metric.config_name,
+            metric.total_time_ms,
+            metric.avg_frame_time_ms,
+            metric.min_frame_time_ms,
+            metric.max_frame_time_ms,
+            metric.bind_group_switches,
+            metric.draw_calls
+        )?;
     }
 
     println!("CSV written to: {}", path);
@@ -496,26 +538,29 @@ async fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
                 if i < args.len() {
                     config.frames = args[i].parse().unwrap_or(600);
                 }
-            },
+            }
             "--objects" => {
                 i += 1;
                 if i < args.len() {
                     config.objects = args[i].parse().unwrap_or(1000);
                 }
-            },
+            }
             "--out" => {
                 i += 1;
                 if i < args.len() {
                     config.output_path = Some(args[i].clone());
                 }
-            },
+            }
             _ => {}
         }
         i += 1;
     }
 
     println!("I6: Split vs Single Bind Group Performance Demo");
-    println!("Configuration: {} frames, {} objects", config.frames, config.objects);
+    println!(
+        "Configuration: {} frames, {} objects",
+        config.frames, config.objects
+    );
 
     let ctx = TestContext::new(config).await?;
 
@@ -523,12 +568,9 @@ async fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
     let split_test = SplitBindGroupTest::new(&ctx)?;
     let single_test = SingleBindGroupTest::new(&ctx)?;
 
-    let split_metrics = run_test(
-        &split_test,
-        &ctx,
-        "SplitBindGroups",
-        |test, ctx, target| test.render_frame(ctx, target),
-    )?;
+    let split_metrics = run_test(&split_test, &ctx, "SplitBindGroups", |test, ctx, target| {
+        test.render_frame(ctx, target)
+    })?;
 
     let single_metrics = run_test(
         &single_test,
@@ -542,15 +584,27 @@ async fn run_demo() -> Result<(), Box<dyn std::error::Error>> {
     println!("Split Bind Groups:");
     println!("  Total time: {:.3}ms", split_metrics.total_time_ms);
     println!("  Avg frame time: {:.3}ms", split_metrics.avg_frame_time_ms);
-    println!("  Bind group switches: {}", split_metrics.bind_group_switches);
+    println!(
+        "  Bind group switches: {}",
+        split_metrics.bind_group_switches
+    );
 
     println!("\nSingle Bind Group:");
     println!("  Total time: {:.3}ms", single_metrics.total_time_ms);
-    println!("  Avg frame time: {:.3}ms", single_metrics.avg_frame_time_ms);
-    println!("  Bind group switches: {}", single_metrics.bind_group_switches);
+    println!(
+        "  Avg frame time: {:.3}ms",
+        single_metrics.avg_frame_time_ms
+    );
+    println!(
+        "  Bind group switches: {}",
+        single_metrics.bind_group_switches
+    );
 
     let improvement = split_metrics.avg_frame_time_ms / single_metrics.avg_frame_time_ms;
-    println!("\nImprovement: {:.2}x faster with single bind group", improvement);
+    println!(
+        "\nImprovement: {:.2}x faster with single bind group",
+        improvement
+    );
 
     // Write CSV if requested
     if let Some(output_path) = &ctx.config.output_path {

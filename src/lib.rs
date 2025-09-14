@@ -15,6 +15,7 @@ mod device_caps;
 mod transforms;
 pub mod mesh;  // Make mesh public for TBN utilities
 pub mod path_tracing; // A1 GPU path tracer backend
+pub mod accel; // A7 LBVH/SAH acceleration structures
 #[cfg(any(feature = "enable-normal-mapping", feature = "enable-pbr", feature = "enable-ibl", feature = "enable-csm"))]
 pub mod pipeline; // Advanced rendering pipelines
 
@@ -133,6 +134,7 @@ fn _pt_render_gpu(
         cam_forward: fwd,
         seed_hi: ((seed >> 32) & 0xFFFF_FFFF) as u32,
         seed_lo: (seed & 0xFFFF_FFFF) as u32,
+        _pad_end: [0, 0, 0],
     };
 
     let rgba = crate::path_tracing::compute::PathTracerGPU::render(width, height, &spheres, uniforms)

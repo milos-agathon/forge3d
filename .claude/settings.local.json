@@ -116,7 +116,9 @@
       "Bash('notebooks' )",
       "Bash(cargo --version)",
       "Bash(cmake:*)",
-      "Bash(maturin:*)"
+      "Bash(maturin:*)",
+      "Bash(dir:*)",
+      "Bash(cargo fmt:*)"
     ],
     "deny": [],
     "additionalDirectories": [

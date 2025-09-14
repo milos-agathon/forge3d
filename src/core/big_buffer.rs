@@ -7,7 +7,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use wgpu::{Buffer, BufferUsages, Device, BufferDescriptor, BufferAddress};
-use crate::core::memory_tracker::ResourceRegistry;\nuse crate::core::resource_tracker::ResourceHandle;
+use crate::core::memory_tracker::ResourceRegistry;
+use crate::core::resource_tracker::ResourceHandle;
 use crate::error::RenderError;
 
 /// Size of each allocation block in bytes (64-byte aligned for WGSL std140)

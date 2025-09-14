@@ -49,6 +49,8 @@ lyon_path = "1.0"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"], optional = true }
 futures-intrusive = "0.5"
 env_logger = "0.10"
+anyhow = "1"
+log = "0.4"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
@@ -61,6 +63,7 @@ path = "examples/perf/split_vs_single_bg.rs"
 [[bin]]
 name = "policies"
 path = "bench/upload_policies/policies.rs"
+required-features = ["async_readback"]
 
 [profile.release]
 codegen-units = 1

@@ -16,7 +16,7 @@ const RENDER_SIZE: (u32, u32) = (512, 512);
 #[derive(Debug, Clone)]
 struct PerfResult {
     cpu_time_ms: f64,
-    setup_time_ms: f64, 
+    setup_time_ms: f64,
     render_time_ms: f64,
     bind_group_switches: u32,
 }
@@ -54,30 +54,36 @@ struct LegacyRenderer {
 impl LegacyRenderer {
     fn new(ctx: &TestContext, object_count: u32) -> Result<Self, Box<dyn std::error::Error>> {
         // Create bind group layout for per-object uniforms
-        let bind_group_layout = ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Legacy_PerObject_Layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
+        let bind_group_layout =
+            ctx.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Legacy_PerObject_Layout"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                });
 
-        let pipeline_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Legacy_Pipeline_Layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout = ctx
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Legacy_Pipeline_Layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
-        let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Legacy_Shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                r#"
+        let shader = ctx
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Legacy_Shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    r#"
 struct Transform {
     matrix: mat4x4<f32>,
 };
@@ -93,58 +99,63 @@ fn vs_main(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
 fn fs_main() -> @location(0) vec4<f32> {
     return vec4<f32>(0.2, 0.6, 0.8, 1.0);
 }
-                "#.into()
-            ),
-        });
+                "#
+                    .into(),
+                ),
+            });
 
-        let pipeline = ctx.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Legacy_Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: 12,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[wgpu::VertexAttribute {
-                        offset: 0,
-                        shader_location: 0,
-                        format: wgpu::VertexFormat::Float32x3,
+        let pipeline = ctx
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Legacy_Pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: 12,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &[wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x3,
+                        }],
                     }],
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+            });
 
         // Create geometry (simple triangle)
-        let vertices = [
-            [-0.05f32, -0.05, 0.0], [0.05, -0.05, 0.0], [0.0, 0.05, 0.0]
-        ];
+        let vertices = [[-0.05f32, -0.05, 0.0], [0.05, -0.05, 0.0], [0.0, 0.05, 0.0]];
         let indices = [0u16, 1, 2];
 
-        let vertex_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Legacy_Vertices"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let vertex_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Legacy_Vertices"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
 
-        let index_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Legacy_Indices"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let index_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Legacy_Indices"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
 
         // Create per-object uniform buffers and bind groups
         let mut bind_groups = Vec::new();
@@ -159,11 +170,13 @@ fn fs_main() -> @location(0) vec4<f32> {
                 [0.0, 0.0, 0.0, 1.0],
             ];
 
-            let uniform_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("Legacy_Uniform_{}", i)),
-                contents: bytemuck::cast_slice(&transform),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
+            let uniform_buffer = ctx
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Legacy_Uniform_{}", i)),
+                    contents: bytemuck::cast_slice(&transform),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
 
             let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(&format!("Legacy_BindGroup_{}", i)),
@@ -186,9 +199,11 @@ fn fs_main() -> @location(0) vec4<f32> {
     }
 
     fn render(&self, ctx: &TestContext, target: &wgpu::TextureView) -> u32 {
-        let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Legacy_Encoder"),
-        });
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Legacy_Encoder"),
+            });
 
         let mut bind_group_switches = 0;
 
@@ -242,7 +257,10 @@ mod big_buffer_impl {
     }
 
     impl BigBufferRenderer {
-        pub fn new(ctx: &TestContext, object_count: u32) -> Result<Self, Box<dyn std::error::Error>> {
+        pub fn new(
+            ctx: &TestContext,
+            object_count: u32,
+        ) -> Result<Self, Box<dyn std::error::Error>> {
             let registry = ResourceRegistry::new();
 
             // Create big buffer for all objects
@@ -253,30 +271,36 @@ mod big_buffer_impl {
             )?;
 
             // Create bind group layout with dynamic offset
-            let bind_group_layout = ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("BigBuffer_Layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(std::num::NonZeroU64::new(64).unwrap()),
-                    },
-                    count: None,
-                }],
-            });
+            let bind_group_layout =
+                ctx.device
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("BigBuffer_Layout"),
+                        entries: &[wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: Some(std::num::NonZeroU64::new(64).unwrap()),
+                            },
+                            count: None,
+                        }],
+                    });
 
-            let pipeline_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("BigBuffer_Pipeline_Layout"),
-                bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[],
-            });
+            let pipeline_layout =
+                ctx.device
+                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("BigBuffer_Pipeline_Layout"),
+                        bind_group_layouts: &[&bind_group_layout],
+                        push_constant_ranges: &[],
+                    });
 
-            let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("BigBuffer_Shader"),
-                source: wgpu::ShaderSource::Wgsl(
-                    r#"
+            let shader = ctx
+                .device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("BigBuffer_Shader"),
+                    source: wgpu::ShaderSource::Wgsl(
+                        r#"
 struct Transform {
     matrix: mat4x4<f32>,
 };
@@ -295,58 +319,63 @@ fn vs_main(
 fn fs_main() -> @location(0) vec4<f32> {
     return vec4<f32>(0.2, 0.6, 0.8, 1.0);
 }
-                    "#.into()
-                ),
-            });
+                    "#
+                        .into(),
+                    ),
+                });
 
-            let pipeline = ctx.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("BigBuffer_Pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: "vs_main",
-                    buffers: &[wgpu::VertexBufferLayout {
-                        array_stride: 12,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            offset: 0,
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x3,
+            let pipeline = ctx
+                .device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("BigBuffer_Pipeline"),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: "vs_main",
+                        buffers: &[wgpu::VertexBufferLayout {
+                            array_stride: 12,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &[wgpu::VertexAttribute {
+                                offset: 0,
+                                shader_location: 0,
+                                format: wgpu::VertexFormat::Float32x3,
+                            }],
                         }],
-                    }],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: "fs_main",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            });
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: "fs_main",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                            blend: Some(wgpu::BlendState::REPLACE),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
+                });
 
             // Create geometry
-            let vertices = [
-                [-0.05f32, -0.05, 0.0], [0.05, -0.05, 0.0], [0.0, 0.05, 0.0]
-            ];
+            let vertices = [[-0.05f32, -0.05, 0.0], [0.05, -0.05, 0.0], [0.0, 0.05, 0.0]];
             let indices = [0u16, 1, 2];
 
-            let vertex_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("BigBuffer_Vertices"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+            let vertex_buffer = ctx
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("BigBuffer_Vertices"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
 
-            let index_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("BigBuffer_Indices"),
-                contents: bytemuck::cast_slice(&indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
+            let index_buffer = ctx
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("BigBuffer_Indices"),
+                    contents: bytemuck::cast_slice(&indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
 
             // Allocate blocks and upload data
             let mut blocks = Vec::new();
@@ -397,9 +426,11 @@ fn fs_main() -> @location(0) vec4<f32> {
         }
 
         pub fn render(&self, ctx: &TestContext, target: &wgpu::TextureView) -> u32 {
-            let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("BigBuffer_Encoder"),
-            });
+            let mut encoder = ctx
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("BigBuffer_Encoder"),
+                });
 
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -419,7 +450,8 @@ fn fs_main() -> @location(0) vec4<f32> {
 
                 render_pass.set_pipeline(&self.pipeline);
                 render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass
+                    .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
                 // Single bind group, render all instances at once
                 render_pass.set_bind_group(0, &self.bind_group, &[]);
@@ -454,9 +486,11 @@ fn read_texture_to_cpu(
         mapped_at_creation: false,
     });
 
-    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("Readback_Encoder"),
-    });
+    let mut encoder = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Readback_Encoder"),
+        });
 
     encoder.copy_texture_to_buffer(
         wgpu::ImageCopyTexture {
@@ -492,7 +526,7 @@ fn read_texture_to_cpu(
     receiver.recv().unwrap()?;
 
     let data = buffer_slice.get_mapped_range();
-    
+
     // Remove padding
     let mut unpadded_data = Vec::with_capacity((width * height * bytes_per_pixel) as usize);
     for row in 0..height {
@@ -540,21 +574,31 @@ fn calculate_ssim(img1: &[u8], img2: &[u8], width: u32, height: u32) -> f64 {
 
     let var1 = gray1.iter().map(|&x| (x - mean1).powi(2)).sum::<f64>() / gray1.len() as f64;
     let var2 = gray2.iter().map(|&x| (x - mean2).powi(2)).sum::<f64>() / gray2.len() as f64;
-    let cov = gray1.iter().zip(&gray2).map(|(&x, &y)| (x - mean1) * (y - mean2)).sum::<f64>() / gray1.len() as f64;
+    let cov = gray1
+        .iter()
+        .zip(&gray2)
+        .map(|(&x, &y)| (x - mean1) * (y - mean2))
+        .sum::<f64>()
+        / gray1.len() as f64;
 
     let c1 = (0.01f64 * 255.0).powi(2);
     let c2 = (0.03f64 * 255.0).powi(2);
 
-    let ssim = ((2.0 * mean1 * mean2 + c1) * (2.0 * cov + c2)) / 
-               ((mean1.powi(2) + mean2.powi(2) + c1) * (var1 + var2 + c2));
+    let ssim = ((2.0 * mean1 * mean2 + c1) * (2.0 * cov + c2))
+        / ((mean1.powi(2) + mean2.powi(2) + c1) * (var1 + var2 + c2));
 
     ssim
 }
 
 /// Run performance test for legacy approach
-async fn test_legacy_performance(ctx: &TestContext) -> Result<(PerfResult, Vec<u8>), Box<dyn std::error::Error>> {
-    println!("Testing legacy per-object bind groups with {} objects...", OBJECT_COUNT);
-    
+async fn test_legacy_performance(
+    ctx: &TestContext,
+) -> Result<(PerfResult, Vec<u8>), Box<dyn std::error::Error>> {
+    println!(
+        "Testing legacy per-object bind groups with {} objects...",
+        OBJECT_COUNT
+    );
+
     let setup_start = Instant::now();
     let renderer = LegacyRenderer::new(ctx, OBJECT_COUNT)?;
     let setup_time_ms = setup_start.elapsed().as_secs_f64() * 1000.0;
@@ -584,9 +628,13 @@ async fn test_legacy_performance(ctx: &TestContext) -> Result<(PerfResult, Vec<u
         ctx.device.poll(wgpu::Maintain::Wait);
         let render_time_ms = render_start.elapsed().as_secs_f64() * 1000.0;
         render_times.push(render_time_ms);
-        
-        println!("  Legacy run {}: {:.3}ms ({} bind group switches)", 
-                 run + 1, render_time_ms, bind_group_switches);
+
+        println!(
+            "  Legacy run {}: {:.3}ms ({} bind group switches)",
+            run + 1,
+            render_time_ms,
+            bind_group_switches
+        );
     }
 
     render_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -607,11 +655,16 @@ async fn test_legacy_performance(ctx: &TestContext) -> Result<(PerfResult, Vec<u
 
 /// Run performance test for big buffer approach (feature-gated)
 #[cfg(feature = "wsI_bigbuf")]
-async fn test_big_buffer_performance(ctx: &TestContext) -> Result<(PerfResult, Vec<u8>), Box<dyn std::error::Error>> {
+async fn test_big_buffer_performance(
+    ctx: &TestContext,
+) -> Result<(PerfResult, Vec<u8>), Box<dyn std::error::Error>> {
     use big_buffer_impl::BigBufferRenderer;
-    
-    println!("Testing big buffer approach with {} objects...", OBJECT_COUNT);
-    
+
+    println!(
+        "Testing big buffer approach with {} objects...",
+        OBJECT_COUNT
+    );
+
     let setup_start = Instant::now();
     let renderer = BigBufferRenderer::new(ctx, OBJECT_COUNT)?;
     let setup_time_ms = setup_start.elapsed().as_secs_f64() * 1000.0;
@@ -641,9 +694,13 @@ async fn test_big_buffer_performance(ctx: &TestContext) -> Result<(PerfResult, V
         ctx.device.poll(wgpu::Maintain::Wait);
         let render_time_ms = render_start.elapsed().as_secs_f64() * 1000.0;
         render_times.push(render_time_ms);
-        
-        println!("  BigBuffer run {}: {:.3}ms ({} bind group switches)", 
-                 run + 1, render_time_ms, bind_group_switches);
+
+        println!(
+            "  BigBuffer run {}: {:.3}ms ({} bind group switches)",
+            run + 1,
+            render_time_ms,
+            bind_group_switches
+        );
     }
 
     render_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -666,43 +723,57 @@ async fn test_big_buffer_performance(ctx: &TestContext) -> Result<(PerfResult, V
 #[tokio::test]
 async fn test_big_buffer_vs_legacy() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== I7: Big Buffer vs Legacy Performance Test ===");
-    println!("Objects: {}, Render Size: {}x{}", OBJECT_COUNT, RENDER_SIZE.0, RENDER_SIZE.1);
-    
+    println!(
+        "Objects: {}, Render Size: {}x{}",
+        OBJECT_COUNT, RENDER_SIZE.0, RENDER_SIZE.1
+    );
+
     let ctx = TestContext::new().await?;
-    
+
     // Test legacy approach
     let (legacy_result, legacy_pixels) = test_legacy_performance(&ctx).await?;
-    
+
     println!("\nLegacy Results:");
     println!("  Setup time: {:.3}ms", legacy_result.setup_time_ms);
     println!("  Render time: {:.3}ms", legacy_result.render_time_ms);
     println!("  Total CPU time: {:.3}ms", legacy_result.cpu_time_ms);
-    println!("  Bind group switches: {}", legacy_result.bind_group_switches);
-    
+    println!(
+        "  Bind group switches: {}",
+        legacy_result.bind_group_switches
+    );
+
     // Test big buffer approach if feature is enabled
     #[cfg(feature = "wsI_bigbuf")]
     {
         let (bigbuf_result, bigbuf_pixels) = test_big_buffer_performance(&ctx).await?;
-        
+
         println!("\nBigBuffer Results:");
         println!("  Setup time: {:.3}ms", bigbuf_result.setup_time_ms);
         println!("  Render time: {:.3}ms", bigbuf_result.render_time_ms);
         println!("  Total CPU time: {:.3}ms", bigbuf_result.cpu_time_ms);
-        println!("  Bind group switches: {}", bigbuf_result.bind_group_switches);
-        
+        println!(
+            "  Bind group switches: {}",
+            bigbuf_result.bind_group_switches
+        );
+
         // Calculate performance improvement
         let improvement_ratio = legacy_result.cpu_time_ms / bigbuf_result.cpu_time_ms;
         let improvement_percentage = (improvement_ratio - 1.0) * 100.0;
-        
+
         println!("\nPerformance Analysis:");
-        println!("  Improvement: {:.2}x faster ({:.1}% reduction)", improvement_ratio, improvement_percentage);
-        
+        println!(
+            "  Improvement: {:.2}x faster ({:.1}% reduction)",
+            improvement_ratio, improvement_percentage
+        );
+
         // Check acceptance criteria: ≥25% reduction
-        assert!(improvement_percentage >= 25.0, 
-                "Big buffer should provide ≥25% CPU time reduction, got {:.1}%", 
-                improvement_percentage);
+        assert!(
+            improvement_percentage >= 25.0,
+            "Big buffer should provide ≥25% CPU time reduction, got {:.1}%",
+            improvement_percentage
+        );
         println!("  ✅ Performance criteria met (≥25% reduction)");
-        
+
         // Visual parity check
         let exact_match = legacy_pixels == bigbuf_pixels;
         let ssim = if !exact_match {
@@ -710,7 +781,7 @@ async fn test_big_buffer_vs_legacy() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             1.0
         };
-        
+
         println!("\nVisual Parity Analysis:");
         if exact_match {
             println!("  ✅ Exact pixel match");
@@ -719,16 +790,16 @@ async fn test_big_buffer_vs_legacy() -> Result<(), Box<dyn std::error::Error>> {
             assert!(ssim >= 0.99, "SSIM should be ≥0.99, got {:.4}", ssim);
             println!("  ✅ Visual parity criteria met (SSIM≥0.99)");
         }
-        
+
         println!("\n=== BIG BUFFER TEST PASSED ===");
     }
-    
+
     #[cfg(not(feature = "wsI_bigbuf"))]
     {
         println!("\nBigBuffer test skipped (feature 'wsI_bigbuf' not enabled)");
         println!("Run with: cargo test --features wsI_bigbuf --test wsI_i7_big_buffer");
     }
-    
+
     println!("\n=== LEGACY PATH TEST COMPLETED ===");
     Ok(())
 }
@@ -736,18 +807,21 @@ async fn test_big_buffer_vs_legacy() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 async fn test_legacy_only() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== I7: Legacy Path Only Test ===");
-    
+
     let ctx = TestContext::new().await?;
     let (result, _pixels) = test_legacy_performance(&ctx).await?;
-    
+
     println!("Legacy performance baseline:");
     println!("  CPU time: {:.3}ms", result.cpu_time_ms);
     println!("  Bind group switches: {}", result.bind_group_switches);
-    
+
     // Basic sanity checks
     assert!(result.cpu_time_ms > 0.0, "CPU time should be positive");
-    assert_eq!(result.bind_group_switches, OBJECT_COUNT, "Should have one bind group switch per object");
-    
+    assert_eq!(
+        result.bind_group_switches, OBJECT_COUNT,
+        "Should have one bind group switch per object"
+    );
+
     println!("✅ Legacy test completed successfully");
     Ok(())
 }

@@ -4,64 +4,35 @@
 // RELEVANT FILES:src/path_tracing/mod.rs,src/path_tracing/compute.rs,python/forge3d/path_tracing.py,tests/test_path_tracing_gpu.py
 
 struct Uniforms {
-  width: u32;
-  height: u32;
-  frame_index: u32;
-  _pad: u32;
-  cam_origin: vec3<f32>;
-  cam_fov_y: f32;
-  cam_right: vec3<f32>;
-  cam_aspect: f32;
-  cam_up: vec3<f32>;
-  cam_exposure: f32;
-  cam_forward: vec3<f32>;
-  seed_hi: u32;
-  seed_lo: u32;
+  width: u32,
+  height: u32,
+  frame_index: u32,
+  _pad: u32,
+  cam_origin: vec3<f32>,
+  cam_fov_y: f32,
+  cam_right: vec3<f32>,
+  cam_aspect: f32,
+  cam_up: vec3<f32>,
+  cam_exposure: f32,
+  cam_forward: vec3<f32>,
+  seed_hi: u32,
+  seed_lo: u32,
 };
 
-struct Sphere { center: vec3<f32>; radius: f32; albedo: vec3<f32>; _pad0: f32; };
+struct Sphere { center: vec3<f32>, radius: f32, albedo: vec3<f32>, _pad0: f32 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(1) @binding(0) var<storage, read> scene_spheres: array<Sphere>;
 @group(2) @binding(0) var<storage, read_write> accum_hdr: array<vec4<f32>>;
 @group(3) @binding(0) var out_tex: texture_storage_2d<rgba16float, write>;
 
-fn xorshift64star(state: ptr<function, vec2<u32>>) -> f32 {
-  // emulate 64-bit xorshift* using two u32 lanes: hi, lo
-  var s = *state; // hi, lo
-  // combine to 64
-  var x_hi = s.x;
-  var x_lo = s.y;
-  // x ^= x >> 12
-  var t_hi: u32 = x_hi >> 12u;
-  var t_lo: u32 = (x_lo >> 12u) | (x_hi << (32u - 12u));
-  x_hi = x_hi ^ t_hi;
-  x_lo = x_lo ^ t_lo;
-  // x ^= x << 25
-  t_hi = (x_hi << 25u) | (x_lo >> (32u - 25u));
-  t_lo = x_lo << 25u;
-  x_hi = x_hi ^ t_hi;
-  x_lo = x_lo ^ t_lo;
-  // x ^= x >> 27
-  t_hi = x_hi >> 27u;
-  t_lo = (x_lo >> 27u) | (x_hi << (32u - 27u));
-  x_hi = x_hi ^ t_hi;
-  x_lo = x_lo ^ t_lo;
-  // * 0x2545F4914F6CDD1D
-  let C_hi: u32 = 0x2545F491u;
-  let C_lo: u32 = 0x4F6CDD1Du;
-  let m0 = u64((x_lo)) * u64((C_lo));
-  let m1 = u64((x_lo)) * u64((C_hi));
-  let m2 = u64((x_hi)) * u64((C_lo));
-  // accumulate 128-bit product collapsed to 64 bits (hi:lo)
-  let lo = m0 & 0xFFFF_FFFFu64;
-  let carry = (m0 >> 32u) + (m1 & 0xFFFF_FFFFu64) + (m2 & 0xFFFF_FFFFu64);
-  let hi = (m1 >> 32u) + (m2 >> 32u) + (carry >> 32u);
-  x_lo = u32(lo & 0xFFFF_FFFFu64);
-  x_hi = u32(hi & 0xFFFF_FFFFu64);
-  *state = vec2<u32>(x_hi, x_lo);
-  let mant = (f32(x_hi) / 4294967296.0) + (f32(x_lo) / 18446744073709551616.0);
-  return fract(mant);
+fn xorshift32(state: ptr<function, u32>) -> f32 {
+  var x = *state;
+  x ^= (x << 13u);
+  x ^= (x >> 17u);
+  x ^= (x << 5u);
+  *state = x;
+  return f32(x) / 4294967296.0;
 }
 
 fn tent_filter(u: f32) -> f32 {
@@ -92,10 +63,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let py = f32(gid.y);
 
   // Seed per-pixel RNG from seed_hi/lo + pixel index + frame_index
-  var st = vec2<u32>(uniforms.seed_hi ^ gid.x ^ (uniforms.frame_index * 1664525u),
-                     uniforms.seed_lo ^ gid.y ^ (uniforms.frame_index * 1013904223u));
-  let jx = tent_filter(xorshift64star(&st)) * 0.5;
-  let jy = tent_filter(xorshift64star(&st)) * 0.5;
+  var st: u32 = uniforms.seed_hi ^ (gid.x * 1664525u) ^ (gid.y * 1013904223u) ^ uniforms.frame_index;
+  let jx = tent_filter(xorshift32(&st)) * 0.5;
+  let jy = tent_filter(xorshift32(&st)) * 0.5;
 
   let ndc_x = ((px + 0.5 + jx) / f32(W)) * 2.0 - 1.0;
   let ndc_y = (1.0 - (py + 0.5 + jy) / f32(H)) * 2.0 - 1.0;

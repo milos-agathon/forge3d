@@ -4,4 +4,5 @@
 // RELEVANT FILES:src/path_tracing/compute.rs,src/shaders/pt_kernel.wgsl,python/forge3d/path_tracing.py,src/lib.rs
 
 pub mod compute;
+pub mod accel;
 

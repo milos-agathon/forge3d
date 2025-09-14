@@ -1,9 +1,9 @@
-<task id="ws-A1-pathtracer-gpu" version="1.0">
-  <title>Implement A1: Compute Path Tracer MVP — GPU Kernel (WGSL) + Rust backend + Python bridge</title>
+<task id="ws-A7-lbvh-refit" version="1.0">
+  <title>Workstream A · Task A7 — LBVH/SAH Builder & Refit (GPU-first with CPU fallback)</title>
 
   <role>
-    You are OpenAI Codex CLI operating as a senior graphics/runtime engineer.
-    Stack: Vulkan ≥1.2 (design-compat), WebGPU/wgpu + WGSL, Rust, Python ≥3.8 (PyO3/maturin abi3), CMake ≥3.24, VMA, Sphinx.
+    You are OpenAI Codex CLI in <b>Verification → Implementation Mode</b>, acting as a senior graphics/runtime engineer.
+    Stack: WebGPU/wgpu + WGSL, Rust, Python ≥3.8 (PyO3/maturin abi3), CMake ≥3.24, VMA, Sphinx.
     Project: forge3d — Rust backend + Python frontend for interactive/offline 3D visualization.
   </role>
 
@@ -17,10 +17,10 @@
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
     <safety>
-      - Make only the minimal changes needed for the A1 MVP.
-      - Never delete custom user code; only add .gitignore entries for generated artifacts.
-      - Keep commits small and scoped: one logical commit per subtask.
-      - If a tool is missing, mark the step SKIPPED with the exact command to run.
+      - Implement only what is necessary for A7 MVP; prefer additive changes, minimal surface area.
+      - Never delete custom user code; for generated artifacts, add .gitignore entries rather than deleting tracked files.
+      - If a tool is missing, mark step SKIPPED with the exact command to run locally.
+      - If essential data is missing, reply <b>UNCERTAIN</b> with the precise artifact or decision required.
     </safety>
     <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz, out, diag_out</exclusions>
   </constraints>
@@ -30,174 +30,177 @@
     <roadmapPath>./roadmap2.csv</roadmapPath>
     <workstreamSelector>
       <![CDATA[
-      ID: A1
-      Title: Compute Path Tracer MVP - GPU Kernel Implementation
+      ID: A
+      Task: A7
+      Title contains: LBVH/SAH Builder & Refit
       ]]>
     </workstreamSelector>
   </inputs>
 
+  <!-- Read from roadmap2.csv (A7 row) -->
   <acceptanceCriteria>
-    <ac id="AC-1">roadmap2.csv contains a row with Workstream ID "A1" (case-insensitive) whose Title contains "Compute Path Tracer MVP". If not found → UNCERTAIN (list discovered workstreams), STOP.</ac>
-    <ac id="AC-2">WGSL compute kernel exists at src/shaders/pt_kernel.wgsl with: (a) uniforms (width, height, frame_index), camera params, scene buffer; (b) xorshift64* RNG matching CPU sequence; (c) jittered primary rays; (d) ray–sphere intersections; (e) HDR accumulation and Reinhard tonemap; (f) documented bind groups/bindings in file header.</ac>
-    <ac id="AC-3">Rust backend implements PathTracerGPU (src/path_tracing/mod.rs) with compute pipeline creation, bind group layout, buffers (uniforms/scene/accum/output), tiling dispatch, and GPU→CPU readback producing RGBA output.</ac>
-    <ac id="AC-4">Python bridge (python/forge3d/path_tracing.py) uses GPU when available, falls back to CPU otherwise, preserves determinism with fixed seeds, and exposes render_rgba(width,height,scene,camera,seed,frames=1,use_gpu=True).</ac>
-    <ac id="AC-5">Unit test tests/test_path_tracing_gpu.py verifies: (a) adapter detection + skip if none; (b) 64×64 single-sphere render runs on GPU; (c) deterministic RNG with fixed seed (first N samples match CPU to tolerance); (d) fallback to CPU if GPU disabled.</ac>
-    <ac id="AC-6">Docs updated: brief section in README.md and docs/api (if Sphinx present) describing A1 GPU tracer usage and limitations.</ac>
-    <ac id="AC-7">Code compiles/lints/tests on all platforms (fmt/clippy/pytest/docs/wheel OK). CI updated/ensured if missing.</ac>
+    <ac id="AC-0">roadmap2.csv contains Workstream ID "A" and Task "A7" (case-insensitive). If not found → <b>UNCERTAIN</b> (list discovered A* tasks) and STOP.</ac>
+    <ac id="AC-1">GPU LBVH build available with Morton codes + radix sort (WGSL compute), producing a compact, traversable BVH node array.</ac>
+    <ac id="AC-2">CPU SAH builder exists as a fallback, API-compatible with GPU output format.</ac>
+    <ac id="AC-3">Refit pass implemented (GPU preferred, CPU fallback) that updates internal node AABBs for modest per-frame motion without full rebuild.</ac>
+    <ac id="AC-4">Public API exposes a single builder interface selecting GPU when available; deterministic seeding and stable outputs given identical inputs.</ac>
+    <ac id="AC-5">Performance targets documented & smoke-validated: build ≤ ~1s for ~1M tris (debug builds may exceed; note in results); refit ≤ ~25ms; memory within budget.</ac>
+    <ac id="AC-6">Unit/integration tests cover GPU build (skip if no adapter), CPU fallback, and refit correctness on a small moving-scene; docs updated.</ac>
   </acceptanceCriteria>
 
+  <design>
+    <dataModel>
+      <![CDATA[
+Node layout (SoA for GPU traversal; AoS for simplicity acceptable for MVP):
+  struct Aabb { min: vec3<f32>, max: vec3<f32> }
+  enum NodeKind { Internal{left:u32,right:u32}, Leaf{first:u32,count:u32} }
+  struct BvhNode { aabb: Aabb, kind: u32, i0: u32, i1: u32 } // packed for GPU
+Primitive index buffer: u32 per triangle; Morton code buffer: u32 (10-10-10 bits, grid 1024^3).
+Coordinate normalization: world AABB → [0,1]^3; morton3D of centroids; clamp.
+      ]]>
+    </dataModel>
+
+    <wgslKernels>
+      <![CDATA[
+Files:
+  src/shaders/lbvh_morton.wgsl       // compute morton codes from primitive centroids
+  src/shaders/radix_sort_pairs.wgsl  // key-value radix sort (codes, indices), 4-bit digit passes
+  src/shaders/lbvh_link.wgsl         // build linear BVH topology from sorted codes (Karras-style)
+  src/shaders/bvh_refit.wgsl         // bottom-up refit of AABBs
+
+Common header in each WGSL:
+  - Bind Group 0: Uniforms { prim_count:u32; frame_index:u32; world_min:vec3<f32>; world_extent:vec3<f32> }
+  - Bind Group 1: readonly storage buffers: centroids[], prim_indices[]
+  - Bind Group 2: readwrite storage buffers: morton_codes[], sorted_indices[] (for sort), nodes[], aabbs[]
+  - @workgroup_size(256) for morton/sort; @workgroup_size(64) for link/refit (tune if needed)
+      ]]>
+    </wgslKernels>
+
+    <rustAPI>
+      <![CDATA[
+Paths:
+  src/accel/mod.rs                // new module root
+  src/accel/types.rs              // AABB, Node, packing helpers
+  src/accel/lbvh_gpu.rs           // orchestrates WGSL pipelines + dispatch (build + refit)
+  src/accel/sah_cpu.rs            // CPU SAH builder (fallback)
+  src/path_tracing/accel.rs       // glue for path tracer to consume BVH buffers
+
+Key structs:
+  pub struct GpuBvhBuilder { device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, pipelines: Pipelines, … }
+  pub struct CpuSahBuilder { … }
+  pub enum BvhBackend { GPU(GpuBvh), CPU(CpuBvh) }
+  pub struct Bvh { nodes: Buffer/Vec<BvhNode>, prim_indices: Buffer/Vec<u32>, world_aabb: Aabb, … }
+
+Public API:
+  pub fn build_bvh(scene:&[Triangle], opts:&BuildOptions, ctx:&GpuContextOption) -> anyhow::Result<Bvh>;
+  pub fn refit_bvh(bvh:&mut Bvh, new_prim_aabbs:&[Aabb], ctx:&GpuContextOption) -> anyhow::Result<()>;
+      ]]>
+    </rustAPI>
+
+    <pythonAPI>
+      <![CDATA[
+# python/forge3d/path_tracing.py
+def build_bvh(primitives, use_gpu: bool = True, seed: int = 1) -> "BvhHandle": ...
+def refit_bvh(handle: "BvhHandle", new_primitives) -> None: ...
+# PathTracer uses GPU-built BVH when available; otherwise CPU SAH fallback.
+      ]]>
+    </pythonAPI>
+
+    <risksMitigations>
+      <![CDATA[
+- GPU radix sort complexity: keep MVP single-GPU-pass radix with limited memory; fallback to CPU sort if WGSL path not available.
+- Driver variability: detect unsupported features and fall back gracefully.
+- Performance variance: document results; ensure correctness-first; gate perf checks as smoke tests.
+      ]]>
+    </risksMitigations>
+  </design>
+
+  <changes>
+    <createOrModify>
+      <!-- Rust -->
+      <file path="src/accel/mod.rs" kind="new"/>
+      <file path="src/accel/types.rs" kind="new"/>
+      <file path="src/accel/lbvh_gpu.rs" kind="new"/>
+      <file path="src/accel/sah_cpu.rs" kind="new"/>
+      <file path="src/path_tracing/accel.rs" kind="new"/>
+
+      <!-- WGSL -->
+      <file path="src/shaders/lbvh_morton.wgsl" kind="new"/>
+      <file path="src/shaders/radix_sort_pairs.wgsl" kind="new"/>
+      <file path="src/shaders/lbvh_link.wgsl" kind="new"/>
+      <file path="src/shaders/bvh_refit.wgsl" kind="new"/>
+
+      <!-- Python bridge -->
+      <file path="python/forge3d/path_tracing.py" kind="modify"/>
+
+      <!-- Tests -->
+      <file path="tests/test_bvh_gpu.rs" kind="new"/>
+      <file path="tests/test_bvh_refit.rs" kind="new"/>
+      <file path="tests/test_bvh_cpu_vs_gpu.py" kind="new"/>
+
+      <!-- Docs -->
+      <file path="README.md" kind="modify-append"/>
+      <file path="docs/api/accel_bvh.md" kind="new-optional"/>
+
+      <!-- Housekeeping -->
+      <file path=".gitignore" kind="modify-append"/>
+    </createOrModify>
+  </changes>
+
+  <tests>
+    <rust path="tests/test_bvh_gpu.rs">
+      <![CDATA[
+#[test]
+fn gpu_lbvh_build_small_scene() {
+    // Build a few triangles, run GPU build if adapter available; assert node count and root AABB sane.
+}
+      ]]>
+    </rust>
+    <rust path="tests/test_bvh_refit.rs">
+      <![CDATA[
+#[test]
+fn refit_updates_aabb_without_rebuild() {
+    // Build once, then nudge a primitive; run refit; assert parent AABBs expanded accordingly.
+}
+      ]]>
+    </rust>
+    <python path="tests/test_bvh_cpu_vs_gpu.py">
+      <![CDATA[
+import pytest, numpy as np
+from forge3d.path_tracing import build_bvh, refit_bvh
+def test_cpu_gpu_equivalence_small():
+    prims = make_unit_cube_tris()
+    bvh_gpu = build_bvh(prims, use_gpu=True, seed=123)
+    bvh_cpu = build_bvh(prims, use_gpu=False, seed=123)
+    # Compare a subset: root AABB, leaf counts, and a hash of structure (tolerate minor ordering diffs).
+      ]]>
+    </python>
+  </tests>
+
   <prechecks>
-    <!-- Verify roadmap row exists -->
     <command>
       <![CDATA[
 python - <<'PY'
-import csv, sys, codecs
-ws_id="A1".lower()
+import csv, codecs, sys
 found=False
-rows=[]
-try:
-  with codecs.open("roadmap2.csv","r","utf-8-sig") as f:
+with codecs.open("roadmap2.csv","r","utf-8-sig") as f:
     rdr=csv.DictReader(f)
     for r in rdr:
-      rows.append((r.get("Workstream ID",""), r.get("Workstream Title","")))
-      if (r.get("Workstream ID","").lower()==ws_id) or ("compute path tracer mvp" in r.get("Workstream Title","").lower()):
-        found=True
-except FileNotFoundError:
-  print("UNCERTAIN: roadmap2.csv not found", file=sys.stderr); sys.exit(2)
+        wid=str(r.get("Workstream ID","")).strip().lower()
+        tid=str(r.get("Task Title","")).strip().lower()
+        rat=str(r.get("Rationale","")).lower()
+        if wid=="a" and ("a7"==tid or "a7" in tid) and ("bvh" in rat or "lbvh" in rat):
+            found=True; break
 if not found:
-  print("UNCERTAIN: A1 not found. Workstreams:", sorted(set(rows))[:50]); sys.exit(3)
-print("WORKSTREAM_FOUND:A1")
+    print("UNCERTAIN: A7 not found in roadmap2.csv (Workstream A). Please confirm row and headers."); sys.exit(3)
+print("WORKSTREAM_TASK_FOUND:A7")
 PY
       ]]>
     </command>
   </prechecks>
 
-  <design>
-    <wgslBindings>
-      <![CDATA[
-# src/shaders/pt_kernel.wgsl — header doc (required)
-Bind Group 0:
-  @binding(0) uniform Uniforms {
-    width: u32; height: u32; frame_index: u32; _pad: u32;
-    cam_origin: vec3<f32>; cam_fov_y: f32;
-    cam_right: vec3<f32>; cam_aspect: f32;
-    cam_up: vec3<f32>;    cam_exposure: f32;
-    cam_forward: vec3<f32>; seed_hi: u32; seed_lo: u32;
-  };
-Bind Group 1:
-  @binding(0) readonly storage buffer Scene { spheres: array<Sphere>; };
-  // MVP sphere only
-  struct Sphere { center: vec3<f32>; radius: f32; albedo: vec3<f32>; _pad0: f32; }
-Bind Group 2:
-  @binding(0) storage buffer Accum { hdr: array<vec4<f32>>; }; // linear HDR accumulation
-Bind Group 3:
-  @binding(0) storage texture2D<rgba16float, write>; // tonemapped output
-Workgroup: @workgroup_size(8,8,1)
-RNG: xorshift64* emulated with vec2<u32> (hi,lo) to match CPU sequence (constant 0x2545F4914F6CDD1D).
-Jitter: tent filter applied via two RNG calls, mapped to [-0.5,+0.5] pixels.
-Tonemap: Reinhard: c/(1+c), then apply exposure; write to RGBA16F storage texture.
-      ]]>
-    </wgslBindings>
-    <rustAPI>
-      <![CDATA[
-pub struct PathTracerGPU {
-  device: Arc<wgpu::Device>,
-  queue: Arc<wgpu::Queue>,
-  pipeline: wgpu::ComputePipeline,
-  bgl0: wgpu::BindGroupLayout, bgl1: wgpu::BindGroupLayout, bgl2: wgpu::BindGroupLayout, bgl3: wgpu::BindGroupLayout,
-  uniforms: wgpu::Buffer,
-  scene_buf: wgpu::Buffer,
-  accum_buf: wgpu::Buffer,
-  out_tex: wgpu::Texture, out_view: wgpu::TextureView,
-  bind0: wgpu::BindGroup, bind1: wgpu::BindGroup, bind2: wgpu::BindGroup, bind3: wgpu::BindGroup,
-  width: u32, height: u32, frame_index: u32,
-}
-impl PathTracerGPU {
-  pub fn new(device:&Arc<wgpu::Device>, queue:&Arc<wgpu::Queue>, width:u32, height:u32, scene:&[SphereCPU], cam:&CameraCPU) -> anyhow::Result<Self> { /* create buffers/pipeline/binds */ }
-  pub fn dispatch(&mut self, tiles:Option<(u32,u32)>) -> anyhow::Result<()> { /* encode compute pass, dispatch ceil_div(width,8) */ }
-  pub fn read_rgba(&self) -> anyhow::Result<Vec<u8>> { /* copy out_tex -> buffer -> map -> RGBA8 via conversion */ }
-}
-      ]]>
-    </rustAPI>
-    <pythonAPI>
-      <![CDATA[
-# python/forge3d/path_tracing.py
-class PathTracer:
-    def render_rgba(self, width:int, height:int, scene, camera, seed:int=1, frames:int=1, use_gpu:bool=True) -> "np.ndarray[H,W,4] uint8":
-        """
-        Uses GPU if available and allowed; falls back to CPU implementation.
-        Deterministic for fixed seed + frames=1. For frames>1, progressive accumulation with fixed per-frame seeds.
-        """
-      ]]>
-    </pythonAPI>
-  </design>
-
-  <changes>
-    <createOrModify>
-      <file path="src/path_tracing/mod.rs" kind="new"/>
-      <file path="src/path_tracing/compute.rs" kind="new"/>
-      <file path="src/shaders/pt_kernel.wgsl" kind="modify-or-new"/>
-      <file path="python/forge3d/path_tracing.py" kind="modify"/>
-      <file path="tests/test_path_tracing_gpu.py" kind="new"/>
-      <file path=".gitignore" kind="modify-append"/>
-      <file path="README.md" kind="modify-append"/>
-      <file path="docs/api/path_tracing.md" kind="new-optional"/>
-    </createOrModify>
-
-    <implNotes>
-      <![CDATA[
-- WGSL: Implement xorshift64* with vec2<u32> (hi,lo):
-    fn rotl64(x: vec2<u32>, n:u32) -> vec2<u32> { /* 64-bit rotate via (hi,lo) */ }
-    fn shl64(x: vec2<u32>, n:u32) -> vec2<u32> { /* 64-bit shift */ }
-    fn shr64(x: vec2<u32>, n:u32) -> vec2<u32> { /* 64-bit shift */ }
-    fn mul64(a: vec2<u32>, b: vec2<u32>) -> vec2<u32> { /* 128-bit -> low64 using u32 math */ }
-    const C: vec2<u32> = vec2<u32>(0x4F6CDD1D, 0x2545F491); // lo, hi of 0x2545F4914F6CDD1D
-    // x ^= x >> 12; x ^= x << 25; x ^= x >> 27; x * C;
-- Scene MVP: array<Sphere>; compute nearest hit and simple lambert shading with constant light dir or white albedo.
-- Accumulation: hdr[idx] = mix(hdr[idx], sample, 1.0 / f32(frame_index+1u)); then reinhard + exposure, write to out texture.
-- Rust: ensure bind group layouts reflect WGSL; use storage texture format rgba16float for out.
-- Tiling: default tile 256×256 if width*height large; loop dispatch over tiles; keep memory usage ≤512 MiB host-visible.
-- Readback: copy texture to a temp RGBA16F buffer, map, convert to u8 RGBA in Rust (or do a tonemap/output-to-RGBA8 in kernel).
-- Determinism: base RNG seed on (seed ^ frame_index) and per-pixel hashed coords (e.g., Wang hash) but keep sequence identical to CPU baseline for first draw; validate with tests.
-      ]]>
-    </implNotes>
-  </changes>
-
-  <tests>
-    <python path="tests/test_path_tracing_gpu.py">
-      <![CDATA[
-import os, pytest, numpy as np
-from forge3d.path_tracing import PathTracer, make_sphere, make_camera
-
-def _gpu_available():
-    try:
-        # import internal probe if exists; else attempt to construct tracer
-        return True
-    except Exception:
-        return False
-
-@pytest.mark.skipif(not _gpu_available(), reason="No compatible GPU adapter")
-def test_gpu_single_sphere_64x64_deterministic(tmp_path):
-    tracer = PathTracer()
-    scene = [make_sphere(center=(0,0,-3), radius=1.0, albedo=(0.8,0.2,0.2))]
-    cam   = make_camera(origin=(0,0,0), look_at=(0,0,-1), up=(0,1,0), fov_y=45.0, aspect=1.0, exposure=1.0)
-    img1 = tracer.render_rgba(64,64,scene,cam,seed=123,frames=1,use_gpu=True)
-    img2 = tracer.render_rgba(64,64,scene,cam,seed=123,frames=1,use_gpu=True)
-    assert img1.shape == (64,64,4)
-    assert np.all(img1 == img2), "deterministic for 1 frame with fixed seed"
-
-def test_fallback_cpu(tmp_path):
-    tracer = PathTracer()
-    scene = [make_sphere(center=(0,0,-3), radius=1.0, albedo=(1,1,1))]
-    cam   = make_camera(origin=(0,0,0), look_at=(0,0,-1), up=(0,1,0), fov_y=45.0, aspect=1.0, exposure=1.0)
-    img = tracer.render_rgba(32,32,scene,cam,seed=1,frames=1,use_gpu=False)
-    assert img.shape == (32,32,4)
-      ]]>
-    </python>
-  </tests>
-
+  <!-- EXACTLY INCLUDE THESE STEPS -->
   <plan>
-    <!-- EXACTLY INCLUDE THESE STEPS -->
     5) Implementation (Write mode only if &lt;WRITE_CHANGES&gt;true&lt;/WRITE_CHANGES&gt;)
        - Create branch: <code>git checkout -b ws-&lt;ID-or-slug&gt;-implementation</code>
        - For each task in deterministic order (by Priority then Task ID):
@@ -227,31 +230,53 @@ def test_fallback_cpu(tmp_path):
 
   <execution>
     <steps>
-      <step>Create feature branch: <code>git checkout -b ws-A1-implementation</code></step>
-      <step>Expand/create <code>src/shaders/pt_kernel.wgsl</code> with the documented header, uniforms, scene, RNG (xorshift64*), jittered primary rays, ray–sphere hit, HDR accumulation, Reinhard tonemap, and storage texture write.</step>
-      <step>Add Rust backend files: <code>src/path_tracing/mod.rs</code>, <code>src/path_tracing/compute.rs</code> implementing <code>PathTracerGPU</code>, pipeline creation, buffers, bind groups, tiling dispatch, and readback.</step>
-      <step>Modify Python bridge: <code>python/forge3d/path_tracing.py</code> to expose <code>render_rgba(..., use_gpu=True)</code>, with GPU detection/selection and deterministic seeding; fallback to CPU path if GPU unavailable.</step>
-      <step>Create tests: <code>tests/test_path_tracing_gpu.py</code> per above; mark GPU dependency with a skip guard.</step>
-      <step>Append <code>.gitignore</code> with <code>out/</code>, <code>diag_out/</code>, build artifacts as needed; keep user code untouched.</step>
-      <step>Docs: add a short usage section to <code>README.md</code>; if docs/ exists, add <code>docs/api/path_tracing.md</code> and link from index.</step>
-      <step>Run Validation Run commands; fix non-flaky failures. Record any SKIPPED with the command to run locally.</step>
-      <step>Generate <code>PR_BODY.md</code> summarizing changes and results. Print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
+      <step>Create feature branch: <code>git checkout -b ws-A7-implementation</code></step>
+
+      <!-- WGSL kernels -->
+      <step>Add/implement WGSL: <code>src/shaders/lbvh_morton.wgsl</code>, <code>src/shaders/radix_sort_pairs.wgsl</code>, <code>src/shaders/lbvh_link.wgsl</code>, <code>src/shaders/bvh_refit.wgsl</code> with header docs (bind groups/bindings, formats, spaces).</step>
+
+      <!-- Rust backend -->
+      <step>Create Rust modules under <code>src/accel/</code> for GPU builder and CPU SAH fallback with identical output format; expose <code>build_bvh</code> and <code>refit_bvh</code>.</step>
+      <step>Glue into path tracer via <code>src/path_tracing/accel.rs</code>; ensure traversal code can consume the produced BVH layout.</step>
+
+      <!-- Python bridge -->
+      <step>Modify <code>python/forge3d/path_tracing.py</code> to expose <code>build_bvh(..., use_gpu=True)</code> and <code>refit_bvh(...)</code>; default to GPU when available, otherwise CPU; preserve determinism for fixed inputs.</step>
+
+      <!-- Tests -->
+      <step>Add tests: Rust GPU build/refit and Python CPU-vs-GPU equivalence; mark GPU tests skipped when adapter unavailable.</step>
+
+      <!-- Docs & housekeeping -->
+      <step>Append <code>.gitignore</code> (out/, diag_out/, build artifacts); update <code>README.md</code> and (if present) <code>docs/api/accel_bvh.md</code> with usage and limitations.</step>
+
+      <!-- Validation -->
+      <step>Run the Validation Run commands; address non-flaky failures; document SKIPPED with exact commands.</step>
+
+      <!-- PR -->
+      <step>Generate <code>PR_BODY.md</code> and print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
     </steps>
   </execution>
 
   <completion>
     <print>
-      - src/shaders/pt_kernel.wgsl (expanded)
-      - src/path_tracing/mod.rs
-      - src/path_tracing/compute.rs
+      - src/accel/mod.rs
+      - src/accel/types.rs
+      - src/accel/lbvh_gpu.rs
+      - src/accel/sah_cpu.rs
+      - src/path_tracing/accel.rs
+      - src/shaders/lbvh_morton.wgsl
+      - src/shaders/radix_sort_pairs.wgsl
+      - src/shaders/lbvh_link.wgsl
+      - src/shaders/bvh_refit.wgsl
       - python/forge3d/path_tracing.py
-      - tests/test_path_tracing_gpu.py
-      - README.md (updated)
-      - docs/api/path_tracing.md (if Sphinx present)
+      - tests/test_bvh_gpu.rs
+      - tests/test_bvh_refit.rs
+      - tests/test_bvh_cpu_vs_gpu.py
+      - README.md
+      - docs/api/accel_bvh.md (if Sphinx present)
       - PR_BODY.md
     </print>
     <fallback>
-      If A1 is not found in roadmap2.csv, respond <b>UNCERTAIN</b> with discovered workstreams (ID→Title) and STOP without changes.
+      If A7 is not found in roadmap2.csv, respond <b>UNCERTAIN</b> with the list of detected A* tasks and STOP without changes.
     </fallback>
   </completion>
 </task>
