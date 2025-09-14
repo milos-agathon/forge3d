@@ -1,5 +1,5 @@
 <task>
-  <title>Implement & wire missing/partial items for Workstream V</title>
+  <title>Implement & wire missing/partial items for Workstream W</title>
 
   <inputs>
     <repoRoot>./</repoRoot>
@@ -7,128 +7,153 @@
       <path>src/</path>
       <path>shaders/</path>
       <path>python/forge3d/</path>
-      <path>python/forge3d/adapters/</path>
       <path>examples/</path>
+      <path>notebooks/integration/</path>
       <path>tests/</path>
+      <path>tests/goldens/</path>
       <path>docs/</path>
       <path>.github/workflows/</path>
     </paths>
-    <workstream id="V" title="Datashader Interop">
-      <item id="V1" title="Datashader pipeline → RGBA overlay"/>
-      <item id="V2" title="Datashader performance stress &amp; goldens"/>
+    <workstream id="W" title="Integration Docs &amp; CI">
+      <item id="W1" title="End-to-end notebooks for Python stack"/>
+      <item id="W2" title="CI validation for I/O and CRS correctness"/>
+      <item id="W3" title="Features &amp; limits gating at device request (fallback matrices)"/>
+      <item id="W4" title="GPU timestamp &amp; pipeline statistics queries (with fallback)"/>
+      <item id="W5" title="Copy/layout/usage conformance (buffers &amp; textures)"/>
+      <item id="W6" title="Sampler vs texture sampleType compatibility tests + fallbacks"/>
+      <item id="W7" title="Buffer mapping lifecycle correctness &amp; negative tests"/>
+      <item id="W8" title="External image import demo (copyExternalImageToTexture parity)"/>
     </workstream>
   </inputs>
 
   <constraints>
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
-    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
+    <gpuBudget>&#8804; 512 MiB host-visible heap</gpuBudget>
     <build>cmake≥3.24, cargo/rustc, PyO3, VMA</build>
     <apis>Primary: WebGPU/WGSL; Vulkan 1.2-compatible design</apis>
     <docs>Sphinx</docs>
-    <scope>Only Workstream V tasks; do not modify other workstreams</scope>
+    <scope>Only Workstream W; do not modify other workstreams</scope>
   </constraints>
 
   <safety>
-    <step>Create branch: <code>git checkout -b feat/workstream-v-datashader</code></step>
-    <step>Audit-first: list and diff only files under <code>python/forge3d/adapters</code>, <code>examples</code>, <code>tests</code>, <code>docs</code>, <code>.github/workflows</code>.</step>
-    <step>No blind search/replace; avoid binary directories; small, reviewable commits.</step>
-    <step>Treat Datashader as optional dependency; gate imports with availability checks.</step>
+    <step>Create branch: <code>git checkout -b feat/workstream-w-integration-ci</code></step>
+    <step>Audit-first: only add/modify files within declared paths; no blind search/replace; small, reviewable commits.</step>
+    <step>Guard optional deps (e.g., Jupyter, PIL) behind availability checks; skip tests cleanly when unavailable.</step>
+    <step>Exclude binary/artifact directories from commits.</step>
   </safety>
 
   <plan>
-    <!-- Dependency awareness from roadmap.csv -->
-    <!-- V1 depends on N2;O3 (advanced rendering systems, resource mgmt) – preflight only. -->
-    <!-- V2 depends on R1;G7 (matplotlib interop, perf testing) – preflight only. -->
-    <step id="P0">Preflight checks:
-      <item>Verify adapter framework present (e.g., <code>python/forge3d/adapters/__init__.py</code>).</item>
-      <item>Non-blocking asserts that referenced deps (N2,O3,R1,G7) exist; if missing, proceed with V work using internal shims/tests only.</item>
-      <item>Add dev extra: <code>pip install datashader</code> documented, but keep core package import-safe without datashader installed.</item>
+    <!-- Preflight & dependency awareness (non-blocking) -->
+    <step id="P0">Preflight
+      <item>Verify existing CI and test scaffolding; list files that will be added under <code>notebooks/integration/</code>, <code>tests/</code>, <code>.github/workflows/</code>, <code>docs/</code>.</item>
+      <item>Confirm device caps/timing features present (W3/W4) but do not modify them.</item>
     </step>
 
-    <step id="V1-1">Implement adapter:
-      <item>Create <code>python/forge3d/adapters/datashader_adapter.py</code> with class <code>DatashaderAdapter</code>.</item>
-      <item>Functions: <code>is_datashader_available()</code>, <code>rgba_view_from_agg(agg_or_img)</code> (zero-copy numpy RGBA view), <code>validate_alignment(extent, transform, width, height)</code>, <code>to_overlay_texture(rgba, extent)</code>.</item>
-      <item>Zero-copy contract: ensure <code>np.shares_memory</code> true where possible; fallback path allowed with explicit copy counter.</item>
+    <!-- W1: Notebooks & CI execution -->
+    <step id="W1-1">Create end-to-end notebooks
+      <item>Add <code>notebooks/integration/matplotlib_terrain.ipynb</code> (terrain via mpl colormaps).</item>
+      <item>Add <code>notebooks/integration/datashader_points.ipynb</code> (large-scale points → RGBA overlay).</item>
+      <item>Add <code>notebooks/integration/adapter_showcase.ipynb</code> (adapters interop).</item>
+      <item>Add <code>notebooks/integration/data_ingestion.ipynb</code> (I/O pipelines &amp; CRS checks).</item>
+    </step>
+    <step id="W1-2">Headless execution in CI
+      <item>Add <code>.github/workflows/notebooks.yml</code> to run nbconvert headless on linux_x86_64 within a 10-minute budget per notebook.</item>
+      <item>Store rendered PNG/HTML as CI artifacts under <code>artifacts/notebooks/</code>.</item>
     </step>
 
-    <step id="V1-2">Wire exports:
-      <item>Update <code>python/forge3d/adapters/__init__.py</code> to export adapter + availability probe.</item>
-      <item>Update <code>python/forge3d/__init__.py</code> to expose entry points under a stable namespace (e.g., <code>forge3d.adapters.datashader_adapter</code>).</item>
+    <!-- W5: Copy/layout/usage conformance -->
+    <step id="W5-1">Conformance tests (buffers &amp; textures)
+      <item>Create <code>tests/test_copy_conformance.py</code> with positive/negative cases (COPY_SRC/DST flags, 256B alignment, depth-stencil coverage where supported).</item>
+      <item>Validate scoped error messages for invalid operations.</item>
     </step>
 
-    <step id="V1-3">Examples:
-      <item>Add <code>examples/datashader_overlay_demo.py</code> demonstrating millions-of-points pipeline producing an RGBA overlay aligned to geographic extent and composited in forge3d.</item>
-      <item>Output assets: <code>examples/output/datashader_overlay_demo.png</code>, JSON metadata for extent.</item>
+    <!-- W6: Sampler/sampleType compatibility -->
+    <step id="W6-1">Compatibility validation
+      <item>Add explicit sampleType compatibility checks during sampler/texture binding.</item>
+      <item>Create <code>tests/test_sampler_compat.py</code> with a compatibility matrix and illegal-combo rejection tests; include device-filtered fallbacks.</item>
     </step>
 
-    <step id="V1-4">Unit &amp; integration tests:
-      <item>Create <code>tests/test_datashader_adapter.py</code> with:
-        <subitem>Zero-copy assertion using <code>np.shares_memory</code> for RGBA buffer.</subitem>
-        <subitem>Alignment validation: pixel center offset ≤ 0.5 px over synthetic extents.</subitem>
-        <subitem>Adapter works when Datashader missing (skipped tests) and when present.</subitem>
-      </item>
+    <!-- W7: Buffer mapping lifecycle -->
+    <step id="W7-1">Lifecycle &amp; negative tests
+      <item>Add <code>tests/test_buffer_mapping.py</code> covering mapAsync state transitions, bounds validation, unmapped-usage errors, and basic race/misuse scenarios.</item>
     </step>
 
-    <step id="V2-1">Perf infra &amp; goldens:
-      <item>Create <code>tests/perf/</code> and <code>tests/goldens/</code>.</item>
-      <item>Add <code>tests/perf/test_datashader_zoom.py</code>:
-        <subitem>Generate deterministic synthetic data with fixed seed.</subitem>
-        <subitem>Render at zoom levels Z0,Z4,Z8,Z12 to images; compare to goldens via SSIM.</subitem>
-        <subitem>Measure frame time per zoom; collect peak RSS; assert thresholds.</subitem>
-      </item>
-      <item>Generate initial goldens: <code>tests/goldens/datashader_Z*.png</code> + sidecar JSON (params, hash).</item>
+    <!-- W8: External image import parity -->
+    <step id="W8-1">External image import (native copyExternalImageToTexture parity)
+      <item>Add <code>src/external_image/mod.rs</code> (decode &amp; upload path for PNG/JPEG; parity constraints documented).</item>
+      <item>Add <code>examples/external_image_demo.py</code> that loads an external image and uploads to a texture; renders a proof PNG.</item>
+      <item>Add <code>docs/integration/external_images.md</code> describing native vs browser behavior, constraints, and pitfalls.</item>
+      <item>Add tests under <code>tests/test_external_image.py</code> for decode/upload sanity (skipped on missing PIL).</item>
     </step>
 
-    <step id="V2-2">CI wiring:
-      <item>Add <code>.github/workflows/datashader-perf.yml</code> (linux_x86_64 runner) to run perf tests on push/PR; upload diffs on regression.</item>
-      <item>Matrix pin Datashader version(s) to control drift; cache build artifacts.</item>
+    <!-- Docs -->
+    <step id="DOCS">Documentation wiring
+      <item>Ensure Sphinx TOC links to <code>docs/integration/external_images.md</code> and a short “Running notebooks in CI” section.</item>
     </step>
 
-    <step id="DOCS">Docs:
-      <item>Add Sphinx page <code>docs/user/datashader_interop.rst</code> with usage, zero-copy notes, limits, and memory guidance.</item>
-      <item>Link from docs TOC; include code snippets from the example.</item>
-    </step>
-
-    <step id="FINAL">Finalization:
-      <item>Run full test subset: <code>pytest -k "datashader" -v</code>.</item>
-      <item>Build docs: <code>cd docs &amp;&amp; make html</code>.</item>
-      <item>Open PR with summary, perf table, and goldens diff preview.</item>
+    <!-- Finalization -->
+    <step id="FINAL">Validate &amp; PR
+      <item>Run: <code>pytest -k "(copy_conformance or sampler_compat or buffer_mapping or external_image)" -v</code></item>
+      <item>Execute notebooks locally (optional): <code>jupyter nbconvert --execute --to notebook notebooks/integration/*.ipynb</code></item>
+      <item>Build docs: <code>cd docs &amp;&amp; make html</code></item>
+      <item>Open PR with summary, runtime table per notebook, and test results.</item>
     </step>
   </plan>
 
   <deliverables>
-    <item>python/forge3d/adapters/datashader_adapter.py</item>
-    <item>python/forge3d/adapters/__init__.py (updated)</item>
-    <item>python/forge3d/__init__.py (updated exports)</item>
-    <item>examples/datashader_overlay_demo.py</item>
-    <item>examples/output/datashader_overlay_demo.png</item>
-    <item>tests/test_datashader_adapter.py</item>
-    <item>tests/perf/test_datashader_zoom.py</item>
-    <item>tests/goldens/datashader_Z{0,4,8,12}.png + metadata JSON</item>
-    <item>.github/workflows/datashader-perf.yml</item>
-    <item>docs/user/datashader_interop.rst</item>
+    <!-- W1 -->
+    <item>notebooks/integration/matplotlib_terrain.ipynb</item>
+    <item>notebooks/integration/datashader_points.ipynb</item>
+    <item>notebooks/integration/adapter_showcase.ipynb</item>
+    <item>notebooks/integration/data_ingestion.ipynb</item>
+    <item>.github/workflows/notebooks.yml</item>
+
+    <!-- W5 -->
+    <item>tests/test_copy_conformance.py</item>
+
+    <!-- W6 -->
+    <item>tests/test_sampler_compat.py</item>
+
+    <!-- W7 -->
+    <item>tests/test_buffer_mapping.py</item>
+
+    <!-- W8 -->
+    <item>src/external_image/mod.rs</item>
+    <item>examples/external_image_demo.py</item>
+    <item>tests/test_external_image.py</item>
+    <item>docs/integration/external_images.md</item>
   </deliverables>
 
   <acceptanceCriteria>
-    <!-- From roadmap.csv (lightly normalized to be measurable) -->
-    <item>V1: Datashader RGBA arrays accepted without copy: unit test asserts <code>np.shares_memory(adapter_rgba, src_rgba) == True</code> for shaded output shapes (H,W,4) uint8.</item>
-    <item>V1: Overlay aligns with coordinates: alignment error ≤ 0.5 px over provided extent/transform; test passes across two synthetic extents.</item>
-    <item>V1: Example renders: running <code>python examples/datashader_overlay_demo.py</code> writes <code>examples/output/datashader_overlay_demo.png</code> and prints "OK".</item>
-    <item>V2: SSIM ≥ 0.98 vs goldens across zoom levels Z0,Z4,Z8,Z12 using <code>skimage.metrics.structural_similarity</code>.</item>
-    <item>V2: Frame time ≤ 33 ms at Z8 on linux_x86_64 (reference runner) for the synthetic 1e6-point scene; trend captured for other zooms.</item>
-    <item>V2: CI uploads diff images on regression and fails the job when SSIM &lt; 0.98 or frame time target exceeded.</item>
-    <item>All: Peak RSS during tests ≤ 512 MiB; tests skip gracefully if datashader is not installed.</item>
-    <item>Docs build without warnings and new page appears in the TOC.</item>
+    <!-- W1 -->
+    <item>Each notebook executes headless via CI (nbconvert) within ≤10 minutes per notebook on linux_x86_64; exit code 0; artifacts uploaded under <code>artifacts/notebooks/</code>.</item>
+    <item>Rendered outputs contain at least one PNG per notebook proving successful rendering path.</item>
+
+    <!-- W5 -->
+    <item>Conformance suite passes: valid COPY_SRC/DST, 256B alignment respected, depth-stencil copy behavior validated or explicitly skipped with rationale; negative tests assert expected error messages.</item>
+
+    <!-- W6 -->
+    <item>Sampler/texture sampleType compatibility enforced: illegal combinations are rejected with clear errors; tests cover at least 6 valid and 6 invalid matrix cases; device-filtered fallbacks verified.</item>
+
+    <!-- W7 -->
+    <item>Buffer mapping lifecycle tests pass: mapAsync state transitions correct; out-of-bounds ranges raise errors; unmapped usage errors caught; basic race/misuse scenarios handled deterministically.</item>
+
+    <!-- W8 -->
+    <item>External image demo runs and writes a proof image (<code>examples/output/external_image_demo.png</code>); texture content checksum is stable (SSIM ≥ 0.99 vs golden on reference runner).</item>
+    <item>Native parity constraints documented; functionally equivalent upload path available via <code>external_image</code> module.</item>
+
+    <!-- Global -->
+    <item>All tests pass on CI (linux_x86_64 required; win_amd64/macos_universal2 unit suites green when enabled); peak RSS during tests ≤512 MiB.</item>
+    <item>Sphinx builds cleanly; new docs are linked in TOC; zero warnings promoted to failure.</item>
   </acceptanceCriteria>
 
   <completion>
-    <summary>Implements Workstream V by adding a Datashader adapter, examples, tests, goldens, and CI to ensure correctness and performance within memory budget.</summary>
+    <summary>Completes Workstream W by adding integration notebooks + CI execution, GPU conformance/compatibility/mapping tests, and an external image import parity path with demo and docs, all within memory and platform constraints.</summary>
     <commands>
-      <cmd>pip install -e .[dev] datashader</cmd>
+      <cmd>pip install -e .[dev]</cmd>
       <cmd>maturin develop --release</cmd>
-      <cmd>pytest tests/test_datashader_adapter.py -v</cmd>
-      <cmd>pytest tests/perf/test_datashader_zoom.py -v</cmd>
-      <cmd>python examples/datashader_overlay_demo.py</cmd>
+      <cmd>pytest -k "copy_conformance or sampler_compat or buffer_mapping or external_image" -v</cmd>
+      <cmd>jupyter nbconvert --execute --to notebook notebooks/integration/*.ipynb</cmd>
       <cmd>cd docs &amp;&amp; make html</cmd>
     </commands>
   </completion>

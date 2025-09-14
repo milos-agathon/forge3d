@@ -5,6 +5,24 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [0.14.0] - 2025-09-12
+
+### Added
+- Workstream V – Datashader Interop
+  - V1: Datashader adapter providing zero-copy RGBA views (`rgba_view_from_agg`) and alignment validation (`validate_alignment`), plus overlay packaging (`to_overlay_texture`) and convenience (`shade_to_overlay`).
+  - V2: Performance and fidelity harness: deterministic dataset, zoom tests (Z0/Z4/Z8/Z12), SSIM checks vs goldens, and frame-time/memory metrics.
+  - Demo: `examples/datashader_overlay_demo.py` writes `examples/output/datashader_overlay_demo.png` and prints `OK`.
+  - CI: `.github/workflows/datashader-perf.yml` runs perf tests, enforces thresholds, uploads artifacts.
+- Docs: `docs/user/datashader_interop.rst` added to ToC; covers zero-copy, alignment, and memory guidance.
+- Optional dependency handling: graceful skips when Datashader is missing; adapter availability probe.
+
+### Changed
+- Public API exposes `forge3d.adapters` with Datashader utilities guarded by availability.
+- `validate_alignment` usable without Datashader for basic extent checks.
+
+### Tests
+- Datashader unit/perf tests skip cleanly when optional deps absent.
+
 ## [0.13.0] - 2025-09-12
 
 ### Added

@@ -1,241 +1,115 @@
-<codex-job>
-  <Role>
-    You are a senior code auditor + implementer. First VERIFY whether the repo satisfies the full Workstream S spec (files, APIs, docs, tests, demos, measurable ACs). If any item is missing or partial, IMPLEMENT the smallest set of changes to bring that item to "Present &amp; Wired" and make ACs pass, without altering unrelated workstreams.
-  </Role>
+# Codex CLI — Auditor → Finisher for Workstream V (forge3d)
 
-  <Constraints>
-    <OS>win_amd64, linux_x86_64, macos_universal2</OS>
-    <GpuBudget>&lt;= 512 MiB host-visible heap</GpuBudget>
-    <Toolchain>cmake &gt;= 3.24; cargo/rustc; PyO3/maturin; Sphinx</Toolchain>
-    <APIs>Primary WebGPU/WGSL; Vulkan 1.2-compatible design</APIs>
-    <Safety>
-      - Create a feature branch; keep commits small and scoped to Workstream S.
-      - No blind search/replace; restrict edits to explicitly listed files/paths.
-      - Add/extend tests alongside features; never reduce existing coverage.
-      - Treat rasterio/xarray/dask/pyproj as OPTIONAL extras; import lazily and degrade gracefully when absent.
-      - Respect memory budget; prefer windowed I/O, overviews, and chunked compute; avoid full materialization.
-    </Safety>
-  </Constraints>
+ROLE
+You are a senior engineer acting as both (A) a rigorous auditor and (B) an implementer/finisher for Workstream V in the forge3d repo.
 
-  <Repo>
-    <Root>.</Root>
-    <Paths>
-      <Path>src/</Path>
-      <Path>python/forge3d/</Path>
-      <Path>python/forge3d/adapters/</Path>
-      <Path>python/forge3d/ingest/</Path>
-      <Path>examples/</Path>
-      <Path>tests/</Path>
-      <Path>tests/fixtures/</Path>
-      <Path>docs/</Path>
-      <Path>reports/</Path>
-    </Paths>
-    <Branch>
-      <Create>audit/workstream-S</Create>
-    </Branch>
-  </Repo>
+OBJECTIVE
+1) **Audit** if Claude Code fully delivered Workstream **V** from the prior plan (Datashader interop).
+2) If anything is missing or partial, **implement and wire it yourself**, in minimal, reviewable commits.
 
-  <SpecOfRecord name="Workstream S — Raster IO &amp; Streaming">
-    <!-- This is the authoritative contract to audit against. -->
+REPO CONTEXT
+- Root: .
+- Key paths: src/, shaders/, python/forge3d/, python/forge3d/adapters/, examples/, tests/, tests/perf/, tests/goldens/, docs/, .github/workflows/
+- Platforms: win_amd64, linux_x86_64, macos_universal2
+- APIs: WebGPU/WGSL primary; Vulkan 1.2 compatible design
+- Build/tooling: cmake≥3.24, cargo/rustc, PyO3, VMA; docs via Sphinx
+- GPU host-visible heap budget: ≤ 512 MiB
+- Datashader is an **optional** dependency (gate gracefully).
 
-    <Task id="S1" title="Rasterio windowed reads + block iterator">
-      <Deliverables>
-        <File>python/forge3d/adapters/rasterio_tiles.py</File>
-        <File>tests/test_rasterio_adapter.py</File>
-        <File>examples/raster_window_demo.py</File>
-        <File>docs/ingest/rasterio_tiles.md</File>
-      </Deliverables>
-      <APIs>windowed_read(dataset, window, out_shape, resampling); block_iterator(dataset, blocksize)</APIs>
-      <Acceptance>
-        <Criterion>Windowed reads match requested window/out_shape; total pixel count across a scripted sweep equals expected.</Criterion>
-        <Criterion>Block iterator yields block-aligned windows covering the dataset with no gaps/overlap (count &amp; extent verified).</Criterion>
-        <Criterion>Resampling mode honored; parity vs rasterio reference for sample windows.</Criterion>
-      </Acceptance>
-    </Task>
+WORKSTREAM V SCOPE (only)
+V1 — Datashader pipeline → RGBA overlay  
+V2 — Datashader performance stress & goldens
 
-    <Task id="S2" title="Nodata/mask → alpha propagation">
-      <Deliverables>
-        <File>tests/test_mask_alpha.py</File>
-        <File>examples/mask_to_alpha_demo.py</File>
-        <File>docs/ingest/rasterio_tiles.md</File>
-      </Deliverables>
-      <APIs>extract_masks(dataset); RGBA alpha synthesis</APIs>
-      <Acceptance>
-        <Criterion>Masked areas map to alpha=0; color channels preserved (parity w/ rasterio masks).</Criterion>
-        <Criterion>Golden-image tests pass at SSIM ≥ 0.99 for mask→alpha overlays.</Criterion>
-      </Acceptance>
-    </Task>
+WHAT “DONE” MEANS (deliverables & measurable ACs)
+Deliverables to find or create exactly:
+  D1: python/forge3d/adapters/datashader_adapter.py  (class DatashaderAdapter)
+  D2: python/forge3d/adapters/__init__.py            (export adapter + probe)
+  D3: python/forge3d/__init__.py                     (expose stable namespace forge3d.adapters.datashader_adapter)
+  D4: examples/datashader_overlay_demo.py
+  D5: examples/output/datashader_overlay_demo.png    (artifact produced by the demo)
+  D6: tests/test_datashader_adapter.py               (unit/integration)
+  D7: tests/perf/test_datashader_zoom.py             (perf)
+  D8: tests/goldens/datashader_Z{0,4,8,12}.png       (+ sidecar JSON with params & hash)
+  D9: .github/workflows/datashader-perf.yml          (CI for perf + artifact upload on regression)
+  D10: docs/user/datashader_interop.rst              (Sphinx page; in TOC)
 
-    <Task id="S3" title="CRS normalization via WarpedVRT + pyproj">
-      <Deliverables>
-        <File>python/forge3d/adapters/reproject.py</File>
-        <File>tests/test_reproject_window.py</File>
-        <File>examples/reproject_window_demo.py</File>
-        <File>docs/ingest/reprojection.md</File>
-      </Deliverables>
-      <APIs>WarpedVRTWrapper(...); reproject_window(src_dataset, dst_crs, window)</APIs>
-      <Acceptance>
-        <Criterion>Reprojected windows align with target CRS within ≤ 0.5 px georef error; SSIM ≥ 0.99 vs WarpedVRT reference.</Criterion>
-        <Criterion>CRS string preserved; transform near-equality within 1e-6.</Criterion>
-      </Acceptance>
-    </Task>
+Acceptance Criteria to verify or enforce:
+  A1 (V1, zero-copy): adapter returns (H,W,4) uint8 RGBA with np.shares_memory(src, out) == True for normal shaded outputs; if a copy is unavoidable, fallback path is explicit and tested.
+  A2 (V1, alignment): overlay alignment error ≤ 0.5 px over provided extent/transform (two synthetic extents).
+  A3 (V1, example): running `python examples/datashader_overlay_demo.py` writes examples/output/datashader_overlay_demo.png and prints “OK”.
+  A4 (V2, fidelity): SSIM ≥ 0.98 vs goldens at Z0, Z4, Z8, Z12 (skimage.metrics.structural_similarity).
+  A5 (V2, perf): frame time ≤ 33 ms at Z8 on linux_x86_64 reference runner for a 1e6-point deterministic scene; record the other zooms as a trend table.
+  A6 (V2, CI): CI fails on SSIM/latency regression and uploads diff images on failure.
+  A7 (All, memory): peak RSS during tests ≤ 512 MiB.
+  A8 (Docs): Sphinx builds cleanly; page appears in TOC; includes zero-copy and memory guidance.
+  A9 (Optional-dep): core import works without Datashader; tests skip with a clear reason if it’s not installed.
 
-    <Task id="S4" title="xarray/rioxarray DataArray ingestion">
-      <Deliverables>
-        <File>python/forge3d/ingest/xarray_adapter.py</File>
-        <File>tests/test_xarray_ingestion.py</File>
-        <File>examples/xarray_ingest_demo.py</File>
-        <File>docs/ingest/xarray.md</File>
-      </Deliverables>
-      <APIs>ingest_dataarray(da: xarray.DataArray)</APIs>
-      <Acceptance>
-        <Criterion>Preserves CRS/transform (via rioxarray), dims order (y,x[,band]), and attrs.</Criterion>
-        <Criterion>Zero unnecessary copies for C-contiguous uint8/float32 inputs (validated via numpy.shares_memory).</Criterion>
-      </Acceptance>
-    </Task>
+SAFETY & PRACTICES
+- Create a feature branch: feat/workstream-v-datashader
+- No blind search/replace. Keep commits small and reviewable.
+- Don’t modify other workstreams. Avoid binary directories.
+- Treat Datashader as optional: guard imports; add a dev extra if needed.
 
-    <Task id="S5" title="Dask-chunked raster ingestion">
-      <Deliverables>
-        <File>python/forge3d/ingest/dask_adapter.py</File>
-        <File>tests/test_dask_ingestion.py</File>
-        <File>examples/dask_ingest_demo.py</File>
-        <File>docs/ingest/dask.md</File>
-      </Deliverables>
-      <APIs>ingest_dask_array(a: dask.array.Array)</APIs>
-      <Acceptance>
-        <Criterion>No full materialization; peak host memory ≤ 1.5× tile size along streaming path (measured).</Criterion>
-        <Criterion>Chunk plan aligns with tile grid; ingest succeeds on synthetic multi-GB virtual dataset.</Criterion>
-      </Acceptance>
-    </Task>
+PHASE A — AUDIT (no changes yet)
+1) Presence checks: verify all D1–D10 exist at the exact paths above.
+2) Content checks:
+   - D1 contains class DatashaderAdapter and functions:
+       is_datashader_available(), rgba_view_from_agg(), validate_alignment(), to_overlay_texture()
+   - D2 exports the adapter and availability probe.
+   - D3 exposes forge3d.adapters.datashader_adapter in the public API.
+   - D4 demo uses Datashader to produce an RGBA overlay aligned to extent; writes D5 and prints “OK”.
+   - D6 asserts zero-copy (np.shares_memory) and alignment error ≤ 0.5 px; skips cleanly if Datashader missing.
+   - D7 renders deterministic data at Z{0,4,8,12}, measures frame time, compares SSIM to goldens.
+   - D8 goldens exist with sidecar JSON (params, seed, hash).
+   - D9 CI workflow runs perf tests, enforces A4/A5, uploads diffs, caches deps.
+   - D10 docs page exists; linked in TOC; explains zero-copy, alignment, memory budget.
+3) Buildability & docs dry-run (if environment permits):
+   - `pip install -e .[dev] datashader`
+   - `maturin develop --release`
+   - `pytest -k "datashader" -v`
+   - `cd docs && make html`
+4) Produce an AUDIT REPORT (markdown) summarizing D1–D10 and A1–A9 as ✅/❌ with short evidence. If all ✅, stop and output the report.
 
-    <Task id="S6" title="Overview/LOD selection">
-      <Deliverables>
-        <File>tests/test_overview_selection.py</File>
-        <File>examples/overview_selection_demo.py</File>
-        <File>docs/ingest/overviews.md</File>
-      </Deliverables>
-      <APIs>select_overview_level(dataset, target_resolution)</APIs>
-      <Acceptance>
-        <Criterion>At 1/8 effective resolution, bytes read reduced by ≥ 60% vs full-res read.</Criterion>
-        <Criterion>SSIM ≥ 0.99 vs full-res downsample rendered to same output size.</Criterion>
-      </Acceptance>
-    </Task>
-  </SpecOfRecord>
+PHASE B — IMPLEMENT (only if any ❌ from Phase A)
+Implement the minimum changes to turn every ❌ into ✅, in dependency order:
 
-  <AuditPlan>
-    <Step>Create small deterministic fixtures in tests/fixtures/ with rasterio (e.g., GeoTIFF with internal masks, nodata, overviews) to avoid network access.</Step>
-    <Step>Assert presence of every Deliverables file; if any file is missing, flag FAIL.</Step>
-    <Step>Static checks for required symbols:
-      - S1: windowed_read, block_iterator; correct signatures; resampling path.
-      - S2: mask extraction and alpha synthesis path; no unintended channel mutation.
-      - S3: WarpedVRT use; reproject_window returns array + transform/CRS.
-      - S4: ingest_dataarray reading rioxarray attrs (crs, transform).
-      - S5: ingestion accepts dask.array; no compute() on full array; chunk→tile planning.
-      - S6: overview level selection using dataset.overviews(); fewer bytes at low zoom.
-    </Step>
-    <Step>Build &amp; test:
-      - maturin develop --release
-      - cargo build --release
-      - pytest -q tests/test_rasterio_adapter.py tests/test_mask_alpha.py tests/test_reproject_window.py tests/test_overview_selection.py tests/test_xarray_ingestion.py tests/test_dask_ingestion.py
-    </Step>
-    <Step>Run demos headless; write artifacts:
-      - python examples/raster_window_demo.py --out reports/s1_windows.png
-      - python examples/mask_to_alpha_demo.py --out reports/s2_mask.png
-      - python examples/reproject_window_demo.py --out reports/s3_reproject.png
-      - python examples/overview_selection_demo.py --out reports/s6_overviews.png
-      - python examples/xarray_ingest_demo.py --out reports/s4_xarray.png
-      - python examples/dask_ingest_demo.py --out reports/s5_dask.png
-    </Step>
-    <Step>Compute AC metrics and log to reports/ (JSON/MD):
-      - Pixel coverage/counts; resampling parity vs rasterio reference.
-      - SSIM/PSNR for mask→alpha, reprojection, overviews.
-      - shares_memory checks; peak memory tracking for Dask path.
-    </Step>
-    <Step>Produce WORKSTREAM_S_AUDIT.md with a PASS/FAIL matrix (tasks × Deliverables × ACs) including file paths and metric values.</Step>
-  </AuditPlan>
+V1 — Datashader pipeline → RGBA overlay
+  B1) Add D1 DatashaderAdapter with:
+      - Zero-copy RGBA view from Datashader agg/image (prefer memoryview/np.frombuffer).
+      - `validate_alignment(extent, transform, width, height)` guarding ≤ 0.5 px tolerance.
+      - `to_overlay_texture(rgba, extent)` for renderer upload (document assumptions).
+  B2) Wire exports (D2, D3) under stable namespace; soft-import datashader with probe.
+  B3) Add demo (D4) producing D5; deterministic seed; CLI print “OK”.
+  B4) Write tests (D6):
+      - Zero-copy shares_memory true on main path; explicit fallback path also covered.
+      - Alignment tests on two synthetic extents.
+      - Skip if Datashader unavailable.
+V2 — Perf stress & goldens
+  B5) Add perf test (D7) with deterministic 1e6 points; zooms Z0/Z4/Z8/Z12; capture frame time and SSIM.
+  B6) Generate initial goldens (D8) and sidecar JSON (params, seed, hash).
+  B7) Add CI workflow (D9) on linux_x86_64 to run perf tests, enforce A4/A5, upload diff artifacts, and cache deps.
+Docs
+  B8) Add Sphinx page (D10) with usage, limits, zero-copy notes, memory guidance; add to TOC.
 
-  <ImplementationPlan condition="If any Deliverable/Acceptance FAILS">
-    <Branch>
-      <Create>fix/workstream-S</Create>
-      <Base>audit/workstream-S</Base>
-    </Branch>
+PHASE C — VALIDATE & WRAP
+1) Re-run the measurable checks A1–A9 locally (if environment allows) and ensure pass/skip as specified.
+2) Update AUDIT REPORT to FINAL REPORT with before/after table.
+3) Prepare PR text including:
+   - What changed; how to run demo; perf table (zoom→ms); SSIM & memory lines; screenshots of golden vs. current.
+4) Output:
+   - Branch name, list of new/changed files, FINAL REPORT markdown, and exact local commands:
 
-    <Order>S1 → S2 → S3 → S6 → S4 → S5</Order>
+COMMANDS (reference; run when possible)
+- pip install -e .[dev] datashader
+- maturin develop --release
+- pytest tests/test_datashader_adapter.py -v
+- pytest tests/perf/test_datashader_zoom.py -v
+- python examples/datashader_overlay_demo.py
+- cd docs && make html
 
-    <S1>
-      <Action>Create/complete python/forge3d/adapters/rasterio_tiles.py with windowed_read and block_iterator; avoid extra copies.</Action>
-      <Action>Add tests/test_rasterio_adapter.py with fixture-based windows and resampling checks.</Action>
-      <Action>Add examples/raster_window_demo.py and docs/ingest/rasterio_tiles.md.</Action>
-    </S1>
+REPORTING FORMAT
+Return a concise markdown report:
+- “Workstream V Audit” table for D1–D10 and A1–A9 (✅/❌ + 1-line evidence)
+- If fixes were made: short commit log, perf table, and next steps.
 
-    <S2>
-      <Action>Extend rasterio_tiles to propagate masks to alpha; keep color channels intact.</Action>
-      <Action>Add tests/test_mask_alpha.py and examples/mask_to_alpha_demo.py; update docs.</Action>
-    </S2>
-
-    <S3>
-      <Action>Create python/forge3d/adapters/reproject.py using rasterio.vrt.WarpedVRT and pyproj; implement reproject_window.</Action>
-      <Action>Add tests/test_reproject_window.py, examples/reproject_window_demo.py, docs/ingest/reprojection.md.</Action>
-    </S3>
-
-    <S6>
-      <Action>Implement select_overview_level using dataset.overviews(); integrate into reads to reduce bytes at low zoom.</Action>
-      <Action>Add tests/test_overview_selection.py, examples/overview_selection_demo.py, docs/ingest/overviews.md.</Action>
-    </S6>
-
-    <S4>
-      <Action>Create python/forge3d/ingest/xarray_adapter.py with ingest_dataarray; validate dims, dtype, CRS/transform via rioxarray.</Action>
-      <Action>Add tests/test_xarray_ingestion.py, examples/xarray_ingest_demo.py, docs/ingest/xarray.md.</Action>
-    </S4>
-
-    <S5>
-      <Action>Create python/forge3d/ingest/dask_adapter.py with chunk→tile planning; ensure no full materialization; add peak memory guardrails.</Action>
-      <Action>Add tests/test_dask_ingestion.py, examples/dask_ingest_demo.py, docs/ingest/dask.md.</Action>
-    </S5>
-
-    <Packaging>
-      <Action>If missing, add optional extras to pyproject.toml:
-        [project.optional-dependencies]
-        raster = ["rasterio", "pyproj"]
-        xarray = ["xarray", "rioxarray"]
-        dask = ["dask[array]"]
-      </Action>
-      <Action>Ensure imports are lazy/guarded with clear error hints when extras are not installed.</Action>
-    </Packaging>
-
-    <Common>
-      <Action>Re-run the full AuditPlan; update WORKSTREAM_S_AUDIT.md to PASS with evidence.</Action>
-      <Action>Open a PR titled "Workstream S — Verification &amp; Gap Closure (S1–S6)" mapping each Deliverable/AC to commits and artifacts.</Action>
-    </Common>
-  </ImplementationPlan>
-
-  <Commands>
-    <Build>
-      <Cmd>maturin develop --release</Cmd>
-      <Cmd>cargo build --release</Cmd>
-    </Build>
-    <Test>
-      <Cmd>pytest -q tests/test_rasterio_adapter.py tests/test_mask_alpha.py tests/test_reproject_window.py tests/test_overview_selection.py tests/test_xarray_ingestion.py tests/test_dask_ingestion.py</Cmd>
-    </Test>
-    <Docs>
-      <Cmd>cd docs &amp;&amp; make html</Cmd>
-    </Docs>
-    <Demos>
-      <Cmd>python examples/raster_window_demo.py --out reports/s1_windows.png</Cmd>
-      <Cmd>python examples/mask_to_alpha_demo.py --out reports/s2_mask.png</Cmd>
-      <Cmd>python examples/reproject_window_demo.py --out reports/s3_reproject.png</Cmd>
-      <Cmd>python examples/overview_selection_demo.py --out reports/s6_overviews.png</Cmd>
-      <Cmd>python examples/xarray_ingest_demo.py --out reports/s4_xarray.png</Cmd>
-      <Cmd>python examples/dask_ingest_demo.py --out reports/s5_dask.png</Cmd>
-    </Demos>
-  </Commands>
-
-  <Outputs>
-    <File>WORKSTREAM_S_AUDIT.md</File>
-    <Dir>reports/ (images, JSON metrics, logs)</Dir>
-    <PR>
-      <Title>Workstream S — Verification &amp; Gap Closure</Title>
-      <Body>Matrix of Deliverables/AC → PASS evidence with artifact links and metrics.</Body>
-    </PR>
-  </Outputs>
-</codex-job>
+BEGIN NOW.
