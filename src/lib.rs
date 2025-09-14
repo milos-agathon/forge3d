@@ -14,6 +14,7 @@ pub mod core;  // Make core public for tests
 mod device_caps;
 mod transforms;
 pub mod mesh;  // Make mesh public for TBN utilities
+pub mod path_tracing; // A1 GPU path tracer backend
 #[cfg(any(feature = "enable-normal-mapping", feature = "enable-pbr", feature = "enable-ibl", feature = "enable-csm"))]
 pub mod pipeline; // Advanced rendering pipelines
 
@@ -26,12 +27,13 @@ use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
 use bytemuck::{Pod, Zeroable};
 use image::ImageBuffer;
 use pyo3::prelude::*;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::Bound;
 use numpy::{PyArray3, IntoPyArray, PyArray2, PyReadonlyArray2, PyArray1};
 use numpy::PyUntypedArrayMethods; // needed for contiguous checks
 use ndarray::Array3;
 use wgpu::util::DeviceExt;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyDict, PyList, PyTuple};
 use pyo3::wrap_pyfunction;
 use std::path::PathBuf;
 
@@ -53,6 +55,94 @@ static GLOBAL_PALETTE_INDEX: AtomicU32 = AtomicU32::new(0);
 #[pyfunction]
 pub fn _set_global_palette_index(idx: u32) {
     GLOBAL_PALETTE_INDEX.store(idx, Ordering::Relaxed);
+}
+
+// ---------- A1: GPU path tracer (compute) ----------
+
+#[pyfunction]
+#[pyo3(text_signature = "(width, height, scene, camera, seed, frames)")]
+fn _pt_render_gpu(
+    py: Python<'_>,
+    width: u32,
+    height: u32,
+    scene: &PyAny,
+    camera: &PyAny,
+    seed: u64,
+    frames: u32,
+) -> PyResult<Py<PyArray3<u8>>> {
+    use crate::path_tracing::compute::{PathTracerGPU, Sphere, Uniforms};
+
+    // Parse scene: list of dicts with center, radius, albedo
+    let mut spheres: Vec<Sphere> = Vec::new();
+    if let Ok(list) = scene.downcast::<PyList>() {
+        for item in list.iter() {
+            let d = item.downcast::<PyDict>()?;
+            let center_any = d.get_item("center")?.ok_or_else(|| PyValueError::new_err("sphere.center missing"))?;
+            let radius_any = d.get_item("radius")?.ok_or_else(|| PyValueError::new_err("sphere.radius missing"))?;
+            let albedo_any = d.get_item("albedo")?.ok_or_else(|| PyValueError::new_err("sphere.albedo missing"))?;
+            let center: (f32, f32, f32) = center_any.extract()?;
+            let radius: f32 = radius_any.extract()?;
+            let albedo: (f32, f32, f32) = albedo_any.extract()?;
+            spheres.push(Sphere { center: [center.0, center.1, center.2], radius, albedo: [albedo.0, albedo.1, albedo.2], _pad0: 0.0 });
+        }
+    }
+
+    // Camera defaults
+    let cdict = camera.downcast::<PyDict>()?;
+    let origin: (f32, f32, f32) = cdict.get_item("origin")?.and_then(|v| v.extract().ok()).unwrap_or((0.0, 0.0, 0.0));
+    let look_at: (f32, f32, f32) = cdict.get_item("look_at")?.and_then(|v| v.extract().ok()).unwrap_or((0.0, 0.0, -1.0));
+    let up: (f32, f32, f32) = cdict.get_item("up")?.and_then(|v| v.extract().ok()).unwrap_or((0.0, 1.0, 0.0));
+    let fov_y: f32 = cdict.get_item("fov_y")?.and_then(|v| v.extract().ok()).unwrap_or(45.0);
+    let aspect: f32 = cdict
+        .get_item("aspect")?
+        .and_then(|v| v.extract().ok())
+        .unwrap_or_else(|| (width.max(1) as f32) / (height.max(1) as f32));
+    let exposure: f32 = cdict.get_item("exposure")?.and_then(|v| v.extract().ok()).unwrap_or(1.0);
+
+    // Build camera basis
+    let cam_origin = [origin.0, origin.1, origin.2];
+    let fwd = {
+        let fx = look_at.0 - origin.0; let fy = look_at.1 - origin.1; let fz = look_at.2 - origin.2;
+        let len = (fx*fx + fy*fy + fz*fz).sqrt().max(1e-6);
+        [fx/len, fy/len, fz/len]
+    };
+    let upv = [up.0, up.1, up.2];
+    let right = [
+        fwd[1]*upv[2] - fwd[2]*upv[1],
+        fwd[2]*upv[0] - fwd[0]*upv[2],
+        fwd[0]*upv[1] - fwd[1]*upv[0],
+    ];
+    let rlen = (right[0]*right[0] + right[1]*right[1] + right[2]*right[2]).sqrt().max(1e-6);
+    let right = [right[0]/rlen, right[1]/rlen, right[2]/rlen];
+    let upn = [
+        right[1]*fwd[2] - right[2]*fwd[1],
+        right[2]*fwd[0] - right[0]*fwd[2],
+        right[0]*fwd[1] - right[1]*fwd[0],
+    ];
+
+    let uniforms = Uniforms {
+        width, height,
+        frame_index: 0,
+        _pad0: 0,
+        cam_origin,
+        cam_fov_y: fov_y.to_radians(),
+        cam_right: right,
+        cam_aspect: aspect,
+        cam_up: upn,
+        cam_exposure: exposure,
+        cam_forward: fwd,
+        seed_hi: ((seed >> 32) & 0xFFFF_FFFF) as u32,
+        seed_lo: (seed & 0xFFFF_FFFF) as u32,
+    };
+
+    let rgba = crate::path_tracing::compute::PathTracerGPU::render(width, height, &spheres, uniforms)
+        .map_err(|e| PyRuntimeError::new_err(format!("GPU render failed: {}", e)))?;
+    // into numpy (H, W, 4)
+    let arr = unsafe { PyArray3::<u8>::new(py, [height as usize, width as usize, 4], false) };
+    // safety: we just allocated a contiguous array with exact size
+    let dst = unsafe { arr.as_slice_mut()? };
+    dst.copy_from_slice(&rgba);
+    Ok(arr.into_py(py))
 }
 
 // Helper used by render path to read current index
@@ -2129,5 +2219,7 @@ fn _forge3d(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     
     // Export package version for Python: forge3d._forge3d.__version__
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    // A1 GPU path tracer entry
+    m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
     Ok(())
 }

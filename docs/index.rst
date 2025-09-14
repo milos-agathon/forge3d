@@ -29,6 +29,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    postfx/index
    pbr_materials
    shadow_mapping
+   user/path_tracing
    vector_graphics
    terrain_rendering
    async_operations
