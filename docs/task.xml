@@ -1,160 +1,227 @@
-<task>
-  <title>Implement & wire missing/partial items for Workstream W</title>
+<task id="forge3d-workstream-verify-and-implement" version="2.0">
+  <title>Verify a workstream exists, audit readiness, and implement missing items in one branch/PR</title>
 
-  <inputs>
-    <repoRoot>./</repoRoot>
-    <paths>
-      <path>src/</path>
-      <path>shaders/</path>
-      <path>python/forge3d/</path>
-      <path>examples/</path>
-      <path>notebooks/integration/</path>
-      <path>tests/</path>
-      <path>tests/goldens/</path>
-      <path>docs/</path>
-      <path>.github/workflows/</path>
-    </paths>
-    <workstream id="W" title="Integration Docs &amp; CI">
-      <item id="W1" title="End-to-end notebooks for Python stack"/>
-      <item id="W2" title="CI validation for I/O and CRS correctness"/>
-      <item id="W3" title="Features &amp; limits gating at device request (fallback matrices)"/>
-      <item id="W4" title="GPU timestamp &amp; pipeline statistics queries (with fallback)"/>
-      <item id="W5" title="Copy/layout/usage conformance (buffers &amp; textures)"/>
-      <item id="W6" title="Sampler vs texture sampleType compatibility tests + fallbacks"/>
-      <item id="W7" title="Buffer mapping lifecycle correctness &amp; negative tests"/>
-      <item id="W8" title="External image import demo (copyExternalImageToTexture parity)"/>
-    </workstream>
-  </inputs>
+  <role>
+    You are Codex CLI in <b>Verification → Implementation Mode</b>, acting as a senior graphics/runtime engineer
+    (Vulkan ≥1.2, WebGPU/WGSL, RAII, Rust, Python ≥3.8, PyO3, CMake ≥3.24, VMA, Sphinx).
+    Project: forge3d — Rust backend + Python frontend for interactive/offline 3D visualization.
+  </role>
+
+  <switches>
+    <!-- Set WRITE_CHANGES=false to do verification only -->
+    <WRITE_CHANGES>true</WRITE_CHANGES>
+    <!-- When true, generate and run tests where feasible -->
+    <USE_TESTS>true</USE_TESTS>
+    <!-- When true, add/adjust CI to run fmt/clippy/pytest/docs/wheel (no publish) -->
+    <ENSURE_CI>true</ENSURE_CI>
+  </switches>
 
   <constraints>
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
-    <gpuBudget>&#8804; 512 MiB host-visible heap</gpuBudget>
-    <build>cmake≥3.24, cargo/rustc, PyO3, VMA</build>
-    <apis>Primary: WebGPU/WGSL; Vulkan 1.2-compatible design</apis>
-    <docs>Sphinx</docs>
-    <scope>Only Workstream W; do not modify other workstreams</scope>
+    <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
+    <build>cargo/rustc, maturin abi3 (py≥3.8), optional CMake≥3.24 wrapper</build>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2-compatible design</apis>
+    <docs>Sphinx preferred; README/CHANGELOG kept accurate</docs>
+    <safety>
+      - Work in a feature branch. Keep commits small and scoped to a single task.
+      - Prefer minimal edits; do not remove user content unless obviously generated artifacts.
+      - If an operation would delete or overwrite code, create a backup copy first.
+      - If essential information is missing, reply <b>UNCERTAIN</b> and list exact needs.
+      - If a tool is unavailable, mark the check as SKIPPED with the command to run.
+    </safety>
+    <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz, out, diag_out</exclusions>
   </constraints>
 
-  <safety>
-    <step>Create branch: <code>git checkout -b feat/workstream-w-integration-ci</code></step>
-    <step>Audit-first: only add/modify files within declared paths; no blind search/replace; small, reviewable commits.</step>
-    <step>Guard optional deps (e.g., Jupyter, PIL) behind availability checks; skip tests cleanly when unavailable.</step>
-    <step>Exclude binary/artifact directories from commits.</step>
-  </safety>
+  <inputs>
+    <repoRoot>./</repoRoot>
+    <roadmapPath>./roadmap2.csv</roadmapPath>
+    <workstreamSelector>
+      <![CDATA[
+      ID: A
+      Title: Path Tracing (WebGPU Compute, Offline HQ)
+      ]]>
+  </inputs>
+
+  <csvSchema>
+    <encoding>utf-8</encoding>
+    <delimiter>comma</delimiter>
+    <columns order="fixed">
+      <col index="0">Workstream ID</col>
+      <col index="1">Workstream Title</col>
+      <col index="2">Task ID</col>
+      <col index="3">Task Title</col>
+      <col index="4">Rationale</col>
+      <col index="5">Deliverables</col>
+      <col index="6">Acceptance Criteria</col>
+      <col index="7">Priority</col>
+      <col index="8">Phase</col>
+      <col index="9">Missing Features</col>
+      <col index="10">Dependencies</col>
+      <col index="11">Risks/Mitigations</col>
+      <col index="12" optional="true" ignore="true">Unnamed: 12</col>
+    </columns>
+    <cellConventions>
+      <listSeparator>semicolon-inside-cell</listSeparator>
+      <markdownInline>allowed</markdownInline>
+      <emptyTrailingColumn>ignore if entirely blank</emptyTrailingColumn>
+    </cellConventions>
+  </csvSchema>
 
   <plan>
-    <!-- Preflight & dependency awareness (non-blocking) -->
-    <step id="P0">Preflight
-      <item>Verify existing CI and test scaffolding; list files that will be added under <code>notebooks/integration/</code>, <code>tests/</code>, <code>.github/workflows/</code>, <code>docs/</code>.</item>
-      <item>Confirm device caps/timing features present (W3/W4) but do not modify them.</item>
-    </step>
+    1) Validate & Load CSV
+       - Read <roadmapPath> with UTF-8; verify headers match <csvSchema>.
+       - If headers differ → <b>UNCERTAIN</b> with a diff table and stop.
+       - Produce CSV Hygiene: rows with out-of-vocab Priority/Phase; rows missing Task ID/Title/Deliverables/Acceptance Criteria.
 
-    <!-- W1: Notebooks & CI execution -->
-    <step id="W1-1">Create end-to-end notebooks
-      <item>Add <code>notebooks/integration/matplotlib_terrain.ipynb</code> (terrain via mpl colormaps).</item>
-      <item>Add <code>notebooks/integration/datashader_points.ipynb</code> (large-scale points → RGBA overlay).</item>
-      <item>Add <code>notebooks/integration/adapter_showcase.ipynb</code> (adapters interop).</item>
-      <item>Add <code>notebooks/integration/data_ingestion.ipynb</code> (I/O pipelines &amp; CRS checks).</item>
-    </step>
-    <step id="W1-2">Headless execution in CI
-      <item>Add <code>.github/workflows/notebooks.yml</code> to run nbconvert headless on linux_x86_64 within a 10-minute budget per notebook.</item>
-      <item>Store rendered PNG/HTML as CI artifacts under <code>artifacts/notebooks/</code>.</item>
-    </step>
+    2) Select Workstream (Existence Check)
+       - Case-insensitive match by Workstream ID OR Title.
+       - If none match → <b>UNCERTAIN</b> and list discovered workstreams (ID → Title), then stop.
+       - If matched, print “WORKSTREAM_FOUND” with count of tasks.
 
-    <!-- W5: Copy/layout/usage conformance -->
-    <step id="W5-1">Conformance tests (buffers &amp; textures)
-      <item>Create <code>tests/test_copy_conformance.py</code> with positive/negative cases (COPY_SRC/DST flags, 256B alignment, depth-stencil coverage where supported).</item>
-      <item>Validate scoped error messages for invalid operations.</item>
-    </step>
+    3) Derive Task Intents
+       - For each matched task (respecting priority/phase filters), parse Deliverables & Acceptance Criteria into concrete artifacts:
+         * probable file paths (e.g., src/shaders/*.wgsl, python/forge3d/*.py, docs/*, examples/*)
+         * symbols/APIs (create_render_pipeline, bind_group, class/func names)
+         * tests/docs/CI hooks
+       - Build a per-task keyword set from cell contents (split semicolons inside cells).
 
-    <!-- W6: Sampler/sampleType compatibility -->
-    <step id="W6-1">Compatibility validation
-      <item>Add explicit sampleType compatibility checks during sampler/texture binding.</item>
-      <item>Create <code>tests/test_sampler_compat.py</code> with a compatibility matrix and illegal-combo rejection tests; include device-filtered fallbacks.</item>
-    </step>
+    4) Repository Audit (Read-only)
+       - For each task, scan src/, shaders/, python/, examples/, docs/ with ripgrep.
+       - Classify readiness:
+         <b>Present & Wired</b> (artifacts exist + integrated)
+         <b>Present but Partial</b> (exists but missing wiring/tests/docs)
+         <b>Absent</b> (no meaningful artifacts)
+       - Capture evidence: file:line refs + brief snippet.
 
-    <!-- W7: Buffer mapping lifecycle -->
-    <step id="W7-1">Lifecycle &amp; negative tests
-      <item>Add <code>tests/test_buffer_mapping.py</code> covering mapAsync state transitions, bounds validation, unmapped-usage errors, and basic race/misuse scenarios.</item>
-    </step>
+    5) Minimal Change Plan (Per Task)
+       - For Partial/Absent, list the exact minimal file-level changes needed to meet Acceptance Criteria and constraints (platforms/build/GPU budget).
+       - If unclear → mark the task <b>BLOCKED</b> and specify exactly what artifact/decision is needed.
 
-    <!-- W8: External image import parity -->
-    <step id="W8-1">External image import (native copyExternalImageToTexture parity)
-      <item>Add <code>src/external_image/mod.rs</code> (decode &amp; upload path for PNG/JPEG; parity constraints documented).</item>
-      <item>Add <code>examples/external_image_demo.py</code> that loads an external image and uploads to a texture; renders a proof PNG.</item>
-      <item>Add <code>docs/integration/external_images.md</code> describing native vs browser behavior, constraints, and pitfalls.</item>
-      <item>Add tests under <code>tests/test_external_image.py</code> for decode/upload sanity (skipped on missing PIL).</item>
-    </step>
+    6) Implementation (Write mode only if <WRITE_CHANGES>true</WRITE_CHANGES>)
+       - Create branch: <code>git checkout -b ws-&lt;ID-or-slug&gt;-implementation</code>
+       - For each task in deterministic order (by Priority then Task ID):
+         * Apply minimal changes.
+         * Add/update tests when <USE_TESTS>true</USE_TESTS>.
+         * Update docs (Sphinx/README) and example scripts if referenced by AC.
+         * Update CI if <ENSURE_CI>true</ENSURE_CI> and AC requires.
+         * Keep one commit per task: <code>git commit -am "WS&lt;ID&gt; &lt;TaskID&gt;: &lt;short summary&gt;"</code>
+       - Maintain safety: never delete custom user code; only remove generated artifacts (.pyd/.so, build/ etc.) when explicitly required by AC; otherwise add .gitignore entries.
 
-    <!-- Docs -->
-    <step id="DOCS">Documentation wiring
-      <item>Ensure Sphinx TOC links to <code>docs/integration/external_images.md</code> and a short “Running notebooks in CI” section.</item>
-    </step>
+    7) Validation Run
+       - Commands (skip gracefully if tool missing; record SKIPPED):
+         * <code>cargo fmt -- --check</code>
+         * <code>cargo clippy --all-targets --all-features -D warnings</code>
+         * <code>cargo test -q</code>
+         * <code>pytest -q</code> (when <USE_TESTS>true</USE_TESTS>)
+         * <code>sphinx-build -b html docs _build/html</code>
+         * <code>maturin build --release</code>
+         * <code>cmake -S . -B build && cmake --build build</code> (if CMake wrapper is part of AC)
+       - Re-run the audit matrix; all tasks should now be <b>Present & Wired</b>.
+       - If any still failing → fix or mark explicitly BLOCKED with reason.
 
-    <!-- Finalization -->
-    <step id="FINAL">Validate &amp; PR
-      <item>Run: <code>pytest -k "(copy_conformance or sampler_compat or buffer_mapping or external_image)" -v</code></item>
-      <item>Execute notebooks locally (optional): <code>jupyter nbconvert --execute --to notebook notebooks/integration/*.ipynb</code></item>
-      <item>Build docs: <code>cd docs &amp;&amp; make html</code></item>
-      <item>Open PR with summary, runtime table per notebook, and test results.</item>
-    </step>
+    8) PR Preparation
+       - Generate <b>PR_BODY.md</b> summarizing: scope, tasks addressed, evidence, risks/mitigations, and validation output.
+       - Print final change summary: <code>git status -s</code>, <code>git log --oneline -n 50</code>.
+
   </plan>
 
   <deliverables>
-    <!-- W1 -->
-    <item>notebooks/integration/matplotlib_terrain.ipynb</item>
-    <item>notebooks/integration/datashader_points.ipynb</item>
-    <item>notebooks/integration/adapter_showcase.ipynb</item>
-    <item>notebooks/integration/data_ingestion.ipynb</item>
-    <item>.github/workflows/notebooks.yml</item>
-
-    <!-- W5 -->
-    <item>tests/test_copy_conformance.py</item>
-
-    <!-- W6 -->
-    <item>tests/test_sampler_compat.py</item>
-
-    <!-- W7 -->
-    <item>tests/test_buffer_mapping.py</item>
-
-    <!-- W8 -->
-    <item>src/external_image/mod.rs</item>
-    <item>examples/external_image_demo.py</item>
-    <item>tests/test_external_image.py</item>
-    <item>docs/integration/external_images.md</item>
+    <!-- Always produced -->
+    <file>reports/ws_audit.md</file>
+    <file>reports/ws_matrix.csv</file>
+    <file>reports/csv_hygiene.md</file>
+    <!-- Produced in write mode -->
+    <file optional="true">PR_BODY.md</file>
+    <file optional="true">PATCHPLAN.md</file>
   </deliverables>
 
   <acceptanceCriteria>
-    <!-- W1 -->
-    <item>Each notebook executes headless via CI (nbconvert) within ≤10 minutes per notebook on linux_x86_64; exit code 0; artifacts uploaded under <code>artifacts/notebooks/</code>.</item>
-    <item>Rendered outputs contain at least one PNG per notebook proving successful rendering path.</item>
-
-    <!-- W5 -->
-    <item>Conformance suite passes: valid COPY_SRC/DST, 256B alignment respected, depth-stencil copy behavior validated or explicitly skipped with rationale; negative tests assert expected error messages.</item>
-
-    <!-- W6 -->
-    <item>Sampler/texture sampleType compatibility enforced: illegal combinations are rejected with clear errors; tests cover at least 6 valid and 6 invalid matrix cases; device-filtered fallbacks verified.</item>
-
-    <!-- W7 -->
-    <item>Buffer mapping lifecycle tests pass: mapAsync state transitions correct; out-of-bounds ranges raise errors; unmapped usage errors caught; basic race/misuse scenarios handled deterministically.</item>
-
-    <!-- W8 -->
-    <item>External image demo runs and writes a proof image (<code>examples/output/external_image_demo.png</code>); texture content checksum is stable (SSIM ≥ 0.99 vs golden on reference runner).</item>
-    <item>Native parity constraints documented; functionally equivalent upload path available via <code>external_image</code> module.</item>
-
-    <!-- Global -->
-    <item>All tests pass on CI (linux_x86_64 required; win_amd64/macos_universal2 unit suites green when enabled); peak RSS during tests ≤512 MiB.</item>
-    <item>Sphinx builds cleanly; new docs are linked in TOC; zero warnings promoted to failure.</item>
+    <ac id="AC-001">Workstream existence is verified; if not found, returns <b>UNCERTAIN</b> listing available IDs/Titles.</ac>
+    <ac id="AC-002">Each selected task has a single readiness verdict with at least one evidence reference or “no evidence found”.</ac>
+    <ac id="AC-003">For every Partial/Absent task, a concrete minimal change list exists (paths/symbols).</ac>
+    <ac id="AC-004" when="WRITE_CHANGES=true">All feasible tasks are implemented with one commit per task on a feature branch.</ac>
+    <ac id="AC-005" when="WRITE_CHANGES=true">Validation run completes; failures are either fixed or explicitly BLOCKED with reasons and next steps.</ac>
+    <ac id="AC-006">Deliverables (reports and, if applicable, PR docs) are generated and printed.</ac>
   </acceptanceCriteria>
 
-  <completion>
-    <summary>Completes Workstream W by adding integration notebooks + CI execution, GPU conformance/compatibility/mapping tests, and an external image import parity path with demo and docs, all within memory and platform constraints.</summary>
+  <execution>
     <commands>
-      <cmd>pip install -e .[dev]</cmd>
-      <cmd>maturin develop --release</cmd>
-      <cmd>pytest -k "copy_conformance or sampler_compat or buffer_mapping or external_image" -v</cmd>
-      <cmd>jupyter nbconvert --execute --to notebook notebooks/integration/*.ipynb</cmd>
-      <cmd>cd docs &amp;&amp; make html</cmd>
+      <!-- CSV header check -->
+      - python - <<'PY'
+import csv, sys, codecs, os
+p = os.environ.get("ROADMAP","{{roadmapPath}}")
+try:
+    with codecs.open(p, "r", "utf-8-sig") as f:
+        rdr = csv.reader(f); hdr = next(rdr, [])
+    print("CSV_HEADERS_OK" if hdr[:13]==[
+        "Workstream ID","Workstream Title","Task ID","Task Title","Rationale",
+        "Deliverables","Acceptance Criteria","Priority","Phase","Missing Features",
+        "Dependencies","Risks/Mitigations","Unnamed: 12"
+    ] else "CSV_HEADERS_DIFF", hdr)
+except FileNotFoundError:
+    print("UNCERTAIN: roadmap.csv not found at", p); sys.exit(2)
+PY
+
+      <!-- Discover candidate workstreams -->
+      - python - <<'PY'
+import csv, codecs
+with codecs.open("{{roadmapPath}}","r","utf-8-sig") as f:
+    rdr = csv.DictReader(f)
+    ws = sorted({(r["Workstream ID"].strip(), r["Workstream Title"].strip()) for r in rdr})
+print("WORKSTREAMS:", ws[:50])
+PY
+
+      <!-- Ripgrep presence scan (read-only audit) -->
+      - rg --version
+      - rg -n --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node_modules' -g '!__pycache__' \
+        '(wgsl|@group\\(|@binding\\(|bind_group|create_render_pipeline|queue\\.write_(buffer|texture)|forge3d|from +forge3d +import|sphinx|maturin|CMakeLists\\.txt)' \
+        src/ shaders/ python/ examples/ docs/ || true
+
+      <!-- Optional: quick env snapshot -->
+      - rustc --version || true
+      - cargo --version || true
+      - python -V || true
+      - cmake --version || true
+      - sphinx-build --version || true
+      - maturin --version || true
     </commands>
+
+    <notes>
+      - Build per-task keyword sets from Deliverables/Acceptance Criteria/Dependencies; split semicolons inside those cells only.
+      - Use conservative defaults for platform-specific paths (Windows DLL search, macOS rpaths, Linux SONAME).
+      - Respect the ≤512 MiB host-visible budget when adding examples/buffers; prefer small fixtures.
+    </notes>
+  </execution>
+
+  <implementation when="WRITE_CHANGES=true">
+    <steps>
+      <step>git checkout -b ws-&lt;slug-from-ID-or-Title&gt;-implementation</step>
+      <step>For each <b>Partial/Absent</b> task:
+        <ul>
+          <li>Apply minimal code/doc/test edits per the task’s Acceptance Criteria.</li>
+          <li>If a required artifact is ambiguous, create a thin, documented placeholder and mark the exact TODO in code + reports.</li>
+          <li>Update or add tests when <USE_TESTS>true</USE_TESTS>; prefer deterministic image/array checks where applicable.</li>
+          <li>Update Sphinx/README/CHANGELOG when docs are part of AC.</li>
+          <li>Commit: <code>git commit -am "WS&lt;ID&gt; &lt;TaskID&gt;: &lt;concise change&gt;"</code></li>
+        </ul>
+      </step>
+      <step when="ENSURE_CI=true">If CI workflow missing, add <code>.github/workflows/ci.yml</code> to run fmt/clippy/pytest/docs/wheel on linux/macos/windows (no publish).</step>
+      <step>Run validation commands; fix non-flaky failures; otherwise mark BLOCKED with reason and a single command the maintainer should run to unblock.</step>
+      <step>Generate <b>PR_BODY.md</b> summarizing changes, risks, mitigations, and validation outputs; print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
+    </steps>
+  </implementation>
+
+  <completion>
+    <print>
+      - reports/ws_audit.md
+      - reports/ws_matrix.csv
+      - reports/csv_hygiene.md
+      - PR_BODY.md (if WRITE_CHANGES=true)
+      - PATCHPLAN.md (if WRITE_CHANGES=true)
+    </print>
+    <fallback>
+      If headers mismatch or workstream not found, stop with <b>UNCERTAIN</b> and list:
+      (a) expected vs actual headers, (b) discovered workstreams (ID → Title), and (c) exact fixes required.
+    </fallback>
   </completion>
 </task>

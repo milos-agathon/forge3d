@@ -26,6 +26,7 @@ def _map_with_lut(normed: np.ndarray, lut: np.ndarray) -> np.ndarray:
 
 @pytest.mark.parametrize("cmap_name", ["viridis", "plasma", "magma"]) 
 def test_accepts_name_and_object(cmap_name):
+    pytest.importorskip("matplotlib")
     import matplotlib.pyplot as plt
     from forge3d.adapters.mpl_cmap import matplotlib_to_forge3d_colormap
 
@@ -38,6 +39,7 @@ def test_accepts_name_and_object(cmap_name):
 
 
 def test_linear_normalize_parity():
+    pytest.importorskip("matplotlib")
     import matplotlib.colors as mcolors
     from forge3d.adapters.mpl_cmap import matplotlib_normalize
 
@@ -52,6 +54,7 @@ def test_linear_normalize_parity():
 
 
 def test_ramp_rgba_parity_ssim_or_psnr():
+    pytest.importorskip("matplotlib")
     import matplotlib.pyplot as plt
     import matplotlib.colors as mcolors
     from forge3d.adapters.mpl_cmap import (
