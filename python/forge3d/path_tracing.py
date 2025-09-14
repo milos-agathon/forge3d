@@ -1,8 +1,9 @@
-"""python/forge3d/path_tracing.py
-Minimal CPU path tracing used by tests: RNG, spheres/triangles, simple BSDFs, HDR accumulation.
-This file exists to provide a deterministic, dependency-free path tracing reference for tests.
-RELEVANT FILES:python/forge3d/__init__.py,docs/user/path_tracing.rst,tests/test_path_tracing_*.py
-"""
+# python/forge3d/path_tracing.py
+# Minimal CPU path tracing used by tests: RNG, spheres/triangles, simple BSDFs, HDR accumulation.
+# This file exists to provide a deterministic, dependency-free path tracing reference for tests.
+# RELEVANT FILES:python/forge3d/__init__.py,docs/user/path_tracing.rst,tests/test_path_tracing_*.py
+
+"""CPU path tracing reference used by tests and examples."""
 
 from __future__ import annotations
 
@@ -81,6 +82,99 @@ class PathTracer:
         out = np.clip(ldr * 255.0 + 0.5, 0, 255).astype(np.uint8)
         alpha = np.full((h, w, 1), 255, dtype=np.uint8)
         return np.concatenate([out, alpha], axis=-1)
+
+    def render_aovs_cpu(self, aovs: Tuple[str, ...] = (
+        "albedo", "normal", "depth", "direct", "indirect", "emission", "visibility"
+    ), *, spp: int = 1) -> dict:
+        """Compute basic AOVs on CPU.
+
+        Returns a dict of numpy arrays keyed by canonical names.
+
+        - albedo, normal, direct, indirect, emission: float32, shape (H, W, 3)
+        - depth: float32, shape (H, W), np.nan for miss
+        - visibility: uint8 mask, shape (H, W), 255 hit / 0 miss
+        """
+        h, w, t = self.cfg.height, self.cfg.width, self.cfg.tile
+        spp = int(max(1, spp))
+
+        want = tuple(str(k) for k in aovs)
+        out: dict = {}
+        if "albedo" in want:
+            out["albedo"] = np.zeros((h, w, 3), dtype=np.float32)
+        if "normal" in want:
+            out["normal"] = np.zeros((h, w, 3), dtype=np.float32)
+        if "depth" in want:
+            out["depth"] = np.full((h, w), np.nan, dtype=np.float32)
+        if "direct" in want:
+            out["direct"] = np.zeros((h, w, 3), dtype=np.float32)
+        if "indirect" in want:
+            out["indirect"] = np.zeros((h, w, 3), dtype=np.float32)
+        if "emission" in want:
+            out["emission"] = np.zeros((h, w, 3), dtype=np.float32)
+        if "visibility" in want:
+            out["visibility"] = np.zeros((h, w), dtype=np.uint8)
+
+        cam_pos = np.array([0.0, 0.0, 1.5], dtype=np.float32)
+        fov = 45.0 * np.pi / 180.0
+        aspect = w / max(1.0, float(h))
+        half_height = np.tan(0.5 * fov)
+        half_width = aspect * half_height
+
+        light_dir = np.array([0.5, 0.8, 0.2], dtype=np.float32)
+        light_dir /= max(1e-6, np.linalg.norm(light_dir))
+
+        for _ in range(spp):
+            for y0 in range(0, h, t):
+                for x0 in range(0, w, t):
+                    y1 = min(h, y0 + t)
+                    x1 = min(w, x0 + t)
+                    yy, xx = np.mgrid[y0:y1, x0:x1]
+                    jx = self._rand_uniform(xx.shape)
+                    jy = self._rand_uniform(xx.shape)
+                    ndc_x = ((xx + jx + 0.5) / w) * 2.0 - 1.0
+                    ndc_y = (1.0 - (yy + jy + 0.5) / h) * 2.0 - 1.0
+                    dir_x = ndc_x * half_width
+                    dir_y = ndc_y * half_height
+                    dirs = np.stack([dir_x, dir_y, -np.ones_like(dir_x)], axis=-1).astype(np.float32)
+                    dirs /= np.maximum(1e-6, np.linalg.norm(dirs, axis=-1, keepdims=True))
+
+                    # Intersect scene
+                    t_s, n_s, col_s, hit_s = self._intersect_spheres(cam_pos, dirs)
+                    t_t, n_t, col_t, hit_t = self._intersect_triangles(cam_pos, dirs)
+                    use_t = (t_t < t_s) & hit_t
+                    use_s = (~use_t) & hit_s
+                    hit_any = use_t | use_s
+
+                    t_best = np.where(use_t, t_t, np.where(use_s, t_s, np.inf))
+                    n_best = np.where(use_t[..., None], n_t, np.where(use_s[..., None], n_s, 0.0)).astype(np.float32)
+                    c_best = np.where(use_t[..., None], col_t, np.where(use_s[..., None], col_s, 0.0)).astype(np.float32)
+
+                    if "albedo" in out:
+                        out["albedo"][y0:y1, x0:x1, :] += c_best
+                    if "normal" in out:
+                        out["normal"][y0:y1, x0:x1, :] += n_best
+                    if "depth" in out:
+                        depth_tile = out["depth"][y0:y1, x0:x1]
+                        depth_tile[hit_any] = np.where(hit_any, t_best, np.nan)[hit_any].astype(np.float32)
+                    if "direct" in out:
+                        ndotl = np.clip(np.sum(n_best * light_dir.reshape(1, 1, 3), axis=-1, keepdims=True), 0.0, 1.0)
+                        out["direct"][y0:y1, x0:x1, :] += c_best * ndotl
+                    if "indirect" in out:
+                        # No GI in this CPU stub; keep zeros
+                        pass
+                    if "emission" in out:
+                        # No emissive in this CPU stub; keep zeros
+                        pass
+                    if "visibility" in out:
+                        vis_tile = out["visibility"][y0:y1, x0:x1]
+                        vis_tile[:] = np.where(hit_any, 255, 0).astype(np.uint8)
+
+        if spp > 1:
+            w3 = 1.0 / float(spp)
+            for k in ("albedo", "normal", "direct", "indirect", "emission"):
+                if k in out:
+                    out[k] *= w3
+        return out
 
     def _rand_uniform(self, shape: Tuple[int, ...]) -> np.ndarray:
         n = int(np.prod(shape))
@@ -195,6 +289,79 @@ class PathTracer:
 
 def create_path_tracer(width: int, height: int, *, max_bounces: int = 1, seed: int = 1234) -> PathTracer:
     return PathTracer(width, height, max_bounces=max_bounces, seed=seed)
+
+
+def render_rgba(width: int, height: int, scene, camera, seed: int, frames: int = 1, use_gpu: bool = True):
+    """Render RGBA image using GPU when available, else CPU fallback.
+
+    Matches the A1 bridge signature for deterministic smoke testing.
+    """
+    if use_gpu:
+        try:
+            from . import _forge3d as _f  # type: ignore
+            from . import enumerate_adapters  # type: ignore
+            if enumerate_adapters():
+                return _f._pt_render_gpu(int(width), int(height), scene, camera, int(seed), int(frames))
+        except Exception:
+            pass
+    # CPU fallback
+    t = PathTracer(int(width), int(height), seed=int(seed))
+    for sp in scene or []:
+        c = sp.get('center', (0.0, 0.0, 0.0)); r = float(sp.get('radius', 1.0)); mat = sp.get('albedo', (1.0, 1.0, 1.0))
+        t.add_sphere(tuple(c), float(r), mat)
+    return t.render_rgba(spp=int(frames))
+
+
+def render_aovs(
+    width: int,
+    height: int,
+    scene,
+    camera,
+    *,
+    aovs: Tuple[str, ...] = ("albedo", "normal", "depth", "direct", "indirect", "emission", "visibility"),
+    seed: int = 1234,
+    frames: int = 1,
+    use_gpu: bool = True,
+):
+    """Render AOVs on GPU when available, else CPU fallback.
+
+    Returns dict of numpy arrays keyed by canonical AOV names.
+    """
+    # GPU path: not implemented yet in this workstream scaffold; fall back
+    # to CPU when GPU path is unavailable or fails gracefully.
+    t = PathTracer(int(width), int(height), seed=int(seed))
+    for sp in scene or []:
+        c = sp.get('center', (0.0, 0.0, 0.0)); r = float(sp.get('radius', 1.0)); mat = sp.get('albedo', (1.0, 1.0, 1.0))
+        t.add_sphere(tuple(c), float(r), mat)
+    return t.render_aovs_cpu(tuple(aovs), spp=int(frames))
+
+
+def save_aovs(prefix: str, aovs: dict) -> None:
+    """Save AOVs to disk.
+
+    - HDR AOVs (albedo, normal, depth, direct, indirect, emission) saved as .npy for portability.
+    - visibility saved as .png if PNG writer is available; else as .npy as fallback.
+
+    Note: EXR output is SKIPPED in this environment to avoid adding dependencies.
+    To enable EXR, install an EXR writer (e.g., OpenEXR/imageio-exr) and adjust this helper.
+    """
+    import os
+    from . import numpy_to_png  # type: ignore
+
+    os.makedirs(os.path.dirname(prefix) or ".", exist_ok=True)
+
+    hdr_keys = ("albedo", "normal", "depth", "direct", "indirect", "emission")
+    for k in hdr_keys:
+        if k in aovs:
+            np.save(f"{prefix}_{k}.npy", aovs[k])
+
+    if "visibility" in aovs:
+        vis = aovs["visibility"].astype(np.uint8)
+        try:
+            numpy_to_png(f"{prefix}_visibility.png", vis)
+        except Exception:
+            # Fallback to npy if PNG helper unavailable
+            np.save(f"{prefix}_visibility.npy", vis)
 
 
 # A7: BVH Construction API
