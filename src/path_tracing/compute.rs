@@ -29,6 +29,7 @@ pub struct Uniforms {
     pub cam_forward: [f32; 3],
     pub seed_hi: u32,
     pub seed_lo: u32,
+    pub _pad_end: [u32; 3],
 }
 
 #[repr(C)]
