@@ -320,7 +320,8 @@ def render_rgba(width: int, height: int, scene, camera, seed: int, frames: int =
         try:
             from . import _forge3d as _f  # type: ignore
             from . import enumerate_adapters  # type: ignore
-            if enumerate_adapters():
+            # Only use native GPU path when adapter exists and we have a non-empty scene
+            if enumerate_adapters() and bool(scene):
                 return _f._pt_render_gpu(int(width), int(height), scene, camera, int(seed), int(frames))
         except Exception:
             pass

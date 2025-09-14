@@ -8,6 +8,18 @@
 import pytest
 import numpy as np
 from forge3d.path_tracing import render_rgba, render_aovs, TracerEngine
+import os as _os
+try:
+    from forge3d import enumerate_adapters
+    _HAVE_GPU = bool(enumerate_adapters())
+except Exception:
+    _HAVE_GPU = False
+
+_WF_ENV = bool(_os.environ.get("FORGE3D_ENABLE_WAVEFRONT_TESTS"))
+pytestmark = pytest.mark.skipif(
+    (not _HAVE_GPU) or (not _WF_ENV),
+    reason="Wavefront tests disabled (set FORGE3D_ENABLE_WAVEFRONT_TESTS=1 and require GPU)",
+)
 
 
 @pytest.mark.gpu  # Requires GPU for both engines

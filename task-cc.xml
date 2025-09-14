@@ -1,5 +1,5 @@
-<task id="ws-A12-wavefront-pt" version="1.0">
-  <title>Workstream A · Task A12 — Wavefront Path Tracer (Queue-Based) with Compaction & Persistent Threads</title>
+<task id="ws-A2-auto" version="1.0">
+  <title>Workstream A · Task A2 — Implement per roadmap2.csv (auto-derive deliverables → code/tests/docs)</title>
 
   <role>
     You are OpenAI Codex CLI in <b>Verification → Implementation Mode</b>, acting as a senior graphics/runtime engineer.
@@ -17,10 +17,9 @@
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
     <safety>
-      - Minimal, additive changes; do not break existing “mega-kernel” tracer. Keep a runtime flag to select engine: <code>engine="mega"|"wavefront"</code>.
-      - Never delete custom user code; add .gitignore entries for generated artifacts rather than deleting tracked files.
+      - Minimal, additive changes guided strictly by roadmap2.csv A2 row; do not remove user code.
       - If a tool is missing, mark step SKIPPED with the exact command to run locally.
-      - If essential CSV info is missing, reply <b>UNCERTAIN</b> with the precise artifact or decision required.
+      - If A2 is ambiguous, reply <b>UNCERTAIN</b> with the precise missing fields/rows and STOP without changes.
     </safety>
     <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz, out, diag_out</exclusions>
   </constraints>
@@ -31,190 +30,106 @@
     <workstreamSelector>
       <![CDATA[
       Workstream ID: A
-      Task ID: A12
-      Title contains: Wavefront Path Tracer
+      Task ID: A2
       ]]>
     </workstreamSelector>
   </inputs>
 
-  <!-- Verify A12 exists in roadmap2.csv -->
+  <!-- 1) Verify A2 exists and extract Title/Deliverables/Acceptance -->
   <prechecks>
     <command>
       <![CDATA[
 python - <<'PY'
-import csv, codecs, sys
-found=False; rows=[]
+import csv, codecs, sys, json, re
+row=None
 try:
   with codecs.open("roadmap2.csv","r","utf-8-sig") as f:
     rdr=csv.DictReader(f)
     for r in rdr:
-      rows.append((r.get("Workstream ID",""), r.get("Task ID",""), r.get("Task Title",""), r.get("Rationale",""), r.get("Deliverables",""), r.get("Acceptance Criteria","")))
-      if (str(r.get("Workstream ID","")).strip().lower()=="a" and
-          ("a12" in str(r.get("Task ID","")).strip().lower() or "a12" in str(r.get("Task Title","")).strip().lower()) and
-          "wavefront" in str(r.get("Rationale","")).lower()):
-        found=True
+      if (r.get("Workstream ID","").strip().lower()=="a" and
+          (r.get("Task ID","").strip().lower()=="a2" or "a2" in (r.get("Task Title","") or "").strip().lower())):
+        row=r; break
 except FileNotFoundError:
   print("UNCERTAIN: roadmap2.csv not found", file=sys.stderr); sys.exit(2)
-if not found:
-  print("UNCERTAIN: A12 not found in roadmap2.csv (Workstream A). Detected candidates:", rows[:10]); sys.exit(3)
-print("WORKSTREAM_TASK_FOUND:A12")
+if not row:
+  print("UNCERTAIN: A2 not found in roadmap2.csv (Workstream A). Provide exact row with headers.", file=sys.stderr); sys.exit(3)
+
+meta={
+  "Title": row.get("Task Title","").strip(),
+  "Rationale": row.get("Rationale","").strip(),
+  "Deliverables": row.get("Deliverables","").strip(),
+  "Acceptance": row.get("Acceptance Criteria","").strip(),
+  "Priority": row.get("Priority","").strip(),
+  "Phase": row.get("Phase","").strip()
+}
+print("WORKSTREAM_TASK_FOUND:A2")
+print("A2_META:"+json.dumps(meta, ensure_ascii=False))
 PY
       ]]>
     </command>
   </prechecks>
 
-  <acceptanceCriteria>
-    <ac id="AC-1">Wavefront implementation exists alongside mega-kernel and is selectable at runtime (<code>engine="wavefront"</code>).</ac>
-    <ac id="AC-2">Queue-based PT stages implemented on GPU (WGSL): <b>raygen</b> → <b>intersect</b> → <b>shade</b> → <b>scatter</b>, with storage-buffer queues and atomic counters.</ac>
-    <ac id="AC-3">Stream <b>compaction</b> implemented each iteration (or between stages) to remove terminated rays; a <b>persistent threads</b> loop keeps workgroups pulling until queues drain.</ac>
-    <ac id="AC-4">Rust backend scheduler orchestrates stage pipelines, manages per-stage queues, and supports tiling/segmenting to stay within ≤512 MiB host-visible memory.</ac>
-    <ac id="AC-5">Determinism: with fixed seed and <code>spp=1</code>, wavefront output matches mega-kernel within small epsilon; RNG sequences are documented and reproducible.</ac>
-    <ac id="AC-6">Performance target (release build): ≥25% speedup vs mega-kernel at 128 spp on the small test scene; provide a bench log. (If no compatible adapter, mark PERF SKIPPED with exact command.)</ac>
-    <ac id="AC-7">Python API extended: <code>PathTracer.render_rgba(..., engine="wavefront")</code>; falls back to mega-kernel if GPU not available or if disabled.</ac>
-    <ac id="AC-8">Tests: correctness parity (mega vs wavefront), queue compaction correctness, and persistence loop drain; GPU tests are skipped if no adapter.</ac>
-    <ac id="AC-9">Docs updated (README + docs/api if present): wavefront overview, queues, compaction, persistent threads, memory notes, and how to switch engines.</ac>
-  </acceptanceCriteria>
-
+  <!-- 2) Heuristic mapping rules turn Deliverables text into concrete artifacts -->
   <design>
-    <wgslKernels>
+    <mappingRules>
       <![CDATA[
-New/Updated WGSL files:
-  src/shaders/pt_raygen.wgsl      // generate primary rays; push into RayQueue
-  src/shaders/pt_intersect.wgsl   // intersect rays with scene accel; write HitQueue
-  src/shaders/pt_shade.wgsl       // evaluate BSDF/direct light; write ScatterQueue/new rays or mark termination
-  src/shaders/pt_scatter.wgsl     // spawn next-bounce rays from shade outputs; push to RayQueue
-  src/shaders/pt_compact.wgsl     // stream compaction (flag -> prefix sum -> scatter)
-Common:
-  - Bind Group 0: Uniforms (width,height,frame_index,spp, seed_hi/lo, camera, exposure)
-  - Bind Group 1: Scene (readonly storage: materials, textures/handles, accel/BVH)
-  - Bind Group 2: Queues (read/write storage buffers with atomic counters), e.g.:
-      struct Ray { o:vec3<f32>, tmin:f32, d:vec3<f32>, tmax:f32, throughput:vec3<f32>, pdf:f32, pixel:u32, depth:u32, rng_hi:u32, rng_lo:u32 }
-      struct Hit { p:vec3<f32>,  t:f32,  n:vec3<f32>,  mat:u32,       pixel:u32, depth:u32, rng_hi:u32, rng_lo:u32 }
-  - Bind Group 3: Accum/Output (HDR accum buffer or storage texture)
-  - Workgroup sizes: 64–256 (tunable); persistent loop: while (atomicLoad(counter) > 0) { idx = atomicAdd(pop,1); if (idx >= count) break; ... }
+Mapping keywords → files (prefix-rooted):
+- "WGSL", "compute", "kernel", "shader" → src/shaders/<derived_name>.wgsl
+- "BVH", "accel", "traversal" → src/accel/*.rs and/or src/path_tracing/accel.rs
+- "intersection", "ray-triangle", "ray-sphere" → src/path_tracing/intersect.rs (or existing module), plus WGSL if GPU.
+- "materials", "BSDF", "PBR", "BRDF" → src/pbr/*.rs, python/forge3d/pbr.py, shaders/pbr_*.wgsl
+- "camera", "DOF", "thin lens" → src/camera/*.rs, python/forge3d/camera.py
+- "HDR", "tonemap", "ACES", "Reinhard" → src/post/tonemap.rs, src/shaders/tonemap.wgsl, python bridge
+- "IBL", "environment", "cubemap" → src/lighting/ibl.rs, src/shaders/ibl_*.wgsl
+- "Python API" → python/forge3d/<feature>.py (public functions/classes + type hints)
+- "docs" → README.md section and docs/api/<feature>.md (if Sphinx present)
+- "tests" → tests/<feature>_*.rs or tests/test_<feature>*.py (GPU tests @skip if no adapter)
+If Deliverables specify exact filenames, use those paths verbatim.
       ]]>
-    </wgslKernels>
-
-    <queues>
+    </mappingRules>
+    <acceptanceStrategy>
       <![CDATA[
-Queue scheme (SoA or compact AoS) with ring-buffer style counters:
-  struct QueueHeader { in_count:u32; out_count:u32; capacity:u32; _pad:u32 }
-  Push uses atomicAdd(&in_count, 1); pop uses atomicAdd(&out_count, 1).
-Compaction:
-  - Each stage writes live/kill flags.
-  - pt_compact.wgsl performs prefix sum + scatter into next-queue; updates counts.
-Capacity:
-  - capacity ≈ (width*height) * min(1, spp_per_iter) for MVP; tile if needed.
+For each bullet/line in the Deliverables cell:
+  1) Infer feature kind by keywords; choose target file paths.
+  2) Implement the smallest viable code for MVP that satisfies the Acceptance Criteria cell.
+  3) If ambiguity remains (no keywords matched), mark UNCERTAIN with the exact deliverable text.
       ]]>
-    </queues>
-
-    <rustBackend>
-      <![CDATA[
-New Rust modules:
-  src/path_tracing/wavefront/mod.rs
-  src/path_tracing/wavefront/queues.rs
-  src/path_tracing/wavefront/pipelines.rs
-  src/path_tracing/wavefront/scheduler.rs
-Responsibilities:
-  - Create WGSL compute pipelines and bind groups for stages.
-  - Allocate queue buffers + headers; provide host-visible staging for counters only.
-  - Implement scheduler with: init(raygen) → loop { intersect → shade → compact → scatter } until rays/drain or maxDepth.
-  - Tiling: segment image to keep memory bounded; accumulate into output across tiles.
-  - Readback RGBA buffer; convert to u8 if final output is tonemapped in CPU or keep rgba16f if done in kernel.
-Public API:
-  pub enum PtEngine { MegaKernel, Wavefront }
-  impl PathTracerGPU { pub fn set_engine(&mut self, e:PtEngine); }
-      ]]>
-    </rustBackend>
-
-    <pythonAPI>
-      <![CDATA[
-python/forge3d/path_tracing.py:
-  def render_rgba(self, width, height, scene, camera, seed:int=1, frames:int=1, spp:int=1, engine:str="wavefront", use_gpu:bool=True) -> np.ndarray:
-      - if engine=="wavefront" and GPU available → use wavefront backend; else fallback to mega-kernel or CPU.
-      - deterministic for frames==1 and fixed seed (documented).
-      ]]>
-    </pythonAPI>
-
-    <perfBench>
-      <![CDATA[
-Bench (optional if harness exists):
-  bench/path_tracer_bench.rs (or python timing harness) — render 512×512, spp=128, fixed seed, compare wavefront vs mega-kernel elapsed time.
-      ]]>
-    </perfBench>
+    </acceptanceStrategy>
   </design>
+
+  <acceptanceCriteria>
+    <ac id="AC-0">A2 row is present; meta printed as A2_META JSON.</ac>
+    <ac id="AC-1">Every concrete deliverable item from A2’s Deliverables cell is implemented as code/docs/tests artifacts, with header/inline docs for bind groups and public APIs where applicable.</ac>
+    <ac id="AC-2">Python public API exposes the functions/classes required by Acceptance Criteria (A2 row); type hints and deterministic behavior notes included.</ac>
+    <ac id="AC-3">Unit/integration tests exist for all implemented deliverables; GPU-dependent tests are skipped when no compatible adapter is available.</ac>
+    <ac id="AC-4">Docs updated: README + docs/api/<feature>.md (if Sphinx present) clearly describing usage and limitations.</ac>
+    <ac id="AC-5">Validation run passes: fmt, clippy -D warnings, cargo test, pytest, sphinx-build (if docs), maturin build; CI ensured if missing.</ac>
+  </acceptanceCriteria>
 
   <changes>
     <createOrModify>
-      <!-- WGSL -->
-      <file path="src/shaders/pt_raygen.wgsl" kind="new"/>
-      <file path="src/shaders/pt_intersect.wgsl" kind="new"/>
-      <file path="src/shaders/pt_shade.wgsl" kind="new"/>
-      <file path="src/shaders/pt_scatter.wgsl" kind="new"/>
-      <file path="src/shaders/pt_compact.wgsl" kind="new"/>
-
-      <!-- Rust -->
-      <file path="src/path_tracing/wavefront/mod.rs" kind="new"/>
-      <file path="src/path_tracing/wavefront/queues.rs" kind="new"/>
-      <file path="src/path_tracing/wavefront/pipelines.rs" kind="new"/>
-      <file path="src/path_tracing/wavefront/scheduler.rs" kind="new"/>
-      <file path="src/path_tracing/mod.rs" kind="modify"/>
-
-      <!-- Python -->
-      <file path="python/forge3d/path_tracing.py" kind="modify"/>
-
-      <!-- Tests & Bench -->
-      <file path="tests/test_wavefront_parity.py" kind="new"/>
-      <file path="tests/test_wavefront_compaction.rs" kind="new"/>
-      <file path="bench/path_tracer_bench.rs" kind="new-optional"/>
-
-      <!-- Docs & housekeeping -->
+      <!-- The actual files are derived from A2 deliverables; these are typical targets -->
+      <file path="src/shaders/" kind="modify-or-new"/>
+      <file path="src/path_tracing/" kind="modify-or-new"/>
+      <file path="src/accel/" kind="modify-or-new"/>
+      <file path="src/post/" kind="modify-or-new"/>
+      <file path="src/lighting/" kind="modify-or-new"/>
+      <file path="python/forge3d/" kind="modify-or-new"/>
+      <file path="tests/" kind="modify-or-new"/>
       <file path="README.md" kind="modify-append"/>
-      <file path="docs/api/wavefront_pt.md" kind="new-optional"/>
+      <file path="docs/api/" kind="modify-or-new-optional"/>
       <file path=".gitignore" kind="modify-append"/>
     </createOrModify>
-
-    <implNotes>
-      <![CDATA[
-- RNG: use the same xorshift64* (hi/lo) as the mega-kernel; seed per pixel and bounce deterministically.
-- Persistent threads: each shader pulls tasks via atomic counters; avoid idle lanes by compacting between stages.
-- Memory: keep queue capacity bounded; prefer tiling when spp is large; reuse staging buffers; track host-visible usage.
-- Parity test uses RMSE/SSIM or per-pixel tolerance after first bounce; document known differences for stochastic sampling.
-      ]]>
-    </implNotes>
   </changes>
 
   <tests>
-    <python path="tests/test_wavefront_parity.py">
+    <templates>
       <![CDATA[
-import numpy as np, pytest
-from forge3d.path_tracing import PathTracer, make_sphere, make_camera
-
-def _scene():
-    scene = [make_sphere(center=(0,0,-3), radius=1.0, albedo=(0.8,0.8,0.8))]
-    cam   = make_camera(origin=(0,0,0), look_at=(0,0,-1), up=(0,1,0), fov_y=45.0, aspect=1.0, exposure=1.0)
-    return scene, cam
-
-@pytest.mark.skipif(False, reason="GPU skip hook injected in CI if needed")
-def test_wavefront_vs_mega_single_spp():
-    tr = PathTracer()
-    scene, cam = _scene()
-    img_w = tr.render_rgba(128,128,scene,cam,seed=7,frames=1,spp=1,engine="wavefront",use_gpu=True)
-    img_m = tr.render_rgba(128,128,scene,cam,seed=7,frames=1,spp=1,engine="mega",use_gpu=True)
-    assert img_w.shape == img_m.shape
-    # strict determinism at spp=1, frame=1
-    assert np.allclose(img_w.astype(np.float32), img_m.astype(np.float32), rtol=1e-3, atol=1.0)
+- GPU feature: create pytest with skip-if-no-adapter; assert shape/dtype, determinism for frames=1 with fixed seed.
+- CPU feature: assert outputs match GPU within epsilon where defined; else assert contract (e.g., function raises on invalid input).
+- Doc build: sphinx-build must succeed without warnings (or warnings logged & test passes if docs absent).
       ]]>
-    </python>
-
-    <rust path="tests/test_wavefront_compaction.rs">
-      <![CDATA[
-#[test]
-fn queues_compact_and_drain() {
-    // construct tiny scene; run scheduler one iteration and ensure dead rays are compacted (header counts shrink)
-}
-      ]]>
-    </rust>
+    </templates>
   </tests>
 
   <!-- EXACTLY INCLUDE THESE STEPS -->
@@ -248,39 +163,32 @@ fn queues_compact_and_drain() {
 
   <execution>
     <steps>
-      <step>Create feature branch: <code>git checkout -b ws-A12-implementation</code></step>
-      <step>Implement WGSL stage kernels and compaction as specified; add header docs with bind groups/bindings in each file.</step>
-      <step>Add Rust wavefront scheduler and queues; integrate into PathTracerGPU with <code>PtEngine::Wavefront</code>.</step>
-      <step>Update Python API to accept <code>engine</code> parameter and route to wavefront path when available.</step>
-      <step>Add tests for parity and compaction; add optional bench harness for 128 spp speed test.</step>
-      <step>Update docs (README + docs/api/wavefront_pt.md if Sphinx exists); append .gitignore for out/ and bench outputs.</step>
-      <step>Run Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent.</step>
-      <step>Generate <code>PR_BODY.md</code> and print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
+      <step>Create feature branch: <code>git checkout -b ws-A2-implementation</code></step>
+      <step>Parse A2_META (printed above) to list deliverable bullets; write a small <code>reports/a2_plan.json</code> mapping each bullet → target files via the mapping rules.</step>
+      <step>For each mapped deliverable:
+        <ul>
+          <li>Implement minimal, correct code in WGSL/Rust/Python as indicated.</li>
+          <li>Add or modify tests (Rust/Python) covering success path and a simple failure path.</li>
+          <li>Update README and docs/api/&lt;feature&gt;.md (if Sphinx present) with usage and limitations.</li>
+        </ul>
+      </step>
+      <step>Append <code>.gitignore</code> for out/, diag_out/, build artifacts if needed.</step>
+      <step>Run the Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent.</step>
+      <step>Create <code>PR_BODY.md</code> summarizing A2 implementation with references to lines/files changed; print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
     </steps>
   </execution>
 
   <completion>
     <print>
-      - src/shaders/pt_raygen.wgsl
-      - src/shaders/pt_intersect.wgsl
-      - src/shaders/pt_shade.wgsl
-      - src/shaders/pt_scatter.wgsl
-      - src/shaders/pt_compact.wgsl
-      - src/path_tracing/wavefront/mod.rs
-      - src/path_tracing/wavefront/queues.rs
-      - src/path_tracing/wavefront/pipelines.rs
-      - src/path_tracing/wavefront/scheduler.rs
-      - src/path_tracing/mod.rs
-      - python/forge3d/path_tracing.py
-      - tests/test_wavefront_parity.py
-      - tests/test_wavefront_compaction.rs
-      - bench/path_tracer_bench.rs (optional)
-      - README.md
-      - docs/api/wavefront_pt.md (if Sphinx present)
+      - reports/a2_plan.json
+      - All created/modified source files per mapping (WGSL/Rust/Python)
+      - tests/* for implemented features
+      - README.md (updated)
+      - docs/api/* (if Sphinx present)
       - PR_BODY.md
     </print>
     <fallback>
-      If A12 is not found in roadmap2.csv, respond <b>UNCERTAIN</b> with the list of detected Workstream A tasks and STOP without changes.
+      If A2 is not found or the Deliverables cell is empty/ambiguous, respond <b>UNCERTAIN</b> listing the exact missing fields and STOP without changes.
     </fallback>
   </completion>
 </task>
