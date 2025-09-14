@@ -6,6 +6,8 @@
 pub mod compute;
 pub mod accel;
 pub mod wavefront;
+pub mod aov;
+pub mod io;
 
 /// Parameters for path tracing configuration
 #[derive(Clone, Debug)]

@@ -117,7 +117,11 @@ except Exception:
     
     # Create stubs for all extension functions
     Renderer = Scene = TerrainSpike = _Stub("Renderer/Scene/TerrainSpike")
-    device_probe = enumerate_adapters = _Stub("device_probe/enumerate_adapters")
+    # Provide safe fallbacks for adapter queries so tests can skip gracefully
+    def enumerate_adapters():  # type: ignore
+        return []
+    def device_probe(*args, **kwargs):  # type: ignore
+        return {"backend_request": "AUTO", "adapter_name": "", "ok": False}
     png_to_numpy = numpy_to_png = _Stub("png_to_numpy/numpy_to_png")
     render_triangle_rgba = render_triangle_png = _Stub("render_triangle_rgba/render_triangle_png")
     add_lines_py = add_points_py = add_polygons_py = _Stub("vector functions")
