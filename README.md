@@ -307,3 +307,19 @@ img   = tracer.render_rgba(64,64,scene,cam,seed=123,frames=1,use_gpu=True)  # (6
 - Native toggle methods (available after rebuilding the extension):
   - `Renderer.set_postfx_enabled(True|False)`
   - `Renderer.is_postfx_enabled()`
+
+## Wavefront PT (Queue-Based)
+
+You can select a wavefront engine from Python for parity testing and experimentation.
+
+```python
+from forge3d.path_tracing import render_rgba, TracerEngine
+
+img_wave = render_rgba(128, 128, scene, cam, seed=7, frames=1,
+                       use_gpu=True, engine=TracerEngine.WAVEFRONT)
+img_mega = render_rgba(128, 128, scene, cam, seed=7, frames=1,
+                       use_gpu=True, engine=TracerEngine.MEGAKERNEL)
+```
+
+If the GPU wavefront path isn’t available, calls gracefully fall back to the deterministic CPU implementation.
+See `docs/api/wavefront_pt.md` for details.

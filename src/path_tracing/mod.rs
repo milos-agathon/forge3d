@@ -5,4 +5,30 @@
 
 pub mod compute;
 pub mod accel;
+pub mod wavefront;
+
+/// Parameters for path tracing configuration
+#[derive(Clone, Debug)]
+pub struct TracerParams {
+    pub samples_per_pixel: u32,
+    pub max_depth: u32,
+    pub engine: TracerEngine,
+}
+
+/// Path tracing engine selection
+#[derive(Clone, Debug, PartialEq)]
+pub enum TracerEngine {
+    Megakernel,
+    Wavefront,
+}
+
+impl Default for TracerParams {
+    fn default() -> Self {
+        Self {
+            samples_per_pixel: 64,
+            max_depth: 8,
+            engine: TracerEngine::Megakernel,
+        }
+    }
+}
 
