@@ -383,8 +383,19 @@ def render_aovs(
     Returns:
         Dict of numpy arrays keyed by canonical AOV names.
     """
-    # GPU path: not implemented yet in this workstream scaffold; fall back
-    # to CPU when GPU path is unavailable or fails gracefully.
+    # Prefer GPU path when requested and adapter available
+    if use_gpu:
+        try:
+            from . import _forge3d as _f  # type: ignore
+            from . import enumerate_adapters  # type: ignore
+            if enumerate_adapters() and (bool(scene)):
+                # Only spheres are supported in the current GPU AOV stub
+                arrs = _f._pt_render_aovs_gpu(int(width), int(height), scene, camera, int(seed), int(frames), list(aovs))
+                return arrs  # already a dict of numpy arrays
+        except Exception:
+            pass
+
+    # CPU fallback
     t = PathTracer(int(width), int(height), seed=int(seed))
     for sp in scene or []:
         c = sp.get('center', (0.0, 0.0, 0.0)); r = float(sp.get('radius', 1.0)); mat = sp.get('albedo', (1.0, 1.0, 1.0))
@@ -396,12 +407,11 @@ def render_aovs(
         if isinstance(mesh, MeshHandle):
             vertices = mesh._mesh['vertices']
             indices = mesh._mesh['indices']
-            # Convert to individual triangles for CPU PathTracer
             for tri_indices in indices:
                 v0 = tuple(vertices[tri_indices[0]])
                 v1 = tuple(vertices[tri_indices[1]])
                 v2 = tuple(vertices[tri_indices[2]])
-                t.add_triangle(v0, v1, v2, (0.7, 0.7, 0.8))  # Default mesh color
+                t.add_triangle(v0, v1, v2, (0.7, 0.7, 0.8))
 
     return t.render_aovs_cpu(tuple(aovs), spp=int(frames))
 

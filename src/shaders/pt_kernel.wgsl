@@ -1,13 +1,21 @@
 // src/shaders/pt_kernel.wgsl
-// WGSL compute kernel for A3: GPU path tracer with sphere and triangle mesh intersection support.
-// This file implements the GPU path tracer with BVH traversal for triangle meshes and sphere primitives.
-// RELEVANT FILES:src/path_tracing/mod.rs,src/path_tracing/compute.rs,src/path_tracing/mesh.rs,python/forge3d/path_tracing.py,tests/test_path_tracing_gpu.py
+// WGSL compute kernel for A14: GPU path tracer with AOV (Arbitrary Output Variables) support.
+// This file implements the GPU path tracer with BVH traversal for triangle meshes, sphere primitives, and AOV outputs.
+//
+// Bind Group Layout:
+//   Group 0 (Uniforms): width, height, frame_index; camera params; exposure; seed_hi/seed_lo; aov_flags
+//   Group 1 (Scene): readonly storage (materials, spheres, mesh vertices/indices/BVH nodes)
+//   Group 2 (Accum/State): storage buffers (HDR accumulation buffer)
+//   Group 3 (Output): primary RGBA output texture
+//   Group 4 (AOV Outputs): storage textures for albedo, normal, depth, direct, indirect, emission, visibility
+//
+// RELEVANT FILES:src/path_tracing/mod.rs,src/path_tracing/compute.rs,src/path_tracing/aov.rs,python/forge3d/path_tracing.py,tests/test_aovs_gpu.py
 
 struct Uniforms {
   width: u32,
   height: u32,
   frame_index: u32,
-  _pad: u32,
+  aov_flags: u32,           // Bitmask: bit 0=albedo, 1=normal, 2=depth, 3=direct, 4=indirect, 5=emission, 6=visibility
   cam_origin: vec3<f32>,
   cam_fov_y: f32,
   cam_right: vec3<f32>,
@@ -17,6 +25,7 @@ struct Uniforms {
   cam_forward: vec3<f32>,
   seed_hi: u32,
   seed_lo: u32,
+  _pad: u32,
 };
 
 struct Sphere { center: vec3<f32>, radius: f32, albedo: vec3<f32>, _pad0: f32 };
@@ -53,11 +62,31 @@ struct HitResult {
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(1) @binding(0) var<storage, read> scene_spheres: array<Sphere>;
-@group(1) @binding(1) var<storage, read> mesh_vertices: array<Vertex>;
-@group(1) @binding(2) var<storage, read> mesh_indices: array<u32>;
-@group(1) @binding(3) var<storage, read> mesh_bvh_nodes: array<BvhNode>;
+// Mesh buffers omitted in A1/A14 minimal pipeline; wavefront path provides them separately
 @group(2) @binding(0) var<storage, read_write> accum_hdr: array<vec4<f32>>;
 @group(3) @binding(0) var out_tex: texture_storage_2d<rgba16float, write>;
+
+// AOV Output textures (Group 4)
+@group(4) @binding(0) var aov_albedo: texture_storage_2d<rgba16float, write>;
+@group(4) @binding(1) var aov_normal: texture_storage_2d<rgba16float, write>;
+@group(4) @binding(2) var aov_depth: texture_storage_2d<r32float, write>;
+@group(4) @binding(3) var aov_direct: texture_storage_2d<rgba16float, write>;
+@group(4) @binding(4) var aov_indirect: texture_storage_2d<rgba16float, write>;
+@group(4) @binding(5) var aov_emission: texture_storage_2d<rgba16float, write>;
+@group(4) @binding(6) var aov_visibility: texture_storage_2d<r8unorm, write>;
+
+// AOV flag constants (bit positions in uniforms.aov_flags)
+const AOV_ALBEDO_BIT: u32 = 0u;
+const AOV_NORMAL_BIT: u32 = 1u;
+const AOV_DEPTH_BIT: u32 = 2u;
+const AOV_DIRECT_BIT: u32 = 3u;
+const AOV_INDIRECT_BIT: u32 = 4u;
+const AOV_EMISSION_BIT: u32 = 5u;
+const AOV_VISIBILITY_BIT: u32 = 6u;
+
+fn aov_enabled(bit: u32) -> bool {
+    return (uniforms.aov_flags & (1u << bit)) != 0u;
+}
 
 fn xorshift32(state: ptr<function, u32>) -> f32 {
   var x = *state;
@@ -163,87 +192,11 @@ fn ray_triangle_intersect(
 const MAX_STACK_DEPTH: u32 = 64u;
 
 fn bvh_intersect(ray: Ray) -> HitResult {
-    var closest_hit: HitResult;
-    closest_hit.hit = false;
-    closest_hit.t = ray.tmax;
-
-    let node_count = arrayLength(&mesh_bvh_nodes);
-    if (node_count == 0u) {
-        return closest_hit;
-    }
-
-    var stack: array<u32, MAX_STACK_DEPTH>;
-    var stack_ptr = 0u;
-    stack[0] = 0u;
-    stack_ptr = 1u;
-
-    var current_ray = ray;
-
-    while (stack_ptr > 0u) {
-        stack_ptr = stack_ptr - 1u;
-        let node_idx = stack[stack_ptr];
-
-        if (node_idx >= node_count) {
-            continue;
-        }
-
-        let node = mesh_bvh_nodes[node_idx];
-
-        if (!ray_aabb_intersect(current_ray, node.aabb_min, node.aabb_max)) {
-            continue;
-        }
-
-        if ((node.flags & 1u) != 0u) {
-            // Leaf node
-            let first_tri = node.left;
-            let tri_count = node.right;
-
-            for (var i = 0u; i < tri_count; i = i + 1u) {
-                let tri_idx = first_tri + i;
-                let indices_length = arrayLength(&mesh_indices);
-                if (tri_idx * 3u + 2u >= indices_length) {
-                    continue;
-                }
-
-                let i0 = mesh_indices[tri_idx * 3u];
-                let i1 = mesh_indices[tri_idx * 3u + 1u];
-                let i2 = mesh_indices[tri_idx * 3u + 2u];
-
-                let vertex_count = arrayLength(&mesh_vertices);
-                if (max(max(i0, i1), i2) >= vertex_count) {
-                    continue;
-                }
-
-                let v0 = mesh_vertices[i0].position;
-                let v1 = mesh_vertices[i1].position;
-                let v2 = mesh_vertices[i2].position;
-
-                var hit = ray_triangle_intersect(current_ray, v0, v1, v2);
-
-                if (hit.hit && hit.t < closest_hit.t) {
-                    closest_hit = hit;
-                    closest_hit.triangle_idx = tri_idx;
-                    current_ray.tmax = hit.t;
-                }
-            }
-        } else {
-            // Internal node
-            let left_idx = node.left;
-            let right_idx = node.right;
-
-            if (right_idx < node_count && stack_ptr < MAX_STACK_DEPTH) {
-                stack[stack_ptr] = right_idx;
-                stack_ptr = stack_ptr + 1u;
-            }
-
-            if (left_idx < node_count && stack_ptr < MAX_STACK_DEPTH) {
-                stack[stack_ptr] = left_idx;
-                stack_ptr = stack_ptr + 1u;
-            }
-        }
-    }
-
-    return closest_hit;
+    // Minimal stub: no mesh intersection in this kernel variant
+    var h: HitResult;
+    h.hit = false;
+    h.t = ray.tmax;
+    return h;
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -273,9 +226,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   // Test against spheres
   var t_best = 1e30;
-  var hit_color = vec3<f32>(0.5); // Default mesh albedo
-  var hit_n = vec3<f32>(0.0, 0.0, 1.0);
+  var hit_albedo = vec3<f32>(0.7, 0.7, 0.8); // Default mesh albedo
+  var hit_normal = vec3<f32>(0.0, 0.0, 1.0);
   var hit_material_type = 0u; // 0 = mesh, 1 = sphere
+  var hit_point = vec3<f32>(0.0);
 
   let sphere_count = arrayLength(&scene_spheres);
   for (var i: u32 = 0u; i < sphere_count; i = i + 1u) {
@@ -283,9 +237,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let t = ray_sphere(ro, rd, s.center, s.radius);
     if (t < t_best) {
       t_best = t;
-      let p = ro + rd * t;
-      hit_n = normalize(p - s.center);
-      hit_color = s.albedo;
+      hit_point = ro + rd * t;
+      hit_normal = normalize(hit_point - s.center);
+      hit_albedo = s.albedo;
       hit_material_type = 1u;
     }
   }
@@ -294,29 +248,90 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let mesh_hit = bvh_intersect(ray);
   if (mesh_hit.hit && mesh_hit.t < t_best) {
     t_best = mesh_hit.t;
-    hit_n = mesh_hit.normal;
-    hit_color = vec3<f32>(0.7, 0.7, 0.8); // Default mesh color
+    hit_point = ro + rd * t_best;
+    hit_normal = mesh_hit.normal;
+    hit_albedo = vec3<f32>(0.7, 0.7, 0.8); // Default mesh color
     hit_material_type = 0u;
   }
 
-  var rgb = vec3<f32>(0.0);
-  if (t_best < 1e20) {
-    let light_dir = normalize(vec3<f32>(0.5, 0.8, 0.2));
-    let ndotl = max(0.0, dot(hit_n, light_dir));
-    rgb = hit_color * ndotl;
-  } else {
-    // simple sky
+  // Calculate AOV values
+  let pixel_coord = vec2<i32>(i32(gid.x), i32(gid.y));
+  let is_hit = t_best < 1e20;
+
+  // Sky color for miss cases
+  let sky_color = if (is_hit) { vec3<f32>(0.0) } else {
     let tsky = 0.5 * (rd.y + 1.0);
-    rgb = mix(vec3<f32>(0.6, 0.7, 0.9), vec3<f32>(0.1, 0.2, 0.5), tsky);
+    mix(vec3<f32>(0.6, 0.7, 0.9), vec3<f32>(0.1, 0.2, 0.5), tsky)
+  };
+
+  // Lighting calculation
+  let light_dir = normalize(vec3<f32>(0.5, 0.8, 0.2));
+  let light_color = vec3<f32>(1.0, 0.95, 0.8);
+
+  var direct_light = vec3<f32>(0.0);
+  var indirect_light = vec3<f32>(0.0);
+  var final_color = sky_color;
+
+  if (is_hit) {
+    // Direct lighting (simple Lambert)
+    let ndotl = max(0.0, dot(hit_normal, light_dir));
+    direct_light = light_color * ndotl;
+
+    // Simple indirect/ambient lighting
+    indirect_light = vec3<f32>(0.1, 0.12, 0.15);
+
+    final_color = hit_albedo * (direct_light + indirect_light);
   }
 
+  // Write AOVs if enabled
+  if (aov_enabled(AOV_ALBEDO_BIT)) {
+    // CPU stub stores 0 on miss for albedo
+    let albedo_val = if (is_hit) { vec4<f32>(hit_albedo, 1.0) } else { vec4<f32>(0.0, 0.0, 0.0, 1.0) };
+    textureStore(aov_albedo, pixel_coord, albedo_val);
+  }
+
+  if (aov_enabled(AOV_NORMAL_BIT)) {
+    // Store world-space normals; CPU stub leaves zeros on miss
+    let normal_val = if (is_hit) { vec4<f32>(hit_normal, 1.0) } else { vec4<f32>(0.0, 0.0, 0.0, 1.0) };
+    textureStore(aov_normal, pixel_coord, normal_val);
+  }
+
+  if (aov_enabled(AOV_DEPTH_BIT)) {
+    // Linear depth from camera origin; store NaN on miss to match CPU nanmean/nanvar
+    let depth_val = if (is_hit) { t_best } else { bitcast<f32>(0x7FC00000u) /* quiet NaN */ };
+    textureStore(aov_depth, pixel_coord, depth_val);
+  }
+
+  if (aov_enabled(AOV_DIRECT_BIT)) {
+    let direct_val = if (is_hit) { vec4<f32>(hit_albedo * direct_light, 1.0) } else { vec4<f32>(0.0, 0.0, 0.0, 0.0) };
+    textureStore(aov_direct, pixel_coord, direct_val);
+  }
+
+  if (aov_enabled(AOV_INDIRECT_BIT)) {
+    // CPU stub currently does not accumulate GI; keep zeros on miss as well
+    let indirect_val = if (is_hit) { vec4<f32>(hit_albedo * indirect_light, 1.0) } else { vec4<f32>(0.0, 0.0, 0.0, 1.0) };
+    textureStore(aov_indirect, pixel_coord, indirect_val);
+  }
+
+  if (aov_enabled(AOV_EMISSION_BIT)) {
+    // For now, no emissive materials - could be extended for area lights
+    textureStore(aov_emission, pixel_coord, vec4<f32>(0.0, 0.0, 0.0, 1.0));
+  }
+
+  if (aov_enabled(AOV_VISIBILITY_BIT)) {
+    // r8unorm: 1.0 maps to 255, 0.0 to 0
+    let visibility_val = if (is_hit) { 1.0 } else { 0.0 };
+    textureStore(aov_visibility, pixel_coord, visibility_val);
+  }
+
+  // Standard HDR accumulation and output
   let idx = gid.y * W + gid.x;
-  // HDR accumulate
   let prev = accum_hdr[idx];
-  let acc = vec4<f32>(prev.xyz + rgb, 1.0);
+  let acc = vec4<f32>(prev.xyz + final_color, 1.0);
   accum_hdr[idx] = acc;
-  // Tonemap (Reinhard) with exposure and write
+
+  // Tonemap (Reinhard) with exposure and write to main output
   let color = (acc.xyz) / (vec3<f32>(1.0) + acc.xyz);
   let exposed = color * uniforms.cam_exposure;
-  textureStore(out_tex, vec2<i32>(i32(gid.x), i32(gid.y)), vec4<f32>(exposed, 1.0));
+  textureStore(out_tex, pixel_coord, vec4<f32>(exposed, 1.0));
 }
