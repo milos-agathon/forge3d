@@ -269,3 +269,12 @@ flamegraph*.svg
 # Documentation builds
 /docs/_build/
 /docs/build/
+
+# Mesh BVH artifacts and test outputs (Task A3)
+*.bvh
+*.mesh
+*_bvh.json
+*_mesh.json
+mesh_test_*.png
+bvh_test_*.png
+mesh_render_*.png

@@ -1,0 +1,1416 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Terrain Rendering &mdash; forge3d Documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="_static/custom.css" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=9e420a66"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Async Operations" href="async_operations.html" />
+    <link rel="prev" title="Vector Graphics" href="vector_graphics.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            forge3d
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#basic-triangle-rendering">Basic Triangle Rendering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#terrain-visualization">Terrain Visualization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#vector-graphics">Vector Graphics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#device-detection">Device Detection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#what-s-next">What’s Next?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#quick-installation">Quick Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#system-requirements">System Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#installation-from-source">Installation from Source</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#virtual-environment-setup">Virtual Environment Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#verification">Verification</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#development-setup">Development Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#docker-installation">Docker Installation</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="examples_guide.html">Examples Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#basic-examples">Basic Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#diagnostic-examples">Diagnostic Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#advanced-examples-r13">Advanced Examples (R13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#performance-examples">Performance Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#running-examples">Running Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#understanding-example-output">Understanding Example Output</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#example-development-guidelines">Example Development Guidelines</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Core Documentation:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api_reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#core-classes">Core Classes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#renderer">Renderer</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.Renderer"><code class="docutils literal notranslate"><span class="pre">Renderer</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#scene">Scene</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.Scene"><code class="docutils literal notranslate"><span class="pre">Scene</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#vector-graphics">Vector Graphics</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#polygons">Polygons</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#lines">Lines</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#points">Points</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#terrain-rendering">Terrain Rendering</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#height-data-processing">Height Data Processing</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#memory-management">Memory Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#gpu-memory-tracking">GPU Memory Tracking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#budget-management">Budget Management</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#advanced-features">Advanced Features</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#module-forge3d.shadows">Shadow Mapping</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.has_shadows_support"><code class="docutils literal notranslate"><span class="pre">has_shadows_support()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.DirectionalLight"><code class="docutils literal notranslate"><span class="pre">DirectionalLight</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.CsmConfig"><code class="docutils literal notranslate"><span class="pre">CsmConfig</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.ShadowStats"><code class="docutils literal notranslate"><span class="pre">ShadowStats</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.CsmShadowMap"><code class="docutils literal notranslate"><span class="pre">CsmShadowMap</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.ShadowRenderer"><code class="docutils literal notranslate"><span class="pre">ShadowRenderer</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.create_test_scene"><code class="docutils literal notranslate"><span class="pre">create_test_scene()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.compare_shadow_techniques"><code class="docutils literal notranslate"><span class="pre">compare_shadow_techniques()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.validate_csm_setup"><code class="docutils literal notranslate"><span class="pre">validate_csm_setup()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.get_preset_config"><code class="docutils literal notranslate"><span class="pre">get_preset_config()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.calculate_shadow_atlas_memory"><code class="docutils literal notranslate"><span class="pre">calculate_shadow_atlas_memory()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.validate_shadow_memory_constraint"><code class="docutils literal notranslate"><span class="pre">validate_shadow_memory_constraint()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.build_shadow_atlas"><code class="docutils literal notranslate"><span class="pre">build_shadow_atlas()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.sample_shadow"><code class="docutils literal notranslate"><span class="pre">sample_shadow()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#pbr-materials">PBR Materials</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#module-forge3d.async_readback">Async Readback</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncReadbackConfig"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackConfig</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncReadbackHandle"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackHandle</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncReadbackManager"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackManager</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncRenderer"><code class="docutils literal notranslate"><span class="pre">AsyncRenderer</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncReadbackContext"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackContext</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.batch_readback"><code class="docutils literal notranslate"><span class="pre">batch_readback()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.benchmark_readback_performance"><code class="docutils literal notranslate"><span class="pre">benchmark_readback_performance()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#utilities">Utilities</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#device-information">Device Information</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#environment-reporting">Environment Reporting</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#module-forge3d.colormap">Color Management</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.decode_png_rgba8"><code class="docutils literal notranslate"><span class="pre">decode_png_rgba8()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.get_colormap_compression_stats"><code class="docutils literal notranslate"><span class="pre">get_colormap_compression_stats()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.check_compressed_colormap_support"><code class="docutils literal notranslate"><span class="pre">check_compressed_colormap_support()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.get_supported_compression_formats"><code class="docutils literal notranslate"><span class="pre">get_supported_compression_formats()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.estimate_compression_quality"><code class="docutils literal notranslate"><span class="pre">estimate_compression_quality()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.calculate_memory_savings"><code class="docutils literal notranslate"><span class="pre">calculate_memory_savings()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#configuration">Configuration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#environment-variables">Environment Variables</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#gpu-backend-selection">GPU Backend Selection</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#common-exceptions">Common Exceptions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#debugging-tips">Debugging Tips</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#performance-tips">Performance Tips</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#type-annotations">Type Annotations</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="color_management.html">Color Management &amp; Tonemap Pipeline</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#pipeline-details">Pipeline Details</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#linear-scene-lighting">1. Linear Scene Lighting</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#tone-mapping-reinhard">2. Tone Mapping (Reinhard)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#gamma-correction">3. Gamma Correction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#output-format">4. Output Format</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#format-choices-rationale">Format Choices &amp; Rationale</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#why-rgba8unormsrgb">Why Rgba8UnormSrgb?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#when-to-use-linear-vs-srgb-targets">When to Use Linear vs sRGB Targets</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#implementation-notes">Implementation Notes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#shader-integration">Shader Integration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#cpu-reference-implementation">CPU Reference Implementation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#future-extensions">Future Extensions</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="interop_zero_copy.html">Zero-Copy NumPy Interoperability</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#guaranteed-zero-copy-pathways">Guaranteed Zero-Copy Pathways</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#rgba-output">RGBA Output</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#height-input">Height Input</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#data-type-and-layout-requirements">Data Type and Layout Requirements</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#supported-input-types">Supported Input Types</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#output-guarantees">Output Guarantees</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#validation-and-debugging">Validation and Debugging</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#using-validation-helpers">Using Validation Helpers</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#pointer-validation">Pointer Validation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#performance-profiling">Performance Profiling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#common-pitfalls-and-solutions">Common Pitfalls and Solutions</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#non-contiguous-arrays">Non-Contiguous Arrays</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#wrong-data-types">Wrong Data Types</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#memory-layout-assumptions">Memory Layout Assumptions</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#testing-zero-copy-behavior">Testing Zero-Copy Behavior</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#writing-zero-copy-tests">Writing Zero-Copy Tests</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#implementation-notes">Implementation Notes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#buffer-reuse">Buffer Reuse</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#memory-alignment">Memory Alignment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#cross-platform-consistency">Cross-Platform Consistency</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#common-error-messages">Common Error Messages</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#debugging-tips">Debugging Tips</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#for-application-developers">For Application Developers</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#for-library-integration">For Library Integration</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="memory_budget.html">Memory Budget Management</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#budget-limits">Budget Limits</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#default-budget-512-mib">Default Budget: 512 MiB</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#what-counts-towards-the-budget">What Counts Towards the Budget</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#memory-metrics-api">Memory Metrics API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#getting-memory-metrics">Getting Memory Metrics</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#metrics-dictionary-structure">Metrics Dictionary Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#example-metrics-output">Example Metrics Output</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#budget-enforcement">Budget Enforcement</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#automatic-checking">Automatic Checking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#error-messages">Error Messages</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#monitoring-memory-usage">Monitoring Memory Usage</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#real-time-monitoring">Real-Time Monitoring</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#performance-impact-monitoring">Performance Impact Monitoring</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#memory-budget-scenarios">Memory Budget Scenarios</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#normal-usage-patterns">Normal Usage Patterns</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#high-memory-scenarios">High Memory Scenarios</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#budget-friendly-practices">Budget-Friendly Practices</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#debugging-memory-issues">Debugging Memory Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#investigating-budget-violations">Investigating Budget Violations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#common-memory-issues">Common Memory Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#implementation-details">Implementation Details</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#thread-safety">Thread Safety</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#global-vs-per-renderer-tracking">Global vs. Per-Renderer Tracking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#memory-alignment">Memory Alignment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#performance-impact">Performance Impact</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="memory/index.html">Memory Management</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="memory/staging_rings.html">O1: Staging Buffer Rings</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#architecture">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#core-components">Core Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#buffer-states">Buffer States</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#rust-api">Rust API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#python-api">Python API</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#performance-characteristics">Performance Characteristics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#typical-performance">Typical Performance</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#ring-count">Ring Count</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#buffer-size">Buffer Size</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#memory-budget">Memory Budget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#integration">Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#with-memory-pools-o2">With Memory Pools (O2)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#with-texture-compression-o3">With Texture Compression (O3)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#testing">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#unit-tests">Unit Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#performance-tests">Performance Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#high-buffer-stalls">High Buffer Stalls</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#memory-usage-issues">Memory Usage Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#platform-differences">Platform Differences</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory/memory_pools.html">O2: GPU Memory Pools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#architecture">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#core-components">Core Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#size-buckets">Size Buckets</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#rust-api">Rust API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#python-api">Python API</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#performance-characteristics">Performance Characteristics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#allocation-performance">Allocation Performance</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#fragmentation-mitigation">Fragmentation Mitigation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#size-bucket-tuning">Size Bucket Tuning</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#pool-sizing">Pool Sizing</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#memory-budget">Memory Budget</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#reference-counting">Reference Counting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#lifecycle-management">Lifecycle Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#thread-safety">Thread Safety</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#defragmentation">Defragmentation</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#automatic-defragmentation">Automatic Defragmentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#defragmentation-strategy">Defragmentation Strategy</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#integration">Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#with-staging-rings-o1">With Staging Rings (O1)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#with-big-buffers">With Big Buffers</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#testing">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#unit-tests">Unit Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#performance-tests">Performance Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#high-fragmentation">High Fragmentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#memory-leaks">Memory Leaks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#performance-issues">Performance Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#platform-differences">Platform Differences</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory/compressed_textures.html">O3: Compressed Texture Pipeline</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#architecture">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#core-components">Core Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#supported-formats">Supported Formats</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#rust-api">Rust API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#python-api">Python API</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#performance-characteristics">Performance Characteristics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#compression-performance">Compression Performance</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#memory-usage">Memory Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#compression-quality-levels">Compression Quality Levels</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#use-case-optimization">Use Case Optimization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#format-selection-algorithm">Format Selection Algorithm</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#memory-budget-compliance">Memory Budget Compliance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#ktx2-container-support">KTX2 Container Support</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#supported-features">Supported Features</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#transcoding-pipeline">Transcoding Pipeline</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#current-limitations">Current Limitations</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#integration">Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#with-memory-pools-o2">With Memory Pools (O2)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#with-virtual-texturing-o4">With Virtual Texturing (O4)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#testing">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#unit-tests">Unit Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#quality-tests">Quality Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#poor-compression-quality">Poor Compression Quality</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#high-memory-usage">High Memory Usage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#loading-failures">Loading Failures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#platform-differences">Platform Differences</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory/virtual_texturing.html">Virtual Texture Streaming</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#key-components">Key Components</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#virtualtexturesystem">VirtualTextureSystem</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#tile-management">Tile Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#camera-based-streaming">Camera-Based Streaming</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#memory-budget">Memory Budget</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#tile-size">Tile Size</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#quality-settings">Quality Settings</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#usage-patterns">Usage Patterns</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#basic-streaming-setup">Basic Streaming Setup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#prefetching">Prefetching</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#multiple-textures">Multiple Textures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#performance-monitoring">Performance Monitoring</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#statistics-tracking">Statistics Tracking</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#memory-analysis">Memory Analysis</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#performance-estimation">Performance Estimation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#integration-with-other-systems">Integration with Other Systems</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#staging-rings-integration">Staging Rings Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#compressed-texture-support">Compressed Texture Support</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#shader-integration">Shader Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#wgsl-shader-code">WGSL Shader Code</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#c-integration">C++ Integration</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#memory-budget-guidelines">Memory Budget Guidelines</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#tile-size-selection">Tile Size Selection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#streaming-strategy">Streaming Strategy</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#performance-optimization">Performance Optimization</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#api-reference">API Reference</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#memory-monitoring">Memory Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#integration-examples">Integration Examples</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api/path_tracing.html">A1: GPU Path Tracer (MVP)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/path_tracing.html#gpu-usage">GPU Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/path_tracing.html#cpu-reference">CPU Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/path_tracing.html#limitations">Limitations</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Advanced Features:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="postfx/index.html">Post-Processing Effect Chain</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="postfx/index.html#features">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="postfx/index.html#python-api">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="postfx/index.html#notes">Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="postfx/index.html#demo">Demo</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="pbr_materials.html">PBR Materials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#api-reference">API Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#texture-support">Texture Support</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#brdf-evaluation">BRDF Evaluation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#predefined-materials">Predefined Materials</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#material-validation">Material Validation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#gpu-integration">GPU Integration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#lighting-configuration">Lighting Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#feature-detection">Feature Detection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#legacy-compatibility">Legacy Compatibility</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="shadow_mapping.html">Shadow Mapping</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#memory-management">Memory Management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#shadow-configuration">Shadow Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#directional-lighting">Directional Lighting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#shadow-rendering">Shadow Rendering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#quality-vs-performance">Quality vs Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#pcf-filtering">PCF Filtering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#integration-examples">Integration Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#performance-monitoring">Performance Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#legacy-support">Legacy Support</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="user/path_tracing.html">Path Tracing (Workstream A)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="user/path_tracing.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/path_tracing.html#api">API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/path_tracing.html#roadmap">Roadmap</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="vector_graphics.html">Vector Graphics</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#vector-types">Vector Types</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#data-format-requirements">Data Format Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#performance-considerations">Performance Considerations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#integration-with-3d-rendering">Integration with 3D Rendering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#use-cases">Use Cases</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#advanced-examples">Advanced Examples</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Terrain Rendering</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#height-data-processing">Height Data Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#scene-configuration">Scene Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#colormap-system">Colormap System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#level-of-detail-lod">Level of Detail (LOD)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#terrain-analysis">Terrain Analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#integration-with-other-systems">Integration with Other Systems</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#performance-optimization">Performance Optimization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#real-world-applications">Real-World Applications</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example-applications">Example Applications</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="async_operations.html">Async Operations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#async-readback-system">Async Readback System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#multi-threaded-command-recording">Multi-threaded Command Recording</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#async-compute-operations">Async Compute Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#non-blocking-gpu-operations">Non-blocking GPU Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#performance-monitoring">Performance Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#memory-management-for-async-operations">Memory Management for Async Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#example-applications">Example Applications</a></li>
+<li class="toctree-l2"><a class="reference internal" href="async_operations.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Basemaps &amp; Tiles:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="tiles/xyz_wmts.html">docs/tiles/xyz_wmts.md</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tiles/xyz_wmts.html#basemap-tile-fetching-caching-and-composition-xyz-wmts-in-forge3d">Basemap tile fetching, caching, and composition (XYZ/WMTS) in forge3d.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tiles/xyz_wmts.html#documents-the-python-tiles-api-cache-layout-and-attribution-requirements">Documents the Python tiles API, cache layout, and attribution requirements.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tiles/xyz_wmts.html#relevant-files-python-forge3d-tiles-client-py-python-forge3d-tiles-overlay-py-examples-xyz-tile-compose-demo-py">RELEVANT FILES:python/forge3d/tiles/client.py,python/forge3d/tiles/overlay.py,examples/xyz_tile_compose_demo.py</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#api">API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#cache-layout">Cache layout</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#attribution">Attribution</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="integration/cartopy.html">docs/integration/cartopy.md</a></li>
+<li class="toctree-l1"><a class="reference internal" href="integration/cartopy.html#cartopy-integration-example-using-forge3d-tiles-as-a-background">Cartopy integration example using forge3d tiles as a background.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="integration/cartopy.html#shows-headless-agg-rendering-and-extent-alignment-with-geoaxes">Shows headless (Agg) rendering and extent alignment with GeoAxes.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="integration/cartopy.html#relevant-files-examples-cartopy-overlay-py-python-forge3d-tiles-client-py-python-forge3d-tiles-overlay-py">RELEVANT FILES:examples/cartopy_overlay.py,python/forge3d/tiles/client.py,python/forge3d/tiles/overlay.py</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="integration/cartopy.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/cartopy.html#requirements">Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/cartopy.html#example">Example</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Library Integrations:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="integration/matplotlib.html">Matplotlib Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#colormap-integration">Colormap Integration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#supported-colormaps">Supported Colormaps</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#custom-colormap-objects">Custom Colormap Objects</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#data-normalization">Data Normalization</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#linear-normalization">Linear Normalization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#logarithmic-normalization">Logarithmic Normalization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#power-law-normalization">Power Law Normalization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#boundary-normalization">Boundary Normalization</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#display-helpers">Display Helpers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#basic-display">Basic Display</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#custom-extents-and-dpi">Custom Extents and DPI</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#subplot-comparisons">Subplot Comparisons</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#saving-comparisons">Saving Comparisons</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#accuracy-and-performance">Accuracy and Performance</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#colormap-accuracy">Colormap Accuracy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#normalization-accuracy">Normalization Accuracy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#zero-copy-display">Zero-Copy Display</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#error-handling-and-validation">Error Handling and Validation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#optional-dependency-handling">Optional Dependency Handling</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#array-validation">Array Validation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#supported-formats">Supported Formats</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#examples">Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#complete-terrain-visualization">Complete Terrain Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#performance-comparison">Performance Comparison</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#memory-efficiency">Memory Efficiency</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#colormap-selection">Colormap Selection</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#api-reference">API Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#forge3d-adapters-mpl-cmap">forge3d.adapters.mpl_cmap</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#forge3d-helpers-mpl-display">forge3d.helpers.mpl_display</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#common-issues">Common Issues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#performance-issues">Performance Issues</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="integration/external_images.html">External Image Import Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#webgpu-parity">WebGPU Parity</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#what-we-match">What We Match</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#key-similarities">Key Similarities</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#native-vs-browser-differences">Native vs Browser Differences</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#input-sources">Input Sources</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#operational-differences">Operational Differences</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#format-support">Format Support</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#implementation-architecture">Implementation Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#core-components">Core Components</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#processing-pipeline">Processing Pipeline</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#usage-examples">Usage Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#basic-image-import">Basic Image Import</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#advanced-configuration">Advanced Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#constraints-and-limitations">Constraints and Limitations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#memory-budget">Memory Budget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#texture-size-limits">Texture Size Limits</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#format-constraints">Format Constraints</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#threading-model">Threading Model</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#performance-considerations">Performance Considerations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#decode-performance">Decode Performance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#upload-performance">Upload Performance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#memory-usage-patterns">Memory Usage Patterns</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#common-pitfalls-and-solutions">Common Pitfalls and Solutions</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#file-path-issues">1. File Path Issues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#memory-budget-exceeded">2. Memory Budget Exceeded</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#format-assumptions">3. Format Assumptions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#color-space-expectations">4. Color Space Expectations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#synchronous-blocking">5. Synchronous Blocking</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#migration-from-browser-code">Migration from Browser Code</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#replace-dom-image-loading">1. Replace DOM Image Loading</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#handle-synchronous-model">2. Handle Synchronous Model</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#adapt-error-handling">3. Adapt Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#future-enhancements">Future Enhancements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#testing">Testing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="user/datashader_interop.html">Datashader Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#api-reference">API Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#availability-check">Availability Check</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.is_datashader_available"><code class="docutils literal notranslate"><span class="pre">is_datashader_available()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#core-functions">Core Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.rgba_view_from_agg"><code class="docutils literal notranslate"><span class="pre">rgba_view_from_agg()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.validate_alignment"><code class="docutils literal notranslate"><span class="pre">validate_alignment()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.to_overlay_texture"><code class="docutils literal notranslate"><span class="pre">to_overlay_texture()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#convenience-functions">Convenience Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.shade_to_overlay"><code class="docutils literal notranslate"><span class="pre">shade_to_overlay()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#adapter-class">Adapter Class</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.DatashaderAdapter"><code class="docutils literal notranslate"><span class="pre">DatashaderAdapter</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#information-functions">Information Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.get_datashader_info"><code class="docutils literal notranslate"><span class="pre">get_datashader_info()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#memory-management">Memory Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#memory-optimization-strategies">Memory Optimization Strategies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#memory-budget-guidelines">Memory Budget Guidelines</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#performance-considerations">Performance Considerations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#zoom-level-performance">Zoom Level Performance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#performance-monitoring">Performance Monitoring</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#coordinate-systems">Coordinate Systems</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#supported-coordinate-systems">Supported Coordinate Systems</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#alignment-validation">Alignment Validation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#data-preparation">Data Preparation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#canvas-configuration">Canvas Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#common-issues-and-solutions">Common Issues and Solutions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#debugging-tools">Debugging Tools</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#examples">Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">CI &amp; Testing:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="ci/notebook_integration.html">Running Notebooks in CI</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#ci-integration-architecture">CI Integration Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#notebook-execution-workflow">Notebook Execution Workflow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#execution-pipeline">Execution Pipeline</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#configuration">Configuration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#github-actions-workflow">GitHub Actions Workflow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#execution-requirements">Execution Requirements</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#notebook-structure">Notebook Structure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#standard-cell-organization">Standard Cell Organization</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#introduction-setup">1. Introduction &amp; Setup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#device-information">2. Device Information</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#data-generation-loading">3. Data Generation/Loading</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#adapter-integration">4. Adapter Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#processing-rendering">5. Processing &amp; Rendering</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#output-generation">6. Output Generation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#performance-metrics">7. Performance Metrics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#validation-cleanup">8. Validation &amp; Cleanup</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#dependency-management">Dependency Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#optional-dependencies">Optional Dependencies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#fallback-strategies">Fallback Strategies</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#ci-validation">CI Validation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#success-criteria">Success Criteria</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#failure-analysis">Failure Analysis</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#timeout-failures">Timeout Failures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#memory-failures">Memory Failures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#dependency-failures">Dependency Failures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#gpu-failures">GPU Failures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#quality-metrics">Quality Metrics</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#performance-monitoring">Performance Monitoring</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#timing-benchmarks">Timing Benchmarks</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#memory-tracking">Memory Tracking</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#development-guidelines">Development Guidelines</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#testing-locally">Testing Locally</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#debugging-failed-runs">Debugging Failed Runs</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">forge3d</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Terrain Rendering</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/forge3d/forge3d/blob/main/docs/terrain_rendering.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="terrain-rendering">
+<h1>Terrain Rendering<a class="headerlink" href="#terrain-rendering" title="Link to this heading"></a></h1>
+<p>forge3d provides comprehensive terrain visualization capabilities with height field processing, Digital Elevation Model (DEM) support, Level-of-Detail (LOD), and colormap-based visualization.</p>
+<section id="quick-start">
+<h2>Quick Start<a class="headerlink" href="#quick-start" title="Link to this heading"></a></h2>
+<p>Basic terrain rendering:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">forge3d</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">f3d</span>
+
+<span class="c1"># Generate height data</span>
+<span class="n">size</span> <span class="o">=</span> <span class="mi">128</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">size</span><span class="p">)</span>
+<span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">size</span><span class="p">)</span>
+<span class="n">X</span><span class="p">,</span> <span class="n">Y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+
+<span class="c1"># Create hills using sine waves</span>
+<span class="n">height_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">X</span> <span class="o">*</span> <span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">Y</span> <span class="o">*</span> <span class="mf">1.5</span><span class="p">)</span>
+<span class="n">height_data</span> <span class="o">=</span> <span class="n">height_data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+<span class="c1"># Create terrain scene</span>
+<span class="n">scene</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">Scene</span><span class="p">(</span><span class="mi">800</span><span class="p">,</span> <span class="mi">600</span><span class="p">)</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">height_data</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">20.0</span><span class="p">)</span>
+
+<span class="c1"># Render terrain</span>
+<span class="n">image</span> <span class="o">=</span> <span class="n">scene</span><span class="o">.</span><span class="n">render_terrain_rgba</span><span class="p">()</span>
+<span class="n">f3d</span><span class="o">.</span><span class="n">numpy_to_png</span><span class="p">(</span><span class="s2">&quot;terrain.png&quot;</span><span class="p">,</span> <span class="n">image</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="height-data-processing">
+<h2>Height Data Processing<a class="headerlink" href="#height-data-processing" title="Link to this heading"></a></h2>
+<p><strong>Data Format Requirements</strong></p>
+<p>Height data must be 2D arrays with specific requirements:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Shape: (height, width) - row-major ordering</span>
+<span class="n">height_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="mi">256</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+<span class="c1"># Data type: float32 (preferred) or float64</span>
+<span class="n">height_data</span> <span class="o">=</span> <span class="n">height_data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+<span class="c1"># Array must be C-contiguous</span>
+<span class="k">if</span> <span class="ow">not</span> <span class="n">height_data</span><span class="o">.</span><span class="n">flags</span><span class="o">.</span><span class="n">c_contiguous</span><span class="p">:</span>
+    <span class="n">height_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">height_data</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>DEM Utilities</strong></p>
+<p>Process Digital Elevation Models:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Get statistics</span>
+<span class="n">min_elev</span><span class="p">,</span> <span class="n">max_elev</span><span class="p">,</span> <span class="n">mean_elev</span><span class="p">,</span> <span class="n">std_elev</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">dem_stats</span><span class="p">(</span><span class="n">height_data</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Elevation range: </span><span class="si">{</span><span class="n">min_elev</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> to </span><span class="si">{</span><span class="n">max_elev</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Mean elevation: </span><span class="si">{</span><span class="n">mean_elev</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> ± </span><span class="si">{</span><span class="n">std_elev</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Normalize elevation data</span>
+<span class="n">normalized</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">dem_normalize</span><span class="p">(</span>
+    <span class="n">height_data</span><span class="p">,</span>
+    <span class="n">vmin</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>                    <span class="c1"># Auto-detect minimum</span>
+    <span class="n">vmax</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>                    <span class="c1"># Auto-detect maximum</span>
+    <span class="n">out_range</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">),</span>         <span class="c1"># Target range</span>
+    <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span>              <span class="c1"># Output type</span>
+<span class="p">)</span>
+
+<span class="c1"># Custom normalization range</span>
+<span class="n">scaled</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">dem_normalize</span><span class="p">(</span>
+    <span class="n">height_data</span><span class="p">,</span>
+    <span class="n">vmin</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>                     <span class="c1"># Clip minimum</span>
+    <span class="n">vmax</span><span class="o">=</span><span class="mf">1000.0</span><span class="p">,</span>                  <span class="c1"># Clip maximum</span>
+    <span class="n">out_range</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mf">50.0</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">),</span>      <span class="c1"># Custom range</span>
+    <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Procedural Generation</strong></p>
+<p>Create synthetic terrain:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">generate_mountainous_terrain</span><span class="p">(</span><span class="n">width</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">height</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Generate realistic mountainous terrain.&quot;&quot;&quot;</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">width</span><span class="p">)</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">height</span><span class="p">)</span>
+    <span class="n">X</span><span class="p">,</span> <span class="n">Y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+
+    <span class="c1"># Large-scale mountains</span>
+    <span class="n">terrain</span> <span class="o">=</span> <span class="mf">0.8</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="p">(</span><span class="n">X</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">Y</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span>
+
+    <span class="c1"># Medium-scale hills</span>
+    <span class="n">terrain</span> <span class="o">+=</span> <span class="mf">0.4</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">X</span> <span class="o">*</span> <span class="mi">2</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">Y</span> <span class="o">*</span> <span class="mf">1.5</span> <span class="o">+</span> <span class="mf">0.5</span><span class="p">)</span>
+
+    <span class="c1"># Fine-scale detail</span>
+    <span class="n">terrain</span> <span class="o">+=</span> <span class="mf">0.2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">X</span> <span class="o">*</span> <span class="mi">8</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">Y</span> <span class="o">*</span> <span class="mi">6</span><span class="p">)</span>
+
+    <span class="c1"># Add noise for realism</span>
+    <span class="n">terrain</span> <span class="o">+=</span> <span class="mf">0.1</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">((</span><span class="n">height</span><span class="p">,</span> <span class="n">width</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="n">terrain</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="scene-configuration">
+<h2>Scene Configuration<a class="headerlink" href="#scene-configuration" title="Link to this heading"></a></h2>
+<p><strong>Camera Setup</strong></p>
+<p>Configure camera for optimal terrain viewing:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">scene</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">Scene</span><span class="p">(</span><span class="mi">800</span><span class="p">,</span> <span class="mi">600</span><span class="p">)</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">height_data</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">15.0</span><span class="p">)</span>
+
+<span class="c1"># Set camera position and target</span>
+<span class="n">terrain_size</span> <span class="o">=</span> <span class="n">height_data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_camera</span><span class="p">(</span>
+    <span class="n">position</span><span class="o">=</span><span class="p">(</span><span class="n">terrain_size</span> <span class="o">*</span> <span class="mi">4</span><span class="p">,</span> <span class="n">terrain_size</span> <span class="o">*</span> <span class="mi">1</span><span class="p">,</span> <span class="n">terrain_size</span> <span class="o">*</span> <span class="mi">4</span><span class="p">),</span>  <span class="c1"># Eye position</span>
+    <span class="n">target</span><span class="o">=</span><span class="p">(</span><span class="n">terrain_size</span> <span class="o">*</span> <span class="mi">2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">terrain_size</span> <span class="o">*</span> <span class="mi">2</span><span class="p">),</span>                 <span class="c1"># Look at center</span>
+    <span class="n">up</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>                                                <span class="c1"># Up vector</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Terrain Parameters</strong></p>
+<p>Control terrain appearance:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span>
+    <span class="n">height_data</span><span class="p">,</span>
+    <span class="n">spacing</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>         <span class="c1"># Distance between height samples (world units)</span>
+    <span class="n">exaggeration</span><span class="o">=</span><span class="mf">10.0</span>    <span class="c1"># Vertical scale multiplier</span>
+<span class="p">)</span>
+
+<span class="c1"># Large terrain with detailed features</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">terrain_large</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">25.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span>
+
+<span class="c1"># Small terrain with dramatic relief</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">terrain_small</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">50.0</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="colormap-system">
+<h2>Colormap System<a class="headerlink" href="#colormap-system" title="Link to this heading"></a></h2>
+<p><strong>Built-in Colormaps</strong></p>
+<p>Use predefined color schemes:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># List available palettes</span>
+<span class="n">palettes</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">list_palettes</span><span class="p">()</span>
+<span class="k">for</span> <span class="n">palette</span> <span class="ow">in</span> <span class="n">palettes</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">palette</span><span class="p">[</span><span class="s1">&#39;index&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">palette</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> - </span><span class="si">{</span><span class="n">palette</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Set active colormap</span>
+<span class="n">f3d</span><span class="o">.</span><span class="n">set_palette</span><span class="p">(</span><span class="s1">&#39;viridis&#39;</span><span class="p">)</span>    <span class="c1"># Perceptually uniform</span>
+<span class="n">f3d</span><span class="o">.</span><span class="n">set_palette</span><span class="p">(</span><span class="s1">&#39;magma&#39;</span><span class="p">)</span>      <span class="c1"># Purple to yellow</span>
+<span class="n">f3d</span><span class="o">.</span><span class="n">set_palette</span><span class="p">(</span><span class="s1">&#39;terrain&#39;</span><span class="p">)</span>    <span class="c1"># Geographic colors</span>
+
+<span class="c1"># Get current palette</span>
+<span class="n">current</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">get_current_palette</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Active palette: </span><span class="si">{</span><span class="n">current</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Colormap Switching</strong></p>
+<p>Change colormaps dynamically:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Render with different colormaps</span>
+<span class="n">colormaps</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;viridis&#39;</span><span class="p">,</span> <span class="s1">&#39;magma&#39;</span><span class="p">,</span> <span class="s1">&#39;terrain&#39;</span><span class="p">]</span>
+
+<span class="k">for</span> <span class="n">cmap</span> <span class="ow">in</span> <span class="n">colormaps</span><span class="p">:</span>
+    <span class="n">f3d</span><span class="o">.</span><span class="n">set_palette</span><span class="p">(</span><span class="n">cmap</span><span class="p">)</span>
+    <span class="n">image</span> <span class="o">=</span> <span class="n">scene</span><span class="o">.</span><span class="n">render_terrain_rgba</span><span class="p">()</span>
+    <span class="n">f3d</span><span class="o">.</span><span class="n">numpy_to_png</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;terrain_</span><span class="si">{</span><span class="n">cmap</span><span class="si">}</span><span class="s2">.png&quot;</span><span class="p">,</span> <span class="n">image</span><span class="p">)</span>
+
+<span class="c1"># Check colormap support</span>
+<span class="k">if</span> <span class="n">f3d</span><span class="o">.</span><span class="n">colormap_supported</span><span class="p">(</span><span class="s1">&#39;custom_map&#39;</span><span class="p">):</span>
+    <span class="n">f3d</span><span class="o">.</span><span class="n">set_palette</span><span class="p">(</span><span class="s1">&#39;custom_map&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="level-of-detail-lod">
+<h2>Level of Detail (LOD)<a class="headerlink" href="#level-of-detail-lod" title="Link to this heading"></a></h2>
+<p><strong>Automatic LOD</strong></p>
+<p>The terrain system automatically applies LOD based on distance and screen-space size:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># LOD is automatically applied during rendering</span>
+<span class="c1"># Closer areas get higher detail, distant areas get lower detail</span>
+
+<span class="c1"># Control LOD behavior with camera distance</span>
+<span class="c1"># Closer camera = more detail visible</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_camera</span><span class="p">(</span>
+    <span class="n">position</span><span class="o">=</span><span class="p">(</span><span class="n">terrain_size</span> <span class="o">*</span> <span class="mi">2</span><span class="p">,</span> <span class="n">terrain_size</span> <span class="o">*</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">terrain_size</span> <span class="o">*</span> <span class="mi">2</span><span class="p">),</span>  <span class="c1"># Close view</span>
+    <span class="n">target</span><span class="o">=</span><span class="p">(</span><span class="n">terrain_size</span> <span class="o">*</span> <span class="mi">1</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">terrain_size</span> <span class="o">*</span> <span class="mi">1</span><span class="p">),</span>
+    <span class="n">up</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Performance Considerations</strong></p>
+<p>Balance quality vs. performance:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># For performance-critical applications:</span>
+<span class="c1"># - Use smaller terrain grids (128x128 vs 512x512)</span>
+<span class="c1"># - Reduce exaggeration to minimize overdraw</span>
+<span class="c1"># - Position camera for optimal LOD utilization</span>
+
+<span class="c1"># High performance setup</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">small_terrain</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">3.0</span><span class="p">)</span>
+
+<span class="c1"># High quality setup (slower)</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">large_terrain</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">20.0</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="terrain-analysis">
+<h2>Terrain Analysis<a class="headerlink" href="#terrain-analysis" title="Link to this heading"></a></h2>
+<p><strong>Surface Properties</strong></p>
+<p>Analyze terrain characteristics:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Calculate slopes (requires custom implementation)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">calculate_slopes</span><span class="p">(</span><span class="n">height_data</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">spacing</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Calculate slope in degrees from height data.&quot;&quot;&quot;</span>
+    <span class="n">dy</span><span class="p">,</span> <span class="n">dx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">gradient</span><span class="p">(</span><span class="n">height_data</span><span class="p">)</span>
+    <span class="n">slope_radians</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">dx</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">dy</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="n">spacing</span><span class="p">)</span>
+    <span class="n">slope_degrees</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">degrees</span><span class="p">(</span><span class="n">slope_radians</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">slope_degrees</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+<span class="c1"># Calculate aspects (compass direction of steepest descent)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">calculate_aspects</span><span class="p">(</span><span class="n">height_data</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Calculate aspect in degrees from height data.&quot;&quot;&quot;</span>
+    <span class="n">dy</span><span class="p">,</span> <span class="n">dx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">gradient</span><span class="p">(</span><span class="n">height_data</span><span class="p">)</span>
+    <span class="n">aspect_radians</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan2</span><span class="p">(</span><span class="o">-</span><span class="n">dx</span><span class="p">,</span> <span class="n">dy</span><span class="p">)</span>  <span class="c1"># Note: -dx for correct orientation</span>
+    <span class="n">aspect_degrees</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">degrees</span><span class="p">(</span><span class="n">aspect_radians</span><span class="p">)</span> <span class="o">%</span> <span class="mi">360</span>
+    <span class="k">return</span> <span class="n">aspect_degrees</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+<span class="c1"># Apply analysis</span>
+<span class="n">slopes</span> <span class="o">=</span> <span class="n">calculate_slopes</span><span class="p">(</span><span class="n">height_data</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span>
+<span class="n">aspects</span> <span class="o">=</span> <span class="n">calculate_aspects</span><span class="p">(</span><span class="n">height_data</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Slope range: </span><span class="si">{</span><span class="n">slopes</span><span class="o">.</span><span class="n">min</span><span class="p">()</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">° to </span><span class="si">{</span><span class="n">slopes</span><span class="o">.</span><span class="n">max</span><span class="p">()</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">°&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Mean slope: </span><span class="si">{</span><span class="n">slopes</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">°&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Terrain Statistics</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Comprehensive terrain analysis</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">analyze_terrain</span><span class="p">(</span><span class="n">height_data</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">spacing</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Comprehensive terrain analysis.&quot;&quot;&quot;</span>
+    <span class="n">min_elev</span><span class="p">,</span> <span class="n">max_elev</span><span class="p">,</span> <span class="n">mean_elev</span><span class="p">,</span> <span class="n">std_elev</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">dem_stats</span><span class="p">(</span><span class="n">height_data</span><span class="p">)</span>
+
+    <span class="n">slopes</span> <span class="o">=</span> <span class="n">calculate_slopes</span><span class="p">(</span><span class="n">height_data</span><span class="p">,</span> <span class="n">spacing</span><span class="p">)</span>
+    <span class="n">aspects</span> <span class="o">=</span> <span class="n">calculate_aspects</span><span class="p">(</span><span class="n">height_data</span><span class="p">)</span>
+
+    <span class="c1"># Calculate roughness (standard deviation of slopes in local neighborhood)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">scipy.ndimage</span><span class="w"> </span><span class="kn">import</span> <span class="n">uniform_filter</span>
+    <span class="n">slope_mean</span> <span class="o">=</span> <span class="n">uniform_filter</span><span class="p">(</span><span class="n">slopes</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+    <span class="n">slope_sq_mean</span> <span class="o">=</span> <span class="n">uniform_filter</span><span class="p">(</span><span class="n">slopes</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+    <span class="n">roughness</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">maximum</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">slope_sq_mean</span> <span class="o">-</span> <span class="n">slope_mean</span><span class="o">**</span><span class="mi">2</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;elevation&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;min&#39;</span><span class="p">:</span> <span class="n">min_elev</span><span class="p">,</span> <span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="n">max_elev</span><span class="p">,</span>
+            <span class="s1">&#39;mean&#39;</span><span class="p">:</span> <span class="n">mean_elev</span><span class="p">,</span> <span class="s1">&#39;std&#39;</span><span class="p">:</span> <span class="n">std_elev</span><span class="p">,</span>
+            <span class="s1">&#39;range&#39;</span><span class="p">:</span> <span class="n">max_elev</span> <span class="o">-</span> <span class="n">min_elev</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;slopes&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;min&#39;</span><span class="p">:</span> <span class="n">slopes</span><span class="o">.</span><span class="n">min</span><span class="p">(),</span> <span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="n">slopes</span><span class="o">.</span><span class="n">max</span><span class="p">(),</span>
+            <span class="s1">&#39;mean&#39;</span><span class="p">:</span> <span class="n">slopes</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span> <span class="s1">&#39;std&#39;</span><span class="p">:</span> <span class="n">slopes</span><span class="o">.</span><span class="n">std</span><span class="p">()</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;roughness&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;min&#39;</span><span class="p">:</span> <span class="n">roughness</span><span class="o">.</span><span class="n">min</span><span class="p">(),</span> <span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="n">roughness</span><span class="o">.</span><span class="n">max</span><span class="p">(),</span>
+            <span class="s1">&#39;mean&#39;</span><span class="p">:</span> <span class="n">roughness</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;grid_info&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;size&#39;</span><span class="p">:</span> <span class="n">height_data</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span>
+            <span class="s1">&#39;spacing&#39;</span><span class="p">:</span> <span class="n">spacing</span><span class="p">,</span>
+            <span class="s1">&#39;area&#39;</span><span class="p">:</span> <span class="n">height_data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">height_data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="n">spacing</span><span class="o">**</span><span class="mi">2</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="advanced-features">
+<h2>Advanced Features<a class="headerlink" href="#advanced-features" title="Link to this heading"></a></h2>
+<p><strong>Multi-Scale Terrain</strong></p>
+<p>Render terrain at different scales:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Regional view (large area, low detail per unit)</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">height_data</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">100.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
+<span class="n">regional_view</span> <span class="o">=</span> <span class="n">scene</span><span class="o">.</span><span class="n">render_terrain_rgba</span><span class="p">()</span>
+
+<span class="c1"># Local view (small area, high detail per unit)</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">height_data</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">20.0</span><span class="p">)</span>
+<span class="n">local_view</span> <span class="o">=</span> <span class="n">scene</span><span class="o">.</span><span class="n">render_terrain_rgba</span><span class="p">()</span>
+</pre></div>
+</div>
+<p><strong>Terrain Blending</strong></p>
+<p>Combine multiple height sources:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Blend terrain sources</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">blend_terrains</span><span class="p">(</span><span class="n">terrain1</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">terrain2</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">alpha</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Blend two terrain sources with specified weight.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">((</span><span class="mi">1</span> <span class="o">-</span> <span class="n">alpha</span><span class="p">)</span> <span class="o">*</span> <span class="n">terrain1</span> <span class="o">+</span> <span class="n">alpha</span> <span class="o">*</span> <span class="n">terrain2</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+<span class="c1"># Combine base terrain with detail layer</span>
+<span class="n">base_terrain</span> <span class="o">=</span> <span class="n">generate_mountainous_terrain</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="mi">256</span><span class="p">)</span>
+<span class="n">detail_terrain</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="mi">256</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span> <span class="o">*</span> <span class="mf">0.1</span>
+
+<span class="n">combined</span> <span class="o">=</span> <span class="n">blend_terrains</span><span class="p">(</span><span class="n">base_terrain</span><span class="p">,</span> <span class="n">detail_terrain</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.2</span><span class="p">)</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">combined</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">15.0</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Terrain Tiling</strong></p>
+<p>Handle large terrain datasets:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Create terrain tiles for large datasets</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_terrain_tile</span><span class="p">(</span><span class="n">full_terrain</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+                       <span class="n">tile_x</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">tile_y</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                       <span class="n">tile_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Extract tile from larger terrain.&quot;&quot;&quot;</span>
+    <span class="n">x_start</span> <span class="o">=</span> <span class="n">tile_x</span> <span class="o">*</span> <span class="n">tile_size</span>
+    <span class="n">x_end</span> <span class="o">=</span> <span class="n">x_start</span> <span class="o">+</span> <span class="n">tile_size</span>
+    <span class="n">y_start</span> <span class="o">=</span> <span class="n">tile_y</span> <span class="o">*</span> <span class="n">tile_size</span>
+    <span class="n">y_end</span> <span class="o">=</span> <span class="n">y_start</span> <span class="o">+</span> <span class="n">tile_size</span>
+
+    <span class="c1"># Handle edge cases</span>
+    <span class="n">x_end</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">x_end</span><span class="p">,</span> <span class="n">full_terrain</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">y_end</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">y_end</span><span class="p">,</span> <span class="n">full_terrain</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+
+    <span class="k">return</span> <span class="n">full_terrain</span><span class="p">[</span><span class="n">y_start</span><span class="p">:</span><span class="n">y_end</span><span class="p">,</span> <span class="n">x_start</span><span class="p">:</span><span class="n">x_end</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+<span class="c1"># Render specific tile</span>
+<span class="n">large_terrain</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">1024</span><span class="p">,</span> <span class="mi">1024</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+<span class="n">tile</span> <span class="o">=</span> <span class="n">create_terrain_tile</span><span class="p">(</span><span class="n">large_terrain</span><span class="p">,</span> <span class="n">tile_x</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">tile_y</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">tile_size</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span>
+
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">tile</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">10.0</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="integration-with-other-systems">
+<h2>Integration with Other Systems<a class="headerlink" href="#integration-with-other-systems" title="Link to this heading"></a></h2>
+<p><strong>Terrain + Vector Graphics</strong></p>
+<p>Combine terrain with vector overlays:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Render terrain</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">height_data</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">15.0</span><span class="p">)</span>
+
+<span class="c1"># Add vector annotations</span>
+<span class="n">f3d</span><span class="o">.</span><span class="n">clear_vectors_py</span><span class="p">()</span>
+
+<span class="c1"># Mark peaks and valleys</span>
+<span class="n">peak_locations</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[[</span><span class="mi">200</span><span class="p">,</span> <span class="mi">150</span><span class="p">],</span> <span class="p">[</span><span class="mi">400</span><span class="p">,</span> <span class="mi">350</span><span class="p">]]],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+<span class="n">peak_colors</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">],</span> <span class="p">[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">]],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+<span class="n">peak_sizes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">8.0</span><span class="p">,</span> <span class="mf">8.0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+<span class="n">f3d</span><span class="o">.</span><span class="n">add_points_py</span><span class="p">(</span><span class="n">peak_locations</span><span class="p">,</span> <span class="n">colors</span><span class="o">=</span><span class="n">peak_colors</span><span class="p">,</span> <span class="n">sizes</span><span class="o">=</span><span class="n">peak_sizes</span><span class="p">)</span>
+
+<span class="c1"># Render combined result</span>
+<span class="n">combined_image</span> <span class="o">=</span> <span class="n">scene</span><span class="o">.</span><span class="n">render_terrain_rgba</span><span class="p">()</span>
+</pre></div>
+</div>
+<p><strong>Terrain + Shadows</strong></p>
+<p>Add realistic lighting:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">forge3d.shadows</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">shadows</span>
+
+    <span class="k">if</span> <span class="n">shadows</span><span class="o">.</span><span class="n">has_shadows_support</span><span class="p">():</span>
+        <span class="c1"># Configure shadows for terrain</span>
+        <span class="n">shadow_config</span> <span class="o">=</span> <span class="n">shadows</span><span class="o">.</span><span class="n">get_preset_config</span><span class="p">(</span><span class="s1">&#39;medium_quality&#39;</span><span class="p">)</span>
+        <span class="n">sun_light</span> <span class="o">=</span> <span class="n">shadows</span><span class="o">.</span><span class="n">DirectionalLight</span><span class="p">(</span>
+            <span class="n">direction</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mf">0.3</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.8</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.5</span><span class="p">),</span>  <span class="c1"># Afternoon sun</span>
+            <span class="n">color</span><span class="o">=</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.9</span><span class="p">,</span> <span class="mf">0.7</span><span class="p">),</span>         <span class="c1"># Warm light</span>
+            <span class="n">intensity</span><span class="o">=</span><span class="mf">2.5</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Render with shadows</span>
+        <span class="n">renderer</span> <span class="o">=</span> <span class="n">shadows</span><span class="o">.</span><span class="n">ShadowRenderer</span><span class="p">(</span><span class="mi">800</span><span class="p">,</span> <span class="mi">600</span><span class="p">,</span> <span class="n">shadow_config</span><span class="p">)</span>
+        <span class="n">renderer</span><span class="o">.</span><span class="n">set_light</span><span class="p">(</span><span class="n">sun_light</span><span class="p">)</span>
+
+        <span class="n">scene_data</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;terrain&#39;</span><span class="p">:</span> <span class="n">height_data</span><span class="p">}</span>
+        <span class="n">shadowed_terrain</span> <span class="o">=</span> <span class="n">renderer</span><span class="o">.</span><span class="n">render_with_shadows</span><span class="p">(</span><span class="n">scene_data</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Fallback to standard rendering</span>
+        <span class="n">shadowed_terrain</span> <span class="o">=</span> <span class="n">scene</span><span class="o">.</span><span class="n">render_terrain_rgba</span><span class="p">()</span>
+
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="c1"># Shadows not available</span>
+    <span class="n">shadowed_terrain</span> <span class="o">=</span> <span class="n">scene</span><span class="o">.</span><span class="n">render_terrain_rgba</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="performance-optimization">
+<h2>Performance Optimization<a class="headerlink" href="#performance-optimization" title="Link to this heading"></a></h2>
+<p><strong>Memory Management</strong></p>
+<p>Optimize terrain memory usage:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Choose appropriate terrain size for your needs</span>
+<span class="c1"># Large terrain: high memory usage, high detail</span>
+<span class="n">large_terrain</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">512</span><span class="p">,</span> <span class="mi">512</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>  <span class="c1"># ~1 MiB</span>
+
+<span class="c1"># Medium terrain: balanced memory/detail</span>
+<span class="n">medium_terrain</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="mi">256</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>  <span class="c1"># ~256 KiB</span>
+
+<span class="c1"># Small terrain: low memory, good for testing</span>
+<span class="n">small_terrain</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">128</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>   <span class="c1"># ~64 KiB</span>
+
+<span class="c1"># Monitor memory usage</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Terrain memory: </span><span class="si">{</span><span class="n">terrain</span><span class="o">.</span><span class="n">nbytes</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">1024</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> KiB&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Rendering Performance</strong></p>
+<p>Optimize rendering speed:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Performance tips:</span>
+<span class="c1"># 1. Use appropriate exaggeration (avoid extreme values)</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">terrain</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">10.0</span><span class="p">)</span>  <span class="c1"># Good</span>
+<span class="c1"># scene.set_height_data(terrain, spacing=5.0, exaggeration=100.0)  # May cause issues</span>
+
+<span class="c1"># 2. Position camera efficiently (avoid extreme angles)</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_camera</span><span class="p">(</span>
+    <span class="n">position</span><span class="o">=</span><span class="p">(</span><span class="n">terrain_size</span> <span class="o">*</span> <span class="mf">1.5</span><span class="p">,</span> <span class="n">terrain_size</span> <span class="o">*</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">terrain_size</span> <span class="o">*</span> <span class="mf">1.5</span><span class="p">),</span>
+    <span class="n">target</span><span class="o">=</span><span class="p">(</span><span class="n">terrain_size</span> <span class="o">*</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">terrain_size</span> <span class="o">*</span> <span class="mf">0.5</span><span class="p">),</span>
+    <span class="n">up</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+<span class="p">)</span>
+
+<span class="c1"># 3. Use smaller render targets for preview</span>
+<span class="n">preview_scene</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">Scene</span><span class="p">(</span><span class="mi">400</span><span class="p">,</span> <span class="mi">300</span><span class="p">)</span>  <span class="c1"># Half resolution</span>
+<span class="n">preview_scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">terrain</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">10.0</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="real-world-applications">
+<h2>Real-World Applications<a class="headerlink" href="#real-world-applications" title="Link to this heading"></a></h2>
+<p><strong>Geographic Visualization</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Visualize real DEM data</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">visualize_dem_file</span><span class="p">(</span><span class="n">dem_file</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">output_file</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Visualize DEM data from file.&quot;&quot;&quot;</span>
+    <span class="c1"># Load DEM (implementation depends on format: GeoTIFF, etc.)</span>
+    <span class="c1"># height_data = load_dem(dem_file)  # Custom loader required</span>
+
+    <span class="c1"># Normalize for display</span>
+    <span class="n">height_norm</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">dem_normalize</span><span class="p">(</span><span class="n">height_data</span><span class="p">,</span> <span class="n">out_range</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">))</span>
+
+    <span class="c1"># Create visualization</span>
+    <span class="n">scene</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">Scene</span><span class="p">(</span><span class="mi">1200</span><span class="p">,</span> <span class="mi">900</span><span class="p">)</span>  <span class="c1"># High resolution</span>
+    <span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">height_norm</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">30.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>  <span class="c1"># 30m resolution</span>
+
+    <span class="c1"># Use terrain colormap</span>
+    <span class="n">f3d</span><span class="o">.</span><span class="n">set_palette</span><span class="p">(</span><span class="s1">&#39;terrain&#39;</span><span class="p">)</span>
+
+    <span class="c1"># Render and save</span>
+    <span class="n">image</span> <span class="o">=</span> <span class="n">scene</span><span class="o">.</span><span class="n">render_terrain_rgba</span><span class="p">()</span>
+    <span class="n">f3d</span><span class="o">.</span><span class="n">numpy_to_png</span><span class="p">(</span><span class="n">output_file</span><span class="p">,</span> <span class="n">image</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Scientific Visualization</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Analyze and visualize surface processes</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">visualize_surface_analysis</span><span class="p">(</span><span class="n">height_data</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create multi-panel terrain analysis.&quot;&quot;&quot;</span>
+
+    <span class="c1"># Calculate derived products</span>
+    <span class="n">slopes</span> <span class="o">=</span> <span class="n">calculate_slopes</span><span class="p">(</span><span class="n">height_data</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">aspects</span> <span class="o">=</span> <span class="n">calculate_aspects</span><span class="p">(</span><span class="n">height_data</span><span class="p">)</span>
+
+    <span class="c1"># Render elevation</span>
+    <span class="n">f3d</span><span class="o">.</span><span class="n">set_palette</span><span class="p">(</span><span class="s1">&#39;terrain&#39;</span><span class="p">)</span>
+    <span class="n">scene</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">Scene</span><span class="p">(</span><span class="mi">400</span><span class="p">,</span> <span class="mi">300</span><span class="p">)</span>
+    <span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">height_data</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">10.0</span><span class="p">)</span>
+    <span class="n">elevation_img</span> <span class="o">=</span> <span class="n">scene</span><span class="o">.</span><span class="n">render_terrain_rgba</span><span class="p">()</span>
+
+    <span class="c1"># Visualize slopes</span>
+    <span class="n">f3d</span><span class="o">.</span><span class="n">set_palette</span><span class="p">(</span><span class="s1">&#39;viridis&#39;</span><span class="p">)</span>
+    <span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">slopes</span> <span class="o">/</span> <span class="n">slopes</span><span class="o">.</span><span class="n">max</span><span class="p">(),</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">10.0</span><span class="p">)</span>
+    <span class="n">slope_img</span> <span class="o">=</span> <span class="n">scene</span><span class="o">.</span><span class="n">render_terrain_rgba</span><span class="p">()</span>
+
+    <span class="c1"># Save results</span>
+    <span class="n">f3d</span><span class="o">.</span><span class="n">numpy_to_png</span><span class="p">(</span><span class="s2">&quot;elevation.png&quot;</span><span class="p">,</span> <span class="n">elevation_img</span><span class="p">)</span>
+    <span class="n">f3d</span><span class="o">.</span><span class="n">numpy_to_png</span><span class="p">(</span><span class="s2">&quot;slopes.png&quot;</span><span class="p">,</span> <span class="n">slope_img</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="troubleshooting">
+<h2>Troubleshooting<a class="headerlink" href="#troubleshooting" title="Link to this heading"></a></h2>
+<p><strong>Common Issues</strong></p>
+<ol class="arabic">
+<li><p><strong>Memory Errors with Large Terrain</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Problem: Terrain too large</span>
+<span class="n">huge_terrain</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">2048</span><span class="p">,</span> <span class="mi">2048</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>  <span class="c1"># ~16 MiB</span>
+
+<span class="c1"># Solution: Reduce size or use tiling</span>
+<span class="n">reasonable_terrain</span> <span class="o">=</span> <span class="n">huge_terrain</span><span class="p">[::</span><span class="mi">4</span><span class="p">,</span> <span class="p">::</span><span class="mi">4</span><span class="p">]</span>  <span class="c1"># Downsample by 4x</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Poor Visual Quality</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Problem: Insufficient exaggeration</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">terrain</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>  <span class="c1"># Too flat</span>
+
+<span class="c1"># Solution: Increase exaggeration</span>
+<span class="n">scene</span><span class="o">.</span><span class="n">set_height_data</span><span class="p">(</span><span class="n">terrain</span><span class="p">,</span> <span class="n">spacing</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">exaggeration</span><span class="o">=</span><span class="mf">15.0</span><span class="p">)</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Array Format Errors</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Problem: Wrong data type or shape</span>
+<span class="n">height_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">128</span><span class="p">))</span>  <span class="c1"># Integer data</span>
+
+<span class="c1"># Solution: Convert to float32</span>
+<span class="n">height_data</span> <span class="o">=</span> <span class="n">height_data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+</pre></div>
+</div>
+</li>
+</ol>
+<p><strong>Performance Issues</strong></p>
+<ul class="simple">
+<li><p>Use smaller terrain sizes for testing</p></li>
+<li><p>Reduce exaggeration if rendering is slow</p></li>
+<li><p>Check GPU memory usage with large terrains</p></li>
+<li><p>Consider LOD when rendering large datasets</p></li>
+</ul>
+<p><strong>Visual Artifacts</strong></p>
+<ul class="simple">
+<li><p>Ensure height data is properly normalized</p></li>
+<li><p>Check for NaN or infinite values in data</p></li>
+<li><p>Verify camera positioning and field of view</p></li>
+<li><p>Use appropriate spacing and exaggeration values</p></li>
+</ul>
+</section>
+<section id="example-applications">
+<h2>Example Applications<a class="headerlink" href="#example-applications" title="Link to this heading"></a></h2>
+<p>See these comprehensive examples:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">examples/terrain_single_tile.py</span></code> - Basic terrain rendering</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">examples/advanced_terrain_shadows_pbr.py</span></code> - Full-featured terrain with lighting</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">examples/contour_overlay_demo.py</span></code> - Terrain with topographic overlays</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">examples/normal_mapping_terrain.py</span></code> - Advanced surface detail techniques</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="vector_graphics.html" class="btn btn-neutral float-left" title="Vector Graphics" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="async_operations.html" class="btn btn-neutral float-right" title="Async Operations" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, forge3d contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

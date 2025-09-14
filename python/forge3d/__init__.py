@@ -35,7 +35,10 @@ __all__ = [
     
     # Mesh Generation
     "grid_generate",
-    
+
+    # Denoising (Workstream A5)
+    "atrous_denoise",
+
     # Advanced (explicit import recommended)
     # "path_tracing" module provides PathTracer skeleton for Workstream A
     
@@ -124,6 +127,9 @@ except Exception:
     invert_matrix = look_at_transform = multiply_matrices = _Stub("matrix functions")
     rotate_x = rotate_y = rotate_z = scale = scale_uniform = translate = _Stub("transform functions")
     grid_generate = _Stub("grid_generate")
+
+# Denoiser is pure Python and always available
+from .denoise import atrous_denoise  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Legacy compatibility shims for tests (pure-Python fallbacks)

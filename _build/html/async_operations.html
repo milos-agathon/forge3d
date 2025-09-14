@@ -1,0 +1,1578 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Async Operations &mdash; forge3d Documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="_static/custom.css" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=9e420a66"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="docs/tiles/xyz_wmts.md" href="tiles/xyz_wmts.html" />
+    <link rel="prev" title="Terrain Rendering" href="terrain_rendering.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            forge3d
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#basic-triangle-rendering">Basic Triangle Rendering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#terrain-visualization">Terrain Visualization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#vector-graphics">Vector Graphics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#device-detection">Device Detection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="quickstart.html#what-s-next">What’s Next?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#quick-installation">Quick Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#system-requirements">System Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#installation-from-source">Installation from Source</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#virtual-environment-setup">Virtual Environment Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#verification">Verification</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#development-setup">Development Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#docker-installation">Docker Installation</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="examples_guide.html">Examples Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#basic-examples">Basic Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#diagnostic-examples">Diagnostic Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#advanced-examples-r13">Advanced Examples (R13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#performance-examples">Performance Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#running-examples">Running Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#understanding-example-output">Understanding Example Output</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples_guide.html#example-development-guidelines">Example Development Guidelines</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Core Documentation:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api_reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#core-classes">Core Classes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#renderer">Renderer</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.Renderer"><code class="docutils literal notranslate"><span class="pre">Renderer</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#scene">Scene</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.Scene"><code class="docutils literal notranslate"><span class="pre">Scene</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#vector-graphics">Vector Graphics</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#polygons">Polygons</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#lines">Lines</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#points">Points</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#terrain-rendering">Terrain Rendering</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#height-data-processing">Height Data Processing</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#memory-management">Memory Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#gpu-memory-tracking">GPU Memory Tracking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#budget-management">Budget Management</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#advanced-features">Advanced Features</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#module-forge3d.shadows">Shadow Mapping</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.has_shadows_support"><code class="docutils literal notranslate"><span class="pre">has_shadows_support()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.DirectionalLight"><code class="docutils literal notranslate"><span class="pre">DirectionalLight</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.CsmConfig"><code class="docutils literal notranslate"><span class="pre">CsmConfig</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.ShadowStats"><code class="docutils literal notranslate"><span class="pre">ShadowStats</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.CsmShadowMap"><code class="docutils literal notranslate"><span class="pre">CsmShadowMap</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.ShadowRenderer"><code class="docutils literal notranslate"><span class="pre">ShadowRenderer</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.create_test_scene"><code class="docutils literal notranslate"><span class="pre">create_test_scene()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.compare_shadow_techniques"><code class="docutils literal notranslate"><span class="pre">compare_shadow_techniques()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.validate_csm_setup"><code class="docutils literal notranslate"><span class="pre">validate_csm_setup()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.get_preset_config"><code class="docutils literal notranslate"><span class="pre">get_preset_config()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.calculate_shadow_atlas_memory"><code class="docutils literal notranslate"><span class="pre">calculate_shadow_atlas_memory()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.validate_shadow_memory_constraint"><code class="docutils literal notranslate"><span class="pre">validate_shadow_memory_constraint()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.build_shadow_atlas"><code class="docutils literal notranslate"><span class="pre">build_shadow_atlas()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.shadows.sample_shadow"><code class="docutils literal notranslate"><span class="pre">sample_shadow()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#pbr-materials">PBR Materials</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#module-forge3d.async_readback">Async Readback</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncReadbackConfig"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackConfig</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncReadbackHandle"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackHandle</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncReadbackManager"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackManager</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncRenderer"><code class="docutils literal notranslate"><span class="pre">AsyncRenderer</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.AsyncReadbackContext"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackContext</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.batch_readback"><code class="docutils literal notranslate"><span class="pre">batch_readback()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.async_readback.benchmark_readback_performance"><code class="docutils literal notranslate"><span class="pre">benchmark_readback_performance()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#utilities">Utilities</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#device-information">Device Information</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#environment-reporting">Environment Reporting</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#module-forge3d.colormap">Color Management</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.decode_png_rgba8"><code class="docutils literal notranslate"><span class="pre">decode_png_rgba8()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.get_colormap_compression_stats"><code class="docutils literal notranslate"><span class="pre">get_colormap_compression_stats()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.check_compressed_colormap_support"><code class="docutils literal notranslate"><span class="pre">check_compressed_colormap_support()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.get_supported_compression_formats"><code class="docutils literal notranslate"><span class="pre">get_supported_compression_formats()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.estimate_compression_quality"><code class="docutils literal notranslate"><span class="pre">estimate_compression_quality()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api_reference.html#forge3d.colormap.calculate_memory_savings"><code class="docutils literal notranslate"><span class="pre">calculate_memory_savings()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#configuration">Configuration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#environment-variables">Environment Variables</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#gpu-backend-selection">GPU Backend Selection</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#common-exceptions">Common Exceptions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#debugging-tips">Debugging Tips</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api_reference.html#performance-tips">Performance Tips</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api_reference.html#type-annotations">Type Annotations</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="color_management.html">Color Management &amp; Tonemap Pipeline</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#pipeline-details">Pipeline Details</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#linear-scene-lighting">1. Linear Scene Lighting</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#tone-mapping-reinhard">2. Tone Mapping (Reinhard)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#gamma-correction">3. Gamma Correction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#output-format">4. Output Format</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#format-choices-rationale">Format Choices &amp; Rationale</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#why-rgba8unormsrgb">Why Rgba8UnormSrgb?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#when-to-use-linear-vs-srgb-targets">When to Use Linear vs sRGB Targets</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#implementation-notes">Implementation Notes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#shader-integration">Shader Integration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="color_management.html#cpu-reference-implementation">CPU Reference Implementation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="color_management.html#future-extensions">Future Extensions</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="interop_zero_copy.html">Zero-Copy NumPy Interoperability</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#guaranteed-zero-copy-pathways">Guaranteed Zero-Copy Pathways</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#rgba-output">RGBA Output</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#height-input">Height Input</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#data-type-and-layout-requirements">Data Type and Layout Requirements</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#supported-input-types">Supported Input Types</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#output-guarantees">Output Guarantees</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#validation-and-debugging">Validation and Debugging</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#using-validation-helpers">Using Validation Helpers</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#pointer-validation">Pointer Validation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#performance-profiling">Performance Profiling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#common-pitfalls-and-solutions">Common Pitfalls and Solutions</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#non-contiguous-arrays">Non-Contiguous Arrays</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#wrong-data-types">Wrong Data Types</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#memory-layout-assumptions">Memory Layout Assumptions</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#testing-zero-copy-behavior">Testing Zero-Copy Behavior</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#writing-zero-copy-tests">Writing Zero-Copy Tests</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#implementation-notes">Implementation Notes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#buffer-reuse">Buffer Reuse</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#memory-alignment">Memory Alignment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#cross-platform-consistency">Cross-Platform Consistency</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#common-error-messages">Common Error Messages</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#debugging-tips">Debugging Tips</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="interop_zero_copy.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#for-application-developers">For Application Developers</a></li>
+<li class="toctree-l3"><a class="reference internal" href="interop_zero_copy.html#for-library-integration">For Library Integration</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="memory_budget.html">Memory Budget Management</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#budget-limits">Budget Limits</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#default-budget-512-mib">Default Budget: 512 MiB</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#what-counts-towards-the-budget">What Counts Towards the Budget</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#memory-metrics-api">Memory Metrics API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#getting-memory-metrics">Getting Memory Metrics</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#metrics-dictionary-structure">Metrics Dictionary Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#example-metrics-output">Example Metrics Output</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#budget-enforcement">Budget Enforcement</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#automatic-checking">Automatic Checking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#error-messages">Error Messages</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#monitoring-memory-usage">Monitoring Memory Usage</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#real-time-monitoring">Real-Time Monitoring</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#performance-impact-monitoring">Performance Impact Monitoring</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#memory-budget-scenarios">Memory Budget Scenarios</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#normal-usage-patterns">Normal Usage Patterns</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#high-memory-scenarios">High Memory Scenarios</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#budget-friendly-practices">Budget-Friendly Practices</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#debugging-memory-issues">Debugging Memory Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#investigating-budget-violations">Investigating Budget Violations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#common-memory-issues">Common Memory Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory_budget.html#implementation-details">Implementation Details</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#thread-safety">Thread Safety</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#global-vs-per-renderer-tracking">Global vs. Per-Renderer Tracking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#memory-alignment">Memory Alignment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory_budget.html#performance-impact">Performance Impact</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="memory/index.html">Memory Management</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="memory/staging_rings.html">O1: Staging Buffer Rings</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#architecture">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#core-components">Core Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#buffer-states">Buffer States</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#rust-api">Rust API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#python-api">Python API</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#performance-characteristics">Performance Characteristics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#typical-performance">Typical Performance</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#ring-count">Ring Count</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#buffer-size">Buffer Size</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#memory-budget">Memory Budget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#integration">Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#with-memory-pools-o2">With Memory Pools (O2)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#with-texture-compression-o3">With Texture Compression (O3)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#testing">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#unit-tests">Unit Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#performance-tests">Performance Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/staging_rings.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#high-buffer-stalls">High Buffer Stalls</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#memory-usage-issues">Memory Usage Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/staging_rings.html#platform-differences">Platform Differences</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory/memory_pools.html">O2: GPU Memory Pools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#architecture">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#core-components">Core Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#size-buckets">Size Buckets</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#rust-api">Rust API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#python-api">Python API</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#performance-characteristics">Performance Characteristics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#allocation-performance">Allocation Performance</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#fragmentation-mitigation">Fragmentation Mitigation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#size-bucket-tuning">Size Bucket Tuning</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#pool-sizing">Pool Sizing</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#memory-budget">Memory Budget</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#reference-counting">Reference Counting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#lifecycle-management">Lifecycle Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#thread-safety">Thread Safety</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#defragmentation">Defragmentation</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#automatic-defragmentation">Automatic Defragmentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#defragmentation-strategy">Defragmentation Strategy</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#integration">Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#with-staging-rings-o1">With Staging Rings (O1)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#with-big-buffers">With Big Buffers</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#testing">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#unit-tests">Unit Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#performance-tests">Performance Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#high-fragmentation">High Fragmentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#memory-leaks">Memory Leaks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/memory_pools.html#performance-issues">Performance Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/memory_pools.html#platform-differences">Platform Differences</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory/compressed_textures.html">O3: Compressed Texture Pipeline</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#architecture">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#core-components">Core Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#supported-formats">Supported Formats</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#rust-api">Rust API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#python-api">Python API</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#performance-characteristics">Performance Characteristics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#compression-performance">Compression Performance</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#memory-usage">Memory Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#compression-quality-levels">Compression Quality Levels</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#use-case-optimization">Use Case Optimization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#format-selection-algorithm">Format Selection Algorithm</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#memory-budget-compliance">Memory Budget Compliance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#ktx2-container-support">KTX2 Container Support</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#supported-features">Supported Features</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#transcoding-pipeline">Transcoding Pipeline</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#current-limitations">Current Limitations</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#integration">Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#with-memory-pools-o2">With Memory Pools (O2)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#with-virtual-texturing-o4">With Virtual Texturing (O4)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#testing">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#unit-tests">Unit Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#quality-tests">Quality Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#poor-compression-quality">Poor Compression Quality</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#high-memory-usage">High Memory Usage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/compressed_textures.html#loading-failures">Loading Failures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/compressed_textures.html#platform-differences">Platform Differences</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory/virtual_texturing.html">Virtual Texture Streaming</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#key-components">Key Components</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#virtualtexturesystem">VirtualTextureSystem</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#tile-management">Tile Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#camera-based-streaming">Camera-Based Streaming</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#memory-budget">Memory Budget</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#tile-size">Tile Size</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#quality-settings">Quality Settings</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#usage-patterns">Usage Patterns</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#basic-streaming-setup">Basic Streaming Setup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#prefetching">Prefetching</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#multiple-textures">Multiple Textures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#performance-monitoring">Performance Monitoring</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#statistics-tracking">Statistics Tracking</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#memory-analysis">Memory Analysis</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#performance-estimation">Performance Estimation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#integration-with-other-systems">Integration with Other Systems</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#staging-rings-integration">Staging Rings Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#compressed-texture-support">Compressed Texture Support</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#shader-integration">Shader Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#wgsl-shader-code">WGSL Shader Code</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#c-integration">C++ Integration</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#memory-budget-guidelines">Memory Budget Guidelines</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#tile-size-selection">Tile Size Selection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#streaming-strategy">Streaming Strategy</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#performance-optimization">Performance Optimization</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="memory/virtual_texturing.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="memory/virtual_texturing.html#api-reference">API Reference</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#memory-monitoring">Memory Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="memory/index.html#integration-examples">Integration Examples</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api/path_tracing.html">A1: GPU Path Tracer (MVP)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/path_tracing.html#gpu-usage">GPU Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/path_tracing.html#cpu-reference">CPU Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/path_tracing.html#limitations">Limitations</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Advanced Features:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="postfx/index.html">Post-Processing Effect Chain</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="postfx/index.html#features">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="postfx/index.html#python-api">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="postfx/index.html#notes">Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="postfx/index.html#demo">Demo</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="pbr_materials.html">PBR Materials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#api-reference">API Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#texture-support">Texture Support</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#brdf-evaluation">BRDF Evaluation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#predefined-materials">Predefined Materials</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#material-validation">Material Validation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#gpu-integration">GPU Integration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#lighting-configuration">Lighting Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#feature-detection">Feature Detection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="pbr_materials.html#legacy-compatibility">Legacy Compatibility</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="shadow_mapping.html">Shadow Mapping</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#memory-management">Memory Management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#shadow-configuration">Shadow Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#directional-lighting">Directional Lighting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#shadow-rendering">Shadow Rendering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#quality-vs-performance">Quality vs Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#pcf-filtering">PCF Filtering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#integration-examples">Integration Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#performance-monitoring">Performance Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shadow_mapping.html#legacy-support">Legacy Support</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="user/path_tracing.html">Path Tracing (Workstream A)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="user/path_tracing.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/path_tracing.html#api">API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/path_tracing.html#roadmap">Roadmap</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="vector_graphics.html">Vector Graphics</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#vector-types">Vector Types</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#data-format-requirements">Data Format Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#performance-considerations">Performance Considerations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#integration-with-3d-rendering">Integration with 3D Rendering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#use-cases">Use Cases</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector_graphics.html#advanced-examples">Advanced Examples</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="terrain_rendering.html">Terrain Rendering</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#height-data-processing">Height Data Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#scene-configuration">Scene Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#colormap-system">Colormap System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#level-of-detail-lod">Level of Detail (LOD)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#terrain-analysis">Terrain Analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#integration-with-other-systems">Integration with Other Systems</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#performance-optimization">Performance Optimization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#real-world-applications">Real-World Applications</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="terrain_rendering.html#example-applications">Example Applications</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Async Operations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#async-readback-system">Async Readback System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#multi-threaded-command-recording">Multi-threaded Command Recording</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#async-compute-operations">Async Compute Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#non-blocking-gpu-operations">Non-blocking GPU Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#performance-monitoring">Performance Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#memory-management-for-async-operations">Memory Management for Async Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example-applications">Example Applications</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Basemaps &amp; Tiles:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="tiles/xyz_wmts.html">docs/tiles/xyz_wmts.md</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tiles/xyz_wmts.html#basemap-tile-fetching-caching-and-composition-xyz-wmts-in-forge3d">Basemap tile fetching, caching, and composition (XYZ/WMTS) in forge3d.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tiles/xyz_wmts.html#documents-the-python-tiles-api-cache-layout-and-attribution-requirements">Documents the Python tiles API, cache layout, and attribution requirements.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tiles/xyz_wmts.html#relevant-files-python-forge3d-tiles-client-py-python-forge3d-tiles-overlay-py-examples-xyz-tile-compose-demo-py">RELEVANT FILES:python/forge3d/tiles/client.py,python/forge3d/tiles/overlay.py,examples/xyz_tile_compose_demo.py</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#api">API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#cache-layout">Cache layout</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tiles/xyz_wmts.html#attribution">Attribution</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="integration/cartopy.html">docs/integration/cartopy.md</a></li>
+<li class="toctree-l1"><a class="reference internal" href="integration/cartopy.html#cartopy-integration-example-using-forge3d-tiles-as-a-background">Cartopy integration example using forge3d tiles as a background.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="integration/cartopy.html#shows-headless-agg-rendering-and-extent-alignment-with-geoaxes">Shows headless (Agg) rendering and extent alignment with GeoAxes.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="integration/cartopy.html#relevant-files-examples-cartopy-overlay-py-python-forge3d-tiles-client-py-python-forge3d-tiles-overlay-py">RELEVANT FILES:examples/cartopy_overlay.py,python/forge3d/tiles/client.py,python/forge3d/tiles/overlay.py</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="integration/cartopy.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/cartopy.html#requirements">Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/cartopy.html#example">Example</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Library Integrations:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="integration/matplotlib.html">Matplotlib Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#colormap-integration">Colormap Integration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#supported-colormaps">Supported Colormaps</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#custom-colormap-objects">Custom Colormap Objects</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#data-normalization">Data Normalization</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#linear-normalization">Linear Normalization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#logarithmic-normalization">Logarithmic Normalization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#power-law-normalization">Power Law Normalization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#boundary-normalization">Boundary Normalization</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#display-helpers">Display Helpers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#basic-display">Basic Display</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#custom-extents-and-dpi">Custom Extents and DPI</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#subplot-comparisons">Subplot Comparisons</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#saving-comparisons">Saving Comparisons</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#accuracy-and-performance">Accuracy and Performance</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#colormap-accuracy">Colormap Accuracy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#normalization-accuracy">Normalization Accuracy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#zero-copy-display">Zero-Copy Display</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#error-handling-and-validation">Error Handling and Validation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#optional-dependency-handling">Optional Dependency Handling</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#array-validation">Array Validation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#supported-formats">Supported Formats</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#examples">Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#complete-terrain-visualization">Complete Terrain Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#performance-comparison">Performance Comparison</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#memory-efficiency">Memory Efficiency</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#colormap-selection">Colormap Selection</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#api-reference">API Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#forge3d-adapters-mpl-cmap">forge3d.adapters.mpl_cmap</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#forge3d-helpers-mpl-display">forge3d.helpers.mpl_display</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/matplotlib.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#common-issues">Common Issues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/matplotlib.html#performance-issues">Performance Issues</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="integration/external_images.html">External Image Import Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#webgpu-parity">WebGPU Parity</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#what-we-match">What We Match</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#key-similarities">Key Similarities</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#native-vs-browser-differences">Native vs Browser Differences</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#input-sources">Input Sources</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#operational-differences">Operational Differences</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#format-support">Format Support</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#implementation-architecture">Implementation Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#core-components">Core Components</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#processing-pipeline">Processing Pipeline</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#usage-examples">Usage Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#basic-image-import">Basic Image Import</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#advanced-configuration">Advanced Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#constraints-and-limitations">Constraints and Limitations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#memory-budget">Memory Budget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#texture-size-limits">Texture Size Limits</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#format-constraints">Format Constraints</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#threading-model">Threading Model</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#performance-considerations">Performance Considerations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#decode-performance">Decode Performance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#upload-performance">Upload Performance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#memory-usage-patterns">Memory Usage Patterns</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#common-pitfalls-and-solutions">Common Pitfalls and Solutions</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#file-path-issues">1. File Path Issues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#memory-budget-exceeded">2. Memory Budget Exceeded</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#format-assumptions">3. Format Assumptions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#color-space-expectations">4. Color Space Expectations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#synchronous-blocking">5. Synchronous Blocking</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#migration-from-browser-code">Migration from Browser Code</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#replace-dom-image-loading">1. Replace DOM Image Loading</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#handle-synchronous-model">2. Handle Synchronous Model</a></li>
+<li class="toctree-l3"><a class="reference internal" href="integration/external_images.html#adapt-error-handling">3. Adapt Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#future-enhancements">Future Enhancements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="integration/external_images.html#testing">Testing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="user/datashader_interop.html">Datashader Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#api-reference">API Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#availability-check">Availability Check</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.is_datashader_available"><code class="docutils literal notranslate"><span class="pre">is_datashader_available()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#core-functions">Core Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.rgba_view_from_agg"><code class="docutils literal notranslate"><span class="pre">rgba_view_from_agg()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.validate_alignment"><code class="docutils literal notranslate"><span class="pre">validate_alignment()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.to_overlay_texture"><code class="docutils literal notranslate"><span class="pre">to_overlay_texture()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#convenience-functions">Convenience Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.shade_to_overlay"><code class="docutils literal notranslate"><span class="pre">shade_to_overlay()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#adapter-class">Adapter Class</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.DatashaderAdapter"><code class="docutils literal notranslate"><span class="pre">DatashaderAdapter</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#information-functions">Information Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="user/datashader_interop.html#forge3d.adapters.get_datashader_info"><code class="docutils literal notranslate"><span class="pre">get_datashader_info()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#memory-management">Memory Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#memory-optimization-strategies">Memory Optimization Strategies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#memory-budget-guidelines">Memory Budget Guidelines</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#performance-considerations">Performance Considerations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#zoom-level-performance">Zoom Level Performance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#performance-monitoring">Performance Monitoring</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#coordinate-systems">Coordinate Systems</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#supported-coordinate-systems">Supported Coordinate Systems</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#alignment-validation">Alignment Validation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#data-preparation">Data Preparation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#canvas-configuration">Canvas Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#common-issues-and-solutions">Common Issues and Solutions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="user/datashader_interop.html#debugging-tools">Debugging Tools</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#examples">Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="user/datashader_interop.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">CI &amp; Testing:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="ci/notebook_integration.html">Running Notebooks in CI</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#ci-integration-architecture">CI Integration Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#notebook-execution-workflow">Notebook Execution Workflow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#execution-pipeline">Execution Pipeline</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#configuration">Configuration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#github-actions-workflow">GitHub Actions Workflow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#execution-requirements">Execution Requirements</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#notebook-structure">Notebook Structure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#standard-cell-organization">Standard Cell Organization</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#introduction-setup">1. Introduction &amp; Setup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#device-information">2. Device Information</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#data-generation-loading">3. Data Generation/Loading</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#adapter-integration">4. Adapter Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#processing-rendering">5. Processing &amp; Rendering</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#output-generation">6. Output Generation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#performance-metrics">7. Performance Metrics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#validation-cleanup">8. Validation &amp; Cleanup</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#dependency-management">Dependency Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#optional-dependencies">Optional Dependencies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#fallback-strategies">Fallback Strategies</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#ci-validation">CI Validation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#success-criteria">Success Criteria</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#failure-analysis">Failure Analysis</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#timeout-failures">Timeout Failures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#memory-failures">Memory Failures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#dependency-failures">Dependency Failures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="ci/notebook_integration.html#gpu-failures">GPU Failures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#quality-metrics">Quality Metrics</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#performance-monitoring">Performance Monitoring</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#timing-benchmarks">Timing Benchmarks</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#memory-tracking">Memory Tracking</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ci/notebook_integration.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#development-guidelines">Development Guidelines</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#testing-locally">Testing Locally</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ci/notebook_integration.html#debugging-failed-runs">Debugging Failed Runs</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">forge3d</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Async Operations</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/forge3d/forge3d/blob/main/docs/async_operations.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="async-operations">
+<h1>Async Operations<a class="headerlink" href="#async-operations" title="Link to this heading"></a></h1>
+<p>forge3d provides asynchronous and multi-threaded operations for improved performance and responsiveness. This includes async readback systems, multi-threaded command recording, and non-blocking GPU operations.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Async operations require careful memory management and proper resource cleanup to maintain the 512 MiB GPU memory budget.</p>
+</div>
+<section id="async-readback-system">
+<h2>Async Readback System<a class="headerlink" href="#async-readback-system" title="Link to this heading"></a></h2>
+<p><strong>Overview</strong></p>
+<p>The async readback system allows non-blocking GPU-to-CPU data transfers with double-buffering and automatic resource management:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">forge3d</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">f3d</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="c1"># Create renderer</span>
+<span class="n">renderer</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">Renderer</span><span class="p">(</span><span class="mi">512</span><span class="p">,</span> <span class="mi">512</span><span class="p">)</span>
+
+<span class="c1"># Standard synchronous readback</span>
+<span class="n">sync_image</span> <span class="o">=</span> <span class="n">renderer</span><span class="o">.</span><span class="n">render_triangle_rgba</span><span class="p">()</span>  <span class="c1"># Blocks until complete</span>
+
+<span class="c1"># TODO: Async readback (when implemented)</span>
+<span class="c1"># async_handle = renderer.render_triangle_rgba_async()</span>
+<span class="c1"># async_image = async_handle.get()  # Non-blocking until ready</span>
+</pre></div>
+</div>
+<p><strong>Double-Buffered Operations</strong></p>
+<p>Double-buffering prevents pipeline stalls:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">render_sequence_async</span><span class="p">(</span><span class="n">renderer</span><span class="p">,</span> <span class="n">num_frames</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Example of async rendering pattern.&quot;&quot;&quot;</span>
+
+    <span class="n">frames</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">frame_idx</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_frames</span><span class="p">):</span>
+        <span class="c1"># Render current frame</span>
+        <span class="n">current_image</span> <span class="o">=</span> <span class="n">renderer</span><span class="o">.</span><span class="n">render_triangle_rgba</span><span class="p">()</span>
+        <span class="n">frames</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">current_image</span><span class="p">)</span>
+
+        <span class="c1"># In a full async implementation:</span>
+        <span class="c1"># - Start rendering frame N+1 while processing frame N</span>
+        <span class="c1"># - Use double-buffered command buffers</span>
+        <span class="c1"># - Pipeline GPU and CPU operations</span>
+
+    <span class="k">return</span> <span class="n">frames</span>
+</pre></div>
+</div>
+<p><strong>Buffer Pooling</strong></p>
+<p>Efficient buffer management for async operations:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">AsyncBufferPool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Buffer pool for async readback operations.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">buffer_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">pool_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">buffer_size</span> <span class="o">=</span> <span class="n">buffer_size</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">available_buffers</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">used_buffers</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># Pre-allocate buffers</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">pool_size</span><span class="p">):</span>
+            <span class="n">buffer</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">buffer_size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">available_buffers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">buffer</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_buffer</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get an available buffer from the pool.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">available_buffers</span><span class="p">:</span>
+            <span class="n">buffer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">available_buffers</span><span class="o">.</span><span class="n">pop</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">used_buffers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">buffer</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">buffer</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Allocate new buffer if pool is empty</span>
+            <span class="n">buffer</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">buffer_size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">used_buffers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">buffer</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">buffer</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">return_buffer</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">buffer</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a buffer to the pool.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">buffer</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">used_buffers</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">used_buffers</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">buffer</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">available_buffers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">buffer</span><span class="p">)</span>
+
+<span class="c1"># Usage example</span>
+<span class="n">pool</span> <span class="o">=</span> <span class="n">AsyncBufferPool</span><span class="p">(</span><span class="n">buffer_size</span><span class="o">=</span><span class="mi">512</span><span class="o">*</span><span class="mi">512</span><span class="o">*</span><span class="mi">4</span><span class="p">,</span> <span class="n">pool_size</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+<span class="n">buffer</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">get_buffer</span><span class="p">()</span>
+<span class="c1"># ... use buffer for readback ...</span>
+<span class="n">pool</span><span class="o">.</span><span class="n">return_buffer</span><span class="p">(</span><span class="n">buffer</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="multi-threaded-command-recording">
+<h2>Multi-threaded Command Recording<a class="headerlink" href="#multi-threaded-command-recording" title="Link to this heading"></a></h2>
+<p><strong>Thread Pool Pattern</strong></p>
+<p>Use ThreadPoolExecutor for parallel rendering tasks:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">concurrent.futures</span><span class="w"> </span><span class="kn">import</span> <span class="n">ThreadPoolExecutor</span><span class="p">,</span> <span class="n">as_completed</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">render_task</span><span class="p">(</span><span class="n">task_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">width</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">height</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Individual rendering task for thread pool.&quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+
+        <span class="c1"># Create renderer (each thread gets its own)</span>
+        <span class="n">renderer</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">Renderer</span><span class="p">(</span><span class="n">width</span><span class="p">,</span> <span class="n">height</span><span class="p">)</span>
+
+        <span class="c1"># Render content</span>
+        <span class="n">image</span> <span class="o">=</span> <span class="n">renderer</span><span class="o">.</span><span class="n">render_triangle_rgba</span><span class="p">()</span>
+
+        <span class="n">end_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;task_id&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+            <span class="s1">&#39;image&#39;</span><span class="p">:</span> <span class="n">image</span><span class="p">,</span>
+            <span class="s1">&#39;render_time&#39;</span><span class="p">:</span> <span class="n">end_time</span> <span class="o">-</span> <span class="n">start_time</span><span class="p">,</span>
+            <span class="s1">&#39;success&#39;</span><span class="p">:</span> <span class="kc">True</span>
+        <span class="p">}</span>
+
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;task_id&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+            <span class="s1">&#39;image&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">),</span>
+            <span class="s1">&#39;success&#39;</span><span class="p">:</span> <span class="kc">False</span>
+        <span class="p">}</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parallel_rendering</span><span class="p">(</span><span class="n">num_tasks</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">max_workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Render multiple tasks in parallel.&quot;&quot;&quot;</span>
+
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">with</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="n">max_workers</span><span class="p">)</span> <span class="k">as</span> <span class="n">executor</span><span class="p">:</span>
+        <span class="c1"># Submit all tasks</span>
+        <span class="n">future_to_task</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">executor</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">render_task</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="mi">256</span><span class="p">,</span> <span class="mi">256</span><span class="p">):</span> <span class="n">i</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_tasks</span><span class="p">)</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Collect results as they complete</span>
+        <span class="k">for</span> <span class="n">future</span> <span class="ow">in</span> <span class="n">as_completed</span><span class="p">(</span><span class="n">future_to_task</span><span class="p">):</span>
+            <span class="n">task_id</span> <span class="o">=</span> <span class="n">future_to_task</span><span class="p">[</span><span class="n">future</span><span class="p">]</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="n">future</span><span class="o">.</span><span class="n">result</span><span class="p">()</span>
+                <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Task </span><span class="si">{</span><span class="n">task_id</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="s1">&#39;Success&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;success&#39;</span><span class="p">]</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;Failed&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Task </span><span class="si">{</span><span class="n">task_id</span><span class="si">}</span><span class="s2"> generated exception: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">results</span>
+
+<span class="c1"># Run parallel rendering</span>
+<span class="n">results</span> <span class="o">=</span> <span class="n">parallel_rendering</span><span class="p">(</span><span class="n">num_tasks</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">max_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+<span class="n">successful_results</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">results</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s1">&#39;success&#39;</span><span class="p">]]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Completed </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">successful_results</span><span class="p">)</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">)</span><span class="si">}</span><span class="s2"> tasks&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Producer-Consumer Pattern</strong></p>
+<p>Queue-based task distribution:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">queue</span><span class="w"> </span><span class="kn">import</span> <span class="n">Queue</span><span class="p">,</span> <span class="n">Empty</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">producer_consumer_rendering</span><span class="p">(</span><span class="n">tasks</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">num_workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Render using producer-consumer pattern.&quot;&quot;&quot;</span>
+
+    <span class="n">task_queue</span> <span class="o">=</span> <span class="n">Queue</span><span class="p">()</span>
+    <span class="n">result_queue</span> <span class="o">=</span> <span class="n">Queue</span><span class="p">()</span>
+
+    <span class="c1"># Producer: Add tasks to queue</span>
+    <span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">tasks</span><span class="p">:</span>
+        <span class="n">task_queue</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+
+    <span class="c1"># Add sentinel values to signal workers to stop</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_workers</span><span class="p">):</span>
+        <span class="n">task_queue</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">worker</span><span class="p">():</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Worker function that processes tasks.&quot;&quot;&quot;</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">task</span> <span class="o">=</span> <span class="n">task_queue</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">task</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>  <span class="c1"># Sentinel value</span>
+                    <span class="k">break</span>
+
+                <span class="c1"># Process task</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="n">render_task</span><span class="p">(</span><span class="n">task</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">],</span> <span class="n">task</span><span class="p">[</span><span class="s1">&#39;width&#39;</span><span class="p">],</span> <span class="n">task</span><span class="p">[</span><span class="s1">&#39;height&#39;</span><span class="p">])</span>
+                <span class="n">result_queue</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+                <span class="n">task_queue</span><span class="o">.</span><span class="n">task_done</span><span class="p">()</span>
+
+            <span class="k">except</span> <span class="n">Empty</span><span class="p">:</span>
+                <span class="k">break</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">result_queue</span><span class="o">.</span><span class="n">put</span><span class="p">({</span>
+                    <span class="s1">&#39;task_id&#39;</span><span class="p">:</span> <span class="n">task</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;id&#39;</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">),</span>
+                    <span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">),</span>
+                    <span class="s1">&#39;success&#39;</span><span class="p">:</span> <span class="kc">False</span>
+                <span class="p">})</span>
+
+    <span class="c1"># Start workers</span>
+    <span class="n">workers</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_workers</span><span class="p">):</span>
+        <span class="n">worker_thread</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">worker</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Worker-</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">worker_thread</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+        <span class="n">workers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">worker_thread</span><span class="p">)</span>
+
+    <span class="c1"># Collect results</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">tasks</span><span class="p">)):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">result_queue</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">10.0</span><span class="p">)</span>
+            <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">Empty</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Timeout waiting for result&quot;</span><span class="p">)</span>
+            <span class="k">break</span>
+
+    <span class="c1"># Wait for workers to complete</span>
+    <span class="k">for</span> <span class="n">worker_thread</span> <span class="ow">in</span> <span class="n">workers</span><span class="p">:</span>
+        <span class="n">worker_thread</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">results</span>
+</pre></div>
+</div>
+</section>
+<section id="async-compute-operations">
+<h2>Async Compute Operations<a class="headerlink" href="#async-compute-operations" title="Link to this heading"></a></h2>
+<p><strong>Prepass Operations</strong></p>
+<p>Implement async compute prepasses for performance optimization:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">AsyncComputePrepass</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Async compute prepass for depth optimization.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">width</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">height</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">width</span> <span class="o">=</span> <span class="n">width</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">height</span> <span class="o">=</span> <span class="n">height</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">depth_buffer</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">((</span><span class="n">height</span><span class="p">,</span> <span class="n">width</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">object_ids</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">((</span><span class="n">height</span><span class="p">,</span> <span class="n">width</span><span class="p">),</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">compute_depth_prepass_async</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scene_objects</span><span class="p">:</span> <span class="nb">list</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute depth prepass asynchronously.&quot;&quot;&quot;</span>
+
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+
+        <span class="c1"># Simulate async depth computation</span>
+        <span class="c1"># In real implementation, this would use GPU compute shaders</span>
+
+        <span class="n">objects_processed</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">pixels_with_geometry</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="k">for</span> <span class="n">obj</span> <span class="ow">in</span> <span class="n">scene_objects</span><span class="p">:</span>
+            <span class="c1"># Simulate object depth testing</span>
+            <span class="n">obj_depth</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+            <span class="n">obj_pixels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)</span>
+
+            <span class="c1"># Update depth buffer (simplified)</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">height</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">width</span><span class="p">))</span> <span class="o">&lt;</span> <span class="mf">0.1</span>
+            <span class="n">closer_mask</span> <span class="o">=</span> <span class="n">mask</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">obj_depth</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">depth_buffer</span><span class="p">)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">depth_buffer</span><span class="p">[</span><span class="n">closer_mask</span><span class="p">]</span> <span class="o">=</span> <span class="n">obj_depth</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">object_ids</span><span class="p">[</span><span class="n">closer_mask</span><span class="p">]</span> <span class="o">=</span> <span class="n">obj</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+
+            <span class="n">objects_processed</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">pixels_with_geometry</span> <span class="o">+=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">closer_mask</span><span class="p">)</span>
+
+        <span class="n">prepass_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;depth_buffer&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">depth_buffer</span><span class="p">,</span>
+            <span class="s1">&#39;object_ids&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">object_ids</span><span class="p">,</span>
+            <span class="s1">&#39;stats&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;objects_processed&#39;</span><span class="p">:</span> <span class="n">objects_processed</span><span class="p">,</span>
+                <span class="s1">&#39;pixels_with_geometry&#39;</span><span class="p">:</span> <span class="n">pixels_with_geometry</span><span class="p">,</span>
+                <span class="s1">&#39;prepass_time&#39;</span><span class="p">:</span> <span class="n">prepass_time</span><span class="p">,</span>
+                <span class="s1">&#39;depth_complexity&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">depth_buffer</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">object_ids</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">])</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">apply_early_z_optimization</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">main_pass_objects</span><span class="p">:</span> <span class="nb">list</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Apply early-Z optimization using prepass results.&quot;&quot;&quot;</span>
+
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+
+        <span class="c1"># Only process objects that passed depth test</span>
+        <span class="n">visible_objects</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">pixels_shaded</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="k">for</span> <span class="n">obj</span> <span class="ow">in</span> <span class="n">main_pass_objects</span><span class="p">:</span>
+            <span class="n">obj_mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">object_ids</span> <span class="o">==</span> <span class="n">obj</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span>
+            <span class="n">obj_pixel_count</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">obj_mask</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">obj_pixel_count</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">visible_objects</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span>
+                <span class="n">pixels_shaded</span> <span class="o">+=</span> <span class="n">obj_pixel_count</span>
+
+        <span class="n">main_pass_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;visible_objects&#39;</span><span class="p">:</span> <span class="n">visible_objects</span><span class="p">,</span>
+            <span class="s1">&#39;pixels_shaded&#39;</span><span class="p">:</span> <span class="n">pixels_shaded</span><span class="p">,</span>
+            <span class="s1">&#39;main_pass_time&#39;</span><span class="p">:</span> <span class="n">main_pass_time</span><span class="p">,</span>
+            <span class="s1">&#39;optimization_ratio&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">visible_objects</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">main_pass_objects</span><span class="p">)</span> <span class="k">if</span> <span class="n">main_pass_objects</span> <span class="k">else</span> <span class="mi">0</span>
+        <span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="non-blocking-gpu-operations">
+<h2>Non-blocking GPU Operations<a class="headerlink" href="#non-blocking-gpu-operations" title="Link to this heading"></a></h2>
+<p><strong>Async Texture Upload</strong></p>
+<p>Upload textures without blocking the main thread:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">AsyncTextureUploader</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Async texture upload with memory management.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">max_memory_mb</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">256</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_memory_bytes</span> <span class="o">=</span> <span class="n">max_memory_mb</span> <span class="o">*</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">used_memory</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">upload_queue</span> <span class="o">=</span> <span class="n">Queue</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">uploaded_textures</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">calculate_texture_memory</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">width</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">height</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">channels</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Calculate texture memory usage.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">width</span> <span class="o">*</span> <span class="n">height</span> <span class="o">*</span> <span class="n">channels</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">can_upload</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">width</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">height</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">channels</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Check if texture fits in memory budget.&quot;&quot;&quot;</span>
+        <span class="n">required_memory</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">calculate_texture_memory</span><span class="p">(</span><span class="n">width</span><span class="p">,</span> <span class="n">height</span><span class="p">,</span> <span class="n">channels</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">used_memory</span> <span class="o">+</span> <span class="n">required_memory</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_memory_bytes</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">queue_texture_upload</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">texture_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">texture_data</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Queue texture for async upload.&quot;&quot;&quot;</span>
+        <span class="n">height</span><span class="p">,</span> <span class="n">width</span> <span class="o">=</span> <span class="n">texture_data</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="mi">2</span><span class="p">]</span>
+        <span class="n">channels</span> <span class="o">=</span> <span class="n">texture_data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">texture_data</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">2</span> <span class="k">else</span> <span class="mi">1</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">can_upload</span><span class="p">(</span><span class="n">width</span><span class="p">,</span> <span class="n">height</span><span class="p">,</span> <span class="n">channels</span><span class="p">):</span>
+            <span class="k">return</span> <span class="kc">False</span>
+
+        <span class="n">upload_task</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;id&#39;</span><span class="p">:</span> <span class="n">texture_id</span><span class="p">,</span>
+            <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="n">texture_data</span><span class="p">,</span>
+            <span class="s1">&#39;memory_size&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">calculate_texture_memory</span><span class="p">(</span><span class="n">width</span><span class="p">,</span> <span class="n">height</span><span class="p">,</span> <span class="n">channels</span><span class="p">)</span>
+        <span class="p">}</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">upload_queue</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">upload_task</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">process_upload_queue</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Process queued texture uploads.&quot;&quot;&quot;</span>
+        <span class="n">processed</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">failed</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="k">while</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">upload_queue</span><span class="o">.</span><span class="n">empty</span><span class="p">():</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">upload_queue</span><span class="o">.</span><span class="n">get_nowait</span><span class="p">()</span>
+
+                <span class="c1"># Simulate texture upload</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.001</span><span class="p">)</span>  <span class="c1"># Simulate upload time</span>
+
+                <span class="c1"># Track memory usage</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">used_memory</span> <span class="o">+=</span> <span class="n">task</span><span class="p">[</span><span class="s1">&#39;memory_size&#39;</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">uploaded_textures</span><span class="p">[</span><span class="n">task</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span>
+                    <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="n">task</span><span class="p">[</span><span class="s1">&#39;data&#39;</span><span class="p">],</span>
+                    <span class="s1">&#39;memory_size&#39;</span><span class="p">:</span> <span class="n">task</span><span class="p">[</span><span class="s1">&#39;memory_size&#39;</span><span class="p">]</span>
+                <span class="p">}</span>
+
+                <span class="n">processed</span> <span class="o">+=</span> <span class="mi">1</span>
+
+            <span class="k">except</span> <span class="n">Empty</span><span class="p">:</span>
+                <span class="k">break</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">failed</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Upload failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;processed&#39;</span><span class="p">:</span> <span class="n">processed</span><span class="p">,</span>
+            <span class="s1">&#39;failed&#39;</span><span class="p">:</span> <span class="n">failed</span><span class="p">,</span>
+            <span class="s1">&#39;memory_used_mb&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">used_memory</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">),</span>
+            <span class="s1">&#39;memory_utilization&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">used_memory</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_memory_bytes</span>
+        <span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="performance-monitoring">
+<h2>Performance Monitoring<a class="headerlink" href="#performance-monitoring" title="Link to this heading"></a></h2>
+<p><strong>Async Performance Metrics</strong></p>
+<p>Monitor async operation performance:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">AsyncPerformanceMonitor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Monitor performance of async operations.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">metrics</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">start_times</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">start_operation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">operation_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Start timing an async operation.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">start_times</span><span class="p">[</span><span class="n">operation_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">end_operation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">operation_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">**</span><span class="n">metadata</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;End timing and record metrics.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">operation_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_times</span><span class="p">:</span>
+            <span class="n">duration</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_times</span><span class="p">[</span><span class="n">operation_name</span><span class="p">]</span>
+
+            <span class="k">if</span> <span class="n">operation_name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">metrics</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">metrics</span><span class="p">[</span><span class="n">operation_name</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+                    <span class="s1">&#39;count&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+                    <span class="s1">&#39;total_time&#39;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>
+                    <span class="s1">&#39;min_time&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="s1">&#39;inf&#39;</span><span class="p">),</span>
+                    <span class="s1">&#39;max_time&#39;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>
+                    <span class="s1">&#39;metadata&#39;</span><span class="p">:</span> <span class="p">[]</span>
+                <span class="p">}</span>
+
+            <span class="n">metric</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">metrics</span><span class="p">[</span><span class="n">operation_name</span><span class="p">]</span>
+            <span class="n">metric</span><span class="p">[</span><span class="s1">&#39;count&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">metric</span><span class="p">[</span><span class="s1">&#39;total_time&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="n">duration</span>
+            <span class="n">metric</span><span class="p">[</span><span class="s1">&#39;min_time&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">metric</span><span class="p">[</span><span class="s1">&#39;min_time&#39;</span><span class="p">],</span> <span class="n">duration</span><span class="p">)</span>
+            <span class="n">metric</span><span class="p">[</span><span class="s1">&#39;max_time&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">metric</span><span class="p">[</span><span class="s1">&#39;max_time&#39;</span><span class="p">],</span> <span class="n">duration</span><span class="p">)</span>
+            <span class="n">metric</span><span class="p">[</span><span class="s1">&#39;metadata&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span>
+
+            <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_times</span><span class="p">[</span><span class="n">operation_name</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_summary</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get performance summary.&quot;&quot;&quot;</span>
+        <span class="n">summary</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="k">for</span> <span class="n">op_name</span><span class="p">,</span> <span class="n">metric</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">metrics</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">metric</span><span class="p">[</span><span class="s1">&#39;count&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">summary</span><span class="p">[</span><span class="n">op_name</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+                    <span class="s1">&#39;count&#39;</span><span class="p">:</span> <span class="n">metric</span><span class="p">[</span><span class="s1">&#39;count&#39;</span><span class="p">],</span>
+                    <span class="s1">&#39;avg_time_ms&#39;</span><span class="p">:</span> <span class="p">(</span><span class="n">metric</span><span class="p">[</span><span class="s1">&#39;total_time&#39;</span><span class="p">]</span> <span class="o">/</span> <span class="n">metric</span><span class="p">[</span><span class="s1">&#39;count&#39;</span><span class="p">])</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span>
+                    <span class="s1">&#39;min_time_ms&#39;</span><span class="p">:</span> <span class="n">metric</span><span class="p">[</span><span class="s1">&#39;min_time&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span>
+                    <span class="s1">&#39;max_time_ms&#39;</span><span class="p">:</span> <span class="n">metric</span><span class="p">[</span><span class="s1">&#39;max_time&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span>
+                    <span class="s1">&#39;total_time_ms&#39;</span><span class="p">:</span> <span class="n">metric</span><span class="p">[</span><span class="s1">&#39;total_time&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="mi">1000</span>
+                <span class="p">}</span>
+
+        <span class="k">return</span> <span class="n">summary</span>
+
+<span class="c1"># Usage example</span>
+<span class="n">monitor</span> <span class="o">=</span> <span class="n">AsyncPerformanceMonitor</span><span class="p">()</span>
+
+<span class="n">monitor</span><span class="o">.</span><span class="n">start_operation</span><span class="p">(</span><span class="s1">&#39;async_render&#39;</span><span class="p">)</span>
+<span class="c1"># ... perform async rendering ...</span>
+<span class="n">monitor</span><span class="o">.</span><span class="n">end_operation</span><span class="p">(</span><span class="s1">&#39;async_render&#39;</span><span class="p">,</span> <span class="n">resolution</span><span class="o">=</span><span class="p">(</span><span class="mi">800</span><span class="p">,</span> <span class="mi">600</span><span class="p">),</span> <span class="n">objects</span><span class="o">=</span><span class="mi">25</span><span class="p">)</span>
+
+<span class="n">summary</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">get_summary</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Async render average: </span><span class="si">{</span><span class="n">summary</span><span class="p">[</span><span class="s1">&#39;async_render&#39;</span><span class="p">][</span><span class="s1">&#39;avg_time_ms&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">ms&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>Threading Performance Analysis</strong></p>
+<p>Analyze threading efficiency:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">analyze_threading_performance</span><span class="p">(</span><span class="n">results</span><span class="p">:</span> <span class="nb">list</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Analyze performance across different threading approaches.&quot;&quot;&quot;</span>
+
+    <span class="n">analysis</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="c1"># Find sequential baseline</span>
+    <span class="n">sequential</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">results</span> <span class="k">if</span> <span class="s1">&#39;sequential&#39;</span> <span class="ow">in</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;mode&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)),</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">baseline_time</span> <span class="o">=</span> <span class="n">sequential</span><span class="p">[</span><span class="s1">&#39;total_time&#39;</span><span class="p">]</span> <span class="k">if</span> <span class="n">sequential</span> <span class="k">else</span> <span class="kc">None</span>
+
+    <span class="k">for</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">results</span><span class="p">:</span>
+        <span class="n">mode</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;mode&#39;</span><span class="p">,</span> <span class="s1">&#39;unknown&#39;</span><span class="p">)</span>
+        <span class="n">total_time</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;total_time&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">worker_count</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;max_workers&#39;</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;num_workers&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+
+        <span class="c1"># Calculate performance metrics</span>
+        <span class="n">speedup</span> <span class="o">=</span> <span class="n">baseline_time</span> <span class="o">/</span> <span class="n">total_time</span> <span class="k">if</span> <span class="n">baseline_time</span> <span class="ow">and</span> <span class="n">total_time</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+        <span class="n">efficiency</span> <span class="o">=</span> <span class="n">speedup</span> <span class="o">/</span> <span class="n">worker_count</span> <span class="k">if</span> <span class="n">worker_count</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+
+        <span class="c1"># Thread utilization</span>
+        <span class="n">unique_threads</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;thread_id&#39;</span><span class="p">)</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tasks&#39;</span><span class="p">,</span> <span class="p">[])</span> <span class="k">if</span> <span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;thread_id&#39;</span><span class="p">)))</span>
+
+        <span class="n">analysis</span><span class="p">[</span><span class="n">mode</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;total_time_ms&#39;</span><span class="p">:</span> <span class="n">total_time</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span>
+            <span class="s1">&#39;speedup&#39;</span><span class="p">:</span> <span class="n">speedup</span><span class="p">,</span>
+            <span class="s1">&#39;efficiency_percent&#39;</span><span class="p">:</span> <span class="n">efficiency</span> <span class="o">*</span> <span class="mi">100</span><span class="p">,</span>
+            <span class="s1">&#39;threads_used&#39;</span><span class="p">:</span> <span class="n">unique_threads</span><span class="p">,</span>
+            <span class="s1">&#39;theoretical_max_speedup&#39;</span><span class="p">:</span> <span class="n">worker_count</span><span class="p">,</span>
+            <span class="s1">&#39;utilization_percent&#39;</span><span class="p">:</span> <span class="p">(</span><span class="n">unique_threads</span> <span class="o">/</span> <span class="n">worker_count</span> <span class="o">*</span> <span class="mi">100</span><span class="p">)</span> <span class="k">if</span> <span class="n">worker_count</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+        <span class="p">}</span>
+
+    <span class="k">return</span> <span class="n">analysis</span>
+</pre></div>
+</div>
+</section>
+<section id="memory-management-for-async-operations">
+<h2>Memory Management for Async Operations<a class="headerlink" href="#memory-management-for-async-operations" title="Link to this heading"></a></h2>
+<p><strong>Resource Cleanup</strong></p>
+<p>Ensure proper cleanup of async resources:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">AsyncResourceManager</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Manage resources for async operations.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">memory_budget_mb</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">256</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">memory_budget</span> <span class="o">=</span> <span class="n">memory_budget_mb</span> <span class="o">*</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">allocated_resources</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_usage</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">allocate_resource</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">resource_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">size_bytes</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Allocate resource if within budget.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_usage</span> <span class="o">+</span> <span class="n">size_bytes</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">memory_budget</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">allocated_resources</span><span class="p">[</span><span class="n">resource_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">size_bytes</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_usage</span> <span class="o">+=</span> <span class="n">size_bytes</span>
+        <span class="k">return</span> <span class="kc">True</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">deallocate_resource</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">resource_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Deallocate resource and free memory.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">resource_id</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">allocated_resources</span><span class="p">:</span>
+            <span class="n">size_bytes</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">allocated_resources</span><span class="p">[</span><span class="n">resource_id</span><span class="p">]</span>
+            <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">allocated_resources</span><span class="p">[</span><span class="n">resource_id</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">current_usage</span> <span class="o">-=</span> <span class="n">size_bytes</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">cleanup_all</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Clean up all allocated resources.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">allocated_resources</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_usage</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_memory_stats</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get current memory usage statistics.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;used_bytes&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_usage</span><span class="p">,</span>
+            <span class="s1">&#39;used_mb&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_usage</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">),</span>
+            <span class="s1">&#39;budget_mb&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">memory_budget</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">),</span>
+            <span class="s1">&#39;utilization_percent&#39;</span><span class="p">:</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">current_usage</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">memory_budget</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span><span class="p">,</span>
+            <span class="s1">&#39;active_resources&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">allocated_resources</span><span class="p">)</span>
+        <span class="p">}</span>
+
+<span class="c1"># Usage with context manager</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">AsyncOperation</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">resource_manager</span><span class="p">:</span> <span class="n">AsyncResourceManager</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">resource_manager</span> <span class="o">=</span> <span class="n">resource_manager</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">allocated_resources</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc_type</span><span class="p">,</span> <span class="n">exc_val</span><span class="p">,</span> <span class="n">exc_tb</span><span class="p">):</span>
+        <span class="c1"># Cleanup resources on exit</span>
+        <span class="k">for</span> <span class="n">resource_id</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">allocated_resources</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">resource_manager</span><span class="o">.</span><span class="n">deallocate_resource</span><span class="p">(</span><span class="n">resource_id</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">allocated_resources</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">allocate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">resource_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">size_bytes</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Allocate resource and track it.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">resource_manager</span><span class="o">.</span><span class="n">allocate_resource</span><span class="p">(</span><span class="n">resource_id</span><span class="p">,</span> <span class="n">size_bytes</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">allocated_resources</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">resource_id</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">return</span> <span class="kc">False</span>
+</pre></div>
+</div>
+</section>
+<section id="best-practices">
+<h2>Best Practices<a class="headerlink" href="#best-practices" title="Link to this heading"></a></h2>
+<p><strong>Thread Safety</strong></p>
+<p>Ensure thread-safe operations:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+
+<span class="c1"># Use thread-local storage for per-thread resources</span>
+<span class="n">thread_local_data</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">local</span><span class="p">()</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_thread_renderer</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get renderer for current thread.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">thread_local_data</span><span class="p">,</span> <span class="s1">&#39;renderer&#39;</span><span class="p">):</span>
+        <span class="n">thread_local_data</span><span class="o">.</span><span class="n">renderer</span> <span class="o">=</span> <span class="n">f3d</span><span class="o">.</span><span class="n">Renderer</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="mi">256</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">thread_local_data</span><span class="o">.</span><span class="n">renderer</span>
+
+<span class="c1"># Use locks for shared resources</span>
+<span class="n">resource_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+<span class="n">shared_counter</span> <span class="o">=</span> <span class="mi">0</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">thread_safe_increment</span><span class="p">():</span>
+    <span class="k">global</span> <span class="n">shared_counter</span>
+    <span class="k">with</span> <span class="n">resource_lock</span><span class="p">:</span>
+        <span class="n">shared_counter</span> <span class="o">+=</span> <span class="mi">1</span>
+</pre></div>
+</div>
+<p><strong>Error Handling</strong></p>
+<p>Robust error handling for async operations:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">safe_async_operation</span><span class="p">(</span><span class="n">task_func</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Wrapper for safe async operation execution.&quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">task_func</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;success&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;result&#39;</span><span class="p">:</span> <span class="n">result</span><span class="p">}</span>
+    <span class="k">except</span> <span class="ne">MemoryError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;success&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="s1">&#39;memory_error&#39;</span><span class="p">,</span> <span class="s1">&#39;message&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;success&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="s1">&#39;general_error&#39;</span><span class="p">,</span> <span class="s1">&#39;message&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
+</pre></div>
+</div>
+<p><strong>Memory Budget Compliance</strong></p>
+<p>Always respect the 512 MiB memory budget:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">check_memory_before_async_operation</span><span class="p">(</span><span class="n">operation_size_mb</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Check if async operation fits within memory budget.&quot;&quot;&quot;</span>
+    <span class="n">MAX_MEMORY_MB</span> <span class="o">=</span> <span class="mi">512</span>
+
+    <span class="c1"># Estimate current usage (simplified)</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">psutil</span>
+    <span class="n">process</span> <span class="o">=</span> <span class="n">psutil</span><span class="o">.</span><span class="n">Process</span><span class="p">()</span>
+    <span class="n">current_mb</span> <span class="o">=</span> <span class="n">process</span><span class="o">.</span><span class="n">memory_info</span><span class="p">()</span><span class="o">.</span><span class="n">rss</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">current_mb</span> <span class="o">+</span> <span class="n">operation_size_mb</span> <span class="o">&gt;</span> <span class="n">MAX_MEMORY_MB</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;⚠ Operation would exceed memory budget: </span><span class="si">{</span><span class="n">current_mb</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">operation_size_mb</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> MB&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="k">return</span> <span class="kc">True</span>
+</pre></div>
+</div>
+</section>
+<section id="example-applications">
+<h2>Example Applications<a class="headerlink" href="#example-applications" title="Link to this heading"></a></h2>
+<p><strong>Batch Rendering Pipeline</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">create_batch_rendering_pipeline</span><span class="p">(</span><span class="n">tasks</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">max_workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create async batch rendering pipeline.&quot;&quot;&quot;</span>
+
+    <span class="c1"># Setup resource management</span>
+    <span class="n">resource_manager</span> <span class="o">=</span> <span class="n">AsyncResourceManager</span><span class="p">(</span><span class="n">memory_budget_mb</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span>
+    <span class="n">monitor</span> <span class="o">=</span> <span class="n">AsyncPerformanceMonitor</span><span class="p">()</span>
+
+    <span class="k">with</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="n">max_workers</span><span class="p">)</span> <span class="k">as</span> <span class="n">executor</span><span class="p">:</span>
+        <span class="c1"># Submit all tasks</span>
+        <span class="n">futures</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">tasks</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">check_memory_before_async_operation</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;memory_mb&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">)):</span>
+                <span class="n">future</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">render_task</span><span class="p">,</span> <span class="n">task</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">],</span> <span class="n">task</span><span class="p">[</span><span class="s1">&#39;width&#39;</span><span class="p">],</span> <span class="n">task</span><span class="p">[</span><span class="s1">&#39;height&#39;</span><span class="p">])</span>
+                <span class="n">futures</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">future</span><span class="p">,</span> <span class="n">task</span><span class="p">))</span>
+
+        <span class="c1"># Collect results with monitoring</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">future</span><span class="p">,</span> <span class="n">task</span> <span class="ow">in</span> <span class="n">futures</span><span class="p">:</span>
+            <span class="n">monitor</span><span class="o">.</span><span class="n">start_operation</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;task_</span><span class="si">{</span><span class="n">task</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="n">future</span><span class="o">.</span><span class="n">result</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">30.0</span><span class="p">)</span>
+                <span class="n">monitor</span><span class="o">.</span><span class="n">end_operation</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;task_</span><span class="si">{</span><span class="n">task</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="o">**</span><span class="n">task</span><span class="p">)</span>
+                <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Task </span><span class="si">{</span><span class="n">task</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Cleanup and report</span>
+    <span class="n">resource_manager</span><span class="o">.</span><span class="n">cleanup_all</span><span class="p">()</span>
+    <span class="n">performance_summary</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">get_summary</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="n">results</span><span class="p">,</span> <span class="n">performance_summary</span>
+</pre></div>
+</div>
+</section>
+<section id="troubleshooting">
+<h2>Troubleshooting<a class="headerlink" href="#troubleshooting" title="Link to this heading"></a></h2>
+<p><strong>Common Async Issues</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Memory Leaks in Async Operations</strong>
+- Always use context managers or explicit cleanup
+- Monitor memory usage regularly
+- Implement resource tracking</p></li>
+<li><p><strong>Threading Deadlocks</strong>
+- Use timeout parameters on blocking operations
+- Avoid nested locking
+- Use thread-safe data structures</p></li>
+<li><p><strong>Performance Degradation</strong>
+- Don’t over-parallelize (optimal worker count ≈ CPU cores)
+- Consider I/O bound vs CPU bound operations
+- Monitor thread utilization</p></li>
+</ol>
+<p><strong>Memory Budget Violations</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Always check memory before large async operations</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">safe_large_operation</span><span class="p">(</span><span class="n">data_size_mb</span><span class="p">:</span> <span class="nb">float</span><span class="p">):</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">check_memory_before_async_operation</span><span class="p">(</span><span class="n">data_size_mb</span><span class="p">):</span>
+        <span class="c1"># Use streaming or tiling approach</span>
+        <span class="k">return</span> <span class="n">process_in_chunks</span><span class="p">(</span><span class="n">data_size_mb</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">process_all_at_once</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>See the comprehensive async examples:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">examples/multithreaded_command_recording.py</span></code> - Threading patterns and performance</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">examples/async_compute_prepass.py</span></code> - GPU compute optimization</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">examples/large_texture_upload_policies.py</span></code> - Memory management strategies</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="terrain_rendering.html" class="btn btn-neutral float-left" title="Terrain Rendering" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="tiles/xyz_wmts.html" class="btn btn-neutral float-right" title="docs/tiles/xyz_wmts.md" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, forge3d contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

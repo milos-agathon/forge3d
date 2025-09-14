@@ -7,7 +7,4 @@ pub mod hdr;
 pub use hdr::{HdrImage, load_hdr};
 
 // L6: Optional EXR format loader (feature-gated)
-#[cfg(feature = "exr")]
-pub mod exr;
-#[cfg(feature = "exr")]
-pub use exr::{ExrImage, load_exr};
+// EXR support is planned but not yet implemented
