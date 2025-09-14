@@ -8,8 +8,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple, List, Any
+from typing import Tuple, List, Any, Optional
+from enum import Enum
 import numpy as np
+
+
+class TracerEngine(Enum):
+    """Path tracing engine selection."""
+    MEGAKERNEL = "megakernel"
+    WAVEFRONT = "wavefront"
 
 
 @dataclass
@@ -291,8 +298,21 @@ def create_path_tracer(width: int, height: int, *, max_bounces: int = 1, seed: i
     return PathTracer(width, height, max_bounces=max_bounces, seed=seed)
 
 
-def render_rgba(width: int, height: int, scene, camera, seed: int, frames: int = 1, use_gpu: bool = True):
+def render_rgba(width: int, height: int, scene, camera, seed: int, frames: int = 1, use_gpu: bool = True, engine: Optional[TracerEngine] = None):
     """Render RGBA image using GPU when available, else CPU fallback.
+
+    Args:
+        width: Image width in pixels
+        height: Image height in pixels
+        scene: Scene description (list of spheres/primitives)
+        camera: Camera parameters
+        seed: Random seed for deterministic rendering
+        frames: Number of samples per pixel
+        use_gpu: Whether to use GPU rendering
+        engine: Path tracing engine (MEGAKERNEL or WAVEFRONT), defaults to MEGAKERNEL
+
+    Returns:
+        RGBA image as numpy array (H, W, 4) uint8
 
     Matches the A1 bridge signature for deterministic smoke testing.
     """
@@ -322,10 +342,23 @@ def render_aovs(
     seed: int = 1234,
     frames: int = 1,
     use_gpu: bool = True,
+    engine: Optional[TracerEngine] = None,
 ):
     """Render AOVs on GPU when available, else CPU fallback.
 
-    Returns dict of numpy arrays keyed by canonical AOV names.
+    Args:
+        width: Image width in pixels
+        height: Image height in pixels
+        scene: Scene description (list of spheres/primitives)
+        camera: Camera parameters
+        aovs: Tuple of AOV names to render
+        seed: Random seed for deterministic rendering
+        frames: Number of samples per pixel
+        use_gpu: Whether to use GPU rendering
+        engine: Path tracing engine (MEGAKERNEL or WAVEFRONT), defaults to MEGAKERNEL
+
+    Returns:
+        Dict of numpy arrays keyed by canonical AOV names.
     """
     # GPU path: not implemented yet in this workstream scaffold; fall back
     # to CPU when GPU path is unavailable or fails gracefully.

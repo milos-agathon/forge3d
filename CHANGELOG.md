@@ -5,6 +5,17 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Added
+- Workstream A12 – Wavefront Path Tracer
+  - Queue-based GPU path tracing architecture with persistent threads
+  - WGSL compute kernels for raygen, intersect, shade, scatter, and compact stages
+  - Stream compaction to remove terminated rays and maintain efficiency
+  - Rust scheduler orchestrating wavefront execution with atomic queue management
+  - Python API extended with `TracerEngine` enum for selecting MEGAKERNEL or WAVEFRONT
+  - Deterministic rendering with XorShift RNG for consistent results across engines
+  - Comprehensive parity tests ensuring identical output between engines
+  - Performance tests validating compaction behavior under various scenarios
+
 ## [0.14.0] - 2025-09-12
 
 ### Added
