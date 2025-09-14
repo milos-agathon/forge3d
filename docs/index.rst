@@ -21,6 +21,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    memory_budget
    gpu_memory_management
    memory/index
+   api/path_tracing
 
 .. toctree::
    :maxdepth: 2

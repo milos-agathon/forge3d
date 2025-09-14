@@ -1,5 +1,5 @@
-<task id="ws-A7-lbvh-refit" version="1.0">
-  <title>Workstream A · Task A7 — LBVH/SAH Builder & Refit (GPU-first with CPU fallback)</title>
+<task id="ws-A14-aovs-debug-outputs" version="1.0">
+  <title>Workstream A · Task A14 — Path Tracer AOVs & Debug Outputs (GPU-first, CPU fallback)</title>
 
   <role>
     You are OpenAI Codex CLI in <b>Verification → Implementation Mode</b>, acting as a senior graphics/runtime engineer.
@@ -17,8 +17,8 @@
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
     <safety>
-      - Implement only what is necessary for A7 MVP; prefer additive changes, minimal surface area.
-      - Never delete custom user code; for generated artifacts, add .gitignore entries rather than deleting tracked files.
+      - Minimal, additive changes; preserve existing public API (add new, non-breaking endpoints).
+      - Never delete custom user code; add .gitignore entries for generated artifacts rather than deleting tracked files.
       - If a tool is missing, mark step SKIPPED with the exact command to run locally.
       - If essential data is missing, reply <b>UNCERTAIN</b> with the precise artifact or decision required.
     </safety>
@@ -30,174 +30,201 @@
     <roadmapPath>./roadmap2.csv</roadmapPath>
     <workstreamSelector>
       <![CDATA[
-      ID: A
-      Task: A7
-      Title contains: LBVH/SAH Builder & Refit
+      Workstream ID: A
+      Task ID: A14
+      Title contains: AOVs & Debug Outputs
       ]]>
     </workstreamSelector>
   </inputs>
 
-  <!-- Read from roadmap2.csv (A7 row) -->
-  <acceptanceCriteria>
-    <ac id="AC-0">roadmap2.csv contains Workstream ID "A" and Task "A7" (case-insensitive). If not found → <b>UNCERTAIN</b> (list discovered A* tasks) and STOP.</ac>
-    <ac id="AC-1">GPU LBVH build available with Morton codes + radix sort (WGSL compute), producing a compact, traversable BVH node array.</ac>
-    <ac id="AC-2">CPU SAH builder exists as a fallback, API-compatible with GPU output format.</ac>
-    <ac id="AC-3">Refit pass implemented (GPU preferred, CPU fallback) that updates internal node AABBs for modest per-frame motion without full rebuild.</ac>
-    <ac id="AC-4">Public API exposes a single builder interface selecting GPU when available; deterministic seeding and stable outputs given identical inputs.</ac>
-    <ac id="AC-5">Performance targets documented & smoke-validated: build ≤ ~1s for ~1M tris (debug builds may exceed; note in results); refit ≤ ~25ms; memory within budget.</ac>
-    <ac id="AC-6">Unit/integration tests cover GPU build (skip if no adapter), CPU fallback, and refit correctness on a small moving-scene; docs updated.</ac>
-  </acceptanceCriteria>
-
-  <design>
-    <dataModel>
-      <![CDATA[
-Node layout (SoA for GPU traversal; AoS for simplicity acceptable for MVP):
-  struct Aabb { min: vec3<f32>, max: vec3<f32> }
-  enum NodeKind { Internal{left:u32,right:u32}, Leaf{first:u32,count:u32} }
-  struct BvhNode { aabb: Aabb, kind: u32, i0: u32, i1: u32 } // packed for GPU
-Primitive index buffer: u32 per triangle; Morton code buffer: u32 (10-10-10 bits, grid 1024^3).
-Coordinate normalization: world AABB → [0,1]^3; morton3D of centroids; clamp.
-      ]]>
-    </dataModel>
-
-    <wgslKernels>
-      <![CDATA[
-Files:
-  src/shaders/lbvh_morton.wgsl       // compute morton codes from primitive centroids
-  src/shaders/radix_sort_pairs.wgsl  // key-value radix sort (codes, indices), 4-bit digit passes
-  src/shaders/lbvh_link.wgsl         // build linear BVH topology from sorted codes (Karras-style)
-  src/shaders/bvh_refit.wgsl         // bottom-up refit of AABBs
-
-Common header in each WGSL:
-  - Bind Group 0: Uniforms { prim_count:u32; frame_index:u32; world_min:vec3<f32>; world_extent:vec3<f32> }
-  - Bind Group 1: readonly storage buffers: centroids[], prim_indices[]
-  - Bind Group 2: readwrite storage buffers: morton_codes[], sorted_indices[] (for sort), nodes[], aabbs[]
-  - @workgroup_size(256) for morton/sort; @workgroup_size(64) for link/refit (tune if needed)
-      ]]>
-    </wgslKernels>
-
-    <rustAPI>
-      <![CDATA[
-Paths:
-  src/accel/mod.rs                // new module root
-  src/accel/types.rs              // AABB, Node, packing helpers
-  src/accel/lbvh_gpu.rs           // orchestrates WGSL pipelines + dispatch (build + refit)
-  src/accel/sah_cpu.rs            // CPU SAH builder (fallback)
-  src/path_tracing/accel.rs       // glue for path tracer to consume BVH buffers
-
-Key structs:
-  pub struct GpuBvhBuilder { device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, pipelines: Pipelines, … }
-  pub struct CpuSahBuilder { … }
-  pub enum BvhBackend { GPU(GpuBvh), CPU(CpuBvh) }
-  pub struct Bvh { nodes: Buffer/Vec<BvhNode>, prim_indices: Buffer/Vec<u32>, world_aabb: Aabb, … }
-
-Public API:
-  pub fn build_bvh(scene:&[Triangle], opts:&BuildOptions, ctx:&GpuContextOption) -> anyhow::Result<Bvh>;
-  pub fn refit_bvh(bvh:&mut Bvh, new_prim_aabbs:&[Aabb], ctx:&GpuContextOption) -> anyhow::Result<()>;
-      ]]>
-    </rustAPI>
-
-    <pythonAPI>
-      <![CDATA[
-# python/forge3d/path_tracing.py
-def build_bvh(primitives, use_gpu: bool = True, seed: int = 1) -> "BvhHandle": ...
-def refit_bvh(handle: "BvhHandle", new_primitives) -> None: ...
-# PathTracer uses GPU-built BVH when available; otherwise CPU SAH fallback.
-      ]]>
-    </pythonAPI>
-
-    <risksMitigations>
-      <![CDATA[
-- GPU radix sort complexity: keep MVP single-GPU-pass radix with limited memory; fallback to CPU sort if WGSL path not available.
-- Driver variability: detect unsupported features and fall back gracefully.
-- Performance variance: document results; ensure correctness-first; gate perf checks as smoke tests.
-      ]]>
-    </risksMitigations>
-  </design>
-
-  <changes>
-    <createOrModify>
-      <!-- Rust -->
-      <file path="src/accel/mod.rs" kind="new"/>
-      <file path="src/accel/types.rs" kind="new"/>
-      <file path="src/accel/lbvh_gpu.rs" kind="new"/>
-      <file path="src/accel/sah_cpu.rs" kind="new"/>
-      <file path="src/path_tracing/accel.rs" kind="new"/>
-
-      <!-- WGSL -->
-      <file path="src/shaders/lbvh_morton.wgsl" kind="new"/>
-      <file path="src/shaders/radix_sort_pairs.wgsl" kind="new"/>
-      <file path="src/shaders/lbvh_link.wgsl" kind="new"/>
-      <file path="src/shaders/bvh_refit.wgsl" kind="new"/>
-
-      <!-- Python bridge -->
-      <file path="python/forge3d/path_tracing.py" kind="modify"/>
-
-      <!-- Tests -->
-      <file path="tests/test_bvh_gpu.rs" kind="new"/>
-      <file path="tests/test_bvh_refit.rs" kind="new"/>
-      <file path="tests/test_bvh_cpu_vs_gpu.py" kind="new"/>
-
-      <!-- Docs -->
-      <file path="README.md" kind="modify-append"/>
-      <file path="docs/api/accel_bvh.md" kind="new-optional"/>
-
-      <!-- Housekeeping -->
-      <file path=".gitignore" kind="modify-append"/>
-    </createOrModify>
-  </changes>
-
-  <tests>
-    <rust path="tests/test_bvh_gpu.rs">
-      <![CDATA[
-#[test]
-fn gpu_lbvh_build_small_scene() {
-    // Build a few triangles, run GPU build if adapter available; assert node count and root AABB sane.
-}
-      ]]>
-    </rust>
-    <rust path="tests/test_bvh_refit.rs">
-      <![CDATA[
-#[test]
-fn refit_updates_aabb_without_rebuild() {
-    // Build once, then nudge a primitive; run refit; assert parent AABBs expanded accordingly.
-}
-      ]]>
-    </rust>
-    <python path="tests/test_bvh_cpu_vs_gpu.py">
-      <![CDATA[
-import pytest, numpy as np
-from forge3d.path_tracing import build_bvh, refit_bvh
-def test_cpu_gpu_equivalence_small():
-    prims = make_unit_cube_tris()
-    bvh_gpu = build_bvh(prims, use_gpu=True, seed=123)
-    bvh_cpu = build_bvh(prims, use_gpu=False, seed=123)
-    # Compare a subset: root AABB, leaf counts, and a hash of structure (tolerate minor ordering diffs).
-      ]]>
-    </python>
-  </tests>
-
+  <!-- Verify A14 exists in roadmap2.csv even if columns are misaligned -->
   <prechecks>
     <command>
       <![CDATA[
 python - <<'PY'
 import csv, codecs, sys
-found=False
-with codecs.open("roadmap2.csv","r","utf-8-sig") as f:
-    rdr=csv.DictReader(f)
+found=False; rows=[]
+try:
+  with codecs.open("roadmap2.csv","r","utf-8-sig") as f:
+    rdr=csv.reader(f)
+    headers=next(rdr, [])
+    # Accept either proper CSV or misaligned (Task Title holds "A14")
     for r in rdr:
-        wid=str(r.get("Workstream ID","")).strip().lower()
-        tid=str(r.get("Task Title","")).strip().lower()
-        rat=str(r.get("Rationale","")).lower()
-        if wid=="a" and ("a7"==tid or "a7" in tid) and ("bvh" in rat or "lbvh" in rat):
-            found=True; break
+      rows.append(r)
+      line="|".join([c.strip().lower() for c in r])
+      if "workstream id" in "|".join([h.lower() for h in headers]):
+        if ("a14" in line) and ("a|" in line or "|a|" in line or line.startswith("a|") or "|a|" in line.replace(",","|")):
+          found=True; break
+      else:
+        if ("a14" in line):
+          found=True; break
+except FileNotFoundError:
+  print("UNCERTAIN: roadmap2.csv not found", file=sys.stderr); sys.exit(2)
 if not found:
-    print("UNCERTAIN: A7 not found in roadmap2.csv (Workstream A). Please confirm row and headers."); sys.exit(3)
-print("WORKSTREAM_TASK_FOUND:A7")
+  print("UNCERTAIN: A14 not found in roadmap2.csv (Workstream A). Please confirm row and headers."); sys.exit(3)
+print("WORKSTREAM_TASK_FOUND:A14")
 PY
       ]]>
     </command>
   </prechecks>
+
+  <acceptanceCriteria>
+    <ac id="AC-1">Compute kernel emits the following AOVs: <b>albedo</b>, <b>normal</b>, <b>depth</b> (linear), <b>direct</b>, <b>indirect</b>, <b>emission</b>, <b>visibility</b> (mask). Each is produced on GPU when available; CPU fallback computes identical semantics.</ac>
+    <ac id="AC-2">WGSL defines separate storage targets per AOV with documented bind group layout; formats: albedo/direct/indirect/emission as <code>rgba16float</code>, normal as <code>rgba16float</code> (xyz in rgb), depth as <code>r32float</code>, visibility as <code>r8unorm</code>.</ac>
+    <ac id="AC-3">Rust backend exposes a typed API to enable/disable specific AOVs to keep peak host-visible usage ≤ 512 MiB (tile or sequential readback if necessary). Provides GPU→CPU readback for selected AOVs.</ac>
+    <ac id="AC-4">Python API returns a dict of numpy arrays keyed by canonical names (<code>{"albedo","normal","depth","direct","indirect","emission","visibility"}</code>) and offers <code>save_aovs()</code> helper to write <b>EXR</b> for HDR (albedo/normal/depth/direct/indirect/emission) and <b>PNG</b> for visibility with consistent filenames.</ac>
+    <ac id="AC-5">Determinism: with fixed seed, single-frame GPU/CPU AOVs match within tolerance (per-channel mean/var within epsilon). Tests skip GPU if no adapter.</ac>
+    <ac id="AC-6">Docs updated (README and docs/api if Sphinx present) describing AOVs, formats, ranges, and naming scheme; examples added or updated.</ac>
+    <ac id="AC-7">Validation passes: <code>cargo fmt</code>, <code>cargo clippy -D warnings</code>, <code>cargo test</code>, <code>pytest</code>, <code>sphinx-build</code> (if docs), <code>maturin build</code>, optional <code>cmake</code>.</ac>
+  </acceptanceCriteria>
+
+  <design>
+    <wgsl>
+      <![CDATA[
+File: src/shaders/pt_kernel.wgsl  (extend existing kernel)
+Header doc (required):
+  Bind Group 0 (Uniforms): width, height, frame_index; camera params; exposure; seed_hi/seed_lo
+  Bind Group 1 (Scene): readonly storage (materials, spheres/triangles, etc.)
+  Bind Group 2 (Accum/State): storage buffers (HDR accum if used by tracer)
+  Bind Group 3..N (AOV outputs):
+    @binding(0) storage texture2D<rgba16float, write>   // aov_albedo
+    @binding(1) storage texture2D<rgba16float, write>   // aov_normal (xyz in rgb, w=1)
+    @binding(2) storage texture2D<r32float, write>      // aov_depth (linear world/view)
+    @binding(3) storage texture2D<rgba16float, write>   // aov_direct
+    @binding(4) storage texture2D<rgba16float, write>   // aov_indirect
+    @binding(5) storage texture2D<rgba16float, write>   // aov_emission
+    @binding(6) storage texture2D<r8unorm, write>       // aov_visibility (0 or 1)
+
+Kernel body:
+  - Generate primary ray (existing tracer path); compute per-AOV contributions.
+  - Write normalized outputs:
+      normal in [-1,1] mapped to [-1,1] (EXR float), not remapped to [0,1].
+      depth in linear units (meters) as r32float.
+      albedo/direct/indirect/emission as linear HDR radiance (no tonemap).
+      visibility ∈ {0,1}.
+      Skip writes for disabled AOVs (runtime flags).
+      ]]>
+    </wgsl>
+
+    <rust>
+      <![CDATA[
+New files:
+  src/path_tracing/aov.rs       // AovKind enum, formats, enabling flags, size calculators
+  src/path_tracing/io.rs        // EXR/PNG writers (use crates: exr, png or image), optional gated by feature "images"
+Modified:
+  src/path_tracing/mod.rs       // PathTracerGPU: create storage textures/buffers per enabled AOV; bind groups
+  src/path_tracing/compute.rs   // dispatch + sequential readback per AOV to keep host-visible usage low
+
+Public API (Rust):
+  pub enum AovKind { Albedo, Normal, Depth, Direct, Indirect, Emission, Visibility }
+  pub struct AovDesc { kind: AovKind, enabled: bool, format: wgpu::TextureFormat }
+  pub struct AovFrames { /* device handles and optional staging buffers */ }
+
+  impl PathTracerGPU {
+    pub fn with_aovs(mut self, aovs:&[AovKind]) -> Self;
+    pub fn read_aov_rgba16f(&self, kind:AovKind) -> anyhow::Result<Vec<f16>>; // or f32
+    pub fn read_aov_r32f(&self, kind:AovKind) -> anyhow::Result<Vec<f32>>;
+    pub fn read_aov_r8u (&self, kind:AovKind) -> anyhow::Result<Vec<u8>>;
+  }
+      ]]>
+    </rust>
+
+    <python>
+      <![CDATA[
+File: python/forge3d/path_tracing.py
+Add:
+  def render_aovs(self, width:int, height:int, scene, camera, aovs=("albedo","normal","depth","direct","indirect","emission","visibility"), seed:int=1, frames:int=1, use_gpu:bool=True) -> dict[str,np.ndarray]:
+      """Returns dict of selected AOVs. Shapes:
+         - float EXR candidates as float32 arrays (H,W,3 or 4); visibility as uint8 (H,W,1).
+      """
+
+  def save_aovs(self, aov_dict:dict, out_dir:PathLike, basename:str="frame0001"):
+      """Write EXR for HDR AOVs (albedo/normal/depth/direct/indirect/emission) and PNG for visibility.
+         Filenames: {basename}_aov-{name}.exr|png
+      """
+      ]]>
+    </python>
+  </design>
+
+  <changes>
+    <createOrModify>
+      <file path="src/path_tracing/aov.rs" kind="new"/>
+      <file path="src/path_tracing/io.rs" kind="new"/>
+      <file path="src/path_tracing/mod.rs" kind="modify"/>
+      <file path="src/path_tracing/compute.rs" kind="modify-or-new"/>
+      <file path="src/shaders/pt_kernel.wgsl" kind="modify"/>
+      <file path="python/forge3d/path_tracing.py" kind="modify"/>
+      <file path="tests/test_aovs_gpu.py" kind="new"/>
+      <file path="tests/test_aovs_cpu_equiv.py" kind="new"/>
+      <file path="README.md" kind="modify-append"/>
+      <file path="docs/api/aovs.md" kind="new-optional"/>
+      <file path=".gitignore" kind="modify-append"/>
+      <file path="Cargo.toml" kind="modify-append"/>
+    </createOrModify>
+
+    <implNotes>
+      <![CDATA[
+- Use feature flag "images" to gate EXR/PNG writers; default enabled for CI.
+- Keep peak host-visible memory low: reuse a single staging buffer and copy AOVs sequentially; or tile dispatch for very large frames.
+- Normalization:
+   * normal: store true linear normals in EXR (no [0,1] remap).
+   * depth: linear metric units; document near/far if clipped.
+   * visibility: 0/1.
+- Deterministic RNG: base on seed ^ pixel_id; ensure CPU/GPU parity for single frame (epsilon checks).
+- Naming: {basename}_aov-{name}.exr|png with stable lowercase names: albedo, normal, depth, direct, indirect, emission, visibility.
+      ]]>
+    </implNotes>
+  </changes>
+
+  <tests>
+    <python path="tests/test_aovs_gpu.py">
+      <![CDATA[
+import os, pytest, numpy as np
+from forge3d.path_tracing import PathTracer
+
+def gpu_available():
+    try:
+        # Construct and probe adapter via PathTracer (implement internal probe if needed)
+        return True
+    except Exception:
+        return False
+
+@pytest.mark.skipif(not gpu_available(), reason="No compatible GPU adapter")
+def test_gpu_aovs_shapes_and_ranges(tmp_path):
+    tr = PathTracer()
+    scene, cam = make_test_scene()  # use existing helpers or minimal sphere/tri
+    aovs = tr.render_aovs(64,64,scene,cam, aovs=("albedo","normal","depth","direct","indirect","emission","visibility"), seed=123, frames=1, use_gpu=True)
+    assert set(aovs.keys())=={"albedo","normal","depth","direct","indirect","emission","visibility"}
+    assert aovs["visibility"].dtype==np.uint8
+    assert aovs["depth"].dtype in (np.float32, np.float64)
+    for k in ("albedo","normal","direct","indirect","emission"):
+        assert aovs[k].ndim==3 and aovs[k].shape[0]==64 and aovs[k].shape[1]==64
+    # Determinism single frame
+    aovs2 = tr.render_aovs(64,64,scene,cam, aovs=("albedo",), seed=123, frames=1, use_gpu=True)
+    assert np.allclose(aovs["albedo"], aovs2["albedo"], atol=1e-5, rtol=1e-5)
+      ]]>
+    </python>
+
+    <python path="tests/test_aovs_cpu_equiv.py">
+      <![CDATA[
+import pytest, numpy as np
+from forge3d.path_tracing import PathTracer
+
+def test_cpu_gpu_stats_match_or_skip():
+    tr = PathTracer()
+    scene, cam = make_test_scene()
+    a_gpu = tr.render_aovs(32,32,scene,cam, aovs=("albedo","depth"), seed=7, frames=1, use_gpu=True)
+    a_cpu = tr.render_aovs(32,32,scene,cam, aovs=("albedo","depth"), seed=7, frames=1, use_gpu=False)
+    for k in a_gpu:
+        g, c = a_gpu[k], a_cpu[k]
+        # Compare per-channel means/vars to a small tolerance
+        gm, cm = np.nanmean(g, axis=(0,1)), np.nanmean(c, axis=(0,1))
+        gv, cv = np.nanvar(g, axis=(0,1)), np.nanvar(c, axis=(0,1))
+        assert np.allclose(gm, cm, rtol=5e-2, atol=5e-2)
+        assert np.allclose(gv, cv, rtol=1e-1, atol=1e-1)
+      ]]>
+    </python>
+  </tests>
 
   <!-- EXACTLY INCLUDE THESE STEPS -->
   <plan>
@@ -230,53 +257,33 @@ PY
 
   <execution>
     <steps>
-      <step>Create feature branch: <code>git checkout -b ws-A7-implementation</code></step>
-
-      <!-- WGSL kernels -->
-      <step>Add/implement WGSL: <code>src/shaders/lbvh_morton.wgsl</code>, <code>src/shaders/radix_sort_pairs.wgsl</code>, <code>src/shaders/lbvh_link.wgsl</code>, <code>src/shaders/bvh_refit.wgsl</code> with header docs (bind groups/bindings, formats, spaces).</step>
-
-      <!-- Rust backend -->
-      <step>Create Rust modules under <code>src/accel/</code> for GPU builder and CPU SAH fallback with identical output format; expose <code>build_bvh</code> and <code>refit_bvh</code>.</step>
-      <step>Glue into path tracer via <code>src/path_tracing/accel.rs</code>; ensure traversal code can consume the produced BVH layout.</step>
-
-      <!-- Python bridge -->
-      <step>Modify <code>python/forge3d/path_tracing.py</code> to expose <code>build_bvh(..., use_gpu=True)</code> and <code>refit_bvh(...)</code>; default to GPU when available, otherwise CPU; preserve determinism for fixed inputs.</step>
-
-      <!-- Tests -->
-      <step>Add tests: Rust GPU build/refit and Python CPU-vs-GPU equivalence; mark GPU tests skipped when adapter unavailable.</step>
-
-      <!-- Docs & housekeeping -->
-      <step>Append <code>.gitignore</code> (out/, diag_out/, build artifacts); update <code>README.md</code> and (if present) <code>docs/api/accel_bvh.md</code> with usage and limitations.</step>
-
-      <!-- Validation -->
-      <step>Run the Validation Run commands; address non-flaky failures; document SKIPPED with exact commands.</step>
-
-      <!-- PR -->
+      <step>Create feature branch: <code>git checkout -b ws-A14-implementation</code></step>
+      <step>Extend <code>src/shaders/pt_kernel.wgsl</code> to declare and write AOV storage targets per design (guard writes behind runtime flags bindings or descriptor bitmask).</step>
+      <step>Add/modify Rust: <code>src/path_tracing/aov.rs</code>, <code>src/path_tracing/io.rs</code>, <code>src/path_tracing/mod.rs</code>, <code>src/path_tracing/compute.rs</code> — create AOV textures, bind groups, sequential readback, and file writers (EXR/PNG) behind a feature gate.</step>
+      <step>Modify Python: <code>python/forge3d/path_tracing.py</code> to expose <code>render_aovs()</code> and <code>save_aovs()</code>, enabling selection of AOVs and deterministic seeding; default to GPU when available, CPU otherwise.</step>
+      <step>Create tests: <code>tests/test_aovs_gpu.py</code>, <code>tests/test_aovs_cpu_equiv.py</code> as specified.</step>
+      <step>Docs & housekeeping: update <code>README.md</code>, add <code>docs/api/aovs.md</code> (if Sphinx present), and append <code>.gitignore</code> entries for out/ and image outputs.</step>
+      <step>Run Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent.</step>
       <step>Generate <code>PR_BODY.md</code> and print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
     </steps>
   </execution>
 
   <completion>
     <print>
-      - src/accel/mod.rs
-      - src/accel/types.rs
-      - src/accel/lbvh_gpu.rs
-      - src/accel/sah_cpu.rs
-      - src/path_tracing/accel.rs
-      - src/shaders/lbvh_morton.wgsl
-      - src/shaders/radix_sort_pairs.wgsl
-      - src/shaders/lbvh_link.wgsl
-      - src/shaders/bvh_refit.wgsl
+      - src/shaders/pt_kernel.wgsl
+      - src/path_tracing/aov.rs
+      - src/path_tracing/io.rs
+      - src/path_tracing/mod.rs
+      - src/path_tracing/compute.rs
       - python/forge3d/path_tracing.py
-      - tests/test_bvh_gpu.rs
-      - tests/test_bvh_refit.rs
-      - tests/test_bvh_cpu_vs_gpu.py
+      - tests/test_aovs_gpu.py
+      - tests/test_aovs_cpu_equiv.py
       - README.md
-      - docs/api/accel_bvh.md (if Sphinx present)
+      - docs/api/aovs.md (if Sphinx present)
       - PR_BODY.md
     </print>
     <fallback>
-      If A7 is not found in roadmap2.csv, respond <b>UNCERTAIN</b> with the list of detected A* tasks and STOP without changes.
+      If A14 is not found in roadmap2.csv, respond <b>UNCERTAIN</b> with the list of detected Workstream A tasks and STOP without changes.
     </fallback>
   </completion>
 </task>
