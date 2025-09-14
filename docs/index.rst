@@ -45,7 +45,14 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    :caption: Library Integrations:
 
    integration/matplotlib
+   integration/external_images
    user/datashader_interop
+
+.. toctree::
+   :maxdepth: 1
+   :caption: CI & Testing:
+
+   ci/notebook_integration
 
 Overview
 --------
