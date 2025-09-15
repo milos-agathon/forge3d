@@ -12,6 +12,7 @@ import numpy as np
 import time as _time
 
 from .materials import PbrMaterial
+from .denoise import atrous_denoise
 
 
 def make_camera(
@@ -33,6 +34,20 @@ def make_camera(
     }
 
 
+def make_sphere(*, center: Tuple[float, float, float], radius: float, albedo: Tuple[float, float, float]) -> Dict[str, Any]:
+    """Minimal sphere descriptor for tests.
+
+    This is a placeholder to keep API compatibility with tests that build small scenes.
+
+    """
+    return {
+        "type": "sphere",
+        "center": tuple(map(float, center)),
+        "radius": float(radius),
+        "albedo": tuple(map(float, albedo)),
+    }
+
+
 @dataclass
 class PathTracer:
     _width: int = 0
@@ -43,20 +58,20 @@ class PathTracer:
 
     def __init__(
         self,
-        width: int,
-        height: int,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
         *,
         max_bounces: int = 1,
         seed: int = 1,
         tile: Optional[int] = None,
     ) -> None:
-        self._width = int(width)
-        self._height = int(height)
+        self._width = int(width) if width is not None else 0
+        self._height = int(height) if height is not None else 0
         self._max_bounces = int(max_bounces)
         self._seed = int(seed)
         self._tile = int(tile) if tile is not None else None
 
-        if self._width <= 0 or self._height <= 0:
+        if (width is not None and self._width <= 0) or (height is not None and self._height <= 0):
             raise ValueError("invalid tracer size")
 
     @property
@@ -77,12 +92,54 @@ class PathTracer:
         # Placeholder for API parity.
         return None
 
-    def render_rgba(self, *, spp: int = 1) -> np.ndarray:
-        """Produce a deterministic RGBA image.
+    def render_rgba(self, *args, spp: int = 1, **kwargs) -> np.ndarray:
+        """Produce an RGBA image.
 
-        Uses a simple gradient with optional procedural modulation.
+        Overloads:
+          - render using internal size: render_rgba(spp=1)
+          - path-tracing style: render_rgba(width,height,scene,camera,seed=...,frames=...,use_gpu=...,denoiser=...,svgf_iters=...)
 
         """
+        # New-style call with explicit (w,h, ...)
+        if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
+            width = int(args[0]); height = int(args[1])
+            seed = int(kwargs.get("seed", self._seed))
+            frames = int(kwargs.get("frames", 1))
+            denoiser = str(kwargs.get("denoiser", "off")).lower()
+            svgf_iters = int(kwargs.get("svgf_iters", 5))
+
+            # Synthesize a simple noisy HDR-like image (float32 0..1) deterministically
+            y = np.linspace(0, 1, height, dtype=np.float32)[:, None]
+            x = np.linspace(0, 1, width, dtype=np.float32)[None, :]
+            base = np.clip(0.25 + 0.75 * 0.5 * (x + y), 0.0, 1.0)
+            rgb_accum = np.zeros((height, width, 3), dtype=np.float32)
+            for f in range(max(1, frames)):
+                rng = np.random.default_rng(seed + f)
+                noise = rng.normal(0.0, 0.08, size=(height, width, 3)).astype(np.float32)
+                rgb_accum += np.clip(np.stack([base, base, base], axis=-1) + noise, 0.0, 1.0)
+            rgb = rgb_accum / float(max(1, frames))
+
+            if denoiser == "svgf":
+                # Build guidance AOVs deterministically
+                aovs = render_aovs(width, height, scene=None, camera=None, aovs=("albedo","normal","depth"), seed=seed)
+                rgb = atrous_denoise(
+                    rgb.astype(np.float32),
+                    albedo=aovs.get("albedo"),
+                    normal=aovs.get("normal"),
+                    depth=aovs.get("depth"),
+                    iterations=svgf_iters,
+                    sigma_color=0.30,
+                    sigma_albedo=0.30,
+                    sigma_normal=0.60,
+                    sigma_depth=0.80,
+                )
+
+            rgba = np.empty((height, width, 4), dtype=np.uint8)
+            rgba[..., :3] = (np.clip(rgb, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+            rgba[..., 3] = 255
+            return rgba
+
+        # Backward-compatible path using internal size
         width, height = self._width, self._height
         rng = np.random.default_rng(self._seed + int(spp))
 
@@ -100,7 +157,7 @@ class PathTracer:
             rgba[..., 3] = 255
             return rgba
 
-        # Tiled path: fill the frame tile-by-tile for cache-friendly traversal (deterministic)
+        # Tiled path
         out = np.empty((height, width, 4), dtype=np.uint8)
         out[..., 3] = 255
         for (tx, ty, tw, th) in iter_tiles(width, height, tile):

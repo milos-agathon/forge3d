@@ -13,6 +13,9 @@ pub mod guiding;
 pub mod restir;
 pub mod wavefront;
 
+// Note: SVGF integration stubs live under src/denoise/svgf for future wiring.
+// Keeping this file unchanged functionally to avoid build impact.
+
 /// Parameters for path tracing configuration
 #[derive(Clone, Debug)]
 pub struct TracerParams {
