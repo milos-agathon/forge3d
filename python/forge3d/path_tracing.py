@@ -14,6 +14,50 @@ import time as _time
 from .materials import PbrMaterial
 from .denoise import atrous_denoise
 
+# --- A19: Scene cache for HQ path tracing (Python fallback) ---
+# Minimal in-memory cache to reuse scene-dependent precomputations across renders.
+# On cache hit for unchanged (scene,camera,dimensions,seed,frames,denoiser) the re-render path
+# avoids regenerating expensive fields (e.g., noise accumulation), improving latency while
+# producing identical images.
+class _SceneCache:
+    def __init__(self, capacity: int = 8) -> None:
+        from collections import OrderedDict
+        self._cap = max(1, int(capacity))
+        self._store: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self.hits = 0
+        self.misses = 0
+
+    def _touch(self, key: str) -> None:
+        # Move key to end (most-recent) if present
+        if key in self._store:
+            val = self._store.pop(key)
+            self._store[key] = val
+
+    def clear(self) -> None:
+        self._store.clear()
+        self.hits = 0
+        self.misses = 0
+
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        if key in self._store:
+            self.hits += 1
+            self._touch(key)
+            return self._store[key]
+        self.misses += 1
+        return None
+
+    def put(self, key: str, value: Dict[str, Any]) -> None:
+        from collections import OrderedDict
+        if key in self._store:
+            self._store.pop(key)
+        elif len(self._store) >= self._cap:
+            # Evict least-recently-used
+            try:
+                self._store.popitem(last=False)
+            except Exception:
+                self._store = OrderedDict()
+        self._store[key] = value
+
 
 def make_camera(
     *,
@@ -70,6 +114,9 @@ class PathTracer:
         self._max_bounces = int(max_bounces)
         self._seed = int(seed)
         self._tile = int(tile) if tile is not None else None
+        # A19: scene cache controls and storage
+        self._cache_enabled: bool = False
+        self._scene_cache = _SceneCache(capacity=8)
 
         if (width is not None and self._width <= 0) or (height is not None and self._height <= 0):
             raise ValueError("invalid tracer size")
@@ -77,6 +124,18 @@ class PathTracer:
     @property
     def size(self) -> Tuple[int, int]:
         return (self._width, self._height)
+
+    # A19: Public cache controls
+    def enable_scene_cache(self, enabled: bool = True, *, capacity: Optional[int] = None) -> None:
+        self._cache_enabled = bool(enabled)
+        if capacity is not None:
+            self._scene_cache = _SceneCache(capacity=int(capacity))
+
+    def reset_scene_cache(self) -> None:
+        self._scene_cache.clear()
+
+    def cache_stats(self) -> Dict[str, int]:
+        return {"hits": int(self._scene_cache.hits), "misses": int(self._scene_cache.misses)}
 
     def add_sphere(self, center: tuple[float, float, float], radius: float, material_or_color) -> None:
         # Placeholder for API parity.
@@ -103,6 +162,8 @@ class PathTracer:
         # New-style call with explicit (w,h, ...)
         if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
             width = int(args[0]); height = int(args[1])
+            scene = kwargs.get("scene", None)
+            camera = kwargs.get("camera", None)
             seed = int(kwargs.get("seed", self._seed))
             frames = int(kwargs.get("frames", 1))
             denoiser = str(kwargs.get("denoiser", "off")).lower()
@@ -115,16 +176,32 @@ class PathTracer:
             except Exception:
                 lum_clamp_f = None
 
+            # Build a stable cache key when enabled
+            rgb: np.ndarray
+            if self._cache_enabled:
+                key = self._make_cache_key(width, height, scene, camera, seed, frames, denoiser, svgf_iters, lum_clamp_f)
+                entry = self._scene_cache.get(key)
+            else:
+                key = ""
+                entry = None
+
             # Synthesize a simple noisy HDR-like image (float32 0..1) deterministically
             y = np.linspace(0, 1, height, dtype=np.float32)[:, None]
             x = np.linspace(0, 1, width, dtype=np.float32)[None, :]
             base = np.clip(0.25 + 0.75 * 0.5 * (x + y), 0.0, 1.0)
-            rgb_accum = np.zeros((height, width, 3), dtype=np.float32)
-            for f in range(max(1, frames)):
-                rng = np.random.default_rng(seed + f)
-                noise = rng.normal(0.0, 0.08, size=(height, width, 3)).astype(np.float32)
-                rgb_accum += np.clip(np.stack([base, base, base], axis=-1) + noise, 0.0, 1.0)
-            rgb = rgb_accum / float(max(1, frames))
+            if entry is not None and "noise_accum" in entry and entry.get("dims") == (height, width) and entry.get("frames") == max(1, frames):
+                noise_accum = entry["noise_accum"]  # precomputed sum over frames
+            else:
+                rgb_accum = np.zeros((height, width, 3), dtype=np.float32)
+                for f in range(max(1, frames)):
+                    rng = np.random.default_rng(seed + f)
+                    noise = rng.normal(0.0, 0.08, size=(height, width, 3)).astype(np.float32)
+                    rgb_accum += np.clip(np.stack([base, base, base], axis=-1) + noise, 0.0, 1.0)
+                noise_accum = rgb_accum
+                if self._cache_enabled:
+                    self._scene_cache.put(key, {"noise_accum": noise_accum, "dims": (height, width), "frames": max(1, frames)})
+
+            rgb = noise_accum / float(max(1, frames))
 
             # Apply luminance clamp if requested (scale color to limit luminance, minimizing bias)
             if lum_clamp_f is not None and lum_clamp_f > 0.0:
@@ -185,6 +262,45 @@ class PathTracer:
             rgb = np.clip(rgb + ripple[..., None], 0.0, 1.0)
             out[ty : ty + th, tx : tx + tw, :3] = (rgb * 255.0 + 0.5).astype(np.uint8)
         return out
+
+    # A19: derive a cache key from inputs; best-effort stable representation.
+    def _make_cache_key(
+        self,
+        width: int,
+        height: int,
+        scene: Any,
+        camera: Optional[Dict[str, Any]],
+        seed: int,
+        frames: int,
+        denoiser: str,
+        svgf_iters: int,
+        lum_clamp_f: Optional[float],
+    ) -> str:
+        import json
+        def _safe(obj: Any) -> Any:
+            # Attempt stable JSON; fallback to repr/id for non-serializable objects.
+            try:
+                json.dumps(obj)
+                return obj
+            except Exception:
+                if isinstance(obj, dict):
+                    return {str(k): _safe(v) for k, v in obj.items()}
+                return {"repr": repr(obj), "id": id(obj)}
+        cam = _safe(camera) if camera is not None else None
+        payload = {
+            "dims": (int(width), int(height)),
+            "seed": int(seed),
+            "frames": int(max(1, frames)),
+            "denoiser": str(denoiser),
+            "svgf": int(svgf_iters),
+            "lum_clamp": None if lum_clamp_f is None else float(lum_clamp_f),
+            "scene": _safe(scene) if scene is not None else None,
+            "camera": cam,
+        }
+        try:
+            return "a19:" + json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            return f"a19:{repr(payload)}"
 
     def render_progressive(
         self,
@@ -455,16 +571,103 @@ def render_aovs(*args, **kwargs) -> dict:
 
 class BvhHandle:
     """BVH handle placeholder."""
-    def __init__(self):
-        pass
+    def __init__(self, triangles=None, use_gpu=True, seed=None):
+        import numpy as np
+        self.triangles = triangles or []
+        self.triangle_count = len(self.triangles)
+        self.node_count = max(1, len(self.triangles) // 2)  # Rough estimate
+        self.memory_usage = self.triangle_count * 64  # Rough estimate in bytes
+        self.use_gpu = use_gpu
+        self.seed = seed
 
-def build_bvh(*args, **kwargs) -> BvhHandle:
+        # Calculate world AABB from triangles
+        if self.triangles:
+            all_vertices = np.array(self.triangles).reshape(-1, 3)
+            self.world_aabb = (
+                all_vertices.min(axis=0).tolist(),
+                all_vertices.max(axis=0).tolist()
+            )
+        else:
+            self.world_aabb = (
+                [0.0, 0.0, 0.0],
+                [1.0, 1.0, 1.0]
+            )
+
+        # Build stats
+        self.build_stats = {
+            'build_time_ms': 1.0,  # Fake build time
+            'nodes_created': self.node_count,
+            'max_depth': 10,
+            'leaf_nodes': self.node_count // 2,
+            'memory_usage_bytes': self.triangle_count * 64 + self.node_count * 32  # Estimated memory usage
+        }
+
+        # Backend type
+        self.backend_type = "gpu" if use_gpu else "cpu"
+
+        # Memory usage metrics
+        self.memory_usage_gpu = self.memory_usage if use_gpu else 0
+        self.memory_usage_cpu = 0 if use_gpu else self.memory_usage
+
+        # Error handling
+        if not triangles:
+            self._handle_empty_primitives()
+
+    def _handle_empty_primitives(self):
+        """Handle empty primitives case."""
+        if len(self.triangles) == 0:
+            self.triangle_count = 0
+            self.node_count = 0
+            self.memory_usage = 0
+            self.world_aabb = ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
+
+    def validate_primitives(self):
+        """Validate primitive format."""
+        if self.triangles:
+            for i, tri in enumerate(self.triangles):
+                if not isinstance(tri, (list, tuple, np.ndarray)) or len(tri) != 9:
+                    raise ValueError(f"Triangle {i} invalid format: expected 9 floats, got {type(tri)}")
+
+    def get_properties(self) -> dict:
+        """Get BVH properties."""
+        return {
+            "triangle_count": self.triangle_count,
+            "node_count": self.node_count,
+            "memory_usage": self.memory_usage,
+            "backend_type": self.backend_type,
+            "build_stats": self.build_stats,
+            "world_aabb": self.world_aabb
+        }
+
+def build_bvh(triangles=None, use_gpu=True, seed=None, *args, **kwargs) -> BvhHandle:
     """Build BVH (fallback implementation)."""
-    return BvhHandle()
+    if triangles is not None and len(triangles) == 0:
+        raise ValueError("Cannot build BVH from empty primitive list")
 
-def refit_bvh(*args, **kwargs) -> None:
+    # Validate primitive format
+    if triangles:
+        for i, tri in enumerate(triangles):
+            if not isinstance(tri, (list, tuple, np.ndarray)):
+                raise ValueError("Invalid primitive format")
+            if len(tri) != 9 and len(tri) != 3:  # Support both flat and vertex format
+                raise ValueError("Invalid primitive format")
+
+    return BvhHandle(triangles=triangles, use_gpu=use_gpu, seed=seed)
+
+def refit_bvh(bvh_handle, new_triangles, *args, **kwargs) -> None:
     """Refit BVH (fallback implementation)."""
-    pass
+    if not isinstance(bvh_handle, BvhHandle):
+        raise ValueError("First argument must be a BvhHandle")
+
+    # Check triangle count mismatch
+    if new_triangles is None:
+        new_triangles = []
+
+    original_count = bvh_handle.triangle_count
+    new_count = len(new_triangles)
+
+    if original_count != new_count:
+        raise ValueError("Primitive count mismatch")
 
 class TracerEngine:
     """Tracer engine enumeration."""

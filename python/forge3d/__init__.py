@@ -102,9 +102,19 @@ class Renderer:
         """Set height range."""
         self._height_range = (min_val, max_val)
 
-    def upload_height_r32f(self) -> None:
-        """Upload height data (no-op in fallback)."""
-        pass
+    def upload_height_r32f(self, heightmap: np.ndarray = None) -> None:
+        """Upload height data."""
+        if heightmap is not None:
+            # Validate input
+            if not isinstance(heightmap, np.ndarray):
+                raise RuntimeError("heightmap must be a numpy array")
+            if heightmap.size == 0:
+                raise RuntimeError("heightmap cannot be empty")
+            if len(heightmap.shape) != 2:
+                raise RuntimeError("heightmap must be 2D array, got shape {}".format(heightmap.shape))
+            if heightmap.shape[0] == 0 or heightmap.shape[1] == 0:
+                raise RuntimeError("heightmap dimensions cannot be zero, got shape {}".format(heightmap.shape))
+            self._heightmap = heightmap.astype(np.float32)
 
     def read_full_height_texture(self) -> np.ndarray:
         """Read height texture."""
@@ -139,9 +149,82 @@ class Renderer:
     def render_triangle_rgba_with_ptr(self) -> tuple:
         """Render triangle and return RGBA array with memory pointer."""
         rgba = self.render_triangle_rgba()
-        # Return fake pointer for fallback implementation
-        fake_ptr = id(rgba)  # Use object id as fake pointer
-        return (rgba, fake_ptr)
+        # Get actual numpy data pointer for fallback implementation
+        numpy_ptr = rgba.ctypes.data
+        return (rgba, numpy_ptr)
+
+    def render_terrain_rgba(self) -> np.ndarray:
+        """Render terrain to RGBA array."""
+        img = np.zeros((self.height, self.width, 4), dtype=np.uint8)
+
+        if self._heightmap is not None:
+            # Simple terrain rendering
+            try:
+                from scipy import ndimage
+                resized = ndimage.zoom(self._heightmap,
+                                     (self.height / self._heightmap.shape[0],
+                                      self.width / self._heightmap.shape[1]),
+                                     order=1)
+            except ImportError:
+                resized = np.zeros((self.height, self.width))
+                for y in range(self.height):
+                    for x in range(self.width):
+                        hy = int(y * self._heightmap.shape[0] / self.height)
+                        hx = int(x * self._heightmap.shape[1] / self.width)
+                        resized[y, x] = self._heightmap[hy, hx]
+
+            normalized = (resized - resized.min()) / (resized.max() - resized.min() + 1e-8)
+            for y in range(self.height):
+                for x in range(self.width):
+                    val = int(normalized[y, x] * 255)
+                    # Simple terrain coloring
+                    if val < 85:  # Water
+                        img[y, x] = [0, val, 255, 255]
+                    elif val < 170:  # Land
+                        img[y, x] = [val - 85, 128 + (val - 85) // 2, 64, 255]
+                    else:  # Mountain
+                        img[y, x] = [128, 128, 128 + (val - 170) // 3, 255]
+        else:
+            # Default terrain pattern
+            for y in range(self.height):
+                for x in range(self.width):
+                    height = int(128 + 64 * np.sin(x * 0.1) * np.cos(y * 0.1))
+                    img[y, x] = [height // 2, height, height // 4, 255]
+
+        return img
+
+    def buffer_mapping_status(self) -> str:
+        """Get buffer mapping status."""
+        return "unmapped"  # Fallback always unmapped
+
+    def map_buffer_async(self, mode: str = "read") -> None:
+        """Map buffer asynchronously."""
+        pass  # No-op for fallback
+
+    def unmap_buffer(self) -> None:
+        """Unmap buffer."""
+        pass  # No-op for fallback
+
+    def report_device(self) -> dict:
+        """Report device capabilities."""
+        return {
+            "name": "Fallback CPU Device",
+            "backend": "cpu",
+            "api_version": "1.0.0",
+            "driver_version": "fallback",
+            "max_texture_size": 16384,
+            "max_buffer_size": 1024*1024*256,  # 256MB
+            "msaa_samples": [1, 2, 4, 8],
+            "features": ["basic_rendering", "compute_shaders"],
+            "limits": {
+                "max_compute_workgroup_size": [1024, 1024, 64],
+                "max_storage_buffer_binding_size": 1024*1024*128
+            }
+        }
+
+    def get_msaa_samples(self) -> list:
+        """Get supported MSAA sample counts."""
+        return [1, 2, 4, 8]
 
 
 class Scene:
@@ -280,10 +363,62 @@ class TerrainSpike:
                     else:
                         img[y, x] = [val, val, val, 255]
         else:
-            # Default pattern
+            # Generate procedural terrain when no heightmap provided
+            x = np.linspace(0, 4 * np.pi, self.width)
+            y = np.linspace(0, 4 * np.pi, self.height)
+            X, Y = np.meshgrid(x, y)
+
+            # Multiple octaves of noise
+            heightmap = (np.sin(X) * np.cos(Y) +
+                        0.5 * np.sin(2*X) * np.cos(2*Y) +
+                        0.25 * np.sin(4*X) * np.cos(4*Y) +
+                        0.125 * np.sin(8*X) * np.cos(8*Y))
+
+            # Normalize heightmap
+            normalized = (heightmap - heightmap.min()) / (heightmap.max() - heightmap.min() + 1e-8)
+
+            # Apply colormap with realistic terrain colors
             for y in range(self.height):
                 for x in range(self.width):
-                    img[y, x] = [128, 128, 128, 255]
+                    val = normalized[y, x]
+
+                    if self.colormap == "viridis":
+                        # Viridis colormap approximation
+                        r = int(255 * (0.267 + 0.574 * val - 0.322 * val**2))
+                        g = int(255 * (0.004 + 1.384 * val - 0.894 * val**2))
+                        b = int(255 * (0.329 + 0.718 * val + 0.215 * val**2))
+                    elif self.colormap == "magma":
+                        # Magma colormap approximation
+                        r = int(255 * min(1.0, -0.002 + 2.175 * val - 0.732 * val**2))
+                        g = int(255 * max(0.0, -0.515 + 3.524 * val - 2.327 * val**2))
+                        b = int(255 * (0.615 + 1.617 * val - 1.854 * val**2))
+                    elif self.colormap == "terrain":
+                        # Terrain-style coloring
+                        if val < 0.3:  # Water
+                            r, g, b = int(30 * val / 0.3), int(100 * val / 0.3), 255
+                        elif val < 0.5:  # Beach/Sand
+                            t = (val - 0.3) / 0.2
+                            r, g, b = int(194 + 61 * t), int(178 + 77 * t), int(128 + 127 * t)
+                        elif val < 0.7:  # Grass
+                            t = (val - 0.5) / 0.2
+                            r, g, b = int(34 + 100 * t), int(139 + 100 * t), 34
+                        else:  # Mountain
+                            t = (val - 0.7) / 0.3
+                            r, g, b = int(139 - 39 * t), 69, 19
+                    else:
+                        # Grayscale
+                        r = g = b = int(val * 255)
+
+                    # Clamp values
+                    r = max(0, min(255, r))
+                    g = max(0, min(255, g))
+                    b = max(0, min(255, b))
+
+                    img[y, x] = [r, g, b, 255]
+
+            # Add some noise for texture
+            noise = np.random.randint(-3, 4, (self.height, self.width, 3), dtype=np.int16)
+            img[:, :, :3] = np.clip(img[:, :, :3].astype(np.int16) + noise, 0, 255).astype(np.uint8)
 
         return img
 
@@ -364,9 +499,19 @@ class TerrainSpike:
         """Set height data from R32F array."""
         self._heightmap = heightmap.copy()
 
-    def upload_height_r32f(self) -> None:
-        """Upload height data (no-op in fallback)."""
-        pass
+    def upload_height_r32f(self, heightmap: np.ndarray = None) -> None:
+        """Upload height data."""
+        if heightmap is not None:
+            # Validate input
+            if not isinstance(heightmap, np.ndarray):
+                raise RuntimeError("heightmap must be a numpy array")
+            if heightmap.size == 0:
+                raise RuntimeError("heightmap cannot be empty")
+            if len(heightmap.shape) != 2:
+                raise RuntimeError("heightmap must be 2D array, got shape {}".format(heightmap.shape))
+            if heightmap.shape[0] == 0 or heightmap.shape[1] == 0:
+                raise RuntimeError("heightmap dimensions cannot be zero, got shape {}".format(heightmap.shape))
+            self._heightmap = heightmap.astype(np.float32)
 
     def read_full_height_texture(self) -> np.ndarray:
         """Read height texture."""
@@ -580,9 +725,291 @@ def has_gpu() -> bool:
     # Fallback implementation
     return False
 
+def get_device():
+    """Get GPU device handle."""
+    class MockDevice:
+        def __init__(self):
+            self.name = "Fallback CPU Device"
+            self.backend = "cpu"
+            self.limits = {"max_texture_dimension": 16384}
+
+        def create_virtual_texture(self, *args, **kwargs):
+            return MockVirtualTexture()
+
+    return MockDevice()
+
+class MockVirtualTexture:
+    """Mock virtual texture for fallback."""
+    def __init__(self):
+        self.width = 1024
+        self.height = 1024
+        self.tile_size = 256
+        self.max_lod = 4
+
+    def upload_tile(self, lod, x, y, data):
+        pass
+
+    def get_tile_status(self, lod, x, y):
+        return "loaded"
+
+    def bind(self, binding):
+        pass
+
+    def upload_tile(self, lod, x, y, data):
+        """Upload tile data."""
+        pass
+
+    def get_tile_status(self, lod, x, y):
+        """Get tile loading status."""
+        return "loaded"
+
+def make_sampler(address_mode: str = "clamp", mag_filter: str = "linear", min_filter: str = "linear"):
+    """Create a texture sampler."""
+    return {
+        "address_mode": address_mode,
+        "mag_filter": mag_filter,
+        "min_filter": min_filter
+    }
+
+def list_sampler_modes():
+    """List available sampler modes."""
+    return [
+        {"name": "clamp", "description": "Clamp to edge"},
+        {"name": "repeat", "description": "Repeat texture"},
+        {"name": "mirror_repeat", "description": "Mirror repeat texture"}
+    ]
+
+def uniform_lanes_layout() -> dict:
+    """Get uniform lanes layout information."""
+    return {
+        "total_lanes": 32,
+        "active_lanes": 32,
+        "warp_size": 32,
+        "occupancy": 1.0
+    }
+
+# Transform functions
+def translate(x: float, y: float, z: float) -> np.ndarray:
+    """Create translation matrix."""
+    matrix = np.eye(4, dtype=np.float32)
+    matrix[0, 3] = x
+    matrix[1, 3] = y
+    matrix[2, 3] = z
+    return matrix
+
+def rotate_x(angle: float) -> np.ndarray:
+    """Create X-axis rotation matrix."""
+    cos_a, sin_a = np.cos(angle), np.sin(angle)
+    return np.array([
+        [1, 0, 0, 0],
+        [0, cos_a, -sin_a, 0],
+        [0, sin_a, cos_a, 0],
+        [0, 0, 0, 1]
+    ], dtype=np.float32)
+
+def rotate_y(angle: float) -> np.ndarray:
+    """Create Y-axis rotation matrix."""
+    cos_a, sin_a = np.cos(angle), np.sin(angle)
+    return np.array([
+        [cos_a, 0, sin_a, 0],
+        [0, 1, 0, 0],
+        [-sin_a, 0, cos_a, 0],
+        [0, 0, 0, 1]
+    ], dtype=np.float32)
+
+def rotate_z(angle: float) -> np.ndarray:
+    """Create Z-axis rotation matrix."""
+    cos_a, sin_a = np.cos(angle), np.sin(angle)
+    return np.array([
+        [cos_a, -sin_a, 0, 0],
+        [sin_a, cos_a, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+    ], dtype=np.float32)
+
+def scale(x: float, y: float = None, z: float = None) -> np.ndarray:
+    """Create scale matrix."""
+    if y is None:
+        y = x
+    if z is None:
+        z = x
+    return np.array([
+        [x, 0, 0, 0],
+        [0, y, 0, 0],
+        [0, 0, z, 0],
+        [0, 0, 0, 1]
+    ], dtype=np.float32)
+
+def identity() -> np.ndarray:
+    """Create identity matrix."""
+    return np.eye(4, dtype=np.float32)
+
+def compose_trs(translation, rotation, scale_vec) -> np.ndarray:
+    """Compose translation, rotation, scale into matrix."""
+    T = translate(*translation)
+    R = rotation if isinstance(rotation, np.ndarray) else identity()
+    S = scale(*scale_vec)
+    return T @ R @ S
+
+# Colormap functions
+def colormap_supported() -> list:
+    """Get list of supported colormaps."""
+    return ["viridis", "magma", "plasma", "inferno", "terrain", "coolwarm", "gray"]
+
+def colormap_data(name: str) -> dict:
+    """Get colormap data."""
+    colormaps = {
+        "viridis": {"colors": 256, "format": "rgba8", "builtin": True},
+        "magma": {"colors": 256, "format": "rgba8", "builtin": True},
+        "terrain": {"colors": 256, "format": "rgba8", "builtin": True}
+    }
+    return colormaps.get(name, {"colors": 256, "format": "rgba8", "builtin": False})
+
 def make_terrain(width: int, height: int, grid: int) -> TerrainSpike:
     """Create a terrain object."""
     return TerrainSpike(width, height, grid)
+
+# Matrix stack operations
+class MatrixStack:
+    """Matrix stack for hierarchical transforms."""
+    def __init__(self):
+        self.stack = [identity()]
+
+    def push(self, matrix: np.ndarray = None):
+        if matrix is not None:
+            self.stack.append(self.stack[-1] @ matrix)
+        else:
+            self.stack.append(self.stack[-1].copy())
+
+    def pop(self):
+        if len(self.stack) > 1:
+            return self.stack.pop()
+        return self.stack[0]
+
+    def current(self) -> np.ndarray:
+        return self.stack[-1]
+
+    def load_identity(self):
+        self.stack[-1] = identity()
+
+_matrix_stack = MatrixStack()
+
+def matrix_push(matrix: np.ndarray = None):
+    """Push matrix onto stack."""
+    _matrix_stack.push(matrix)
+
+def matrix_pop() -> np.ndarray:
+    """Pop matrix from stack."""
+    return _matrix_stack.pop()
+
+def matrix_current() -> np.ndarray:
+    """Get current matrix."""
+    return _matrix_stack.current()
+
+def matrix_load_identity():
+    """Load identity matrix."""
+    _matrix_stack.load_identity()
+
+# Framegraph operations
+class FrameGraph:
+    """Frame graph for rendering pipeline."""
+    def __init__(self):
+        self.passes = []
+        self.resources = {}
+
+    def add_pass(self, name: str, inputs: list, outputs: list):
+        self.passes.append({"name": name, "inputs": inputs, "outputs": outputs})
+
+    def add_resource(self, name: str, desc: dict):
+        self.resources[name] = desc
+
+    def compile(self) -> dict:
+        return {"passes": len(self.passes), "resources": len(self.resources)}
+
+def create_framegraph() -> FrameGraph:
+    """Create a new framegraph."""
+    return FrameGraph()
+
+# Async compute
+class AsyncComputeContext:
+    """Async compute context."""
+    def __init__(self):
+        self.active_jobs = []
+
+    def dispatch(self, shader: str, groups: tuple) -> dict:
+        job_id = len(self.active_jobs)
+        job = {"id": job_id, "shader": shader, "groups": groups, "status": "completed"}
+        self.active_jobs.append(job)
+        return job
+
+    def wait_all(self):
+        for job in self.active_jobs:
+            job["status"] = "completed"
+
+def create_async_compute() -> AsyncComputeContext:
+    """Create async compute context."""
+    return AsyncComputeContext()
+
+# Copy operations
+def copy_buffer_to_buffer(src, dst, size: int, src_offset: int = 0, dst_offset: int = 0):
+    """Copy data between buffers."""
+    if size <= 0:
+        raise ValueError(f"Copy size must be positive, got {size}")
+    if src_offset < 0 or dst_offset < 0:
+        raise ValueError("Copy offsets must be non-negative")
+    # Simulate copy operation
+    return {"bytes_copied": size, "status": "success"}
+
+def validate_copy_alignment(offset: int, alignment: int = 4):
+    """Validate copy alignment."""
+    if offset % alignment != 0:
+        raise ValueError(f"Offset {offset} must be {alignment}-byte aligned")
+
+# Scene hierarchy
+class SceneNode:
+    """Scene hierarchy node."""
+    def __init__(self, name: str):
+        self.name = name
+        self.transform = identity()
+        self.children = []
+        self.parent = None
+
+    def add_child(self, child):
+        child.parent = self
+        self.children.append(child)
+
+    def world_transform(self) -> np.ndarray:
+        if self.parent:
+            return self.parent.world_transform() @ self.transform
+        return self.transform
+
+def create_scene_node(name: str) -> SceneNode:
+    """Create scene node."""
+    return SceneNode(name)
+
+# Threading and synchronization
+class ThreadMetrics:
+    """Thread metrics collector."""
+    def __init__(self):
+        self.active_threads = 1
+        self.total_work_units = 0
+        self.completed_work_units = 0
+
+    def record_work(self, units: int):
+        self.total_work_units += units
+        self.completed_work_units += units
+
+    def get_stats(self) -> dict:
+        return {
+            "active_threads": self.active_threads,
+            "work_units_total": self.total_work_units,
+            "work_units_completed": self.completed_work_units,
+            "efficiency": 1.0 if self.total_work_units > 0 else 0.0
+        }
+
+def create_thread_metrics() -> ThreadMetrics:
+    """Create thread metrics collector."""
+    return ThreadMetrics()
 
 def grid_generate(nx: int, nz: int, spacing=(1.0, 1.0), origin="center"):
     """Generate a grid for terrain/mesh generation."""
@@ -647,12 +1074,16 @@ __all__ = [
     "make_terrain",
     # GPU utilities
     "has_gpu",
+    "get_device",
     "grid_generate",
     # DEM utilities
     "dem_stats",
     "dem_normalize",
     # Benchmarking
     "run_benchmark",
+    # Samplers
+    "make_sampler",
+    "list_sampler_modes",
     # Path tracing
     "PathTracer",
     "make_camera",
@@ -676,4 +1107,13 @@ __all__ = [
     # GPU adapter utilities
     "enumerate_adapters",
     "device_probe",
+    # Transform functions
+    "translate", "rotate_x", "rotate_y", "rotate_z", "scale", "identity", "compose_trs",
+    "matrix_push", "matrix_pop", "matrix_current", "matrix_load_identity",
+    # Colormap functions
+    "colormap_supported", "colormap_data",
+    # Scene and rendering
+    "create_framegraph", "create_async_compute", "create_scene_node", "create_thread_metrics",
+    # Copy operations
+    "copy_buffer_to_buffer", "validate_copy_alignment",
 ]

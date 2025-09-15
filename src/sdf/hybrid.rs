@@ -8,9 +8,9 @@
 // RELEVANT FILES:src/path_tracing/hybrid_compute.rs,src/gpu/mod.rs,src/accel/mod.rs
 
 use bytemuck::{Pod, Zeroable};
-use std::sync::Arc;
-use wgpu::{Device, Queue, Buffer};
 use once_cell::sync::OnceCell;
+use std::sync::Arc;
+use wgpu::{Buffer, Device, Queue};
 
 use crate::accel::{BvhHandle, Triangle};
 use crate::error::RenderError;
@@ -22,7 +22,7 @@ pub struct Vertex {
     pub position: [f32; 3],
     pub _pad: f32,
 }
-use crate::sdf::{SdfScene, CsgResult};
+use crate::sdf::{CsgResult, SdfScene};
 
 /// Hybrid scene containing both SDF and mesh geometry
 #[derive(Debug)]
@@ -144,7 +144,12 @@ impl HybridScene {
     }
 
     /// Add mesh geometry to the scene
-    pub fn add_mesh(&mut self, vertices: Vec<Vertex>, indices: Vec<u32>, bvh: BvhHandle) -> Result<(), RenderError> {
+    pub fn add_mesh(
+        &mut self,
+        vertices: Vec<Vertex>,
+        indices: Vec<u32>,
+        bvh: BvhHandle,
+    ) -> Result<(), RenderError> {
         self.vertices = vertices;
         self.indices = indices;
         self.bvh = Some(bvh);
@@ -226,13 +231,29 @@ impl HybridScene {
                 // Hit! Calculate normal using finite differences
                 let eps = 0.001;
                 let normal = glam::Vec3::new(
-                    self.sdf_scene.evaluate(point + glam::Vec3::X * eps).distance -
-                    self.sdf_scene.evaluate(point - glam::Vec3::X * eps).distance,
-                    self.sdf_scene.evaluate(point + glam::Vec3::Y * eps).distance -
-                    self.sdf_scene.evaluate(point - glam::Vec3::Y * eps).distance,
-                    self.sdf_scene.evaluate(point + glam::Vec3::Z * eps).distance -
-                    self.sdf_scene.evaluate(point - glam::Vec3::Z * eps).distance,
-                ).normalize();
+                    self.sdf_scene
+                        .evaluate(point + glam::Vec3::X * eps)
+                        .distance
+                        - self
+                            .sdf_scene
+                            .evaluate(point - glam::Vec3::X * eps)
+                            .distance,
+                    self.sdf_scene
+                        .evaluate(point + glam::Vec3::Y * eps)
+                        .distance
+                        - self
+                            .sdf_scene
+                            .evaluate(point - glam::Vec3::Y * eps)
+                            .distance,
+                    self.sdf_scene
+                        .evaluate(point + glam::Vec3::Z * eps)
+                        .distance
+                        - self
+                            .sdf_scene
+                            .evaluate(point - glam::Vec3::Z * eps)
+                            .distance,
+                )
+                .normalize();
 
                 return Some(HybridHitResult {
                     t,
@@ -270,10 +291,10 @@ impl HybridScene {
 
         let device = &ctx().device;
 
-          // Convert SDF data to GPU-compatible format
-          // Note: primitives may not be Pod; defer actual upload and create minimal buffers.
-          let primitives_data: Vec<u8> = Vec::new();
-          let nodes_data: Vec<u8> = Vec::new();
+        // Convert SDF data to GPU-compatible format
+        // Note: primitives may not be Pod; defer actual upload and create minimal buffers.
+        let primitives_data: Vec<u8> = Vec::new();
+        let nodes_data: Vec<u8> = Vec::new();
 
         // Create buffers
         let primitives_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -291,18 +312,20 @@ impl HybridScene {
         });
 
         // Upload data if not empty
-          if !primitives_data.is_empty() {
-              ctx().queue.write_buffer(&primitives_buffer, 0, &primitives_data);
-          }
-          if !nodes_data.is_empty() {
-              ctx().queue.write_buffer(&nodes_buffer, 0, &nodes_data);
-          }
+        if !primitives_data.is_empty() {
+            ctx()
+                .queue
+                .write_buffer(&primitives_buffer, 0, &primitives_data);
+        }
+        if !nodes_data.is_empty() {
+            ctx().queue.write_buffer(&nodes_buffer, 0, &nodes_data);
+        }
 
         self.sdf_buffers = Some(SdfBuffers {
             primitives_buffer,
             nodes_buffer,
-              primitive_count: self.sdf_scene.primitive_count() as u32,
-              node_count: self.sdf_scene.node_count() as u32,
+            primitive_count: self.sdf_scene.primitive_count() as u32,
+            node_count: self.sdf_scene.node_count() as u32,
         });
 
         Ok(())
@@ -399,8 +422,14 @@ impl HybridScene {
         } else {
             let dummy = dummy_storage_buffer();
             vec![
-                wgpu::BindGroupEntry { binding: 0, resource: dummy.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: dummy.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: dummy.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: dummy.as_entire_binding(),
+                },
             ]
         }
     }
@@ -425,9 +454,18 @@ impl HybridScene {
         } else {
             let dummy = dummy_storage_buffer();
             vec![
-                wgpu::BindGroupEntry { binding: 0, resource: dummy.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: dummy.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: dummy.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: dummy.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: dummy.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: dummy.as_entire_binding(),
+                },
             ]
         }
     }
@@ -482,7 +520,7 @@ impl HybridMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sdf::{SdfSceneBuilder, SdfPrimitive};
+    use crate::sdf::{SdfPrimitive, SdfSceneBuilder};
     use glam::Vec3;
 
     #[test]
@@ -494,8 +532,7 @@ mod tests {
 
     #[test]
     fn test_sdf_only_scene() {
-        let (builder, _) = SdfSceneBuilder::new()
-            .add_sphere(Vec3::ZERO, 1.0, 1);
+        let (builder, _) = SdfSceneBuilder::new().add_sphere(Vec3::ZERO, 1.0, 1);
         let sdf_scene = builder.build();
 
         let hybrid = HybridScene::sdf_only(sdf_scene);
@@ -506,8 +543,7 @@ mod tests {
 
     #[test]
     fn test_sdf_raymarching() {
-        let (builder, _) = SdfSceneBuilder::new()
-            .add_sphere(Vec3::new(0.0, 0.0, -5.0), 1.0, 1);
+        let (builder, _) = SdfSceneBuilder::new().add_sphere(Vec3::new(0.0, 0.0, -5.0), 1.0, 1);
         let sdf_scene = builder.build();
 
         let hybrid = HybridScene::sdf_only(sdf_scene);

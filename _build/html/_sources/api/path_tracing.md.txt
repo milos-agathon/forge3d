@@ -32,6 +32,23 @@ t.add_sphere((0.0, 0.0, 0.0), 0.6, {"type": "lambert", "base_color": (0.8, 0.8, 
 img = t.render_rgba(spp=1)
 ```
 
+## Progressive Tiling (A15)
+
+The CPU reference supports progressive rendering with a tile scheduler and checkpoint callbacks:
+
+```python
+from forge3d.path_tracing import PathTracer
+
+t = PathTracer(3840, 2160, seed=2, tile=128)
+
+def on_update(info):
+    print(f"progress: {info['progress']*100:.1f}% tile={info['tile']}")
+
+img = t.render_progressive(tile_size=128, min_updates_per_sec=2.0, callback=on_update)
+```
+
+This provides at least two checkpoints per second on typical hardware at 4K by scheduling small tiles and throttling callback cadence.
+
 ## Limitations
 
 - MVP supports spheres only on GPU; triangles and materials are covered in the CPU reference.

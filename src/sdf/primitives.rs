@@ -3,7 +3,7 @@
 // Implementation supports common SDF shapes for CSG operations and raymarching
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Vec3, Vec2};
+use glam::{Vec2, Vec3};
 
 /// Parameters for SDF sphere primitive
 #[repr(C)]
@@ -254,8 +254,8 @@ pub mod cpu_eval {
         let radial_dist = xz_dist - cylinder.radius;
         let vertical_dist = local_point.y.abs() - half_height;
 
-        radial_dist.max(vertical_dist).max(0.0) +
-            Vec2::new(radial_dist.max(0.0), vertical_dist.max(0.0)).length()
+        radial_dist.max(vertical_dist).max(0.0)
+            + Vec2::new(radial_dist.max(0.0), vertical_dist.max(0.0)).length()
     }
 
     /// Evaluate plane SDF
@@ -290,32 +290,58 @@ pub mod cpu_eval {
         match primitive.primitive_type {
             0 => {
                 let p = &primitive.params;
-                let sphere = SdfSphere { center: [p[0], p[1], p[2]], radius: p[3] };
+                let sphere = SdfSphere {
+                    center: [p[0], p[1], p[2]],
+                    radius: p[3],
+                };
                 sphere_sdf(point, &sphere)
             }
             1 => {
                 let p = &primitive.params;
-                let sdf_box = SdfBox { center: [p[0], p[1], p[2]], _pad1: 0.0, extents: [p[4], p[5], p[6]], _pad2: 0.0 };
+                let sdf_box = SdfBox {
+                    center: [p[0], p[1], p[2]],
+                    _pad1: 0.0,
+                    extents: [p[4], p[5], p[6]],
+                    _pad2: 0.0,
+                };
                 box_sdf(point, &sdf_box)
             }
             2 => {
                 let p = &primitive.params;
-                let cylinder = SdfCylinder { center: [p[0], p[1], p[2]], radius: p[3], height: p[4], _pad: [0.0; 3] };
+                let cylinder = SdfCylinder {
+                    center: [p[0], p[1], p[2]],
+                    radius: p[3],
+                    height: p[4],
+                    _pad: [0.0; 3],
+                };
                 cylinder_sdf(point, &cylinder)
             }
             3 => {
                 let p = &primitive.params;
-                let plane = SdfPlane { normal: [p[0], p[1], p[2]], distance: p[3] };
+                let plane = SdfPlane {
+                    normal: [p[0], p[1], p[2]],
+                    distance: p[3],
+                };
                 plane_sdf(point, &plane)
             }
             4 => {
                 let p = &primitive.params;
-                let torus = SdfTorus { center: [p[0], p[1], p[2]], major_radius: p[3], minor_radius: p[4], _pad: [0.0; 3] };
+                let torus = SdfTorus {
+                    center: [p[0], p[1], p[2]],
+                    major_radius: p[3],
+                    minor_radius: p[4],
+                    _pad: [0.0; 3],
+                };
                 torus_sdf(point, &torus)
             }
             5 => {
                 let p = &primitive.params;
-                let capsule = SdfCapsule { point_a: [p[0], p[1], p[2]], radius: p[3], point_b: [p[4], p[5], p[6]], _pad: 0.0 };
+                let capsule = SdfCapsule {
+                    point_a: [p[0], p[1], p[2]],
+                    radius: p[3],
+                    point_b: [p[4], p[5], p[6]],
+                    _pad: 0.0,
+                };
                 capsule_sdf(point, &capsule)
             }
             _ => f32::INFINITY,
@@ -369,7 +395,8 @@ mod tests {
         assert_eq!(sphere.primitive_type, SdfPrimitiveType::Sphere as u32);
         assert_eq!(sphere.material_id, 42);
 
-        let sdf_box = SdfPrimitive::box_primitive(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 2.0, 3.0), 1);
+        let sdf_box =
+            SdfPrimitive::box_primitive(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 2.0, 3.0), 1);
         assert_eq!(sdf_box.primitive_type, SdfPrimitiveType::Box as u32);
         assert_eq!(sdf_box.material_id, 1);
     }

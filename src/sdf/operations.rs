@@ -135,7 +135,11 @@ pub mod cpu_eval {
             (b.distance) / (a.distance + b.distance)
         };
 
-        let material_id = if t < 0.5 { a.material_id } else { b.material_id };
+        let material_id = if t < 0.5 {
+            a.material_id
+        } else {
+            b.material_id
+        };
 
         CsgResult {
             distance,
@@ -387,13 +391,7 @@ mod tests {
         let leaf2_idx = tree.add_leaf(prim2_idx, 2);
 
         // Add union operation
-        let union_idx = tree.add_operation(
-            CsgOperation::Union,
-            leaf1_idx,
-            leaf2_idx,
-            0.0,
-            0,
-        );
+        let union_idx = tree.add_operation(CsgOperation::Union, leaf1_idx, leaf2_idx, 0.0, 0);
 
         // Evaluate at origin (should be inside both spheres, union should be negative)
         let result = tree.evaluate(Vec3::ZERO, union_idx);

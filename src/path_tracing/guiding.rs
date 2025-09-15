@@ -37,9 +37,19 @@ impl GuidingGrid {
 
     /// Online update: increment the directional bin count for the given cell.
     pub fn update(&mut self, x: u32, y: u32, bin: u32, weight: f32) {
-        let w = if weight.is_finite() { weight.max(0.0) } else { 0.0 };
+        let w = if weight.is_finite() {
+            weight.max(0.0)
+        } else {
+            0.0
+        };
         // Use stochastic rounding to keep counts integral but weight-sensitive.
-        let inc = if w <= 0.0 { 0 } else if w >= 1.0 { 1 } else { (rand_like(w) as u32) };
+        let inc = if w <= 0.0 {
+            0
+        } else if w >= 1.0 {
+            1
+        } else {
+            (rand_like(w) as u32)
+        };
         if inc > 0 {
             let i = self.idx(x, y, bin);
             // Saturating add to avoid overflow.
@@ -78,7 +88,11 @@ fn rand_like(w: f32) -> f32 {
     let mut x = bits.wrapping_mul(1664525).wrapping_add(1013904223);
     x ^= x.rotate_left(13);
     let u = (x as f32) / (u32::MAX as f32);
-    if u < w { 1.0 } else { 0.0 }
+    if u < w {
+        1.0
+    } else {
+        0.0
+    }
 }
 
 #[cfg(test)]
@@ -92,13 +106,17 @@ mod tests {
         assert_eq!(pdf.len(), 8);
         let s: f32 = pdf.iter().sum();
         assert!((s - 1.0).abs() < 1e-6);
-        for p in pdf { assert!((p - 1.0/8.0).abs() < 1e-6); }
+        for p in pdf {
+            assert!((p - 1.0 / 8.0).abs() < 1e-6);
+        }
     }
 
     #[test]
     fn updates_accumulate() {
         let mut g = GuidingGrid::new(2, 2, 4);
-        for _ in 0..10 { g.update(0, 0, 1, 1.0); }
+        for _ in 0..10 {
+            g.update(0, 0, 1, 1.0);
+        }
         let pdf = g.pdf(0, 0);
         // Bin 1 should dominate.
         assert!(pdf[1] > 0.5);
@@ -106,4 +124,3 @@ mod tests {
         assert!((s - 1.0).abs() < 1e-6);
     }
 }
-
