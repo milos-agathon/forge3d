@@ -1,5 +1,5 @@
-<task id="ws-A14-aovs-debug-outputs" version="1.0">
-  <title>Workstream A · Task A14 — Path Tracer AOVs & Debug Outputs (GPU-first, CPU fallback)</title>
+<task id="ws-A15-auto" version="1.0">
+  <title>Workstream A · Task A15 — Implement per roadmap2.csv (derive deliverables → code/tests/docs)</title>
 
   <role>
     You are OpenAI Codex CLI in <b>Verification → Implementation Mode</b>, acting as a senior graphics/runtime engineer.
@@ -17,10 +17,10 @@
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
     <safety>
-      - Minimal, additive changes; preserve existing public API (add new, non-breaking endpoints).
-      - Never delete custom user code; add .gitignore entries for generated artifacts rather than deleting tracked files.
-      - If a tool is missing, mark step SKIPPED with the exact command to run locally.
-      - If essential data is missing, reply <b>UNCERTAIN</b> with the precise artifact or decision required.
+      - Make only the minimal changes needed to satisfy the A15 row’s Deliverables and Acceptance Criteria.
+      - Never delete custom user code; prefer adding .gitignore entries for generated artifacts instead of deleting tracked files.
+      - If a tool is missing, mark the step SKIPPED with the exact command to run locally.
+      - If the A15 row is missing/ambiguous, reply <b>UNCERTAIN</b> listing the exact headers/rows/fields needed, then STOP with no edits.
     </safety>
     <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz, out, diag_out</exclusions>
   </constraints>
@@ -31,199 +31,123 @@
     <workstreamSelector>
       <![CDATA[
       Workstream ID: A
-      Task ID: A14
-      Title contains: AOVs & Debug Outputs
+      Task ID: A15
       ]]>
     </workstreamSelector>
   </inputs>
 
-  <!-- Verify A14 exists in roadmap2.csv even if columns are misaligned -->
+  <!-- 1) Verify A15 exists and extract Title/Deliverables/Acceptance -->
   <prechecks>
     <command>
       <![CDATA[
 python - <<'PY'
-import csv, codecs, sys
-found=False; rows=[]
+import csv, codecs, sys, json
+row=None
 try:
   with codecs.open("roadmap2.csv","r","utf-8-sig") as f:
-    rdr=csv.reader(f)
-    headers=next(rdr, [])
-    # Accept either proper CSV or misaligned (Task Title holds "A14")
+    rdr=csv.DictReader(f)
     for r in rdr:
-      rows.append(r)
-      line="|".join([c.strip().lower() for c in r])
-      if "workstream id" in "|".join([h.lower() for h in headers]):
-        if ("a14" in line) and ("a|" in line or "|a|" in line or line.startswith("a|") or "|a|" in line.replace(",","|")):
-          found=True; break
-      else:
-        if ("a14" in line):
-          found=True; break
+      wid=(r.get("Workstream ID","") or "").strip().lower()
+      tid=(r.get("Task ID","") or "").strip().lower()
+      ttl=(r.get("Task Title","") or "").strip().lower()
+      if wid=="a" and (tid=="a15" or "a15" in ttl):
+        row=r; break
 except FileNotFoundError:
   print("UNCERTAIN: roadmap2.csv not found", file=sys.stderr); sys.exit(2)
-if not found:
-  print("UNCERTAIN: A14 not found in roadmap2.csv (Workstream A). Please confirm row and headers."); sys.exit(3)
-print("WORKSTREAM_TASK_FOUND:A14")
+if not row:
+  print("UNCERTAIN: A15 not found in roadmap2.csv (Workstream A). Provide the exact row with headers.", file=sys.stderr); sys.exit(3)
+meta={
+  "Title": row.get("Task Title","").strip(),
+  "Rationale": row.get("Rationale","").strip(),
+  "Deliverables": row.get("Deliverables","").strip(),
+  "Acceptance": row.get("Acceptance Criteria","").strip(),
+  "Priority": row.get("Priority","").strip(),
+  "Phase": row.get("Phase","").strip(),
+  "Missing": row.get("Missing Features","").strip(),
+  "Dependencies": row.get("Dependencies","").strip(),
+  "Risks": row.get("Risks/Mitigations","").strip()
+}
+print("WORKSTREAM_TASK_FOUND:A15")
+print("A15_META:"+json.dumps(meta, ensure_ascii=False))
 PY
       ]]>
     </command>
   </prechecks>
 
-  <acceptanceCriteria>
-    <ac id="AC-1">Compute kernel emits the following AOVs: <b>albedo</b>, <b>normal</b>, <b>depth</b> (linear), <b>direct</b>, <b>indirect</b>, <b>emission</b>, <b>visibility</b> (mask). Each is produced on GPU when available; CPU fallback computes identical semantics.</ac>
-    <ac id="AC-2">WGSL defines separate storage targets per AOV with documented bind group layout; formats: albedo/direct/indirect/emission as <code>rgba16float</code>, normal as <code>rgba16float</code> (xyz in rgb), depth as <code>r32float</code>, visibility as <code>r8unorm</code>.</ac>
-    <ac id="AC-3">Rust backend exposes a typed API to enable/disable specific AOVs to keep peak host-visible usage ≤ 512 MiB (tile or sequential readback if necessary). Provides GPU→CPU readback for selected AOVs.</ac>
-    <ac id="AC-4">Python API returns a dict of numpy arrays keyed by canonical names (<code>{"albedo","normal","depth","direct","indirect","emission","visibility"}</code>) and offers <code>save_aovs()</code> helper to write <b>EXR</b> for HDR (albedo/normal/depth/direct/indirect/emission) and <b>PNG</b> for visibility with consistent filenames.</ac>
-    <ac id="AC-5">Determinism: with fixed seed, single-frame GPU/CPU AOVs match within tolerance (per-channel mean/var within epsilon). Tests skip GPU if no adapter.</ac>
-    <ac id="AC-6">Docs updated (README and docs/api if Sphinx present) describing AOVs, formats, ranges, and naming scheme; examples added or updated.</ac>
-    <ac id="AC-7">Validation passes: <code>cargo fmt</code>, <code>cargo clippy -D warnings</code>, <code>cargo test</code>, <code>pytest</code>, <code>sphinx-build</code> (if docs), <code>maturin build</code>, optional <code>cmake</code>.</ac>
-  </acceptanceCriteria>
-
   <design>
-    <wgsl>
+    <mappingRules>
       <![CDATA[
-File: src/shaders/pt_kernel.wgsl  (extend existing kernel)
-Header doc (required):
-  Bind Group 0 (Uniforms): width, height, frame_index; camera params; exposure; seed_hi/seed_lo
-  Bind Group 1 (Scene): readonly storage (materials, spheres/triangles, etc.)
-  Bind Group 2 (Accum/State): storage buffers (HDR accum if used by tracer)
-  Bind Group 3..N (AOV outputs):
-    @binding(0) storage texture2D<rgba16float, write>   // aov_albedo
-    @binding(1) storage texture2D<rgba16float, write>   // aov_normal (xyz in rgb, w=1)
-    @binding(2) storage texture2D<r32float, write>      // aov_depth (linear world/view)
-    @binding(3) storage texture2D<rgba16float, write>   // aov_direct
-    @binding(4) storage texture2D<rgba16float, write>   // aov_indirect
-    @binding(5) storage texture2D<rgba16float, write>   // aov_emission
-    @binding(6) storage texture2D<r8unorm, write>       // aov_visibility (0 or 1)
-
-Kernel body:
-  - Generate primary ray (existing tracer path); compute per-AOV contributions.
-  - Write normalized outputs:
-      normal in [-1,1] mapped to [-1,1] (EXR float), not remapped to [0,1].
-      depth in linear units (meters) as r32float.
-      albedo/direct/indirect/emission as linear HDR radiance (no tonemap).
-      visibility ∈ {0,1}.
-      Skip writes for disabled AOVs (runtime flags).
+Derive concrete artifacts from A15 “Deliverables” using these keyword→path rules (use exact filenames in CSV if present):
+- "WGSL", "compute", "shader", "kernel" → src/shaders/<feature>.wgsl
+- "BVH", "accel", "traversal" → src/accel/*.rs; src/path_tracing/accel.rs (+ WGSL hooks)
+- "intersection", "ray-triangle", "ray-sphere" → src/path_tracing/intersect.rs; src/shaders/pt_intersect_*.wgsl
+- "sampling", "NEE", "MIS", "alias", "reservoir", "ReSTIR" → src/lighting/*.rs; src/shaders/lighting_*.wgsl; python/forge3d/lighting.py
+- "materials", "BSDF", "PBR", "GGX", "BRDF", "clearcoat", "sheen" → src/pbr/*.rs; shaders/pbr_*.wgsl; python/forge3d/pbr.py
+- "camera", "DOF", "thin lens", "motion vectors", "TAA" → src/camera/*.rs; shaders/camera_*.wgsl; python/forge3d/camera.py
+- "textures", "image", "mipmap", "sampler" → src/textures/*.rs; shaders/texture_*.wgsl; python/forge3d/textures.py
+- "mesh", "IO", "OBJ", "PLY", "glTF", "USD", "tangents" → src/mesh/*.rs; python/forge3d/mesh_io.py
+- "instancing", "transforms", "scene graph" → src/scene/*.rs; python/forge3d/scene.py
+- "AOV", "debug", "diagnostics" → src/path_tracing/aov.rs; shaders/pt_kernel.wgsl (extend); python bridge
+- "denoise", "SVGF", "temporal" → src/denoise/svgf/*.rs; shaders/svgf_*.wgsl; python/forge3d/path_tracing.py (flags)
+- "wavefront", "queues", "compaction" → src/path_tracing/wavefront/**/*.rs; shaders/pt_*.wgsl
+- "Python API" → python/forge3d/<feature>.py (public class/functions + type hints)
+- "docs" → README.md section and docs/api/<feature>.md (if Sphinx present)
+- "tests" → tests/<feature>_*.rs or tests/test_<feature>*.py (GPU tests @skip if no adapter)
+- "examples" → examples/<feature>_*.py (write images to out/; ensure .gitignore ignores out/)
+If Deliverables specify explicit filenames, use those verbatim instead of heuristics.
       ]]>
-    </wgsl>
-
-    <rust>
+    </mappingRules>
+    <acceptanceStrategy>
       <![CDATA[
-New files:
-  src/path_tracing/aov.rs       // AovKind enum, formats, enabling flags, size calculators
-  src/path_tracing/io.rs        // EXR/PNG writers (use crates: exr, png or image), optional gated by feature "images"
-Modified:
-  src/path_tracing/mod.rs       // PathTracerGPU: create storage textures/buffers per enabled AOV; bind groups
-  src/path_tracing/compute.rs   // dispatch + sequential readback per AOV to keep host-visible usage low
-
-Public API (Rust):
-  pub enum AovKind { Albedo, Normal, Depth, Direct, Indirect, Emission, Visibility }
-  pub struct AovDesc { kind: AovKind, enabled: bool, format: wgpu::TextureFormat }
-  pub struct AovFrames { /* device handles and optional staging buffers */ }
-
-  impl PathTracerGPU {
-    pub fn with_aovs(mut self, aovs:&[AovKind]) -> Self;
-    pub fn read_aov_rgba16f(&self, kind:AovKind) -> anyhow::Result<Vec<f16>>; // or f32
-    pub fn read_aov_r32f(&self, kind:AovKind) -> anyhow::Result<Vec<f32>>;
-    pub fn read_aov_r8u (&self, kind:AovKind) -> anyhow::Result<Vec<u8>>;
-  }
+For each bullet/line in A15 Deliverables:
+  1) Map it to concrete files/symbols with the rules above.
+  2) Implement the smallest viable code to satisfy A15 “Acceptance Criteria”.
+  3) If a deliverable is ambiguous, reply UNCERTAIN with the exact text and the minimal clarification needed (no edits).
       ]]>
-    </rust>
-
-    <python>
-      <![CDATA[
-File: python/forge3d/path_tracing.py
-Add:
-  def render_aovs(self, width:int, height:int, scene, camera, aovs=("albedo","normal","depth","direct","indirect","emission","visibility"), seed:int=1, frames:int=1, use_gpu:bool=True) -> dict[str,np.ndarray]:
-      """Returns dict of selected AOVs. Shapes:
-         - float EXR candidates as float32 arrays (H,W,3 or 4); visibility as uint8 (H,W,1).
-      """
-
-  def save_aovs(self, aov_dict:dict, out_dir:PathLike, basename:str="frame0001"):
-      """Write EXR for HDR AOVs (albedo/normal/depth/direct/indirect/emission) and PNG for visibility.
-         Filenames: {basename}_aov-{name}.exr|png
-      """
-      ]]>
-    </python>
+    </acceptanceStrategy>
   </design>
+
+  <acceptanceCriteria>
+    <ac id="AC-0">A15 row is present; meta printed as A15_META JSON.</ac>
+    <ac id="AC-1">Every concrete deliverable item from A15’s Deliverables cell exists as code/docs/tests artifacts with appropriate header/inline docs (bind groups for WGSL, public APIs for Python/Rust).</ac>
+    <ac id="AC-2">Python public API exposes the functions/classes required by A15’s Acceptance Criteria (row text), with type hints and determinism notes where relevant.</ac>
+    <ac id="AC-3">Unit/integration tests exist for all implemented deliverables; GPU-dependent tests are skipped when no compatible adapter is available.</ac>
+    <ac id="AC-4">Docs updated: README + docs/api/<feature>.md (if Sphinx present) clearly describing usage, parameters, and limitations; examples added if requested by A15.</ac>
+    <ac id="AC-5">Validation run passes: fmt, clippy -D warnings, cargo test, pytest, sphinx-build (if docs), maturin build; CI ensured if missing.</ac>
+  </acceptanceCriteria>
 
   <changes>
     <createOrModify>
-      <file path="src/path_tracing/aov.rs" kind="new"/>
-      <file path="src/path_tracing/io.rs" kind="new"/>
-      <file path="src/path_tracing/mod.rs" kind="modify"/>
-      <file path="src/path_tracing/compute.rs" kind="modify-or-new"/>
-      <file path="src/shaders/pt_kernel.wgsl" kind="modify"/>
-      <file path="python/forge3d/path_tracing.py" kind="modify"/>
-      <file path="tests/test_aovs_gpu.py" kind="new"/>
-      <file path="tests/test_aovs_cpu_equiv.py" kind="new"/>
+      <!-- Actual files depend on A15 deliverables; these directories are typical targets -->
+      <file path="src/shaders/" kind="modify-or-new"/>
+      <file path="src/path_tracing/" kind="modify-or-new"/>
+      <file path="src/accel/" kind="modify-or-new"/>
+      <file path="src/lighting/" kind="modify-or-new-optional"/>
+      <file path="src/pbr/" kind="modify-or-new-optional"/>
+      <file path="src/camera/" kind="modify-or-new-optional"/>
+      <file path="src/textures/" kind="modify-or-new-optional"/>
+      <file path="src/mesh/" kind="modify-or-new-optional"/>
+      <file path="src/scene/" kind="modify-or-new-optional"/>
+      <file path="src/denoise/" kind="modify-or-new-optional"/>
+      <file path="python/forge3d/" kind="modify-or-new"/>
+      <file path="tests/" kind="modify-or-new"/>
+      <file path="examples/" kind="modify-or-new-optional"/>
       <file path="README.md" kind="modify-append"/>
-      <file path="docs/api/aovs.md" kind="new-optional"/>
+      <file path="docs/api/" kind="modify-or-new-optional"/>
       <file path=".gitignore" kind="modify-append"/>
-      <file path="Cargo.toml" kind="modify-append"/>
     </createOrModify>
-
-    <implNotes>
-      <![CDATA[
-- Use feature flag "images" to gate EXR/PNG writers; default enabled for CI.
-- Keep peak host-visible memory low: reuse a single staging buffer and copy AOVs sequentially; or tile dispatch for very large frames.
-- Normalization:
-   * normal: store true linear normals in EXR (no [0,1] remap).
-   * depth: linear metric units; document near/far if clipped.
-   * visibility: 0/1.
-- Deterministic RNG: base on seed ^ pixel_id; ensure CPU/GPU parity for single frame (epsilon checks).
-- Naming: {basename}_aov-{name}.exr|png with stable lowercase names: albedo, normal, depth, direct, indirect, emission, visibility.
-      ]]>
-    </implNotes>
   </changes>
 
   <tests>
-    <python path="tests/test_aovs_gpu.py">
+    <templates>
       <![CDATA[
-import os, pytest, numpy as np
-from forge3d.path_tracing import PathTracer
-
-def gpu_available():
-    try:
-        # Construct and probe adapter via PathTracer (implement internal probe if needed)
-        return True
-    except Exception:
-        return False
-
-@pytest.mark.skipif(not gpu_available(), reason="No compatible GPU adapter")
-def test_gpu_aovs_shapes_and_ranges(tmp_path):
-    tr = PathTracer()
-    scene, cam = make_test_scene()  # use existing helpers or minimal sphere/tri
-    aovs = tr.render_aovs(64,64,scene,cam, aovs=("albedo","normal","depth","direct","indirect","emission","visibility"), seed=123, frames=1, use_gpu=True)
-    assert set(aovs.keys())=={"albedo","normal","depth","direct","indirect","emission","visibility"}
-    assert aovs["visibility"].dtype==np.uint8
-    assert aovs["depth"].dtype in (np.float32, np.float64)
-    for k in ("albedo","normal","direct","indirect","emission"):
-        assert aovs[k].ndim==3 and aovs[k].shape[0]==64 and aovs[k].shape[1]==64
-    # Determinism single frame
-    aovs2 = tr.render_aovs(64,64,scene,cam, aovs=("albedo",), seed=123, frames=1, use_gpu=True)
-    assert np.allclose(aovs["albedo"], aovs2["albedo"], atol=1e-5, rtol=1e-5)
+- GPU feature tests (pytest): skip if no adapter; assert shapes/dtypes; deterministic behavior for frames=1 with fixed seed; epsilon checks vs CPU where applicable.
+- Rust unit tests: validate struct packing/layout, math utilities, and error handling (no panics across FFI boundaries).
+- Golden/contract tests derived from A15 Acceptance Criteria text (e.g., if “MIS/NEE” is specified, include pdf normalization or variance checks).
+- Docs build test: sphinx-build succeeds (or SKIPPED if docs absent).
+- Example smoke test (optional): script runs headless and writes to out/ (gitignored).
       ]]>
-    </python>
-
-    <python path="tests/test_aovs_cpu_equiv.py">
-      <![CDATA[
-import pytest, numpy as np
-from forge3d.path_tracing import PathTracer
-
-def test_cpu_gpu_stats_match_or_skip():
-    tr = PathTracer()
-    scene, cam = make_test_scene()
-    a_gpu = tr.render_aovs(32,32,scene,cam, aovs=("albedo","depth"), seed=7, frames=1, use_gpu=True)
-    a_cpu = tr.render_aovs(32,32,scene,cam, aovs=("albedo","depth"), seed=7, frames=1, use_gpu=False)
-    for k in a_gpu:
-        g, c = a_gpu[k], a_cpu[k]
-        # Compare per-channel means/vars to a small tolerance
-        gm, cm = np.nanmean(g, axis=(0,1)), np.nanmean(c, axis=(0,1))
-        gv, cv = np.nanvar(g, axis=(0,1)), np.nanvar(c, axis=(0,1))
-        assert np.allclose(gm, cm, rtol=5e-2, atol=5e-2)
-        assert np.allclose(gv, cv, rtol=1e-1, atol=1e-1)
-      ]]>
-    </python>
+    </templates>
   </tests>
 
   <!-- EXACTLY INCLUDE THESE STEPS -->
@@ -257,33 +181,34 @@ def test_cpu_gpu_stats_match_or_skip():
 
   <execution>
     <steps>
-      <step>Create feature branch: <code>git checkout -b ws-A14-implementation</code></step>
-      <step>Extend <code>src/shaders/pt_kernel.wgsl</code> to declare and write AOV storage targets per design (guard writes behind runtime flags bindings or descriptor bitmask).</step>
-      <step>Add/modify Rust: <code>src/path_tracing/aov.rs</code>, <code>src/path_tracing/io.rs</code>, <code>src/path_tracing/mod.rs</code>, <code>src/path_tracing/compute.rs</code> — create AOV textures, bind groups, sequential readback, and file writers (EXR/PNG) behind a feature gate.</step>
-      <step>Modify Python: <code>python/forge3d/path_tracing.py</code> to expose <code>render_aovs()</code> and <code>save_aovs()</code>, enabling selection of AOVs and deterministic seeding; default to GPU when available, CPU otherwise.</step>
-      <step>Create tests: <code>tests/test_aovs_gpu.py</code>, <code>tests/test_aovs_cpu_equiv.py</code> as specified.</step>
-      <step>Docs & housekeeping: update <code>README.md</code>, add <code>docs/api/aovs.md</code> (if Sphinx present), and append <code>.gitignore</code> entries for out/ and image outputs.</step>
-      <step>Run Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent.</step>
-      <step>Generate <code>PR_BODY.md</code> and print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
+      <step>Create feature branch: <code>git checkout -b ws-A15-implementation</code></step>
+      <step>Parse A15_META (printed above) into bullet items (split by newlines/semicolons). Save mapping to <code>reports/a15_plan.json</code> (deliverable → files/symbols) using the mapping rules.</step>
+      <step>For each mapped deliverable:
+        <ul>
+          <li>Implement minimal, correct code in WGSL/Rust/Python as indicated by the mapping rules and A15 Acceptance Criteria.</li>
+          <li>Add/modify tests (Rust/Python) covering success paths and at least one failure/validation path tied to the AC.</li>
+          <li>Update README and docs/api/&lt;feature&gt;.md (if Sphinx present) with usage, parameters, and limitations.</li>
+          <li>If examples requested: add an example script in <code>examples/</code> writing outputs to <code>out/</code> (ensure .gitignore ignores it).</li>
+        </ul>
+      </step>
+      <step>Append <code>.gitignore</code> entries for out/, diag_out/, and build artifacts if needed.</step>
+      <step>Run the Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent and record the exact command.</step>
+      <step>Create <code>PR_BODY.md</code> summarizing A15 implementation with references to files/lines and validation results; print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
     </steps>
   </execution>
 
   <completion>
     <print>
-      - src/shaders/pt_kernel.wgsl
-      - src/path_tracing/aov.rs
-      - src/path_tracing/io.rs
-      - src/path_tracing/mod.rs
-      - src/path_tracing/compute.rs
-      - python/forge3d/path_tracing.py
-      - tests/test_aovs_gpu.py
-      - tests/test_aovs_cpu_equiv.py
-      - README.md
-      - docs/api/aovs.md (if Sphinx present)
+      - reports/a15_plan.json
+      - All created/modified source files per mapping (WGSL/Rust/Python)
+      - tests/* for implemented features
+      - examples/* (if requested by A15)
+      - README.md (updated)
+      - docs/api/* (if Sphinx present)
       - PR_BODY.md
     </print>
     <fallback>
-      If A14 is not found in roadmap2.csv, respond <b>UNCERTAIN</b> with the list of detected Workstream A tasks and STOP without changes.
+      If A15 is not found or its Deliverables/Acceptance text is empty/ambiguous, respond <b>UNCERTAIN</b> listing the exact missing fields and STOP without changes.
     </fallback>
   </completion>
 </task>

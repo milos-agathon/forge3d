@@ -6,9 +6,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple, Iterable, Mapping
+from typing import Any, Dict, Optional, Tuple, Iterable, Mapping, Callable
 
 import numpy as np
+import time as _time
 
 from .materials import PbrMaterial
 
@@ -38,12 +39,22 @@ class PathTracer:
     _height: int = 0
     _max_bounces: int = 1
     _seed: int = 1
+    _tile: Optional[int] = None
 
-    def __init__(self, width: int, height: int, *, max_bounces: int = 1, seed: int = 1) -> None:
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        *,
+        max_bounces: int = 1,
+        seed: int = 1,
+        tile: Optional[int] = None,
+    ) -> None:
         self._width = int(width)
         self._height = int(height)
         self._max_bounces = int(max_bounces)
         self._seed = int(seed)
+        self._tile = int(tile) if tile is not None else None
 
         if self._width <= 0 or self._height <= 0:
             raise ValueError("invalid tracer size")
@@ -74,19 +85,97 @@ class PathTracer:
         """
         width, height = self._width, self._height
         rng = np.random.default_rng(self._seed + int(spp))
-        y = np.linspace(0, 1, height, dtype=np.float32)[:, None]
-        x = np.linspace(0, 1, width, dtype=np.float32)[None, :]
-        base = np.clip(0.25 + 0.75 * 0.5 * (x + y), 0.0, 1.0)
-        rgb = np.stack([base, base, base], axis=-1)
 
-        # Subtle variation to ensure deterministic but non-uniform output.
-        ripple = 0.05 * np.sin(12.0 * x + 0.7) * np.cos(9.0 * y + 0.3)
-        rgb = np.clip(rgb + ripple[..., None], 0.0, 1.0)
+        tile = self._tile if (self._tile is not None and self._tile > 0) else None
+        if tile is None:
+            # Fast path: full-frame computation
+            y = np.linspace(0, 1, height, dtype=np.float32)[:, None]
+            x = np.linspace(0, 1, width, dtype=np.float32)[None, :]
+            base = np.clip(0.25 + 0.75 * 0.5 * (x + y), 0.0, 1.0)
+            rgb = np.stack([base, base, base], axis=-1)
+            ripple = 0.05 * np.sin(12.0 * x + 0.7) * np.cos(9.0 * y + 0.3)
+            rgb = np.clip(rgb + ripple[..., None], 0.0, 1.0)
+            rgba = np.empty((height, width, 4), dtype=np.uint8)
+            rgba[..., :3] = (rgb * 255.0 + 0.5).astype(np.uint8)
+            rgba[..., 3] = 255
+            return rgba
 
-        rgba = np.empty((height, width, 4), dtype=np.uint8)
-        rgba[..., :3] = (rgb * 255.0 + 0.5).astype(np.uint8)
-        rgba[..., 3] = 255
-        return rgba
+        # Tiled path: fill the frame tile-by-tile for cache-friendly traversal (deterministic)
+        out = np.empty((height, width, 4), dtype=np.uint8)
+        out[..., 3] = 255
+        for (tx, ty, tw, th) in iter_tiles(width, height, tile):
+            ys = np.linspace(ty / height, (ty + th - 1) / height, th, dtype=np.float32)[:, None]
+            xs = np.linspace(tx / width, (tx + tw - 1) / width, tw, dtype=np.float32)[None, :]
+            base = np.clip(0.25 + 0.75 * 0.5 * (xs + ys), 0.0, 1.0)
+            rgb = np.stack([base, base, base], axis=-1)
+            ripple = 0.05 * np.sin(12.0 * xs + 0.7) * np.cos(9.0 * ys + 0.3)
+            rgb = np.clip(rgb + ripple[..., None], 0.0, 1.0)
+            out[ty : ty + th, tx : tx + tw, :3] = (rgb * 255.0 + 0.5).astype(np.uint8)
+        return out
+
+    def render_progressive(
+        self,
+        *,
+        callback: Optional[Callable[[Dict[str, Any]], Optional[bool]]] = None,
+        tile_size: Optional[int] = None,
+        min_updates_per_sec: float = 2.0,
+        time_source: Callable[[], float] = _time.perf_counter,
+        spp: int = 1,
+    ) -> np.ndarray:
+        """Render progressively in tiles, invoking callback on cadence.
+
+        The callback receives a dictionary with keys:
+          - 'image': np.ndarray (H,W,4) uint8 current buffer
+          - 'tile': (x, y, w, h) of the last completed tile
+          - 'progress': float in [0,1]
+          - 'timestamp': float from time_source()
+          - 'tile_index': int (0-based)
+          - 'total_tiles': int
+
+        If the callback returns True, rendering stops early.
+        """
+        width, height = self._width, self._height
+        spp = int(spp)
+        out = np.empty((height, width, 4), dtype=np.uint8)
+        out[..., 3] = 255
+
+        tile = int(tile_size) if tile_size is not None else (self._tile or 256)
+        tile = max(1, int(tile))
+        tiles = list(iter_tiles(width, height, tile))
+        total = len(tiles)
+
+        last_cb_t = time_source()
+        min_dt = 1.0 / float(min_updates_per_sec) if min_updates_per_sec > 0 else 0.0
+
+        # Deterministic RNG seed usage to mirror render_rgba behavior
+        _ = np.random.default_rng(self._seed + spp)
+
+        for i, (tx, ty, tw, th) in enumerate(tiles):
+            ys = np.linspace(ty / height, (ty + th - 1) / height, th, dtype=np.float32)[:, None]
+            xs = np.linspace(tx / width, (tx + tw - 1) / width, tw, dtype=np.float32)[None, :]
+            base = np.clip(0.25 + 0.75 * 0.5 * (xs + ys), 0.0, 1.0)
+            rgb = np.stack([base, base, base], axis=-1)
+            ripple = 0.05 * np.sin(12.0 * xs + 0.7) * np.cos(9.0 * ys + 0.3)
+            rgb = np.clip(rgb + ripple[..., None], 0.0, 1.0)
+            out[ty : ty + th, tx : tx + tw, :3] = (rgb * 255.0 + 0.5).astype(np.uint8)
+
+            now = time_source()
+            should_emit = (i == 0) or ((now - last_cb_t) >= min_dt) or (i + 1 == total)
+            if should_emit and callback is not None:
+                info = {
+                    "image": out,
+                    "tile": (tx, ty, tw, th),
+                    "progress": float(i + 1) / float(total),
+                    "timestamp": now,
+                    "tile_index": i,
+                    "total_tiles": total,
+                }
+                stop = bool(callback(info)) if callback is not None else False
+                last_cb_t = now
+                if stop:
+                    break
+
+        return out
 
 
 def create_path_tracer(width: int, height: int, *, max_bounces: int = 1, seed: int = 1) -> PathTracer:
@@ -172,6 +261,26 @@ def render_aovs(
         out["visibility"] = vis
 
     return out
+
+
+def iter_tiles(width: int, height: int, tile: int) -> Iterable[Tuple[int, int, int, int]]:
+    """Simple scanline tile iterator (x, y, w, h).
+
+    Ensures full coverage including partial edge tiles.
+    """
+    w = int(width)
+    h = int(height)
+    t = max(1, int(tile))
+    tiles_x = (w + t - 1) // t
+    tiles_y = (h + t - 1) // t
+    for ty in range(tiles_y):
+        for tx in range(tiles_x):
+            x = tx * t
+            y = ty * t
+            tw = min(t, w - x)
+            th = min(t, h - y)
+            if tw > 0 and th > 0:
+                yield (x, y, tw, th)
 
 
 def save_aovs(

@@ -409,3 +409,19 @@ Minimal CPU-side helpers are available for prototyping and tests:
 - `forge3d.lighting.hg_phase` (Henyey–Greenstein), `sample_hg`, `height_fog_factor`, and `single_scatter_estimate`.
 
 WGSL helpers live in `src/shaders/lighting_media.wgsl`. Examples can write images under `out/` (gitignored).
+
+## Progressive Tiling (A15)
+
+Use the CPU fallback to preview large renders with progressive tiling and checkpoint callbacks.
+
+`python
+from forge3d.path_tracing import PathTracer
+
+tr = PathTracer(1920, 1080, seed=3, tile=128)
+def cb(info):
+    print(f"progress {info['progress']:.2f}")
+
+img = tr.render_progressive(tile_size=128, min_updates_per_sec=2.0, callback=cb)
+`
+
+See examples/progressive_tiling.py (writes to out/, which is gitignored).

@@ -295,3 +295,6 @@ examples/output/
 out/
 diag_out/
 
+# Generated outputs and diagnostics
+out/
+diag_out/
