@@ -13,6 +13,16 @@ from .sdf import (
     create_sphere, create_box, create_simple_scene, render_simple_scene
 )
 
+# Optional GPU adapter enumeration (provided by native extension when available).
+try:
+    from ._forge3d import enumerate_adapters, device_probe  # type: ignore
+except Exception:  # pragma: no cover
+    def enumerate_adapters() -> list[dict]:  # type: ignore
+        return []
+
+    def device_probe(backend: str | None = None) -> dict:  # type: ignore
+        return {"status": "unavailable"}
+
 __all__ = [
     "PathTracer",
     "make_camera",
@@ -33,4 +43,7 @@ __all__ = [
     "render_simple_scene",
     # Path guiding (A13)
     "OnlineGuidingGrid",
+    # GPU adapter utilities
+    "enumerate_adapters",
+    "device_probe",
 ]
