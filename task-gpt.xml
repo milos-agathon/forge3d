@@ -1,10 +1,10 @@
-<task id="ws-A16-svgf-denoiser" version="1.0">
-  <title>Workstream A · Task A16 — SVGF Denoiser & Temporal Reprojection (TAA) with GPU-first path</title>
+<task id="ws-A17-auto" version="1.0">
+  <title>Workstream A · Task A17 — Implement per roadmap2.csv (derive deliverables → code/tests/docs)</title>
 
   <role>
     You are OpenAI Codex CLI in <b>Verification → Implementation Mode</b>, acting as a senior graphics/runtime engineer.
     Stack: WebGPU/wgpu + WGSL, Rust, Python ≥3.8 (PyO3/maturin abi3), CMake ≥3.24, VMA, Sphinx.
-    Project: forge3d — Rust backend + Python frontend for interactive/offline 3D visualization.
+    Project: forge3d — Rust backend + Python frontend for interactive/offline 3D visualization (terrain, maps, graphs).
   </role>
 
   <switches>
@@ -17,10 +17,11 @@
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
     <safety>
-      - Minimal, additive changes; preserve existing public API and rendering pipeline. New APIs must be backward compatible.
-      - Never delete custom user code; prefer adding .gitignore entries for generated artifacts.
-      - If a tool is missing, mark the step SKIPPED with the exact command to run locally.
-      - If roadmap data is missing/ambiguous, reply <b>UNCERTAIN</b> listing the exact CSV headers/rows needed.
+      - Make only the minimal, additive changes needed to satisfy the A17 row’s Deliverables and Acceptance Criteria.
+      - Preserve existing public APIs unless A17 explicitly calls out a breaking change; prefer opt-in flags/parameters.
+      - Never delete custom user code; for generated artifacts, prefer adding .gitignore entries.
+      - If a required tool is missing, mark the step SKIPPED with the exact command to run locally.
+      - If the A17 row is missing/ambiguous, reply <b>UNCERTAIN</b> listing the exact headers/rows/fields needed, then STOP with no edits.
     </safety>
     <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz, out, diag_out</exclusions>
   </constraints>
@@ -31,193 +32,125 @@
     <workstreamSelector>
       <![CDATA[
       Workstream ID: A
-      Task ID: A16
-      Title keywords: denoise|denoiser|SVGF|temporal reprojection|TAA
+      Task ID: A17
       ]]>
     </workstreamSelector>
   </inputs>
 
-  <!-- Verify A16 exists and capture its Title/Deliverables if present -->
+  <!-- 1) Verify A17 exists and extract Title/Deliverables/Acceptance -->
   <prechecks>
     <command>
       <![CDATA[
 python - <<'PY'
 import csv, codecs, sys, json
-found=None
+row=None
 try:
   with codecs.open("roadmap2.csv","r","utf-8-sig") as f:
     rdr=csv.DictReader(f)
     for r in rdr:
       wid=(r.get("Workstream ID","") or "").strip().lower()
       tid=(r.get("Task ID","") or "").strip().lower()
-      ttl=(r.get("Task Title","") or "").strip()
-      if wid=="a" and (tid=="a16" or "a16" in (ttl.lower())):
-        found={"Title":ttl, "Deliverables":r.get("Deliverables",""), "Acceptance":r.get("Acceptance Criteria","")}
-        break
+      ttl=(r.get("Task Title","") or "").strip().lower()
+      if wid=="a" and (tid=="a17" or "a17" in ttl):
+        row=r; break
 except FileNotFoundError:
   print("UNCERTAIN: roadmap2.csv not found", file=sys.stderr); sys.exit(2)
-if not found:
-  print("UNCERTAIN: A16 not found in roadmap2.csv (Workstream A). Please confirm the exact row/headers.", file=sys.stderr); sys.exit(3)
-print("WORKSTREAM_TASK_FOUND:A16")
-print("A16_META:"+json.dumps(found))
+if not row:
+  print("UNCERTAIN: A17 not found in roadmap2.csv (Workstream A). Provide the exact row with headers.", file=sys.stderr); sys.exit(3)
+meta={
+  "Title": (row.get("Task Title","") or "").strip(),
+  "Rationale": (row.get("Rationale","") or "").strip(),
+  "Deliverables": (row.get("Deliverables","") or "").strip(),
+  "Acceptance": (row.get("Acceptance Criteria","") or "").strip(),
+  "Priority": (row.get("Priority","") or "").strip(),
+  "Phase": (row.get("Phase","") or "").strip(),
+  "Missing": (row.get("Missing Features","") or "").strip(),
+  "Dependencies": (row.get("Dependencies","") or "").strip(),
+  "Risks": (row.get("Risks/Mitigations","") or "").strip()
+}
+print("WORKSTREAM_TASK_FOUND:A17")
+print("A17_META:"+json.dumps(meta, ensure_ascii=False))
 PY
       ]]>
     </command>
   </prechecks>
 
-  <acceptanceCriteria>
-    <ac id="AC-1">WGSL compute passes exist to implement <b>SVGF</b> denoising: (a) <b>temporal reprojection</b> using motion vectors; (b) <b>temporal accumulation</b> of color + first/second moments; (c) <b>variance estimation</b>; (d) <b>à-trous</b> edge-aware filtering with albedo/normal/depth guides; (e) <b>history clamp/reset</b> heuristics.</ac>
-    <ac id="AC-2">Required AOVs/inputs provided: <b>motion vectors</b> (r16g16float, pixel velocity in prev→curr NDC or pixels), <b>linear depth</b>, <b>world/eye normals</b>, <b>albedo</b>, and current-frame <b>radiance</b> (HDR). If motion vectors are not yet produced, compute from previous camera matrices (fallback).</ac>
-    <ac id="AC-3">Rust backend integrates a denoiser stage: manages ping-pong <b>history color</b> (rgba16f), <b>moments</b> (rg16f), <b>variance</b> (r16f), and performs N (default 5) à-trous iterations with tunable σ values; stays within ≤512 MiB host-visible using tiling or sequential readbacks.</ac>
-    <ac id="AC-4">Python API exposes <code>render_rgba(..., denoiser="off"|"svgf", svgf_iters=5, seed=..., frames=...)</code>; default remains <code>"off"</code>. Deterministic behavior for <code>frames==1</code> and fixed seed; multi-frame accumulation documented.</ac>
-    <ac id="AC-5">Unit/integration tests: (a) GPU test verifies variance drop (noisy vs denoised) on a 128×128 scene; (b) reprojection sanity (subpixel camera shift retains structure); (c) CPU fallback path (no-op or bilateral) executes without error; GPU tests skip if no adapter.</ac>
-    <ac id="AC-6">Docs updated (README + docs/api if present) with SVGF overview, AOV requirements, parameters, and examples; example script renders side-by-side noisy/denoised outputs.</ac>
-    <ac id="AC-7">Validation passes: <code>cargo fmt</code>, <code>cargo clippy -D warnings</code>, <code>cargo test</code>, <code>pytest</code>, <code>sphinx-build</code> (if docs), <code>maturin build</code>; CI updated/ensured.</ac>
-  </acceptanceCriteria>
-
   <design>
-    <wgslPipelines>
+    <mappingRules>
       <![CDATA[
-New/updated WGSL files:
-  src/shaders/svgf_reproject.wgsl   // uses motion vectors to fetch history; outputs reprojected color + moments
-  src/shaders/svgf_variance.wgsl    // updates first/second moments; computes variance
-  src/shaders/svgf_atrous.wgsl      // à-trous edge-aware filter with albedo/normal/depth edge-stops
-  (optional) src/shaders/svgf_history_reset.wgsl  // clamp & reset criteria
+Turn A17 “Deliverables” text into concrete artifacts using these keyword→path rules (use exact filenames if the CSV specifies them; otherwise apply heuristics):
 
-Common header for each WGSL:
-  Bind Group 0: Uniforms { width:u32; height:u32; frame_index:u32; reproj_alpha:f32; sigma_color:f32; sigma_normal:f32; sigma_depth:f32; }
-  Bind Group 1: readonly storage textures/buffers: current radiance (rgba16f), albedo (rgba16f), normal (rgba16f xyz), depth (r32f), motion (rg16f), history color/moments (prev)
-  Bind Group 2: write storage textures/buffers: reprojected color (rgba16f), moments (rg16f), variance (r16f), filtered (rgba16f)
-  Workgroup sizes: 8×8 or 16×16 (tune later)
+Core rendering:
+- "WGSL", "compute", "shader", "kernel", "AOV" → src/shaders/<feature>.wgsl (+ header docs: bind groups/bindings, formats).
+- "BVH", "accel", "traversal" → src/accel/*.rs, src/path_tracing/accel.rs (+ WGSL hooks).
+- "intersection", "ray-triangle", "ray-sphere" → src/path_tracing/intersect.rs and/or src/shaders/pt_intersect_*.wgsl.
+- "materials", "BSDF", "PBR", "BRDF", "GGX", "clearcoat", "sheen" → src/pbr/*.rs; shaders/pbr_*.wgsl; python/forge3d/pbr.py.
+- "sampling", "MIS", "NEE", "alias", "reservoir", "light tree" → src/lighting/*.rs; shaders/lighting_*.wgsl; python/forge3d/lighting.py.
+- "denoise", "SVGF", "temporal", "TAA" → src/denoise/*; shaders/svgf_*.wgsl; python/forge3d/path_tracing.py (flags).
+- "wavefront", "queues", "compaction" → src/path_tracing/wavefront/**/*.rs; shaders/pt_*.wgsl.
 
-Edge-stops:
-  w = exp( - (Δcolor^2/σ_c^2 + Δnormal^2/σ_n^2 + Δdepth^2/σ_d^2) )
-History clamp:
-  clamp reprojected sample to neighborhood min/max of current radiance before accumulation to avoid ghosting.
+Scene/content:
+- "camera", "DOF", "thin lens", "motion vectors" → src/camera/*.rs; shaders/camera_*.wgsl; python/forge3d/camera.py.
+- "textures", "image", "mipmap", "sampler" → src/textures/*.rs; shaders/texture_*.wgsl; python/forge3d/textures.py.
+- "mesh", "OBJ", "PLY", "glTF", "USD", "tangents" → src/mesh/*.rs; python/forge3d/mesh_io.py.
+- "terrain", "heightmap", "tile", "geospatial", "map" → src/terrain/*.rs; python/forge3d/terrain.py; shaders/terrain_*.wgsl.
+- "graphs", "layouts", "instancing" → src/scene/graph.rs; python/forge3d/graph.py; shaders/instancing_*.wgsl.
+
+Pipelines & UX:
+- "tonemap", "ACES", "Reinhard", "exposure" → src/post/tonemap.rs; src/shaders/tonemap.wgsl; python bridge.
+- "examples" → examples/<feature>_*.py (write to out/; ensure .gitignore ignores out/).
+- "docs" → README.md + docs/api/<feature>.md (if Sphinx present).
+- "Python API" → python/forge3d/<feature>.py (public class/functions + type hints).
+
+Tests:
+- "tests", "validation", "golden" → tests/<feature>_*.rs or tests/test_<feature>*.py (GPU tests @skip if no adapter).
+
+If a deliverable is ambiguous or lacks keywords, mark UNCERTAIN for that bullet with the minimal clarification needed.
       ]]>
-    </wgslPipelines>
-
-    <rustBackend>
-      <![CDATA[
-New modules:
-  src/denoise/svgf/mod.rs        // orchestration: create pipelines, bind groups, ping-pong history
-  src/denoise/svgf/pipelines.rs  // pipeline creation and dispatch helpers
-  src/denoise/svgf/history.rs    // resource management: history color/moments/variance
-
-Integration:
-  - After path tracer accumulates current radiance/AOVs, run: reproject -> variance -> N×(à-trous).
-  - Manage ping-pong textures across frames; reset on camera cut or large motion.
-  - Provide tunables via a DenoiseOptions struct (iters, σ values, alpha).
-  - Respect memory budget with tiling or sequential AOV read/write.
-Public API (Rust):
-  pub struct DenoiseOptions { pub iters:u32, pub alpha:f32, pub sigma_color:f32, pub sigma_normal:f32, pub sigma_depth:f32 }
-  impl PathTracerGPU { pub fn enable_svgf(&mut self, opts:DenoiseOptions) -> &mut Self; }
-      ]]>
-    </rustBackend>
-
-    <pythonAPI>
-      <![CDATA[
-python/forge3d/path_tracing.py:
-  def render_rgba(self, width, height, scene, camera, *, denoiser:str="off", svgf_iters:int=5, svgf_alpha:float=0.2, svgf_sigma_color:float=4.0, svgf_sigma_normal:float=128.0, svgf_sigma_depth:float=4.0, seed:int=1, frames:int=1, use_gpu:bool=True) -> np.ndarray:
-      - When denoiser=="svgf" and GPU available: run SVGF passes after rendering.
-      - Else: return raw output (or optional simple bilateral CPU fallback).
-      - Deterministic for frames==1 with fixed seed; document multi-frame behavior.
-      ]]>
-    </pythonAPI>
-
-    <aovs>
-      <![CDATA[
-If motion vectors are not already produced by the renderer, add a minimal pass:
-  - Compute per-pixel velocity from prev/current view-projection matrices and depth.
-  - Format: r16g16float (pixels or NDC delta; document convention).
-      ]]>
-    </aovs>
-
-    <metrics>
-      <![CDATA[
-Variance metric in tests:
-  var(img) = per-channel variance across image; expect var(denoised) < 0.5 * var(noisy) for the test scene.
-  Also assert basic temporal stability: reproject(frame_t) close to frame_{t-1} after a 0.25px camera shift.
-      ]]>
-    </metrics>
+    </mappingRules>
   </design>
+
+  <acceptanceCriteria>
+    <ac id="AC-0">A17 row is present; meta printed as A17_META JSON.</ac>
+    <ac id="AC-1">Every concrete deliverable item from A17’s Deliverables cell exists as code/docs/tests artifacts with appropriate header/inline docs (bind groups for WGSL, public APIs for Python/Rust, type hints for Python).</ac>
+    <ac id="AC-2">Public Python API exposes the functions/classes required by A17’s Acceptance Criteria; deterministic behavior documented for frames=1 with fixed seed where applicable.</ac>
+    <ac id="AC-3">Unit/integration tests exist for all implemented deliverables; GPU-dependent tests are skipped when no compatible adapter is available; failure modes are covered.</ac>
+    <ac id="AC-4">Docs updated: README + docs/api/<feature>.md (if Sphinx present) clearly describing usage, parameters, conventions, and limitations; examples added if referenced.</ac>
+    <ac id="AC-5">Validation run passes: fmt, clippy -D warnings, cargo test, pytest, sphinx-build (if docs), maturin build; CI ensured if missing.</ac>
+  </acceptanceCriteria>
 
   <changes>
     <createOrModify>
-      <!-- WGSL -->
-      <file path="src/shaders/svgf_reproject.wgsl" kind="new"/>
-      <file path="src/shaders/svgf_variance.wgsl" kind="new"/>
-      <file path="src/shaders/svgf_atrous.wgsl" kind="new"/>
-      <file path="src/shaders/svgf_history_reset.wgsl" kind="new-optional"/>
-
-      <!-- Rust -->
-      <file path="src/denoise/svgf/mod.rs" kind="new"/>
-      <file path="src/denoise/svgf/pipelines.rs" kind="new"/>
-      <file path="src/denoise/svgf/history.rs" kind="new"/>
-      <file path="src/path_tracing/mod.rs" kind="modify"/>
-
-      <!-- Python -->
-      <file path="python/forge3d/path_tracing.py" kind="modify"/>
-
-      <!-- Tests -->
-      <file path="tests/test_svgf_gpu_variance.py" kind="new"/>
-      <file path="tests/test_svgf_reprojection.py" kind="new"/>
-
-      <!-- Docs & housekeeping -->
+      <!-- Actual files depend on A17 deliverables; these directories are typical targets -->
+      <file path="src/shaders/" kind="modify-or-new"/>
+      <file path="src/path_tracing/" kind="modify-or-new"/>
+      <file path="src/accel/" kind="modify-or-new-optional"/>
+      <file path="src/lighting/" kind="modify-or-new-optional"/>
+      <file path="src/pbr/" kind="modify-or-new-optional"/>
+      <file path="src/camera/" kind="modify-or-new-optional"/>
+      <file path="src/textures/" kind="modify-or-new-optional"/>
+      <file path="src/mesh/" kind="modify-or-new-optional"/>
+      <file path="src/scene/" kind="modify-or-new-optional"/>
+      <file path="src/terrain/" kind="modify-or-new-optional"/>
+      <file path="src/denoise/" kind="modify-or-new-optional"/>
+      <file path="python/forge3d/" kind="modify-or-new"/>
+      <file path="tests/" kind="modify-or-new"/>
+      <file path="examples/" kind="modify-or-new-optional"/>
       <file path="README.md" kind="modify-append"/>
-      <file path="docs/api/svgf.md" kind="new-optional"/>
+      <file path="docs/api/" kind="modify-or-new-optional"/>
       <file path=".gitignore" kind="modify-append"/>
     </createOrModify>
-
-    <implNotes>
-      <![CDATA[
-- Keep peak host-visible usage low: reuse staging buffers; prefer storage textures rgba16f for HDR intermediates.
-- History reset triggers: large motion magnitude, first frame, resolution change, engine switch.
-- Tuning defaults conservative to avoid over-blur; expose params in Python.
-- Ensure WGSL, Rust layouts, and Python shapes agree; document bind groups in each WGSL file header.
-      ]]>
-    </implNotes>
   </changes>
 
   <tests>
-    <python path="tests/test_svgf_gpu_variance.py">
+    <templates>
       <![CDATA[
-import numpy as np, pytest
-from forge3d.path_tracing import PathTracer, make_sphere, make_camera
-
-def _scene():
-    scene = [make_sphere(center=(0,0,-3), radius=1.0, albedo=(0.7,0.7,0.7))]
-    cam   = make_camera(origin=(0,0,0), look_at=(0,0,-1), up=(0,1,0), fov_y=45.0, aspect=1.0, exposure=1.0)
-    return scene, cam
-
-@pytest.mark.skipif(False, reason="GPU skip hook if no adapter")
-def test_variance_reduction_128x128():
-    tr = PathTracer()
-    scene, cam = _scene()
-    noisy = tr.render_rgba(128,128,scene,cam,seed=3,frames=1,use_gpu=True,denoiser="off")
-    den  = tr.render_rgba(128,128,scene,cam,seed=3,frames=1,use_gpu=True,denoiser="svgf", svgf_iters=5)
-    def var(img): return np.var(img.astype(np.float32), axis=(0,1)).mean()
-    assert var(den) < 0.5 * var(noisy)
+- GPU feature tests (pytest): skip if no adapter; assert shapes/dtypes; determinism for frames=1 with fixed seed; numeric assertions aligned with A17 AC (e.g., variance reduction, pdf normalization, bounds checks).
+- Rust unit tests: struct packing/layout (assert_eq!(size_of::<T>(), ...)), math helpers, error handling (no panics across FFI).
+- Docs build test: sphinx-build succeeds (or SKIPPED if docs absent).
+- Example smoke test (optional): script runs headless and writes to out/ (gitignored).
       ]]>
-    </python>
-
-    <python path="tests/test_svgf_reprojection.py">
-      <![CDATA[
-import numpy as np, pytest
-from forge3d.path_tracing import PathTracer, make_sphere, make_camera
-
-@pytest.mark.skipif(False, reason="GPU skip hook if no adapter")
-def test_reprojection_consistency():
-    tr = PathTracer()
-    scene = [make_sphere(center=(0,0,-3), radius=1.0, albedo=(0.9,0.9,0.9))]
-    cam1  = make_camera(origin=(0,0,0), look_at=(0,0,-1), up=(0,1,0), fov_y=45.0, aspect=1.0, exposure=1.0)
-    cam2  = make_camera(origin=(0.002,0,0), look_at=(0.002,0,-1), up=(0,1,0), fov_y=45.0, aspect=1.0, exposure=1.0)
-    img1  = tr.render_rgba(96,96,scene,cam1,seed=1,frames=1,use_gpu=True,denoiser="svgf")
-    img2  = tr.render_rgba(96,96,scene,cam2,seed=1,frames=1,use_gpu=True,denoiser="svgf")
-    diff = np.abs(img1.astype(np.float32)-img2.astype(np.float32)).mean()
-    assert diff < 8.0
-      ]]>
-    </python>
+    </templates>
   </tests>
 
   <!-- EXACTLY INCLUDE THESE STEPS -->
@@ -251,36 +184,34 @@ def test_reprojection_consistency():
 
   <execution>
     <steps>
-      <step>Create feature branch: <code>git checkout -b ws-A16-implementation</code></step>
-      <step>Add WGSL passes (<code>svgf_reproject.wgsl</code>, <code>svgf_variance.wgsl</code>, <code>svgf_atrous.wgsl</code>, optional <code>svgf_history_reset.wgsl</code>) with header docs (bind groups/bindings, formats, coordinate conventions).</step>
-      <step>Implement Rust denoiser integration under <code>src/denoise/svgf/</code>; wire into the post-path-trace pipeline; manage history ping-pong and options.</step>
-      <step>Extend Python API (<code>python/forge3d/path_tracing.py</code>) with <code>denoiser="svgf"</code> and tunables; default remains off.</step>
-      <step>Create tests for variance reduction and reprojection stability; mark GPU tests skipped if no adapter.</step>
-      <step>Docs & housekeeping: update <code>README.md</code>, add <code>docs/api/svgf.md</code> (if Sphinx present), append <code>.gitignore</code> entries for outputs.</step>
-      <step>Run Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent.</step>
-      <step>Generate <code>PR_BODY.md</code> and print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
+      <step>Create feature branch: <code>git checkout -b ws-A17-implementation</code></step>
+      <step>Parse A17_META into bullet items (split by newlines/semicolons). Save mapping to <code>reports/a17_plan.json</code> (deliverable → files/symbols) using the mapping rules.</step>
+      <step>For each mapped deliverable:
+        <ul>
+          <li>Implement minimal, correct code in WGSL/Rust/Python as indicated by A17 Deliverables and Acceptance Criteria.</li>
+          <li>Add/modify tests (Rust/Python) covering success paths and at least one failure/validation path tied to the AC.</li>
+          <li>Update README and docs/api/&lt;feature&gt;.md (if Sphinx present) with usage, parameters, conventions, and limitations.</li>
+          <li>If examples requested: add example(s) in <code>examples/</code>, writing outputs to <code>out/</code> (ensure .gitignore ignores it).</li>
+        </ul>
+      </step>
+      <step>Append <code>.gitignore</code> entries for out/, diag_out/, and build artifacts if needed.</step>
+      <step>Run the Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent and record the exact command.</step>
+      <step>Create <code>PR_BODY.md</code> summarizing A17 implementation with references to files/lines and validation results; print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
     </steps>
   </execution>
 
   <completion>
     <print>
-      - src/shaders/svgf_reproject.wgsl
-      - src/shaders/svgf_variance.wgsl
-      - src/shaders/svgf_atrous.wgsl
-      - src/shaders/svgf_history_reset.wgsl
-      - src/denoise/svgf/mod.rs
-      - src/denoise/svgf/pipelines.rs
-      - src/denoise/svgf/history.rs
-      - src/path_tracing/mod.rs
-      - python/forge3d/path_tracing.py
-      - tests/test_svgf_gpu_variance.py
-      - tests/test_svgf_reprojection.py
-      - README.md
-      - docs/api/svgf.md (if Sphinx present)
+      - reports/a17_plan.json
+      - All created/modified source files per mapping (WGSL/Rust/Python)
+      - tests/* for implemented features
+      - examples/* (if requested by A17)
+      - README.md (updated)
+      - docs/api/* (if Sphinx present)
       - PR_BODY.md
     </print>
     <fallback>
-      If A16 is not found in roadmap2.csv, respond <b>UNCERTAIN</b> with the list of detected Workstream A tasks and STOP without changes.
+      If A17 is not found or its Deliverables/Acceptance text is empty/ambiguous, respond <b>UNCERTAIN</b> listing the exact missing fields and STOP without changes.
     </fallback>
   </completion>
 </task>

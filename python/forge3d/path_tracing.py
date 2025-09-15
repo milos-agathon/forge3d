@@ -1,7 +1,7 @@
 # python/forge3d/path_tracing.py
-# Deterministic CPU fallback path tracer stub used by tests.
-# Exists to provide a predictable render_rgba API while GPU compute is not implemented here.
-# RELEVANT FILES:python/forge3d/materials.py,python/forge3d/textures.py,tests/test_pbr_textures_gpu.py
+# Deterministic CPU fallback path tracer with basic features for tests and demos.
+# Exists to provide a predictable render_rgba API and host-side utilities while GPU compute matures.
+# RELEVANT FILES:python/forge3d/path_tracing.pyi,tests/test_a17_firefly_clamp.py,README.md
 
 from __future__ import annotations
 
@@ -107,6 +107,13 @@ class PathTracer:
             frames = int(kwargs.get("frames", 1))
             denoiser = str(kwargs.get("denoiser", "off")).lower()
             svgf_iters = int(kwargs.get("svgf_iters", 5))
+            # A17: optional luminance/throughput clamp to suppress fireflies with minimal bias.
+            # Prefer "luminance_clamp"; accept legacy alias "firefly_clamp".
+            lum_clamp = kwargs.get("luminance_clamp", kwargs.get("firefly_clamp", None))
+            try:
+                lum_clamp_f = float(lum_clamp) if lum_clamp is not None else None
+            except Exception:
+                lum_clamp_f = None
 
             # Synthesize a simple noisy HDR-like image (float32 0..1) deterministically
             y = np.linspace(0, 1, height, dtype=np.float32)[:, None]
@@ -118,6 +125,15 @@ class PathTracer:
                 noise = rng.normal(0.0, 0.08, size=(height, width, 3)).astype(np.float32)
                 rgb_accum += np.clip(np.stack([base, base, base], axis=-1) + noise, 0.0, 1.0)
             rgb = rgb_accum / float(max(1, frames))
+
+            # Apply luminance clamp if requested (scale color to limit luminance, minimizing bias)
+            if lum_clamp_f is not None and lum_clamp_f > 0.0:
+                # Compute luminance using Rec. 709 weights
+                lum = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
+                # Avoid div-by-zero; where lum <= clamp, scale=1; else scale=clamp/lum
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    scale = np.where(lum > lum_clamp_f, (lum_clamp_f / np.maximum(lum, 1e-8)), 1.0).astype(np.float32)
+                rgb = rgb * scale[..., None]
 
             if denoiser == "svgf":
                 # Build guidance AOVs deterministically
