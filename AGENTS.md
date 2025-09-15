@@ -57,7 +57,6 @@ Tips: set `RUST_LOG=info` for debug logs; force a backend with `WGPU_BACKEND=dx1
 - Always prioritize writing clean, simple, and modular code.
 - do not add unnecessary complications. SIMPLE = GOOD, COMPLEX = BAD.
 - Implement precisely what the user asks for, without additional features or complexity.
-- the fewer lines of code, the better.
 
 # READING FILES
 - always read the file in full, do not be lazy
@@ -68,12 +67,6 @@ Tips: set `RUST_LOG=info` for debug logs; force a backend with `WGPU_BACKEND=dx1
 - do not make assumption. do not jump to conclusions.
 - you are just a Large Language Model, you are very limited.
 - always consider multiple different approaches, just like a Senior Developer would
-
-# CUSTOM CODE
-- in general, I prefer to write custom code rather than adding external dependencies
-- especially for the core functionality of the app (backend, infra, core business logic)
-- it's fine to use some libraries / packages in the frontend, for complex things
-- however as our codebase, userbase and company grows, we should seek to write everything custom
 
 # WRITING STYLE
 - each long sentence should be followed by two newline characters

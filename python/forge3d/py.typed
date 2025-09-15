@@ -1,1 +1,5 @@
-# Marker file to indicate this package ships typing information.
+# python/forge3d/py.typed
+# Marker file to indicate the package is typed.
+# Exists so type checkers know this package includes inline type hints.
+# RELEVANT FILES:python/forge3d/__init__.py,python/forge3d/path_tracing.py,python/forge3d/materials.py
+

@@ -50,6 +50,16 @@ python examples/terrain_single_tile.py
 
 Runs anywhere wgpu supports: Vulkan / Metal / DX12 / GL (and Browser WebGPU for diagnostics). A discrete or integrated GPU is recommended. Examples/tests that need a GPU will skip if no compatible adapter is found.
 
+## PBR textures (A9)
+
+The Python API includes a minimal, deterministic scaffold for textured PBR inputs.
+
+Use `forge3d.textures.build_pbr_textures` to assemble baseColor, metallic-roughness (G=roughness, B=metallic), normal, and emissive textures and attach them to a `forge3d.materials.PbrMaterial`.
+
+The `forge3d.path_tracing.PathTracer.render_rgba` function produces a deterministic RGBA image and will visibly differ when textures are attached, providing a simple CPU fallback for tests.
+
+Example outputs should be written under `out/` which is gitignored.
+
 ## What's new - Workstream A8
 
 - **ReSTIR DI (Reservoir-based Spatio-Temporal Importance Resampling for Direct Illumination)**:
@@ -392,3 +402,10 @@ rgb = water_shade(n, v, l, base, ior=1.33, absorption=(0.0,0.05,0.1), roughness=
 ```
 
 Deterministic tests exercise monotonic Fresnel and attenuation.
+
+## Participating Media (A11)
+
+Minimal CPU-side helpers are available for prototyping and tests:
+- `forge3d.lighting.hg_phase` (Henyey–Greenstein), `sample_hg`, `height_fog_factor`, and `single_scatter_estimate`.
+
+WGSL helpers live in `src/shaders/lighting_media.wgsl`. Examples can write images under `out/` (gitignored).

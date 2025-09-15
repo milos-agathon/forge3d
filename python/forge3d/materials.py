@@ -1,34 +1,28 @@
-"""PBR Materials - legacy compatibility shim.
+# python/forge3d/materials.py
+# Minimal PBR material container with texture set attachment.
+# Exists to provide a simple API surface for tests without GPU coupling.
+# RELEVANT FILES:python/forge3d/textures.py,python/forge3d/path_tracing.py,tests/test_pbr_textures_gpu.py
 
-⚠️  MATERIALS MODULE POLICY:
+from __future__ import annotations
 
-This module provides legacy compatibility for code that imports `forge3d.materials`.
-ALL functionality is re-exported from the `forge3d.pbr` module.
+from dataclasses import dataclass, replace
+from typing import Optional, Tuple
 
-📋 RECOMMENDED USAGE:
-    import forge3d.pbr as pbr           # Preferred - direct import
-    material = pbr.PbrMaterial(...)     # Clear, explicit
-    
-🔧 LEGACY COMPATIBILITY:
-    import forge3d.materials as mat     # Still supported
-    material = mat.PbrMaterial(...)     # Works but not preferred
-    
-💡 MIGRATION PATH:
-    - Existing code using `forge3d.materials` will continue to work
-    - New code should use `forge3d.pbr` directly for better clarity
-    - This shim will be maintained for backward compatibility
-    
-📚 RELATED MODULES:
-    - forge3d.pbr: PBR materials system (primary implementation)
-    - forge3d.shadows: Shadow mapping and CSM functionality
-    
-All classes, functions, and constants from `forge3d.pbr` are available here.
-"""
+from .textures import PbrTexSet
 
-# Re-export all PBR functionality from the pbr module
-from .pbr import *
 
-__all__ = [
-    # Re-export everything from pbr
-    *getattr(__import__('forge3d.pbr', fromlist=['__all__']), '__all__', [])
-]
+Color3 = Tuple[float, float, float]
+Color4 = Tuple[float, float, float, float]
+
+
+@dataclass
+class PbrMaterial:
+    base_color_factor: Color4 = (1.0, 1.0, 1.0, 1.0)
+    metallic_factor: float = 1.0
+    roughness_factor: float = 1.0
+    emissive_factor: Color3 = (0.0, 0.0, 0.0)
+    textures: Optional[PbrTexSet] = None
+
+    def with_textures(self, texset: PbrTexSet) -> "PbrMaterial":
+        return replace(self, textures=texset)
+
