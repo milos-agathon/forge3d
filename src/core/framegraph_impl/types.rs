@@ -3,7 +3,7 @@
 //! This module defines the core types for the framegraph system including
 //! resources, passes, and their relationships.
 
-use wgpu::{TextureFormat, TextureUsages, Extent3d};
+use wgpu::{Extent3d, TextureFormat, TextureUsages};
 
 /// Unique identifier for a resource in the framegraph
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

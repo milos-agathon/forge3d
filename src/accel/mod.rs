@@ -3,17 +3,17 @@
 // This module provides LBVH GPU construction, SAH CPU fallback, and unified API for path tracing integration.
 // RELEVANT FILES:src/shaders/lbvh_*.wgsl,src/path_tracing/accel.rs,python/forge3d/path_tracing.py
 
-pub mod types;
 pub mod lbvh_gpu;
 pub mod sah_cpu;
+pub mod types;
 
-pub use types::{Aabb, BvhNode, Triangle, BuildOptions, BvhHandle};
 pub use lbvh_gpu::GpuBvhBuilder;
 pub use sah_cpu::CpuSahBuilder;
+pub use types::{Aabb, BuildOptions, BvhHandle, BvhNode, Triangle};
 
-use anyhow::{Result, Context};
-use wgpu::{Device, Queue};
+use anyhow::{Context, Result};
 use std::sync::Arc;
+use wgpu::{Device, Queue};
 
 /// GPU context option for BVH building
 #[derive(Clone)]
@@ -35,9 +35,7 @@ impl BvhBuilder {
     /// Create a new BVH builder with optional GPU support
     pub fn new(gpu_context: GpuContext) -> Result<Self> {
         let gpu_builder = match gpu_context {
-            GpuContext::Available { device, queue } => {
-                Some(GpuBvhBuilder::new(device, queue)?)
-            }
+            GpuContext::Available { device, queue } => Some(GpuBvhBuilder::new(device, queue)?),
             GpuContext::NotAvailable => None,
         };
 
@@ -62,7 +60,8 @@ impl BvhBuilder {
         }
 
         // Fallback to CPU
-        self.cpu_builder.build(triangles, options)
+        self.cpu_builder
+            .build(triangles, options)
             .context("CPU BVH build failed")
     }
 
@@ -71,16 +70,17 @@ impl BvhBuilder {
         match &handle.backend {
             BvhBackend::Gpu(_) => {
                 if let Some(ref mut gpu_builder) = self.gpu_builder {
-                    gpu_builder.refit(handle, triangles)
+                    gpu_builder
+                        .refit(handle, triangles)
                         .context("GPU BVH refit failed")
                 } else {
                     anyhow::bail!("Cannot refit GPU BVH without GPU context")
                 }
             }
-            BvhBackend::Cpu(_) => {
-                self.cpu_builder.refit(handle, triangles)
-                    .context("CPU BVH refit failed")
-            }
+            BvhBackend::Cpu(_) => self
+                .cpu_builder
+                .refit(handle, triangles)
+                .context("CPU BVH refit failed"),
         }
     }
 
@@ -120,9 +120,9 @@ pub struct CpuBvhData {
 
 /// Convenience functions for building BVH with different backends
 pub fn build_bvh(
-    triangles: &[Triangle], 
-    options: &BuildOptions, 
-    gpu_context: GpuContext
+    triangles: &[Triangle],
+    options: &BuildOptions,
+    gpu_context: GpuContext,
 ) -> Result<BvhHandle> {
     let mut builder = BvhBuilder::new(gpu_context)?;
     builder.build(triangles, options)
@@ -130,8 +130,8 @@ pub fn build_bvh(
 
 pub fn refit_bvh(
     builder: &mut BvhBuilder,
-    handle: &mut BvhHandle, 
-    triangles: &[Triangle]
+    handle: &mut BvhHandle,
+    triangles: &[Triangle],
 ) -> Result<()> {
     builder.refit(handle, triangles)
 }

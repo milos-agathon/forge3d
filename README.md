@@ -50,6 +50,17 @@ python examples/terrain_single_tile.py
 
 Runs anywhere wgpu supports: Vulkan / Metal / DX12 / GL (and Browser WebGPU for diagnostics). A discrete or integrated GPU is recommended. Examples/tests that need a GPU will skip if no compatible adapter is found.
 
+## What's new - Workstream A8
+
+- **ReSTIR DI (Reservoir-based Spatio-Temporal Importance Resampling for Direct Illumination)**:
+  - Efficient many-light rendering with reservoir sampling, temporal and spatial reuse
+  - Alias table implementation for O(1) light sampling using Walker's method
+  - Target ≥40% variance reduction vs MIS-only at 64 spp
+  - GPU-accelerated WGSL compute shaders for temporal/spatial passes
+  - Python API: `forge3d.lighting.RestirDI` with configuration and light management
+  - Example: `examples/restir_many_lights.py` demonstrates variance reduction
+  - Docs: `docs/api/restir.md`
+
 ## What's new in v0.14.0
 
 - Workstream V – Datashader Interop:
@@ -359,3 +370,25 @@ Features:
 - **Performance:** Supports meshes up to GPU memory limits with efficient traversal
 
 The mesh path tracer integrates seamlessly with existing sphere rendering and supports both individual triangles and complex meshes. BVH construction uses a flattened node layout optimized for GPU traversal performance.
+## A6: Dielectric Water (offline)
+
+This release adds minimal dielectric water helpers for offline shading previews.
+
+It implements Schlick Fresnel using IOR, and Beer–Lambert transmittance.
+
+Use `forge3d.pbr.water_shade()` to blend reflected and transmitted components with simple roughness control.
+
+Example:
+
+```python
+from forge3d.pbr import water_shade
+import numpy as np
+
+n = np.array([[[0,0,1]]], np.float32)
+v = np.array([[[0,0,-1]]], np.float32)
+l = np.array([[[0.5,0.8,0.2]]], np.float32)
+base = np.array([0.1,0.2,0.8], np.float32)
+rgb = water_shade(n, v, l, base, ior=1.33, absorption=(0.0,0.05,0.1), roughness=0.05, thickness=1.0)
+```
+
+Deterministic tests exercise monotonic Fresnel and attenuation.

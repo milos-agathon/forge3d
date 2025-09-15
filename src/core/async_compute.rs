@@ -3,10 +3,10 @@
 //! Provides utilities for running compute shaders asynchronously alongside
 //! graphics workloads to improve GPU utilization and performance.
 
-use wgpu::*;
 use crate::error::{RenderError, RenderResult};
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use wgpu::*;
 
 /// Handle for an async compute pass
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -99,7 +99,7 @@ impl DispatchParams {
             workgroups_z: 1,
         }
     }
-    
+
     /// Create dispatch parameters for 2D workload
     pub fn planar(workgroups_x: u32, workgroups_y: u32) -> Self {
         Self {
@@ -108,7 +108,7 @@ impl DispatchParams {
             workgroups_z: 1,
         }
     }
-    
+
     /// Create dispatch parameters for 3D workload
     pub fn volumetric(workgroups_x: u32, workgroups_y: u32, workgroups_z: u32) -> Self {
         Self {
@@ -117,7 +117,7 @@ impl DispatchParams {
             workgroups_z,
         }
     }
-    
+
     /// Calculate total workgroups
     pub fn total_workgroups(&self) -> u32 {
         self.workgroups_x * self.workgroups_y * self.workgroups_z
@@ -147,7 +147,7 @@ pub enum ComputePassStatus {
     /// Pass is queued for execution
     Queued,
     /// Pass is currently executing
-    Executing, 
+    Executing,
     /// Pass completed successfully
     Completed,
     /// Pass failed with error
@@ -219,23 +219,33 @@ impl AsyncComputeScheduler {
             mutex: Mutex::new(()),
         }
     }
-    
+
     /// Submit a compute pass for async execution
-    pub fn submit_compute_pass(&mut self, descriptor: ComputePassDescriptor) -> RenderResult<ComputePassId> {
+    pub fn submit_compute_pass(
+        &mut self,
+        descriptor: ComputePassDescriptor,
+    ) -> RenderResult<ComputePassId> {
         let _lock = self.mutex.lock().unwrap();
-        
+
         let pass_id = ComputePassId(self.next_pass_id);
         self.next_pass_id += 1;
-        
+
         // Check if we can accept more passes
-        let active_passes = self.passes.values()
-            .filter(|info| matches!(info.status, ComputePassStatus::Queued | ComputePassStatus::Executing))
+        let active_passes = self
+            .passes
+            .values()
+            .filter(|info| {
+                matches!(
+                    info.status,
+                    ComputePassStatus::Queued | ComputePassStatus::Executing
+                )
+            })
             .count();
-            
+
         if active_passes >= self.config.max_concurrent_passes {
             return Err(RenderError::render("Too many concurrent compute passes"));
         }
-        
+
         let pass_info = ComputePassInfo {
             descriptor,
             status: ComputePassStatus::Queued,
@@ -243,28 +253,30 @@ impl AsyncComputeScheduler {
             end_time: None,
             command_buffer: None,
         };
-        
+
         self.passes.insert(pass_id, pass_info);
         Ok(pass_id)
     }
-    
+
     /// Execute all queued compute passes
     pub fn execute_queued_passes(&mut self) -> RenderResult<Vec<ComputePassId>> {
         let queued_passes = {
             let _lock = self.mutex.lock().unwrap();
-            
+
             // Collect queued passes sorted by priority
-            let mut queued_passes: Vec<_> = self.passes.iter()
+            let mut queued_passes: Vec<_> = self
+                .passes
+                .iter()
                 .filter(|(_, info)| info.status == ComputePassStatus::Queued)
                 .map(|(&id, info)| (id, info.descriptor.priority))
                 .collect();
-            
+
             queued_passes.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by priority descending
             queued_passes
         };
-        
+
         let mut executed_passes = Vec::new();
-        
+
         for (pass_id, _) in queued_passes {
             match self.execute_compute_pass_internal(pass_id) {
                 Ok(()) => executed_passes.push(pass_id),
@@ -276,51 +288,61 @@ impl AsyncComputeScheduler {
                 }
             }
         }
-        
+
         Ok(executed_passes)
     }
-    
+
     /// Wait for specific compute passes to complete
     pub fn wait_for_passes(&mut self, pass_ids: &[ComputePassId]) -> RenderResult<()> {
         let timeout = std::time::Duration::from_millis(self.config.timeout_ms);
         let start_time = std::time::Instant::now();
-        
+
         loop {
             let all_completed = {
                 let _lock = self.mutex.lock().unwrap();
                 pass_ids.iter().all(|&pass_id| {
-                    self.passes.get(&pass_id)
-                        .map(|info| matches!(info.status, ComputePassStatus::Completed | ComputePassStatus::Failed(_)))
+                    self.passes
+                        .get(&pass_id)
+                        .map(|info| {
+                            matches!(
+                                info.status,
+                                ComputePassStatus::Completed | ComputePassStatus::Failed(_)
+                            )
+                        })
                         .unwrap_or(true) // Consider missing passes as completed
                 })
             };
-            
+
             if all_completed {
                 break;
             }
-            
+
             if start_time.elapsed() > timeout {
-                return Err(RenderError::render("Timeout waiting for compute passes to complete"));
+                return Err(RenderError::render(
+                    "Timeout waiting for compute passes to complete",
+                ));
             }
-            
+
             // Small sleep to avoid busy waiting
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        
+
         Ok(())
     }
-    
+
     /// Insert barriers for compute/graphics synchronization
     pub fn insert_barriers(&mut self, barriers: Vec<ComputeBarrier>) -> RenderResult<()> {
         if barriers.is_empty() {
             return Ok(());
         }
-        
+
         // Create a command encoder for barriers
-        let encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
-            label: Some("compute_barriers"),
-        });
-        
+        let encoder = self
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("compute_barriers"),
+            });
+
         // GPU barriers are implicit in WebGPU - just update our state tracking
         for barrier in barriers {
             let resource_name = if let Some(ref buffer) = barrier.buffer {
@@ -330,38 +352,39 @@ impl AsyncComputeScheduler {
             } else {
                 continue;
             };
-            
-            self.resource_states.insert(resource_name, barrier.dst_usage);
+
+            self.resource_states
+                .insert(resource_name, barrier.dst_usage);
         }
-        
+
         // Submit empty command buffer to ensure ordering
         let command_buffer = encoder.finish();
         self.queue.submit([command_buffer]);
-        
+
         Ok(())
     }
-    
+
     /// Get status of a compute pass
     pub fn get_pass_status(&self, pass_id: ComputePassId) -> Option<ComputePassStatus> {
         let _lock = self.mutex.lock().unwrap();
         self.passes.get(&pass_id).map(|info| info.status.clone())
     }
-    
+
     /// Get performance metrics for completed passes
     pub fn get_metrics(&self) -> ComputeMetrics {
         let _lock = self.mutex.lock().unwrap();
-        
+
         let mut completed_passes = 0;
         let mut failed_passes = 0;
         let mut total_execution_time_ms = 0.0;
         let mut total_workgroups = 0;
-        
+
         for info in self.passes.values() {
             match &info.status {
                 ComputePassStatus::Completed => {
                     completed_passes += 1;
                     total_workgroups += info.descriptor.dispatch.total_workgroups();
-                    
+
                     if let (Some(start), Some(end)) = (info.start_time, info.end_time) {
                         total_execution_time_ms += end.duration_since(start).as_millis() as f32;
                     }
@@ -370,7 +393,7 @@ impl AsyncComputeScheduler {
                 _ => {}
             }
         }
-        
+
         ComputeMetrics {
             total_passes: self.passes.len(),
             completed_passes,
@@ -384,56 +407,70 @@ impl AsyncComputeScheduler {
             },
         }
     }
-    
+
     /// Cancel a queued compute pass
     pub fn cancel_pass(&mut self, pass_id: ComputePassId) -> RenderResult<()> {
         let _lock = self.mutex.lock().unwrap();
-        
+
         if let Some(pass_info) = self.passes.get_mut(&pass_id) {
             match pass_info.status {
                 ComputePassStatus::Queued => {
                     pass_info.status = ComputePassStatus::Cancelled;
                     Ok(())
                 }
-                _ => Err(RenderError::render("Cannot cancel compute pass that is not queued"))
+                _ => Err(RenderError::render(
+                    "Cannot cancel compute pass that is not queued",
+                )),
             }
         } else {
             Err(RenderError::render("Compute pass not found"))
         }
     }
-    
+
     /// Clear completed and failed passes
     pub fn cleanup_completed_passes(&mut self) {
         let _lock = self.mutex.lock().unwrap();
-        
+
         self.passes.retain(|_, info| {
-            !matches!(info.status, ComputePassStatus::Completed | ComputePassStatus::Failed(_) | ComputePassStatus::Cancelled)
+            !matches!(
+                info.status,
+                ComputePassStatus::Completed
+                    | ComputePassStatus::Failed(_)
+                    | ComputePassStatus::Cancelled
+            )
         });
     }
-    
+
     /// Internal method to execute a single compute pass
     fn execute_compute_pass_internal(&mut self, pass_id: ComputePassId) -> RenderResult<()> {
         // Get pass descriptor info (clone to avoid borrowing issues)
         let (label, label_prefix) = {
             let _lock = self.mutex.lock().unwrap();
-            let pass_info = self.passes.get_mut(&pass_id)
+            let pass_info = self
+                .passes
+                .get_mut(&pass_id)
                 .ok_or_else(|| RenderError::render("Compute pass not found"))?;
-                
+
             // Mark as executing
             pass_info.status = ComputePassStatus::Executing;
             pass_info.start_time = Some(std::time::Instant::now());
-            
-            (pass_info.descriptor.label.clone(), self.config.label_prefix.clone())
+
+            (
+                pass_info.descriptor.label.clone(),
+                self.config.label_prefix.clone(),
+            )
         };
-        
+
         // Create command encoder
-        let encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
-            label: Some(&format!("{}_{}", label_prefix, label)),
-        });
-        
+        let encoder = self
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some(&format!("{}_{}", label_prefix, label)),
+            });
+
         // For now, just create an empty command buffer
         let command_buffer = encoder.finish();
-        
+
         // Mark as completed
         {
             let _lock = self.mutex.lock().unwrap();
@@ -443,7 +480,7 @@ impl AsyncComputeScheduler {
                 pass_info.end_time = Some(std::time::Instant::now());
             }
         }
-        
+
         Ok(())
     }
 }
@@ -451,7 +488,7 @@ impl AsyncComputeScheduler {
 /// Utility functions for common compute patterns
 pub mod patterns {
     use super::*;
-    
+
     /// Create a simple buffer copy compute pass
     pub fn create_buffer_copy_pass(
         _device: &Device,
@@ -461,9 +498,11 @@ pub mod patterns {
     ) -> RenderResult<ComputePassDescriptor> {
         // This would typically require a compute shader for buffer copying
         // For now, return a placeholder
-        Err(RenderError::render("Buffer copy compute shader not implemented"))
+        Err(RenderError::render(
+            "Buffer copy compute shader not implemented",
+        ))
     }
-    
+
     /// Create a parallel reduction compute pass
     pub fn create_reduction_pass(
         _device: &Device,
@@ -472,9 +511,11 @@ pub mod patterns {
         _element_count: u32,
     ) -> RenderResult<ComputePassDescriptor> {
         // This would typically require a reduction compute shader
-        Err(RenderError::render("Reduction compute shader not implemented"))
+        Err(RenderError::render(
+            "Reduction compute shader not implemented",
+        ))
     }
-    
+
     /// Create a parallel prefix sum (scan) compute pass
     pub fn create_scan_pass(
         _device: &Device,
@@ -488,7 +529,12 @@ pub mod patterns {
 }
 
 /// Helper function to estimate post-processing workgroup count
-pub fn estimate_postfx_workgroups(width: u32, height: u32, local_size_x: u32, local_size_y: u32) -> (u32, u32, u32) {
+pub fn estimate_postfx_workgroups(
+    width: u32,
+    height: u32,
+    local_size_x: u32,
+    local_size_y: u32,
+) -> (u32, u32, u32) {
     let workgroups_x = (width + local_size_x - 1) / local_size_x;
     let workgroups_y = (height + local_size_y - 1) / local_size_y;
     (workgroups_x, workgroups_y, 1)
@@ -497,7 +543,7 @@ pub fn estimate_postfx_workgroups(width: u32, height: u32, local_size_x: u32, lo
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_c7_dispatch_params_linear() {
         let dispatch = DispatchParams::linear(256);

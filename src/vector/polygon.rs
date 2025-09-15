@@ -2,8 +2,8 @@
 //! GPU tessellation with proper sRGB target rendering
 
 use crate::error::RenderError;
-use crate::vector::data::{PolygonVertex, PackedPolygon, validate_polygon_vertices};
 use crate::vector::api::PolygonDef;
+use crate::vector::data::{validate_polygon_vertices, PackedPolygon, PolygonVertex};
 use crate::vector::layer::Layer;
 use bytemuck::{Pod, Zeroable};
 
@@ -22,10 +22,10 @@ pub struct PolygonRenderer {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct PolygonUniform {
-    transform: [[f32; 4]; 4],  // View-projection matrix
-    fill_color: [f32; 4],      // RGBA fill color
-    stroke_color: [f32; 4],    // RGBA stroke color  
-    stroke_width: f32,         // Stroke width in pixels
+    transform: [[f32; 4]; 4], // View-projection matrix
+    fill_color: [f32; 4],     // RGBA fill color
+    stroke_color: [f32; 4],   // RGBA stroke color
+    stroke_width: f32,        // Stroke width in pixels
     _pad: [f32; 3],           // Alignment padding
 }
 
@@ -53,30 +53,26 @@ impl PolygonRenderer {
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vf.Vector.Polygon.BindGroupLayout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
-            ],
+                count: None,
+            }],
         });
 
         // Create bind group
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vf.Vector.Polygon.BindGroup"),
             layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
         });
 
         // Create pipeline layout
@@ -93,26 +89,24 @@ impl PolygonRenderer {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<PolygonVertex>() as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[
-                            // Position
-                            wgpu::VertexAttribute {
-                                offset: 0,
-                                shader_location: 0,
-                                format: wgpu::VertexFormat::Float32x2,
-                            },
-                            // UV
-                            wgpu::VertexAttribute {
-                                offset: 8,
-                                shader_location: 1, 
-                                format: wgpu::VertexFormat::Float32x2,
-                            },
-                        ],
-                    },
-                ],
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<PolygonVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        // Position
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        // UV
+                        wgpu::VertexAttribute {
+                            offset: 8,
+                            shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                    ],
+                }],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -150,8 +144,8 @@ impl PolygonRenderer {
 
     /// Tessellate polygon with proper winding order and hole support
     pub fn tessellate_polygon(&self, polygon: &PolygonDef) -> Result<PackedPolygon, RenderError> {
-        use lyon_tessellation::{FillTessellator, FillOptions, VertexBuffers, FillVertex};
         use lyon_path::Path;
+        use lyon_tessellation::{FillOptions, FillTessellator, FillVertex, VertexBuffers};
 
         let mut tessellator = FillTessellator::new();
         let mut buffers = VertexBuffers::new();
@@ -162,14 +156,11 @@ impl PolygonRenderer {
         // Add exterior ring (should be CCW for filled areas)
         if polygon.exterior.len() < 3 {
             return Err(RenderError::Upload(
-                "Polygon exterior must have at least 3 vertices".to_string()
+                "Polygon exterior must have at least 3 vertices".to_string(),
             ));
         }
 
-        let first_point = lyon_path::math::Point::new(
-            polygon.exterior[0].x, 
-            polygon.exterior[0].y
-        );
+        let first_point = lyon_path::math::Point::new(polygon.exterior[0].x, polygon.exterior[0].y);
         path_builder.begin(first_point);
 
         for vertex in polygon.exterior.iter().skip(1) {
@@ -181,13 +172,13 @@ impl PolygonRenderer {
         for hole in &polygon.holes {
             if hole.len() < 3 {
                 return Err(RenderError::Upload(
-                    "Polygon hole must have at least 3 vertices".to_string()
+                    "Polygon hole must have at least 3 vertices".to_string(),
                 ));
             }
 
             let first_hole_point = lyon_path::math::Point::new(hole[0].x, hole[0].y);
             path_builder.begin(first_hole_point);
-            
+
             for vertex in hole.iter().skip(1) {
                 path_builder.line_to(lyon_path::math::Point::new(vertex.x, vertex.y));
             }
@@ -210,7 +201,8 @@ impl PolygonRenderer {
 
         if let Err(e) = result {
             return Err(RenderError::Upload(format!(
-                "Polygon tessellation failed: {:?}", e
+                "Polygon tessellation failed: {:?}",
+                e
             )));
         }
 
@@ -218,9 +210,9 @@ impl PolygonRenderer {
         let validation_result = validate_polygon_vertices(&buffers.vertices, &buffers.indices);
         if !validation_result.is_valid {
             return Err(RenderError::Upload(
-                validation_result.error_message.unwrap_or_else(|| 
-                    "Polygon tessellation validation failed".to_string()
-                )
+                validation_result
+                    .error_message
+                    .unwrap_or_else(|| "Polygon tessellation validation failed".to_string()),
             ));
         }
 
@@ -258,7 +250,7 @@ impl PolygonRenderer {
             self.vertex_capacity = new_capacity;
         }
 
-        // Reallocate index buffer if needed  
+        // Reallocate index buffer if needed
         if total_indices > self.index_capacity {
             let new_capacity = (total_indices * 2).max(3072); // At least 1024 triangles
             self.index_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
@@ -277,7 +269,7 @@ impl PolygonRenderer {
         for polygon in polygons {
             let vertex_offset = combined_vertices.len() as u32;
             combined_vertices.extend_from_slice(&polygon.vertices);
-            
+
             // Adjust indices by current vertex offset
             for &index in &polygon.indices {
                 combined_indices.push(vertex_offset + index);
@@ -313,7 +305,8 @@ impl PolygonRenderer {
         stroke_width: f32,
         index_count: u32,
     ) -> Result<(), RenderError> {
-        if let (Some(vertex_buffer), Some(index_buffer)) = (&self.vertex_buffer, &self.index_buffer) {
+        if let (Some(vertex_buffer), Some(index_buffer)) = (&self.vertex_buffer, &self.index_buffer)
+        {
             // Update uniforms
             let uniform = PolygonUniform {
                 transform: *transform,
@@ -323,11 +316,7 @@ impl PolygonRenderer {
                 _pad: [0.0; 3],
             };
 
-            queue.write_buffer(
-                &self.uniform_buffer,
-                0,
-                bytemuck::cast_slice(&[uniform]),
-            );
+            queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
 
             // Set pipeline and resources
             render_pass.set_pipeline(&self.render_pipeline);
@@ -362,10 +351,10 @@ impl PolygonOutlines {
         outline_color: [f32; 4],
     ) -> Result<Self, RenderError> {
         use crate::vector::api::{PolylineDef, VectorStyle};
-        
+
         let mut exterior_lines = Vec::new();
         let mut hole_lines = Vec::new();
-        
+
         // Create outline style
         let outline_style = VectorStyle {
             fill_color: [0.0, 0.0, 0.0, 0.0], // Not used for lines
@@ -373,39 +362,39 @@ impl PolygonOutlines {
             stroke_width: outline_width,
             point_size: 4.0, // Not used for lines
         };
-        
+
         // Generate exterior outline
         if polygon.exterior.len() >= 3 {
             let mut exterior_path = polygon.exterior.clone();
             // Close the path by adding first point at end
             exterior_path.push(polygon.exterior[0]);
-            
+
             exterior_lines.push(PolylineDef {
                 path: exterior_path,
                 style: outline_style.clone(),
             });
         }
-        
+
         // Generate hole outlines
         for hole in &polygon.holes {
             if hole.len() >= 3 {
                 let mut hole_path = hole.clone();
                 // Close the hole path
                 hole_path.push(hole[0]);
-                
+
                 hole_lines.push(PolylineDef {
                     path: hole_path,
                     style: outline_style.clone(),
                 });
             }
         }
-        
+
         Ok(Self {
             exterior_lines,
             hole_lines,
         })
     }
-    
+
     /// Get all outline polylines as a single vector
     pub fn all_lines(&self) -> Vec<&crate::vector::api::PolylineDef> {
         let mut lines = Vec::new();
@@ -413,11 +402,18 @@ impl PolygonOutlines {
         lines.extend(self.hole_lines.iter());
         lines
     }
-    
+
     /// Get total number of outline segments
     pub fn segment_count(&self) -> usize {
-        self.exterior_lines.iter().map(|line| line.path.len().saturating_sub(1)).sum::<usize>() +
-        self.hole_lines.iter().map(|line| line.path.len().saturating_sub(1)).sum::<usize>()
+        self.exterior_lines
+            .iter()
+            .map(|line| line.path.len().saturating_sub(1))
+            .sum::<usize>()
+            + self
+                .hole_lines
+                .iter()
+                .map(|line| line.path.len().saturating_sub(1))
+                .sum::<usize>()
     }
 }
 
@@ -434,7 +430,7 @@ mod tests {
         let triangle = PolygonDef {
             exterior: vec![
                 Vec2::new(0.0, 0.0),
-                Vec2::new(1.0, 0.0), 
+                Vec2::new(1.0, 0.0),
                 Vec2::new(0.5, 1.0),
             ],
             holes: vec![],
@@ -442,7 +438,7 @@ mod tests {
         };
 
         let packed = renderer.tessellate_polygon(&triangle).unwrap();
-        
+
         assert!(packed.vertices.len() >= 3);
         assert!(packed.indices.len() >= 3);
         assert_eq!(packed.indices.len() % 3, 0); // Must be triangles
@@ -463,14 +459,14 @@ mod tests {
             holes: vec![vec![
                 Vec2::new(-0.5, -0.5),
                 Vec2::new(0.5, -0.5),
-                Vec2::new(0.5, 0.5), 
+                Vec2::new(0.5, 0.5),
                 Vec2::new(-0.5, 0.5),
             ]],
             style: VectorStyle::default(),
         };
 
         let packed = renderer.tessellate_polygon(&polygon_with_hole).unwrap();
-        
+
         // Should have more vertices than a simple quad due to hole tessellation
         assert!(packed.vertices.len() > 4);
         assert!(packed.indices.len() > 6); // More than 2 triangles
@@ -490,6 +486,9 @@ mod tests {
 
         let result = renderer.tessellate_polygon(&degenerate);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("at least 3 vertices"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("at least 3 vertices"));
     }
 }

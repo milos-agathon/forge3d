@@ -6,7 +6,9 @@
 use crate::error::RenderResult;
 
 // Re-export main types from the new implementation
-pub use super::framegraph_impl::{FrameGraph as NewFrameGraph, PassType, ResourceDesc, ResourceType};
+pub use super::framegraph_impl::{
+    FrameGraph as NewFrameGraph, PassType, ResourceDesc, ResourceType,
+};
 
 /// Legacy FrameGraph wrapper for backward compatibility
 #[derive(Debug)]
@@ -21,17 +23,15 @@ impl FrameGraph {
             inner: NewFrameGraph::new(),
         }
     }
-    
+
     /// Add a render pass (legacy compatibility)
     pub fn add_pass(&mut self, name: impl Into<String>) -> RenderResult<()> {
-        let _handle = self.inner.add_pass(
-            &name.into(),
-            PassType::Graphics,
-            |_builder| Ok(())
-        )?;
+        let _handle = self
+            .inner
+            .add_pass(&name.into(), PassType::Graphics, |_builder| Ok(()))?;
         Ok(())
     }
-    
+
     /// Get access to the full framegraph implementation
     pub fn full(&mut self) -> &mut NewFrameGraph {
         &mut self.inner

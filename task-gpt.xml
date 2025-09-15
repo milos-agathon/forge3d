@@ -1,5 +1,5 @@
-<task id="ws-A6-auto" version="1.0">
-  <title>Workstream A · Task A6 — Implement per roadmap2.csv (derive deliverables → code/tests/docs)</title>
+<task id="ws-A9-pbr-textures" version="1.0">
+  <title>Workstream A · Task A9 — PBR Textures in Path Tracer (albedo/metallic/roughness/normal/emissive) with filtered sampling & tangents</title>
 
   <role>
     You are OpenAI Codex CLI in <b>Verification → Implementation Mode</b>, acting as a senior graphics/runtime engineer.
@@ -17,10 +17,10 @@
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
     <safety>
-      - Make only the minimal changes needed to satisfy the A6 row’s Deliverables and Acceptance Criteria.
-      - Never delete custom user code; for generated artifacts, prefer adding .gitignore entries.
+      - Minimal, additive changes; do not break existing untextured PBR path.
+      - Never delete custom user code; prefer adding .gitignore entries for generated artifacts.
       - If a tool is missing, mark the step SKIPPED with the exact command to run locally.
-      - If the A6 row is missing/ambiguous, reply <b>UNCERTAIN</b> listing the exact headers/rows/fields needed, then STOP with no edits.
+      - If roadmap data is missing/ambiguous, reply <b>UNCERTAIN</b> listing the exact CSV headers/rows needed.
     </safety>
     <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz, out, diag_out</exclusions>
   </constraints>
@@ -31,12 +31,13 @@
     <workstreamSelector>
       <![CDATA[
       Workstream ID: A
-      Task ID: A6
+      Task ID: A9
+      Title contains: PBR Textures in PT
       ]]>
     </workstreamSelector>
   </inputs>
 
-  <!-- 1) Verify A6 exists and extract Title/Deliverables/Acceptance -->
+  <!-- Verify A9 exists in roadmap2.csv and capture its meta -->
   <prechecks>
     <command>
       <![CDATA[
@@ -50,94 +51,222 @@ try:
       wid=(r.get("Workstream ID","") or "").strip().lower()
       tid=(r.get("Task ID","") or "").strip().lower()
       ttl=(r.get("Task Title","") or "").strip().lower()
-      if wid=="a" and (tid=="a6" or "a6" in ttl):
+      if wid=="a" and (tid=="a9" or "a9" in ttl):
         row=r; break
 except FileNotFoundError:
   print("UNCERTAIN: roadmap2.csv not found", file=sys.stderr); sys.exit(2)
 if not row:
-  print("UNCERTAIN: A6 not found in roadmap2.csv (Workstream A). Provide the exact row with headers.", file=sys.stderr); sys.exit(3)
-meta={
-  "Title": row.get("Task Title","").strip(),
-  "Rationale": row.get("Rationale","").strip(),
-  "Deliverables": row.get("Deliverables","").strip(),
-  "Acceptance": row.get("Acceptance Criteria","").strip(),
-  "Priority": row.get("Priority","").strip(),
-  "Phase": row.get("Phase","").strip()
-}
-print("WORKSTREAM_TASK_FOUND:A6")
-print("A6_META:"+json.dumps(meta, ensure_ascii=False))
+  print("UNCERTAIN: A9 not found in roadmap2.csv (Workstream A). Please confirm the exact row/headers.", file=sys.stderr); sys.exit(3)
+meta={"Title":row.get("Task Title",""),
+      "Rationale":row.get("Rationale",""),
+      "Deliverables":row.get("Deliverables",""),
+      "Acceptance":row.get("Acceptance Criteria",""),
+      "Priority":row.get("Priority",""),
+      "Phase":row.get("Phase",""),
+      "Missing":row.get("Missing Features",""),
+      "Dependencies":row.get("Dependencies",""),
+      "Risks":row.get("Risks/Mitigations","")}
+print("WORKSTREAM_TASK_FOUND:A9")
+print("A9_META:"+json.dumps(meta, ensure_ascii=False))
 PY
       ]]>
     </command>
   </prechecks>
 
-  <design>
-    <mappingRules>
-      <![CDATA[
-Derive concrete artifacts from A6 “Deliverables” using these keyword→path rules (use exact filenames in CSV if present):
-- "WGSL", "compute", "shader", "kernel" → src/shaders/<feature>.wgsl
-- "BVH", "accel", "traversal" → src/accel/*.rs, src/path_tracing/accel.rs, and WGSL hooks
-- "intersection", "ray-triangle", "ray-sphere" → src/path_tracing/intersect.rs and/or shaders/pt_intersect_*.wgsl
-- "sampling", "MIS", "importance", "lights", "pdf" → src/lighting/*.rs, shaders/lighting_*.wgsl, python/forge3d/lighting.py
-- "materials", "BSDF", "PBR", "GGX", "roughness", "eta" → src/pbr/*.rs, python/forge3d/pbr.py, shaders/pbr_*.wgsl
-- "camera", "DOF", "thin lens", "motion vectors" → src/camera/*.rs, python/forge3d/camera.py, shaders/camera_*.wgsl
-- "sky", "sun-sky", "IBL", "environment", "cubemap", "latlong" → src/lighting/ibl.rs, shaders/ibl_*.wgsl, python/forge3d/ibl.py
-- "textures", "image", "mipmap", "sampler" → src/textures/*.rs, shaders/texture_*.wgsl, python/forge3d/textures.py
-- "tonemap", "ACES", "Reinhard", "exposure" → src/post/tonemap.rs, src/shaders/tonemap.wgsl, python bridge
-- "Python API" → python/forge3d/<feature>.py (public class/functions + type hints)
-- "docs" → README.md section and docs/api/<feature>.md (if Sphinx present)
-- "tests" → tests/<feature>_*.rs or tests/test_<feature>*.py (GPU tests @skip if no adapter)
-- "examples" → examples/<feature>_*.py (write images to out/; ensure .gitignore ignores out/)
-If Deliverables specify explicit filenames, use those verbatim instead of heuristics.
-      ]]>
-    </mappingRules>
-    <acceptanceStrategy>
-      <![CDATA[
-For each bullet/line in A6 Deliverables:
-  1) Map it to concrete files/symbols with the rules above.
-  2) Implement the smallest viable code to satisfy A6 “Acceptance Criteria”.
-  3) If a deliverable is ambiguous, mark UNCERTAIN with the exact text and the minimal clarification needed.
-      ]]>
-    </acceptanceStrategy>
-  </design>
-
   <acceptanceCriteria>
-    <ac id="AC-0">A6 row is present; meta printed as A6_META JSON.</ac>
-    <ac id="AC-1">Every concrete deliverable item from A6’s Deliverables cell exists as code/docs/tests artifacts with appropriate header/inline docs for bind groups and public APIs.</ac>
-    <ac id="AC-2">Python public API exposes the functions/classes required by A6’s Acceptance Criteria (row text), with type hints and deterministic behavior notes where relevant.</ac>
-    <ac id="AC-3">Unit/integration tests exist for all implemented deliverables; GPU-dependent tests are skipped when no compatible adapter is available.</ac>
-    <ac id="AC-4">Docs updated: README + docs/api/<feature>.md (if Sphinx present) clearly describing usage and limitations; examples added if requested by A6.</ac>
-    <ac id="AC-5">Validation run passes: fmt, clippy -D warnings, cargo test, pytest, sphinx-build (if docs), maturin build; CI ensured if missing.</ac>
+    <ac id="AC-1">WGSL compute path supports PBR textures: <b>albedo (sRGB)</b>, <b>metallic-roughness</b> (glTF convention: G=roughness, B=metallic), <b>normal map</b> (tangent space), and <b>emissive</b> (sRGB). Optional <b>occlusion</b> can be read but may be no-op for MVP.</ac>
+    <ac id="AC-2">Filtered texture lookups in compute: mipmapped 2D sampled textures with <code>filtering=linear</code>, <code>address=repeat</code> (configurable); use <code>textureSample()</code> and correct LOD via implicit gradients; anisotropy not required.</ac>
+    <ac id="AC-3">Tangent space normal mapping implemented: per-vertex tangents generated on CPU (MikkTSpace-like or MVP Gram-Schmidt), TBN built in shader, normal map scale applied; fall back gracefully if tangents absent.</ac>
+    <ac id="AC-4">Rust backend provides texture loading & GPU upload (with mipmap generation on CPU), sampler creation, and bind group wiring; memory usage tracked to respect ≤512 MiB host-visible.</ac>
+    <ac id="AC-5">Python API exposes a friendly way to attach texture sets to materials/meshes and to load images from disk or numpy arrays; sRGB↔linear handling is correct for baseColor/emissive.</ac>
+    <ac id="AC-6">Correctness tests: (a) GPU test renders a textured quad/sphere; (b) normal map visibly perturbs shading (numeric assertion on variance/mean normal dot-L change); (c) CPU fallback path executes without error; GPU tests skip if no adapter.</ac>
+    <ac id="AC-7">Parity note: provide a small smoke comparison harness and document that on a reference scene the average color difference vs raster PBR is targeted at ΔE≤3 (informational if raster baseline unavailable in CI).</ac>
+    <ac id="AC-8">Docs updated (README + docs/api if present) describing texture conventions, glTF channel mapping, normal scale, and examples; examples write outputs to <code>out/</code> (gitignored).</ac>
+    <ac id="AC-9">Validation passes: <code>cargo fmt</code>, <code>cargo clippy -D warnings</code>, <code>cargo test</code>, <code>pytest</code>, <code>sphinx-build</code> (if docs), <code>maturin build</code>; CI ensured.</ac>
   </acceptanceCriteria>
+
+  <design>
+    <wgsl>
+      <![CDATA[
+New/updated shader files:
+  src/shaders/pbr_textured.wgsl     // sampling helpers + material fetch
+  (extend) src/shaders/pt_shade.wgsl or pt_kernel.wgsl — integrate texture reads into BRDF
+
+Header docs (each WGSL file MUST list bind groups/bindings):
+Bind Group 0 — Uniforms:
+  width, height, frame_index, exposure, seed_hi/lo, flags (bitmask enabling textures)
+Bind Group 1 — Scene/Geometry (readonly buffers):
+  vertices, indices, materials, uvs, tangents (optional), bvh (if using meshes)
+Bind Group 2 — Textures/Samplers:
+  @binding(0) texture_2d<f32>  baseColorTex   (sRGB → linear conversion in shader)
+  @binding(1) texture_2d<f32>  mrTex          (R: occlusion opt., G: roughness, B: metallic)
+  @binding(2) texture_2d<f32>  normalTex      (tangent-space, +Y up convention)
+  @binding(3) texture_2d<f32>  emissiveTex    (sRGB → linear)
+  @binding(4) sampler          linearRepeatSampler
+
+Notes:
+  - Base color sampled as sRGB, converted to linear via pow or fast_srgb_to_linear.
+  - Metallic & roughness read from mrTex.g (Roughness), mrTex.b (Metallic); clamp [0,1].
+  - Normal map unpack: n = normalize(2*rgb-1); build TBN: T,B,N from per-vertex attributes; Nshading = normalize(T*(n.x*scale)+B*(n.y*scale)+N*n.z)
+  - Emissive sampled sRGB→linear; multiplied by emissiveFactor.
+      ]]>
+    </wgsl>
+
+    <rustBackend>
+      <![CDATA[
+New modules (or extend existing):
+  src/textures/mod.rs             // image loading, mipmap generation (box or Lanczos), wgpu texture upload
+  src/path_tracing/materials.rs   // PbrMaterial { base_color_factor, metallic_factor, roughness_factor, emissive_factor, texture_handles }
+  src/path_tracing/mod.rs         // integrate textures/samplers into bind groups; pass factors to shader
+
+Key APIs:
+  pub struct TextureHandle { view: wgpu::TextureView, format: wgpu::TextureFormat, size: (u32,u32), mip_level_count:u32 }
+  pub fn upload_rgba8_srgb(device:&wgpu::Device, queue:&wgpu::Queue, data:&[u8], w:u32, h:u32, generate_mips:bool) -> TextureHandle
+  pub fn generate_mips_cpu(rgba8:&mut [u8], w:u32, h:u32) -> Vec<(Vec<u8>, (u32,u32))> // MVP
+
+Samplers:
+  linearRepeatSampler: mag=min=linear, mipmap=linear, address_mode_{u,v}=repeat
+
+Tangent generation (CPU, MVP):
+  - For each triangle, compute tangent/bitangent from UV gradients; orthonormalize with normal (Gram-Schmidt); store per-vertex avg; normalize.
+      ]]>
+    </rustBackend>
+
+    <pythonAPI>
+      <![CDATA[
+python/forge3d/textures.py (new):
+  def load_texture(path_or_array, srgb:bool) -> "Tex": ...
+  def build_pbr_textures(base_color=None, metallic_roughness=None, normal=None, emissive=None, *, srgb_defaults=True) -> "PbrTexSet": ...
+
+python/forge3d/materials.py (new or extend):
+  class PbrMaterial:
+      def __init__(..., base_color_factor=(1,1,1,1), metallic_factor=1.0, roughness_factor=1.0, emissive_factor=(0,0,0)):
+          ...
+      def with_textures(self, texset:"PbrTexSet") -> "PbrMaterial": ...
+
+python/forge3d/path_tracing.py (modify):
+  def render_rgba(..., material: "PbrMaterial|None"=None, use_gpu:bool=True, seed:int=1, frames:int=1) -> np.ndarray:
+      - If material has textures → enable textured BRDF path; else use factors only.
+      - Deterministic for frames==1 with fixed seed.
+      ]]>
+    </pythonAPI>
+
+    <examples>
+      <![CDATA[
+examples/textured_sphere.py — load checkerboard baseColor + normal ripple; render at 256×256; save out/textured_sphere.png
+examples/textured_quad_gltf_like.py — synthesize MR channels; show roughness/metallic variation bands; save output
+      ]]>
+    </examples>
+
+    <risksMitigations>
+      <![CDATA[
+- sRGB handling: convert only baseColor/emissive; MR and normal stay linear.
+- Memory: reuse one staging buffer per upload; prefer RGBA8 formats; keep mips; free temporary CPU mip buffers.
+- Tangent quality: MVP generator is sufficient; allow swapping with MikkTSpace later.
+- glTF channel mapping: document convention; add unit test asserting G→roughness, B→metallic.
+      ]]>
+    </risksMitigations>
+  </design>
 
   <changes>
     <createOrModify>
-      <!-- Actual files depend on A6 deliverables; these directories are typical targets -->
-      <file path="src/shaders/" kind="modify-or-new"/>
-      <file path="src/path_tracing/" kind="modify-or-new"/>
-      <file path="src/accel/" kind="modify-or-new"/>
-      <file path="src/lighting/" kind="modify-or-new"/>
-      <file path="src/post/" kind="modify-or-new"/>
-      <file path="src/camera/" kind="modify-or-new"/>
-      <file path="src/textures/" kind="modify-or-new"/>
-      <file path="python/forge3d/" kind="modify-or-new"/>
-      <file path="tests/" kind="modify-or-new"/>
-      <file path="examples/" kind="modify-or-new-optional"/>
+      <!-- WGSL -->
+      <file path="src/shaders/pbr_textured.wgsl" kind="new"/>
+      <file path="src/shaders/pt_shade.wgsl" kind="modify-or-new"/>
+      <file path="src/shaders/pt_kernel.wgsl" kind="modify"/>
+
+      <!-- Rust -->
+      <file path="src/textures/mod.rs" kind="new"/>
+      <file path="src/path_tracing/materials.rs" kind="new-or-modify"/>
+      <file path="src/path_tracing/mod.rs" kind="modify"/>
+
+      <!-- Python -->
+      <file path="python/forge3d/textures.py" kind="new"/>
+      <file path="python/forge3d/materials.py" kind="new-or-modify"/>
+      <file path="python/forge3d/path_tracing.py" kind="modify"/>
+
+      <!-- Tests -->
+      <file path="tests/test_pbr_textures_gpu.py" kind="new"/>
+      <file path="tests/test_tangent_generation.rs" kind="new"/>
+      <file path="tests/test_gltf_mr_channels.py" kind="new"/>
+
+      <!-- Examples & docs -->
+      <file path="examples/textured_sphere.py" kind="new-optional"/>
+      <file path="examples/textured_quad_gltf_like.py" kind="new-optional"/>
       <file path="README.md" kind="modify-append"/>
-      <file path="docs/api/" kind="modify-or-new-optional"/>
+      <file path="docs/api/pbr_textures.md" kind="new-optional"/>
       <file path=".gitignore" kind="modify-append"/>
     </createOrModify>
+
+    <implNotes>
+      <![CDATA[
+- WGSL fast sRGB→linear: pow(c, vec3(2.2)) MVP is acceptable; switchable to piecewise curve later.
+- Normal map unpack uses OpenGL-style [+Y up]; if glTF uses same, OK; otherwise expose flipY flag.
+- Use a single bind group for textures for MVP; material index selects which texture set to use per-primitive.
+- For CPU fallback (if any), keep untextured path working; texture code is GPU-first.
+      ]]>
+    </implNotes>
   </changes>
 
   <tests>
-    <templates>
+    <python path="tests/test_pbr_textures_gpu.py">
       <![CDATA[
-- GPU feature test (pytest): skip if no adapter; assert shapes/dtypes; deterministic behavior for frames=1 with fixed seed; tolerance checks vs CPU where defined.
-- Rust unit tests: validate struct packing/layout, math helpers, error handling (no panics across FFI).
-- Docs build test: sphinx-build succeeds (or SKIPPED if docs absent).
-- Example smoke test (optional): script runs headless and writes to out/ (gitignored).
+import numpy as np, pytest
+from forge3d.path_tracing import PathTracer, make_camera
+from forge3d.textures import build_pbr_textures
+from forge3d.materials import PbrMaterial
+
+def _checker_rgba8(w=64,h=64):
+    img = np.zeros((h,w,4), dtype=np.uint8)
+    for y in range(h):
+        for x in range(w):
+            v = 255 if ((x//8 + y//8) % 2)==0 else 0
+            img[y,x] = (v, v, v, 255)
+    return img
+
+@pytest.mark.skipif(False, reason="Inject GPU-skip in CI if needed")
+def test_textured_sphere_normalmap_affects_shading():
+    base = _checker_rgba8()
+    # fake MR: roughness in G, metallic in B
+    mr = np.zeros((64,64,4), dtype=np.uint8); mr[...,1] = 64; mr[...,2] = 0
+    # simple normal bump (encode +Y up)
+    nrm = np.zeros((64,64,4), dtype=np.uint8); nrm[...,0]=128; nrm[...,1]=255; nrm[...,2]=128; nrm[...,3]=255
+    tex = build_pbr_textures(base_color=base, metallic_roughness=mr, normal=nrm, emissive=None)
+    mat = PbrMaterial().with_textures(tex)
+    cam = make_camera(origin=(0,0,2.5), look_at=(0,0,0), up=(0,1,0), fov_y=45.0, aspect=1.0, exposure=1.0)
+    tr = PathTracer()
+    img_no = tr.render_rgba(64,64, scene=None, camera=cam, material=PbrMaterial(), seed=7, frames=1, use_gpu=True)
+    img_tx = tr.render_rgba(64,64, scene=None, camera=cam, material=mat, seed=7, frames=1, use_gpu=True)
+    assert img_tx.shape == img_no.shape
+    # normal mapping should change shading (mean absolute difference threshold)
+    mad = np.abs(img_tx.astype(np.int16)-img_no.astype(np.int16)).mean()
+    assert mad > 1.0
       ]]>
-    </templates>
+    </python>
+
+    <rust path="tests/test_tangent_generation.rs">
+      <![CDATA[
+#[test]
+fn tangents_orthonormalize_with_normals() {
+    // Build a single triangle with UVs; run tangent generator; check T ⟂ N and |T|≈1
+}
+      ]]>
+    </rust>
+
+    <python path="tests/test_gltf_mr_channels.py">
+      <![CDATA[
+import numpy as np
+from forge3d.textures import build_pbr_textures
+
+def test_mr_channel_mapping():
+    mr = np.zeros((4,4,4), dtype=np.uint8)
+    mr[...,1] = 255  # roughness=1.0
+    mr[...,2] = 0    # metallic=0.0
+    t = build_pbr_textures(metallic_roughness=mr)
+    # This test asserts mapping/documentation rather than rendering
+    assert t.meta["mapping"] == {"roughness":"G","metallic":"B","occlusion":"R(optional)"}
+      ]]>
+    </python>
   </tests>
 
   <!-- EXACTLY INCLUDE THESE STEPS -->
@@ -171,34 +300,40 @@ For each bullet/line in A6 Deliverables:
 
   <execution>
     <steps>
-      <step>Create feature branch: <code>git checkout -b ws-A6-implementation</code></step>
-      <step>Parse A6_META (printed above) into bullet items (split by newlines/semicolons). Save mapping to <code>reports/a6_plan.json</code> (deliverable → files/symbols) using the mapping rules.</step>
-      <step>For each mapped deliverable:
-        <ul>
-          <li>Implement minimal, correct code in WGSL/Rust/Python as indicated by the mapping rules and A6 Acceptance Criteria.</li>
-          <li>Add/modify tests (Rust/Python) covering success paths and at least one failure/validation path.</li>
-          <li>Update README and docs/api/&lt;feature&gt;.md (if Sphinx present) with usage, parameters, and limitations.</li>
-          <li>If examples requested: add an example script in <code>examples/</code> writing outputs to <code>out/</code> (ensure .gitignore ignores it).</li>
-        </ul>
-      </step>
-      <step>Append <code>.gitignore</code> entries for out/, diag_out/, and build artifacts if needed.</step>
-      <step>Run the Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent and record the exact command.</step>
-      <step>Create <code>PR_BODY.md</code> summarizing A6 implementation with references to files/lines and validation results; print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
+      <step>Create feature branch: <code>git checkout -b ws-A9-implementation</code></step>
+      <step>Add WGSL sampling helpers and integrate into shading; extend bind groups with textures + sampler and document them in headers.</step>
+      <step>Implement Rust texture upload with CPU mipmap generation; create linear-repeat sampler; wire material factors + texture sets to shader.</step>
+      <step>Add CPU tangent generator; upload tangents per-vertex; build TBN in shader and apply normal map scale.</step>
+      <step>Extend Python API to load/attach texture sets; update path_tracing render function to enable textured mode when material has textures.</step>
+      <step>Create tests for GPU textured render, tangent generation, and glTF MR channel mapping; add examples.</step>
+      <step>Docs & housekeeping: update <code>README.md</code>, add <code>docs/api/pbr_textures.md</code> (if Sphinx), and append <code>.gitignore</code> (e.g., out/).</step>
+      <step>Run Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent.</step>
+      <step>Generate <code>PR_BODY.md</code> and print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
     </steps>
   </execution>
 
   <completion>
     <print>
-      - reports/a6_plan.json
-      - All created/modified source files per mapping (WGSL/Rust/Python)
-      - tests/* for implemented features
-      - examples/* (if requested by A6)
-      - README.md (updated)
-      - docs/api/* (if Sphinx present)
+      - src/shaders/pbr_textured.wgsl
+      - src/shaders/pt_shade.wgsl
+      - src/shaders/pt_kernel.wgsl
+      - src/textures/mod.rs
+      - src/path_tracing/materials.rs
+      - src/path_tracing/mod.rs
+      - python/forge3d/textures.py
+      - python/forge3d/materials.py
+      - python/forge3d/path_tracing.py
+      - tests/test_pbr_textures_gpu.py
+      - tests/test_tangent_generation.rs
+      - tests/test_gltf_mr_channels.py
+      - examples/textured_sphere.py
+      - examples/textured_quad_gltf_like.py
+      - README.md
+      - docs/api/pbr_textures.md (if Sphinx present)
       - PR_BODY.md
     </print>
     <fallback>
-      If A6 is not found or its Deliverables/Acceptance text is empty/ambiguous, respond <b>UNCERTAIN</b> listing the exact missing fields and STOP without changes.
+      If A9 is not found in roadmap2.csv, respond <b>UNCERTAIN</b> with the list of detected Workstream A tasks and STOP without changes.
     </fallback>
   </completion>
 </task>

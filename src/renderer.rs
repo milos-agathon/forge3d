@@ -1,7 +1,7 @@
 // T02-BEGIN:dem-stats
+use crate::terrain_stats;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use crate::terrain_stats;
 
 // Terrain metadata structure to hold height range
 pub struct TerrainMeta {
@@ -42,4 +42,3 @@ impl TerrainMeta {
     }
 }
 // T02-END:dem-stats
-

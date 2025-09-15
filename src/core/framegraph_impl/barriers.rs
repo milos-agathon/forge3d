@@ -4,11 +4,10 @@
 //! to ensure correct resource state transitions.
 
 use super::types::{
-    PassHandle, ResourceHandle, ResourceInfo, PassInfo, 
-    ResourceBarrier, BarrierType, ResourceType
+    BarrierType, PassHandle, PassInfo, ResourceBarrier, ResourceHandle, ResourceInfo, ResourceType,
 };
 use std::collections::HashMap;
-use wgpu::{TextureUsages, BufferUsages};
+use wgpu::{BufferUsages, TextureUsages};
 
 // ToPassHandle trait is defined below
 
@@ -45,22 +44,22 @@ impl BarrierPlanner {
         resources: &HashMap<ResourceHandle, ResourceInfo>,
     ) -> Vec<ResourceBarrier> {
         let mut barriers = Vec::new();
-        
+
         // Reset resource states
         self.resource_states.clear();
-        
+
         // Process each pass in execution order
         for pass_info in passes {
             let pass_barriers = self.plan_pass_barriers(pass_info, resources);
             barriers.extend(pass_barriers);
-            
+
             // Update resource states after pass execution
             self.update_resource_states_after_pass(pass_info, resources);
         }
-        
+
         barriers
     }
-    
+
     /// Plan barriers needed before a specific pass
     fn plan_pass_barriers(
         &self,
@@ -68,15 +67,15 @@ impl BarrierPlanner {
         resources: &HashMap<ResourceHandle, ResourceInfo>,
     ) -> Vec<ResourceBarrier> {
         let mut barriers = Vec::new();
-        
+
         // Check all resources used by this pass
         let mut all_resources = pass_info.desc.reads.clone();
         all_resources.extend(&pass_info.desc.writes);
-        
+
         for &resource_handle in &all_resources {
             if let Some(resource_info) = resources.get(&resource_handle) {
                 if let Some(barrier) = self.plan_resource_barrier(
-                    resource_handle, 
+                    resource_handle,
                     resource_info,
                     pass_info,
                     &pass_info.desc.reads,
@@ -86,10 +85,10 @@ impl BarrierPlanner {
                 }
             }
         }
-        
+
         barriers
     }
-    
+
     /// Plan barrier for a specific resource
     fn plan_resource_barrier(
         &self,
@@ -99,17 +98,15 @@ impl BarrierPlanner {
         reads: &[ResourceHandle],
         writes: &[ResourceHandle],
     ) -> Option<ResourceBarrier> {
-        let current_usage = self.resource_states.get(&resource_handle)
+        let current_usage = self
+            .resource_states
+            .get(&resource_handle)
             .cloned()
             .unwrap_or(ResourceUsage::Unknown);
-            
-        let required_usage = self.determine_required_usage(
-            resource_handle,
-            resource_info,
-            reads,
-            writes,
-        );
-        
+
+        let required_usage =
+            self.determine_required_usage(resource_handle, resource_info, reads, writes);
+
         // Check if we need a transition
         match (&current_usage, &required_usage) {
             (ResourceUsage::Texture(old), ResourceUsage::Texture(new)) => {
@@ -154,7 +151,7 @@ impl BarrierPlanner {
             }
         }
     }
-    
+
     /// Determine the required usage for a resource in a pass
     fn determine_required_usage(
         &self,
@@ -165,7 +162,7 @@ impl BarrierPlanner {
     ) -> ResourceUsage {
         let _is_read = reads.contains(&resource_handle);
         let is_written = writes.contains(&resource_handle);
-        
+
         match resource_info.desc.resource_type {
             ResourceType::ColorAttachment => {
                 if is_written {
@@ -181,9 +178,7 @@ impl BarrierPlanner {
                     ResourceUsage::Texture(TextureUsages::TEXTURE_BINDING)
                 }
             }
-            ResourceType::SampledTexture => {
-                ResourceUsage::Texture(TextureUsages::TEXTURE_BINDING)
-            }
+            ResourceType::SampledTexture => ResourceUsage::Texture(TextureUsages::TEXTURE_BINDING),
             ResourceType::StorageBuffer => {
                 if is_written {
                     ResourceUsage::Buffer(BufferUsages::STORAGE)
@@ -191,12 +186,10 @@ impl BarrierPlanner {
                     ResourceUsage::Buffer(BufferUsages::STORAGE)
                 }
             }
-            ResourceType::UniformBuffer => {
-                ResourceUsage::Buffer(BufferUsages::UNIFORM)
-            }
+            ResourceType::UniformBuffer => ResourceUsage::Buffer(BufferUsages::UNIFORM),
         }
     }
-    
+
     /// Update resource states after a pass completes
     fn update_resource_states_after_pass(
         &mut self,
@@ -206,7 +199,7 @@ impl BarrierPlanner {
         // Update states for all resources used by this pass
         let mut all_resources = pass_info.desc.reads.clone();
         all_resources.extend(&pass_info.desc.writes);
-        
+
         for &resource_handle in &all_resources {
             if let Some(resource_info) = resources.get(&resource_handle) {
                 let new_usage = self.determine_required_usage(

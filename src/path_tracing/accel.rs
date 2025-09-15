@@ -3,9 +3,9 @@
 // This file exists to provide BVH traversal utilities and integration with the path tracing renderer.
 // RELEVANT FILES:src/accel/mod.rs,src/path_tracing/mod.rs,python/forge3d/path_tracing.py
 
-use crate::accel::{BvhHandle, BvhBackend, GpuBvhData, CpuBvhData, Triangle};
-use crate::accel::types::{BvhNode, Aabb};
-use anyhow::{Result, Context};
+use crate::accel::types::{Aabb, BvhNode};
+use crate::accel::{BvhBackend, BvhHandle, CpuBvhData, GpuBvhData, Triangle};
+use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
 
 /// Ray structure for traversal
@@ -68,9 +68,7 @@ impl BvhTraverser {
         ray: &Ray,
     ) -> Result<Option<HitInfo>> {
         match &bvh.backend {
-            BvhBackend::Cpu(cpu_data) => {
-                self.intersect_cpu(cpu_data, triangles, ray)
-            }
+            BvhBackend::Cpu(cpu_data) => self.intersect_cpu(cpu_data, triangles, ray),
             BvhBackend::Gpu(_gpu_data) => {
                 // For GPU BVH, we'd need to copy data back to CPU for traversal
                 // or implement GPU-based traversal. For now, fall back to CPU.
@@ -113,7 +111,7 @@ impl BvhTraverser {
         ];
         let edge2 = [
             triangle.v2[0] - triangle.v0[0],
-            triangle.v2[1] - triangle.v0[1], 
+            triangle.v2[1] - triangle.v0[1],
             triangle.v2[2] - triangle.v0[2],
         ];
 
@@ -126,7 +124,7 @@ impl BvhTraverser {
 
         // Dot product: edge1 · h
         let a = edge1[0] * h[0] + edge1[1] * h[1] + edge1[2] * h[2];
-        
+
         if a > -1e-7 && a < 1e-7 {
             return None; // Ray is parallel to triangle
         }
@@ -166,9 +164,10 @@ impl BvhTraverser {
                 edge1[2] * edge2[0] - edge1[0] * edge2[2],
                 edge1[0] * edge2[1] - edge1[1] * edge2[0],
             ];
-            
+
             // Normalize normal
-            let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+            let length =
+                (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
             let normal = if length > 1e-6 {
                 [normal[0] / length, normal[1] / length, normal[2] / length]
             } else {
@@ -222,14 +221,16 @@ impl BvhTraverser {
             if node.is_leaf() {
                 // Test ray against all triangles in leaf
                 let (first_prim, prim_count) = node.primitives().unwrap();
-                
+
                 for i in 0..prim_count {
                     let prim_idx = cpu_data.indices[(first_prim + i) as usize] as usize;
                     if prim_idx >= triangles.len() {
                         continue;
                     }
 
-                    if let Some(mut hit) = self.ray_triangle_intersect(&current_ray, &triangles[prim_idx]) {
+                    if let Some(mut hit) =
+                        self.ray_triangle_intersect(&current_ray, &triangles[prim_idx])
+                    {
                         if hit.t < closest_t {
                             hit.triangle_idx = prim_idx as u32;
                             closest_hit = Some(hit);
@@ -241,7 +242,7 @@ impl BvhTraverser {
             } else {
                 // Internal node - add children to stack
                 let (left_idx, right_idx) = node.children().unwrap();
-                
+
                 // Add children in order that may improve traversal efficiency
                 // (closer node first, but requires more computation)
                 self.cpu_stack.push(right_idx);
@@ -263,9 +264,7 @@ impl BvhTraverser {
             BvhBackend::Cpu(cpu_data) => {
                 let mut stats = TraversalStats::default();
                 stats.node_count = cpu_data.nodes.len() as u32;
-                stats.leaf_count = cpu_data.nodes.iter()
-                    .filter(|n| n.is_leaf())
-                    .count() as u32;
+                stats.leaf_count = cpu_data.nodes.iter().filter(|n| n.is_leaf()).count() as u32;
                 stats.internal_count = stats.node_count - stats.leaf_count;
                 stats.max_depth = self.compute_max_depth(&cpu_data.nodes, 0, 0);
                 stats
@@ -295,7 +294,7 @@ impl BvhTraverser {
         let (left_idx, right_idx) = node.children().unwrap();
         let left_depth = self.compute_max_depth(nodes, left_idx as usize, current_depth + 1);
         let right_depth = self.compute_max_depth(nodes, right_idx as usize, current_depth + 1);
-        
+
         left_depth.max(right_depth)
     }
 }
@@ -319,12 +318,7 @@ pub struct TraversalStats {
 }
 
 /// Utility functions for path tracing integration
-pub fn create_camera_ray(
-    origin: [f32; 3],
-    direction: [f32; 3],
-    t_min: f32,
-    t_max: f32,
-) -> Ray {
+pub fn create_camera_ray(origin: [f32; 3], direction: [f32; 3], t_min: f32, t_max: f32) -> Ray {
     Ray {
         origin,
         t_min,
@@ -334,24 +328,22 @@ pub fn create_camera_ray(
 }
 
 pub fn create_shadow_ray(from: [f32; 3], to: [f32; 3]) -> Ray {
-    let direction = [
-        to[0] - from[0],
-        to[1] - from[1],
-        to[2] - from[2],
-    ];
-    
-    let length = (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]).sqrt();
-    
+    let direction = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+
+    let length =
+        (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
+            .sqrt();
+
     if length < 1e-6 {
         return Ray::new(from, [0.0, 1.0, 0.0]);
     }
-    
+
     let normalized_direction = [
         direction[0] / length,
         direction[1] / length,
         direction[2] / length,
     ];
-    
+
     Ray {
         origin: from,
         t_min: 1e-4,

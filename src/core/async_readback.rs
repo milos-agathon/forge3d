@@ -1,13 +1,13 @@
 //! Async and double-buffered readback system
-//! 
+//!
 //! Provides asynchronous texture readback with optional double-buffering
 //! for improved performance in scenarios with frequent readbacks.
 
-use std::sync::{Arc, Mutex};
-use tokio::sync::{oneshot, mpsc};
-use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device, Queue, Texture, NonZeroU32};
-use crate::error::RenderError;
 use crate::core::memory_tracker::global_tracker;
+use crate::error::RenderError;
+use std::sync::{Arc, Mutex};
+use tokio::sync::{mpsc, oneshot};
+use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device, NonZeroU32, Queue, Texture};
 
 /// Configuration for async readback operations
 #[derive(Debug, Clone)]
@@ -39,21 +39,22 @@ pub struct AsyncReadbackHandle {
 impl AsyncReadbackHandle {
     /// Wait for the readback to complete and get the result
     pub async fn wait(self) -> Result<Vec<u8>, RenderError> {
-        self.receiver.await
+        self.receiver
+            .await
             .map_err(|_| RenderError::Readback("Readback operation was cancelled".to_string()))?
     }
-    
+
     /// Try to get the result if available (non-blocking)
     pub fn try_get(self) -> Result<Option<Vec<u8>>, RenderError> {
         match self.receiver.try_recv() {
             Ok(result) => result.map(Some),
             Err(oneshot::error::TryRecvError::Empty) => Ok(None),
-            Err(oneshot::error::TryRecvError::Closed) => {
-                Err(RenderError::Readback("Readback operation was cancelled".to_string()))
-            }
+            Err(oneshot::error::TryRecvError::Closed) => Err(RenderError::Readback(
+                "Readback operation was cancelled".to_string(),
+            )),
         }
     }
-    
+
     /// Get the expected size of the readback data
     pub fn expected_size(&self) -> u64 {
         self.size
@@ -75,10 +76,10 @@ impl ReadbackBuffer {
             usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
-        
+
         // Track allocation
         global_tracker().track_buffer_allocation(size, true); // host-visible
-        
+
         Self {
             buffer,
             size,
@@ -122,7 +123,7 @@ impl AsyncReadbackManager {
         config: AsyncReadbackConfig,
     ) -> Result<Self, RenderError> {
         let (worker_tx, mut worker_rx) = mpsc::unbounded_channel::<ReadbackTask>();
-        
+
         // Spawn worker task for processing readbacks
         let device_worker = device.clone();
         tokio::spawn(async move {
@@ -130,7 +131,7 @@ impl AsyncReadbackManager {
                 Self::process_readback_task(device_worker.clone(), task).await;
             }
         });
-        
+
         Ok(Self {
             device,
             queue,
@@ -140,7 +141,7 @@ impl AsyncReadbackManager {
             worker_tx,
         })
     }
-    
+
     /// Start an async readback operation
     pub async fn readback_texture_async(
         &self,
@@ -158,20 +159,20 @@ impl AsyncReadbackManager {
                 )));
             }
         }
-        
+
         let row_bytes = width * 4; // Assume RGBA8
         let padded_bpr = align_copy_bpr(row_bytes);
         let buffer_size = (padded_bpr * height) as u64;
-        
+
         // Get or create a readback buffer
         let buffer = self.get_readback_buffer(buffer_size)?;
-        
+
         // Submit copy command
         self.submit_copy_command(texture, &buffer, width, height, padded_bpr)?;
-        
+
         // Create channel for result
         let (sender, receiver) = oneshot::channel();
-        
+
         // Submit task to worker
         let task = ReadbackTask {
             buffer: Arc::new(buffer),
@@ -181,19 +182,20 @@ impl AsyncReadbackManager {
             row_bytes,
             sender,
         };
-        
-        self.worker_tx.send(task)
+
+        self.worker_tx
+            .send(task)
             .map_err(|_| RenderError::Readback("Worker task queue closed".to_string()))?;
-        
+
         // Increment pending operations counter
         *self.pending_ops.lock().unwrap() += 1;
-        
+
         Ok(AsyncReadbackHandle {
             receiver,
             size: buffer_size,
         })
     }
-    
+
     /// Synchronous readback (fallback for compatibility)
     pub fn readback_texture_sync(
         &self,
@@ -209,11 +211,11 @@ impl AsyncReadbackManager {
             })
         })
     }
-    
+
     /// Get an available readback buffer or create a new one
     fn get_readback_buffer(&self, required_size: u64) -> Result<Buffer, RenderError> {
         let mut buffers = self.buffers.lock().unwrap();
-        
+
         // Try to find an available buffer of sufficient size
         for buffer_state in buffers.iter_mut() {
             if !buffer_state.in_use && buffer_state.size >= required_size {
@@ -222,7 +224,7 @@ impl AsyncReadbackManager {
                 return Ok(buffer_state.buffer.clone());
             }
         }
-        
+
         // Create new buffer if pre-allocation is enabled or no suitable buffer found
         if self.config.pre_allocate || buffers.is_empty() {
             let buffer_state = ReadbackBuffer::new(
@@ -230,7 +232,7 @@ impl AsyncReadbackManager {
                 required_size,
                 &format!("async-readback-{}", buffers.len()),
             );
-            
+
             let buffer = buffer_state.buffer.clone();
             buffers.push(buffer_state);
             Ok(buffer)
@@ -242,12 +244,12 @@ impl AsyncReadbackManager {
                 usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
                 mapped_at_creation: false,
             });
-            
+
             global_tracker().track_buffer_allocation(required_size, true);
             Ok(buffer)
         }
     }
-    
+
     /// Submit the texture-to-buffer copy command
     fn submit_copy_command(
         &self,
@@ -257,101 +259,114 @@ impl AsyncReadbackManager {
         height: u32,
         padded_bpr: u32,
     ) -> Result<(), RenderError> {
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("async-readback-copy"),
-        });
-        
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("async-readback-copy"),
+            });
+
         let copy_src = wgpu::ImageCopyTexture {
             texture,
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         };
-        
+
         let copy_dst = wgpu::ImageCopyBuffer {
             buffer,
             layout: wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(NonZeroU32::new(padded_bpr)
-                    .ok_or_else(|| RenderError::Upload("bytes_per_row cannot be zero".to_string()))?
-                    .into()),
-                rows_per_image: Some(NonZeroU32::new(height)
-                    .ok_or_else(|| RenderError::Upload("height cannot be zero".to_string()))?
-                    .into()),
+                bytes_per_row: Some(
+                    NonZeroU32::new(padded_bpr)
+                        .ok_or_else(|| {
+                            RenderError::Upload("bytes_per_row cannot be zero".to_string())
+                        })?
+                        .into(),
+                ),
+                rows_per_image: Some(
+                    NonZeroU32::new(height)
+                        .ok_or_else(|| RenderError::Upload("height cannot be zero".to_string()))?
+                        .into(),
+                ),
             },
         };
-        
-        let extent = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+
+        let extent = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
         encoder.copy_texture_to_buffer(copy_src, copy_dst, extent);
-        
+
         self.queue.submit([encoder.finish()]);
-        
+
         Ok(())
     }
-    
+
     /// Process a readback task asynchronously
     async fn process_readback_task(device: Arc<Device>, task: ReadbackTask) {
         let result = Self::execute_readback_task(device, &task).await;
         let _ = task.sender.send(result);
     }
-    
+
     /// Execute the actual readback operation
     async fn execute_readback_task(
         device: Arc<Device>,
         task: &ReadbackTask,
     ) -> Result<Vec<u8>, RenderError> {
         let slice = task.buffer.slice(..);
-        
+
         // Create channel for map_async callback
         let (tx, rx) = oneshot::channel();
-        
+
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
-        
+
         // Poll device until mapping is complete
         loop {
             device.poll(wgpu::Maintain::Poll);
-            
+
             // Check if mapping completed
             if let Ok(map_result) = rx.try_recv() {
-                map_result.map_err(|e| RenderError::Readback(format!("MapAsync failed: {:?}", e)))?;
+                map_result
+                    .map_err(|e| RenderError::Readback(format!("MapAsync failed: {:?}", e)))?;
                 break;
             }
-            
+
             // Yield to avoid busy waiting
             tokio::task::yield_now().await;
         }
-        
+
         // Extract data
         let data = slice.get_mapped_range();
         let mut out = vec![0u8; (task.row_bytes * task.height) as usize];
-        
+
         let src_stride = task.padded_bpr as usize;
         let dst_stride = task.row_bytes as usize;
-        
+
         for y in 0..(task.height as usize) {
             let src_off = y * src_stride;
             let dst_off = y * dst_stride;
             out[dst_off..dst_off + dst_stride]
                 .copy_from_slice(&data[src_off..src_off + dst_stride]);
         }
-        
+
         drop(data);
         task.buffer.unmap();
-        
+
         Ok(out)
     }
-    
+
     /// Get statistics about the readback manager
     pub fn get_stats(&self) -> AsyncReadbackStats {
         let buffers = self.buffers.lock().unwrap();
         let pending_ops = *self.pending_ops.lock().unwrap();
-        
+
         let total_buffers = buffers.len();
         let in_use_buffers = buffers.iter().filter(|b| b.in_use).count();
         let total_buffer_memory = buffers.iter().map(|b| b.size).sum();
-        
+
         AsyncReadbackStats {
             pending_operations: pending_ops,
             total_buffers,
@@ -384,7 +399,7 @@ fn align_copy_bpr(unpadded: u32) -> u32 {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    
+
     #[tokio::test]
     async fn test_async_readback_config() {
         let config = AsyncReadbackConfig::default();
@@ -392,11 +407,11 @@ mod tests {
         assert!(config.pre_allocate);
         assert_eq!(config.max_pending_ops, 4);
     }
-    
+
     #[test]
     fn test_copy_alignment() {
-        assert_eq!(align_copy_bpr(100), 256);  // Aligns to 256
-        assert_eq!(align_copy_bpr(256), 256);  // Already aligned
-        assert_eq!(align_copy_bpr(300), 512);  // Next 256-byte boundary
+        assert_eq!(align_copy_bpr(100), 256); // Aligns to 256
+        assert_eq!(align_copy_bpr(256), 256); // Already aligned
+        assert_eq!(align_copy_bpr(300), 512); // Next 256-byte boundary
     }
 }

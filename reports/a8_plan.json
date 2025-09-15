@@ -1,0 +1,47 @@
+{
+  "task": "A8",
+  "title": "ReSTIR DI Implementation",
+  "deliverables_mapping": {
+    "reservoir_sampling_for_many_lights": {
+      "rust_files": [
+        "src/lighting/restir.rs",
+        "src/lighting/alias_table.rs",
+        "src/lighting/mod.rs"
+      ],
+      "wgsl_files": [
+        "src/shaders/restir_reservoir.wgsl",
+        "src/shaders/restir_temporal.wgsl",
+        "src/shaders/restir_spatial.wgsl",
+        "src/shaders/alias_table.wgsl"
+      ],
+      "python_files": [
+        "python/forge3d/lighting.py"
+      ],
+      "test_files": [
+        "tests/test_restir.py",
+        "tests/restir_integration.rs"
+      ],
+      "docs": [
+        "docs/api/restir.md"
+      ],
+      "examples": [
+        "examples/restir_many_lights.py"
+      ]
+    }
+  },
+  "acceptance_criteria": {
+    "temporal_spatial_reuse": "Implement temporal and spatial reservoir reuse in WGSL shaders",
+    "alias_tables": "Implement alias table data structure for efficient light sampling",
+    "variance_reduction": "Target ≤40% variance reduction vs MIS-only at 64 spp"
+  },
+  "implementation_order": [
+    "alias_table",
+    "reservoir_sampling",
+    "temporal_reuse",
+    "spatial_reuse",
+    "python_bindings",
+    "tests",
+    "docs",
+    "examples"
+  ]
+}

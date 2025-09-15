@@ -1,13 +1,13 @@
 //! Double-buffering for per-frame data (I8)
 //!
 //! Implements ping-pong buffers to avoid writing GPU-in-use buffers during
-//! per-frame uniform/storage buffer updates. Supports double (N=2) and 
+//! per-frame uniform/storage buffer updates. Supports double (N=2) and
 //! triple-buffering (N=3) strategies.
 
-use std::sync::Arc;
-use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device, Queue, BufferAddress, CommandEncoder};
 use crate::core::memory_tracker::ResourceRegistry;
 use crate::error::RenderError;
+use std::sync::Arc;
+use wgpu::{Buffer, BufferAddress, BufferDescriptor, BufferUsages, CommandEncoder, Device, Queue};
 
 /// Configuration for double-buffering strategy
 #[derive(Debug, Clone, Copy)]
@@ -97,7 +97,8 @@ impl DoubleBuffer {
     ) -> Result<Self, RenderError> {
         if config.buffer_count < 2 || config.buffer_count > 3 {
             return Err(RenderError::Upload(format!(
-                "Invalid buffer count: {}. Must be 2 or 3.", config.buffer_count
+                "Invalid buffer count: {}. Must be 2 or 3.",
+                config.buffer_count
             )));
         }
 
@@ -112,8 +113,8 @@ impl DoubleBuffer {
 
             // Track in memory registry
             if let Some(registry) = registry {
-                let is_host_visible = config.usage.contains(BufferUsages::MAP_READ) || 
-                                    config.usage.contains(BufferUsages::MAP_WRITE);
+                let is_host_visible = config.usage.contains(BufferUsages::MAP_READ)
+                    || config.usage.contains(BufferUsages::MAP_WRITE);
                 registry.track_buffer_allocation(config.size, is_host_visible);
             }
 
@@ -173,11 +174,18 @@ impl DoubleBuffer {
     }
 
     /// Write data to the current write buffer
-    pub fn write_data(&mut self, queue: &Queue, data: &[u8], offset: u64) -> Result<(), RenderError> {
+    pub fn write_data(
+        &mut self,
+        queue: &Queue,
+        data: &[u8],
+        offset: u64,
+    ) -> Result<(), RenderError> {
         if data.len() + offset as usize > self.config.size as usize {
             return Err(RenderError::Upload(format!(
                 "Write would exceed buffer size: {} + {} > {}",
-                offset, data.len(), self.config.size
+                offset,
+                data.len(),
+                self.config.size
             )));
         }
 
@@ -193,7 +201,12 @@ impl DoubleBuffer {
     }
 
     /// Write typed data to the current write buffer
-    pub fn write_typed<T: bytemuck::Pod>(&mut self, queue: &Queue, data: &[T], offset: u64) -> Result<(), RenderError> {
+    pub fn write_typed<T: bytemuck::Pod>(
+        &mut self,
+        queue: &Queue,
+        data: &[T],
+        offset: u64,
+    ) -> Result<(), RenderError> {
         let bytes = bytemuck::cast_slice(data);
         self.write_data(queue, bytes, offset)
     }
@@ -289,7 +302,7 @@ impl DoubleBufferPool {
     /// Get metrics summary for all buffers
     pub fn get_metrics_summary(&self) -> PoolMetrics {
         let mut summary = PoolMetrics::default();
-        
+
         for buffer in self.buffers.values() {
             if let Some(metrics) = buffer.metrics() {
                 summary.total_swaps += metrics.swap_count;
@@ -345,7 +358,7 @@ mod tests {
     fn test_triple_buffering_indices() {
         // Test triple-buffering index rotation
         // Initial: write=0, read=2
-        // After swap 1: write=1, read=0  
+        // After swap 1: write=1, read=0
         // After swap 2: write=2, read=1
         // After swap 3: write=0, read=2 (back to start)
     }

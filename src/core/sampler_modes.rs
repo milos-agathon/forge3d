@@ -164,19 +164,23 @@ impl SamplerConfig {
 
     /// Generate a descriptive name for this configuration
     pub fn name(&self) -> String {
-        format!("{}_{}_{}_{}", 
-                self.address_mode_u.name(),
-                self.mag_filter.name(), 
-                self.min_filter.name(),
-                self.mipmap_filter.name())
+        format!(
+            "{}_{}_{}_{}",
+            self.address_mode_u.name(),
+            self.mag_filter.name(),
+            self.min_filter.name(),
+            self.mipmap_filter.name()
+        )
     }
 
     /// Generate a short descriptive name
     pub fn short_name(&self) -> String {
-        format!("{}_{}_{}", 
-                self.address_mode_u.name().chars().next().unwrap(),
-                self.mag_filter.name().chars().next().unwrap(),
-                self.mipmap_filter.name().chars().next().unwrap())
+        format!(
+            "{}_{}_{}",
+            self.address_mode_u.name().chars().next().unwrap(),
+            self.mag_filter.name().chars().next().unwrap(),
+            self.mipmap_filter.name().chars().next().unwrap()
+        )
     }
 }
 
@@ -200,9 +204,8 @@ impl SamplerModeMatrix {
             for mag_filter in FilterMode::all() {
                 for min_filter in FilterMode::all() {
                     for mip_filter in FilterMode::all() {
-                        let config = SamplerConfig::new(
-                            address, mag_filter, min_filter, mip_filter
-                        );
+                        let config =
+                            SamplerConfig::new(address, mag_filter, min_filter, mip_filter);
                         let name = config.name();
                         by_name.insert(name, configs.len());
                         configs.push(config);
@@ -224,9 +227,7 @@ impl SamplerModeMatrix {
         for address in AddressMode::all() {
             for filter in FilterMode::all() {
                 for mip_filter in FilterMode::all() {
-                    let config = SamplerConfig::new(
-                        address, filter, filter, mip_filter
-                    );
+                    let config = SamplerConfig::new(address, filter, filter, mip_filter);
                     let name = config.name();
                     by_name.insert(name, configs.len());
                     configs.push(config);
@@ -264,7 +265,8 @@ impl SamplerModeMatrix {
 
     /// Create samplers for all configurations
     pub fn create_all_samplers(&self) -> RenderResult<Vec<wgpu::Sampler>> {
-        self.configs.iter()
+        self.configs
+            .iter()
             .map(|config| Ok(config.create_sampler()))
             .collect()
     }
@@ -341,10 +343,10 @@ impl SamplerConfig {
     /// Format: "address_mag_min_mip" (e.g., "clamp_linear_linear_nearest")
     pub fn parse(desc: &str) -> RenderResult<Self> {
         let parts: Vec<&str> = desc.split('_').collect();
-        
+
         if parts.len() != 4 {
             return Err(RenderError::upload(format!(
-                "Invalid sampler description '{}', expected format: address_mag_min_mip", 
+                "Invalid sampler description '{}', expected format: address_mag_min_mip",
                 desc
             )));
         }
@@ -353,28 +355,50 @@ impl SamplerConfig {
             "clamp" => AddressMode::Clamp,
             "repeat" => AddressMode::Repeat,
             "mirror" => AddressMode::Mirror,
-            _ => return Err(RenderError::upload(format!("Invalid address mode '{}'", parts[0]))),
+            _ => {
+                return Err(RenderError::upload(format!(
+                    "Invalid address mode '{}'",
+                    parts[0]
+                )))
+            }
         };
 
         let mag_filter = match parts[1] {
             "nearest" => FilterMode::Nearest,
             "linear" => FilterMode::Linear,
-            _ => return Err(RenderError::upload(format!("Invalid mag filter '{}'", parts[1]))),
+            _ => {
+                return Err(RenderError::upload(format!(
+                    "Invalid mag filter '{}'",
+                    parts[1]
+                )))
+            }
         };
 
         let min_filter = match parts[2] {
             "nearest" => FilterMode::Nearest,
             "linear" => FilterMode::Linear,
-            _ => return Err(RenderError::upload(format!("Invalid min filter '{}'", parts[2]))),
+            _ => {
+                return Err(RenderError::upload(format!(
+                    "Invalid min filter '{}'",
+                    parts[2]
+                )))
+            }
         };
 
         let mip_filter = match parts[3] {
             "nearest" => FilterMode::Nearest,
             "linear" => FilterMode::Linear,
-            _ => return Err(RenderError::upload(format!("Invalid mip filter '{}'", parts[3]))),
+            _ => {
+                return Err(RenderError::upload(format!(
+                    "Invalid mip filter '{}'",
+                    parts[3]
+                )))
+            }
         };
 
-        Ok(SamplerConfig::new(address, mag_filter, min_filter, mip_filter))
+        Ok(SamplerConfig::new(
+            address, mag_filter, min_filter, mip_filter,
+        ))
     }
 }
 
@@ -400,21 +424,19 @@ mod tests {
     #[test]
     fn test_sampler_matrix_generation() {
         let matrix = SamplerModeMatrix::generate_reduced();
-        
+
         // Should have 3 address modes × 2 filters × 2 mip filters = 12 combinations
         assert_eq!(matrix.len(), 12);
-        
+
         // All configs should have unique names
-        let names: std::collections::HashSet<_> = matrix.configs.iter()
-            .map(|c| c.name())
-            .collect();
+        let names: std::collections::HashSet<_> = matrix.configs.iter().map(|c| c.name()).collect();
         assert_eq!(names.len(), matrix.len());
     }
 
     #[test]
     fn test_sampler_matrix_full() {
         let matrix = SamplerModeMatrix::generate_full();
-        
+
         // Should have 3 × 2 × 2 × 2 = 24 combinations
         assert_eq!(matrix.len(), 24);
     }
@@ -422,10 +444,10 @@ mod tests {
     #[test]
     fn test_sampler_lookup() {
         let matrix = SamplerModeMatrix::generate_reduced();
-        
+
         let clamp_linear = matrix.get_config("clamp_linear_linear_nearest");
         assert!(clamp_linear.is_some());
-        
+
         let config = clamp_linear.unwrap();
         assert_eq!(config.address_mode_u, AddressMode::Clamp);
         assert_eq!(config.mag_filter, FilterMode::Linear);

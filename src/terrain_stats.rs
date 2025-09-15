@@ -14,8 +14,12 @@ pub fn min_max(data: &[f32], clamp: bool) -> (f32, f32) {
         // Fast path single sweep
         let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
         for &v in data {
-            if v < lo { lo = v; }
-            if v > hi { hi = v; }
+            if v < lo {
+                lo = v;
+            }
+            if v > hi {
+                hi = v;
+            }
         }
         return (lo, hi);
     }
@@ -29,8 +33,8 @@ pub fn min_max(data: &[f32], clamp: bool) -> (f32, f32) {
         data.to_vec()
     };
     buf.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-    let p1   = buf[(buf.len() as f32 * 0.01) as usize];
-    let p99  = buf[(buf.len() as f32 * 0.99) as usize];
+    let p1 = buf[(buf.len() as f32 * 0.01) as usize];
+    let p99 = buf[(buf.len() as f32 * 0.99) as usize];
     (p1, p99)
 }
 // T02-END:terrain_stats

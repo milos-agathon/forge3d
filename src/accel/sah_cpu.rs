@@ -3,9 +3,9 @@
 // This file exists to provide API-compatible CPU BVH building when GPU is unavailable or for small scenes.
 // RELEVANT FILES:src/accel/lbvh_gpu.rs,src/accel/types.rs,src/accel/mod.rs
 
-use crate::accel::types::{Triangle, Aabb, BvhNode, BuildOptions, BvhHandle, BuildStats};
+use crate::accel::types::{Aabb, BuildOptions, BuildStats, BvhHandle, BvhNode, Triangle};
 use crate::accel::{BvhBackend, CpuBvhData};
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use std::time::Instant;
 
 /// CPU SAH-based BVH builder
@@ -22,18 +22,18 @@ impl CpuSahBuilder {
     /// Build BVH from triangles using Surface Area Heuristic
     pub fn build(&mut self, triangles: &[Triangle], options: &BuildOptions) -> Result<BvhHandle> {
         let start_time = Instant::now();
-        
+
         if triangles.is_empty() {
             anyhow::bail!("Cannot build BVH from empty triangle list");
         }
 
         let triangle_count = triangles.len() as u32;
-        
+
         // Compute scene bounds and primitive information
         let world_aabb = crate::accel::types::compute_scene_aabb(triangles);
         let primitive_aabbs = crate::accel::types::compute_triangle_aabbs(triangles);
         let mut primitive_indices: Vec<u32> = (0..triangle_count).collect();
-        
+
         let mut nodes = Vec::new();
         let mut stats = BuildStats {
             build_time_ms: 0.0,
@@ -71,10 +71,11 @@ impl CpuSahBuilder {
 
         // Calculate final statistics
         stats.build_time_ms = start_time.elapsed().as_secs_f32() * 1000.0;
-        stats.memory_usage_bytes = (nodes.len() * std::mem::size_of::<BvhNode>() + 
-                                   primitive_indices.len() * std::mem::size_of::<u32>()) as u64;
+        stats.memory_usage_bytes = (nodes.len() * std::mem::size_of::<BvhNode>()
+            + primitive_indices.len() * std::mem::size_of::<u32>())
+            as u64;
         stats.internal_count = node_count - stats.leaf_count;
-        
+
         if stats.leaf_count > 0 {
             stats.avg_leaf_size = triangle_count as f32 / stats.leaf_count as f32;
         }
@@ -102,13 +103,16 @@ impl CpuSahBuilder {
         };
 
         if triangles.len() as u32 != handle.triangle_count {
-            anyhow::bail!("Triangle count mismatch: expected {}, got {}", 
-                         handle.triangle_count, triangles.len());
+            anyhow::bail!(
+                "Triangle count mismatch: expected {}, got {}",
+                handle.triangle_count,
+                triangles.len()
+            );
         }
 
         // Update primitive AABBs
         let primitive_aabbs = crate::accel::types::compute_triangle_aabbs(triangles);
-        
+
         // Refit nodes bottom-up
         self.refit_recursive(&mut cpu_data.nodes, &cpu_data.indices, &primitive_aabbs, 0)?;
 
@@ -200,11 +204,23 @@ impl CpuSahBuilder {
         };
 
         let left_child = self.build_recursive(
-            triangles, primitive_aabbs, primitive_indices, nodes, left_info, options, stats
+            triangles,
+            primitive_aabbs,
+            primitive_indices,
+            nodes,
+            left_info,
+            options,
+            stats,
         )?;
-        
+
         let right_child = self.build_recursive(
-            triangles, primitive_aabbs, primitive_indices, nodes, right_info, options, stats
+            triangles,
+            primitive_aabbs,
+            primitive_indices,
+            nodes,
+            right_info,
+            options,
+            stats,
         )?;
 
         let left_idx = nodes.len() as u32;
@@ -234,21 +250,22 @@ impl CpuSahBuilder {
         // Try splitting on each axis
         for axis in 0..3 {
             // Collect primitive centroids for this axis
-            let mut centroids: Vec<f32> = indices.iter()
+            let mut centroids: Vec<f32> = indices
+                .iter()
                 .map(|&idx| primitive_aabbs[idx as usize].center()[axis])
                 .collect();
             centroids.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
             // Try splits between unique centroid values
             for i in 1..centroids.len() {
-                if centroids[i] == centroids[i-1] {
+                if centroids[i] == centroids[i - 1] {
                     continue; // Skip duplicate positions
                 }
 
-                let split_pos = (centroids[i] + centroids[i-1]) * 0.5;
-                
+                let split_pos = (centroids[i] + centroids[i - 1]) * 0.5;
+
                 // Count primitives and compute AABBs for each side
-                let (left_aabb, right_aabb, left_count, right_count) = 
+                let (left_aabb, right_aabb, left_count, right_count) =
                     self.evaluate_split(primitive_aabbs, indices, axis, split_pos);
 
                 if left_count == 0 || right_count == 0 {
@@ -264,10 +281,10 @@ impl CpuSahBuilder {
                 let left_sa = left_aabb.surface_area();
                 let right_sa = right_aabb.surface_area();
 
-                let cost = options.traversal_cost + 
-                          options.intersection_cost * 
-                          ((left_sa / parent_sa) * left_count as f32 + 
-                           (right_sa / parent_sa) * right_count as f32);
+                let cost = options.traversal_cost
+                    + options.intersection_cost
+                        * ((left_sa / parent_sa) * left_count as f32
+                            + (right_sa / parent_sa) * right_count as f32);
 
                 if cost < best_cost {
                     best_cost = cost;
@@ -329,10 +346,10 @@ impl CpuSahBuilder {
         primitive_aabbs: &[Aabb],
     ) -> Result<u32> {
         let range = &mut indices[first as usize..(first + count) as usize];
-        
+
         let mut left = 0;
         let mut right = range.len();
-        
+
         while left < right {
             let centroid = primitive_aabbs[range[left] as usize].center();
             if centroid[axis] < split_pos {
@@ -368,31 +385,31 @@ impl CpuSahBuilder {
         }
 
         let node = nodes[node_idx];
-        
+
         if node.is_leaf() {
             // Update leaf AABB from primitives
             let (first, count) = node.primitives().unwrap();
             let mut aabb = Aabb::empty();
-            
+
             for i in 0..count {
                 let prim_idx = indices[(first + i) as usize];
                 aabb.expand_aabb(&primitive_aabbs[prim_idx as usize]);
             }
-            
+
             nodes[node_idx].aabb = aabb;
         } else {
             // Update internal node from children
             let (left_idx, right_idx) = node.children().unwrap();
-            
+
             // Recursively refit children first
             self.refit_recursive(nodes, indices, primitive_aabbs, left_idx as usize)?;
             self.refit_recursive(nodes, indices, primitive_aabbs, right_idx as usize)?;
-            
+
             // Update this node's AABB from children
             let mut aabb = Aabb::empty();
             aabb.expand_aabb(&nodes[left_idx as usize].aabb);
             aabb.expand_aabb(&nodes[right_idx as usize].aabb);
-            
+
             nodes[node_idx].aabb = aabb;
         }
 

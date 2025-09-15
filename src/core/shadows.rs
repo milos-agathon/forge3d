@@ -1,12 +1,12 @@
 /*!
  * Cascaded Shadow Maps (CSM) implementation with PCF filtering
- * 
+ *
  * Provides high-quality shadows for directional lights across large view distances
  * using cascaded shadow maps with percentage-closer filtering for soft edges.
  */
 
-use glam::{Mat4, Vec3};
 use bytemuck::Zeroable;
+use glam::{Mat4, Vec3};
 
 /// Configuration for cascaded shadow maps
 #[derive(Debug, Clone)]
@@ -137,20 +137,20 @@ impl CameraFrustum {
         // Extract camera position from inverse view matrix
         let inv_view = view.inverse();
         let position = Vec3::new(inv_view.w_axis.x, inv_view.w_axis.y, inv_view.w_axis.z);
-        
+
         // Extract camera directions from view matrix
         let forward = -Vec3::new(view.z_axis.x, view.z_axis.y, view.z_axis.z);
         let up = Vec3::new(view.y_axis.x, view.y_axis.y, view.y_axis.z);
         let right = Vec3::new(view.x_axis.x, view.x_axis.y, view.x_axis.z);
-        
+
         // Extract FOV and aspect from projection matrix
         let fov_y = 2.0 * (1.0 / projection.y_axis.y).atan();
         let aspect = projection.y_axis.y / projection.x_axis.x;
-        
+
         // Extract near/far planes from projection matrix (assuming reverse Z)
         let near = projection.w_axis.z / (projection.z_axis.z - 1.0);
         let far = projection.w_axis.z / (projection.z_axis.z + 1.0);
-        
+
         Self {
             position,
             forward: forward.normalize(),
@@ -162,24 +162,23 @@ impl CameraFrustum {
             far,
         }
     }
-    
+
     /// Get frustum corners at specific depth
     pub fn get_corners_at_depth(&self, depth: f32) -> [Vec3; 8] {
         let h_near = (self.fov_y * 0.5).tan() * self.near;
         let w_near = h_near * self.aspect;
         let h_far = (self.fov_y * 0.5).tan() * depth;
         let w_far = h_far * self.aspect;
-        
+
         let near_center = self.position + self.forward * self.near;
         let far_center = self.position + self.forward * depth;
-        
+
         [
             // Near plane corners
             near_center + self.up * h_near - self.right * w_near, // top-left
             near_center + self.up * h_near + self.right * w_near, // top-right
             near_center - self.up * h_near - self.right * w_near, // bottom-left
             near_center - self.up * h_near + self.right * w_near, // bottom-right
-            
             // Far plane corners
             far_center + self.up * h_far - self.right * w_far, // top-left
             far_center + self.up * h_far + self.right * w_far, // top-right
@@ -231,7 +230,7 @@ impl CsmShadowMap {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-        
+
         // Create depth views for each cascade
         let mut shadow_depth_views = Vec::with_capacity(config.cascade_count as usize);
         for i in 0..config.cascade_count {
@@ -247,7 +246,7 @@ impl CsmShadowMap {
             });
             shadow_depth_views.push(view);
         }
-        
+
         // Create array view for shader sampling
         let shadow_array_view = shadow_maps.create_view(&wgpu::TextureViewDescriptor {
             label: Some("CSM Shadow Map Array"),
@@ -259,7 +258,7 @@ impl CsmShadowMap {
             base_array_layer: 0,
             array_layer_count: Some(config.cascade_count),
         });
-        
+
         // Create shadow sampler with comparison for PCF
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("CSM Shadow Sampler"),
@@ -272,7 +271,7 @@ impl CsmShadowMap {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
-        
+
         // Create uniform buffer
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("CSM Uniforms"),
@@ -280,7 +279,7 @@ impl CsmShadowMap {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        
+
         Self {
             config,
             light: DirectionalLight::default(),
@@ -293,40 +292,38 @@ impl CsmShadowMap {
             debug_visualization: false,
         }
     }
-    
+
     /// Set directional light parameters
     pub fn set_light(&mut self, light: DirectionalLight) {
         self.light = light;
     }
-    
+
     /// Enable/disable debug cascade visualization
     pub fn set_debug_visualization(&mut self, enabled: bool) {
         self.debug_visualization = enabled;
     }
-    
+
     /// Update shadow cascades for current camera
     pub fn update_cascades(&mut self, queue: &wgpu::Queue, camera_frustum: &CameraFrustum) {
         // Calculate cascade split distances using practical split scheme
         let mut split_distances = vec![camera_frustum.near];
-        
+
         for i in 1..=self.config.cascade_count {
             let i_norm = i as f32 / self.config.cascade_count as f32;
-            
+
             // Uniform split
-            let uniform = camera_frustum.near + 
-                (camera_frustum.far - camera_frustum.near) * i_norm;
-            
+            let uniform = camera_frustum.near + (camera_frustum.far - camera_frustum.near) * i_norm;
+
             // Logarithmic split
-            let logarithmic = camera_frustum.near * 
-                (camera_frustum.far / camera_frustum.near).powf(i_norm);
-            
+            let logarithmic =
+                camera_frustum.near * (camera_frustum.far / camera_frustum.near).powf(i_norm);
+
             // Blend between uniform and logarithmic
-            let distance = self.config.lambda * logarithmic + 
-                (1.0 - self.config.lambda) * uniform;
-            
+            let distance = self.config.lambda * logarithmic + (1.0 - self.config.lambda) * uniform;
+
             split_distances.push(distance);
         }
-        
+
         // Calculate light space matrices for each cascade
         let light_dir = self.light.direction.normalize();
         let light_up = if light_dir.dot(Vec3::Y).abs() > 0.99 {
@@ -336,19 +333,19 @@ impl CsmShadowMap {
         };
         let light_right = light_dir.cross(light_up).normalize();
         let light_up = light_right.cross(light_dir).normalize();
-        
+
         // Update each cascade
         for (cascade_idx, cascade) in self.cascades.iter_mut().enumerate() {
             let near_dist = split_distances[cascade_idx];
             let far_dist = split_distances[cascade_idx + 1];
-            
+
             // Get frustum corners for this cascade
             let mut corners = camera_frustum.get_corners_at_depth(far_dist);
-            
+
             // Update near corners
             let near_corners = camera_frustum.get_corners_at_depth(near_dist);
             corners[0..4].copy_from_slice(&near_corners[0..4]);
-            
+
             // Transform corners to light space
             let mut light_space_corners = Vec::with_capacity(8);
             for corner in &corners {
@@ -359,7 +356,7 @@ impl CsmShadowMap {
                 );
                 light_space_corners.push(light_space);
             }
-            
+
             // Calculate tight bounding box in light space
             let mut min_x = f32::INFINITY;
             let mut max_x = f32::NEG_INFINITY;
@@ -367,7 +364,7 @@ impl CsmShadowMap {
             let mut max_y = f32::NEG_INFINITY;
             let mut min_z = f32::INFINITY;
             let mut max_z = f32::NEG_INFINITY;
-            
+
             for corner in &light_space_corners {
                 min_x = min_x.min(corner.x);
                 max_x = max_x.max(corner.x);
@@ -376,55 +373,50 @@ impl CsmShadowMap {
                 min_z = min_z.min(corner.z);
                 max_z = max_z.max(corner.z);
             }
-            
+
             // Add padding to prevent edge sampling issues
             let padding = (max_x - min_x).max(max_y - min_y) * 0.05;
             min_x -= padding;
             max_x += padding;
             min_y -= padding;
             max_y += padding;
-            
+
             // Extend depth range to include potential casters
             min_z -= (max_z - min_z) * 0.1;
-            
+
             // Snap to texel boundaries to reduce shimmering
             let texel_size = (max_x - min_x) / self.config.shadow_map_size as f32;
             min_x = (min_x / texel_size).floor() * texel_size;
             max_x = (max_x / texel_size).ceil() * texel_size;
             min_y = (min_y / texel_size).floor() * texel_size;
             max_y = (max_y / texel_size).ceil() * texel_size;
-            
+
             // Create orthographic projection matrix
-            let ortho_projection = Mat4::orthographic_rh(
-                min_x, max_x, min_y, max_y, min_z, max_z
-            );
-            
+            let ortho_projection = Mat4::orthographic_rh(min_x, max_x, min_y, max_y, min_z, max_z);
+
             // Create light view matrix
             let light_pos = Vec3::ZERO - light_dir * (max_z + 100.0);
-            let light_view = Mat4::look_at_rh(
-                light_pos,
-                light_pos + light_dir,
-                light_up
-            );
-            
+            let light_view = Mat4::look_at_rh(light_pos, light_pos + light_dir, light_up);
+
             let light_projection = ortho_projection * light_view;
-            
+
             // Update cascade data
             cascade.light_projection = light_projection.to_cols_array_2d();
             cascade.near_distance = near_dist;
             cascade.far_distance = far_dist;
             cascade.texel_size = texel_size;
         }
-        
+
         // Update uniform buffer
         let uniforms = CsmUniforms {
-            light_direction: [self.light.direction.x, self.light.direction.y, 
-                             self.light.direction.z, 0.0],
-            light_view: Mat4::look_at_rh(
-                Vec3::ZERO,
-                self.light.direction,
-                light_up
-            ).to_cols_array_2d(),
+            light_direction: [
+                self.light.direction.x,
+                self.light.direction.y,
+                self.light.direction.z,
+                0.0,
+            ],
+            light_view: Mat4::look_at_rh(Vec3::ZERO, self.light.direction, light_up)
+                .to_cols_array_2d(),
             cascades: {
                 let mut cascade_array = [ShadowCascade::zeroed(); 4];
                 for (i, cascade) in self.cascades.iter().enumerate() {
@@ -442,42 +434,42 @@ impl CsmShadowMap {
             debug_mode: if self.debug_visualization { 1 } else { 0 },
             _padding: [0.0; 2],
         };
-        
+
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
     }
-    
+
     /// Get shadow map texture array view for binding
     pub fn shadow_array_view(&self) -> &wgpu::TextureView {
         &self.shadow_array_view
     }
-    
+
     /// Get shadow sampler for binding
     pub fn shadow_sampler(&self) -> &wgpu::Sampler {
         &self.shadow_sampler
     }
-    
+
     /// Get uniform buffer for binding
     pub fn uniform_buffer(&self) -> &wgpu::Buffer {
         &self.uniform_buffer
     }
-    
+
     /// Get depth view for specific cascade (for rendering)
     pub fn cascade_depth_view(&self, cascade_idx: usize) -> Option<&wgpu::TextureView> {
         self.shadow_depth_views.get(cascade_idx)
     }
-    
+
     /// Get number of active cascades
     pub fn cascade_count(&self) -> u32 {
         self.config.cascade_count
     }
-    
+
     /// Get light-space projection matrix for cascade
     pub fn cascade_projection(&self, cascade_idx: usize) -> Option<Mat4> {
         self.cascades
             .get(cascade_idx)
             .map(|c| Mat4::from_cols_array_2d(&c.light_projection))
     }
-    
+
     /// Get shadow map resolution
     pub fn shadow_map_size(&self) -> u32 {
         self.config.shadow_map_size
@@ -504,9 +496,10 @@ pub struct ShadowStats {
 impl CsmShadowMap {
     /// Get current shadow mapping statistics
     pub fn get_stats(&self) -> ShadowStats {
-        let memory_per_cascade = (self.config.shadow_map_size * self.config.shadow_map_size * 4) as u64;
+        let memory_per_cascade =
+            (self.config.shadow_map_size * self.config.shadow_map_size * 4) as u64;
         let total_memory = memory_per_cascade * self.config.cascade_count as u64;
-        
+
         ShadowStats {
             cascade_count: self.config.cascade_count,
             shadow_map_size: self.config.shadow_map_size,

@@ -4,8 +4,8 @@
 //! to sRGB output with exposure control.
 
 use crate::error::RenderResult;
-use wgpu::*;
 use std::borrow::Cow;
+use wgpu::*;
 
 /// Tonemap post-processor for converting HDR linear to sRGB
 pub struct TonemapProcessor {
@@ -80,7 +80,9 @@ impl TonemapProcessor {
         // Create shader module
         let shader_module = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("tonemap_shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/postprocess_tonemap.wgsl"))),
+            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                "../shaders/postprocess_tonemap.wgsl"
+            ))),
         });
 
         // Create render pipeline
@@ -213,7 +215,7 @@ impl TonemapProcessor {
 
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, &bind_group, &[]);
-            
+
             // Draw full-screen triangle (3 vertices, no vertex buffer needed)
             render_pass.draw(0..3, 0..1);
         }
@@ -222,11 +224,7 @@ impl TonemapProcessor {
     }
 
     /// Create a bind group for the tonemap pass
-    pub fn create_bind_group(
-        &self,
-        device: &Device,
-        hdr_input: &TextureView,
-    ) -> BindGroup {
+    pub fn create_bind_group(&self, device: &Device, hdr_input: &TextureView) -> BindGroup {
         device.create_bind_group(&BindGroupDescriptor {
             label: Some("tonemap_bind_group"),
             layout: &self.bind_group_layout,
@@ -260,16 +258,17 @@ impl TonemapProcessor {
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }
-    
+
     /// Create compute-based tone mapping effect for post-processing chain
-    /// 
+    ///
     /// This method creates a compute-based version of the tone mapping effect
     /// that can be integrated into the post-processing pipeline.
     pub fn create_compute_effect(&self, device: &Device) -> RenderResult<ComputePipeline> {
         // Create compute shader for tone mapping
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("tonemap_compute_shader"),
-            source: ShaderSource::Wgsl(r#"
+            source: ShaderSource::Wgsl(
+                r#"
                 @group(0) @binding(0) var<uniform> uniforms: TonemapUniforms;
                 @group(0) @binding(1) var input_texture: texture_2d<f32>;
                 @group(0) @binding(2) var output_texture: texture_storage_2d<rgba8unorm, write>;
@@ -301,22 +300,24 @@ impl TonemapProcessor {
                     
                     textureStore(output_texture, coord, vec4<f32>(gamma_corrected, hdr_color.a));
                 }
-            "#.into()),
+            "#
+                .into(),
+            ),
         });
-        
+
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("tonemap_compute_pipeline_layout"),
             bind_group_layouts: &[&self.bind_group_layout],
             push_constant_ranges: &[],
         });
-        
+
         let compute_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("tonemap_compute_pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: "main",
         });
-        
+
         Ok(compute_pipeline)
     }
 }

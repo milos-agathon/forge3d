@@ -1,22 +1,22 @@
 //! HDR off-screen rendering pipeline
-//! 
+//!
 //! Provides high dynamic range off-screen rendering to RGBA16Float textures with
 //! tone mapping post-process to sRGB8 output suitable for PNG export and readback.
 
+use crate::core::gpu_timing::{GpuTimingManager, TimingScopeId};
 use glam::Vec3;
 use wgpu::{
-    Device, Queue, Texture, TextureDescriptor, TextureUsages, TextureDimension, TextureFormat,
-    Extent3d, TextureView, TextureViewDescriptor, TextureViewDimension, TextureAspect,
-    RenderPassDescriptor, RenderPassColorAttachment, Operations, LoadOp, StoreOp,
-    CommandEncoder, RenderPass, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource,
-    Buffer, BufferDescriptor, BufferUsages, ImageCopyTexture, Origin3d, ImageDataLayout,
-    RenderPipeline, RenderPipelineDescriptor, ShaderModule, ShaderModuleDescriptor, ShaderSource,
-    VertexState, FragmentState, ColorTargetState, BlendState, ColorWrites, PrimitiveState,
-    MultisampleState, PipelineLayoutDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
-    BindingType, BufferBindingType, SamplerBindingType, TextureSampleType, ShaderStages,
-    SamplerDescriptor, AddressMode, FilterMode,
+    AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
+    BindGroupLayoutEntry, BindingResource, BindingType, BlendState, Buffer, BufferBindingType,
+    BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, CommandEncoder, Device,
+    Extent3d, FilterMode, FragmentState, ImageCopyTexture, ImageDataLayout, LoadOp,
+    MultisampleState, Operations, Origin3d, PipelineLayoutDescriptor, PrimitiveState, Queue,
+    RenderPass, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
+    RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor, ShaderModule,
+    ShaderModuleDescriptor, ShaderSource, ShaderStages, StoreOp, Texture, TextureAspect,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
+    TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
 };
-use crate::core::gpu_timing::{GpuTimingManager, TimingScopeId};
 
 /// HDR tone mapping operators
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -106,9 +106,9 @@ impl HdrOffscreenPipeline {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: config.hdr_format,
-            usage: TextureUsages::RENDER_ATTACHMENT 
-                 | TextureUsages::TEXTURE_BINDING
-                 | TextureUsages::COPY_SRC,
+            usage: TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
 
@@ -129,9 +129,9 @@ impl HdrOffscreenPipeline {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: config.ldr_format,
-            usage: TextureUsages::RENDER_ATTACHMENT 
-                 | TextureUsages::TEXTURE_BINDING
-                 | TextureUsages::COPY_SRC,
+            usage: TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
 
@@ -328,15 +328,19 @@ impl HdrOffscreenPipeline {
     pub fn apply_tone_mapping(&self, encoder: &mut CommandEncoder) {
         self.apply_tone_mapping_with_timing(encoder, None);
     }
-    
+
     /// Apply tone mapping with optional GPU timing
-    pub fn apply_tone_mapping_with_timing(&self, encoder: &mut CommandEncoder, timing_manager: Option<&mut GpuTimingManager>) {
+    pub fn apply_tone_mapping_with_timing(
+        &self,
+        encoder: &mut CommandEncoder,
+        timing_manager: Option<&mut GpuTimingManager>,
+    ) {
         let timing_scope = if let Some(timer) = timing_manager {
             Some(timer.begin_scope(encoder, "hdr_offscreen_tonemap"))
         } else {
             None
         };
-        
+
         let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
             label: Some("tone_mapping_pass"),
             color_attachments: &[Some(RenderPassColorAttachment {
@@ -356,10 +360,10 @@ impl HdrOffscreenPipeline {
         render_pass.set_pipeline(&self.tonemap_pipeline);
         render_pass.set_bind_group(0, &self.tonemap_bind_group, &[]);
         render_pass.draw(3, 1, 0, 0); // Full-screen triangle
-        
+
         // End render pass before ending timing scope
         drop(render_pass);
-        
+
         // End GPU timing scope
         if let (Some(timer), Some(scope_id)) = (timing_manager, timing_scope) {
             timer.end_scope(encoder, scope_id);
@@ -368,15 +372,16 @@ impl HdrOffscreenPipeline {
 
     /// Get estimated VRAM usage in bytes
     pub fn get_vram_usage(&self) -> u64 {
-        let hdr_size = (self.config.width * self.config.height) as u64 * match self.config.hdr_format {
-            TextureFormat::Rgba16Float => 8, // 4 channels * 2 bytes
-            TextureFormat::Rgba32Float => 16, // 4 channels * 4 bytes
-            _ => 8, // Default to 16-bit
-        };
-        
+        let hdr_size = (self.config.width * self.config.height) as u64
+            * match self.config.hdr_format {
+                TextureFormat::Rgba16Float => 8,  // 4 channels * 2 bytes
+                TextureFormat::Rgba32Float => 16, // 4 channels * 4 bytes
+                _ => 8,                           // Default to 16-bit
+            };
+
         let ldr_size = (self.config.width * self.config.height * 4) as u64; // RGBA8
         let depth_size = (self.config.width * self.config.height * 4) as u64; // Depth32Float
-        
+
         hdr_size + ldr_size + depth_size
     }
 
@@ -385,10 +390,11 @@ impl HdrOffscreenPipeline {
         let bpp = 4; // RGBA8
         let unpadded_bytes_per_row = self.config.width * bpp;
         let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_bytes_per_row = ((unpadded_bytes_per_row + alignment - 1) / alignment) * alignment;
+        let padded_bytes_per_row =
+            ((unpadded_bytes_per_row + alignment - 1) / alignment) * alignment;
 
         let buffer_size = padded_bytes_per_row * self.config.height;
-        
+
         let staging_buffer = device.create_buffer(&BufferDescriptor {
             label: Some("ldr_staging_buffer"),
             size: buffer_size as u64,
@@ -432,13 +438,17 @@ impl HdrOffscreenPipeline {
             sender.send(result).unwrap();
         });
         device.poll(wgpu::Maintain::Wait);
-        receiver.recv().unwrap().map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
+        receiver
+            .recv()
+            .unwrap()
+            .map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
 
         let data = buffer_slice.get_mapped_range();
-        
+
         // Copy LDR data (remove padding)
-        let mut ldr_data = Vec::with_capacity((self.config.width * self.config.height * 4) as usize);
-        
+        let mut ldr_data =
+            Vec::with_capacity((self.config.width * self.config.height * 4) as usize);
+
         for y in 0..self.config.height {
             let row_offset = (y * padded_bytes_per_row) as usize;
             let row_data = &data[row_offset..row_offset + unpadded_bytes_per_row as usize];
@@ -454,7 +464,7 @@ impl HdrOffscreenPipeline {
     /// Compute clamp-rate (#pixels channel==0 or 255)/total
     pub fn compute_clamp_rate(&self, device: &Device, queue: &Queue) -> Result<f32, String> {
         let ldr_data = self.read_ldr_data(device, queue)?;
-        
+
         let total_samples = ldr_data.len(); // Total channel values (width * height * 4)
         let mut clamped_samples = 0;
 
