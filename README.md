@@ -14,7 +14,7 @@
 
 # forge3d
 
-Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
+Headless GPU rendering + PNGâ†”NumPy utilities (Rust + PyO3 + wgpu).
 
 ## Installation
 
@@ -30,20 +30,20 @@ maturin develop --release
 
 New to forge3d? Get a terrain rendering example working in under 10 minutes:
 
-1. **Install prerequisites**: Ensure you have Python ≥3.8 installed
+1. **Install prerequisites**: Ensure you have Python â‰¥3.8 installed
 2. **Install maturin**: `pip install -U maturin`
 3. **Build forge3d**: `maturin develop --release`
 4. **Run terrain example**: `python examples/terrain_single_tile.py`
 5. **Verify output**: Check that `terrain_single_tile.png` was created and shows a shaded terrain
 
-Expected runtime: ~1-2 minutes for the script at default 128×128 resolution. The PNG will be saved in your current directory and shows a procedural terrain with the viridis colormap.
+Expected runtime: ~1-2 minutes for the script at default 128Ã—128 resolution. The PNG will be saved in your current directory and shows a procedural terrain with the viridis colormap.
 
 ```bash
 # Complete quick start sequence
 pip install -U maturin
 maturin develop --release
 python examples/terrain_single_tile.py
-# -> Creates terrain_single_tile.png (512×512 image)
+# -> Creates terrain_single_tile.png (512Ã—512 image)
 ```
 
 ## Platform requirements
@@ -65,7 +65,7 @@ Example outputs should be written under `out/` which is gitignored.
 - **ReSTIR DI (Reservoir-based Spatio-Temporal Importance Resampling for Direct Illumination)**:
   - Efficient many-light rendering with reservoir sampling, temporal and spatial reuse
   - Alias table implementation for O(1) light sampling using Walker's method
-  - Target ≥40% variance reduction vs MIS-only at 64 spp
+  - Target â‰¥40% variance reduction vs MIS-only at 64 spp
   - GPU-accelerated WGSL compute shaders for temporal/spatial passes
   - Python API: `forge3d.lighting.RestirDI` with configuration and light management
   - Example: `examples/restir_many_lights.py` demonstrates variance reduction
@@ -73,35 +73,35 @@ Example outputs should be written under `out/` which is gitignored.
 
 ## What's new in v0.14.0
 
-- Workstream V – Datashader Interop:
+- Workstream V â€“ Datashader Interop:
   - V1: Datashader adapter for zero-copy RGBA overlays, alignment validation, and simple conversion helpers.
   - V2: Performance + fidelity tests over Z0/Z4/Z8/Z12 with SSIM vs goldens and frame-time/memory metrics; CI workflow uploads artifacts and guards regressions.
   - Demo: `examples/datashader_overlay_demo.py` produces `examples/output/datashader_overlay_demo.png` and prints `OK`.
-  - Optional dependency handling: functions skip gracefully when Datashader isn’t installed.
+  - Optional dependency handling: functions skip gracefully when Datashader isnâ€™t installed.
 
 Docs:
 - `docs/user/datashader_interop.rst` (in ToC)
 
 ## What's new in v0.13.0
 
-- Workstream U – Basemaps & Tiles:
+- Workstream U â€“ Basemaps & Tiles:
   - U1: XYZ/WMTS tile fetch client with on-disk cache, offline mode, and conditional GET handling; mosaic composition to RGBA via Pillow.
   - U2: Attribution overlay utility with DPI-aware text/logo rendering and TL/TR/BL/BR presets.
   - U3: Cartopy interop example (Agg backend) with correct extent matching and attribution.
-  - Provider policy compliance: polite `User-Agent` and `Referer` supported (env: `FORGE3D_TILE_USER_AGENT`, `FORGE3D_TILE_REFERER`); OSM attribution uses “© OpenStreetMap contributors”.
+  - Provider policy compliance: polite `User-Agent` and `Referer` supported (env: `FORGE3D_TILE_USER_AGENT`, `FORGE3D_TILE_REFERER`); OSM attribution uses â€œÂ© OpenStreetMap contributorsâ€.
 
 Examples:
-- `examples/xyz_tile_compose_demo.py` → `reports/u1_tiles.png`
-- `examples/cartopy_overlay.py` → `reports/u3_cartopy.png`
+- `examples/xyz_tile_compose_demo.py` â†’ `reports/u1_tiles.png`
+- `examples/cartopy_overlay.py` â†’ `reports/u3_cartopy.png`
 
 Docs:
 - `docs/tiles/xyz_wmts.md`, `docs/integration/cartopy.md`
 
 ## What's new in v0.12.0
 
-- Workstream S — Raster IO & Streaming:
+- Workstream S â€” Raster IO & Streaming:
   - S1: RasterIO windowed reads + block iterator (`windowed_read`, `block_iterator`) with window/out_shape parity.
-  - S2: Nodata/mask → alpha propagation (`extract_masks`, RGBA alpha synthesis) with color fidelity.
+  - S2: Nodata/mask â†’ alpha propagation (`extract_masks`, RGBA alpha synthesis) with color fidelity.
   - S3: CRS normalization via WarpedVRT + pyproj (`WarpedVRTWrapper`, `reproject_window`, `get_crs_info`).
   - S6: Overview selection (`select_overview_level`, `windowed_read_with_overview`) to reduce bytes at low zoom.
   - S4: xarray/rioxarray DataArray ingestion (`ingest_dataarray`) preserving dims and CRS/transform.
@@ -110,9 +110,9 @@ Docs:
 
 ## What's new in v0.11.0
 
-- Workstream R — Matplotlib & Array Interop:
-  - R1: Matplotlib colormap interop and linear Normalize parity (accepts names and `Colormap` objects; SSIM ≥ 0.999 on ramp; optional dependency handling)
-  - R3: Normalization presets (LogNorm, PowerNorm, BoundaryNorm) mapped with ≤1e-7 parity
+- Workstream R â€” Matplotlib & Array Interop:
+  - R1: Matplotlib colormap interop and linear Normalize parity (accepts names and `Colormap` objects; SSIM â‰¥ 0.999 on ramp; optional dependency handling)
+  - R3: Normalization presets (LogNorm, PowerNorm, BoundaryNorm) mapped with â‰¤1e-7 parity
   - R4: Display helpers `imshow_rgba` with correct extent/DPI handling and zero-copy for `uint8` inputs
   - Demos: `examples/mpl_cmap_demo.py`, `examples/mpl_norms_demo.py`, `examples/mpl_imshow_demo.py`
 
@@ -120,7 +120,7 @@ Docs:
 
 - Workstream Q deliverables (initial cut):
   - Q1: Post-Processing effect chain (Python API enable/disable/list, presets) with HDR pipeline and tonemap integration.
-  - Q5: Bloom passes scaffolded and wired — bright-pass + separable blur (H/V) + composite into HDR chain output prior to tonemap.
+  - Q5: Bloom passes scaffolded and wired â€” bright-pass + separable blur (H/V) + composite into HDR chain output prior to tonemap.
   - Q3: GPU profiling surfaces present (timestamp markers/types), Python `gpu_metrics` accessors and indirect culling metric exposure.
   - Q2: LOD impostors scaffolding and sweep demo; basic triangle-reduction performance test added.
   - Demos/artifacts: `examples/postfx_chain_demo.py`, `examples/bloom_demo.py`, `examples/lod_impostors_demo.py` write outputs under `reports/`.
@@ -128,7 +128,7 @@ Docs:
 
 The comprehensive API below provides access to all these features.
 
-## Quickstart: PNG ↔ NumPy
+## Quickstart: PNG â†” NumPy
 
 ```python
 from pathlib import Path
@@ -152,7 +152,7 @@ assert arr.shape == (64, 64, 4)
 ## Curated Python API (top-level)
 
 * I/O: `png_to_numpy(path)`, `numpy_to_png(path, array)`
-* Rendering: `Renderer(width, height)` → `render_triangle_png(path)`, `render_triangle_rgba()`
+* Rendering: `Renderer(width, height)` â†’ `render_triangle_png(path)`, `render_triangle_rgba()`
 * Scene: `Scene(width, height, grid=..., colormap='viridis')`:
 
   * `set_height_from_r32f(height_float32_HxW)`
@@ -374,7 +374,7 @@ img = render_rgba(256, 256, scene, cam, seed=42, frames=1, mesh=mesh_handle)
 
 Features:
 - **CPU BVH construction** with median-split partitioning for GPU-compatible layout
-- **GPU BVH traversal** with watertight Möller-Trumbore triangle intersection
+- **GPU BVH traversal** with watertight MÃ¶ller-Trumbore triangle intersection
 - **CPU fallback** for systems without compatible GPU adapters
 - **Deterministic rendering** with fixed seeds for reproducible results
 - **Performance:** Supports meshes up to GPU memory limits with efficient traversal
@@ -384,7 +384,7 @@ The mesh path tracer integrates seamlessly with existing sphere rendering and su
 
 This release adds minimal dielectric water helpers for offline shading previews.
 
-It implements Schlick Fresnel using IOR, and Beer–Lambert transmittance.
+It implements Schlick Fresnel using IOR, and Beerâ€“Lambert transmittance.
 
 Use `forge3d.pbr.water_shade()` to blend reflected and transmitted components with simple roughness control.
 
@@ -406,7 +406,7 @@ Deterministic tests exercise monotonic Fresnel and attenuation.
 ## Participating Media (A11)
 
 Minimal CPU-side helpers are available for prototyping and tests:
-- `forge3d.lighting.hg_phase` (Henyey�Greenstein), `sample_hg`, `height_fog_factor`, and `single_scatter_estimate`.
+- `forge3d.lighting.hg_phase` (Henyey–Greenstein), `sample_hg`, `height_fog_factor`, and `single_scatter_estimate`.
 
 WGSL helpers live in `src/shaders/lighting_media.wgsl`. Examples can write images under `out/` (gitignored).
 

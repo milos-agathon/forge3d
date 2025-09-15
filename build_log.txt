@@ -1,0 +1,578 @@
+﻿cargo :    Compiling forge3d v0.14.0 (C:\Users\milos\forge3d)
+At line:1 char:43
++ ... ctionPreference='Continue'; $log = cargo build --release 2>&1; $log | ...
++                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling fo...\milos\forge3d):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+warning: unused import: `Context`
+ --> src\accel\lbvh_gpu.rs:8:14
+  |
+8 | use anyhow::{Context, Result};
+  |              ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `BindGroup`
+  --> src\accel\lbvh_gpu.rs:13:12
+   |
+13 | use wgpu::{BindGroup, Buffer, BufferUsages, ComputePipeline, Device, Queue};
+   |            ^^^^^^^^^
+
+warning: unused import: `Context`
+ --> src\accel\sah_cpu.rs:8:14
+  |
+8 | use anyhow::{Context, Result};
+  |              ^^^^^^^
+
+warning: unused imports: `Arc` and `Mutex`
+  --> src\core\virtual_texture.rs:11:17
+   |
+11 | use std::sync::{Arc, Mutex};
+   |                 ^^^  ^^^^^
+
+warning: unused import: `std::io::BufReader`
+  --> src\external_image\mod.rs:47:5
+   |
+47 | use std::io::BufReader;
+   |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `GpuBvhData`
+ --> src\path_tracing\accel.rs:7:55
+  |
+7 | use crate::accel::{BvhBackend, BvhHandle, CpuBvhData, GpuBvhData, Triangle};
+  |                                                       ^^^^^^^^^^
+
+warning: unused import: `Context`
+ --> src\path_tracing\accel.rs:8:14
+  |
+8 | use anyhow::{Context, Result};
+  |              ^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> src\path_tracing\compute.rs:7:5
+  |
+7 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unnecessary parentheses around assigned value
+    --> src\path_tracing\compute.rs:1023:34
+     |
+1023 |                 let dst_stride = (width as usize);
+     |                                  ^              ^
+     |
+     = note: `#[warn(unused_parens)]` on by default
+help: remove these parentheses
+     |
+1023 -                 let dst_stride = (width as usize);
+1023 +                 let dst_stride = width as usize;
+     |
+
+warning: unused import: `std::sync::Arc`
+ --> src\path_tracing\hybrid_compute.rs:6:5
+  |
+6 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `std::num::NonZeroU32`
+ --> src\path_tracing\guiding.rs:6:5
+  |
+6 | use std::num::NonZeroU32;
+  |     ^^^^^^^^^^^^^^^^^^^^
+
+warning: unnecessary parentheses around block return value
+  --> src\path_tracing\guiding.rs:42:67
+   |
+42 |         let inc = if w <= 0.0 { 0 } else if w >= 1.0 { 1 } else { (rand_like(w) as u32) };
+   |                                                                   ^                   ^
+   |
+help: remove these parentheses
+   |
+42 -         let inc = if w <= 0.0 { 0 } else if w >= 1.0 { 1 } else { (rand_like(w) as u32) };
+42 +         let inc = if w <= 0.0 { 0 } else if w >= 1.0 { 1 } else { rand_like(w) as u32 };
+   |
+
+warning: unused import: `std::sync::Arc`
+ --> src\path_tracing\wavefront\queues.rs:5:5
+  |
+5 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `BindGroupLayout`
+ --> src\path_tracing\wavefront\queues.rs:6:23
+  |
+6 | use wgpu::{BindGroup, BindGroupLayout, Buffer, BufferUsages, CommandEncoder, Device, Queue};
+  |                       ^^^^^^^^^^^^^^^
+
+warning: unused import: `BufferUsages`
+  --> src\path_tracing\wavefront\mod.rs:13:31
+   |
+13 | use wgpu::{BindGroup, Buffer, BufferUsages, CommandEncoder, Device, Queue};
+   |                               ^^^^^^^^^^^^
+
+warning: unused imports: `Pod` and `Zeroable`
+  --> src\sdf\hybrid.rs:10:16
+   |
+10 | use bytemuck::{Pod, Zeroable};
+   |                ^^^  ^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+  --> src\sdf\hybrid.rs:11:5
+   |
+11 | use std::sync::Arc;
+   |     ^^^^^^^^^^^^^^
+
+warning: unused imports: `Device` and `Queue`
+  --> src\sdf\hybrid.rs:12:12
+   |
+12 | use wgpu::{Device, Queue, Buffer};
+   |            ^^^^^^  ^^^^^
+
+warning: unused import: `Triangle`
+  --> src\sdf\hybrid.rs:15:31
+   |
+15 | use crate::accel::{BvhHandle, Triangle};
+   |                               ^^^^^^^^
+
+warning: unused import: `CsgResult`
+  --> src\sdf\hybrid.rs:25:28
+   |
+25 | use crate::sdf::{SdfScene, CsgResult};
+   |                            ^^^^^^^^^
+
+error[E0283]: type annotations needed
+   --> src\sdf\primitives.rs:292:41
+    |
+292 |                 let sphere: SdfSphere = bytemuck::cast(primitive.params[0..4].try_into().unwrap());
+    |                                         ^^^^^^^^^^^^^^ ------------------------------------------ type must be known at this point
+    |                                         |
+    |                                         cannot infer type of the type parameter `A` declared on the function `cast`
+    |
+    = note: cannot satisfy `_: NoUninit`
+    = help: the following types implement trait `NoUninit`:
+              bool
+              char
+              std::num::NonZero<i128>
+              std::num::NonZero<i16>
+              std::num::NonZero<i32>
+              std::num::NonZero<i64>
+              std::num::NonZero<i8>
+              std::num::NonZero<isize>
+            and 6 others
+note: required by a bound in `bytemuck::cast`
+   --> C:\Users\milos\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bytemuck-1.23.1\src\lib.rs:372:16
+    |
+372 | pub fn cast<A: NoUninit, B: AnyBitPattern>(a: A) -> B {
+    |                ^^^^^^^^ required by this bound in `cast`
+help: consider specifying the generic arguments
+    |
+292 |                 let sphere: SdfSphere = bytemuck::cast::<A, primitives::SdfSphere>(primitive.params[0..4].try_into().unwrap());
+    |                                                       ++++++++++++++++++++++++++++
+
+error[E0283]: type annotations needed
+   --> src\sdf\primitives.rs:292:41
+    |
+292 |                 let sphere: SdfSphere = bytemuck::cast(primitive.params[0..4].try_into().unwrap());
+    |                                         ^^^^^^^^^^^^^^                        -------- type must be known at this point
+    |                                         |
+    |                                         cannot infer type of the type parameter `A` declared on the function `cast`
+    |
+    = note: multiple `impl`s satisfying `_: TryFrom<&[f32]>` found in the following crates: `arrayvec`, `core`:
+            - impl<'a, T, N> TryFrom<&'a [T]> for &'a [T; N]
+              where the constant `N` has type `usize`;
+            - impl<T, CAP> TryFrom<&[T]> for ArrayVec<T, CAP>
+              where the constant `CAP` has type `usize`, T: Clone;
+            - impl<T, N> TryFrom<&[T]> for Simd<T, N>
+              where the constant `N` has type `usize`, LaneCount<N>: SupportedLaneCount, T: SimdElement;
+            - impl<T, N> TryFrom<&[T]> for [T; N]
+              where the constant `N` has type `usize`, T: std::marker::Copy;
+            - impl<T, U> TryFrom<U> for T
+              where U: Into<T>;
+    = note: required for `&[f32]` to implement `TryInto<_>`
+help: consider specifying the generic arguments
+    |
+292 |                 let sphere: SdfSphere = bytemuck::cast::<A, primitives::SdfSphere>(primitive.params[0..4].try_into().unwrap());
+    |                                                       ++++++++++++++++++++++++++++
+
+error[E0283]: type annotations needed
+   --> src\sdf\primitives.rs:296:39
+    |
+296 |                 let sdf_box: SdfBox = bytemuck::cast(primitive.params[0..8].try_into().unwrap());
+    |                                       ^^^^^^^^^^^^^^                        -------- type must be known at this point
+    |                                       |
+    |                                       cannot infer type of the type parameter `A` declared on the function `cast`
+    |
+    = note: multiple `impl`s satisfying `_: TryFrom<&[f32]>` found in the following crates: `arrayvec`, `core`:
+            - impl<'a, T, N> TryFrom<&'a [T]> for &'a [T; N]
+              where the constant `N` has type `usize`;
+            - impl<T, CAP> TryFrom<&[T]> for ArrayVec<T, CAP>
+              where the constant `CAP` has type `usize`, T: Clone;
+            - impl<T, N> TryFrom<&[T]> for Simd<T, N>
+              where the constant `N` has type `usize`, LaneCount<N>: SupportedLaneCount, T: SimdElement;
+            - impl<T, N> TryFrom<&[T]> for [T; N]
+              where the constant `N` has type `usize`, T: std::marker::Copy;
+            - impl<T, U> TryFrom<U> for T
+              where U: Into<T>;
+    = note: required for `&[f32]` to implement `TryInto<_>`
+help: consider specifying the generic arguments
+    |
+296 |                 let sdf_box: SdfBox = bytemuck::cast::<A, primitives::SdfBox>(primitive.params[0..8].try_into().unwrap());
+    |                                                     +++++++++++++++++++++++++
+
+error[E0283]: type annotations needed
+   --> src\sdf\primitives.rs:300:45
+    |
+300 |                 let cylinder: SdfCylinder = bytemuck::cast(primitive.params[0..8].try_into().unwrap());
+    |                                             ^^^^^^^^^^^^^^                        -------- type must be known at this point
+    |                                             |
+    |                                             cannot infer type of the type parameter `A` declared on the function `cast`
+    |
+    = note: multiple `impl`s satisfying `_: TryFrom<&[f32]>` found in the following crates: `arrayvec`, `core`:
+            - impl<'a, T, N> TryFrom<&'a [T]> for &'a [T; N]
+              where the constant `N` has type `usize`;
+            - impl<T, CAP> TryFrom<&[T]> for ArrayVec<T, CAP>
+              where the constant `CAP` has type `usize`, T: Clone;
+            - impl<T, N> TryFrom<&[T]> for Simd<T, N>
+              where the constant `N` has type `usize`, LaneCount<N>: SupportedLaneCount, T: SimdElement;
+            - impl<T, N> TryFrom<&[T]> for [T; N]
+              where the constant `N` has type `usize`, T: std::marker::Copy;
+            - impl<T, U> TryFrom<U> for T
+              where U: Into<T>;
+    = note: required for `&[f32]` to implement `TryInto<_>`
+help: consider specifying the generic arguments
+    |
+300 |                 let cylinder: SdfCylinder = bytemuck::cast::<A, primitives::SdfCylinder>(primitive.params[0..8].try_into().unwrap());
+    |                                                           ++++++++++++++++++++++++++++++
+
+error[E0283]: type annotations needed
+   --> src\sdf\primitives.rs:304:39
+    |
+304 |                 let plane: SdfPlane = bytemuck::cast(primitive.params[0..4].try_into().unwrap());
+    |                                       ^^^^^^^^^^^^^^                        -------- type must be known at this point
+    |                                       |
+    |                                       cannot infer type of the type parameter `A` declared on the function `cast`
+    |
+    = note: multiple `impl`s satisfying `_: TryFrom<&[f32]>` found in the following crates: `arrayvec`, `core`:
+            - impl<'a, T, N> TryFrom<&'a [T]> for &'a [T; N]
+              where the constant `N` has type `usize`;
+            - impl<T, CAP> TryFrom<&[T]> for ArrayVec<T, CAP>
+              where the constant `CAP` has type `usize`, T: Clone;
+            - impl<T, N> TryFrom<&[T]> for Simd<T, N>
+              where the constant `N` has type `usize`, LaneCount<N>: SupportedLaneCount, T: SimdElement;
+            - impl<T, N> TryFrom<&[T]> for [T; N]
+              where the constant `N` has type `usize`, T: std::marker::Copy;
+            - impl<T, U> TryFrom<U> for T
+              where U: Into<T>;
+    = note: required for `&[f32]` to implement `TryInto<_>`
+help: consider specifying the generic arguments
+    |
+304 |                 let plane: SdfPlane = bytemuck::cast::<A, primitives::SdfPlane>(primitive.params[0..4].try_into().unwrap());
+    |                                                     +++++++++++++++++++++++++++
+
+error[E0283]: type annotations needed
+   --> src\sdf\primitives.rs:308:39
+    |
+308 |                 let torus: SdfTorus = bytemuck::cast(primitive.params[0..8].try_into().unwrap());
+    |                                       ^^^^^^^^^^^^^^                        -------- type must be known at this point
+    |                                       |
+    |                                       cannot infer type of the type parameter `A` declared on the function `cast`
+    |
+    = note: multiple `impl`s satisfying `_: TryFrom<&[f32]>` found in the following crates: `arrayvec`, `core`:
+            - impl<'a, T, N> TryFrom<&'a [T]> for &'a [T; N]
+              where the constant `N` has type `usize`;
+            - impl<T, CAP> TryFrom<&[T]> for ArrayVec<T, CAP>
+              where the constant `CAP` has type `usize`, T: Clone;
+            - impl<T, N> TryFrom<&[T]> for Simd<T, N>
+              where the constant `N` has type `usize`, LaneCount<N>: SupportedLaneCount, T: SimdElement;
+            - impl<T, N> TryFrom<&[T]> for [T; N]
+              where the constant `N` has type `usize`, T: std::marker::Copy;
+            - impl<T, U> TryFrom<U> for T
+              where U: Into<T>;
+    = note: required for `&[f32]` to implement `TryInto<_>`
+help: consider specifying the generic arguments
+    |
+308 |                 let torus: SdfTorus = bytemuck::cast::<A, primitives::SdfTorus>(primitive.params[0..8].try_into().unwrap());
+    |                                                     +++++++++++++++++++++++++++
+
+error[E0283]: type annotations needed
+   --> src\sdf\primitives.rs:312:43
+    |
+312 |                 let capsule: SdfCapsule = bytemuck::cast(primitive.params[0..8].try_into().unwrap());
+    |                                           ^^^^^^^^^^^^^^                        -------- type must be known at this point
+    |                                           |
+    |                                           cannot infer type of the type parameter `A` declared on the function `cast`
+    |
+    = note: multiple `impl`s satisfying `_: TryFrom<&[f32]>` found in the following crates: `arrayvec`, `core`:
+            - impl<'a, T, N> TryFrom<&'a [T]> for &'a [T; N]
+              where the constant `N` has type `usize`;
+            - impl<T, CAP> TryFrom<&[T]> for ArrayVec<T, CAP>
+              where the constant `CAP` has type `usize`, T: Clone;
+            - impl<T, N> TryFrom<&[T]> for Simd<T, N>
+              where the constant `N` has type `usize`, LaneCount<N>: SupportedLaneCount, T: SimdElement;
+            - impl<T, N> TryFrom<&[T]> for [T; N]
+              where the constant `N` has type `usize`, T: std::marker::Copy;
+            - impl<T, U> TryFrom<U> for T
+              where U: Into<T>;
+    = note: required for `&[f32]` to implement `TryInto<_>`
+help: consider specifying the generic arguments
+    |
+312 |                 let capsule: SdfCapsule = bytemuck::cast::<A, primitives::SdfCapsule>(primitive.params[0..8].try_into().unwrap());
+    |                                                         +++++++++++++++++++++++++++++
+
+warning: unused variable: `options`
+   --> src\accel\lbvh_gpu.rs:179:53
+    |
+179 |     pub fn build(&mut self, triangles: &[Triangle], options: &BuildOptions) -> Result<BvhHandle> {
+    |                                                     ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_options`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `buffers`
+   --> src\accel\lbvh_gpu.rs:418:9
+    |
+418 |         buffers: &GpuBuffers,
+    |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_buffers`
+
+warning: unused variable: `world_aabb`
+   --> src\accel\lbvh_gpu.rs:419:9
+    |
+419 |         world_aabb: &Aabb,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_world_aabb`
+
+warning: unused variable: `prim_count`
+   --> src\accel\lbvh_gpu.rs:420:9
+    |
+420 |         prim_count: u32,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prim_count`
+
+warning: unused variable: `buffers`
+   --> src\accel\lbvh_gpu.rs:427:33
+    |
+427 |     fn sort_morton_codes(&self, buffers: &GpuBuffers, prim_count: u32) -> Result<()> {
+    |                                 ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_buffers`
+
+warning: unused variable: `prim_count`
+   --> src\accel\lbvh_gpu.rs:427:55
+    |
+427 |     fn sort_morton_codes(&self, buffers: &GpuBuffers, prim_count: u32) -> Result<()> {
+    |                                                       ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prim_count`
+
+warning: unused variable: `buffers`
+   --> src\accel\lbvh_gpu.rs:434:9
+    |
+434 |         buffers: &GpuBuffers,
+    |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_buffers`
+
+warning: unused variable: `prim_count`
+   --> src\accel\lbvh_gpu.rs:435:9
+    |
+435 |         prim_count: u32,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prim_count`
+
+warning: unused variable: `node_count`
+   --> src\accel\lbvh_gpu.rs:436:9
+    |
+436 |         node_count: u32,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_node_count`
+
+warning: unused variable: `aabb_buffer`
+   --> src\accel\lbvh_gpu.rs:444:9
+    |
+444 |         aabb_buffer: &Buffer,
+    |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_aabb_buffer`
+
+warning: unused variable: `nodes_buffer`
+   --> src\accel\lbvh_gpu.rs:445:9
+    |
+445 |         nodes_buffer: &Buffer,
+    |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_nodes_buffer`
+
+warning: unused variable: `prim_count`
+   --> src\accel\lbvh_gpu.rs:446:9
+    |
+446 |         prim_count: u32,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prim_count`
+
+warning: unused variable: `limits`
+   --> src\core\gpu_timing.rs:125:13
+    |
+125 |         let limits = device.limits();
+    |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_limits`
+
+warning: unused variable: `scope_id`
+   --> src\core\gpu_timing.rs:249:9
+    |
+249 |         scope_id: TimingScopeId,
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_scope_id`
+
+warning: unused variable: `device`
+  --> src\core\postfx.rs:92:16
+   |
+92 |     pub fn new(device: &Device, width: u32, height: u32, max_ping_pong_pairs: usize) -> Self {
+   |                ^^^^^^ help: if this is intentional, prefix it with an underscore: `_device`
+
+warning: unused variable: `resource_pool`
+   --> src\core\bloom.rs:123:9
+    |
+123 |         resource_pool: &mut PostFxResourcePool,
+    |         ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_resource_pool`
+
+warning: unused variable: `brightpass_pipeline`
+   --> src\core\bloom.rs:294:13
+    |
+294 |         let brightpass_pipeline = self
+    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_brightpass_pipeline`
+
+warning: unused variable: `blur_h_pipeline`
+   --> src\core\bloom.rs:298:13
+    |
+298 |         let blur_h_pipeline = self
+    |             ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_blur_h_pipeline`
+
+warning: unused variable: `blur_v_pipeline`
+   --> src\core\bloom.rs:302:13
+    |
+302 |         let blur_v_pipeline = self
+    |             ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_blur_v_pipeline`
+
+warning: unused variable: `brightpass_layout`
+   --> src\core\bloom.rs:307:13
+    |
+307 |         let brightpass_layout = self
+    |             ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_brightpass_layout`
+
+warning: unused variable: `blur_layout`
+   --> src\core\bloom.rs:311:13
+    |
+311 |         let blur_layout = self
+    |             ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_blur_layout`
+
+warning: unused variable: `brightpass_uniform_buffer`
+   --> src\core\bloom.rs:316:13
+    |
+316 |         let brightpass_uniform_buffer = self
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_brightpass_uniform_buffer`
+
+warning: unused variable: `blur_uniform_buffer`
+   --> src\core\bloom.rs:320:13
+    |
+320 |         let blur_uniform_buffer = self
+    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_blur_uniform_buffer`
+
+warning: unused variable: `input`
+   --> src\core\bloom.rs:282:9
+    |
+282 |         input: &TextureView,
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_input`
+
+warning: unused variable: `output`
+   --> src\core\bloom.rs:283:9
+    |
+283 |         output: &TextureView,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_output`
+
+warning: unused variable: `device`
+   --> src\core\virtual_texture.rs:394:9
+    |
+394 |         device: &Device,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_device`
+
+warning: unused variable: `u2`
+   --> src\path_tracing\alias_table.rs:110:35
+    |
+110 |     pub fn sample(&self, u1: f32, u2: f32) -> (usize, f32) {
+    |                                   ^^ help: if this is intentional, prefix it with an underscore: `_u2`
+
+warning: unused variable: `aov_data`
+   --> src\path_tracing\io.rs:167:18
+    |
+167 |     fn write_exr(aov_data: &AovData, path: &Path) -> Result<()> {
+    |                  ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_aov_data`
+
+warning: unused variable: `path`
+   --> src\path_tracing\io.rs:167:38
+    |
+167 |     fn write_exr(aov_data: &AovData, path: &Path) -> Result<()> {
+    |                                      ^^^^ help: if this is intentional, prefix it with an underscore: `_path`
+
+warning: unused variable: `encoder`
+   --> src\path_tracing\wavefront\queues.rs:208:49
+    |
+208 |     pub fn reset_counters(&self, queue: &Queue, encoder: &mut CommandEncoder) {
+    |                                                 ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_encoder`
+
+warning: unused variable: `device`
+   --> src\path_tracing\wavefront\queues.rs:224:9
+    |
+224 |         device: &Device,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_device`
+
+warning: unused variable: `queue`
+   --> src\path_tracing\wavefront\queues.rs:225:9
+    |
+225 |         queue: &Queue,
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_queue`
+
+warning: unused variable: `encoder`
+   --> src\path_tracing\wavefront\queues.rs:226:9
+    |
+226 |         encoder: &mut CommandEncoder,
+    |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_encoder`
+
+warning: unused variable: `scene`
+  --> src\path_tracing\wavefront\mod.rs:67:9
+   |
+67 |         scene: &Scene,
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_scene`
+
+warning: unused variable: `params`
+  --> src\path_tracing\wavefront\mod.rs:68:9
+   |
+68 |         params: &TracerParams,
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_params`
+
+warning: unused variable: `accum_buffer`
+  --> src\path_tracing\wavefront\mod.rs:69:9
+   |
+69 |         accum_buffer: &Buffer,
+   |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_accum_buffer`
+
+warning: unused variable: `ray`
+   --> src\sdf\hybrid.rs:258:30
+    |
+258 |     fn intersect_mesh(&self, ray: Ray) -> Option<HybridHitResult> {
+    |                              ^^^ help: if this is intentional, prefix it with an underscore: `_ray`
+
+warning: unused variable: `gpu_data`
+   --> src\sdf\hybrid.rs:327:51
+    |
+327 |                     crate::accel::BvhBackend::Gpu(gpu_data) => {
+    |                                                   ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_gpu_data`
+
+warning: unused variable: `camera_pos`
+   --> src\terrain\lod.rs:210:5
+    |
+210 |     camera_pos: Vec3,
+    |     ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_camera_pos`
+
+warning: unused variable: `view_matrix`
+   --> src\terrain\lod.rs:211:5
+    |
+211 |     view_matrix: Mat4,
+    |     ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_view_matrix`
+
+warning: unused variable: `proj_matrix`
+   --> src\terrain\lod.rs:212:5
+    |
+212 |     proj_matrix: Mat4,
+    |     ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proj_matrix`
+
+warning: unused variable: `config`
+   --> src\terrain\lod.rs:213:5
+    |
+213 |     config: &LodConfig,
+    |     ^^^^^^ help: if this is intentional, prefix it with an underscore: `_config`
+
+For more information about this error, try `rustc --explain E0283`.
+warning: `forge3d` (lib) generated 62 warnings
+error: could not compile `forge3d` (lib) due to 7 previous errors; 62 warnings emitted

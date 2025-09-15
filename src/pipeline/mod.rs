@@ -6,6 +6,7 @@
 #[cfg(feature = "enable-normal-mapping")]
 pub mod normal_mapping;
 
+#[cfg(feature = "enable-pbr")]
 pub mod pbr;
 
 #[cfg(feature = "enable-hdr-offscreen")]
@@ -17,6 +18,7 @@ pub use normal_mapping::{
     NormalMappingUniforms,
 };
 
+#[cfg(feature = "enable-pbr")]
 pub use pbr::{create_pbr_sampler, PbrMaterialGpu, PbrTextures};
 
 #[cfg(feature = "enable-hdr-offscreen")]

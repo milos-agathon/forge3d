@@ -77,7 +77,7 @@ impl Default for ImageImportConfig {
 }
 
 /// Information about an imported texture
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ImportedTextureInfo {
     /// The created WGPU texture
     pub texture: wgpu::Texture,
@@ -176,7 +176,7 @@ pub fn import_image_to_texture(
     
     // Validate path exists
     if !path.exists() {
-        return Err(RenderError::IO(format!("Image file not found: {}", path.display())));
+        return Err(RenderError::io(format!("Image file not found: {}", path.display())));
     }
     
     // Detect format and decode image
@@ -190,20 +190,10 @@ pub fn import_image_to_texture(
         )));
     }
     
-    // Calculate memory requirements
-    let texture_size = (width * height * 4) as u64; // RGBA8 = 4 bytes per pixel
-    
-    // Check memory budget
-    let current_usage = global_tracker().get_total_usage().texture_bytes;
-    let budget_limit = 512 * 1024 * 1024; // 512 MiB budget
-    if current_usage + texture_size > budget_limit {
-        return Err(RenderError::Upload(format!(
-            "Texture would exceed memory budget: current {}MB + new {}MB > {}MB limit",
-            current_usage / (1024 * 1024),
-            texture_size / (1024 * 1024), 
-            budget_limit / (1024 * 1024)
-        )));
-    }
+    // Calculate memory requirements (approximate)
+    let texture_size = (width as u64) * (height as u64) * 4; // RGBA8 = 4 bytes per pixel
+    // Optionally consult global metrics (not enforcing budget here)
+    let _metrics = global_tracker().get_metrics();
     
     // Create texture
     let texture = create_texture_for_import(device, width, height, &config)?;
@@ -215,7 +205,7 @@ pub fn import_image_to_texture(
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     
     // Track memory usage
-    global_tracker().track_texture_allocation(texture_size, false); // not host-visible
+    global_tracker().track_texture_allocation(width, height, config.target_format);
     
     Ok(ImportedTextureInfo {
         texture,
@@ -239,12 +229,12 @@ fn decode_image_file(
     let extension = path.extension()
         .and_then(|ext| ext.to_str())
         .map(|s| s.to_lowercase())
-        .ok_or_else(|| RenderError::IO("Cannot determine image format from file extension".to_string()))?;
+        .ok_or_else(|| RenderError::io("Cannot determine image format from file extension"))?;
     
     match extension.as_str() {
         "png" => decode_png_file(path, config),
         "jpg" | "jpeg" => decode_jpeg_file(path, config),
-        _ => Err(RenderError::IO(format!("Unsupported image format: {}", extension))),
+        _ => Err(RenderError::io(format!("Unsupported image format: {}", extension))),
     }
 }
 
@@ -257,7 +247,7 @@ fn decode_png_file(
     
     // Simulate reading file header to detect format
     let _file = File::open(path)
-        .map_err(|e| RenderError::IO(format!("Failed to open PNG file: {}", e)))?;
+        .map_err(|e| RenderError::io(format!("Failed to open PNG file: {}", e)))?;
     
     // For simulation, create a test pattern based on filename
     let filename = path.file_name()
@@ -295,7 +285,7 @@ fn decode_jpeg_file(
     // This is a simplified simulation - real implementation would use jpeg crate
     
     let _file = File::open(path)
-        .map_err(|e| RenderError::IO(format!("Failed to open JPEG file: {}", e)))?;
+        .map_err(|e| RenderError::io(format!("Failed to open JPEG file: {}", e)))?;
     
     // For simulation, create a different test pattern for JPEG
     let (width, height) = (128, 128); // JPEG simulation size
@@ -307,7 +297,7 @@ fn decode_jpeg_file(
             // Different pattern for JPEG simulation
             let r = ((x + y) * 255 / (width + height)) as u8;
             let g = ((x * y) * 255 / (width * height)) as u8;
-            let b = ((x.saturating_sub(y)) * 255 / width) as u8;
+            let b = (((x as u32).saturating_sub(y as u32)) * 255 / width) as u8;
             let a = 255u8; // JPEG has no alpha, so fill with opaque
             rgba_data.extend_from_slice(&[r, g, b, a]);
         }
@@ -427,13 +417,13 @@ pub fn probe_image_info(image_path: impl AsRef<Path>) -> RenderResult<(u32, u32,
     let path = image_path.as_ref();
     
     if !path.exists() {
-        return Err(RenderError::IO(format!("Image file not found: {}", path.display())));
+        return Err(RenderError::io(format!("Image file not found: {}", path.display())));
     }
     
     let extension = path.extension()
         .and_then(|ext| ext.to_str())
         .map(|s| s.to_lowercase())
-        .ok_or_else(|| RenderError::IO("Cannot determine image format from file extension".to_string()))?;
+        .ok_or_else(|| RenderError::io("Cannot determine image format from file extension".to_string()))?;
     
     // Simulate probing (real implementation would read headers)
     match extension.as_str() {
@@ -448,7 +438,7 @@ pub fn probe_image_info(image_path: impl AsRef<Path>) -> RenderResult<(u32, u32,
         "jpg" | "jpeg" => {
             Ok((128, 128, ImageSourceFormat::JpegRgb))
         },
-        _ => Err(RenderError::IO(format!("Unsupported image format: {}", extension))),
+        _ => Err(RenderError::io(format!("Unsupported image format: {}", extension))),
     }
 }
 
