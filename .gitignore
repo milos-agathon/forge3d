@@ -257,6 +257,9 @@ Thumbs.db
 
 # Temporary files
 tmp/
+out/
+diag_out/
+*.exr
 temp/
 *.tmp
 *.temp
