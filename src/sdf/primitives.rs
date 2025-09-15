@@ -288,31 +288,37 @@ pub mod cpu_eval {
     /// Evaluate arbitrary SDF primitive
     pub fn evaluate_primitive(point: Vec3, primitive: &SdfPrimitive) -> f32 {
         match primitive.primitive_type {
-            0 => { // Sphere
-                let sphere: SdfSphere = bytemuck::cast(primitive.params[0..4].try_into().unwrap());
+            0 => {
+                let p = &primitive.params;
+                let sphere = SdfSphere { center: [p[0], p[1], p[2]], radius: p[3] };
                 sphere_sdf(point, &sphere)
-            },
-            1 => { // Box
-                let sdf_box: SdfBox = bytemuck::cast(primitive.params[0..8].try_into().unwrap());
+            }
+            1 => {
+                let p = &primitive.params;
+                let sdf_box = SdfBox { center: [p[0], p[1], p[2]], _pad1: 0.0, extents: [p[4], p[5], p[6]], _pad2: 0.0 };
                 box_sdf(point, &sdf_box)
-            },
-            2 => { // Cylinder
-                let cylinder: SdfCylinder = bytemuck::cast(primitive.params[0..8].try_into().unwrap());
+            }
+            2 => {
+                let p = &primitive.params;
+                let cylinder = SdfCylinder { center: [p[0], p[1], p[2]], radius: p[3], height: p[4], _pad: [0.0; 3] };
                 cylinder_sdf(point, &cylinder)
-            },
-            3 => { // Plane
-                let plane: SdfPlane = bytemuck::cast(primitive.params[0..4].try_into().unwrap());
+            }
+            3 => {
+                let p = &primitive.params;
+                let plane = SdfPlane { normal: [p[0], p[1], p[2]], distance: p[3] };
                 plane_sdf(point, &plane)
-            },
-            4 => { // Torus
-                let torus: SdfTorus = bytemuck::cast(primitive.params[0..8].try_into().unwrap());
+            }
+            4 => {
+                let p = &primitive.params;
+                let torus = SdfTorus { center: [p[0], p[1], p[2]], major_radius: p[3], minor_radius: p[4], _pad: [0.0; 3] };
                 torus_sdf(point, &torus)
-            },
-            5 => { // Capsule
-                let capsule: SdfCapsule = bytemuck::cast(primitive.params[0..8].try_into().unwrap());
+            }
+            5 => {
+                let p = &primitive.params;
+                let capsule = SdfCapsule { point_a: [p[0], p[1], p[2]], radius: p[3], point_b: [p[4], p[5], p[6]], _pad: 0.0 };
                 capsule_sdf(point, &capsule)
-            },
-            _ => f32::INFINITY, // Unknown primitive type
+            }
+            _ => f32::INFINITY,
         }
     }
 }

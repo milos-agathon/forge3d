@@ -13,7 +13,7 @@ use crate::error::RenderError;
 use crate::gpu::{align_copy_bpr, ctx};
 use crate::path_tracing::aov::{AovFrames, AovKind};
 use crate::path_tracing::compute::{Uniforms, Sphere};
-use crate::sdf::{HybridScene};
+use crate::sdf::HybridScene;
 
 /// Additional uniforms for hybrid traversal
 #[repr(C)]

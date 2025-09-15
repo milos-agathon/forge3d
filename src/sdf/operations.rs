@@ -89,7 +89,8 @@ pub mod cpu_eval {
             return a.min(b);
         }
         let h = (0.5 + 0.5 * (b - a) / k).clamp(0.0, 1.0);
-        b.lerp(a, h) - k * h * (1.0 - h)
+        // Linear interpolation without unstable f32::lerp
+        (1.0 - h) * b + h * a - k * h * (1.0 - h)
     }
 
     /// Smooth maximum function for smooth CSG operations
