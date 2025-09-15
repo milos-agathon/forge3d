@@ -48,6 +48,11 @@ coverage.xml
 *.cover
 *.py.cover
 .hypothesis/
+.DS_Store
+
+# Local outputs and diagnostics
+out/
+diag_out/
 .pytest_cache/
 cover/
 tmp/

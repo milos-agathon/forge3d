@@ -6,7 +6,12 @@ staging buffer rings and memory pool statistics.
 """
 
 from typing import Dict, Any, Optional
-import forge3d._forge3d as _core
+
+# Try to import native extension, fall back to None if not available
+try:
+    import forge3d._forge3d as _core
+except ImportError:
+    _core = None
 
 
 def staging_stats() -> Dict[str, Any]:
@@ -21,11 +26,13 @@ def staging_stats() -> Dict[str, Any]:
         - ring_count: Total number of ring buffers
         - buffer_size: Size of each ring buffer in bytes
     """
-    try:
-        return _core.staging_stats()
-    except AttributeError:
-        # Return default stats if staging rings not available
-        return {
+    if _core is not None:
+        try:
+            return _core.staging_stats()
+        except AttributeError:
+            pass
+    # Return default stats if staging rings not available
+    return {
             "bytes_in_flight": 0,
             "current_ring_index": 0,
             "buffer_stalls": 0,
@@ -47,11 +54,13 @@ def pool_stats() -> Dict[str, Any]:
         - pool_count: Number of memory pools
         - largest_free_block: Size of largest free block
     """
-    try:
-        return _core.pool_stats()
-    except AttributeError:
-        # Return default stats if memory pools not available
-        return {
+    if _core is not None:
+        try:
+            return _core.pool_stats()
+        except AttributeError:
+            pass
+    # Return default stats if memory pools not available
+    return {
             "total_allocated": 0,
             "total_freed": 0,
             "fragmentation_ratio": 0.0,
