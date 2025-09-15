@@ -2,7 +2,7 @@
 //!
 //! Contains foundational types and systems for the renderer.
 
-pub mod framegraph;  // Legacy compatibility layer
+pub mod framegraph; // Legacy compatibility layer
 pub mod gpu_types;
 pub mod memory_tracker;
 pub mod resource_tracker;
@@ -18,11 +18,11 @@ pub mod bloom;
 
 // Workstream O: Resource & Memory Management
 // staging_rings and fence_tracker are declared below with feature flags
-pub mod compressed_textures;  // O3: Compressed texture pipeline
-pub mod texture_format;       // O3: Texture format registry and detection
-pub mod virtual_texture;      // O4: Virtual texture streaming system
-pub mod feedback_buffer;      // O4: GPU feedback buffer for tile visibility
-pub mod tile_cache;          // O4: LRU tile cache for virtual textures
+pub mod compressed_textures; // O3: Compressed texture pipeline
+pub mod feedback_buffer; // O4: GPU feedback buffer for tile visibility
+pub mod texture_format; // O3: Texture format registry and detection
+pub mod tile_cache;
+pub mod virtual_texture; // O4: Virtual texture streaming system // O4: LRU tile cache for virtual textures
 
 // New framegraph implementation
 pub mod framegraph_impl;
@@ -83,9 +83,9 @@ pub mod render_bundles;
 
 // O1: Staging buffer rings with fence synchronization
 #[cfg(feature = "enable-staging-rings")]
-pub mod staging_rings;
-#[cfg(feature = "enable-staging-rings")]
 pub mod fence_tracker;
+#[cfg(feature = "enable-staging-rings")]
+pub mod staging_rings;
 
 // O2: Memory pools are integrated into memory_tracker
 // Available when enable-memory-pools feature is enabled

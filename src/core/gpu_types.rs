@@ -5,18 +5,8 @@
 
 // Re-export commonly used wgpu types for consistency
 pub use wgpu::{
-    Buffer, 
-    BufferUsages,
-    Texture,
-    TextureFormat,
-    TextureView,
-    RenderPipeline,
-    BindGroup,
-    BindGroupLayout,
-    CommandEncoder,
-    RenderPass,
-    Device,
-    Queue,
+    BindGroup, BindGroupLayout, Buffer, BufferUsages, CommandEncoder, Device, Queue, RenderPass,
+    RenderPipeline, Texture, TextureFormat, TextureView,
 };
 
 /// Common texture format used throughout the renderer
@@ -43,7 +33,7 @@ impl GpuBufferDesc {
             usage,
         }
     }
-    
+
     /// Set a debug label
     pub fn with_label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());

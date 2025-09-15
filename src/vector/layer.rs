@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 pub enum Layer {
     /// Background elements (filled polygons, terrain overlays)
     Background = 0,
-    /// Main vector content (lines, strokes, polygon outlines) 
+    /// Main vector content (lines, strokes, polygon outlines)
     Vector = 1,
     /// Point features and symbols
     Points = 2,
@@ -25,15 +25,15 @@ impl Layer {
     pub fn render_order(&self) -> u32 {
         *self as u32
     }
-    
+
     /// Get debug label for GPU debugging
     pub fn debug_label(&self) -> &'static str {
         match self {
             Layer::Background => "vf.Vector.Background",
-            Layer::Vector => "vf.Vector.Vector", 
+            Layer::Vector => "vf.Vector.Vector",
             Layer::Points => "vf.Vector.Points",
             Layer::GraphNodes => "vf.Vector.GraphNodes",
-            Layer::GraphEdges => "vf.Vector.GraphEdges", 
+            Layer::GraphEdges => "vf.Vector.GraphEdges",
             Layer::Labels => "vf.Vector.Labels",
         }
     }
@@ -94,25 +94,28 @@ mod tests {
     fn test_layer_ordering() {
         let mut layers = vec![
             Layer::Labels,
-            Layer::Background, 
+            Layer::Background,
             Layer::GraphNodes,
             Layer::Vector,
             Layer::Points,
             Layer::GraphEdges,
         ];
-        
+
         layers.sort();
-        
-        assert_eq!(layers, vec![
-            Layer::Background,
-            Layer::Vector, 
-            Layer::Points,
-            Layer::GraphNodes,
-            Layer::GraphEdges,
-            Layer::Labels,
-        ]);
+
+        assert_eq!(
+            layers,
+            vec![
+                Layer::Background,
+                Layer::Vector,
+                Layer::Points,
+                Layer::GraphNodes,
+                Layer::GraphEdges,
+                Layer::Labels,
+            ]
+        );
     }
-    
+
     #[test]
     fn test_draw_command_sorting() {
         let mut commands = vec![
@@ -121,23 +124,23 @@ mod tests {
             LayeredDrawCmd::new(Layer::Points, 1, 150, 1), // Same layer, lower draw_id
             LayeredDrawCmd::new(Layer::Vector, 3, 300, 1),
         ];
-        
+
         sort_draw_commands(&mut commands);
-        
+
         // Should be sorted by layer first, then draw_id within layer
         assert_eq!(commands[0].layer, Layer::Background);
         assert_eq!(commands[0].draw_id, 1);
-        
+
         assert_eq!(commands[1].layer, Layer::Vector);
         assert_eq!(commands[1].draw_id, 3);
-        
+
         assert_eq!(commands[2].layer, Layer::Points);
         assert_eq!(commands[2].draw_id, 1); // Lower draw_id first
-        
+
         assert_eq!(commands[3].layer, Layer::Points);
         assert_eq!(commands[3].draw_id, 2);
     }
-    
+
     #[test]
     fn test_debug_labels() {
         assert_eq!(Layer::Background.debug_label(), "vf.Vector.Background");

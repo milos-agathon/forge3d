@@ -6,8 +6,8 @@
 //! RELEVANT FILES: src/path_tracing/aov.rs, python/forge3d/path_tracing.py
 
 use crate::path_tracing::aov::AovKind;
+use anyhow::{Context, Result};
 use std::path::Path;
-use anyhow::{Result, Context};
 
 /// Represents AOV data for writing to files
 #[derive(Debug, Clone)]
@@ -36,7 +36,10 @@ impl AovData {
         anyhow::ensure!(
             data.len() == expected_len,
             "Expected {} floats for {}x{} RGBA data, got {}",
-            expected_len, width, height, data.len()
+            expected_len,
+            width,
+            height,
+            data.len()
         );
 
         Ok(Self {
@@ -53,7 +56,10 @@ impl AovData {
         anyhow::ensure!(
             data.len() == expected_len,
             "Expected {} floats for {}x{} single channel data, got {}",
-            expected_len, width, height, data.len()
+            expected_len,
+            width,
+            height,
+            data.len()
         );
 
         Ok(Self {
@@ -70,7 +76,10 @@ impl AovData {
         anyhow::ensure!(
             data.len() == expected_len,
             "Expected {} bytes for {}x{} single channel data, got {}",
-            expected_len, width, height, data.len()
+            expected_len,
+            width,
+            height,
+            data.len()
         );
 
         Ok(Self {
@@ -126,8 +135,12 @@ impl AovWriter {
         basename: &str,
     ) -> Result<()> {
         let output_dir = output_dir.as_ref();
-        std::fs::create_dir_all(output_dir)
-            .with_context(|| format!("Failed to create output directory: {}", output_dir.display()))?;
+        std::fs::create_dir_all(output_dir).with_context(|| {
+            format!(
+                "Failed to create output directory: {}",
+                output_dir.display()
+            )
+        })?;
 
         for aov_data in aov_data_list {
             let extension = match &aov_data.data {
@@ -138,8 +151,13 @@ impl AovWriter {
             let filename = format!("{}_aov-{}.{}", basename, aov_data.kind.name(), extension);
             let filepath = output_dir.join(filename);
 
-            Self::write_aov(aov_data, &filepath)
-                .with_context(|| format!("Failed to write AOV {} to {}", aov_data.kind.name(), filepath.display()))?;
+            Self::write_aov(aov_data, &filepath).with_context(|| {
+                format!(
+                    "Failed to write AOV {} to {}",
+                    aov_data.kind.name(),
+                    filepath.display()
+                )
+            })?;
         }
 
         Ok(())
@@ -163,7 +181,8 @@ impl AovWriter {
                     aov_data.width,
                     aov_data.height,
                     data.clone(),
-                ).context("Failed to create image buffer from data")?;
+                )
+                .context("Failed to create image buffer from data")?;
 
                 img.save(path)
                     .with_context(|| format!("Failed to save PNG to {}", path.display()))?;
@@ -190,8 +209,12 @@ pub mod utils {
     /// Check if AOV should be written as EXR (HDR) or PNG (LDR)
     pub fn is_hdr_aov(kind: AovKind) -> bool {
         match kind {
-            AovKind::Albedo | AovKind::Normal | AovKind::Depth |
-            AovKind::Direct | AovKind::Indirect | AovKind::Emission => true,
+            AovKind::Albedo
+            | AovKind::Normal
+            | AovKind::Depth
+            | AovKind::Direct
+            | AovKind::Indirect
+            | AovKind::Emission => true,
             AovKind::Visibility => false,
         }
     }

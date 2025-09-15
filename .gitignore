@@ -278,3 +278,7 @@ flamegraph*.svg
 mesh_test_*.png
 bvh_test_*.png
 mesh_render_*.png
+
+out/
+
+diag_out/

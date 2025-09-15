@@ -3,11 +3,13 @@
 // This exists to expose a minimal compute-based tracer to Python via PyO3 and internal Rust use.
 // RELEVANT FILES:src/path_tracing/compute.rs,src/shaders/pt_kernel.wgsl,python/forge3d/path_tracing.py,src/lib.rs
 
-pub mod compute;
 pub mod accel;
-pub mod wavefront;
+pub mod alias_table;
 pub mod aov;
+pub mod compute;
 pub mod io;
+pub mod restir;
+pub mod wavefront;
 
 /// Parameters for path tracing configuration
 #[derive(Clone, Debug)]
@@ -33,4 +35,3 @@ impl Default for TracerParams {
         }
     }
 }
-

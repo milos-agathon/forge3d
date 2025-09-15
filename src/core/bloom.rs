@@ -3,11 +3,11 @@
 //! Implements bloom effect with bright-pass filtering and dual blur passes.
 //! Integrates with the post-processing chain system.
 
-use crate::error::{RenderError, RenderResult};
-use crate::core::postfx::{PostFxEffect, PostFxResourcePool, PostFxConfig};
 use crate::core::gpu_timing::GpuTimingManager;
-use wgpu::*;
+use crate::core::postfx::{PostFxConfig, PostFxEffect, PostFxResourcePool};
+use crate::error::{RenderError, RenderResult};
 use std::borrow::Cow;
+use wgpu::*;
 
 /// Bloom effect configuration
 #[derive(Debug, Clone)]
@@ -50,20 +50,20 @@ struct BloomBlurUniforms {
 /// Bloom post-processing effect implementation
 pub struct BloomEffect {
     config: PostFxConfig,
-    
+
     // Compute pipelines (initialized during initialize())
     brightpass_pipeline: Option<ComputePipeline>,
     blur_h_pipeline: Option<ComputePipeline>,
     blur_v_pipeline: Option<ComputePipeline>,
-    
+
     // Bind group layouts
     brightpass_layout: Option<BindGroupLayout>,
     blur_layout: Option<BindGroupLayout>,
-    
+
     // Uniform buffers
     brightpass_uniform_buffer: Option<Buffer>,
     blur_uniform_buffer: Option<Buffer>,
-    
+
     // Resource pool indices
     brightpass_texture_index: Option<usize>,
     blur_temp_texture_index: Option<usize>,
@@ -77,13 +77,13 @@ impl BloomEffect {
         config.priority = 800;
         config.temporal = false;
         config.ping_pong_count = 2;
-        
+
         // Initialize default parameters
         config.parameters.insert("threshold".to_string(), 1.0);
         config.parameters.insert("softness".to_string(), 0.1);
         config.parameters.insert("strength".to_string(), 0.5);
         config.parameters.insert("radius".to_string(), 1.0);
-        
+
         Self {
             config,
             brightpass_pipeline: None,
@@ -97,28 +97,31 @@ impl BloomEffect {
             blur_temp_texture_index: None,
         }
     }
-    
 }
 
 impl PostFxEffect for BloomEffect {
     fn name(&self) -> &str {
         &self.config.name
     }
-    
+
     fn config(&self) -> &PostFxConfig {
         &self.config
     }
-    
+
     fn set_parameter(&mut self, name: &str, value: f32) -> RenderResult<()> {
         self.config.parameters.insert(name.to_string(), value);
         Ok(())
     }
-    
+
     fn get_parameter(&self, name: &str) -> Option<f32> {
         self.config.parameters.get(name).copied()
     }
-    
-    fn initialize(&mut self, device: &Device, resource_pool: &mut PostFxResourcePool) -> RenderResult<()> {
+
+    fn initialize(
+        &mut self,
+        device: &Device,
+        resource_pool: &mut PostFxResourcePool,
+    ) -> RenderResult<()> {
         // Create bind group layouts
         let brightpass_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("bloom_brightpass_layout"),
@@ -195,7 +198,9 @@ impl PostFxEffect for BloomEffect {
         // Create shader modules
         let brightpass_shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("bloom_brightpass_shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/bloom_brightpass.wgsl"))),
+            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                "../shaders/bloom_brightpass.wgsl"
+            ))),
         });
 
         let blur_h_shader = device.create_shader_module(ShaderModuleDescriptor {
@@ -269,7 +274,7 @@ impl PostFxEffect for BloomEffect {
 
         Ok(())
     }
-    
+
     fn execute(
         &self,
         _device: &Device,
@@ -286,33 +291,47 @@ impl PostFxEffect for BloomEffect {
         };
 
         // Get pipeline references
-        let brightpass_pipeline = self.brightpass_pipeline.as_ref()
+        let brightpass_pipeline = self
+            .brightpass_pipeline
+            .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
-        let blur_h_pipeline = self.blur_h_pipeline.as_ref()
+        let blur_h_pipeline = self
+            .blur_h_pipeline
+            .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
-        let blur_v_pipeline = self.blur_v_pipeline.as_ref()
+        let blur_v_pipeline = self
+            .blur_v_pipeline
+            .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
 
-        let brightpass_layout = self.brightpass_layout.as_ref()
+        let brightpass_layout = self
+            .brightpass_layout
+            .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
-        let blur_layout = self.blur_layout.as_ref()
+        let blur_layout = self
+            .blur_layout
+            .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
 
-        let brightpass_uniform_buffer = self.brightpass_uniform_buffer.as_ref()
+        let brightpass_uniform_buffer = self
+            .brightpass_uniform_buffer
+            .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
-        let blur_uniform_buffer = self.blur_uniform_buffer.as_ref()
+        let blur_uniform_buffer = self
+            .blur_uniform_buffer
+            .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
 
         // Create temporary textures (in a real implementation, these would come from resource pool)
         // For now, we'll copy input to output as a placeholder
         // TODO: Implement full bloom pipeline with resource pool integration
-        
+
         // Placeholder implementation - just copy input to output
         // This should be replaced with the full 3-pass bloom implementation
-        
+
         // End timing scope
         drop(timing_scope);
-        
+
         Ok(())
     }
 }

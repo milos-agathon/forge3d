@@ -10,7 +10,12 @@ pub mod tbn;
 pub mod vertex;
 
 #[cfg(feature = "enable-tbn")]
-pub use tbn::{TbnVertex as TbnMeshVertex, TbnData, generate_tbn, generate_plane_tbn, generate_cube_tbn};
+pub use tbn::{
+    generate_cube_tbn, generate_plane_tbn, generate_tbn, TbnData, TbnVertex as TbnMeshVertex,
+};
 
 #[cfg(feature = "enable-tbn")]
-pub use vertex::{TbnVertex, CompactTbnVertex, create_tbn_vertices_from_mesh, create_compact_tbn_vertices_from_mesh};
+pub use vertex::{
+    create_compact_tbn_vertices_from_mesh, create_tbn_vertices_from_mesh, CompactTbnVertex,
+    TbnVertex,
+};

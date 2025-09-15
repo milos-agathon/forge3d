@@ -3,11 +3,11 @@
 //! Provides a flexible effect chain manager for post-processing operations including
 //! temporal effects, ping-pong resource management, and GPU compute-based filters.
 
-use crate::error::{RenderError, RenderResult};
-use crate::core::gpu_timing::GpuTimingManager;
 use crate::core::async_compute::AsyncComputeConfig;
-use wgpu::*;
+use crate::core::gpu_timing::GpuTimingManager;
+use crate::error::{RenderError, RenderResult};
 use std::collections::{HashMap, VecDeque};
+use wgpu::*;
 
 /// Post-processing effect configuration
 #[derive(Debug, Clone)]
@@ -100,39 +100,53 @@ impl PostFxResourcePool {
             height,
         }
     }
-    
+
     /// Get current ping-pong texture
     pub fn get_current_ping_pong(&self, pair_index: usize) -> Option<&TextureView> {
         self.ping_pong_views
             .get(pair_index)?
             .get(self.ping_pong_index)
     }
-    
+
     /// Get previous ping-pong texture
     pub fn get_previous_ping_pong(&self, pair_index: usize) -> Option<&TextureView> {
         let prev_index = (self.ping_pong_index + 1) % 2;
-        self.ping_pong_views
-            .get(pair_index)?
-            .get(prev_index)
+        self.ping_pong_views.get(pair_index)?.get(prev_index)
     }
-    
+
     /// Swap ping-pong buffers
     pub fn swap_ping_pong(&mut self) {
         self.ping_pong_index = (self.ping_pong_index + 1) % 2;
     }
-    
+
     /// Allocate ping-pong texture pair
-    pub fn allocate_ping_pong_pair(&mut self, device: &Device, desc: &PostFxResourceDesc) -> RenderResult<usize> {
-        let actual_width = if desc.width == 0 { self.width } else { desc.width };
-        let actual_height = if desc.height == 0 { self.height } else { desc.height };
-        
+    pub fn allocate_ping_pong_pair(
+        &mut self,
+        device: &Device,
+        desc: &PostFxResourceDesc,
+    ) -> RenderResult<usize> {
+        let actual_width = if desc.width == 0 {
+            self.width
+        } else {
+            desc.width
+        };
+        let actual_height = if desc.height == 0 {
+            self.height
+        } else {
+            desc.height
+        };
+
         let mut textures = Vec::new();
         let mut views = Vec::new();
-        
+
         // Create pair of textures
         for i in 0..2 {
             let texture = device.create_texture(&TextureDescriptor {
-                label: Some(&format!("postfx_ping_pong_{}_{}", self.ping_pong_textures.len(), i)),
+                label: Some(&format!(
+                    "postfx_ping_pong_{}_{}",
+                    self.ping_pong_textures.len(),
+                    i
+                )),
                 size: Extent3d {
                     width: actual_width,
                     height: actual_height,
@@ -145,28 +159,42 @@ impl PostFxResourcePool {
                 usage: desc.usage,
                 view_formats: &[],
             });
-            
+
             let view = texture.create_view(&TextureViewDescriptor::default());
-            
+
             textures.push(texture);
             views.push(view);
         }
-        
+
         let pair_index = self.ping_pong_textures.len();
         self.ping_pong_textures.push(textures);
         self.ping_pong_views.push(views);
-        
+
         Ok(pair_index)
     }
-    
+
     /// Allocate temporal texture
-    pub fn allocate_temporal_texture(&mut self, device: &Device, name: &str, frame_count: usize, desc: &PostFxResourceDesc) -> RenderResult<()> {
-        let actual_width = if desc.width == 0 { self.width } else { desc.width };
-        let actual_height = if desc.height == 0 { self.height } else { desc.height };
-        
+    pub fn allocate_temporal_texture(
+        &mut self,
+        device: &Device,
+        name: &str,
+        frame_count: usize,
+        desc: &PostFxResourceDesc,
+    ) -> RenderResult<()> {
+        let actual_width = if desc.width == 0 {
+            self.width
+        } else {
+            desc.width
+        };
+        let actual_height = if desc.height == 0 {
+            self.height
+        } else {
+            desc.height
+        };
+
         let mut textures = Vec::new();
         let mut views = Vec::new();
-        
+
         for i in 0..frame_count {
             let texture = device.create_texture(&TextureDescriptor {
                 label: Some(&format!("postfx_temporal_{}_{}", name, i)),
@@ -182,24 +210,22 @@ impl PostFxResourcePool {
                 usage: desc.usage,
                 view_formats: &[],
             });
-            
+
             let view = texture.create_view(&TextureViewDescriptor::default());
-            
+
             textures.push(texture);
             views.push(view);
         }
-        
+
         self.temporal_textures.insert(name.to_string(), textures);
         self.temporal_views.insert(name.to_string(), views);
-        
+
         Ok(())
     }
-    
+
     /// Get temporal texture by name and frame index
     pub fn get_temporal_texture(&self, name: &str, frame_index: usize) -> Option<&TextureView> {
-        self.temporal_views
-            .get(name)?
-            .get(frame_index)
+        self.temporal_views.get(name)?.get(frame_index)
     }
 }
 
@@ -207,19 +233,23 @@ impl PostFxResourcePool {
 pub trait PostFxEffect: Send + Sync {
     /// Get effect name
     fn name(&self) -> &str;
-    
+
     /// Get effect configuration
     fn config(&self) -> &PostFxConfig;
-    
+
     /// Set effect parameter
     fn set_parameter(&mut self, name: &str, value: f32) -> RenderResult<()>;
-    
+
     /// Get effect parameter
     fn get_parameter(&self, name: &str) -> Option<f32>;
-    
+
     /// Initialize effect resources
-    fn initialize(&mut self, device: &Device, resource_pool: &mut PostFxResourcePool) -> RenderResult<()>;
-    
+    fn initialize(
+        &mut self,
+        device: &Device,
+        resource_pool: &mut PostFxResourcePool,
+    ) -> RenderResult<()>;
+
     /// Execute effect compute pass
     fn execute(
         &self,
@@ -230,7 +260,7 @@ pub trait PostFxEffect: Send + Sync {
         resource_pool: &PostFxResourcePool,
         timing_manager: Option<&mut GpuTimingManager>,
     ) -> RenderResult<()>;
-    
+
     /// Cleanup effect resources
     fn cleanup(&mut self) -> RenderResult<()> {
         Ok(())
@@ -258,7 +288,7 @@ impl PostFxChain {
     pub fn new(device: &Device, width: u32, height: u32) -> Self {
         let max_ping_pong_pairs = 8; // Reasonable default
         let resource_pool = PostFxResourcePool::new(device, width, height, max_ping_pong_pairs);
-        
+
         Self {
             effects: HashMap::new(),
             execution_order: VecDeque::new(),
@@ -268,18 +298,22 @@ impl PostFxChain {
             timing_stats: HashMap::new(),
         }
     }
-    
+
     /// Register a post-processing effect
-    pub fn register_effect(&mut self, mut effect: Box<dyn PostFxEffect>, device: &Device) -> RenderResult<()> {
+    pub fn register_effect(
+        &mut self,
+        mut effect: Box<dyn PostFxEffect>,
+        device: &Device,
+    ) -> RenderResult<()> {
         let name = effect.name().to_string();
-        
+
         // Initialize effect resources
         effect.initialize(device, &mut self.resource_pool)?;
-        
+
         // Insert in priority order
         let priority = effect.config().priority;
         let mut insert_index = self.execution_order.len();
-        
+
         for (i, existing_name) in self.execution_order.iter().enumerate() {
             if let Some(existing_effect) = self.effects.get(existing_name) {
                 if existing_effect.config().priority > priority {
@@ -288,23 +322,23 @@ impl PostFxChain {
                 }
             }
         }
-        
+
         self.execution_order.insert(insert_index, name.clone());
         self.effects.insert(name, effect);
-        
+
         Ok(())
     }
-    
+
     /// Unregister an effect
     pub fn unregister_effect(&mut self, name: &str) -> RenderResult<()> {
         if let Some(mut effect) = self.effects.remove(name) {
             effect.cleanup()?;
             self.execution_order.retain(|n| n != name);
         }
-        
+
         Ok(())
     }
-    
+
     /// Enable/disable an effect
     pub fn set_effect_enabled(&mut self, name: &str, enabled: bool) -> RenderResult<()> {
         if let Some(effect) = self.effects.get_mut(name) {
@@ -314,7 +348,7 @@ impl PostFxChain {
             if enabled && !self.execution_order.contains(&name.to_string()) {
                 let priority = effect.config().priority;
                 let mut insert_index = self.execution_order.len();
-                
+
                 for (i, existing_name) in self.execution_order.iter().enumerate() {
                     if let Some(existing_effect) = self.effects.get(existing_name) {
                         if existing_effect.config().priority > priority {
@@ -323,29 +357,34 @@ impl PostFxChain {
                         }
                     }
                 }
-                
+
                 self.execution_order.insert(insert_index, name.to_string());
             } else if !enabled {
                 self.execution_order.retain(|n| n != name);
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Set effect parameter
-    pub fn set_effect_parameter(&mut self, effect_name: &str, param_name: &str, value: f32) -> RenderResult<()> {
+    pub fn set_effect_parameter(
+        &mut self,
+        effect_name: &str,
+        param_name: &str,
+        value: f32,
+    ) -> RenderResult<()> {
         if let Some(effect) = self.effects.get_mut(effect_name) {
             effect.set_parameter(param_name, value)?;
         }
         Ok(())
     }
-    
+
     /// Get effect parameter
     pub fn get_effect_parameter(&self, effect_name: &str, param_name: &str) -> Option<f32> {
         self.effects.get(effect_name)?.get_parameter(param_name)
     }
-    
+
     /// Execute the entire post-processing chain
     pub fn execute_chain(
         &mut self,
@@ -360,29 +399,34 @@ impl PostFxChain {
             // TODO: Implement blit/copy operation
             return Ok(());
         }
-        
+
         let chain_scope = if let Some(timer) = timing_manager.as_mut() {
             Some(timer.begin_scope(encoder, "postfx_chain"))
         } else {
             None
         };
-        
+
         // Execute effects in order
         for (i, effect_name) in self.execution_order.iter().enumerate() {
             if let Some(effect) = self.effects.get(effect_name) {
                 let is_last = i == self.execution_order.len() - 1;
                 let is_first = i == 0;
-                
+
                 if is_last {
                     // Execute final effect to output
                     let effect_input = if is_first {
                         input
                     } else {
                         // Use previous ping-pong buffer as input
-                        self.resource_pool.get_previous_ping_pong(0)
-                            .ok_or_else(|| RenderError::Render("No previous ping-pong buffer available".to_string()))?
+                        self.resource_pool
+                            .get_previous_ping_pong(0)
+                            .ok_or_else(|| {
+                                RenderError::Render(
+                                    "No previous ping-pong buffer available".to_string(),
+                                )
+                            })?
                     };
-                    
+
                     effect.execute(
                         device,
                         encoder,
@@ -397,14 +441,21 @@ impl PostFxChain {
                         input
                     } else {
                         // Use previous ping-pong buffer as input
-                        self.resource_pool.get_previous_ping_pong(0)
-                            .ok_or_else(|| RenderError::Render("No previous ping-pong buffer available".to_string()))?
+                        self.resource_pool
+                            .get_previous_ping_pong(0)
+                            .ok_or_else(|| {
+                                RenderError::Render(
+                                    "No previous ping-pong buffer available".to_string(),
+                                )
+                            })?
                     };
-                    
+
                     // Use current ping-pong buffer as output
-                    let ping_pong_output = self.resource_pool.get_current_ping_pong(0)
-                        .ok_or_else(|| RenderError::Render("No current ping-pong buffer available".to_string()))?;
-                    
+                    let ping_pong_output =
+                        self.resource_pool.get_current_ping_pong(0).ok_or_else(|| {
+                            RenderError::Render("No current ping-pong buffer available".to_string())
+                        })?;
+
                     effect.execute(
                         device,
                         encoder,
@@ -413,46 +464,46 @@ impl PostFxChain {
                         &self.resource_pool,
                         None,
                     )?;
-                    
+
                     // Swap ping-pong buffers for next effect
                     self.resource_pool.swap_ping_pong();
                 }
             }
         }
-        
+
         // End chain timing scope
         if let (Some(timer), Some(scope_id)) = (timing_manager, chain_scope) {
             timer.end_scope(encoder, scope_id);
         }
-        
+
         Ok(())
     }
-    
+
     /// Get list of registered effects
     pub fn list_effects(&self) -> Vec<String> {
         self.effects.keys().cloned().collect()
     }
-    
+
     /// Get list of enabled effects in execution order
     pub fn list_enabled_effects(&self) -> Vec<String> {
         self.execution_order.iter().cloned().collect()
     }
-    
+
     /// Enable/disable entire chain
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
     }
-    
+
     /// Check if chain is enabled
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
-    
+
     /// Get timing statistics for effects
     pub fn get_timing_stats(&self) -> &HashMap<String, f32> {
         &self.timing_stats
     }
-    
+
     /// Update timing statistics
     pub fn update_timing_stats(&mut self, stats: HashMap<String, f32>) {
         self.timing_stats = stats;
@@ -488,13 +539,15 @@ impl BloomEffect {
         let layout_bright = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("bloom_bright_layout"),
             entries: &[
-                BindGroupLayoutEntry { // sampler
+                BindGroupLayoutEntry {
+                    // sampler
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
-                BindGroupLayoutEntry { // src
+                BindGroupLayoutEntry {
+                    // src
                     binding: 1,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Texture {
@@ -504,7 +557,8 @@ impl BloomEffect {
                     },
                     count: None,
                 },
-                BindGroupLayoutEntry { // dst
+                BindGroupLayoutEntry {
+                    // dst
                     binding: 2,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
@@ -514,10 +568,15 @@ impl BloomEffect {
                     },
                     count: None,
                 },
-                BindGroupLayoutEntry { // params UBO
+                BindGroupLayoutEntry {
+                    // params UBO
                     binding: 3,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     count: None,
                 },
             ],
@@ -602,24 +661,48 @@ impl BloomEffect {
             entry_point: "main",
         });
 
-        Ok(Self { config, layout_bright, layout_blur, pipe_bright, pipe_blur_h, pipe_blur_v, sampler, ping_pong_pair: None })
+        Ok(Self {
+            config,
+            layout_bright,
+            layout_blur,
+            pipe_bright,
+            pipe_blur_h,
+            pipe_blur_v,
+            sampler,
+            ping_pong_pair: None,
+        })
     }
 }
 
 impl PostFxEffect for BloomEffect {
-    fn name(&self) -> &str { &self.config.name }
-    fn config(&self) -> &PostFxConfig { &self.config }
-    fn set_parameter(&mut self, name: &str, value: f32) -> RenderResult<()> {
-        self.config.parameters.insert(name.to_string(), value); Ok(())
+    fn name(&self) -> &str {
+        &self.config.name
     }
-    fn get_parameter(&self, name: &str) -> Option<f32> { self.config.parameters.get(name).copied() }
-    fn initialize(&mut self, device: &Device, resource_pool: &mut PostFxResourcePool) -> RenderResult<()> {
-        let desc = PostFxResourceDesc { format: TextureFormat::Rgba16Float, ..Default::default() };
+    fn config(&self) -> &PostFxConfig {
+        &self.config
+    }
+    fn set_parameter(&mut self, name: &str, value: f32) -> RenderResult<()> {
+        self.config.parameters.insert(name.to_string(), value);
+        Ok(())
+    }
+    fn get_parameter(&self, name: &str) -> Option<f32> {
+        self.config.parameters.get(name).copied()
+    }
+    fn initialize(
+        &mut self,
+        device: &Device,
+        resource_pool: &mut PostFxResourcePool,
+    ) -> RenderResult<()> {
+        let desc = PostFxResourceDesc {
+            format: TextureFormat::Rgba16Float,
+            ..Default::default()
+        };
         let idx = resource_pool.allocate_ping_pong_pair(device, &desc)?;
         self.ping_pong_pair = Some(idx);
         Ok(())
     }
-    fn execute(&self,
+    fn execute(
+        &self,
         device: &Device,
         encoder: &mut CommandEncoder,
         input: &TextureView,
@@ -628,9 +711,15 @@ impl PostFxEffect for BloomEffect {
         _timing_manager: Option<&mut GpuTimingManager>,
     ) -> RenderResult<()> {
         // Acquire ping-pong views for intermediates
-        let pair = self.ping_pong_pair.ok_or_else(|| RenderError::Render("BloomEffect not initialized".to_string()))?;
-        let a = resource_pool.get_current_ping_pong(pair).ok_or_else(|| RenderError::Render("Ping-pong view A unavailable".to_string()))?;
-        let b = resource_pool.get_previous_ping_pong(pair).ok_or_else(|| RenderError::Render("Ping-pong view B unavailable".to_string()))?;
+        let pair = self
+            .ping_pong_pair
+            .ok_or_else(|| RenderError::Render("BloomEffect not initialized".to_string()))?;
+        let a = resource_pool
+            .get_current_ping_pong(pair)
+            .ok_or_else(|| RenderError::Render("Ping-pong view A unavailable".to_string()))?;
+        let b = resource_pool
+            .get_previous_ping_pong(pair)
+            .ok_or_else(|| RenderError::Render("Ping-pong view B unavailable".to_string()))?;
 
         // Workgroup dispatch sizes from resource pool dimensions
         let w = resource_pool.width.max(1);
@@ -639,7 +728,12 @@ impl PostFxEffect for BloomEffect {
         let gy8 = (h + 7) / 8;
 
         // Bright-pass params (threshold)
-        let threshold = self.config.parameters.get("threshold").copied().unwrap_or(1.0);
+        let threshold = self
+            .config
+            .parameters
+            .get("threshold")
+            .copied()
+            .unwrap_or(1.0);
         let params_array = [threshold, 0.0_f32, 0.0_f32, 0.0_f32];
         let params_bytes = bytemuck::bytes_of(&params_array);
         let params_buf = device.create_buffer(&BufferDescriptor {
@@ -659,14 +753,29 @@ impl PostFxEffect for BloomEffect {
             label: Some("bloom_bright_bg"),
             layout: &self.layout_bright,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::Sampler(&self.sampler) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(input) },
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(a) },
-                BindGroupEntry { binding: 3, resource: params_buf.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::Sampler(&self.sampler),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(input),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(a),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: params_buf.as_entire_binding(),
+                },
             ],
         });
         {
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("bloom_bright"), timestamp_writes: None });
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("bloom_bright"),
+                timestamp_writes: None,
+            });
             pass.set_pipeline(&self.pipe_bright);
             pass.set_bind_group(0, &bg_bright, &[]);
             pass.dispatch_workgroups(gx8, gy8, 1);
@@ -677,13 +786,25 @@ impl PostFxEffect for BloomEffect {
             label: Some("bloom_blur_h_bg"),
             layout: &self.layout_blur,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::Sampler(&self.sampler) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(a) },
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(b) },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::Sampler(&self.sampler),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(a),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(b),
+                },
             ],
         });
         {
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("bloom_blur_h"), timestamp_writes: None });
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("bloom_blur_h"),
+                timestamp_writes: None,
+            });
             pass.set_pipeline(&self.pipe_blur_h);
             pass.set_bind_group(0, &bg_blur_h, &[]);
             pass.dispatch_workgroups(gx8, gy8, 1);
@@ -694,13 +815,25 @@ impl PostFxEffect for BloomEffect {
             label: Some("bloom_blur_v_bg"),
             layout: &self.layout_blur,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::Sampler(&self.sampler) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(b) },
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(output) },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::Sampler(&self.sampler),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(b),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(output),
+                },
             ],
         });
         {
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("bloom_blur_v"), timestamp_writes: None });
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("bloom_blur_v"),
+                timestamp_writes: None,
+            });
             pass.set_pipeline(&self.pipe_blur_v);
             pass.set_bind_group(0, &bg_blur_v, &[]);
             pass.dispatch_workgroups(gx8, gy8, 1);
@@ -723,7 +856,7 @@ impl SimpleBlurEffect {
         let mut config = PostFxConfig::default();
         config.name = "simple_blur".to_string();
         config.parameters.insert("strength".to_string(), 1.0);
-        
+
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("simple_blur_bind_group_layout"),
@@ -756,28 +889,28 @@ impl SimpleBlurEffect {
                 },
             ],
         });
-        
+
         // Create compute shader (stub for now)
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("simple_blur_shader"),
             source: ShaderSource::Wgsl(include_str!("../shaders/simple_blur.wgsl").into()),
         });
-        
+
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("simple_blur_pipeline_layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
-        
+
         let compute_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("simple_blur_pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: "main",
         });
-        
+
         let sampler = device.create_sampler(&SamplerDescriptor::default());
-        
+
         Ok(Self {
             config,
             bind_group_layout,
@@ -791,25 +924,29 @@ impl PostFxEffect for SimpleBlurEffect {
     fn name(&self) -> &str {
         &self.config.name
     }
-    
+
     fn config(&self) -> &PostFxConfig {
         &self.config
     }
-    
+
     fn set_parameter(&mut self, name: &str, value: f32) -> RenderResult<()> {
         self.config.parameters.insert(name.to_string(), value);
         Ok(())
     }
-    
+
     fn get_parameter(&self, name: &str) -> Option<f32> {
         self.config.parameters.get(name).copied()
     }
-    
-    fn initialize(&mut self, _device: &Device, _resource_pool: &mut PostFxResourcePool) -> RenderResult<()> {
+
+    fn initialize(
+        &mut self,
+        _device: &Device,
+        _resource_pool: &mut PostFxResourcePool,
+    ) -> RenderResult<()> {
         // Effect-specific initialization would go here
         Ok(())
     }
-    
+
     fn execute(
         &self,
         _device: &Device,
@@ -825,13 +962,17 @@ impl PostFxEffect for SimpleBlurEffect {
 }
 
 /// Create a default post-processing chain with common effects
-pub fn create_default_postfx_chain(device: &Device, width: u32, height: u32) -> RenderResult<PostFxChain> {
+pub fn create_default_postfx_chain(
+    device: &Device,
+    width: u32,
+    height: u32,
+) -> RenderResult<PostFxChain> {
     let mut chain = PostFxChain::new(device, width, height);
-    
+
     // Add simple blur effect as an example
     let blur_effect = SimpleBlurEffect::new(device)?;
     chain.register_effect(Box::new(blur_effect), device)?;
-    
+
     Ok(chain)
 }
 

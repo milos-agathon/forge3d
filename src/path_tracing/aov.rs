@@ -4,8 +4,10 @@
 //! multiple output channels from the GPU path tracer.
 //! RELEVANT FILES: src/shaders/pt_kernel.wgsl, src/path_tracing/compute.rs, python/forge3d/path_tracing.py
 
-use wgpu::{TextureFormat, Extent3d, Texture, TextureDescriptor, TextureDimension, TextureUsages, Device};
 use std::collections::HashMap;
+use wgpu::{
+    Device, Extent3d, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+};
 
 /// AOV (Arbitrary Output Variable) types supported by the path tracer
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -70,9 +72,11 @@ impl AovKind {
     /// Get the GPU texture format for this AOV
     pub fn texture_format(self) -> TextureFormat {
         match self {
-            AovKind::Albedo | AovKind::Normal | AovKind::Direct | AovKind::Indirect | AovKind::Emission => {
-                TextureFormat::Rgba16Float
-            }
+            AovKind::Albedo
+            | AovKind::Normal
+            | AovKind::Direct
+            | AovKind::Indirect
+            | AovKind::Emission => TextureFormat::Rgba16Float,
             AovKind::Depth => TextureFormat::R32Float,
             AovKind::Visibility => TextureFormat::R8Unorm,
         }
@@ -107,7 +111,11 @@ impl AovKind {
     /// Get the number of color channels for this AOV
     pub fn channel_count(self) -> u32 {
         match self {
-            AovKind::Albedo | AovKind::Normal | AovKind::Direct | AovKind::Indirect | AovKind::Emission => 3, // RGB
+            AovKind::Albedo
+            | AovKind::Normal
+            | AovKind::Direct
+            | AovKind::Indirect
+            | AovKind::Emission => 3, // RGB
             AovKind::Depth | AovKind::Visibility => 1, // Single channel
         }
     }
@@ -116,7 +124,11 @@ impl AovKind {
     pub fn memory_usage_bytes(self, width: u32, height: u32) -> u64 {
         let pixel_count = width as u64 * height as u64;
         match self {
-            AovKind::Albedo | AovKind::Normal | AovKind::Direct | AovKind::Indirect | AovKind::Emission => {
+            AovKind::Albedo
+            | AovKind::Normal
+            | AovKind::Direct
+            | AovKind::Indirect
+            | AovKind::Emission => {
                 pixel_count * 8 // rgba16float = 4 channels * 2 bytes
             }
             AovKind::Depth => {
@@ -202,7 +214,8 @@ impl AovFrames {
 
     /// Calculate total memory usage for all enabled AOVs
     pub fn total_memory_usage(&self) -> u64 {
-        self.textures.keys()
+        self.textures
+            .keys()
             .map(|&kind| kind.memory_usage_bytes(self.width, self.height))
             .sum()
     }
@@ -239,7 +252,7 @@ mod tests {
     fn test_memory_calculations() {
         // 100x100 texture
         assert_eq!(AovKind::Albedo.memory_usage_bytes(100, 100), 80000); // 10k pixels * 8 bytes (rgba16f)
-        assert_eq!(AovKind::Depth.memory_usage_bytes(100, 100), 40000);  // 10k pixels * 4 bytes (r32f)
+        assert_eq!(AovKind::Depth.memory_usage_bytes(100, 100), 40000); // 10k pixels * 4 bytes (r32f)
         assert_eq!(AovKind::Visibility.memory_usage_bytes(100, 100), 10000); // 10k pixels * 1 byte (r8unorm)
     }
 }

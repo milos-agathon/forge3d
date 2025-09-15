@@ -4,4 +4,4 @@
 
 pub mod ktx2;
 
-pub use ktx2::{Ktx2Loader, validate_ktx2_file, validate_ktx2_data};
+pub use ktx2::{validate_ktx2_data, validate_ktx2_file, Ktx2Loader};

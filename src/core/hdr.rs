@@ -1,17 +1,17 @@
 //! HDR off-screen rendering and tone mapping
-//! 
+//!
 //! Provides high dynamic range rendering to floating-point textures with
 //! tone mapping operators for converting HDR to LDR display output.
 
+use crate::core::gpu_timing::GpuTimingManager;
 use glam::Vec3;
 use wgpu::{
-    Device, Queue, Texture, TextureDescriptor, TextureUsages, TextureDimension, TextureFormat,
-    Extent3d, TextureView, TextureViewDescriptor, TextureViewDimension, TextureAspect,
-    RenderPassDescriptor, RenderPassColorAttachment, Operations, LoadOp, StoreOp,
-    CommandEncoder, RenderPass, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource,
-    Buffer, BufferDescriptor, BufferUsages, ImageCopyTexture, Origin3d, ImageDataLayout,
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, Buffer, BufferDescriptor,
+    BufferUsages, CommandEncoder, Device, Extent3d, ImageCopyTexture, ImageDataLayout, LoadOp,
+    Operations, Origin3d, Queue, RenderPass, RenderPassColorAttachment, RenderPassDescriptor,
+    StoreOp, Texture, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension,
 };
-use crate::core::gpu_timing::GpuTimingManager;
 
 /// HDR tone mapping operators
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -98,9 +98,9 @@ impl HdrRenderTarget {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: config.hdr_format,
-            usage: TextureUsages::RENDER_ATTACHMENT 
-                 | TextureUsages::TEXTURE_BINDING
-                 | TextureUsages::COPY_SRC,
+            usage: TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
 
@@ -121,9 +121,9 @@ impl HdrRenderTarget {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba8UnormSrgb,
-            usage: TextureUsages::RENDER_ATTACHMENT 
-                 | TextureUsages::TEXTURE_BINDING
-                 | TextureUsages::COPY_SRC,
+            usage: TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
 
@@ -288,15 +288,19 @@ impl HdrRenderTarget {
     pub fn apply_tone_mapping(&self, encoder: &mut CommandEncoder) {
         self.apply_tone_mapping_with_timing(encoder, None);
     }
-    
+
     /// Apply tone mapping with optional GPU timing
-    pub fn apply_tone_mapping_with_timing(&self, encoder: &mut CommandEncoder, mut timing_manager: Option<&mut GpuTimingManager>) {
+    pub fn apply_tone_mapping_with_timing(
+        &self,
+        encoder: &mut CommandEncoder,
+        mut timing_manager: Option<&mut GpuTimingManager>,
+    ) {
         let timing_scope = if let Some(timer) = timing_manager.as_mut() {
             Some(timer.begin_scope(encoder, "hdr_tonemap"))
         } else {
             None
         };
-        
+
         let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
             label: Some("tone_mapping_pass"),
             color_attachments: &[Some(RenderPassColorAttachment {
@@ -315,15 +319,15 @@ impl HdrRenderTarget {
         // This would use a fullscreen quad pipeline to apply tone mapping
         // For now, we'll just record the pass setup
         render_pass.set_bind_group(0, &self.tonemap_bind_group, &[]);
-        
+
         // Note: In a complete implementation, this would:
         // 1. Set the tone mapping render pipeline
         // 2. Draw a fullscreen triangle
         // 3. The fragment shader would sample HDR and apply tone mapping
-        
+
         // End render pass before ending timing scope
         drop(render_pass);
-        
+
         // End GPU timing scope
         if let (Some(timer), Some(scope_id)) = (timing_manager, timing_scope) {
             timer.end_scope(encoder, scope_id);
@@ -333,7 +337,7 @@ impl HdrRenderTarget {
     /// Read HDR data from texture
     pub fn read_hdr_data(&self, device: &Device, queue: &Queue) -> Result<Vec<f32>, String> {
         let bpp = match self.config.hdr_format {
-            TextureFormat::Rgba16Float => 8, // 4 channels * 2 bytes
+            TextureFormat::Rgba16Float => 8,  // 4 channels * 2 bytes
             TextureFormat::Rgba32Float => 16, // 4 channels * 4 bytes
             _ => return Err("Unsupported HDR format for readback".to_string()),
         };
@@ -345,7 +349,7 @@ impl HdrRenderTarget {
         };
 
         let buffer_size = padded_bytes_per_row * self.config.height;
-        
+
         let staging_buffer = device.create_buffer(&BufferDescriptor {
             label: Some("hdr_staging_buffer"),
             size: buffer_size as u64,
@@ -389,23 +393,27 @@ impl HdrRenderTarget {
             sender.send(result).unwrap();
         });
         device.poll(wgpu::Maintain::Wait);
-        receiver.recv().unwrap().map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
+        receiver
+            .recv()
+            .unwrap()
+            .map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
 
         let data = buffer_slice.get_mapped_range();
-        
+
         // Convert to float data
         let mut hdr_data = Vec::new();
-        
+
         match self.config.hdr_format {
             TextureFormat::Rgba16Float => {
                 for y in 0..self.config.height {
                     let row_offset = (y * padded_bytes_per_row) as usize;
                     for x in 0..self.config.width {
                         let pixel_offset = row_offset + (x * 8) as usize; // 8 bytes per pixel
-                        
+
                         // Read half-float values and convert to f32
                         for c in 0..4 {
-                            let half_bytes = [data[pixel_offset + c * 2], data[pixel_offset + c * 2 + 1]];
+                            let half_bytes =
+                                [data[pixel_offset + c * 2], data[pixel_offset + c * 2 + 1]];
                             let half_val = half::f16::from_le_bytes(half_bytes);
                             hdr_data.push(half_val.to_f32());
                         }
@@ -417,13 +425,13 @@ impl HdrRenderTarget {
                     let row_offset = (y * padded_bytes_per_row) as usize;
                     for x in 0..self.config.width {
                         let pixel_offset = row_offset + (x * 16) as usize; // 16 bytes per pixel
-                        
+
                         // Read float values directly
                         for c in 0..4 {
                             let float_bytes = [
                                 data[pixel_offset + c * 4],
                                 data[pixel_offset + c * 4 + 1],
-                                data[pixel_offset + c * 4 + 2], 
+                                data[pixel_offset + c * 4 + 2],
                                 data[pixel_offset + c * 4 + 3],
                             ];
                             let float_val = f32::from_le_bytes(float_bytes);
@@ -451,7 +459,7 @@ impl HdrRenderTarget {
         };
 
         let buffer_size = padded_bytes_per_row * self.config.height;
-        
+
         let staging_buffer = device.create_buffer(&BufferDescriptor {
             label: Some("ldr_staging_buffer"),
             size: buffer_size as u64,
@@ -495,13 +503,17 @@ impl HdrRenderTarget {
             sender.send(result).unwrap();
         });
         device.poll(wgpu::Maintain::Wait);
-        receiver.recv().unwrap().map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
+        receiver
+            .recv()
+            .unwrap()
+            .map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
 
         let data = buffer_slice.get_mapped_range();
-        
+
         // Copy LDR data (remove padding)
-        let mut ldr_data = Vec::with_capacity((self.config.width * self.config.height * 4) as usize);
-        
+        let mut ldr_data =
+            Vec::with_capacity((self.config.width * self.config.height * 4) as usize);
+
         for y in 0..self.config.height {
             let row_offset = (y * padded_bytes_per_row) as usize;
             let row_data = &data[row_offset..row_offset + unpadded_bytes_per_row as usize];
@@ -518,29 +530,29 @@ impl HdrRenderTarget {
     pub fn resize(&mut self, device: &Device, width: u32, height: u32) -> Result<(), String> {
         self.config.width = width;
         self.config.height = height;
-        
+
         // Recreate textures with new size
         *self = Self::new(device, self.config.clone())?;
-        
+
         Ok(())
     }
 }
 
 /// Apply CPU-side tone mapping to HDR data
 pub fn apply_cpu_tone_mapping(
-    hdr_data: &[f32], 
-    width: u32, 
+    hdr_data: &[f32],
+    width: u32,
     height: u32,
     operator: ToneMappingOperator,
     exposure: f32,
     white_point: f32,
-    gamma: f32
+    gamma: f32,
 ) -> Vec<u8> {
     let mut ldr_data = Vec::with_capacity((width * height * 4) as usize);
-    
+
     for chunk in hdr_data.chunks(4) {
         let hdr = Vec3::new(chunk[0], chunk[1], chunk[2]) * exposure;
-        
+
         let tone_mapped = match operator {
             ToneMappingOperator::Reinhard => {
                 // Reinhard: color / (color + 1)
@@ -569,9 +581,11 @@ pub fn apply_cpu_tone_mapping(
                     let d = 0.20;
                     let e = 0.02;
                     let f = 0.30;
-                    ((x * (x * a + Vec3::splat(c * b)) + Vec3::splat(d * e)) / (x * (x * a + b) + Vec3::splat(d * f))) - Vec3::splat(e / f)
+                    ((x * (x * a + Vec3::splat(c * b)) + Vec3::splat(d * e))
+                        / (x * (x * a + b) + Vec3::splat(d * f)))
+                        - Vec3::splat(e / f)
                 }
-                
+
                 let curr = uncharted2_tonemap_partial(hdr);
                 let white_scale = Vec3::ONE / uncharted2_tonemap_partial(Vec3::splat(white_point));
                 curr * white_scale
@@ -581,18 +595,18 @@ pub fn apply_cpu_tone_mapping(
                 Vec3::ONE - (-hdr).exp()
             }
         };
-        
+
         // Apply gamma correction
         let gamma_corrected = tone_mapped.powf(1.0 / gamma);
-        
+
         // Convert to 8-bit
         let r = (gamma_corrected.x.clamp(0.0, 1.0) * 255.0) as u8;
         let g = (gamma_corrected.y.clamp(0.0, 1.0) * 255.0) as u8;
         let b = (gamma_corrected.z.clamp(0.0, 1.0) * 255.0) as u8;
         let a = (chunk[3].clamp(0.0, 1.0) * 255.0) as u8;
-        
+
         ldr_data.extend_from_slice(&[r, g, b, a]);
     }
-    
+
     ldr_data
 }

@@ -16,14 +16,14 @@ pub struct TbnVertex {
     pub normal: [f32; 3],
     /// Tangent vector [x, y, z]
     pub tangent: [f32; 3],
-    /// Bitangent vector [x, y, z] 
+    /// Bitangent vector [x, y, z]
     pub bitangent: [f32; 3],
 }
 
 impl TbnVertex {
     pub fn new(
         position: [f32; 3],
-        uv: [f32; 2], 
+        uv: [f32; 2],
         normal: [f32; 3],
         tangent: [f32; 3],
         bitangent: [f32; 3],
@@ -96,7 +96,7 @@ impl CompactTbnVertex {
     pub fn new(
         position: [f32; 3],
         uv: [f32; 2],
-        normal: [f32; 3], 
+        normal: [f32; 3],
         tangent: [f32; 3],
         handedness: f32,
     ) -> Self {
@@ -149,7 +149,7 @@ pub fn create_tbn_vertices_from_mesh(
     tbn_data: &[crate::mesh::tbn::TbnData],
 ) -> Vec<TbnVertex> {
     assert_eq!(vertices.len(), tbn_data.len());
-    
+
     vertices
         .iter()
         .zip(tbn_data.iter())
@@ -171,7 +171,7 @@ pub fn create_compact_tbn_vertices_from_mesh(
     tbn_data: &[crate::mesh::tbn::TbnData],
 ) -> Vec<CompactTbnVertex> {
     assert_eq!(vertices.len(), tbn_data.len());
-    
+
     vertices
         .iter()
         .zip(tbn_data.iter())
@@ -197,13 +197,16 @@ mod tests {
         assert_eq!(layout.array_stride, std::mem::size_of::<TbnVertex>() as u64);
         assert_eq!(layout.attributes.len(), 5); // position, uv, normal, tangent, bitangent
     }
-    
-    #[test] 
+
+    #[test]
     fn test_compact_tbn_vertex_layout() {
         let layout = CompactTbnVertex::buffer_layout();
-        assert_eq!(layout.array_stride, std::mem::size_of::<CompactTbnVertex>() as u64);
+        assert_eq!(
+            layout.array_stride,
+            std::mem::size_of::<CompactTbnVertex>() as u64
+        );
         assert_eq!(layout.attributes.len(), 4); // position, uv, normal, tangent+handedness
-        
+
         // Compact should be smaller
         assert!(std::mem::size_of::<CompactTbnVertex>() < std::mem::size_of::<TbnVertex>());
     }

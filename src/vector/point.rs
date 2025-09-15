@@ -2,11 +2,11 @@
 //! GPU-based point sprite rendering with anti-aliasing
 
 use crate::error::RenderError;
-use crate::vector::data::{PointInstance, validate_point_instances};
 use crate::vector::api::PointDef;
+use crate::vector::data::{validate_point_instances, PointInstance};
 use crate::vector::layer::Layer;
-use glam::Vec2;
 use bytemuck::{Pod, Zeroable};
+use glam::Vec2;
 
 /// Instanced point renderer with H20,H21,H22 enhancements
 pub struct PointRenderer {
@@ -29,22 +29,22 @@ pub struct PointRenderer {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct PointUniform {
-    transform: [[f32; 4]; 4],     // View-projection matrix
-    viewport_size: [f32; 2],      // Viewport dimensions for size calculation
-    pixel_scale: f32,             // Pixels per world unit
-    debug_mode: u32,              // H20: Debug rendering flags
-    atlas_size: [f32; 2],         // H21: Texture atlas dimensions
-    enable_clip_w_scaling: u32,   // H22: Enable clip.w aware sizing
-    depth_range: [f32; 2],        // H22: Near/far planes for clip.w scaling
+    transform: [[f32; 4]; 4],   // View-projection matrix
+    viewport_size: [f32; 2],    // Viewport dimensions for size calculation
+    pixel_scale: f32,           // Pixels per world unit
+    debug_mode: u32,            // H20: Debug rendering flags
+    atlas_size: [f32; 2],       // H21: Texture atlas dimensions
+    enable_clip_w_scaling: u32, // H22: Enable clip.w aware sizing
+    depth_range: [f32; 2],      // H22: Near/far planes for clip.w scaling
 }
 
 /// H20: Debug rendering mode flags
 #[derive(Debug, Clone, Copy)]
 pub struct DebugFlags {
-    pub show_bounds: bool,        // Show point bounding boxes
-    pub show_centers: bool,       // Show point centers as dots
-    pub color_by_depth: bool,     // Color points by depth
-    pub show_normals: bool,       // Show surface normals (if available)
+    pub show_bounds: bool,    // Show point bounding boxes
+    pub show_centers: bool,   // Show point centers as dots
+    pub color_by_depth: bool, // Color points by depth
+    pub show_normals: bool,   // Show surface normals (if available)
 }
 
 impl Default for DebugFlags {
@@ -62,10 +62,18 @@ impl DebugFlags {
     /// Convert debug flags to u32 bitfield for shader
     pub fn to_bitfield(&self) -> u32 {
         let mut flags = 0u32;
-        if self.show_bounds { flags |= 1 << 0; }
-        if self.show_centers { flags |= 1 << 1; }
-        if self.color_by_depth { flags |= 1 << 2; }
-        if self.show_normals { flags |= 1 << 3; }
+        if self.show_bounds {
+            flags |= 1 << 0;
+        }
+        if self.show_centers {
+            flags |= 1 << 1;
+        }
+        if self.color_by_depth {
+            flags |= 1 << 2;
+        }
+        if self.show_normals {
+            flags |= 1 << 3;
+        }
         flags
     }
 }
@@ -78,8 +86,8 @@ pub struct TextureAtlas {
     pub sampler: wgpu::Sampler,
     pub width: u32,
     pub height: u32,
-    pub tile_size: u32,           // Size of each tile in pixels
-    pub tiles_per_row: u32,       // Number of tiles per row
+    pub tile_size: u32,     // Size of each tile in pixels
+    pub tiles_per_row: u32, // Number of tiles per row
 }
 
 impl TextureAtlas {
@@ -94,7 +102,11 @@ impl TextureAtlas {
     ) -> Result<Self, RenderError> {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("vf.Vector.Point.TextureAtlas"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -116,11 +128,15 @@ impl TextureAtlas {
                 bytes_per_row: Some(width * 4), // RGBA8
                 rows_per_image: Some(height),
             },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        
+
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("vf.Vector.Point.AtlasSampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -149,15 +165,15 @@ impl TextureAtlas {
     pub fn get_tile_uv(&self, tile_index: u32) -> ([f32; 2], [f32; 2]) {
         let tile_x = tile_index % self.tiles_per_row;
         let tile_y = tile_index / self.tiles_per_row;
-        
+
         let u_size = self.tile_size as f32 / self.width as f32;
         let v_size = self.tile_size as f32 / self.height as f32;
-        
+
         let u_min = tile_x as f32 * u_size;
         let v_min = tile_y as f32 * v_size;
         let u_max = u_min + u_size;
         let v_max = v_min + v_size;
-        
+
         ([u_min, v_min], [u_max, v_max])
     }
 }
@@ -201,30 +217,26 @@ impl PointRenderer {
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vf.Vector.Point.BindGroupLayout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
-            ],
+                count: None,
+            }],
         });
 
         // Create bind group
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vf.Vector.Point.BindGroup"),
             layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
         });
 
         // Create pipeline layout
@@ -345,7 +357,7 @@ impl PointRenderer {
                 position: [point.position.x, point.position.y],
                 size: point.style.point_size,
                 color: point.style.fill_color,
-                rotation: 0.0, // Default rotation (H21)
+                rotation: 0.0,         // Default rotation (H21)
                 uv_offset: [0.0, 0.0], // Default UV offset (H21)
                 _pad: 0.0,
             });
@@ -355,9 +367,9 @@ impl PointRenderer {
         let validation_result = validate_point_instances(&instances);
         if !validation_result.is_valid {
             return Err(RenderError::Upload(
-                validation_result.error_message.unwrap_or_else(|| 
-                    "Point instance validation failed".to_string()
-                )
+                validation_result
+                    .error_message
+                    .unwrap_or_else(|| "Point instance validation failed".to_string()),
             ));
         }
 
@@ -418,17 +430,13 @@ impl PointRenderer {
                 transform: *transform,
                 viewport_size,
                 pixel_scale,
-                debug_mode: self.debug_flags.to_bitfield(),           // H20
-                atlas_size,                                           // H21
+                debug_mode: self.debug_flags.to_bitfield(), // H20
+                atlas_size,                                 // H21
                 enable_clip_w_scaling: self.enable_clip_w_scaling as u32, // H22
-                depth_range: [self.depth_range.0, self.depth_range.1],   // H22
+                depth_range: [self.depth_range.0, self.depth_range.1], // H22
             };
 
-            queue.write_buffer(
-                &self.uniform_buffer,
-                0,
-                bytemuck::cast_slice(&[uniform]),
-            );
+            queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
 
             // Set pipeline and resources
             render_pass.set_pipeline(&self.render_pipeline);
@@ -453,7 +461,12 @@ impl PointRenderer {
     }
 
     /// H21: Set texture atlas for sprite rendering  
-    pub fn set_texture_atlas(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, atlas: Option<TextureAtlas>) {
+    pub fn set_texture_atlas(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        atlas: Option<TextureAtlas>,
+    ) {
         self.texture_atlas = atlas;
         // Recreate bind group with atlas texture and sampler
         self.recreate_bind_group(device, queue);
@@ -491,21 +504,27 @@ impl PointRenderer {
             },
         ];
 
-        self.bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("vf.Vector.Point.BindGroupLayout"),
-            entries: &entries,
-        });
+        self.bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("vf.Vector.Point.BindGroupLayout"),
+                entries: &entries,
+            });
 
         // Use atlas texture if available, otherwise create a default 1x1 white texture
         let (texture_view, sampler) = if let Some(atlas) = &self.texture_atlas {
             (&atlas.view, &atlas.sampler)
         } else {
             // Create default 1x1 white texture for non-atlas rendering
-            static DEFAULT_TEXTURE: std::sync::OnceLock<(wgpu::TextureView, wgpu::Sampler)> = std::sync::OnceLock::new();
+            static DEFAULT_TEXTURE: std::sync::OnceLock<(wgpu::TextureView, wgpu::Sampler)> =
+                std::sync::OnceLock::new();
             DEFAULT_TEXTURE.get_or_init(|| {
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("vf.Vector.Point.DefaultTexture"),
-                    size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
@@ -513,7 +532,7 @@ impl PointRenderer {
                     usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                     view_formats: &[],
                 });
-                
+
                 // Upload white pixel
                 queue.write_texture(
                     wgpu::ImageCopyTexture {
@@ -528,9 +547,13 @@ impl PointRenderer {
                         bytes_per_row: Some(4),
                         rows_per_image: Some(1),
                     },
-                    wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                    wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
                 );
-                
+
                 let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                 let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
                 (view, sampler)
@@ -613,7 +636,8 @@ pub fn cluster_points(points: &[Vec2], cluster_radius: f32) -> Vec<(Vec2, u32)> 
 
             let distance = (other_point - point).length();
             if distance <= cluster_radius {
-                cluster_center = (cluster_center * cluster_count as f32 + other_point) / (cluster_count + 1) as f32;
+                cluster_center = (cluster_center * cluster_count as f32 + other_point)
+                    / (cluster_count + 1) as f32;
                 cluster_count += 1;
                 used[j] = true;
             }
@@ -655,7 +679,7 @@ mod tests {
         ];
 
         let instances = renderer.pack_points(&points).unwrap();
-        
+
         assert_eq!(instances.len(), 2);
         assert_eq!(instances[0].size, 4.0);
         assert_eq!(instances[0].color, [1.0, 0.0, 0.0, 1.0]);
@@ -678,7 +702,10 @@ mod tests {
 
         let result = renderer.pack_points(&[invalid_point]);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("positive and finite"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("positive and finite"));
     }
 
     #[test]
@@ -693,7 +720,10 @@ mod tests {
 
         let result = renderer.pack_points(&[invalid_point]);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("non-finite coordinates"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("non-finite coordinates"));
     }
 
     #[test]
@@ -706,13 +736,13 @@ mod tests {
         ];
 
         let clusters = cluster_points(&points, 1.0);
-        
+
         // Should create 2 clusters
         assert_eq!(clusters.len(), 2);
-        
+
         // First cluster should have 2 points
         assert_eq!(clusters[0].1, 2);
-        // Second cluster should have 2 points  
+        // Second cluster should have 2 points
         assert_eq!(clusters[1].1, 2);
     }
 
@@ -725,7 +755,7 @@ mod tests {
         ];
 
         let clusters = cluster_points(&points, 1.0);
-        
+
         // Should create 3 clusters (no clustering)
         assert_eq!(clusters.len(), 3);
         assert!(clusters.iter().all(|(_, count)| *count == 1));

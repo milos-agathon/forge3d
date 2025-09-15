@@ -3,8 +3,8 @@
 //! Provides utilities for creating and uploading RGBA16F and RGBA32F textures
 //! with proper memory budget checking and alignment handling.
 
-use crate::error::{RenderError, RenderResult};
 use crate::core::memory_tracker::global_tracker;
+use crate::error::{RenderError, RenderResult};
 use crate::gpu::ctx;
 use std::num::NonZeroU32;
 
@@ -41,14 +41,14 @@ impl HdrFormat {
             HdrFormat::Rgba32Float => wgpu::TextureFormat::Rgba32Float,
         }
     }
-    
+
     pub fn bytes_per_pixel(self) -> usize {
         match self {
             HdrFormat::Rgba16Float => 8,  // 4 components × 2 bytes
             HdrFormat::Rgba32Float => 16, // 4 components × 4 bytes
         }
     }
-    
+
     pub fn name(self) -> &'static str {
         match self {
             HdrFormat::Rgba16Float => "Rgba16Float",
@@ -84,22 +84,22 @@ impl HdrTexture {
     pub fn pixel_count(&self) -> usize {
         (self.width * self.height) as usize
     }
-    
+
     /// Get texture size in bytes
     pub fn size_bytes(&self) -> usize {
         self.pixel_count() * self.format.bytes_per_pixel()
     }
-    
+
     /// Create a sampler suitable for HDR textures
     pub fn create_sampler(&self, linear_filtering: bool) -> wgpu::Sampler {
         let g = ctx();
-        
+
         let filter = if linear_filtering {
             wgpu::FilterMode::Linear
         } else {
             wgpu::FilterMode::Nearest
         };
-        
+
         g.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("hdr-texture-sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -118,26 +118,24 @@ impl HdrTexture {
 }
 
 /// Create HDR texture from RGBA32F data
-pub fn create_texture_rgba32f(
-    data: &[f32],
-    config: HdrTextureConfig,
-) -> RenderResult<HdrTexture> {
+pub fn create_texture_rgba32f(data: &[f32], config: HdrTextureConfig) -> RenderResult<HdrTexture> {
     if config.format != HdrFormat::Rgba32Float {
-        return Err(RenderError::upload("create_texture_rgba32f requires Rgba32Float format".to_string()));
+        return Err(RenderError::upload(
+            "create_texture_rgba32f requires Rgba32Float format".to_string(),
+        ));
     }
-    
+
     create_hdr_texture_internal(bytemuck::cast_slice(data), config)
 }
 
 /// Create HDR texture from RGBA16F data
-pub fn create_texture_rgba16f(
-    data: &[u16],
-    config: HdrTextureConfig,
-) -> RenderResult<HdrTexture> {
+pub fn create_texture_rgba16f(data: &[u16], config: HdrTextureConfig) -> RenderResult<HdrTexture> {
     if config.format != HdrFormat::Rgba16Float {
-        return Err(RenderError::upload("create_texture_rgba16f requires Rgba16Float format".to_string()));
+        return Err(RenderError::upload(
+            "create_texture_rgba16f requires Rgba16Float format".to_string(),
+        ));
     }
-    
+
     create_hdr_texture_internal(bytemuck::cast_slice(data), config)
 }
 
@@ -148,44 +146,47 @@ pub fn create_texture_rgb32f_with_alpha(
     config: HdrTextureConfig,
 ) -> RenderResult<HdrTexture> {
     if config.format != HdrFormat::Rgba32Float {
-        return Err(RenderError::upload("create_texture_rgb32f_with_alpha requires Rgba32Float format".to_string()));
+        return Err(RenderError::upload(
+            "create_texture_rgb32f_with_alpha requires Rgba32Float format".to_string(),
+        ));
     }
-    
+
     let pixel_count = (config.width * config.height) as usize;
     if rgb_data.len() != pixel_count * 3 {
         return Err(RenderError::upload(format!(
             "RGB data length mismatch: expected {} ({}x{}x3), got {}",
-            pixel_count * 3, config.width, config.height, rgb_data.len()
+            pixel_count * 3,
+            config.width,
+            config.height,
+            rgb_data.len()
         )));
     }
-    
+
     // Convert RGB to RGBA
     let mut rgba_data = Vec::with_capacity(pixel_count * 4);
     for i in 0..pixel_count {
         let base = i * 3;
-        rgba_data.push(rgb_data[base]);     // R
-        rgba_data.push(rgb_data[base + 1]); // G  
+        rgba_data.push(rgb_data[base]); // R
+        rgba_data.push(rgb_data[base + 1]); // G
         rgba_data.push(rgb_data[base + 2]); // B
-        rgba_data.push(alpha);              // A
+        rgba_data.push(alpha); // A
     }
-    
+
     create_texture_rgba32f(&rgba_data, config)
 }
 
 /// Internal HDR texture creation
-fn create_hdr_texture_internal(
-    data: &[u8],
-    config: HdrTextureConfig,
-) -> RenderResult<HdrTexture> {
+fn create_hdr_texture_internal(data: &[u8], config: HdrTextureConfig) -> RenderResult<HdrTexture> {
     validate_config(&config)?;
-    
+
     let g = ctx();
     let format = config.format.to_wgpu();
-    
+
     // Check memory budget
-    let texture_size = (config.width as u64) * (config.height as u64) * (config.format.bytes_per_pixel() as u64);
+    let texture_size =
+        (config.width as u64) * (config.height as u64) * (config.format.bytes_per_pixel() as u64);
     let tracker = global_tracker();
-    
+
     // Check if we have enough budget for this texture
     let current_metrics = tracker.get_metrics();
     if texture_size > current_metrics.limit_bytes - current_metrics.total_bytes {
@@ -194,14 +195,14 @@ fn create_hdr_texture_internal(
             texture_size, current_metrics.total_bytes, current_metrics.limit_bytes
         )));
     }
-    
+
     // Calculate mip levels
     let mip_level_count = if config.generate_mipmaps {
         (config.width.max(config.height) as f32).log2().floor() as u32 + 1
     } else {
         1
     };
-    
+
     // Create texture
     let texture = g.device.create_texture(&wgpu::TextureDescriptor {
         label: config.label.as_deref(),
@@ -217,16 +218,24 @@ fn create_hdr_texture_internal(
         usage: config.usage,
         view_formats: &[],
     });
-    
+
     // Track texture allocation
     tracker.track_texture_allocation(config.width, config.height, format);
-    
+
     // Upload data with proper alignment
-    upload_texture_data(&g.device, &g.queue, &texture, data, config.width, config.height, config.format)?;
-    
+    upload_texture_data(
+        &g.device,
+        &g.queue,
+        &texture,
+        data,
+        config.width,
+        config.height,
+        config.format,
+    )?;
+
     // Create view
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    
+
     Ok(HdrTexture {
         texture,
         view,
@@ -249,25 +258,28 @@ fn upload_texture_data(
     let bytes_per_pixel = format.bytes_per_pixel();
     let row_bytes = width as usize * bytes_per_pixel;
     let expected_size = height as usize * row_bytes;
-    
+
     if data.len() != expected_size {
         return Err(RenderError::upload(format!(
             "Data size mismatch: expected {} bytes, got {}",
-            expected_size, data.len()
+            expected_size,
+            data.len()
         )));
     }
-    
+
     // Calculate padded bytes per row for GPU alignment
     let padded_bytes_per_row = align_copy_bytes_per_row(row_bytes as u32);
-    
+
     let image_data = if padded_bytes_per_row == row_bytes as u32 {
         // No padding needed, use data directly
         data
     } else {
         // Need to create padded data
-        return Err(RenderError::upload("Texture row padding not yet implemented for HDR formats".to_string()));
+        return Err(RenderError::upload(
+            "Texture row padding not yet implemented for HDR formats".to_string(),
+        ));
     };
-    
+
     queue.write_texture(
         wgpu::ImageCopyTexture {
             texture,
@@ -287,7 +299,7 @@ fn upload_texture_data(
             depth_or_array_layers: 1,
         },
     );
-    
+
     Ok(())
 }
 
@@ -300,9 +312,11 @@ fn align_copy_bytes_per_row(bytes_per_row: u32) -> u32 {
 /// Validate HDR texture configuration
 fn validate_config(config: &HdrTextureConfig) -> RenderResult<()> {
     if config.width == 0 || config.height == 0 {
-        return Err(RenderError::upload("Texture dimensions must be > 0".to_string()));
+        return Err(RenderError::upload(
+            "Texture dimensions must be > 0".to_string(),
+        ));
     }
-    
+
     // Check maximum texture size (implementation-specific, but 16384 is common)
     const MAX_TEXTURE_SIZE: u32 = 16384;
     if config.width > MAX_TEXTURE_SIZE || config.height > MAX_TEXTURE_SIZE {
@@ -311,18 +325,14 @@ fn validate_config(config: &HdrTextureConfig) -> RenderResult<()> {
             config.width, config.height, MAX_TEXTURE_SIZE, MAX_TEXTURE_SIZE
         )));
     }
-    
+
     Ok(())
 }
 
 /// Utility functions for common HDR texture patterns
 
 /// Create a 1D HDR LUT texture
-pub fn create_hdr_lut_1d(
-    data: &[f32],
-    width: u32,
-    format: HdrFormat,
-) -> RenderResult<HdrTexture> {
+pub fn create_hdr_lut_1d(data: &[f32], width: u32, format: HdrFormat) -> RenderResult<HdrTexture> {
     let config = HdrTextureConfig {
         label: Some("hdr-lut-1d".to_string()),
         width,
@@ -331,12 +341,13 @@ pub fn create_hdr_lut_1d(
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         generate_mipmaps: false,
     };
-    
+
     match format {
         HdrFormat::Rgba32Float => create_texture_rgba32f(data, config),
         HdrFormat::Rgba16Float => {
             // Convert f32 to f16 (this is a simplified conversion)
-            let f16_data: Vec<u16> = data.iter()
+            let f16_data: Vec<u16> = data
+                .iter()
                 .map(|&f| half::f16::from_f32(f).to_bits())
                 .collect();
             create_texture_rgba16f(&f16_data, config)
@@ -358,7 +369,7 @@ pub fn create_hdr_environment_map(
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         generate_mipmaps: true, // Useful for environment maps
     };
-    
+
     create_texture_rgba32f(data, config)
 }
 
@@ -382,49 +393,49 @@ mod tests {
     #[test]
     fn test_validate_config() {
         let mut config = HdrTextureConfig::default();
-        
+
         // Valid config should pass
         config.width = 512;
         config.height = 512;
         assert!(validate_config(&config).is_ok());
-        
+
         // Zero dimensions should fail
         config.width = 0;
         assert!(validate_config(&config).is_err());
-        
+
         config.width = 512;
         config.height = 0;
         assert!(validate_config(&config).is_err());
-        
+
         // Too large dimensions should fail
         config.width = 20000;
         config.height = 20000;
         assert!(validate_config(&config).is_err());
     }
-    
+
     #[test]
     fn test_rgb_to_rgba_conversion() {
         let rgb_data = vec![1.0, 0.5, 0.25, 0.75, 1.0, 0.5]; // 2 RGB pixels
         let alpha = 0.8;
-        
+
         // This would be tested with actual GPU context in integration tests
         // For now, just verify the logic would work
         let expected_rgba = vec![
-            1.0, 0.5, 0.25, 0.8,  // First pixel + alpha
-            0.75, 1.0, 0.5, 0.8,  // Second pixel + alpha
+            1.0, 0.5, 0.25, 0.8, // First pixel + alpha
+            0.75, 1.0, 0.5, 0.8, // Second pixel + alpha
         ];
-        
+
         // Simulate the conversion logic
         let pixel_count = 2;
         let mut rgba_data = Vec::with_capacity(pixel_count * 4);
         for i in 0..pixel_count {
             let base = i * 3;
-            rgba_data.push(rgb_data[base]);     // R
-            rgba_data.push(rgb_data[base + 1]); // G  
+            rgba_data.push(rgb_data[base]); // R
+            rgba_data.push(rgb_data[base + 1]); // G
             rgba_data.push(rgb_data[base + 2]); // B
-            rgba_data.push(alpha);              // A
+            rgba_data.push(alpha); // A
         }
-        
+
         assert_eq!(rgba_data, expected_rgba);
     }
 }
@@ -440,8 +451,8 @@ pub fn create_r32f_height_texture(
     let size = (width * height) as usize;
     if data.len() != size {
         return Err(RenderError::upload(format!(
-            "Data length {} != {} (width*height)", 
-            data.len(), 
+            "Data length {} != {} (width*height)",
+            data.len(),
             size
         )));
     }
@@ -458,18 +469,24 @@ pub fn create_r32f_height_texture(
 
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("height_r32f"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::R32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
 
     // Upload data with proper row alignment
     upload_r32f_data(queue, &texture, data, width, height)?;
-    
+
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     Ok((texture, view))
 }
@@ -484,7 +501,7 @@ fn upload_r32f_data(
 ) -> RenderResult<()> {
     let row_bytes = width * 4; // 4 bytes per f32
     let padded_bpr = align_copy_bytes_per_row(row_bytes);
-    
+
     if padded_bpr == row_bytes {
         // No padding needed, upload directly
         let bytes: &[u8] = bytemuck::cast_slice(data);
@@ -501,19 +518,23 @@ fn upload_r32f_data(
                 bytes_per_row: Some(std::num::NonZeroU32::new(row_bytes).unwrap().into()),
                 rows_per_image: Some(std::num::NonZeroU32::new(height).unwrap().into()),
             },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
     } else {
         // Need padding - create padded upload buffer
         let mut padded_data = vec![0u8; (padded_bpr * height) as usize];
         let input_data = bytemuck::cast_slice::<f32, u8>(data);
-        
+
         for y in 0..height {
             let src_offset = (y * row_bytes) as usize;
             let dst_offset = (y * padded_bpr) as usize;
             let src_end = src_offset + row_bytes as usize;
             let dst_end = dst_offset + row_bytes as usize;
-            
+
             padded_data[dst_offset..dst_end].copy_from_slice(&input_data[src_offset..src_end]);
         }
 
@@ -530,10 +551,14 @@ fn upload_r32f_data(
                 bytes_per_row: Some(std::num::NonZeroU32::new(padded_bpr).unwrap().into()),
                 rows_per_image: Some(std::num::NonZeroU32::new(height).unwrap().into()),
             },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
     }
-    
+
     Ok(())
 }
 
@@ -547,8 +572,8 @@ pub fn create_r32f_height_texture_padded(
     let expected = (width as usize) * (height as usize);
     if data.len() != expected {
         return Err(RenderError::upload(format!(
-            "data length {} != {} (width*height)", 
-            data.len(), 
+            "data length {} != {} (width*height)",
+            data.len(),
             expected
         )));
     }
@@ -561,17 +586,24 @@ pub fn create_r32f_height_texture_padded(
     for row in 0..height as usize {
         let src_off = row * bytes_per_row;
         let dst_off = row * padded_bpr;
-        staged[dst_off..dst_off + bytes_per_row].copy_from_slice(&src[src_off..src_off + bytes_per_row]);
+        staged[dst_off..dst_off + bytes_per_row]
+            .copy_from_slice(&src[src_off..src_off + bytes_per_row]);
     }
 
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("height_r32f"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::R32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
 
@@ -588,7 +620,11 @@ pub fn create_r32f_height_texture_padded(
             bytes_per_row: Some(std::num::NonZeroU32::new(padded_bpr as u32).unwrap().into()),
             rows_per_image: Some(std::num::NonZeroU32::new(height).unwrap().into()),
         },
-        wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
     );
 
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());

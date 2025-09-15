@@ -19,14 +19,18 @@ impl Level {
     /// Create a new mipmap level
     pub fn new(width: u32, height: u32, data: Vec<f32>) -> Self {
         assert_eq!(data.len(), (width * height * 4) as usize);
-        Self { width, height, data }
+        Self {
+            width,
+            height,
+            data,
+        }
     }
-    
+
     /// Get pixel count for this level
     pub fn pixel_count(&self) -> usize {
         (self.width * self.height) as usize
     }
-    
+
     /// Get data size in bytes
     pub fn data_size_bytes(&self) -> usize {
         self.data.len() * 4 // 4 bytes per f32
@@ -61,36 +65,45 @@ impl Default for MipmapConfig {
 ///
 /// Returns a Vec of mipmap levels, where level 0 is the original image
 pub fn build_mip_chain_rgba32f(
-    data: &[f32], 
-    width: u32, 
-    height: u32, 
-    config: &MipmapConfig
+    data: &[f32],
+    width: u32,
+    height: u32,
+    config: &MipmapConfig,
 ) -> RenderResult<Vec<Level>> {
     if width == 0 || height == 0 {
-        return Err(RenderError::upload("width and height must be > 0".to_string()));
+        return Err(RenderError::upload(
+            "width and height must be > 0".to_string(),
+        ));
     }
-    
+
     let expected_len = (width * height * 4) as usize;
     if data.len() != expected_len {
         return Err(RenderError::upload(format!(
             "data length mismatch: expected {} ({}x{}x4), got {}",
-            expected_len, width, height, data.len()
+            expected_len,
+            width,
+            height,
+            data.len()
         )));
     }
-    
+
     let mut levels = Vec::new();
     let mut current_data = data.to_vec();
     let mut current_width = width;
     let mut current_height = height;
-    
+
     // Add the base level
-    levels.push(Level::new(current_width, current_height, current_data.clone()));
-    
+    levels.push(Level::new(
+        current_width,
+        current_height,
+        current_data.clone(),
+    ));
+
     // Generate mip levels until we reach 1x1
     while current_width > 1 || current_height > 1 {
         let next_width = (current_width / 2).max(1);
         let next_height = (current_height / 2).max(1);
-        
+
         let next_data = downsample_box_filter(
             &current_data,
             current_width,
@@ -99,19 +112,23 @@ pub fn build_mip_chain_rgba32f(
             next_height,
             config,
         )?;
-        
+
         levels.push(Level::new(next_width, next_height, next_data.clone()));
-        
+
         current_data = next_data;
         current_width = next_width;
         current_height = next_height;
     }
-    
+
     Ok(levels)
 }
 
 /// Convenience function using default config
-pub fn build_mip_chain_rgba32f_default(data: &[f32], width: u32, height: u32) -> RenderResult<Vec<Level>> {
+pub fn build_mip_chain_rgba32f_default(
+    data: &[f32],
+    width: u32,
+    height: u32,
+) -> RenderResult<Vec<Level>> {
     build_mip_chain_rgba32f(data, width, height, &MipmapConfig::default())
 }
 
@@ -125,10 +142,10 @@ fn downsample_box_filter(
     config: &MipmapConfig,
 ) -> RenderResult<Vec<f32>> {
     let mut dst_data = vec![0.0f32; (dst_width * dst_height * 4) as usize];
-    
+
     let x_ratio = src_width as f32 / dst_width as f32;
     let y_ratio = src_height as f32 / dst_height as f32;
-    
+
     for dst_y in 0..dst_height {
         for dst_x in 0..dst_width {
             // Calculate source region
@@ -136,26 +153,26 @@ fn downsample_box_filter(
             let src_y_start = (dst_y as f32 * y_ratio) as u32;
             let src_x_end = ((dst_x + 1) as f32 * x_ratio).ceil() as u32;
             let src_y_end = ((dst_y + 1) as f32 * y_ratio).ceil() as u32;
-            
+
             let src_x_end = src_x_end.min(src_width);
             let src_y_end = src_y_end.min(src_height);
-            
+
             // Accumulate samples in the box
             let mut rgba_sum = [0.0f32; 4];
             let mut sample_count = 0;
-            
+
             for src_y in src_y_start..src_y_end {
                 for src_x in src_x_start..src_x_end {
                     let src_idx = ((src_y * src_width + src_x) * 4) as usize;
-                    
+
                     if src_idx + 3 < src_data.len() {
                         let mut rgba = [
                             src_data[src_idx],
-                            src_data[src_idx + 1], 
+                            src_data[src_idx + 1],
                             src_data[src_idx + 2],
                             src_data[src_idx + 3],
                         ];
-                        
+
                         // Apply gamma correction if enabled
                         if config.gamma_aware {
                             // Convert sRGB to linear for RGB channels (leave alpha linear)
@@ -163,7 +180,7 @@ fn downsample_box_filter(
                                 rgba[i] = srgb_to_linear(rgba[i]);
                             }
                         }
-                        
+
                         rgba_sum[0] += rgba[0];
                         rgba_sum[1] += rgba[1];
                         rgba_sum[2] += rgba[2];
@@ -172,7 +189,7 @@ fn downsample_box_filter(
                     }
                 }
             }
-            
+
             // Average the samples
             if sample_count > 0 {
                 let inv_count = 1.0 / sample_count as f32;
@@ -180,7 +197,7 @@ fn downsample_box_filter(
                 rgba_sum[1] *= inv_count;
                 rgba_sum[2] *= inv_count;
                 rgba_sum[3] *= inv_count;
-                
+
                 // Apply inverse gamma correction if enabled
                 if config.gamma_aware {
                     // Convert linear back to sRGB for RGB channels
@@ -189,7 +206,7 @@ fn downsample_box_filter(
                     }
                 }
             }
-            
+
             // Store the result
             let dst_idx = ((dst_y * dst_width + dst_x) * 4) as usize;
             dst_data[dst_idx] = rgba_sum[0];
@@ -198,7 +215,7 @@ fn downsample_box_filter(
             dst_data[dst_idx + 3] = rgba_sum[3];
         }
     }
-    
+
     Ok(dst_data)
 }
 
@@ -250,31 +267,31 @@ mod tests {
     fn test_build_mip_chain_small() {
         // Create a simple 2x2 RGBA image (red, green, blue, white)
         let data = vec![
-            1.0, 0.0, 0.0, 1.0,  // red
-            0.0, 1.0, 0.0, 1.0,  // green
-            0.0, 0.0, 1.0, 1.0,  // blue  
-            1.0, 1.0, 1.0, 1.0,  // white
+            1.0, 0.0, 0.0, 1.0, // red
+            0.0, 1.0, 0.0, 1.0, // green
+            0.0, 0.0, 1.0, 1.0, // blue
+            1.0, 1.0, 1.0, 1.0, // white
         ];
-        
+
         let levels = build_mip_chain_rgba32f_default(&data, 2, 2).unwrap();
         assert_eq!(levels.len(), 2); // 2x2 -> 1x1
-        
+
         // Check base level
         assert_eq!(levels[0].width, 2);
         assert_eq!(levels[0].height, 2);
         assert_eq!(levels[0].data.len(), 16); // 2*2*4
-        
+
         // Check 1x1 level
         assert_eq!(levels[1].width, 1);
         assert_eq!(levels[1].height, 1);
         assert_eq!(levels[1].data.len(), 4); // 1*1*4
-        
+
         // The 1x1 level should be the average of all pixels
         let avg_r = (1.0 + 0.0 + 0.0 + 1.0) / 4.0;
         let avg_g = (0.0 + 1.0 + 0.0 + 1.0) / 4.0;
         let avg_b = (0.0 + 0.0 + 1.0 + 1.0) / 4.0;
         let avg_a = 1.0; // All alpha values are 1.0
-        
+
         assert!((levels[1].data[0] - avg_r).abs() < 1e-6);
         assert!((levels[1].data[1] - avg_g).abs() < 1e-6);
         assert!((levels[1].data[2] - avg_b).abs() < 1e-6);
@@ -287,20 +304,20 @@ mod tests {
             gamma_aware: true,
             gamma: 2.2,
         };
-        
+
         // Test with a simple gradient
         let data = vec![
-            0.0, 0.0, 0.0, 1.0,  // black
-            1.0, 1.0, 1.0, 1.0,  // white
+            0.0, 0.0, 0.0, 1.0, // black
+            1.0, 1.0, 1.0, 1.0, // white
         ];
-        
+
         let levels = build_mip_chain_rgba32f(&data, 2, 1, &config).unwrap();
         assert_eq!(levels.len(), 2); // 2x1 -> 1x1
-        
+
         // The gamma-aware average should be different from linear average
         let linear_avg = 0.5;
         let gamma_aware_result = levels[1].data[0]; // R channel of 1x1 result
-        
+
         // With gamma correction, the result should be darker than linear average
         // because we convert to linear space, average, then convert back
         assert!(gamma_aware_result < linear_avg);
@@ -313,7 +330,7 @@ mod tests {
         assert!(build_mip_chain_rgba32f_default(&data, 0, 0).is_err());
         assert!(build_mip_chain_rgba32f_default(&data, 1, 0).is_err());
         assert!(build_mip_chain_rgba32f_default(&data, 0, 1).is_err());
-        
+
         // Test mismatched data length
         let data = vec![1.0; 8]; // Only 2 pixels worth of data
         assert!(build_mip_chain_rgba32f_default(&data, 2, 2).is_err()); // Expects 16 values

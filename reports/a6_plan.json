@@ -1,0 +1,25 @@
+{
+    "Mapping":  [
+                    {
+                        "item":  "Absorption/IOR",
+                        "files":  [
+                                      "python/forge3d/pbr.py",
+                                      "tests/test_water_bsdf.py",
+                                      "docs/api/water.md"
+                                  ]
+                    },
+                    {
+                        "item":  "Roughness BRDF",
+                        "files":  [
+                                      "python/forge3d/pbr.py",
+                                      "examples/water_demo.py"
+                                  ]
+                    }
+                ],
+    "Title":  "Dielectric Water (offline)",
+    "Acceptance":  "Refraction/reflection plausible; attenuation monotonic",
+    "Deliverables":  [
+                         "Absorption/IOR",
+                         "Roughness BRDF"
+                     ]
+}

@@ -2,11 +2,11 @@
 //! Separate pipelines for node points and edge lines
 
 use crate::error::RenderError;
-use crate::vector::data::PointInstance;
 use crate::vector::api::GraphDef;
+use crate::vector::data::PointInstance;
 use crate::vector::layer::Layer;
+use crate::vector::line::{LineCap, LineInstance, LineJoin, LineRenderer};
 use crate::vector::point::PointRenderer;
-use crate::vector::line::{LineRenderer, LineInstance, LineCap, LineJoin};
 use glam::Vec2;
 
 /// Graph renderer with separate node and edge pipelines
@@ -47,7 +47,7 @@ impl GraphRenderer {
             // Validate graph structure
             if graph.nodes.is_empty() {
                 return Err(RenderError::Upload(
-                    "Graph must have at least one node".to_string()
+                    "Graph must have at least one node".to_string(),
                 ));
             }
 
@@ -70,7 +70,9 @@ impl GraphRenderer {
                 if from_idx >= node_count || to_idx >= node_count {
                     return Err(RenderError::Upload(format!(
                         "Edge ({}, {}) references invalid node indices (max: {})",
-                        from_idx, to_idx, node_count - 1
+                        from_idx,
+                        to_idx,
+                        node_count - 1
                     )));
                 }
 
@@ -119,12 +121,14 @@ impl GraphRenderer {
     ) -> Result<(), RenderError> {
         // Upload nodes via point renderer
         if !packed_graph.node_instances.is_empty() {
-            self.node_renderer.upload_points(device, queue, &packed_graph.node_instances)?;
+            self.node_renderer
+                .upload_points(device, queue, &packed_graph.node_instances)?;
         }
 
         // Upload edges via line renderer
         if !packed_graph.edge_instances.is_empty() {
-            self.edge_renderer.upload_lines(device, &packed_graph.edge_instances)?;
+            self.edge_renderer
+                .upload_lines(device, &packed_graph.edge_instances)?;
         }
 
         Ok(())
@@ -148,9 +152,9 @@ impl GraphRenderer {
                 transform,
                 viewport_size,
                 packed_graph.edge_count,
-                LineCap::Round,     // Use round caps for graph edges
-                LineJoin::Round,    // Use round joins for smooth connections
-                2.0,                // Miter limit
+                LineCap::Round,  // Use round caps for graph edges
+                LineJoin::Round, // Use round joins for smooth connections
+                2.0,             // Miter limit
             )?;
         }
 
@@ -199,7 +203,7 @@ pub fn layout_force_directed(
                 let diff = nodes[i] - nodes[j];
                 let dist = diff.length().max(0.1);
                 let force = diff.normalize_or_zero() * (1.0 / (dist * dist));
-                
+
                 forces[i] += force;
                 forces[j] -= force;
             }
@@ -213,7 +217,7 @@ pub fn layout_force_directed(
 
             let from = from_idx as usize;
             let to = to_idx as usize;
-            
+
             let diff = nodes[to] - nodes[from];
             let dist = diff.length();
             if dist > 0.01 {
@@ -249,7 +253,7 @@ pub fn calculate_graph_bounds(graph: &GraphDef) -> Option<(Vec2, Vec2)> {
     // Expand bounds slightly for node sizes
     let node_radius = graph.node_style.point_size * 0.5;
     let expansion = Vec2::splat(node_radius);
-    
+
     Some((min_pos - expansion, max_pos + expansion))
 }
 
@@ -283,16 +287,16 @@ mod tests {
         };
 
         let packed = renderer.pack_graphs(&[graph]).unwrap();
-        
+
         assert_eq!(packed.node_count, 3);
         assert_eq!(packed.edge_count, 3);
         assert_eq!(packed.node_instances.len(), 3);
         assert_eq!(packed.edge_instances.len(), 3);
-        
+
         // Check node instance data
         assert_eq!(packed.node_instances[0].size, 5.0);
         assert_eq!(packed.node_instances[0].color, [1.0, 0.0, 0.0, 1.0]);
-        
+
         // Check edge instance data
         assert_eq!(packed.edge_instances[0].width, 2.0);
         assert_eq!(packed.edge_instances[0].color, [0.0, 1.0, 0.0, 1.0]);
@@ -314,7 +318,7 @@ mod tests {
         };
 
         let packed = renderer.pack_graphs(&[graph]).unwrap();
-        
+
         assert_eq!(packed.node_count, 2);
         assert_eq!(packed.edge_count, 1); // Self-loop was skipped
     }
@@ -333,7 +337,10 @@ mod tests {
 
         let result = renderer.pack_graphs(&[invalid_graph]);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("invalid node indices"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid node indices"));
     }
 
     #[test]
@@ -350,7 +357,7 @@ mod tests {
         // Nodes should have spread out due to repulsive forces
         let dist_01 = (nodes[1] - nodes[0]).length();
         let dist_12 = (nodes[2] - nodes[1]).length();
-        
+
         assert!(dist_01 > 0.01, "Nodes should repel each other");
         assert!(dist_12 > 0.01, "Nodes should repel each other");
     }
@@ -372,11 +379,11 @@ mod tests {
         };
 
         let (min_bound, max_bound) = calculate_graph_bounds(&graph).unwrap();
-        
+
         // Should include node radius expansion
         assert!(min_bound.x <= -1.0 - 1.0); // -1.0 - radius
         assert!(min_bound.y <= -2.0 - 1.0); // -2.0 - radius
-        assert!(max_bound.x >= 3.0 + 1.0);  // 3.0 + radius
-        assert!(max_bound.y >= 4.0 + 1.0);  // 4.0 + radius
+        assert!(max_bound.x >= 3.0 + 1.0); // 3.0 + radius
+        assert!(max_bound.y >= 4.0 + 1.0); // 4.0 + radius
     }
 }

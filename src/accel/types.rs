@@ -12,7 +12,7 @@ use std::fmt;
 pub struct Aabb {
     pub min: [f32; 3],
     pub _pad0: f32,
-    pub max: [f32; 3], 
+    pub max: [f32; 3],
     pub _pad1: f32,
 }
 
@@ -73,9 +73,7 @@ impl Aabb {
 
     /// Check if AABB is valid (min <= max)
     pub fn is_valid(&self) -> bool {
-        self.min[0] <= self.max[0] && 
-        self.min[1] <= self.max[1] && 
-        self.min[2] <= self.max[2]
+        self.min[0] <= self.max[0] && self.min[1] <= self.max[1] && self.min[2] <= self.max[2]
     }
 
     /// Get surface area for SAH calculations
@@ -101,7 +99,7 @@ pub struct BvhNode {
     pub aabb: Aabb,
     pub kind: u32,      // 0 = internal, 1 = leaf
     pub left_idx: u32,  // for internal: left child; for leaf: first primitive
-    pub right_idx: u32, // for internal: right child; for leaf: primitive count  
+    pub right_idx: u32, // for internal: right child; for leaf: primitive count
     pub parent_idx: u32,
 }
 
@@ -161,7 +159,7 @@ impl BvhNode {
 #[derive(Debug, Clone, Copy)]
 pub struct Triangle {
     pub v0: [f32; 3],
-    pub v1: [f32; 3], 
+    pub v1: [f32; 3],
     pub v2: [f32; 3],
 }
 
@@ -193,7 +191,7 @@ impl Triangle {
     pub fn normal(&self) -> [f32; 3] {
         let e1 = [
             self.v1[0] - self.v0[0],
-            self.v1[1] - self.v0[1], 
+            self.v1[1] - self.v0[1],
             self.v1[2] - self.v0[2],
         ];
         let e2 = [
@@ -201,7 +199,7 @@ impl Triangle {
             self.v2[1] - self.v0[1],
             self.v2[2] - self.v0[2],
         ];
-        
+
         [
             e1[1] * e2[2] - e1[2] * e2[1],
             e1[2] * e2[0] - e1[0] * e2[2],
@@ -267,10 +265,13 @@ impl BvhHandle {
 impl fmt::Debug for BvhHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BvhHandle")
-            .field("backend", match &self.backend {
-                crate::accel::BvhBackend::Gpu(_) => &"GPU",
-                crate::accel::BvhBackend::Cpu(_) => &"CPU",
-            })
+            .field(
+                "backend",
+                match &self.backend {
+                    crate::accel::BvhBackend::Gpu(_) => &"GPU",
+                    crate::accel::BvhBackend::Cpu(_) => &"CPU",
+                },
+            )
             .field("triangle_count", &self.triangle_count)
             .field("node_count", &self.node_count)
             .field("world_aabb", &self.world_aabb)

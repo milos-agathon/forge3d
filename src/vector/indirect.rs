@@ -1,12 +1,12 @@
 //! H17,H19: Indirect drawing and GPU culling
 //! CPU and GPU paths for efficient large-scale vector rendering
 
-use crate::error::RenderError;
-use crate::vector::batch::{AABB, Frustum, PrimitiveType};
 use crate::core::gpu_timing::GpuTimingManager;
-use wgpu::util::DeviceExt;
+use crate::error::RenderError;
+use crate::vector::batch::{Frustum, PrimitiveType, AABB};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
+use wgpu::util::DeviceExt;
 
 /// Indirect draw command for GPU execution
 #[repr(C)]
@@ -35,21 +35,21 @@ pub struct IndirectDrawIndexedCommand {
 pub struct CullableInstance {
     pub aabb_min: [f32; 3],
     pub aabb_max: [f32; 3],
-    pub transform: [[f32; 4]; 4],    // World transform matrix
-    pub primitive_type: u32,          // PrimitiveType as u32
-    pub draw_command_index: u32,      // Index into draw command buffer
+    pub transform: [[f32; 4]; 4], // World transform matrix
+    pub primitive_type: u32,      // PrimitiveType as u32
+    pub draw_command_index: u32,  // Index into draw command buffer
 }
 
 /// GPU culling uniforms
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct CullingUniforms {
-    view_proj: [[f32; 4]; 4],        // View-projection matrix
-    frustum_planes: [[f32; 4]; 6],   // Frustum planes (ax + by + cz + d = 0)
-    camera_position: [f32; 3],       // Camera world position
+    view_proj: [[f32; 4]; 4],      // View-projection matrix
+    frustum_planes: [[f32; 4]; 6], // Frustum planes (ax + by + cz + d = 0)
+    camera_position: [f32; 3],     // Camera world position
     _pad0: f32,
-    cull_distance: f32,              // Maximum culling distance
-    enable_frustum_cull: u32,        // Boolean flags
+    cull_distance: f32,       // Maximum culling distance
+    enable_frustum_cull: u32, // Boolean flags
     enable_distance_cull: u32,
     enable_occlusion_cull: u32,
 }
@@ -60,22 +60,22 @@ pub struct IndirectRenderer {
     draw_commands_buffer: wgpu::Buffer,
     #[allow(dead_code)]
     draw_commands_capacity: usize,
-    
+
     // Instance data for culling
     instances_buffer: wgpu::Buffer,
     instances_capacity: usize,
-    
+
     // Culling compute pipeline
     culling_pipeline: wgpu::ComputePipeline,
     culling_bind_group_layout: wgpu::BindGroupLayoutDescriptor<'static>,
-    
+
     // Uniforms
     culling_uniforms_buffer: wgpu::Buffer,
-    
+
     // Counters and results
-    counter_buffer: wgpu::Buffer,        // Draw count results
-    readback_buffer: wgpu::Buffer,       // CPU readback for statistics
-    
+    counter_buffer: wgpu::Buffer,  // Draw count results
+    readback_buffer: wgpu::Buffer, // CPU readback for statistics
+
     // CPU fallback path
     cpu_culling_enabled: bool,
 }
@@ -99,8 +99,8 @@ impl IndirectRenderer {
         let draw_commands_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vf.Vector.Indirect.DrawCommands"),
             size: (initial_capacity * std::mem::size_of::<IndirectDrawCommand>()) as u64,
-            usage: wgpu::BufferUsages::STORAGE 
-                | wgpu::BufferUsages::INDIRECT 
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::INDIRECT
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
@@ -126,8 +126,8 @@ impl IndirectRenderer {
         let counter_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vf.Vector.Indirect.Counters"),
             size: 16, // 4 x u32 counters
-            usage: wgpu::BufferUsages::STORAGE 
-                | wgpu::BufferUsages::COPY_SRC 
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -273,7 +273,7 @@ impl IndirectRenderer {
         );
 
         // Submit upload command (Note: In production, this would be batched)
-        
+
         Ok(())
     }
 
@@ -287,9 +287,17 @@ impl IndirectRenderer {
         frustum: &Frustum,
         instance_count: u32,
     ) -> Result<(), RenderError> {
-        self.cull_gpu_with_timing(device, queue, view_proj, camera_pos, frustum, instance_count, None)
+        self.cull_gpu_with_timing(
+            device,
+            queue,
+            view_proj,
+            camera_pos,
+            frustum,
+            instance_count,
+            None,
+        )
     }
-    
+
     /// Perform GPU culling with optional timing
     pub fn cull_gpu_with_timing(
         &self,
@@ -308,8 +316,8 @@ impl IndirectRenderer {
             frustum_planes[i] = [plane.x, plane.y, plane.z, plane.w];
         }
         // Add default near/far planes for 2D->3D conversion
-        frustum_planes[4] = [0.0, 0.0, 1.0, 1000.0];  // Near plane
-        frustum_planes[5] = [0.0, 0.0, -1.0, 0.1];    // Far plane
+        frustum_planes[4] = [0.0, 0.0, 1.0, 1000.0]; // Near plane
+        frustum_planes[5] = [0.0, 0.0, -1.0, 0.1]; // Far plane
 
         let uniforms = CullingUniforms {
             view_proj: view_proj.to_cols_array_2d(),
@@ -366,7 +374,7 @@ impl IndirectRenderer {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("vf.Vector.Indirect.CullingDispatch"),
         });
-        
+
         let timing_scope = if let Some(timer) = timing_manager.as_mut() {
             Some(timer.begin_scope(&mut encoder, "vector_indirect_culling"))
         } else {
@@ -381,7 +389,7 @@ impl IndirectRenderer {
 
             compute_pass.set_pipeline(&self.culling_pipeline);
             compute_pass.set_bind_group(0, &bind_group, &[]);
-            
+
             // Dispatch with 64 threads per workgroup
             let workgroup_size = 64;
             let workgroups = (instance_count + workgroup_size - 1) / workgroup_size;
@@ -389,14 +397,8 @@ impl IndirectRenderer {
         }
 
         // Copy counters for readback
-        encoder.copy_buffer_to_buffer(
-            &self.counter_buffer,
-            0,
-            &self.readback_buffer,
-            0,
-            16,
-        );
-        
+        encoder.copy_buffer_to_buffer(&self.counter_buffer, 0, &self.readback_buffer, 0, 16);
+
         // End GPU timing scope
         if let (Some(timer), Some(scope_id)) = (timing_manager, timing_scope) {
             timer.end_scope(&mut encoder, scope_id);
@@ -422,7 +424,7 @@ impl IndirectRenderer {
             let transform = Mat4::from_cols_array_2d(&instance.transform);
             let aabb_min = Vec3::from(instance.aabb_min);
             let aabb_max = Vec3::from(instance.aabb_max);
-            
+
             // AABB center in world space
             let world_center = transform.transform_point3((aabb_min + aabb_max) * 0.5);
 
@@ -435,7 +437,7 @@ impl IndirectRenderer {
             // Frustum culling (simplified sphere test)
             let radius = (aabb_max - aabb_min).length() * 0.5;
             let mut inside_frustum = true;
-            
+
             for plane in &frustum.planes {
                 let distance_to_plane = plane.dot(world_center.extend(1.0));
                 if distance_to_plane < -radius {
@@ -464,11 +466,11 @@ impl IndirectRenderer {
 
         let buffer_slice = self.readback_buffer.slice(..);
         let (sender, receiver) = std::sync::mpsc::channel();
-        
+
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).unwrap();
         });
-        
+
         device.poll(wgpu::Maintain::Wait);
         receiver.recv().unwrap().map_err(|e| {
             RenderError::Readback(format!("Failed to map culling stats buffer: {:?}", e))
@@ -476,14 +478,14 @@ impl IndirectRenderer {
 
         let data = buffer_slice.get_mapped_range();
         let counters: &[u32; 4] = bytemuck::from_bytes(&data[..16]);
-        
+
         let stats = CullingStats {
             total_objects: counters[0],
             visible_objects: counters[1],
             frustum_culled: counters[2],
             distance_culled: counters[3],
             occlusion_culled: 0, // Not implemented yet
-            gpu_time_ms: 0.0,   // Would require timestamps
+            gpu_time_ms: 0.0,    // Would require timestamps
         };
 
         drop(data);
@@ -506,11 +508,11 @@ impl IndirectRenderer {
     /// Get vertex count for primitive type
     fn get_vertex_count_for_type(&self, primitive_type: u32) -> u32 {
         match primitive_type {
-            0 => 3,  // Triangle
-            1 => 4,  // Quad/Rectangle  
-            2 => 1,  // Point
-            3 => 2,  // Line segment
-            _ => 3,  // Default to triangle
+            0 => 3, // Triangle
+            1 => 4, // Quad/Rectangle
+            2 => 1, // Point
+            3 => 2, // Line segment
+            _ => 3, // Default to triangle
         }
     }
 
@@ -560,9 +562,9 @@ mod tests {
             max: Vec2::new(1.0, 1.0),
         };
         let transform = Mat4::IDENTITY;
-        
+
         let instance = create_cullable_instance(&aabb, transform, PrimitiveType::Triangle, 0);
-        
+
         assert_eq!(instance.aabb_min, [-1.0, -1.0, 0.0]);
         assert_eq!(instance.aabb_max, [1.0, 1.0, 1.0]);
         assert_eq!(instance.primitive_type, PrimitiveType::Triangle as u32);
@@ -571,7 +573,7 @@ mod tests {
     #[test]
     fn test_vertex_count_for_types() {
         let renderer = IndirectRenderer::new(&crate::gpu::create_device_for_test()).unwrap();
-        
+
         assert_eq!(renderer.get_vertex_count_for_type(0), 3); // Triangle
         assert_eq!(renderer.get_vertex_count_for_type(1), 4); // Quad
         assert_eq!(renderer.get_vertex_count_for_type(2), 1); // Point
@@ -581,7 +583,7 @@ mod tests {
     #[test]
     fn test_cpu_culling_distance() {
         let renderer = IndirectRenderer::new(&crate::gpu::create_device_for_test()).unwrap();
-        
+
         let instance = CullableInstance {
             aabb_min: [-1.0, -1.0, -1.0],
             aabb_max: [1.0, 1.0, 1.0],
@@ -589,11 +591,11 @@ mod tests {
             primitive_type: PrimitiveType::Triangle as u32,
             draw_command_index: 0,
         };
-        
+
         let frustum = Frustum::from_view_proj(Mat4::IDENTITY);
         let camera_pos = Vec3::ZERO;
         let max_distance = 50.0;
-        
+
         let visible = renderer.cull_cpu(&[instance], &frustum, camera_pos, max_distance);
         assert_eq!(visible.len(), 0); // Should be culled by distance
     }

@@ -4,12 +4,12 @@
 //! to reduce bind group churn when rendering many objects. Uses 64-byte
 //! alignment and provides RAII allocation management.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, Weak};
-use wgpu::{Buffer, BufferUsages, Device, BufferDescriptor, BufferAddress};
 use crate::core::memory_tracker::ResourceRegistry;
 use crate::core::resource_tracker::ResourceHandle;
 use crate::error::RenderError;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, Weak};
+use wgpu::{Buffer, BufferAddress, BufferDescriptor, BufferUsages, Device};
 
 /// Size of each allocation block in bytes (64-byte aligned for WGSL std140)
 pub const BIG_BUFFER_BLOCK_SIZE: u64 = 64;
@@ -62,7 +62,8 @@ impl BigBufferAllocator {
     /// Allocate a block of the given size, returns offset and actual size
     fn allocate_block(&mut self, size: u32) -> Result<(u32, u32), RenderError> {
         // Align size to BIG_BUFFER_BLOCK_SIZE
-        let aligned_size = ((size + BIG_BUFFER_BLOCK_SIZE as u32 - 1) / BIG_BUFFER_BLOCK_SIZE as u32) 
+        let aligned_size = ((size + BIG_BUFFER_BLOCK_SIZE as u32 - 1)
+            / BIG_BUFFER_BLOCK_SIZE as u32)
             * BIG_BUFFER_BLOCK_SIZE as u32;
 
         // Find first fit
@@ -71,7 +72,7 @@ impl BigBufferAllocator {
             if block_size >= aligned_size {
                 // Remove this free block
                 self.free_blocks.remove(i);
-                
+
                 // If there's leftover space, add it back as a free block
                 if block_size > aligned_size {
                     let remaining_offset = offset + aligned_size;
@@ -80,15 +81,17 @@ impl BigBufferAllocator {
                     // Keep free blocks sorted by offset
                     self.free_blocks.sort_by_key(|&(o, _)| o);
                 }
-                
+
                 self.allocated_blocks.insert(offset, aligned_size);
                 return Ok((offset, aligned_size));
             }
         }
-        
+
         Err(RenderError::Upload(format!(
             "BigBuffer allocation failed: requested {} bytes (aligned to {}), {} bytes available",
-            size, aligned_size, self.total_free_bytes()
+            size,
+            aligned_size,
+            self.total_free_bytes()
         )))
     }
 
@@ -147,9 +150,9 @@ pub struct BigBuffer {
 impl BigBuffer {
     /// Create a new big buffer with the specified size
     pub fn new(
-        device: &Device, 
-        size: u32, 
-        registry: Option<&ResourceRegistry>
+        device: &Device,
+        size: u32,
+        registry: Option<&ResourceRegistry>,
     ) -> Result<Self, RenderError> {
         if size == 0 || size > BIG_BUFFER_MAX_SIZE as u32 {
             return Err(RenderError::Upload(format!(
@@ -159,7 +162,8 @@ impl BigBuffer {
         }
 
         // Ensure size is aligned to BIG_BUFFER_BLOCK_SIZE
-        let aligned_size = ((size + BIG_BUFFER_BLOCK_SIZE as u32 - 1) / BIG_BUFFER_BLOCK_SIZE as u32) 
+        let aligned_size = ((size + BIG_BUFFER_BLOCK_SIZE as u32 - 1)
+            / BIG_BUFFER_BLOCK_SIZE as u32)
             * BIG_BUFFER_BLOCK_SIZE as u32;
 
         let buffer = device.create_buffer(&BufferDescriptor {
@@ -185,9 +189,11 @@ impl BigBuffer {
 
     /// Allocate a block for per-object data
     pub fn allocate_block(&self, size: u32) -> Result<BigBufferBlock, RenderError> {
-        let mut allocator = self.allocator.lock()
+        let mut allocator = self
+            .allocator
+            .lock()
             .map_err(|_| RenderError::Upload("BigBuffer allocator lock poisoned".to_string()))?;
-        
+
         let (offset, actual_size) = allocator.allocate_block(size)?;
         let index = offset / BIG_BUFFER_BLOCK_SIZE as u32;
 
@@ -214,7 +220,7 @@ impl BigBuffer {
         let allocator = self.allocator.lock().unwrap();
         let free_bytes = allocator.total_free_bytes();
         let used_bytes = self.size - free_bytes;
-        
+
         BigBufferStats {
             total_bytes: self.size,
             used_bytes,
@@ -222,7 +228,8 @@ impl BigBuffer {
             allocated_blocks: allocator.allocated_blocks.len() as u32,
             free_blocks: allocator.free_blocks.len() as u32,
             fragmentation_ratio: if self.size > 0 {
-                allocator.free_blocks.len() as f32 / (self.size / BIG_BUFFER_BLOCK_SIZE as u32) as f32
+                allocator.free_blocks.len() as f32
+                    / (self.size / BIG_BUFFER_BLOCK_SIZE as u32) as f32
             } else {
                 0.0
             },
@@ -258,7 +265,7 @@ mod tests {
     #[test]
     fn test_alignment() {
         assert_eq!(BIG_BUFFER_BLOCK_SIZE, 64);
-        
+
         // Test aligned sizes
         assert_eq!(((63 + 63) / 64) * 64, 64);
         assert_eq!(((64 + 63) / 64) * 64, 64);
@@ -268,20 +275,20 @@ mod tests {
     #[test]
     fn test_allocator_basic() {
         let mut allocator = BigBufferAllocator::new(256);
-        
+
         // Allocate first block
         let (offset1, size1) = allocator.allocate_block(32).unwrap();
         assert_eq!(offset1, 0);
         assert_eq!(size1, 64); // Aligned to BIG_BUFFER_BLOCK_SIZE
-        
+
         // Allocate second block
         let (offset2, size2) = allocator.allocate_block(32).unwrap();
         assert_eq!(offset2, 64);
         assert_eq!(size2, 64);
-        
+
         // Deallocate first block
         allocator.deallocate_block(offset1);
-        
+
         // Should be able to allocate in the freed space
         let (offset3, size3) = allocator.allocate_block(32).unwrap();
         assert_eq!(offset3, 0);
@@ -291,17 +298,17 @@ mod tests {
     #[test]
     fn test_allocator_merge() {
         let mut allocator = BigBufferAllocator::new(256);
-        
+
         // Allocate all blocks
         let (o1, _) = allocator.allocate_block(64).unwrap();
-        let (o2, _) = allocator.allocate_block(64).unwrap();  
+        let (o2, _) = allocator.allocate_block(64).unwrap();
         let (o3, _) = allocator.allocate_block(64).unwrap();
         let (o4, _) = allocator.allocate_block(64).unwrap();
-        
+
         // Free middle blocks
         allocator.deallocate_block(o2);
         allocator.deallocate_block(o3);
-        
+
         // Should merge into one block
         assert_eq!(allocator.free_blocks.len(), 1);
         assert_eq!(allocator.free_blocks[0], (64, 128));
@@ -315,7 +322,7 @@ mod tests {
             index: 2,
             allocator: Weak::new(),
         };
-        
+
         assert_eq!(calculate_dynamic_offset(&block), 128);
         assert_eq!(calculate_index_address(&block), 2);
     }

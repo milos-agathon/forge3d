@@ -1,29 +1,30 @@
 //! Normal mapping pipeline implementation
-//! 
+//!
 //! Provides GPU pipeline for rendering meshes with tangent-space normal mapping
 //! support using the TBN vertex attributes from the mesh module.
 
-use crate::mesh::{TbnVertex, TbnData};
+use crate::mesh::{TbnData, TbnVertex};
+use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3, Vec4};
 use std::sync::Arc;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferAddress, BufferBinding,
-    BufferDescriptor, BufferUsages, Device, Queue, RenderPass, RenderPipeline, RenderPipelineDescriptor,
-    SamplerBindingType, ShaderModuleDescriptor, ShaderSource, Texture, TextureFormat, TextureSampleType,
-    TextureViewDimension, VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode
+    BufferDescriptor, BufferUsages, Device, Queue, RenderPass, RenderPipeline,
+    RenderPipelineDescriptor, SamplerBindingType, ShaderModuleDescriptor, ShaderSource, Texture,
+    TextureFormat, TextureSampleType, TextureViewDimension, VertexAttribute, VertexBufferLayout,
+    VertexFormat, VertexStepMode,
 };
-use bytemuck::{Pod, Zeroable};
 
 /// Uniforms for normal mapping pipeline
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct NormalMappingUniforms {
     pub model_matrix: [[f32; 4]; 4],
-    pub view_matrix: [[f32; 4]; 4], 
+    pub view_matrix: [[f32; 4]; 4],
     pub projection_matrix: [[f32; 4]; 4],
     pub normal_matrix: [[f32; 4]; 4], // Expanded to 4x4 for alignment
-    pub light_direction: [f32; 4], // w component for strength
+    pub light_direction: [f32; 4],    // w component for strength
     pub normal_strength: f32,
     pub _padding: [f32; 3],
 }
@@ -59,47 +60,51 @@ impl NormalMappingPipeline {
         // Create shader module
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("normal_mapping_shader"),
-            source: ShaderSource::Wgsl(include_str!("../shaders/normal_mapping_vertex.wgsl").into()),
+            source: ShaderSource::Wgsl(
+                include_str!("../shaders/normal_mapping_vertex.wgsl").into(),
+            ),
         });
 
         // Create bind group layouts
-        let uniforms_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("normal_mapping_uniforms_layout"),
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                ty: BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-
-        let texture_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("normal_mapping_texture_layout"),
-            entries: &[
-                // Normal map texture
-                BindGroupLayoutEntry {
+        let uniforms_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("normal_mapping_uniforms_layout"),
+                entries: &[BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
                     count: None,
-                },
-                // Normal map sampler  
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+                }],
+            });
+
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("normal_mapping_texture_layout"),
+                entries: &[
+                    // Normal map texture
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Float { filterable: true },
+                            view_dimension: TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // Normal map sampler
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
 
         // Create pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -122,7 +127,7 @@ impl NormalMappingPipeline {
                 // UV coordinates
                 VertexAttribute {
                     offset: 12,
-                    shader_location: 1, 
+                    shader_location: 1,
                     format: VertexFormat::Float32x2,
                 },
                 // Normal
@@ -157,7 +162,7 @@ impl NormalMappingPipeline {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main", 
+                entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -279,7 +284,8 @@ impl NormalMappingPipeline {
         uniforms_bind_group: &'a BindGroup,
         texture_bind_group: &'a BindGroup,
     ) {
-        if let (Some(vertex_buffer), Some(index_buffer)) = (&self.vertex_buffer, &self.index_buffer) {
+        if let (Some(vertex_buffer), Some(index_buffer)) = (&self.vertex_buffer, &self.index_buffer)
+        {
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, uniforms_bind_group, &[]);
             render_pass.set_bind_group(1, texture_bind_group, &[]);
@@ -295,7 +301,7 @@ pub fn compute_normal_matrix(model_matrix: Mat4) -> Mat4 {
     // Extract upper-left 3x3 and compute inverse-transpose
     // For simplicity, we'll use the full 4x4 inverse-transpose
     // In production, this should be optimized to 3x3 operations
-    
+
     // Check if matrix is invertible by testing determinant
     if model_matrix.determinant().abs() < 1e-8 {
         Mat4::IDENTITY // Fallback for non-invertible matrices
@@ -328,7 +334,7 @@ pub fn create_checkerboard_normal_texture(device: &Device, queue: &Queue, size: 
             let checker = ((x / 8) + (y / 8)) % 2;
             if checker == 0 {
                 // Flat normal (pointing up in tangent space)
-                data.extend_from_slice(&[128u8, 128u8, 255u8, 255u8]); // (0,0,1) in [0,255] 
+                data.extend_from_slice(&[128u8, 128u8, 255u8, 255u8]); // (0,0,1) in [0,255]
             } else {
                 // Perturbed normal (slightly tilted)
                 data.extend_from_slice(&[148u8, 148u8, 235u8, 255u8]); // Slightly off-normal

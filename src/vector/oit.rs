@@ -4,9 +4,9 @@
 #[cfg(feature = "weighted-oit")]
 use crate::error::RenderError;
 #[cfg(feature = "weighted-oit")]
-use wgpu::util::DeviceExt;
-#[cfg(feature = "weighted-oit")]
 use bytemuck::{Pod, Zeroable};
+#[cfg(feature = "weighted-oit")]
+use wgpu::util::DeviceExt;
 
 #[cfg(feature = "weighted-oit")]
 /// OIT rendering state and resources
@@ -15,20 +15,20 @@ pub struct WeightedOIT {
     color_buffer: wgpu::Texture,
     reveal_buffer: wgpu::Texture,
     depth_buffer: wgpu::Texture,
-    
+
     // Render targets
     color_view: wgpu::TextureView,
     reveal_view: wgpu::TextureView,
     depth_view: wgpu::TextureView,
-    
+
     // Compose pipeline for final blend
     compose_pipeline: wgpu::RenderPipeline,
     compose_bind_group: wgpu::BindGroup,
-    
+
     // Screen dimensions
     width: u32,
     height: u32,
-    
+
     // AC2: Store target format for resize
     target_format: wgpu::TextureFormat,
 }
@@ -38,10 +38,10 @@ pub struct WeightedOIT {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct OITUniforms {
-    alpha_threshold: f32,      // Alpha cutoff for OIT
-    weight_bias: f32,          // Weight function bias
-    weight_scale: f32,         // Weight function scale  
-    depth_range: f32,          // Depth normalization range
+    alpha_threshold: f32, // Alpha cutoff for OIT
+    weight_bias: f32,     // Weight function bias
+    weight_scale: f32,    // Weight function scale
+    depth_range: f32,     // Depth normalization range
 }
 
 #[cfg(feature = "weighted-oit")]
@@ -55,7 +55,11 @@ impl WeightedOIT {
         // Create accumulation textures
         let color_buffer = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("vf.Vector.OIT.ColorAccum"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -66,7 +70,11 @@ impl WeightedOIT {
 
         let reveal_buffer = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("vf.Vector.OIT.RevealAccum"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -77,7 +85,11 @@ impl WeightedOIT {
 
         let depth_buffer = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("vf.Vector.OIT.Depth"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -100,40 +112,41 @@ impl WeightedOIT {
         });
 
         // Create compose bind group layout
-        let compose_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("vf.Vector.OIT.ComposeBindGroupLayout"),
-            entries: &[
-                // Color accumulation texture
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+        let compose_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("vf.Vector.OIT.ComposeBindGroupLayout"),
+                entries: &[
+                    // Color accumulation texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                // Reveal accumulation texture
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    // Reveal accumulation texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                // Sampler
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+                    // Sampler
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
 
         // Create sampler
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -168,11 +181,12 @@ impl WeightedOIT {
         });
 
         // Create compose pipeline layout
-        let compose_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("vf.Vector.OIT.ComposePipelineLayout"),
-            bind_group_layouts: &[&compose_bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let compose_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("vf.Vector.OIT.ComposePipelineLayout"),
+                bind_group_layouts: &[&compose_bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         // Create compose render pipeline
         let compose_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -254,7 +268,12 @@ impl WeightedOIT {
                     view: &self.reveal_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 1.0, g: 0.0, b: 0.0, a: 0.0 }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 1.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 0.0,
+                        }),
                         store: wgpu::StoreOp::Store,
                     },
                 }),
@@ -273,13 +292,10 @@ impl WeightedOIT {
     }
 
     /// Compose final image from accumulation buffers
-    pub fn compose<'pass>(
-        &'pass self,
-        render_pass: &mut wgpu::RenderPass<'pass>,
-    ) {
+    pub fn compose<'pass>(&'pass self, render_pass: &mut wgpu::RenderPass<'pass>) {
         render_pass.set_pipeline(&self.compose_pipeline);
         render_pass.set_bind_group(0, &self.compose_bind_group, &[]);
-        
+
         // Draw fullscreen triangle
         render_pass.draw(0..3, 0..1);
     }
@@ -419,7 +435,7 @@ impl WeightedOIT {
         _target_format: wgpu::TextureFormat,
     ) -> Result<Self, RenderError> {
         Err(RenderError::Render(
-            "Weighted OIT feature not enabled. Build with --features weighted-oit".to_string()
+            "Weighted OIT feature not enabled. Build with --features weighted-oit".to_string(),
         ))
     }
 }
@@ -439,7 +455,7 @@ mod tests {
     fn test_oit_feature_detection() {
         #[cfg(feature = "weighted-oit")]
         assert!(is_weighted_oit_enabled());
-        
+
         #[cfg(not(feature = "weighted-oit"))]
         assert!(!is_weighted_oit_enabled());
     }
@@ -449,16 +465,16 @@ mod tests {
     fn test_weight_calculation() {
         // Test weight function behavior
         let alpha = 0.5;
-        
+
         // Near depth should have high weight
         let near_weight = WeightedOIT::calculate_weight(1.0, alpha);
         assert!(near_weight > 0.0);
-        
+
         // Far depth should have lower weight
         let far_weight = WeightedOIT::calculate_weight(1000.0, alpha);
         assert!(far_weight > 0.0);
         assert!(near_weight > far_weight);
-        
+
         // Zero alpha should give zero weight
         let zero_weight = WeightedOIT::calculate_weight(1.0, 0.0);
         assert_eq!(zero_weight, 0.0);
@@ -468,12 +484,7 @@ mod tests {
     #[test]
     fn test_oit_creation() {
         let device = crate::gpu::create_device_for_test();
-        let oit = WeightedOIT::new(
-            &device,
-            512,
-            512,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        );
+        let oit = WeightedOIT::new(&device, 512, 512, wgpu::TextureFormat::Rgba8UnormSrgb);
         assert!(oit.is_ok());
     }
 
@@ -481,12 +492,7 @@ mod tests {
     #[test]
     fn test_oit_disabled() {
         let device = crate::gpu::create_device_for_test();
-        let oit = WeightedOIT::new(
-            &device,
-            512,
-            512,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        );
+        let oit = WeightedOIT::new(&device, 512, 512, wgpu::TextureFormat::Rgba8UnormSrgb);
         assert!(oit.is_err());
         assert!(oit.unwrap_err().to_string().contains("not enabled"));
     }
