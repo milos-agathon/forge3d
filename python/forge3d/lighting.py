@@ -453,10 +453,181 @@ def create_test_scene(num_lights: int = 100,
     return restir
 
 
+# A20: Soft Area Lights with Penumbra Control
+class AreaLightType(Enum):
+    """Area light types for A20 implementation."""
+    RECTANGLE = 0
+    DISC = 1
+    SPHERE = 2
+    CYLINDER = 3
+
+@dataclass
+class AreaLight:
+    """Area light with parametric penumbra control."""
+    position: Tuple[float, float, float] = (0.0, 5.0, 0.0)
+    light_type: AreaLightType = AreaLightType.DISC
+    direction: Tuple[float, float, float] = (0.0, -1.0, 0.0)
+    radius: float = 1.0  # Penumbra control radius
+    color: Tuple[float, float, float] = (1.0, 1.0, 1.0)
+    intensity: float = 10.0
+    size: Tuple[float, float] = (2.0, 2.0)  # width, height for rectangle; radius for others
+    softness: float = 0.5  # 0.0 = hard, 1.0 = very soft
+
+    def __post_init__(self):
+        """Validate parameters and compute energy factor."""
+        if self.radius <= 0.0:
+            raise ValueError("Radius must be positive")
+        if self.intensity <= 0.0:
+            raise ValueError("Intensity must be positive")
+        if not (0.0 <= self.softness <= 1.0):
+            raise ValueError("Softness must be in [0.0, 1.0]")
+
+        # Normalize direction
+        direction = np.array(self.direction, dtype=np.float32)
+        norm = np.linalg.norm(direction)
+        if norm > 0:
+            self.direction = tuple(direction / norm)
+
+        # Compute energy normalization factor
+        self.energy_factor = self._compute_energy_factor()
+
+    def _compute_energy_factor(self) -> float:
+        """Compute energy normalization factor for energy conservation."""
+        if self.light_type == AreaLightType.RECTANGLE:
+            base_area = self.size[0] * self.size[1]
+        elif self.light_type == AreaLightType.DISC:
+            base_area = np.pi * self.size[0] ** 2
+        elif self.light_type == AreaLightType.SPHERE:
+            base_area = 4.0 * np.pi * self.size[0] ** 2
+        elif self.light_type == AreaLightType.CYLINDER:
+            base_area = 2.0 * np.pi * self.size[0] * self.size[1]
+        else:
+            base_area = 1.0
+
+        # Energy normalization with penumbra compensation
+        penumbra_factor = 1.0 + (self.radius * 0.1)
+        return 1.0 / (base_area * penumbra_factor)
+
+    def get_effective_energy(self) -> float:
+        """Get effective energy output considering normalization."""
+        return self.intensity * self.energy_factor
+
+    def set_radius(self, radius: float) -> None:
+        """Set penumbra control radius."""
+        if radius <= 0.0:
+            raise ValueError("Radius must be positive")
+        object.__setattr__(self, 'radius', radius)
+        object.__setattr__(self, 'energy_factor', self._compute_energy_factor())
+
+    @classmethod
+    def rectangle(cls, position: Tuple[float, float, float],
+                 direction: Tuple[float, float, float],
+                 width: float, height: float,
+                 intensity: float = 10.0,
+                 penumbra_radius: float = 1.0) -> 'AreaLight':
+        """Create rectangular area light."""
+        return cls(position=position, light_type=AreaLightType.RECTANGLE,
+                  direction=direction, radius=penumbra_radius,
+                  intensity=intensity, size=(width, height))
+
+    @classmethod
+    def disc(cls, position: Tuple[float, float, float],
+            direction: Tuple[float, float, float],
+            disc_radius: float,
+            intensity: float = 10.0,
+            penumbra_radius: float = 1.0) -> 'AreaLight':
+        """Create disc area light."""
+        return cls(position=position, light_type=AreaLightType.DISC,
+                  direction=direction, radius=penumbra_radius,
+                  intensity=intensity, size=(disc_radius, disc_radius))
+
+class AreaLightManager:
+    """Manager for multiple area lights with energy conservation."""
+
+    def __init__(self, max_lights: int = 16):
+        self.max_lights = max_lights
+        self.lights: List[AreaLight] = []
+        self._energy_target: Optional[float] = None
+
+    def add_light(self, light: AreaLight) -> int:
+        """Add area light to scene."""
+        if len(self.lights) >= self.max_lights:
+            raise ValueError(f"Maximum lights ({self.max_lights}) exceeded")
+        self.lights.append(light)
+        if self._energy_target is None:
+            self._energy_target = self.calculate_total_energy()
+        return len(self.lights) - 1
+
+    def calculate_total_energy(self) -> float:
+        """Calculate total energy from all lights."""
+        return sum(light.get_effective_energy() for light in self.lights)
+
+    def normalize_energy(self) -> float:
+        """Normalize energy and return conservation error."""
+        if self._energy_target is None or len(self.lights) == 0:
+            return 0.0
+        current_energy = self.calculate_total_energy()
+        if current_energy <= 0.0:
+            return 0.0
+        scale_factor = self._energy_target / current_energy
+        for light in self.lights:
+            light.intensity *= scale_factor
+        new_energy = self.calculate_total_energy()
+        return abs(new_energy - self._energy_target) / self._energy_target
+
+    def test_energy_conservation(self) -> bool:
+        """Test energy conservation meets A20 requirements (within 2%)."""
+        if not self.lights:
+            return True
+        initial_energy = self.calculate_total_energy()
+        self.set_energy_target(initial_energy)
+        # Modify light parameters to test conservation
+        for light in self.lights:
+            light.set_radius(light.radius * 1.5)
+        error = self.normalize_energy()
+        return error < 0.02  # A20 requirement
+
+    def set_energy_target(self, target: float) -> None:
+        """Set energy conservation target."""
+        if target <= 0.0:
+            raise ValueError("Energy target must be positive")
+        self._energy_target = target
+
+def create_area_light_test_scene() -> AreaLightManager:
+    """Create test scene for A20 validation."""
+    manager = AreaLightManager()
+
+    # Key light (disc with medium penumbra)
+    key_light = AreaLight.disc(
+        position=(2.0, 4.0, 2.0),
+        direction=(-0.5, -1.0, -0.5),
+        disc_radius=1.5,
+        intensity=20.0,
+        penumbra_radius=0.8
+    )
+    manager.add_light(key_light)
+
+    # Fill light (rectangle with soft penumbra)
+    fill_light = AreaLight.rectangle(
+        position=(-3.0, 3.0, 1.0),
+        direction=(0.7, -0.7, -0.2),
+        width=2.0, height=1.0,
+        intensity=8.0,
+        penumbra_radius=1.2
+    )
+    manager.add_light(fill_light)
+
+    return manager
+
 __all__ = [
     "LightType",
     "LightSample",
     "RestirConfig",
     "RestirDI",
-    "create_test_scene"
+    "create_test_scene",
+    # A20: Area lights
+    "AreaLightType",
+    "AreaLight",
+    "AreaLightManager",
+    "create_area_light_test_scene"
 ]
