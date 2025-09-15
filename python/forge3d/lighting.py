@@ -1,7 +1,11 @@
 # python/forge3d/lighting.py
-# ReSTIR DI (Reservoir-based Spatio-Temporal Importance Resampling) Python bindings
+# ReSTIR DI (Reservoir-based Spatio-Temporal Importance Resampling) Python bindings and basic media utilities
 
-"""ReSTIR DI lighting system for many-light scenarios with temporal and spatial reuse."""
+"""ReSTIR DI lighting system with basic participating media helpers (HG phase, height fog).
+
+These media utilities exist to satisfy Workstream A A11 deliverables with minimal, testable CPU-side functionality.
+
+RELEVANT FILES:src/shaders/lighting_media.wgsl,tests/test_media_hg.py,tests/test_media_fog.py"""
 
 from __future__ import annotations
 
@@ -14,6 +18,98 @@ try:
     from . import _forge3d  # Rust bindings
 except ImportError:
     _forge3d = None
+
+_PI = 3.14159265358979323846
+
+
+def _to_float_array(x: Union[float, np.ndarray]) -> np.ndarray:
+    """Convert input to float32 numpy array without copying when possible.
+
+    Keeps shapes intact; scalars become shape=().
+    """
+    arr = np.asarray(x, dtype=np.float32)
+    return arr
+
+
+def hg_phase(cos_theta: Union[float, np.ndarray], g: float) -> np.ndarray:
+    """Henyey–Greenstein phase function.
+
+    Args:
+        cos_theta: Cosine of scattering angle (dot(wo, wi)).
+        g: Asymmetry parameter in [-0.999, 0.999].
+
+    Returns:
+        Phase value with integral over sphere equal to 1.
+    """
+    c = _to_float_array(cos_theta)
+    g = float(np.clip(g, -0.999, 0.999))
+    one_minus_g2 = 1.0 - g * g
+    denom = (1.0 + g * g - 2.0 * g * c)
+    # Avoid tiny negatives from FP error before pow
+    denom = np.maximum(denom, 1e-8)
+    val = (one_minus_g2) / (4.0 * _PI * np.power(denom, 1.5, dtype=np.float32))
+    return val.astype(np.float32)
+
+
+def sample_hg(u1: Union[float, np.ndarray], u2: Union[float, np.ndarray], g: float) -> Tuple[np.ndarray, np.ndarray]:
+    """Sample direction from HG phase and return (dir, pdf).
+
+    The returned direction is in local coordinates where the reference direction is +Z.
+    To orient toward a world-space direction, apply an orthonormal basis transform.
+    """
+    u1 = _to_float_array(u1)
+    u2 = _to_float_array(u2)
+    g = float(np.clip(g, -0.999, 0.999))
+
+    if abs(g) < 1e-4:
+        cos_theta = 1.0 - 2.0 * u1
+    else:
+        sq = (1.0 - g * g) / (1.0 - g + 2.0 * g * u1)
+        cos_theta = (1.0 + g * g - sq * sq) / (2.0 * g)
+        cos_theta = np.clip(cos_theta, -1.0, 1.0)
+
+    sin_theta = np.sqrt(np.maximum(0.0, 1.0 - cos_theta * cos_theta)).astype(np.float32)
+    phi = (2.0 * _PI * u2).astype(np.float32)
+    dir_local = np.stack([
+        sin_theta * np.cos(phi, dtype=np.float32),
+        sin_theta * np.sin(phi, dtype=np.float32),
+        cos_theta.astype(np.float32),
+    ], axis=-1)
+
+    pdf = hg_phase(cos_theta, g)
+    return dir_local, pdf
+
+
+def height_fog_factor(depth: Union[float, np.ndarray], *, density: float = 0.02) -> np.ndarray:
+    """Simple homogeneous medium transmittance-to-fog factor along a ray.
+
+    Args:
+        depth: Distance along the camera ray.
+        density: Extinction coefficient (sigma_t). Units inverse to distance.
+
+    Returns:
+        Fog blend factor in [0, 1]: 0 near, approaching 1 with distance.
+    """
+    d = _to_float_array(depth)
+    sigma_t = float(max(density, 0.0))
+    T = np.exp(-sigma_t * np.clip(d, 0.0, np.inf), dtype=np.float32)
+    fog = (1.0 - T).astype(np.float32)
+    return np.clip(fog, 0.0, 1.0)
+
+
+def single_scatter_estimate(depth: Union[float, np.ndarray], *, sun_intensity: float = 1.0, density: float = 0.02, g: float = 0.0) -> np.ndarray:
+    """Very small single-scatter estimate assuming homogeneous medium and sun back-light.
+
+    This provides a stable, testable CPU reference for A11 acceptance.
+    It is not a full volumetric integrator and is meant for validation only.
+    """
+    d = _to_float_array(depth)
+    g = float(np.clip(g, -0.999, 0.999))
+    sigma_t = float(max(density, 0.0))
+    # Use phase at cos_theta ~ 1 (back-lit shafts proxy)
+    p = hg_phase(1.0, g)
+    # Single scatter with uniform lighting along segment: L ≈ I * p * (1 - exp(-sigma_t * d))
+    return (sun_intensity * p * (1.0 - np.exp(-sigma_t * np.clip(d, 0.0, np.inf)))).astype(np.float32)
 
 
 class LightType(Enum):

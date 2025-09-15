@@ -282,3 +282,11 @@ mesh_render_*.png
 out/
 
 diag_out/
+# ./ .gitignore
+# Ignore generated outputs for examples and tests.
+# Exists to keep artifacts out of version control per task instructions.
+# RELEVANT FILES:examples/textured_sphere.py,examples/textured_quad_gltf_like.py,README.md
+
+out/
+reports/
+examples/output/
