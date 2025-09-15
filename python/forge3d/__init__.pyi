@@ -91,3 +91,13 @@ def run_benchmark(
     colormap: str = ...,
     seed: int = ...,
 ) -> Dict[str, Any]: ...
+
+# A13: Path guiding (Python utility)
+class OnlineGuidingGrid:
+    width: int
+    height: int
+    bins_per_cell: int
+    def __init__(self, width: int, height: int, bins_per_cell: int = ...) -> None: ...
+    def update(self, x: int, y: int, bin_index: int, weight: float = ...) -> None: ...
+    def pdf(self, x: int, y: int) -> np.ndarray: ...  # (B,) float32, sum=1
+    def dims(self) -> Tuple[int, int, int]: ...

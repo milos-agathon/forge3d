@@ -290,3 +290,8 @@ diag_out/
 out/
 reports/
 examples/output/
+
+# forge3d outputs (A13) 
+out/
+diag_out/
+
