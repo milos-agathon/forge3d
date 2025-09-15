@@ -4,6 +4,7 @@
 # RELEVANT FILES:python/forge3d/path_tracing.py,python/forge3d/materials.py,python/forge3d/textures.py
 
 from .path_tracing import PathTracer, make_camera
+from .guiding import OnlineGuidingGrid
 from .materials import PbrMaterial
 from .textures import load_texture, build_pbr_textures
 from .sdf import (
@@ -30,5 +31,6 @@ __all__ = [
     "create_box",
     "create_simple_scene",
     "render_simple_scene",
+    # Path guiding (A13)
+    "OnlineGuidingGrid",
 ]
-

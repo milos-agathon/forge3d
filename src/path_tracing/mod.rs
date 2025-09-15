@@ -9,6 +9,7 @@ pub mod aov;
 pub mod compute;
 pub mod hybrid_compute;
 pub mod io;
+pub mod guiding;
 pub mod restir;
 pub mod wavefront;
 
