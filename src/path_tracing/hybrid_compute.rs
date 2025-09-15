@@ -12,7 +12,7 @@ use wgpu::util::DeviceExt;
 use crate::error::RenderError;
 use crate::gpu::{align_copy_bpr, ctx};
 use crate::path_tracing::aov::{AovFrames, AovKind};
-use crate::path_tracing::compute::{Uniforms, Sphere};
+use crate::path_tracing::compute::{Sphere, Uniforms};
 use crate::sdf::HybridScene;
 
 /// Additional uniforms for hybrid traversal
@@ -95,12 +95,12 @@ pub struct HybridPathTracer {
 
 /// Bind group layouts for hybrid path tracer
 struct HybridBindGroupLayouts {
-    uniforms: wgpu::BindGroupLayout,      // Group 0: camera uniforms
-    scene: wgpu::BindGroupLayout,         // Group 1: spheres + legacy mesh buffers
-    accum: wgpu::BindGroupLayout,         // Group 2: accumulation buffer
-    output: wgpu::BindGroupLayout,        // Group 3: primary output texture
-    aov: wgpu::BindGroupLayout,           // Group 4: AOV textures
-    hybrid: wgpu::BindGroupLayout,        // Group 5: hybrid scene data
+    uniforms: wgpu::BindGroupLayout, // Group 0: camera uniforms
+    scene: wgpu::BindGroupLayout,    // Group 1: spheres + legacy mesh buffers
+    accum: wgpu::BindGroupLayout,    // Group 2: accumulation buffer
+    output: wgpu::BindGroupLayout,   // Group 3: primary output texture
+    aov: wgpu::BindGroupLayout,      // Group 4: AOV textures
+    hybrid: wgpu::BindGroupLayout,   // Group 5: hybrid scene data
 }
 
 impl HybridPathTracer {
@@ -176,7 +176,7 @@ impl HybridPathTracer {
                 Some(bvh) => match &bvh.backend {
                     crate::accel::BvhBackend::Cpu(cpu_data) => cpu_data.nodes.len() as u32,
                     crate::accel::BvhBackend::Gpu(gpu_data) => gpu_data.node_count,
-                }
+                },
                 None => 0,
             },
             traversal_mode: params.traversal_mode as u32,
@@ -356,24 +356,34 @@ impl HybridPathTracer {
         });
 
         // Create hybrid bind group (Group 5)
-        let mut hybrid_entries = vec![
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: hybrid_ubo.as_entire_binding(),
-            },
-        ];
+        let mut hybrid_entries = vec![wgpu::BindGroupEntry {
+            binding: 0,
+            resource: hybrid_ubo.as_entire_binding(),
+        }];
 
         // Add SDF buffer entries
-        hybrid_entries.extend(hybrid_scene.get_sdf_bind_entries().into_iter().enumerate().map(|(i, mut entry)| {
-            entry.binding = (i + 1) as u32; // Bindings 1-2 for SDF
-            entry
-        }));
+        hybrid_entries.extend(
+            hybrid_scene
+                .get_sdf_bind_entries()
+                .into_iter()
+                .enumerate()
+                .map(|(i, mut entry)| {
+                    entry.binding = (i + 1) as u32; // Bindings 1-2 for SDF
+                    entry
+                }),
+        );
 
         // Add mesh buffer entries
-        hybrid_entries.extend(hybrid_scene.get_mesh_bind_entries().into_iter().enumerate().map(|(i, mut entry)| {
-            entry.binding = (i + 3) as u32; // Bindings 3-5 for mesh
-            entry
-        }));
+        hybrid_entries.extend(
+            hybrid_scene
+                .get_mesh_bind_entries()
+                .into_iter()
+                .enumerate()
+                .map(|(i, mut entry)| {
+                    entry.binding = (i + 3) as u32; // Bindings 3-5 for mesh
+                    entry
+                }),
+        );
 
         let bg5 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hybrid-pt-bg5"),

@@ -1,5 +1,5 @@
-<task id="ws-A17-auto" version="1.0">
-  <title>Workstream A · Task A17 — Implement per roadmap2.csv (derive deliverables → code/tests/docs)</title>
+<task id="ws-A19-auto" version="1.0">
+  <title>Workstream A · Task A19 — Implement per roadmap2.csv (derive deliverables → code/tests/docs)</title>
 
   <role>
     You are OpenAI Codex CLI in <b>Verification → Implementation Mode</b>, acting as a senior graphics/runtime engineer.
@@ -17,11 +17,11 @@
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
     <safety>
-      - Make only the minimal, additive changes needed to satisfy the A17 row’s Deliverables and Acceptance Criteria.
-      - Preserve existing public APIs unless A17 explicitly calls out a breaking change; prefer opt-in flags/parameters.
-      - Never delete custom user code; for generated artifacts, prefer adding .gitignore entries.
+      - Make only the minimal, additive changes required to satisfy A19’s Deliverables and Acceptance Criteria.
+      - Preserve existing public APIs unless A19 explicitly calls for a breaking change; prefer opt-in flags/parameters.
+      - Never delete custom user code; for generated artifacts, prefer adding .gitignore entries instead of removing tracked files.
       - If a required tool is missing, mark the step SKIPPED with the exact command to run locally.
-      - If the A17 row is missing/ambiguous, reply <b>UNCERTAIN</b> listing the exact headers/rows/fields needed, then STOP with no edits.
+      - If the A19 row is missing/ambiguous, reply <b>UNCERTAIN</b> listing the exact headers/rows/fields needed, then STOP with no edits.
     </safety>
     <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz, out, diag_out</exclusions>
   </constraints>
@@ -32,12 +32,12 @@
     <workstreamSelector>
       <![CDATA[
       Workstream ID: A
-      Task ID: A17
+      Task ID: A19
       ]]>
     </workstreamSelector>
   </inputs>
 
-  <!-- 1) Verify A17 exists and extract Title/Deliverables/Acceptance -->
+  <!-- 1) Verify A19 exists and extract Title/Deliverables/Acceptance -->
   <prechecks>
     <command>
       <![CDATA[
@@ -51,12 +51,12 @@ try:
       wid=(r.get("Workstream ID","") or "").strip().lower()
       tid=(r.get("Task ID","") or "").strip().lower()
       ttl=(r.get("Task Title","") or "").strip().lower()
-      if wid=="a" and (tid=="a17" or "a17" in ttl):
+      if wid=="a" and (tid=="a19" or "a19" in ttl):
         row=r; break
 except FileNotFoundError:
   print("UNCERTAIN: roadmap2.csv not found", file=sys.stderr); sys.exit(2)
 if not row:
-  print("UNCERTAIN: A17 not found in roadmap2.csv (Workstream A). Provide the exact row with headers.", file=sys.stderr); sys.exit(3)
+  print("UNCERTAIN: A19 not found in roadmap2.csv (Workstream A). Provide the exact row with headers.", file=sys.stderr); sys.exit(3)
 meta={
   "Title": (row.get("Task Title","") or "").strip(),
   "Rationale": (row.get("Rationale","") or "").strip(),
@@ -68,8 +68,8 @@ meta={
   "Dependencies": (row.get("Dependencies","") or "").strip(),
   "Risks": (row.get("Risks/Mitigations","") or "").strip()
 }
-print("WORKSTREAM_TASK_FOUND:A17")
-print("A17_META:"+json.dumps(meta, ensure_ascii=False))
+print("WORKSTREAM_TASK_FOUND:A19")
+print("A19_META:"+json.dumps(meta, ensure_ascii=False))
 PY
       ]]>
     </command>
@@ -78,50 +78,49 @@ PY
   <design>
     <mappingRules>
       <![CDATA[
-Turn A17 “Deliverables” text into concrete artifacts using these keyword→path rules (use exact filenames if the CSV specifies them; otherwise apply heuristics):
+Turn A19 “Deliverables” text into concrete artifacts using these keyword→path rules (use exact filenames if the CSV specifies them; otherwise apply heuristics):
 
-Core rendering:
-- "WGSL", "compute", "shader", "kernel", "AOV" → src/shaders/<feature>.wgsl (+ header docs: bind groups/bindings, formats).
-- "BVH", "accel", "traversal" → src/accel/*.rs, src/path_tracing/accel.rs (+ WGSL hooks).
-- "intersection", "ray-triangle", "ray-sphere" → src/path_tracing/intersect.rs and/or src/shaders/pt_intersect_*.wgsl.
-- "materials", "BSDF", "PBR", "BRDF", "GGX", "clearcoat", "sheen" → src/pbr/*.rs; shaders/pbr_*.wgsl; python/forge3d/pbr.py.
-- "sampling", "MIS", "NEE", "alias", "reservoir", "light tree" → src/lighting/*.rs; shaders/lighting_*.wgsl; python/forge3d/lighting.py.
-- "denoise", "SVGF", "temporal", "TAA" → src/denoise/*; shaders/svgf_*.wgsl; python/forge3d/path_tracing.py (flags).
+Core rendering & kernels:
+- "WGSL", "compute", "shader", "kernel", "AOV" → src/shaders/<feature>.wgsl (add header docs: bind groups/bindings, formats).
+- "BVH", "accel", "traversal" → src/accel/*.rs; src/path_tracing/accel.rs (+ WGSL hooks).
+- "intersection", "ray-triangle", "ray-sphere", "ray-aabb" → src/path_tracing/intersect.rs; src/shaders/pt_intersect_*.wgsl.
+- "materials", "BSDF", "PBR", "GGX", "clearcoat", "sheen" → src/pbr/*.rs; shaders/pbr_*.wgsl; python/forge3d/pbr.py.
+- "sampling", "NEE", "MIS", "alias table", "reservoir", "light tree" → src/lighting/*.rs; shaders/lighting_*.wgsl; python/forge3d/lighting.py.
+- "denoise", "SVGF", "temporal", "TAA", "spatial" → src/denoise/*; shaders/svgf_*.wgsl; python/forge3d/path_tracing.py (flags).
 - "wavefront", "queues", "compaction" → src/path_tracing/wavefront/**/*.rs; shaders/pt_*.wgsl.
 
-Scene/content:
+Scene, IO & content:
 - "camera", "DOF", "thin lens", "motion vectors" → src/camera/*.rs; shaders/camera_*.wgsl; python/forge3d/camera.py.
-- "textures", "image", "mipmap", "sampler" → src/textures/*.rs; shaders/texture_*.wgsl; python/forge3d/textures.py.
+- "textures", "image", "mipmap", "sampler", "image io" → src/textures/*.rs; shaders/texture_*.wgsl; python/forge3d/textures.py.
 - "mesh", "OBJ", "PLY", "glTF", "USD", "tangents" → src/mesh/*.rs; python/forge3d/mesh_io.py.
 - "terrain", "heightmap", "tile", "geospatial", "map" → src/terrain/*.rs; python/forge3d/terrain.py; shaders/terrain_*.wgsl.
-- "graphs", "layouts", "instancing" → src/scene/graph.rs; python/forge3d/graph.py; shaders/instancing_*.wgsl.
+- "graphs", "layouts", "instancing", "colorscale" → src/scene/graph.rs; python/forge3d/graph.py; shaders/instancing_*.wgsl.
 
-Pipelines & UX:
+Pipelines, docs & UX:
 - "tonemap", "ACES", "Reinhard", "exposure" → src/post/tonemap.rs; src/shaders/tonemap.wgsl; python bridge.
 - "examples" → examples/<feature>_*.py (write to out/; ensure .gitignore ignores out/).
 - "docs" → README.md + docs/api/<feature>.md (if Sphinx present).
 - "Python API" → python/forge3d/<feature>.py (public class/functions + type hints).
 
 Tests:
-- "tests", "validation", "golden" → tests/<feature>_*.rs or tests/test_<feature>*.py (GPU tests @skip if no adapter).
-
+- "tests", "validation", "golden", "bench" → tests/<feature>_*.rs or tests/test_<feature>*.py (GPU tests @skip if no adapter).
 If a deliverable is ambiguous or lacks keywords, mark UNCERTAIN for that bullet with the minimal clarification needed.
       ]]>
     </mappingRules>
   </design>
 
   <acceptanceCriteria>
-    <ac id="AC-0">A17 row is present; meta printed as A17_META JSON.</ac>
-    <ac id="AC-1">Every concrete deliverable item from A17’s Deliverables cell exists as code/docs/tests artifacts with appropriate header/inline docs (bind groups for WGSL, public APIs for Python/Rust, type hints for Python).</ac>
-    <ac id="AC-2">Public Python API exposes the functions/classes required by A17’s Acceptance Criteria; deterministic behavior documented for frames=1 with fixed seed where applicable.</ac>
-    <ac id="AC-3">Unit/integration tests exist for all implemented deliverables; GPU-dependent tests are skipped when no compatible adapter is available; failure modes are covered.</ac>
+    <ac id="AC-0">A19 row is present; meta printed as A19_META JSON.</ac>
+    <ac id="AC-1">Every concrete deliverable item from A19’s Deliverables cell exists as code/docs/tests artifacts with appropriate header/inline docs (bind groups for WGSL, public APIs for Python/Rust, type hints for Python).</ac>
+    <ac id="AC-2">Public Python API exposes the functions/classes required by A19’s Acceptance Criteria; deterministic behavior documented for frames=1 with fixed seed where applicable.</ac>
+    <ac id="AC-3">Unit/integration tests exist for all implemented deliverables; GPU-dependent tests are skipped when no compatible adapter is available; at least one failure/validation path is covered.</ac>
     <ac id="AC-4">Docs updated: README + docs/api/<feature>.md (if Sphinx present) clearly describing usage, parameters, conventions, and limitations; examples added if referenced.</ac>
     <ac id="AC-5">Validation run passes: fmt, clippy -D warnings, cargo test, pytest, sphinx-build (if docs), maturin build; CI ensured if missing.</ac>
   </acceptanceCriteria>
 
   <changes>
     <createOrModify>
-      <!-- Actual files depend on A17 deliverables; these directories are typical targets -->
+      <!-- Final paths depend on A19 deliverables; these directories are typical targets -->
       <file path="src/shaders/" kind="modify-or-new"/>
       <file path="src/path_tracing/" kind="modify-or-new"/>
       <file path="src/accel/" kind="modify-or-new-optional"/>
@@ -145,8 +144,8 @@ If a deliverable is ambiguous or lacks keywords, mark UNCERTAIN for that bullet 
   <tests>
     <templates>
       <![CDATA[
-- GPU feature tests (pytest): skip if no adapter; assert shapes/dtypes; determinism for frames=1 with fixed seed; numeric assertions aligned with A17 AC (e.g., variance reduction, pdf normalization, bounds checks).
-- Rust unit tests: struct packing/layout (assert_eq!(size_of::<T>(), ...)), math helpers, error handling (no panics across FFI).
+- GPU feature tests (pytest): skip if no adapter; assert shapes/dtypes; determinism for frames=1 with fixed seed; numeric assertions aligned with A19 Acceptance Criteria.
+- Rust unit tests: struct packing/layout (assert_eq!(size_of::<T>(), ...)), math helpers, and error handling (no panics across FFI).
 - Docs build test: sphinx-build succeeds (or SKIPPED if docs absent).
 - Example smoke test (optional): script runs headless and writes to out/ (gitignored).
       ]]>
@@ -184,11 +183,11 @@ If a deliverable is ambiguous or lacks keywords, mark UNCERTAIN for that bullet 
 
   <execution>
     <steps>
-      <step>Create feature branch: <code>git checkout -b ws-A17-implementation</code></step>
-      <step>Parse A17_META into bullet items (split by newlines/semicolons). Save mapping to <code>reports/a17_plan.json</code> (deliverable → files/symbols) using the mapping rules.</step>
+      <step>Create feature branch: <code>git checkout -b ws-A19-implementation</code></step>
+      <step>Parse A19_META into bullet items (split by newlines/semicolons). Save mapping to <code>reports/a19_plan.json</code> (deliverable → files/symbols) using the mapping rules.</step>
       <step>For each mapped deliverable:
         <ul>
-          <li>Implement minimal, correct code in WGSL/Rust/Python as indicated by A17 Deliverables and Acceptance Criteria.</li>
+          <li>Implement minimal, correct code in WGSL/Rust/Python as indicated by A19 Deliverables and Acceptance Criteria.</li>
           <li>Add/modify tests (Rust/Python) covering success paths and at least one failure/validation path tied to the AC.</li>
           <li>Update README and docs/api/&lt;feature&gt;.md (if Sphinx present) with usage, parameters, conventions, and limitations.</li>
           <li>If examples requested: add example(s) in <code>examples/</code>, writing outputs to <code>out/</code> (ensure .gitignore ignores it).</li>
@@ -196,22 +195,22 @@ If a deliverable is ambiguous or lacks keywords, mark UNCERTAIN for that bullet 
       </step>
       <step>Append <code>.gitignore</code> entries for out/, diag_out/, and build artifacts if needed.</step>
       <step>Run the Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent and record the exact command.</step>
-      <step>Create <code>PR_BODY.md</code> summarizing A17 implementation with references to files/lines and validation results; print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
+      <step>Create <code>PR_BODY.md</code> summarizing A19 implementation with references to files/lines and validation results; print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
     </steps>
   </execution>
 
   <completion>
     <print>
-      - reports/a17_plan.json
+      - reports/a19_plan.json
       - All created/modified source files per mapping (WGSL/Rust/Python)
       - tests/* for implemented features
-      - examples/* (if requested by A17)
+      - examples/* (if requested by A19)
       - README.md (updated)
       - docs/api/* (if Sphinx present)
       - PR_BODY.md
     </print>
     <fallback>
-      If A17 is not found or its Deliverables/Acceptance text is empty/ambiguous, respond <b>UNCERTAIN</b> listing the exact missing fields and STOP without changes.
+      If A19 is not found or its Deliverables/Acceptance text is empty/ambiguous, respond <b>UNCERTAIN</b> listing the exact missing fields and STOP without changes.
     </fallback>
   </completion>
 </task>

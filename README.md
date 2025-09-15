@@ -82,6 +82,27 @@ Example outputs should be written under `out/` which is gitignored.
 Docs:
 - `docs/user/datashader_interop.rst` (in ToC)
 
+## A19: Scene Cache (HQ Re-render)
+
+For high-quality offline/path-traced renders, enable the scene cache to reuse scene-dependent precomputations between identical re-renders.
+
+Example:
+
+```python
+import forge3d.path_tracing as pt
+
+W, H = 128, 96
+tr = pt.PathTracer()
+tr.enable_scene_cache(True)
+cam = pt.make_camera(origin=(0,0,3), look_at=(0,0,0), up=(0,1,0), fov_y=45, aspect=W/H, exposure=1.0)
+scene = {"meshes": 1, "materials": 2}
+img1 = tr.render_rgba(W, H, scene=scene, camera=cam, frames=24, seed=77)
+img2 = tr.render_rgba(W, H, scene=scene, camera=cam, frames=24, seed=77)
+# img2 reuses cached precomputations; images are identical
+```
+
+Use `reset_scene_cache()` to clear, and `cache_stats()` to inspect hits/misses.
+
 ## What's new in v0.13.0
 
 - Workstream U â€“ Basemaps & Tiles:

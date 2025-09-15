@@ -34,17 +34,17 @@
 //! let config = ImageImportConfig::default();
 //! let texture_info = import_image_to_texture(
 //!     device,
-//!     queue, 
+//!     queue,
 //!     "path/to/image.png",
 //!     config
 //! )?;
 //! ```
 
-use crate::error::{RenderError, RenderResult};
 use crate::core::memory_tracker::global_tracker;
-use std::path::Path;
+use crate::error::{RenderError, RenderResult};
 use std::fs::File;
 use std::io::BufReader;
+use std::path::Path;
 
 /// Configuration for external image import operations
 #[derive(Debug, Clone)]
@@ -111,12 +111,12 @@ impl ImageSourceFormat {
     pub fn name(self) -> &'static str {
         match self {
             ImageSourceFormat::PngRgba => "PNG RGBA",
-            ImageSourceFormat::PngRgb => "PNG RGB", 
+            ImageSourceFormat::PngRgb => "PNG RGB",
             ImageSourceFormat::PngGrayscale => "PNG Grayscale",
             ImageSourceFormat::JpegRgb => "JPEG RGB",
         }
     }
-    
+
     pub fn channels(self) -> u32 {
         match self {
             ImageSourceFormat::PngRgba => 4,
@@ -133,7 +133,7 @@ impl ImageSourceFormat {
 /// It decodes the image file and uploads it directly to a GPU texture with format conversion.
 ///
 /// # Arguments
-/// 
+///
 /// * `device` - WGPU device for texture creation
 /// * `queue` - WGPU queue for upload operations
 /// * `image_path` - Path to the image file (PNG or JPEG)
@@ -173,15 +173,18 @@ pub fn import_image_to_texture(
     config: ImageImportConfig,
 ) -> RenderResult<ImportedTextureInfo> {
     let path = image_path.as_ref();
-    
+
     // Validate path exists
     if !path.exists() {
-        return Err(RenderError::io(format!("Image file not found: {}", path.display())));
+        return Err(RenderError::io(format!(
+            "Image file not found: {}",
+            path.display()
+        )));
     }
-    
+
     // Detect format and decode image
     let (rgba_data, width, height, source_format) = decode_image_file(path, &config)?;
-    
+
     // Validate dimensions
     if width > config.max_dimension || height > config.max_dimension {
         return Err(RenderError::Upload(format!(
@@ -189,24 +192,24 @@ pub fn import_image_to_texture(
             width, height, config.max_dimension, config.max_dimension
         )));
     }
-    
+
     // Calculate memory requirements (approximate)
     let texture_size = (width as u64) * (height as u64) * 4; // RGBA8 = 4 bytes per pixel
-    // Optionally consult global metrics (not enforcing budget here)
+                                                             // Optionally consult global metrics (not enforcing budget here)
     let _metrics = global_tracker().get_metrics();
-    
+
     // Create texture
     let texture = create_texture_for_import(device, width, height, &config)?;
-    
+
     // Upload image data to texture
     upload_rgba_data_to_texture(queue, &texture, &rgba_data, width, height)?;
-    
+
     // Create texture view
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    
+
     // Track memory usage
     global_tracker().track_texture_allocation(width, height, config.target_format);
-    
+
     Ok(ImportedTextureInfo {
         texture,
         view,
@@ -225,16 +228,20 @@ fn decode_image_file(
 ) -> RenderResult<(Vec<u8>, u32, u32, ImageSourceFormat)> {
     // For this implementation, we'll simulate image decoding
     // In a real implementation, this would use image crates like `image` or `png`
-    
-    let extension = path.extension()
+
+    let extension = path
+        .extension()
         .and_then(|ext| ext.to_str())
         .map(|s| s.to_lowercase())
         .ok_or_else(|| RenderError::io("Cannot determine image format from file extension"))?;
-    
+
     match extension.as_str() {
         "png" => decode_png_file(path, config),
         "jpg" | "jpeg" => decode_jpeg_file(path, config),
-        _ => Err(RenderError::io(format!("Unsupported image format: {}", extension))),
+        _ => Err(RenderError::io(format!(
+            "Unsupported image format: {}",
+            extension
+        ))),
     }
 }
 
@@ -244,16 +251,14 @@ fn decode_png_file(
     _config: &ImageImportConfig,
 ) -> RenderResult<(Vec<u8>, u32, u32, ImageSourceFormat)> {
     // This is a simplified simulation - real implementation would use png crate
-    
+
     // Simulate reading file header to detect format
-    let _file = File::open(path)
-        .map_err(|e| RenderError::io(format!("Failed to open PNG file: {}", e)))?;
-    
+    let _file =
+        File::open(path).map_err(|e| RenderError::io(format!("Failed to open PNG file: {}", e)))?;
+
     // For simulation, create a test pattern based on filename
-    let filename = path.file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("test");
-    
+    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("test");
+
     let (width, height) = if filename.contains("large") {
         (512, 512)
     } else if filename.contains("small") {
@@ -261,7 +266,7 @@ fn decode_png_file(
     } else {
         (256, 256) // Default test size
     };
-    
+
     // Generate test RGBA data
     let mut rgba_data = Vec::with_capacity((width * height * 4) as usize);
     for y in 0..height {
@@ -273,7 +278,7 @@ fn decode_png_file(
             rgba_data.extend_from_slice(&[r, g, b, a]);
         }
     }
-    
+
     Ok((rgba_data, width, height, ImageSourceFormat::PngRgba))
 }
 
@@ -283,13 +288,13 @@ fn decode_jpeg_file(
     _config: &ImageImportConfig,
 ) -> RenderResult<(Vec<u8>, u32, u32, ImageSourceFormat)> {
     // This is a simplified simulation - real implementation would use jpeg crate
-    
+
     let _file = File::open(path)
         .map_err(|e| RenderError::io(format!("Failed to open JPEG file: {}", e)))?;
-    
+
     // For simulation, create a different test pattern for JPEG
     let (width, height) = (128, 128); // JPEG simulation size
-    
+
     // Generate test RGBA data (converted from RGB)
     let mut rgba_data = Vec::with_capacity((width * height * 4) as usize);
     for y in 0..height {
@@ -302,7 +307,7 @@ fn decode_jpeg_file(
             rgba_data.extend_from_slice(&[r, g, b, a]);
         }
     }
-    
+
     Ok((rgba_data, width, height, ImageSourceFormat::JpegRgb))
 }
 
@@ -318,13 +323,13 @@ fn create_texture_for_import(
         height,
         depth_or_array_layers: 1,
     };
-    
+
     let mip_level_count = if config.generate_mipmaps {
         size.max_mips(wgpu::TextureDimension::D2)
     } else {
         1
     };
-    
+
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: config.label.as_deref(),
         size,
@@ -335,7 +340,7 @@ fn create_texture_for_import(
         usage: config.usage,
         view_formats: &[],
     });
-    
+
     Ok(texture)
 }
 
@@ -351,7 +356,7 @@ fn upload_rgba_data_to_texture(
     let unpadded_bytes_per_row = width * bytes_per_pixel;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
-    
+
     // Check if we need padding
     if padded_bytes_per_row == unpadded_bytes_per_row {
         // No padding needed - direct upload
@@ -378,16 +383,16 @@ fn upload_rgba_data_to_texture(
         // Need padding - create padded buffer
         let padded_size = (padded_bytes_per_row * height) as usize;
         let mut padded_data = vec![0u8; padded_size];
-        
+
         for y in 0..height as usize {
             let src_start = y * unpadded_bytes_per_row as usize;
             let src_end = src_start + unpadded_bytes_per_row as usize;
             let dst_start = y * padded_bytes_per_row as usize;
             let dst_end = dst_start + unpadded_bytes_per_row as usize;
-            
+
             padded_data[dst_start..dst_end].copy_from_slice(&rgba_data[src_start..src_end]);
         }
-        
+
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture,
@@ -408,37 +413,52 @@ fn upload_rgba_data_to_texture(
             },
         );
     }
-    
+
     Ok(())
 }
 
 /// Get information about an image file without fully decoding it
-pub fn probe_image_info(image_path: impl AsRef<Path>) -> RenderResult<(u32, u32, ImageSourceFormat)> {
+pub fn probe_image_info(
+    image_path: impl AsRef<Path>,
+) -> RenderResult<(u32, u32, ImageSourceFormat)> {
     let path = image_path.as_ref();
-    
+
     if !path.exists() {
-        return Err(RenderError::io(format!("Image file not found: {}", path.display())));
+        return Err(RenderError::io(format!(
+            "Image file not found: {}",
+            path.display()
+        )));
     }
-    
-    let extension = path.extension()
+
+    let extension = path
+        .extension()
         .and_then(|ext| ext.to_str())
         .map(|s| s.to_lowercase())
-        .ok_or_else(|| RenderError::io("Cannot determine image format from file extension".to_string()))?;
-    
+        .ok_or_else(|| {
+            RenderError::io("Cannot determine image format from file extension".to_string())
+        })?;
+
     // Simulate probing (real implementation would read headers)
     match extension.as_str() {
         "png" => {
-            let (width, height) = if path.file_name().unwrap_or_default().to_str().unwrap_or("").contains("large") {
+            let (width, height) = if path
+                .file_name()
+                .unwrap_or_default()
+                .to_str()
+                .unwrap_or("")
+                .contains("large")
+            {
                 (512, 512)
             } else {
                 (256, 256)
             };
             Ok((width, height, ImageSourceFormat::PngRgba))
-        },
-        "jpg" | "jpeg" => {
-            Ok((128, 128, ImageSourceFormat::JpegRgb))
-        },
-        _ => Err(RenderError::io(format!("Unsupported image format: {}", extension))),
+        }
+        "jpg" | "jpeg" => Ok((128, 128, ImageSourceFormat::JpegRgb)),
+        _ => Err(RenderError::io(format!(
+            "Unsupported image format: {}",
+            extension
+        ))),
     }
 }
 
@@ -459,21 +479,21 @@ pub mod constraints {
     //!
     //! This module documents the constraints and limitations of the external image
     //! import functionality compared to the WebGPU standard.
-    
+
     /// Maximum texture dimension supported
     pub const MAX_TEXTURE_DIMENSION: u32 = 8192;
-    
+
     /// Memory budget for textures (512 MiB)
     pub const MEMORY_BUDGET_BYTES: u64 = 512 * 1024 * 1024;
-    
+
     /// Supported input formats
     pub const SUPPORTED_INPUT_FORMATS: &[&str] = &["PNG", "JPEG"];
-    
+
     /// Output format (always the same for consistency)
     pub const OUTPUT_FORMAT: &str = "RGBA8UnormSrgb";
-    
+
     /// Key differences from WebGPU copyExternalImageToTexture:
-    /// 
+    ///
     /// 1. **Source**: File path instead of HTMLImageElement/ImageBitmap
     /// 2. **Async**: Synchronous operation instead of promise-based
     /// 3. **Formats**: Limited to PNG/JPEG (no WebP, GIF, BMP, etc.)

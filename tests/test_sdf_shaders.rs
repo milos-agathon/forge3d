@@ -51,7 +51,10 @@ async fn test_hybrid_traversal_shader_compilation() {
         source: wgpu::ShaderSource::Wgsl(shader_source.into()),
     });
 
-    assert!(true, "Hybrid traversal shader should compile without errors");
+    assert!(
+        true,
+        "Hybrid traversal shader should compile without errors"
+    );
 }
 
 #[tokio::test]
@@ -335,7 +338,8 @@ async fn test_sdf_evaluation_gpu() {
     // Create a simple compute pipeline to test SDF evaluation
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("sdf-eval-test"),
-        source: wgpu::ShaderSource::Wgsl(r#"
+        source: wgpu::ShaderSource::Wgsl(
+            r#"
             #include "sdf_primitives.wgsl"
 
             @group(0) @binding(0) var<storage, read_write> results: array<f32>;
@@ -347,7 +351,9 @@ async fn test_sdf_evaluation_gpu() {
                 let distance = sdf_sphere(point, sphere);
                 results[id.x] = distance;
             }
-        "#.into()),
+        "#
+            .into(),
+        ),
     });
 
     // This would continue with full pipeline setup, but is complex to implement here

@@ -2,23 +2,18 @@
 // Signed Distance Function (SDF) module for procedural geometry and CSG operations
 // This module provides analytic SDF primitives and constructive solid geometry operations
 
-pub mod primitives;
-pub mod operations;
 pub mod hybrid;
+pub mod operations;
+pub mod primitives;
 
 // Re-export commonly used types
 pub use primitives::{
-    SdfPrimitive, SdfPrimitiveType, SdfSphere, SdfBox, SdfCylinder,
-    SdfPlane, SdfTorus, SdfCapsule
+    SdfBox, SdfCapsule, SdfCylinder, SdfPlane, SdfPrimitive, SdfPrimitiveType, SdfSphere, SdfTorus,
 };
 
-pub use operations::{
-    CsgOperation, CsgNode, CsgResult, CsgTree
-};
+pub use operations::{CsgNode, CsgOperation, CsgResult, CsgTree};
 
-pub use hybrid::{
-    HybridScene, HybridHitResult, HybridMetrics, Ray as HybridRay
-};
+pub use hybrid::{HybridHitResult, HybridMetrics, HybridScene, Ray as HybridRay};
 
 /// SDF scene containing primitives and CSG tree
 #[derive(Clone, Debug)]
@@ -67,9 +62,12 @@ impl SdfScene {
     /// Check if a point is inside the scene bounds
     pub fn in_bounds(&self, point: glam::Vec3) -> bool {
         if let Some((min_bounds, max_bounds)) = &self.bounds {
-            point.x >= min_bounds.x && point.x <= max_bounds.x &&
-            point.y >= min_bounds.y && point.y <= max_bounds.y &&
-            point.z >= min_bounds.z && point.z <= max_bounds.z
+            point.x >= min_bounds.x
+                && point.x <= max_bounds.x
+                && point.y >= min_bounds.y
+                && point.y <= max_bounds.y
+                && point.z >= min_bounds.z
+                && point.z <= max_bounds.z
         } else {
             true // No bounds set, assume infinite
         }
@@ -114,7 +112,12 @@ impl SdfSceneBuilder {
     }
 
     /// Add a box primitive
-    pub fn add_box(mut self, center: glam::Vec3, extents: glam::Vec3, material_id: u32) -> (Self, u32) {
+    pub fn add_box(
+        mut self,
+        center: glam::Vec3,
+        extents: glam::Vec3,
+        material_id: u32,
+    ) -> (Self, u32) {
         let primitive = SdfPrimitive::box_primitive(center, extents, material_id);
         let prim_idx = self.scene.csg_tree.add_primitive(primitive);
         let node_idx = self.scene.csg_tree.add_leaf(prim_idx, material_id);
@@ -122,7 +125,13 @@ impl SdfSceneBuilder {
     }
 
     /// Add a cylinder primitive
-    pub fn add_cylinder(mut self, center: glam::Vec3, radius: f32, height: f32, material_id: u32) -> (Self, u32) {
+    pub fn add_cylinder(
+        mut self,
+        center: glam::Vec3,
+        radius: f32,
+        height: f32,
+        material_id: u32,
+    ) -> (Self, u32) {
         let primitive = SdfPrimitive::cylinder(center, radius, height, material_id);
         let prim_idx = self.scene.csg_tree.add_primitive(primitive);
         let node_idx = self.scene.csg_tree.add_leaf(prim_idx, material_id);
@@ -131,18 +140,21 @@ impl SdfSceneBuilder {
 
     /// Union two nodes
     pub fn union(mut self, left: u32, right: u32, material_id: u32) -> (Self, u32) {
-        let node_idx = self.scene.csg_tree.add_operation(
-            CsgOperation::Union,
-            left,
-            right,
-            0.0,
-            material_id,
-        );
+        let node_idx =
+            self.scene
+                .csg_tree
+                .add_operation(CsgOperation::Union, left, right, 0.0, material_id);
         (self, node_idx)
     }
 
     /// Smooth union two nodes
-    pub fn smooth_union(mut self, left: u32, right: u32, smoothing: f32, material_id: u32) -> (Self, u32) {
+    pub fn smooth_union(
+        mut self,
+        left: u32,
+        right: u32,
+        smoothing: f32,
+        material_id: u32,
+    ) -> (Self, u32) {
         let node_idx = self.scene.csg_tree.add_operation(
             CsgOperation::SmoothUnion,
             left,
@@ -215,14 +227,12 @@ mod tests {
 
     #[test]
     fn test_scene_builder() {
-        let (builder, sphere1) = SdfSceneBuilder::new()
-            .add_sphere(Vec3::new(-1.0, 0.0, 0.0), 0.8, 1);
+        let (builder, sphere1) =
+            SdfSceneBuilder::new().add_sphere(Vec3::new(-1.0, 0.0, 0.0), 0.8, 1);
 
-        let (builder, sphere2) = builder
-            .add_sphere(Vec3::new(1.0, 0.0, 0.0), 0.8, 2);
+        let (builder, sphere2) = builder.add_sphere(Vec3::new(1.0, 0.0, 0.0), 0.8, 2);
 
-        let (builder, _union_node) = builder
-            .union(sphere1, sphere2, 0);
+        let (builder, _union_node) = builder.union(sphere1, sphere2, 0);
 
         let scene = builder.build();
 
@@ -249,14 +259,12 @@ mod tests {
 
     #[test]
     fn test_complex_csg() {
-        let (builder, box1) = SdfSceneBuilder::new()
-            .add_box(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0), 1);
+        let (builder, box1) =
+            SdfSceneBuilder::new().add_box(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0), 1);
 
-        let (builder, sphere1) = builder
-            .add_sphere(Vec3::ZERO, 1.2, 2);
+        let (builder, sphere1) = builder.add_sphere(Vec3::ZERO, 1.2, 2);
 
-        let (builder, _result) = builder
-            .subtract(box1, sphere1, 0); // Box with sphere subtracted
+        let (builder, _result) = builder.subtract(box1, sphere1, 0); // Box with sphere subtracted
 
         let scene = builder.build();
 

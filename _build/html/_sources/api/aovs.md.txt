@@ -1,35 +1,32 @@
-// docs/api/aovs.md
-// Overview of path tracing AOVs and debug outputs exposed by forge3d.
-// This file exists to document formats, ranges, and naming for AOV outputs and their Python API.
-// RELEVANT FILES:python/forge3d/path_tracing.py,src/shaders/pt_kernel.wgsl,README.md
+<!-- docs/api/aovs.md -->
+<!-- API docs for AOVs (albedo, normal, depth, direct, indirect, emission, visibility). -->
+<!-- Exists to document formats, shapes, and Python usage for render_aovs/save_aovs. -->
+<!-- RELEVANT FILES:python/forge3d/path_tracing.py,src/path_tracing/aov.rs,src/shaders/pt_kernel.wgsl -->
 
-# Path Tracing AOVs
+# AOVs and Debug Outputs
 
-This document describes the AOVs (arbitrary output variables) produced by the path tracing APIs.
+- Names: {"albedo","normal","depth","direct","indirect","emission","visibility"}.
 
-The Python entry points are `forge3d.path_tracing.render_aovs()` and `forge3d.path_tracing.save_aovs()`.
+- Shapes and dtypes:
+  - albedo/normal/direct/indirect/emission: (H, W, 3) float32.
+  - depth: (H, W) float32.
+  - visibility: (H, W) uint8.
 
-## Canonical AOVs
+- Formats (GPU):
+  - albedo/normal/direct/indirect/emission: `rgba16float` storage textures.
+  - depth: `r32float`.
+  - visibility: `r8unorm`.
 
-- albedo: Base color at first hit. Float32 array, shape (H, W, 3).
-- normal: Shading normal (xyz). Float32 array, shape (H, W, 3).
-- depth: Linear distance t along the primary ray. Float32 array, shape (H, W). np.nan for miss.
-- direct: Direct lighting estimate. Float32 array, shape (H, W, 3).
-- indirect: Indirect lighting estimate. Float32 array, shape (H, W, 3).
-- emission: Emissive contribution. Float32 array, shape (H, W, 3).
-- visibility: Primary hit mask. uint8 array, shape (H, W). 255 hit, 0 miss.
-
-## Notes
-
-- GPU-first design with CPU fallback. In this repository snapshot the CPU path is authoritative and deterministic.
-- File I/O: `save_aovs()` writes `.npy` for HDR fields and `.png` for `visibility` when the PNG helper is available; otherwise it falls back to `.npy`.
-- Expected GPU formats when implemented in WGSL/wgpu: rgba16float (albedo/normal/direct/indirect/emission), r32float (depth), r8unorm (visibility).
-
-## Example
+## Python Usage
 
 ```python
 import forge3d.path_tracing as pt
-scene = [{"center": (0.0, 0.0, 0.0), "radius": 0.5, "albedo": (0.8, 0.3, 0.2)}]
-aovs = pt.render_aovs(64, 64, scene, {}, seed=123, frames=1)
-pt.save_aovs("out/demo", aovs)
+
+scene, cam = [{"center": (0,0,0), "radius": 0.5, "albedo": (0.8,0.3,0.2)}], {"pos": (0,0,1.5)}
+aovs = pt.render_aovs(64, 64, scene, cam, aovs=("albedo","depth","visibility"), seed=7, frames=1, use_gpu=True)
+
+paths = pt.save_aovs(aovs, basename="frame0001", output_dir="out")
 ```
+
+The CPU implementation is deterministic and mirrors GPU semantics.
+

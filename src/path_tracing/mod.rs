@@ -7,9 +7,9 @@ pub mod accel;
 pub mod alias_table;
 pub mod aov;
 pub mod compute;
+pub mod guiding;
 pub mod hybrid_compute;
 pub mod io;
-pub mod guiding;
 pub mod restir;
 pub mod wavefront;
 

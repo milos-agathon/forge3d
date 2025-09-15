@@ -1,0 +1,1137 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ReSTIR DI (Reservoir-based Spatio-Temporal Importance Resampling) &mdash; forge3d Documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=9e420a66"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            forge3d
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quick Start Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../quickstart.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../quickstart.html#basic-triangle-rendering">Basic Triangle Rendering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../quickstart.html#terrain-visualization">Terrain Visualization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../quickstart.html#vector-graphics">Vector Graphics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../quickstart.html#device-detection">Device Detection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../quickstart.html#what-s-next">What’s Next?</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../installation.html#quick-installation">Quick Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../installation.html#system-requirements">System Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../installation.html#installation-from-source">Installation from Source</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../installation.html#virtual-environment-setup">Virtual Environment Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../installation.html#verification">Verification</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../installation.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../installation.html#development-setup">Development Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../installation.html#docker-installation">Docker Installation</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../examples_guide.html">Examples Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples_guide.html#basic-examples">Basic Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples_guide.html#diagnostic-examples">Diagnostic Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples_guide.html#advanced-examples-r13">Advanced Examples (R13)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples_guide.html#performance-examples">Performance Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples_guide.html#running-examples">Running Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples_guide.html#understanding-example-output">Understanding Example Output</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples_guide.html#example-development-guidelines">Example Development Guidelines</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Core Documentation:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api_reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference.html#core-classes">Core Classes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#renderer">Renderer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#scene">Scene</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference.html#vector-graphics">Vector Graphics</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#polygons">Polygons</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#lines">Lines</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#points">Points</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference.html#terrain-rendering">Terrain Rendering</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#height-data-processing">Height Data Processing</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference.html#memory-management">Memory Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#gpu-memory-tracking">GPU Memory Tracking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#budget-management">Budget Management</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference.html#advanced-features">Advanced Features</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#shadow-mapping">Shadow Mapping</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#pbr-materials">PBR Materials</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#async-readback">Async Readback</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference.html#utilities">Utilities</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#device-information">Device Information</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#environment-reporting">Environment Reporting</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#color-management">Color Management</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference.html#configuration">Configuration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#environment-variables">Environment Variables</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#gpu-backend-selection">GPU Backend Selection</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#common-exceptions">Common Exceptions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#debugging-tips">Debugging Tips</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../api_reference.html#performance-tips">Performance Tips</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../api_reference.html#type-annotations">Type Annotations</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../color_management.html">Color Management &amp; Tonemap Pipeline</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../color_management.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../color_management.html#pipeline-details">Pipeline Details</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../color_management.html#linear-scene-lighting">1. Linear Scene Lighting</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../color_management.html#tone-mapping-reinhard">2. Tone Mapping (Reinhard)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../color_management.html#gamma-correction">3. Gamma Correction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../color_management.html#output-format">4. Output Format</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../color_management.html#format-choices-rationale">Format Choices &amp; Rationale</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../color_management.html#why-rgba8unormsrgb">Why Rgba8UnormSrgb?</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../color_management.html#when-to-use-linear-vs-srgb-targets">When to Use Linear vs sRGB Targets</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../color_management.html#implementation-notes">Implementation Notes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../color_management.html#shader-integration">Shader Integration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../color_management.html#cpu-reference-implementation">CPU Reference Implementation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../color_management.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../color_management.html#future-extensions">Future Extensions</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../interop_zero_copy.html">Zero-Copy NumPy Interoperability</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../interop_zero_copy.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../interop_zero_copy.html#guaranteed-zero-copy-pathways">Guaranteed Zero-Copy Pathways</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#rgba-output">RGBA Output</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#height-input">Height Input</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../interop_zero_copy.html#data-type-and-layout-requirements">Data Type and Layout Requirements</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#supported-input-types">Supported Input Types</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#output-guarantees">Output Guarantees</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../interop_zero_copy.html#validation-and-debugging">Validation and Debugging</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#using-validation-helpers">Using Validation Helpers</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#pointer-validation">Pointer Validation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../interop_zero_copy.html#performance-profiling">Performance Profiling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../interop_zero_copy.html#common-pitfalls-and-solutions">Common Pitfalls and Solutions</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#non-contiguous-arrays">Non-Contiguous Arrays</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#wrong-data-types">Wrong Data Types</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#memory-layout-assumptions">Memory Layout Assumptions</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../interop_zero_copy.html#testing-zero-copy-behavior">Testing Zero-Copy Behavior</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#writing-zero-copy-tests">Writing Zero-Copy Tests</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../interop_zero_copy.html#implementation-notes">Implementation Notes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#buffer-reuse">Buffer Reuse</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#memory-alignment">Memory Alignment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#cross-platform-consistency">Cross-Platform Consistency</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../interop_zero_copy.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#common-error-messages">Common Error Messages</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#debugging-tips">Debugging Tips</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../interop_zero_copy.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#for-application-developers">For Application Developers</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../interop_zero_copy.html#for-library-integration">For Library Integration</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../memory_budget.html">Memory Budget Management</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../memory_budget.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../memory_budget.html#budget-limits">Budget Limits</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#default-budget-512-mib">Default Budget: 512 MiB</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#what-counts-towards-the-budget">What Counts Towards the Budget</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../memory_budget.html#memory-metrics-api">Memory Metrics API</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#getting-memory-metrics">Getting Memory Metrics</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#metrics-dictionary-structure">Metrics Dictionary Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#example-metrics-output">Example Metrics Output</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../memory_budget.html#budget-enforcement">Budget Enforcement</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#automatic-checking">Automatic Checking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#error-messages">Error Messages</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../memory_budget.html#monitoring-memory-usage">Monitoring Memory Usage</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#real-time-monitoring">Real-Time Monitoring</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#performance-impact-monitoring">Performance Impact Monitoring</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../memory_budget.html#memory-budget-scenarios">Memory Budget Scenarios</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#normal-usage-patterns">Normal Usage Patterns</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#high-memory-scenarios">High Memory Scenarios</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#budget-friendly-practices">Budget-Friendly Practices</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../memory_budget.html#debugging-memory-issues">Debugging Memory Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#investigating-budget-violations">Investigating Budget Violations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#common-memory-issues">Common Memory Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../memory_budget.html#implementation-details">Implementation Details</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#thread-safety">Thread Safety</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#global-vs-per-renderer-tracking">Global vs. Per-Renderer Tracking</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#memory-alignment">Memory Alignment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory_budget.html#performance-impact">Performance Impact</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../memory/index.html">Memory Management</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../memory/staging_rings.html">O1: Staging Buffer Rings</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../memory/staging_rings.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/staging_rings.html#architecture">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#core-components">Core Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#buffer-states">Buffer States</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/staging_rings.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#rust-api">Rust API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#python-api">Python API</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/staging_rings.html#performance-characteristics">Performance Characteristics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#typical-performance">Typical Performance</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/staging_rings.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#ring-count">Ring Count</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#buffer-size">Buffer Size</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/staging_rings.html#memory-budget">Memory Budget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/staging_rings.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/staging_rings.html#integration">Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#with-memory-pools-o2">With Memory Pools (O2)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#with-texture-compression-o3">With Texture Compression (O3)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/staging_rings.html#testing">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#unit-tests">Unit Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#performance-tests">Performance Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/staging_rings.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#high-buffer-stalls">High Buffer Stalls</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#memory-usage-issues">Memory Usage Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/staging_rings.html#platform-differences">Platform Differences</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../memory/memory_pools.html">O2: GPU Memory Pools</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../memory/memory_pools.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/memory_pools.html#architecture">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#core-components">Core Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#size-buckets">Size Buckets</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/memory_pools.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#rust-api">Rust API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#python-api">Python API</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/memory_pools.html#performance-characteristics">Performance Characteristics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#allocation-performance">Allocation Performance</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#fragmentation-mitigation">Fragmentation Mitigation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/memory_pools.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#size-bucket-tuning">Size Bucket Tuning</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#pool-sizing">Pool Sizing</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#memory-budget">Memory Budget</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/memory_pools.html#reference-counting">Reference Counting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#lifecycle-management">Lifecycle Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#thread-safety">Thread Safety</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/memory_pools.html#defragmentation">Defragmentation</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#automatic-defragmentation">Automatic Defragmentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#defragmentation-strategy">Defragmentation Strategy</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/memory_pools.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/memory_pools.html#integration">Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#with-staging-rings-o1">With Staging Rings (O1)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#with-big-buffers">With Big Buffers</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/memory_pools.html#testing">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#unit-tests">Unit Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#performance-tests">Performance Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/memory_pools.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#high-fragmentation">High Fragmentation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#memory-leaks">Memory Leaks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/memory_pools.html#performance-issues">Performance Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/memory_pools.html#platform-differences">Platform Differences</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../memory/compressed_textures.html">O3: Compressed Texture Pipeline</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../memory/compressed_textures.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/compressed_textures.html#architecture">Architecture</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#core-components">Core Components</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#supported-formats">Supported Formats</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/compressed_textures.html#api-reference">API Reference</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#rust-api">Rust API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#python-api">Python API</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/compressed_textures.html#performance-characteristics">Performance Characteristics</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#benchmarks">Benchmarks</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#compression-performance">Compression Performance</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#memory-usage">Memory Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/compressed_textures.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#compression-quality-levels">Compression Quality Levels</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#use-case-optimization">Use Case Optimization</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#format-selection-algorithm">Format Selection Algorithm</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/compressed_textures.html#memory-budget-compliance">Memory Budget Compliance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/compressed_textures.html#ktx2-container-support">KTX2 Container Support</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#supported-features">Supported Features</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#transcoding-pipeline">Transcoding Pipeline</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#current-limitations">Current Limitations</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/compressed_textures.html#error-handling">Error Handling</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/compressed_textures.html#integration">Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#with-memory-pools-o2">With Memory Pools (O2)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#with-virtual-texturing-o4">With Virtual Texturing (O4)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/compressed_textures.html#testing">Testing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#unit-tests">Unit Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#quality-tests">Quality Tests</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/compressed_textures.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#poor-compression-quality">Poor Compression Quality</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#high-memory-usage">High Memory Usage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/compressed_textures.html#loading-failures">Loading Failures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/compressed_textures.html#platform-differences">Platform Differences</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../memory/virtual_texturing.html">Virtual Texture Streaming</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../memory/virtual_texturing.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/virtual_texturing.html#key-components">Key Components</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#virtualtexturesystem">VirtualTextureSystem</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#tile-management">Tile Management</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#camera-based-streaming">Camera-Based Streaming</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/virtual_texturing.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#memory-budget">Memory Budget</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#tile-size">Tile Size</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#quality-settings">Quality Settings</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/virtual_texturing.html#usage-patterns">Usage Patterns</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#basic-streaming-setup">Basic Streaming Setup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#prefetching">Prefetching</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#multiple-textures">Multiple Textures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/virtual_texturing.html#performance-monitoring">Performance Monitoring</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#statistics-tracking">Statistics Tracking</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#memory-analysis">Memory Analysis</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#performance-estimation">Performance Estimation</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/virtual_texturing.html#integration-with-other-systems">Integration with Other Systems</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#staging-rings-integration">Staging Rings Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#compressed-texture-support">Compressed Texture Support</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/virtual_texturing.html#shader-integration">Shader Integration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#wgsl-shader-code">WGSL Shader Code</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#c-integration">C++ Integration</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/virtual_texturing.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#memory-budget-guidelines">Memory Budget Guidelines</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#tile-size-selection">Tile Size Selection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#streaming-strategy">Streaming Strategy</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#performance-optimization">Performance Optimization</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/virtual_texturing.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#common-issues">Common Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../memory/virtual_texturing.html#debug-information">Debug Information</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../memory/virtual_texturing.html#api-reference">API Reference</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../memory/index.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../memory/index.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../memory/index.html#memory-monitoring">Memory Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../memory/index.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../memory/index.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../memory/index.html#integration-examples">Integration Examples</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="path_tracing.html">A1: GPU Path Tracer (MVP)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="path_tracing.html#gpu-usage">GPU Usage</a></li>
+<li class="toctree-l2"><a class="reference internal" href="path_tracing.html#cpu-reference">CPU Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="path_tracing.html#progressive-tiling-a15">Progressive Tiling (A15)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="path_tracing.html#limitations">Limitations</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Advanced Features:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../postfx/index.html">Post-Processing Effect Chain</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../postfx/index.html#features">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../postfx/index.html#python-api">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../postfx/index.html#notes">Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../postfx/index.html#demo">Demo</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../pbr_materials.html">PBR Materials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../pbr_materials.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../pbr_materials.html#api-reference">API Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../pbr_materials.html#texture-support">Texture Support</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../pbr_materials.html#brdf-evaluation">BRDF Evaluation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../pbr_materials.html#predefined-materials">Predefined Materials</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../pbr_materials.html#material-validation">Material Validation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../pbr_materials.html#gpu-integration">GPU Integration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../pbr_materials.html#lighting-configuration">Lighting Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../pbr_materials.html#feature-detection">Feature Detection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../pbr_materials.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../pbr_materials.html#legacy-compatibility">Legacy Compatibility</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../shadow_mapping.html">Shadow Mapping</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../shadow_mapping.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../shadow_mapping.html#memory-management">Memory Management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../shadow_mapping.html#shadow-configuration">Shadow Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../shadow_mapping.html#directional-lighting">Directional Lighting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../shadow_mapping.html#shadow-rendering">Shadow Rendering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../shadow_mapping.html#quality-vs-performance">Quality vs Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../shadow_mapping.html#pcf-filtering">PCF Filtering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../shadow_mapping.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../shadow_mapping.html#integration-examples">Integration Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../shadow_mapping.html#performance-monitoring">Performance Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../shadow_mapping.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../shadow_mapping.html#legacy-support">Legacy Support</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../user/path_tracing.html">Path Tracing (Workstream A)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../user/path_tracing.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user/path_tracing.html#api">API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user/path_tracing.html#roadmap">Roadmap</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../vector_graphics.html">Vector Graphics</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../vector_graphics.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector_graphics.html#vector-types">Vector Types</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector_graphics.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector_graphics.html#data-format-requirements">Data Format Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector_graphics.html#performance-considerations">Performance Considerations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector_graphics.html#integration-with-3d-rendering">Integration with 3D Rendering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector_graphics.html#use-cases">Use Cases</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector_graphics.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../vector_graphics.html#advanced-examples">Advanced Examples</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../terrain_rendering.html">Terrain Rendering</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../terrain_rendering.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../terrain_rendering.html#height-data-processing">Height Data Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../terrain_rendering.html#scene-configuration">Scene Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../terrain_rendering.html#colormap-system">Colormap System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../terrain_rendering.html#level-of-detail-lod">Level of Detail (LOD)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../terrain_rendering.html#terrain-analysis">Terrain Analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../terrain_rendering.html#advanced-features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../terrain_rendering.html#integration-with-other-systems">Integration with Other Systems</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../terrain_rendering.html#performance-optimization">Performance Optimization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../terrain_rendering.html#real-world-applications">Real-World Applications</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../terrain_rendering.html#troubleshooting">Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../terrain_rendering.html#example-applications">Example Applications</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../async_operations.html">Async Operations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../async_operations.html#async-readback-system">Async Readback System</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../async_operations.html#multi-threaded-command-recording">Multi-threaded Command Recording</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../async_operations.html#async-compute-operations">Async Compute Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../async_operations.html#non-blocking-gpu-operations">Non-blocking GPU Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../async_operations.html#performance-monitoring">Performance Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../async_operations.html#memory-management-for-async-operations">Memory Management for Async Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../async_operations.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../async_operations.html#example-applications">Example Applications</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../async_operations.html#troubleshooting">Troubleshooting</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Basemaps &amp; Tiles:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../tiles/xyz_wmts.html">docs/tiles/xyz_wmts.md</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tiles/xyz_wmts.html#basemap-tile-fetching-caching-and-composition-xyz-wmts-in-forge3d">Basemap tile fetching, caching, and composition (XYZ/WMTS) in forge3d.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tiles/xyz_wmts.html#documents-the-python-tiles-api-cache-layout-and-attribution-requirements">Documents the Python tiles API, cache layout, and attribution requirements.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tiles/xyz_wmts.html#relevant-files-python-forge3d-tiles-client-py-python-forge3d-tiles-overlay-py-examples-xyz-tile-compose-demo-py">RELEVANT FILES:python/forge3d/tiles/client.py,python/forge3d/tiles/overlay.py,examples/xyz_tile_compose_demo.py</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../tiles/xyz_wmts.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tiles/xyz_wmts.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tiles/xyz_wmts.html#api">API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tiles/xyz_wmts.html#cache-layout">Cache layout</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../tiles/xyz_wmts.html#attribution">Attribution</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../integration/cartopy.html">docs/integration/cartopy.md</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../integration/cartopy.html#cartopy-integration-example-using-forge3d-tiles-as-a-background">Cartopy integration example using forge3d tiles as a background.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../integration/cartopy.html#shows-headless-agg-rendering-and-extent-alignment-with-geoaxes">Shows headless (Agg) rendering and extent alignment with GeoAxes.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../integration/cartopy.html#relevant-files-examples-cartopy-overlay-py-python-forge3d-tiles-client-py-python-forge3d-tiles-overlay-py">RELEVANT FILES:examples/cartopy_overlay.py,python/forge3d/tiles/client.py,python/forge3d/tiles/overlay.py</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../integration/cartopy.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/cartopy.html#requirements">Requirements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/cartopy.html#example">Example</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Library Integrations:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../integration/matplotlib.html">Matplotlib Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../integration/matplotlib.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/matplotlib.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/matplotlib.html#colormap-integration">Colormap Integration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#supported-colormaps">Supported Colormaps</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#custom-colormap-objects">Custom Colormap Objects</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/matplotlib.html#data-normalization">Data Normalization</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#linear-normalization">Linear Normalization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#logarithmic-normalization">Logarithmic Normalization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#power-law-normalization">Power Law Normalization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#boundary-normalization">Boundary Normalization</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/matplotlib.html#display-helpers">Display Helpers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#basic-display">Basic Display</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#custom-extents-and-dpi">Custom Extents and DPI</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#subplot-comparisons">Subplot Comparisons</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#saving-comparisons">Saving Comparisons</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/matplotlib.html#accuracy-and-performance">Accuracy and Performance</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#colormap-accuracy">Colormap Accuracy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#normalization-accuracy">Normalization Accuracy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#zero-copy-display">Zero-Copy Display</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/matplotlib.html#error-handling-and-validation">Error Handling and Validation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#optional-dependency-handling">Optional Dependency Handling</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#array-validation">Array Validation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#supported-formats">Supported Formats</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/matplotlib.html#examples">Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#complete-terrain-visualization">Complete Terrain Visualization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#performance-comparison">Performance Comparison</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/matplotlib.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#memory-efficiency">Memory Efficiency</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#colormap-selection">Colormap Selection</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/matplotlib.html#api-reference">API Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#forge3d-adapters-mpl-cmap">forge3d.adapters.mpl_cmap</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#forge3d-helpers-mpl-display">forge3d.helpers.mpl_display</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/matplotlib.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#common-issues">Common Issues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/matplotlib.html#performance-issues">Performance Issues</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../integration/external_images.html">External Image Import Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../integration/external_images.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/external_images.html#webgpu-parity">WebGPU Parity</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#what-we-match">What We Match</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#key-similarities">Key Similarities</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/external_images.html#native-vs-browser-differences">Native vs Browser Differences</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#input-sources">Input Sources</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#operational-differences">Operational Differences</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#format-support">Format Support</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/external_images.html#implementation-architecture">Implementation Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#core-components">Core Components</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#processing-pipeline">Processing Pipeline</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/external_images.html#usage-examples">Usage Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#basic-image-import">Basic Image Import</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#advanced-configuration">Advanced Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/external_images.html#constraints-and-limitations">Constraints and Limitations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#memory-budget">Memory Budget</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#texture-size-limits">Texture Size Limits</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#format-constraints">Format Constraints</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#threading-model">Threading Model</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/external_images.html#performance-considerations">Performance Considerations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#decode-performance">Decode Performance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#upload-performance">Upload Performance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#memory-usage-patterns">Memory Usage Patterns</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/external_images.html#common-pitfalls-and-solutions">Common Pitfalls and Solutions</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#file-path-issues">1. File Path Issues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#memory-budget-exceeded">2. Memory Budget Exceeded</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#format-assumptions">3. Format Assumptions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#color-space-expectations">4. Color Space Expectations</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#synchronous-blocking">5. Synchronous Blocking</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/external_images.html#migration-from-browser-code">Migration from Browser Code</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#replace-dom-image-loading">1. Replace DOM Image Loading</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#handle-synchronous-model">2. Handle Synchronous Model</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../integration/external_images.html#adapt-error-handling">3. Adapt Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/external_images.html#future-enhancements">Future Enhancements</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../integration/external_images.html#testing">Testing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../user/datashader_interop.html">Datashader Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../user/datashader_interop.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user/datashader_interop.html#quick-start">Quick Start</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user/datashader_interop.html#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user/datashader_interop.html#api-reference">API Reference</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#availability-check">Availability Check</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../user/datashader_interop.html#forge3d.adapters.is_datashader_available"><code class="docutils literal notranslate"><span class="pre">is_datashader_available()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#core-functions">Core Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../user/datashader_interop.html#forge3d.adapters.rgba_view_from_agg"><code class="docutils literal notranslate"><span class="pre">rgba_view_from_agg()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../user/datashader_interop.html#forge3d.adapters.validate_alignment"><code class="docutils literal notranslate"><span class="pre">validate_alignment()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../user/datashader_interop.html#forge3d.adapters.to_overlay_texture"><code class="docutils literal notranslate"><span class="pre">to_overlay_texture()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#convenience-functions">Convenience Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../user/datashader_interop.html#forge3d.adapters.shade_to_overlay"><code class="docutils literal notranslate"><span class="pre">shade_to_overlay()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#adapter-class">Adapter Class</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../user/datashader_interop.html#forge3d.adapters.DatashaderAdapter"><code class="docutils literal notranslate"><span class="pre">DatashaderAdapter</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#information-functions">Information Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../user/datashader_interop.html#forge3d.adapters.get_datashader_info"><code class="docutils literal notranslate"><span class="pre">get_datashader_info()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../user/datashader_interop.html#memory-management">Memory Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#memory-optimization-strategies">Memory Optimization Strategies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#memory-budget-guidelines">Memory Budget Guidelines</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../user/datashader_interop.html#performance-considerations">Performance Considerations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#zoom-level-performance">Zoom Level Performance</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#performance-monitoring">Performance Monitoring</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../user/datashader_interop.html#coordinate-systems">Coordinate Systems</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#supported-coordinate-systems">Supported Coordinate Systems</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#alignment-validation">Alignment Validation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../user/datashader_interop.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#data-preparation">Data Preparation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#canvas-configuration">Canvas Configuration</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../user/datashader_interop.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#common-issues-and-solutions">Common Issues and Solutions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../user/datashader_interop.html#debugging-tools">Debugging Tools</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../user/datashader_interop.html#examples">Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../user/datashader_interop.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">CI &amp; Testing:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../ci/notebook_integration.html">Running Notebooks in CI</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../ci/notebook_integration.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../ci/notebook_integration.html#ci-integration-architecture">CI Integration Architecture</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#notebook-execution-workflow">Notebook Execution Workflow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#execution-pipeline">Execution Pipeline</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../ci/notebook_integration.html#configuration">Configuration</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#github-actions-workflow">GitHub Actions Workflow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#execution-requirements">Execution Requirements</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#error-handling">Error Handling</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../ci/notebook_integration.html#notebook-structure">Notebook Structure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#standard-cell-organization">Standard Cell Organization</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../ci/notebook_integration.html#introduction-setup">1. Introduction &amp; Setup</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../ci/notebook_integration.html#device-information">2. Device Information</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../ci/notebook_integration.html#data-generation-loading">3. Data Generation/Loading</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../ci/notebook_integration.html#adapter-integration">4. Adapter Integration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../ci/notebook_integration.html#processing-rendering">5. Processing &amp; Rendering</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../ci/notebook_integration.html#output-generation">6. Output Generation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../ci/notebook_integration.html#performance-metrics">7. Performance Metrics</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../ci/notebook_integration.html#validation-cleanup">8. Validation &amp; Cleanup</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../ci/notebook_integration.html#dependency-management">Dependency Management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#optional-dependencies">Optional Dependencies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#fallback-strategies">Fallback Strategies</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../ci/notebook_integration.html#ci-validation">CI Validation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#success-criteria">Success Criteria</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#failure-analysis">Failure Analysis</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../ci/notebook_integration.html#timeout-failures">Timeout Failures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../ci/notebook_integration.html#memory-failures">Memory Failures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../ci/notebook_integration.html#dependency-failures">Dependency Failures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../ci/notebook_integration.html#gpu-failures">GPU Failures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#quality-metrics">Quality Metrics</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../ci/notebook_integration.html#performance-monitoring">Performance Monitoring</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#timing-benchmarks">Timing Benchmarks</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#memory-tracking">Memory Tracking</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../ci/notebook_integration.html#best-practices">Best Practices</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#development-guidelines">Development Guidelines</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#testing-locally">Testing Locally</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../ci/notebook_integration.html#debugging-failed-runs">Debugging Failed Runs</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">forge3d</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">ReSTIR DI (Reservoir-based Spatio-Temporal Importance Resampling)</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/forge3d/forge3d/blob/main/docs/api/restir.md" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="restir-di-reservoir-based-spatio-temporal-importance-resampling">
+<h1>ReSTIR DI (Reservoir-based Spatio-Temporal Importance Resampling)<a class="headerlink" href="#restir-di-reservoir-based-spatio-temporal-importance-resampling" title="Link to this heading"></a></h1>
+<p>ReSTIR DI is an advanced lighting technique for efficiently handling scenes with many lights (thousands) while maintaining low variance in the lighting estimation. It uses reservoir sampling with temporal and spatial reuse to achieve significant variance reduction compared to traditional Multiple Importance Sampling (MIS).</p>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>ReSTIR DI addresses the challenge of many-light rendering by:</p>
+<ol class="arabic simple">
+<li><p><strong>Reservoir Sampling</strong>: Using weighted reservoir sampling to maintain one representative light sample per pixel</p></li>
+<li><p><strong>Temporal Reuse</strong>: Reusing samples from previous frames to increase effective sample count</p></li>
+<li><p><strong>Spatial Reuse</strong>: Sharing samples between neighboring pixels with similar geometry</p></li>
+<li><p><strong>Alias Tables</strong>: Efficient O(1) light sampling using Walker’s alias method</p></li>
+</ol>
+</section>
+<section id="key-benefits">
+<h2>Key Benefits<a class="headerlink" href="#key-benefits" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><strong>Variance Reduction</strong>: Target ≥40% variance reduction vs MIS-only at 64 spp</p></li>
+<li><p><strong>Scalability</strong>: Performance independent of light count (after preprocessing)</p></li>
+<li><p><strong>Quality</strong>: Maintains unbiased results with proper Jacobian corrections</p></li>
+<li><p><strong>GPU Friendly</strong>: Designed for parallel execution on modern GPUs</p></li>
+</ul>
+</section>
+<section id="api-reference">
+<h2>API Reference<a class="headerlink" href="#api-reference" title="Link to this heading"></a></h2>
+<section id="python-api">
+<h3>Python API<a class="headerlink" href="#python-api" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">forge3d.lighting</span><span class="w"> </span><span class="kn">import</span> <span class="n">RestirDI</span><span class="p">,</span> <span class="n">RestirConfig</span><span class="p">,</span> <span class="n">LightSample</span><span class="p">,</span> <span class="n">LightType</span>
+
+<span class="c1"># Create ReSTIR instance</span>
+<span class="n">config</span> <span class="o">=</span> <span class="n">RestirConfig</span><span class="p">(</span>
+    <span class="n">initial_candidates</span><span class="o">=</span><span class="mi">32</span><span class="p">,</span>      <span class="c1"># Number of initial light candidates per pixel</span>
+    <span class="n">spatial_neighbors</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>        <span class="c1"># Number of spatial neighbors for reuse</span>
+    <span class="n">spatial_radius</span><span class="o">=</span><span class="mf">16.0</span><span class="p">,</span>        <span class="c1"># Spatial search radius in pixels</span>
+    <span class="n">temporal_neighbors</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>       <span class="c1"># Number of temporal samples to reuse</span>
+    <span class="n">max_temporal_age</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>        <span class="c1"># Maximum age for temporal samples</span>
+    <span class="n">bias_correction</span><span class="o">=</span><span class="kc">True</span>        <span class="c1"># Enable bias correction for unbiased results</span>
+<span class="p">)</span>
+
+<span class="n">restir</span> <span class="o">=</span> <span class="n">RestirDI</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+</pre></div>
+</div>
+<section id="adding-lights">
+<h4>Adding Lights<a class="headerlink" href="#adding-lights" title="Link to this heading"></a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Add individual lights</span>
+<span class="n">light_idx</span> <span class="o">=</span> <span class="n">restir</span><span class="o">.</span><span class="n">add_light</span><span class="p">(</span>
+    <span class="n">position</span><span class="o">=</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="p">),</span>
+    <span class="n">intensity</span><span class="o">=</span><span class="mf">1.5</span><span class="p">,</span>
+    <span class="n">light_type</span><span class="o">=</span><span class="n">LightType</span><span class="o">.</span><span class="n">POINT</span><span class="p">,</span>
+    <span class="n">weight</span><span class="o">=</span><span class="mf">2.0</span>  <span class="c1"># Sampling weight</span>
+<span class="p">)</span>
+
+<span class="c1"># Or set multiple lights at once</span>
+<span class="n">lights</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="n">LightSample</span><span class="p">(</span><span class="n">position</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">intensity</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span> <span class="n">light_type</span><span class="o">=</span><span class="n">LightType</span><span class="o">.</span><span class="n">POINT</span><span class="p">),</span>
+    <span class="n">LightSample</span><span class="p">(</span><span class="n">position</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">intensity</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">light_type</span><span class="o">=</span><span class="n">LightType</span><span class="o">.</span><span class="n">DIRECTIONAL</span><span class="p">)</span>
+<span class="p">]</span>
+<span class="n">weights</span> <span class="o">=</span> <span class="p">[</span><span class="mf">5.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">]</span>  <span class="c1"># Higher weight = more likely to be sampled</span>
+<span class="n">restir</span><span class="o">.</span><span class="n">set_lights</span><span class="p">(</span><span class="n">lights</span><span class="p">,</span> <span class="n">weights</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="rendering">
+<h4>Rendering<a class="headerlink" href="#rendering" title="Link to this heading"></a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Prepare G-buffer (from your rasterizer/raytracer)</span>
+<span class="n">g_buffer</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;depth&#39;</span><span class="p">:</span> <span class="n">depth_array</span><span class="p">,</span>       <span class="c1"># (H, W) depth values</span>
+    <span class="s1">&#39;normal&#39;</span><span class="p">:</span> <span class="n">normal_array</span><span class="p">,</span>     <span class="c1"># (H, W, 3) world-space normals</span>
+    <span class="s1">&#39;world_pos&#39;</span><span class="p">:</span> <span class="n">pos_array</span>      <span class="c1"># (H, W, 3) world positions</span>
+<span class="p">}</span>
+
+<span class="c1"># Render with ReSTIR</span>
+<span class="n">image</span> <span class="o">=</span> <span class="n">restir</span><span class="o">.</span><span class="n">render_frame</span><span class="p">(</span>
+    <span class="n">width</span><span class="o">=</span><span class="mi">1920</span><span class="p">,</span> <span class="n">height</span><span class="o">=</span><span class="mi">1080</span><span class="p">,</span>
+    <span class="n">camera_params</span><span class="o">=</span><span class="n">camera_dict</span><span class="p">,</span>
+    <span class="n">g_buffer</span><span class="o">=</span><span class="n">g_buffer</span><span class="p">,</span>
+    <span class="n">output_format</span><span class="o">=</span><span class="s2">&quot;rgba&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="variance-analysis">
+<h4>Variance Analysis<a class="headerlink" href="#variance-analysis" title="Link to this heading"></a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Compare against reference (e.g., MIS-only)</span>
+<span class="n">reduction</span> <span class="o">=</span> <span class="n">restir</span><span class="o">.</span><span class="n">calculate_variance_reduction</span><span class="p">(</span><span class="n">reference_image</span><span class="p">,</span> <span class="n">restir_image</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Variance reduction: </span><span class="si">{</span><span class="n">reduction</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>  <span class="c1"># Target: ≥40%</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="configuration-parameters">
+<h3>Configuration Parameters<a class="headerlink" href="#configuration-parameters" title="Link to this heading"></a></h3>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Parameter</p></th>
+<th class="head"><p>Default</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">initial_candidates</span></code></p></td>
+<td><p>32</p></td>
+<td><p>Number of initial light samples per pixel</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">temporal_neighbors</span></code></p></td>
+<td><p>1</p></td>
+<td><p>Number of temporal samples to reuse</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">spatial_neighbors</span></code></p></td>
+<td><p>4</p></td>
+<td><p>Number of spatial neighbors for reuse</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">spatial_radius</span></code></p></td>
+<td><p>16.0</p></td>
+<td><p>Spatial search radius (pixels)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">max_temporal_age</span></code></p></td>
+<td><p>20</p></td>
+<td><p>Maximum frame age for temporal reuse</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">bias_correction</span></code></p></td>
+<td><p>True</p></td>
+<td><p>Enable bias correction for unbiased results</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">depth_threshold</span></code></p></td>
+<td><p>0.1</p></td>
+<td><p>Depth similarity threshold for reuse</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">normal_threshold</span></code></p></td>
+<td><p>0.9</p></td>
+<td><p>Normal similarity threshold (cosine)</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="technical-details">
+<h2>Technical Details<a class="headerlink" href="#technical-details" title="Link to this heading"></a></h2>
+<section id="alias-table-construction">
+<h3>Alias Table Construction<a class="headerlink" href="#alias-table-construction" title="Link to this heading"></a></h3>
+<p>The alias table enables O(1) sampling from weighted light distributions using Walker’s alias method:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Construction</span><span class="p">:</span> <span class="n">O</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="n">time</span><span class="p">,</span> <span class="n">O</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="n">space</span>
+<span class="n">Sampling</span><span class="p">:</span> <span class="n">O</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="n">time</span> <span class="n">per</span> <span class="n">sample</span>
+</pre></div>
+</div>
+</section>
+<section id="reservoir-operations">
+<h3>Reservoir Operations<a class="headerlink" href="#reservoir-operations" title="Link to this heading"></a></h3>
+<p>Each pixel maintains a reservoir containing:</p>
+<ul class="simple">
+<li><p>Current light sample</p></li>
+<li><p>Weight sum (w_sum)</p></li>
+<li><p>Sample count (M)</p></li>
+<li><p>Final weight for shading</p></li>
+</ul>
+</section>
+<section id="temporal-reuse">
+<h3>Temporal Reuse<a class="headerlink" href="#temporal-reuse" title="Link to this heading"></a></h3>
+<p>Temporal reuse propagates samples across frames using motion vectors:</p>
+<ol class="arabic simple">
+<li><p><strong>Geometry Validation</strong>: Check depth and normal similarity</p></li>
+<li><p><strong>Jacobian Calculation</strong>: Account for visibility/geometric changes</p></li>
+<li><p><strong>Reservoir Combination</strong>: Merge temporal sample with current reservoir</p></li>
+</ol>
+</section>
+<section id="spatial-reuse">
+<h3>Spatial Reuse<a class="headerlink" href="#spatial-reuse" title="Link to this heading"></a></h3>
+<p>Spatial reuse shares samples between neighboring pixels:</p>
+<ol class="arabic simple">
+<li><p><strong>Neighbor Selection</strong>: Use structured/random patterns within radius</p></li>
+<li><p><strong>Similarity Testing</strong>: Validate geometric compatibility</p></li>
+<li><p><strong>Multi-pass</strong>: Multiple spatial passes for better quality</p></li>
+</ol>
+</section>
+<section id="bias-correction">
+<h3>Bias Correction<a class="headerlink" href="#bias-correction" title="Link to this heading"></a></h3>
+<p>Bias correction ensures unbiased results by:</p>
+<ul class="simple">
+<li><p>Recomputing normalization factors</p></li>
+<li><p>Accounting for all possible sample sources</p></li>
+<li><p>Maintaining correct PDF estimates</p></li>
+</ul>
+</section>
+</section>
+<section id="performance-considerations">
+<h2>Performance Considerations<a class="headerlink" href="#performance-considerations" title="Link to this heading"></a></h2>
+<section id="memory-usage">
+<h3>Memory Usage<a class="headerlink" href="#memory-usage" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p><strong>Light Storage</strong>: ~40 bytes per light (position, direction, intensity, params)</p></li>
+<li><p><strong>Alias Table</strong>: 8 bytes per light (probability + alias index)</p></li>
+<li><p><strong>Reservoirs</strong>: ~64 bytes per pixel (sample + metadata)</p></li>
+<li><p><strong>G-buffers</strong>: Standard requirements (depth, normal, position)</p></li>
+</ul>
+</section>
+<section id="gpu-memory-layout">
+<h3>GPU Memory Layout<a class="headerlink" href="#gpu-memory-layout" title="Link to this heading"></a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Bind</span> <span class="n">Group</span> <span class="mi">0</span><span class="p">:</span> <span class="n">ReSTIR</span> <span class="n">parameters</span> <span class="ow">and</span> <span class="n">light</span> <span class="n">data</span>
+  <span class="o">-</span> <span class="n">binding</span> <span class="mi">0</span><span class="p">:</span> <span class="n">RestirParams</span> <span class="p">(</span><span class="n">uniform</span><span class="p">)</span>
+  <span class="o">-</span> <span class="n">binding</span> <span class="mi">1</span><span class="p">:</span> <span class="n">Light</span> <span class="n">array</span> <span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">read</span><span class="p">)</span>
+  <span class="o">-</span> <span class="n">binding</span> <span class="mi">2</span><span class="p">:</span> <span class="n">Alias</span> <span class="n">table</span> <span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">read</span><span class="p">)</span>
+
+<span class="n">Bind</span> <span class="n">Group</span> <span class="mi">1</span><span class="p">:</span> <span class="n">Temporal</span> <span class="n">data</span>
+  <span class="o">-</span> <span class="n">binding</span> <span class="mi">0</span><span class="p">:</span> <span class="n">Previous</span> <span class="n">reservoirs</span> <span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">read</span><span class="p">)</span>
+  <span class="o">-</span> <span class="n">binding</span> <span class="mi">1</span><span class="p">:</span> <span class="n">Current</span> <span class="n">reservoirs</span> <span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">read_write</span><span class="p">)</span>
+  <span class="o">-</span> <span class="n">binding</span> <span class="mi">2</span><span class="p">:</span> <span class="n">Motion</span> <span class="n">vectors</span> <span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">read</span><span class="p">)</span>
+
+<span class="n">Bind</span> <span class="n">Group</span> <span class="mi">2</span><span class="p">:</span> <span class="n">Spatial</span> <span class="n">data</span>
+  <span class="o">-</span> <span class="n">binding</span> <span class="mi">0</span><span class="p">:</span> <span class="n">Input</span> <span class="n">reservoirs</span> <span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">read</span><span class="p">)</span>
+  <span class="o">-</span> <span class="n">binding</span> <span class="mi">1</span><span class="p">:</span> <span class="n">Output</span> <span class="n">reservoirs</span> <span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">read_write</span><span class="p">)</span>
+  <span class="o">-</span> <span class="n">binding</span> <span class="mi">2</span><span class="p">:</span> <span class="n">G</span><span class="o">-</span><span class="n">buffer</span> <span class="n">data</span> <span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">read</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="performance-tips">
+<h3>Performance Tips<a class="headerlink" href="#performance-tips" title="Link to this heading"></a></h3>
+<ol class="arabic simple">
+<li><p><strong>Light Count</strong>: Performance is largely independent of light count after alias table construction</p></li>
+<li><p><strong>Spatial Radius</strong>: Larger radius improves quality but increases cost</p></li>
+<li><p><strong>Sample Count</strong>: More initial candidates improve quality with linear cost increase</p></li>
+<li><p><strong>Bias Correction</strong>: Can be disabled for performance if bias is acceptable</p></li>
+</ol>
+</section>
+</section>
+<section id="limitations">
+<h2>Limitations<a class="headerlink" href="#limitations" title="Link to this heading"></a></h2>
+<ol class="arabic simple">
+<li><p><strong>Dynamic Lights</strong>: Light changes require alias table reconstruction</p></li>
+<li><p><strong>Memory</strong>: Requires additional GPU memory for reservoirs and temporal data</p></li>
+<li><p><strong>Latency</strong>: Temporal reuse introduces one frame of latency</p></li>
+<li><p><strong>Complexity</strong>: More complex than traditional sampling methods</p></li>
+</ol>
+</section>
+<section id="integration-example">
+<h2>Integration Example<a class="headerlink" href="#integration-example" title="Link to this heading"></a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">forge3d.lighting</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_test_scene</span>
+
+<span class="c1"># Create a test scene with many lights</span>
+<span class="n">restir</span> <span class="o">=</span> <span class="n">create_test_scene</span><span class="p">(</span>
+    <span class="n">num_lights</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span>
+    <span class="n">scene_bounds</span><span class="o">=</span><span class="p">(</span><span class="mf">20.0</span><span class="p">,</span> <span class="mf">20.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">),</span>
+    <span class="n">intensity_range</span><span class="o">=</span><span class="p">(</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">),</span>
+    <span class="n">seed</span><span class="o">=</span><span class="mi">42</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Created scene with </span><span class="si">{</span><span class="n">restir</span><span class="o">.</span><span class="n">num_lights</span><span class="si">}</span><span class="s2"> lights&quot;</span><span class="p">)</span>
+
+<span class="c1"># Get statistics</span>
+<span class="n">stats</span> <span class="o">=</span> <span class="n">restir</span><span class="o">.</span><span class="n">get_statistics</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Configuration: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;config&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Sample a light</span>
+<span class="n">light_idx</span><span class="p">,</span> <span class="n">pdf</span> <span class="o">=</span> <span class="n">restir</span><span class="o">.</span><span class="n">sample_light</span><span class="p">(</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Sampled light </span><span class="si">{</span><span class="n">light_idx</span><span class="si">}</span><span class="s2"> with PDF </span><span class="si">{</span><span class="n">pdf</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>Bitterli, B., et al. “Spatiotemporal reservoir resampling for real-time ray tracing with dynamic direct lighting.” ACM TOG 2020.</p></li>
+<li><p>Walker, A. J. “An efficient method for generating discrete random variables with general distributions.” ACM TOMS 1977.</p></li>
+</ul>
+</section>
+<section id="see-also">
+<h2>See Also<a class="headerlink" href="#see-also" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="path_tracing.html"><span class="std std-doc">Path Tracing API</span></a></p></li>
+<li><p><a class="reference internal" href="../gpu_memory_guide.html"><span class="std std-doc">GPU Memory Guide</span></a></p></li>
+<li><p><a class="reference internal" href="../wgsl_bind_group_layouts.html"><span class="std std-doc">WGSL Bind Group Layouts</span></a></p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, forge3d contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
