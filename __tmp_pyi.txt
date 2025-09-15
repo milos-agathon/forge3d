@@ -1,10 +1,10 @@
-# python/forge3d/path_tracing.pyi
+﻿# python/forge3d/path_tracing.pyi
 # Type stubs for path tracing API skeleton (Workstream A).
 # This exists to keep the package typed and IDE-friendly.
 # RELEVANT FILES:python/forge3d/path_tracing.py,python/forge3d/__init__.pyi,tests/test_path_tracing_api.py
 
 from __future__ import annotations
-from typing import Tuple
+from typing import Tuple, Iterable, Dict, Mapping
 import numpy as np
 
 class PathTracer:
@@ -18,3 +18,22 @@ class PathTracer:
 def create_path_tracer(width: int, height: int, *, max_bounces: int = ..., seed: int = ...) -> PathTracer: ...
 def _fresnel_schlick(cos_theta: np.ndarray, F0: np.ndarray) -> np.ndarray: ...
 
+# AOV API (A14)
+def render_aovs(
+    width: int,
+    height: int,
+    scene,
+    camera: dict | None = ..., 
+    *,
+    aovs: Iterable[str] = ..., 
+    seed: int = ..., 
+    frames: int = ..., 
+    use_gpu: bool = ..., 
+) -> Dict[str, np.ndarray]: ...
+
+def save_aovs(
+    aovs_map: Mapping[str, np.ndarray], 
+    basename: str, 
+    *, 
+    output_dir: str | None = ..., 
+) -> Dict[str, str]: ...
