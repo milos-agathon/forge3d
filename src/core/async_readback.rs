@@ -7,7 +7,8 @@ use crate::core::memory_tracker::global_tracker;
 use crate::error::RenderError;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
-use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device, NonZeroU32, Queue, Texture};
+use std::num::NonZeroU32;
+use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device, Queue, Texture};
 
 /// Configuration for async readback operations
 #[derive(Debug, Clone)]
@@ -45,7 +46,7 @@ impl AsyncReadbackHandle {
     }
 
     /// Try to get the result if available (non-blocking)
-    pub fn try_get(self) -> Result<Option<Vec<u8>>, RenderError> {
+    pub fn try_get(&mut self) -> Result<Option<Vec<u8>>, RenderError> {
         match self.receiver.try_recv() {
             Ok(result) => result.map(Some),
             Err(oneshot::error::TryRecvError::Empty) => Ok(None),
@@ -63,7 +64,7 @@ impl AsyncReadbackHandle {
 
 /// Internal readback buffer state
 struct ReadbackBuffer {
-    buffer: Buffer,
+    buffer: Arc<Buffer>,
     size: u64,
     in_use: bool,
 }
@@ -81,7 +82,7 @@ impl ReadbackBuffer {
         global_tracker().track_buffer_allocation(size, true); // host-visible
 
         Self {
-            buffer,
+            buffer: Arc::new(buffer),
             size,
             in_use: false,
         }
@@ -168,14 +169,14 @@ impl AsyncReadbackManager {
         let buffer = self.get_readback_buffer(buffer_size)?;
 
         // Submit copy command
-        self.submit_copy_command(texture, &buffer, width, height, padded_bpr)?;
+        self.submit_copy_command(texture, buffer.as_ref(), width, height, padded_bpr)?;
 
         // Create channel for result
         let (sender, receiver) = oneshot::channel();
 
         // Submit task to worker
         let task = ReadbackTask {
-            buffer: Arc::new(buffer),
+            buffer: buffer.clone(),
             width,
             height,
             padded_bpr,
@@ -213,7 +214,7 @@ impl AsyncReadbackManager {
     }
 
     /// Get an available readback buffer or create a new one
-    fn get_readback_buffer(&self, required_size: u64) -> Result<Buffer, RenderError> {
+    fn get_readback_buffer(&self, required_size: u64) -> Result<Arc<Buffer>, RenderError> {
         let mut buffers = self.buffers.lock().unwrap();
 
         // Try to find an available buffer of sufficient size
@@ -246,7 +247,7 @@ impl AsyncReadbackManager {
             });
 
             global_tracker().track_buffer_allocation(required_size, true);
-            Ok(buffer)
+            Ok(Arc::new(buffer))
         }
     }
 
@@ -277,16 +278,14 @@ impl AsyncReadbackManager {
             layout: wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(
-                    NonZeroU32::new(padded_bpr)
-                        .ok_or_else(|| {
-                            RenderError::Upload("bytes_per_row cannot be zero".to_string())
-                        })?
-                        .into(),
+                    NonZeroU32::new(padded_bpr).ok_or_else(|| {
+                        RenderError::Upload("bytes_per_row cannot be zero".to_string())
+                    })?.into(),
                 ),
                 rows_per_image: Some(
-                    NonZeroU32::new(height)
-                        .ok_or_else(|| RenderError::Upload("height cannot be zero".to_string()))?
-                        .into(),
+                    NonZeroU32::new(height).ok_or_else(|| {
+                        RenderError::Upload("height cannot be zero".to_string())
+                    })?.into(),
                 ),
             },
         };
@@ -317,7 +316,7 @@ impl AsyncReadbackManager {
         let slice = task.buffer.slice(..);
 
         // Create channel for map_async callback
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
 
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);

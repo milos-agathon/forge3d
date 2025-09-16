@@ -1,0 +1,519 @@
+   Compiling forge3d v0.14.0 (/Users/mpopovic3/forge3d)
+warning: unused import: `Context`
+ --> src/accel/lbvh_gpu.rs:8:14
+  |
+8 | use anyhow::{Context, Result};
+  |              ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `BindGroup`
+  --> src/accel/lbvh_gpu.rs:13:12
+   |
+13 | use wgpu::{BindGroup, Buffer, BufferUsages, ComputePipeline, Device, Queue};
+   |            ^^^^^^^^^
+
+warning: unused import: `Context`
+ --> src/accel/sah_cpu.rs:8:14
+  |
+8 | use anyhow::{Context, Result};
+  |              ^^^^^^^
+
+warning: unused import: `crate::core::resource_tracker::ResourceHandle`
+ --> src/core/big_buffer.rs:8:5
+  |
+8 | use crate::core::resource_tracker::ResourceHandle;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> src/core/double_buffer.rs:9:5
+  |
+9 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused imports: `BufferAddress` and `CommandEncoder`
+  --> src/core/double_buffer.rs:10:20
+   |
+10 | use wgpu::{Buffer, BufferAddress, BufferDescriptor, BufferUsages, CommandEncoder, Device, Queue};
+   |                    ^^^^^^^^^^^^^                                  ^^^^^^^^^^^^^^
+
+warning: unused import: `std::io::BufReader`
+  --> src/external_image/mod.rs:46:5
+   |
+46 | use std::io::BufReader;
+   |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::collections::HashMap`
+ --> src/mesh/tbn.rs:7:5
+  |
+7 | use std::collections::HashMap;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `GpuBvhData`
+ --> src/path_tracing/accel.rs:7:55
+  |
+7 | use crate::accel::{BvhBackend, BvhHandle, CpuBvhData, GpuBvhData, Triangle};
+  |                                                       ^^^^^^^^^^
+
+warning: unused import: `Context`
+ --> src/path_tracing/accel.rs:8:14
+  |
+8 | use anyhow::{Context, Result};
+  |              ^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> src/path_tracing/compute.rs:7:5
+  |
+7 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unnecessary parentheses around assigned value
+    --> src/path_tracing/compute.rs:1023:34
+     |
+1023 |                 let dst_stride = (width as usize);
+     |                                  ^              ^
+     |
+     = note: `#[warn(unused_parens)]` on by default
+help: remove these parentheses
+     |
+1023 -                 let dst_stride = (width as usize);
+1023 +                 let dst_stride = width as usize;
+     |
+
+warning: unused import: `std::num::NonZeroU32`
+ --> src/path_tracing/guiding.rs:6:5
+  |
+6 | use std::num::NonZeroU32;
+  |     ^^^^^^^^^^^^^^^^^^^^
+
+warning: unnecessary parentheses around block return value
+  --> src/path_tracing/guiding.rs:51:13
+   |
+51 |             (rand_like(w) as u32)
+   |             ^                   ^
+   |
+help: remove these parentheses
+   |
+51 -             (rand_like(w) as u32)
+51 +             rand_like(w) as u32
+   |
+
+warning: unused import: `std::sync::Arc`
+ --> src/path_tracing/hybrid_compute.rs:6:5
+  |
+6 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> src/path_tracing/wavefront/queues.rs:5:5
+  |
+5 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `BindGroupLayout`
+ --> src/path_tracing/wavefront/queues.rs:6:23
+  |
+6 | use wgpu::{BindGroup, BindGroupLayout, Buffer, BufferUsages, CommandEncoder, Device, Queue};
+  |                       ^^^^^^^^^^^^^^^
+
+warning: unused import: `BufferUsages`
+  --> src/path_tracing/wavefront/mod.rs:13:31
+   |
+13 | use wgpu::{BindGroup, Buffer, BufferUsages, CommandEncoder, Device, Queue};
+   |                               ^^^^^^^^^^^^
+
+warning: unused import: `TbnData`
+ --> src/pipeline/normal_mapping.rs:6:19
+  |
+6 | use crate::mesh::{TbnData, TbnVertex};
+  |                   ^^^^^^^
+
+warning: unused imports: `Vec3` and `Vec4`
+ --> src/pipeline/normal_mapping.rs:8:18
+  |
+8 | use glam::{Mat4, Vec3, Vec4};
+  |                  ^^^^  ^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> src/pipeline/normal_mapping.rs:9:5
+  |
+9 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `glam::Vec3`
+ --> src/pipeline/pbr.rs:7:5
+  |
+7 | use glam::Vec3;
+  |     ^^^^^^^^^^
+
+warning: unused import: `TimingScopeId`
+ --> src/pipeline/hdr_offscreen.rs:6:49
+  |
+6 | use crate::core::gpu_timing::{GpuTimingManager, TimingScopeId};
+  |                                                 ^^^^^^^^^^^^^
+
+warning: unused import: `glam::Vec3`
+ --> src/pipeline/hdr_offscreen.rs:7:5
+  |
+7 | use glam::Vec3;
+  |     ^^^^^^^^^^
+
+warning: unused import: `ShaderModule`
+  --> src/pipeline/hdr_offscreen.rs:16:70
+   |
+16 |     RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor, ShaderModule,
+   |                                                                      ^^^^^^^^^^^^
+
+warning: unused imports: `Pod` and `Zeroable`
+  --> src/sdf/hybrid.rs:10:16
+   |
+10 | use bytemuck::{Pod, Zeroable};
+   |                ^^^  ^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+  --> src/sdf/hybrid.rs:12:5
+   |
+12 | use std::sync::Arc;
+   |     ^^^^^^^^^^^^^^
+
+warning: unused imports: `Device` and `Queue`
+  --> src/sdf/hybrid.rs:13:20
+   |
+13 | use wgpu::{Buffer, Device, Queue};
+   |                    ^^^^^^  ^^^^^
+
+warning: unused import: `Triangle`
+  --> src/sdf/hybrid.rs:15:31
+   |
+15 | use crate::accel::{BvhHandle, Triangle};
+   |                               ^^^^^^^^
+
+warning: unused import: `CsgResult`
+  --> src/sdf/hybrid.rs:25:18
+   |
+25 | use crate::sdf::{CsgResult, SdfScene};
+   |                  ^^^^^^^^^
+
+warning: unused import: `wgpu::util::DeviceExt`
+ --> src/vector/oit.rs:9:5
+  |
+9 | use wgpu::util::DeviceExt;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src/pipeline/hdr_offscreen.rs:423:41
+    |
+423 |                     bytes_per_row: Some(NonZeroU32::new(padded_bytes_per_row).unwrap()),
+    |                                    ---- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `u32`, found `NonZero<u32>`
+    |                                    |
+    |                                    arguments to this enum variant are incorrect
+    |
+    = note: expected type `u32`
+             found struct `std::num::NonZero<u32>`
+help: the type constructed contains `std::num::NonZero<u32>` due to the type of the argument passed
+   --> src/pipeline/hdr_offscreen.rs:423:36
+    |
+423 |                     bytes_per_row: Some(NonZeroU32::new(padded_bytes_per_row).unwrap()),
+    |                                    ^^^^^----------------------------------------------^
+    |                                         |
+    |                                         this argument influences the type of `Some`
+note: tuple variant defined here
+   --> /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/core/src/option.rs:597:5
+help: call `Into::into` on this expression to convert `std::num::NonZero<u32>` into `u32`
+    |
+423 |                     bytes_per_row: Some(NonZeroU32::new(padded_bytes_per_row).unwrap().into()),
+    |                                                                                       +++++++
+
+error[E0308]: mismatched types
+   --> src/pipeline/hdr_offscreen.rs:424:42
+    |
+424 |                     rows_per_image: Some(NonZeroU32::new(self.config.height).unwrap()),
+    |                                     ---- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `u32`, found `NonZero<u32>`
+    |                                     |
+    |                                     arguments to this enum variant are incorrect
+    |
+    = note: expected type `u32`
+             found struct `std::num::NonZero<u32>`
+help: the type constructed contains `std::num::NonZero<u32>` due to the type of the argument passed
+   --> src/pipeline/hdr_offscreen.rs:424:37
+    |
+424 |                     rows_per_image: Some(NonZeroU32::new(self.config.height).unwrap()),
+    |                                     ^^^^^--------------------------------------------^
+    |                                          |
+    |                                          this argument influences the type of `Some`
+note: tuple variant defined here
+   --> /rustc/6b00bc3880198600130e1cf62b8f8a93494488cc/library/core/src/option.rs:597:5
+help: call `Into::into` on this expression to convert `std::num::NonZero<u32>` into `u32`
+    |
+424 |                     rows_per_image: Some(NonZeroU32::new(self.config.height).unwrap().into()),
+    |                                                                                      +++++++
+
+warning: unused variable: `options`
+   --> src/accel/lbvh_gpu.rs:179:53
+    |
+179 |     pub fn build(&mut self, triangles: &[Triangle], options: &BuildOptions) -> Result<BvhHandle> {
+    |                                                     ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_options`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `buffers`
+   --> src/accel/lbvh_gpu.rs:418:9
+    |
+418 |         buffers: &GpuBuffers,
+    |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_buffers`
+
+warning: unused variable: `world_aabb`
+   --> src/accel/lbvh_gpu.rs:419:9
+    |
+419 |         world_aabb: &Aabb,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_world_aabb`
+
+warning: unused variable: `prim_count`
+   --> src/accel/lbvh_gpu.rs:420:9
+    |
+420 |         prim_count: u32,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prim_count`
+
+warning: unused variable: `buffers`
+   --> src/accel/lbvh_gpu.rs:427:33
+    |
+427 |     fn sort_morton_codes(&self, buffers: &GpuBuffers, prim_count: u32) -> Result<()> {
+    |                                 ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_buffers`
+
+warning: unused variable: `prim_count`
+   --> src/accel/lbvh_gpu.rs:427:55
+    |
+427 |     fn sort_morton_codes(&self, buffers: &GpuBuffers, prim_count: u32) -> Result<()> {
+    |                                                       ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prim_count`
+
+warning: unused variable: `buffers`
+   --> src/accel/lbvh_gpu.rs:434:9
+    |
+434 |         buffers: &GpuBuffers,
+    |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_buffers`
+
+warning: unused variable: `prim_count`
+   --> src/accel/lbvh_gpu.rs:435:9
+    |
+435 |         prim_count: u32,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prim_count`
+
+warning: unused variable: `node_count`
+   --> src/accel/lbvh_gpu.rs:436:9
+    |
+436 |         node_count: u32,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_node_count`
+
+warning: unused variable: `aabb_buffer`
+   --> src/accel/lbvh_gpu.rs:444:9
+    |
+444 |         aabb_buffer: &Buffer,
+    |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_aabb_buffer`
+
+warning: unused variable: `nodes_buffer`
+   --> src/accel/lbvh_gpu.rs:445:9
+    |
+445 |         nodes_buffer: &Buffer,
+    |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_nodes_buffer`
+
+warning: unused variable: `prim_count`
+   --> src/accel/lbvh_gpu.rs:446:9
+    |
+446 |         prim_count: u32,
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prim_count`
+
+warning: unused variable: `limits`
+   --> src/core/gpu_timing.rs:125:13
+    |
+125 |         let limits = device.limits();
+    |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_limits`
+
+warning: unused variable: `scope_id`
+   --> src/core/gpu_timing.rs:249:9
+    |
+249 |         scope_id: TimingScopeId,
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_scope_id`
+
+warning: unused variable: `device`
+  --> src/core/postfx.rs:92:16
+   |
+92 |     pub fn new(device: &Device, width: u32, height: u32, max_ping_pong_pairs: usize) -> Self {
+   |                ^^^^^^ help: if this is intentional, prefix it with an underscore: `_device`
+
+warning: unused variable: `resource_pool`
+   --> src/core/bloom.rs:123:9
+    |
+123 |         resource_pool: &mut PostFxResourcePool,
+    |         ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_resource_pool`
+
+warning: unused variable: `brightpass_pipeline`
+   --> src/core/bloom.rs:294:13
+    |
+294 |         let brightpass_pipeline = self
+    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_brightpass_pipeline`
+
+warning: unused variable: `blur_h_pipeline`
+   --> src/core/bloom.rs:298:13
+    |
+298 |         let blur_h_pipeline = self
+    |             ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_blur_h_pipeline`
+
+warning: unused variable: `blur_v_pipeline`
+   --> src/core/bloom.rs:302:13
+    |
+302 |         let blur_v_pipeline = self
+    |             ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_blur_v_pipeline`
+
+warning: unused variable: `brightpass_layout`
+   --> src/core/bloom.rs:307:13
+    |
+307 |         let brightpass_layout = self
+    |             ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_brightpass_layout`
+
+warning: unused variable: `blur_layout`
+   --> src/core/bloom.rs:311:13
+    |
+311 |         let blur_layout = self
+    |             ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_blur_layout`
+
+warning: unused variable: `brightpass_uniform_buffer`
+   --> src/core/bloom.rs:316:13
+    |
+316 |         let brightpass_uniform_buffer = self
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_brightpass_uniform_buffer`
+
+warning: unused variable: `blur_uniform_buffer`
+   --> src/core/bloom.rs:320:13
+    |
+320 |         let blur_uniform_buffer = self
+    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_blur_uniform_buffer`
+
+warning: unused variable: `input`
+   --> src/core/bloom.rs:282:9
+    |
+282 |         input: &TextureView,
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_input`
+
+warning: unused variable: `output`
+   --> src/core/bloom.rs:283:9
+    |
+283 |         output: &TextureView,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_output`
+
+warning: unused variable: `u2`
+   --> src/path_tracing/alias_table.rs:110:35
+    |
+110 |     pub fn sample(&self, u1: f32, u2: f32) -> (usize, f32) {
+    |                                   ^^ help: if this is intentional, prefix it with an underscore: `_u2`
+
+warning: unused variable: `aov_data`
+   --> src/path_tracing/io.rs:167:18
+    |
+167 |     fn write_exr(aov_data: &AovData, path: &Path) -> Result<()> {
+    |                  ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_aov_data`
+
+warning: unused variable: `path`
+   --> src/path_tracing/io.rs:167:38
+    |
+167 |     fn write_exr(aov_data: &AovData, path: &Path) -> Result<()> {
+    |                                      ^^^^ help: if this is intentional, prefix it with an underscore: `_path`
+
+warning: unused variable: `encoder`
+   --> src/path_tracing/wavefront/queues.rs:208:49
+    |
+208 |     pub fn reset_counters(&self, queue: &Queue, encoder: &mut CommandEncoder) {
+    |                                                 ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_encoder`
+
+warning: unused variable: `device`
+   --> src/path_tracing/wavefront/queues.rs:224:9
+    |
+224 |         device: &Device,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_device`
+
+warning: unused variable: `queue`
+   --> src/path_tracing/wavefront/queues.rs:225:9
+    |
+225 |         queue: &Queue,
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_queue`
+
+warning: unused variable: `encoder`
+   --> src/path_tracing/wavefront/queues.rs:226:9
+    |
+226 |         encoder: &mut CommandEncoder,
+    |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_encoder`
+
+warning: unused variable: `scene`
+  --> src/path_tracing/wavefront/mod.rs:67:9
+   |
+67 |         scene: &Scene,
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_scene`
+
+warning: unused variable: `params`
+  --> src/path_tracing/wavefront/mod.rs:68:9
+   |
+68 |         params: &TracerParams,
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_params`
+
+warning: unused variable: `accum_buffer`
+  --> src/path_tracing/wavefront/mod.rs:69:9
+   |
+69 |         accum_buffer: &Buffer,
+   |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_accum_buffer`
+
+error[E0596]: cannot borrow `timing_manager` as mutable, as it is not declared as mutable
+   --> src/pipeline/hdr_offscreen.rs:337:9
+    |
+337 |         timing_manager: Option<&mut GpuTimingManager>,
+    |         ^^^^^^^^^^^^^^ not mutable
+338 |     ) {
+339 |         let timing_scope = if let Some(timer) = timing_manager.as_deref_mut() {
+    |                                                 -------------- cannot borrow as mutable
+...
+370 |             if let Some(timer) = timing_manager.as_deref_mut() {
+    |                                  -------------- cannot borrow as mutable
+    |
+help: consider changing this to be mutable
+    |
+337 |         mut timing_manager: Option<&mut GpuTimingManager>,
+    |         +++
+
+warning: unused variable: `ray`
+   --> src/sdf/hybrid.rs:279:30
+    |
+279 |     fn intersect_mesh(&self, ray: Ray) -> Option<HybridHitResult> {
+    |                              ^^^ help: if this is intentional, prefix it with an underscore: `_ray`
+
+warning: unused variable: `gpu_data`
+   --> src/sdf/hybrid.rs:350:51
+    |
+350 |                     crate::accel::BvhBackend::Gpu(gpu_data) => {
+    |                                                   ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_gpu_data`
+
+warning: unused variable: `camera_pos`
+   --> src/terrain/lod.rs:210:5
+    |
+210 |     camera_pos: Vec3,
+    |     ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_camera_pos`
+
+warning: unused variable: `view_matrix`
+   --> src/terrain/lod.rs:211:5
+    |
+211 |     view_matrix: Mat4,
+    |     ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_view_matrix`
+
+warning: unused variable: `proj_matrix`
+   --> src/terrain/lod.rs:212:5
+    |
+212 |     proj_matrix: Mat4,
+    |     ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_proj_matrix`
+
+warning: unused variable: `config`
+   --> src/terrain/lod.rs:213:5
+    |
+213 |     config: &LodConfig,
+    |     ^^^^^^ help: if this is intentional, prefix it with an underscore: `_config`
+
+Some errors have detailed explanations: E0308, E0596.
+For more information about an error, try `rustc --explain E0308`.
+warning: `forge3d` (lib) generated 72 warnings
+error: could not compile `forge3d` (lib) due to 3 previous errors; 72 warnings emitted

@@ -5,6 +5,7 @@
 
 use crate::core::gpu_timing::{GpuTimingManager, TimingScopeId};
 use glam::Vec3;
+use std::num::NonZeroU32;
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BlendState, Buffer, BufferBindingType,
@@ -170,7 +171,7 @@ impl HdrOffscreenPipeline {
         });
 
         // Create tonemap pipeline
-        let tonemap_shader = device.create_shader_module(&ShaderModuleDescriptor {
+        let tonemap_shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("tonemap_shader"),
             source: ShaderSource::Wgsl(include_str!("../shaders/postprocess_tonemap.wgsl").into()),
         });
@@ -333,9 +334,9 @@ impl HdrOffscreenPipeline {
     pub fn apply_tone_mapping_with_timing(
         &self,
         encoder: &mut CommandEncoder,
-        timing_manager: Option<&mut GpuTimingManager>,
+        mut timing_manager: Option<&mut GpuTimingManager>,
     ) {
-        let timing_scope = if let Some(timer) = timing_manager {
+        let timing_scope = if let Some(timer) = timing_manager.as_deref_mut() {
             Some(timer.begin_scope(encoder, "hdr_offscreen_tonemap"))
         } else {
             None
@@ -359,14 +360,16 @@ impl HdrOffscreenPipeline {
         // Fullscreen pass binding hdr texture + sampler to tonemap shader
         render_pass.set_pipeline(&self.tonemap_pipeline);
         render_pass.set_bind_group(0, &self.tonemap_bind_group, &[]);
-        render_pass.draw(3, 1, 0, 0); // Full-screen triangle
+        render_pass.draw(0..3, 0..1); // Full-screen triangle
 
         // End render pass before ending timing scope
         drop(render_pass);
 
         // End GPU timing scope
-        if let (Some(timer), Some(scope_id)) = (timing_manager, timing_scope) {
-            timer.end_scope(encoder, scope_id);
+        if let Some(scope_id) = timing_scope {
+            if let Some(timer) = timing_manager.as_deref_mut() {
+                timer.end_scope(encoder, scope_id);
+            }
         }
     }
 

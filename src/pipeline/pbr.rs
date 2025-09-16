@@ -90,12 +90,14 @@ impl PbrMaterialGpu {
     pub fn set_base_color_texture(
         &mut self,
         device: &Device,
+        queue: &Queue,
         texture_data: &[u8],
         width: u32,
         height: u32,
     ) {
         let texture = create_texture_from_data(
             device,
+            queue,
             "pbr_base_color",
             texture_data,
             width,
@@ -114,12 +116,14 @@ impl PbrMaterialGpu {
     pub fn set_metallic_roughness_texture(
         &mut self,
         device: &Device,
+        queue: &Queue,
         texture_data: &[u8],
         width: u32,
         height: u32,
     ) {
         let texture = create_texture_from_data(
             device,
+            queue,
             "pbr_metallic_roughness",
             texture_data,
             width,
@@ -139,12 +143,14 @@ impl PbrMaterialGpu {
     pub fn set_normal_texture(
         &mut self,
         device: &Device,
+        queue: &Queue,
         texture_data: &[u8],
         width: u32,
         height: u32,
     ) {
         let texture = create_texture_from_data(
             device,
+            queue,
             "pbr_normal",
             texture_data,
             width,
@@ -163,12 +169,14 @@ impl PbrMaterialGpu {
     pub fn set_occlusion_texture(
         &mut self,
         device: &Device,
+        queue: &Queue,
         texture_data: &[u8],
         width: u32,
         height: u32,
     ) {
         let texture = create_texture_from_data(
             device,
+            queue,
             "pbr_occlusion",
             texture_data,
             width,
@@ -187,12 +195,14 @@ impl PbrMaterialGpu {
     pub fn set_emissive_texture(
         &mut self,
         device: &Device,
+        queue: &Queue,
         texture_data: &[u8],
         width: u32,
         height: u32,
     ) {
         let texture = create_texture_from_data(
             device,
+            queue,
             "pbr_emissive",
             texture_data,
             width,
@@ -211,15 +221,16 @@ impl PbrMaterialGpu {
     pub fn create_bind_group(
         &mut self,
         device: &Device,
+        queue: &Queue,
         layout: &wgpu::BindGroupLayout,
         sampler: &Sampler,
     ) {
         // Create default textures for missing ones
-        let default_white = create_default_texture(device, "default_white", [255, 255, 255, 255]);
-        let default_normal = create_default_texture(device, "default_normal", [128, 128, 255, 255]);
+        let default_white = create_default_texture(device, queue, "default_white", [255, 255, 255, 255]);
+        let default_normal = create_default_texture(device, queue, "default_normal", [128, 128, 255, 255]);
         let default_metallic_roughness =
-            create_default_texture(device, "default_mr", [0, 255, 0, 255]); // No metallic, full roughness
-        let default_black = create_default_texture(device, "default_black", [0, 0, 0, 0]);
+            create_default_texture(device, queue, "default_mr", [0, 255, 0, 255]); // No metallic, full roughness
+        let default_black = create_default_texture(device, queue, "default_black", [0, 0, 0, 0]);
 
         // Create views for default textures
         let default_white_view = default_white.create_view(&TextureViewDescriptor::default());
@@ -291,6 +302,7 @@ impl PbrMaterialGpu {
 /// Create texture from raw data
 fn create_texture_from_data(
     device: &Device,
+    queue: &Queue,
     label: &str,
     data: &[u8],
     width: u32,
@@ -329,7 +341,7 @@ fn create_texture_from_data(
     // Create padded data if necessary
     if bytes_per_row == padded_bytes_per_row {
         // No padding needed
-        device.queue().write_texture(
+        queue.write_texture(
             ImageCopyTexture {
                 texture: &texture,
                 mip_level: 0,
@@ -362,7 +374,7 @@ fn create_texture_from_data(
             }
         }
 
-        device.queue().write_texture(
+        queue.write_texture(
             ImageCopyTexture {
                 texture: &texture,
                 mip_level: 0,
@@ -387,8 +399,8 @@ fn create_texture_from_data(
 }
 
 /// Create default 1x1 texture with specific color
-fn create_default_texture(device: &Device, label: &str, color: [u8; 4]) -> Texture {
-    create_texture_from_data(device, label, &color, 1, 1, TextureFormat::Rgba8Unorm)
+fn create_default_texture(device: &Device, queue: &Queue, label: &str, color: [u8; 4]) -> Texture {
+    create_texture_from_data(device, queue, label, &color, 1, 1, TextureFormat::Rgba8Unorm)
 }
 
 /// Create PBR material sampler
