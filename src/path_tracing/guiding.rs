@@ -3,7 +3,6 @@
 // This exists to satisfy A13 deliverables by introducing a simple online histogram grid and directional bins.
 // RELEVANT FILES:src/path_tracing/mod.rs,src/shaders/pt_guiding.wgsl,python/forge3d/guiding.py,tests/test_guiding.py
 
-use std::num::NonZeroU32;
 
 /// Spatial grid with per-cell directional histogram (simple 8-bin azimuth only).
 #[derive(Clone, Debug)]
@@ -48,7 +47,7 @@ impl GuidingGrid {
         } else if w >= 1.0 {
             1
         } else {
-            (rand_like(w) as u32)
+            rand_like(w) as u32
         };
         if inc > 0 {
             let i = self.idx(x, y, bin);

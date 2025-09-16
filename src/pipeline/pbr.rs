@@ -4,7 +4,6 @@
 //! for PBR materials using the metallic-roughness workflow.
 
 use crate::core::material::{texture_flags, PbrMaterial};
-use glam::Vec3;
 use std::collections::HashMap;
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, Buffer,

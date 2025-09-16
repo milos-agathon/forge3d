@@ -106,10 +106,13 @@ impl From<u32> for SuperCompressionScheme {
 /// KTX2 loader with transcoding support
 pub struct Ktx2Loader {
     /// Enable transcoding support
+    #[allow(dead_code)]
     transcoding_enabled: bool,
     /// Supported target formats
+    #[allow(dead_code)]
     target_formats: Vec<wgpu::TextureFormat>,
     /// Basis universal transcoder (placeholder)
+    #[allow(dead_code)]
     basis_transcoder: Option<BasisTranscoder>,
 }
 

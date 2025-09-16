@@ -101,6 +101,7 @@ pub struct TileData {
 #[derive(Debug, Clone)]
 struct CacheEntry {
     /// Tile ID
+    #[allow(dead_code)]
     tile_id: TileId,
     /// Atlas slot where tile is stored
     atlas_slot: AtlasSlot,
@@ -452,11 +453,13 @@ impl AtlasAllocator {
     }
 
     /// Get number of free slots
+    #[allow(dead_code)]
     fn free_count(&self) -> usize {
         self.free_slots.len()
     }
 
     /// Get total number of slots
+    #[allow(dead_code)]
     fn total_count(&self) -> usize {
         (self.tiles_x * self.tiles_y) as usize
     }

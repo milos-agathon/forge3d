@@ -91,6 +91,7 @@ impl<'a> TimingScope<'a> {
 pub struct GpuTimingManager {
     config: GpuTimingConfig,
     device: Arc<Device>,
+    #[allow(dead_code)]
     queue: Arc<Queue>,
 
     // Timestamp queries
@@ -106,6 +107,7 @@ pub struct GpuTimingManager {
     // Timing state
     active_scopes: HashMap<TimingScopeId, String>,
     query_index: u32,
+    #[allow(dead_code)]
     results: Arc<Mutex<Vec<TimingResult>>>,
 
     // Feature support
@@ -122,7 +124,7 @@ impl GpuTimingManager {
         config: GpuTimingConfig,
     ) -> RenderResult<Self> {
         let features = device.features();
-        let limits = device.limits();
+        let _limits = device.limits();
 
         let supports_timestamps =
             config.enable_timestamps && features.contains(Features::TIMESTAMP_QUERY);
@@ -246,7 +248,7 @@ impl GpuTimingManager {
     fn begin_scope_internal(
         &mut self,
         encoder: &mut CommandEncoder,
-        scope_id: TimingScopeId,
+        _scope_id: TimingScopeId,
         label: &str,
     ) {
         let full_label = format!("{}.{}", self.config.label_prefix, label);

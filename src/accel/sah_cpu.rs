@@ -5,7 +5,7 @@
 
 use crate::accel::types::{Aabb, BuildOptions, BuildStats, BvhHandle, BvhNode, Triangle};
 use crate::accel::{BvhBackend, CpuBvhData};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::time::Instant;
 
 /// CPU SAH-based BVH builder
@@ -435,5 +435,6 @@ struct BuildInfo {
 struct SplitInfo {
     axis: usize,
     position: f32,
+    #[allow(dead_code)]
     cost: f32,
 }

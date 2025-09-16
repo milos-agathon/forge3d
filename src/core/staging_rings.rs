@@ -85,8 +85,10 @@ pub struct StagingRing {
     /// Statistics tracking
     stats: Arc<Mutex<StagingStats>>,
     /// Device reference for buffer creation
+    #[allow(dead_code)]
     device: Arc<Device>,
     /// Queue reference for fence submission
+    #[allow(dead_code)]
     queue: Arc<Queue>,
 }
 

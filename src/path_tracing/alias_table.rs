@@ -107,7 +107,7 @@ impl AliasTable {
 
     /// Sample an index using the alias table
     /// Returns (index, pdf) where pdf is the probability of selecting this index
-    pub fn sample(&self, u1: f32, u2: f32) -> (usize, f32) {
+    pub fn sample(&self, u1: f32, _u2: f32) -> (usize, f32) {
         if self.entries.is_empty() {
             return (0, 0.0);
         }

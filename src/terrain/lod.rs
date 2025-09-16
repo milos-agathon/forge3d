@@ -207,10 +207,10 @@ pub fn create_projection_matrix(fov_y: f32, aspect: f32, near: f32, far: f32) ->
 pub fn update_terrain_lod_with_timing(
     encoder: &mut CommandEncoder,
     mut timing_manager: Option<&mut GpuTimingManager>,
-    camera_pos: Vec3,
-    view_matrix: Mat4,
-    proj_matrix: Mat4,
-    config: &LodConfig,
+    _camera_pos: Vec3,
+    _view_matrix: Mat4,
+    _proj_matrix: Mat4,
+    _config: &LodConfig,
 ) -> Vec<TileId> {
     let timing_scope = if let Some(timer) = timing_manager.as_mut() {
         Some(timer.begin_scope(encoder, "terrain_lod_update"))

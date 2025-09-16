@@ -346,6 +346,7 @@ pub struct DefragStats {
 /// A single memory pool for a specific size bucket
 struct MemoryPool {
     /// GPU buffer for this pool
+    #[allow(dead_code)]
     buffer: Buffer,
     /// Size of each allocation in this pool
     allocation_size: u64,

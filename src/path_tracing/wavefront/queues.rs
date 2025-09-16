@@ -2,8 +2,7 @@
 // Queue management structures for wavefront path tracing
 // Handles GPU buffers for rays, hits, scatter rays, and miss rays
 
-use std::sync::Arc;
-use wgpu::{BindGroup, BindGroupLayout, Buffer, BufferUsages, CommandEncoder, Device, Queue};
+use wgpu::{BindGroup, Buffer, BufferUsages, CommandEncoder, Device, Queue};
 
 /// GPU buffer structures for queue headers
 #[repr(C)]
@@ -205,7 +204,7 @@ impl QueueBuffers {
     }
 
     /// Reset all queue counters for new frame
-    pub fn reset_counters(&self, queue: &Queue, encoder: &mut CommandEncoder) {
+    pub fn reset_counters(&self, queue: &Queue, _encoder: &mut CommandEncoder) {
         let zero_header = QueueHeader::new(self.capacity);
         // Avoid borrowing a temporary slice; bind the array first to satisfy borrow checker
         let header_arr = [zero_header];
@@ -221,9 +220,9 @@ impl QueueBuffers {
     /// Get active ray count (requires GPU readback)
     pub fn get_active_ray_count(
         &self,
-        device: &Device,
-        queue: &Queue,
-        encoder: &mut CommandEncoder,
+        _device: &Device,
+        _queue: &Queue,
+        _encoder: &mut CommandEncoder,
     ) -> Result<u32, Box<dyn std::error::Error>> {
         // For now, return estimate based on capacity
         // In full implementation, would do async readback

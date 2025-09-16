@@ -164,7 +164,7 @@ impl AovWriter {
     }
 
     #[cfg(feature = "images")]
-    fn write_exr(aov_data: &AovData, path: &Path) -> Result<()> {
+    fn write_exr(_aov_data: &AovData, _path: &Path) -> Result<()> {
         // For now, provide a placeholder implementation
         // In a full implementation, this would use the 'exr' crate to write float data
         anyhow::bail!("EXR writing not yet implemented - would use 'exr' crate here");

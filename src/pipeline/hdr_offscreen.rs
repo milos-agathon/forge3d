@@ -3,9 +3,7 @@
 //! Provides high dynamic range off-screen rendering to RGBA16Float textures with
 //! tone mapping post-process to sRGB8 output suitable for PNG export and readback.
 
-use crate::core::gpu_timing::{GpuTimingManager, TimingScopeId};
-use glam::Vec3;
-use std::num::NonZeroU32;
+use crate::core::gpu_timing::GpuTimingManager;
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BlendState, Buffer, BufferBindingType,
@@ -13,7 +11,7 @@ use wgpu::{
     Extent3d, FilterMode, FragmentState, ImageCopyTexture, ImageDataLayout, LoadOp,
     MultisampleState, Operations, Origin3d, PipelineLayoutDescriptor, PrimitiveState, Queue,
     RenderPass, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
-    RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor, ShaderModule,
+    RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor,
     ShaderModuleDescriptor, ShaderSource, ShaderStages, StoreOp, Texture, TextureAspect,
     TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
     TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,

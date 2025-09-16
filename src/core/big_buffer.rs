@@ -5,7 +5,6 @@
 //! alignment and provides RAII allocation management.
 
 use crate::core::memory_tracker::ResourceRegistry;
-use crate::core::resource_tracker::ResourceHandle;
 use crate::error::RenderError;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
@@ -47,6 +46,7 @@ struct BigBufferAllocator {
     /// Allocated blocks
     allocated_blocks: HashMap<u32, u32>, // offset -> size
     /// Total buffer size
+    #[allow(dead_code)]
     total_size: u32,
 }
 

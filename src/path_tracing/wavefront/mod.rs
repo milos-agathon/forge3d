@@ -10,7 +10,7 @@ use crate::scene::Scene;
 use pipeline::WavefrontPipelines;
 use queues::*;
 use std::sync::Arc;
-use wgpu::{BindGroup, Buffer, BufferUsages, CommandEncoder, Device, Queue};
+use wgpu::{BindGroup, Buffer, CommandEncoder, Device, Queue};
 
 // Constants from task specification
 const MAX_DEPTH: u32 = 8;
@@ -64,9 +64,9 @@ impl WavefrontScheduler {
     /// Execute one frame of wavefront path tracing
     pub fn render_frame(
         &mut self,
-        scene: &Scene,
-        params: &TracerParams,
-        accum_buffer: &Buffer,
+        _scene: &Scene,
+        _params: &TracerParams,
+        _accum_buffer: &Buffer,
         uniforms_buffer: &Buffer,
         scene_bind_group: &BindGroup,
         accum_bind_group: &BindGroup,

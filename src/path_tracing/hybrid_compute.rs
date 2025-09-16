@@ -3,7 +3,6 @@
 // Extends the existing path tracing compute pipeline with hybrid scene support
 
 use std::num::NonZeroU32;
-use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use half::f16;
@@ -84,10 +83,12 @@ impl Default for HybridTracerParams {
 /// Hybrid path tracer implementation
 pub struct HybridPathTracer {
     /// Shader module for hybrid traversal
+    #[allow(dead_code)]
     shader: wgpu::ShaderModule,
     /// Bind group layouts
     layouts: HybridBindGroupLayouts,
     /// Pipeline layout
+    #[allow(dead_code)]
     pipeline_layout: wgpu::PipelineLayout,
     /// Compute pipeline
     pipeline: wgpu::ComputePipeline,

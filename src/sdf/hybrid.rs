@@ -7,12 +7,10 @@
 // Provides unified intersection testing for both analytic SDFs and polygonal meshes
 // RELEVANT FILES:src/path_tracing/hybrid_compute.rs,src/gpu/mod.rs,src/accel/mod.rs
 
-use bytemuck::{Pod, Zeroable};
 use once_cell::sync::OnceCell;
-use std::sync::Arc;
-use wgpu::{Buffer, Device, Queue};
+use wgpu::Buffer;
 
-use crate::accel::{BvhHandle, Triangle};
+use crate::accel::BvhHandle;
 use crate::error::RenderError;
 use crate::gpu::ctx;
 // Note: Vertex type simplified for core functionality
@@ -22,7 +20,7 @@ pub struct Vertex {
     pub position: [f32; 3],
     pub _pad: f32,
 }
-use crate::sdf::{CsgResult, SdfScene};
+use crate::sdf::SdfScene;
 
 /// Hybrid scene containing both SDF and mesh geometry
 #[derive(Debug)]
@@ -276,7 +274,7 @@ impl HybridScene {
     }
 
     /// Intersect with mesh geometry using BVH
-    fn intersect_mesh(&self, ray: Ray) -> Option<HybridHitResult> {
+    fn intersect_mesh(&self, _ray: Ray) -> Option<HybridHitResult> {
         // This would use the existing BVH traversal code
         // For now, return None as a placeholder
         // In a full implementation, this would traverse the BVH and test triangles
@@ -347,7 +345,7 @@ impl HybridScene {
         let (bvh_data, bvh_node_count) = match &self.bvh {
             Some(bvh) => {
                 match &bvh.backend {
-                    crate::accel::BvhBackend::Gpu(gpu_data) => {
+                    crate::accel::BvhBackend::Gpu(_gpu_data) => {
                         // For GPU BVH, we already have the buffer
                         return Ok(()); // GPU BVH manages its own buffers
                     }

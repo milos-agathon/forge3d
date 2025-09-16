@@ -4,7 +4,6 @@
 //! Calculates per-vertex tangents and bitangents from positions, normals, and UV coordinates.
 
 use glam::{Vec2, Vec3};
-use std::collections::HashMap;
 
 /// Vertex data required for TBN calculation
 #[derive(Debug, Clone)]
@@ -70,8 +69,10 @@ impl TbnData {
 
 /// Triangle for TBN calculation
 struct Triangle {
+    #[allow(dead_code)]
     indices: [u32; 3],
     positions: [Vec3; 3],
+    #[allow(dead_code)]
     normals: [Vec3; 3],
     uvs: [Vec2; 3],
 }

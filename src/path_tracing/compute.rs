@@ -4,7 +4,6 @@
 // RELEVANT FILES:src/path_tracing/mod.rs,src/shaders/pt_kernel.wgsl,python/forge3d/path_tracing.py,src/lib.rs
 
 use std::num::NonZeroU32;
-use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use half::f16;
@@ -1020,7 +1019,7 @@ impl PathTracerGPU {
             } else {
                 // r8
                 let mut out = vec![0u8; (width as usize) * (height as usize)];
-                let dst_stride = (width as usize);
+                let dst_stride = width as usize;
                 for y in 0..(height as usize) {
                     let src = &data[(y as usize) * (padded_bpr as usize)
                         ..(y as usize) * (padded_bpr as usize) + (width as usize) * 1];

@@ -43,7 +43,6 @@
 use crate::core::memory_tracker::global_tracker;
 use crate::error::{RenderError, RenderResult};
 use std::fs::File;
-use std::io::BufReader;
 use std::path::Path;
 
 /// Configuration for external image import operations

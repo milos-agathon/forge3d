@@ -5,15 +5,16 @@
 use crate::error::RenderError;
 #[cfg(feature = "weighted-oit")]
 use bytemuck::{Pod, Zeroable};
-#[cfg(feature = "weighted-oit")]
-use wgpu::util::DeviceExt;
 
 #[cfg(feature = "weighted-oit")]
 /// OIT rendering state and resources
 pub struct WeightedOIT {
     // Accumulation buffers
+    #[allow(dead_code)]
     color_buffer: wgpu::Texture,
+    #[allow(dead_code)]
     reveal_buffer: wgpu::Texture,
+    #[allow(dead_code)]
     depth_buffer: wgpu::Texture,
 
     // Render targets
@@ -37,6 +38,7 @@ pub struct WeightedOIT {
 /// OIT fragment uniform data
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[allow(dead_code)]
 struct OITUniforms {
     alpha_threshold: f32, // Alpha cutoff for OIT
     weight_bias: f32,     // Weight function bias

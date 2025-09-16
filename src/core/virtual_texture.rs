@@ -8,6 +8,7 @@ use crate::core::feedback_buffer::FeedbackBuffer;
 use crate::core::staging_rings::StagingRing;
 use crate::core::tile_cache::{TileCache, TileData, TileId};
 use std::collections::HashSet;
+#[cfg(feature = "enable-staging-rings")]
 use std::sync::{Arc, Mutex};
 use wgpu::{
     BindGroup, BindGroupEntry, BindGroupLayout, BindingResource, Device, Extent3d,
@@ -423,16 +424,8 @@ impl VirtualTexture {
                             buffer,
                             layout: ImageDataLayout {
                                 offset,
-                                bytes_per_row: Some(
-                                    std::num::NonZeroU32::new(tile_data.width * bytes_per_pixel)
-                                        .ok_or("Invalid bytes per row")?
-                                        .into(),
-                                ),
-                                rows_per_image: Some(
-                                    std::num::NonZeroU32::new(tile_data.height)
-                                        .ok_or("Invalid rows per image")?
-                                        .into(),
-                                ),
+                                bytes_per_row: Some(tile_data.width * bytes_per_pixel),
+                                rows_per_image: Some(tile_data.height),
                             },
                         },
                         ImageCopyTexture {
@@ -473,16 +466,8 @@ impl VirtualTexture {
             &tile_data.data,
             ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(
-                    std::num::NonZeroU32::new(tile_data.width * bytes_per_pixel)
-                        .ok_or("Invalid bytes per row")?
-                        .into(),
-                ),
-                rows_per_image: Some(
-                    std::num::NonZeroU32::new(tile_data.height)
-                        .ok_or("Invalid rows per image")?
-                        .into(),
-                ),
+                bytes_per_row: Some(tile_data.width * bytes_per_pixel),
+                rows_per_image: Some(tile_data.height),
             },
             Extent3d {
                 width: tile_data.width,
@@ -528,16 +513,8 @@ impl VirtualTexture {
             &gpu_data,
             ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(
-                    std::num::NonZeroU32::new(pages_x * 16) // 16 bytes per RGBA32Float pixel
-                        .ok_or("Invalid bytes per row")?
-                        .into(),
-                ),
-                rows_per_image: Some(
-                    std::num::NonZeroU32::new(pages_y)
-                        .ok_or("Invalid rows per image")?
-                        .into(),
-                ),
+                bytes_per_row: Some(pages_x * 16),
+                rows_per_image: Some(pages_y),
             },
             Extent3d {
                 width: pages_x,

@@ -89,7 +89,7 @@ pub struct PostFxResourcePool {
 
 impl PostFxResourcePool {
     /// Create new resource pool
-    pub fn new(device: &Device, width: u32, height: u32, max_ping_pong_pairs: usize) -> Self {
+    pub fn new(_device: &Device, width: u32, height: u32, max_ping_pong_pairs: usize) -> Self {
         Self {
             ping_pong_textures: Vec::with_capacity(max_ping_pong_pairs),
             ping_pong_views: Vec::with_capacity(max_ping_pong_pairs),
@@ -276,6 +276,7 @@ pub struct PostFxChain {
     /// Resource pool for ping-pong and temporal textures
     resource_pool: PostFxResourcePool,
     /// Async compute configuration
+    #[allow(dead_code)]
     async_config: AsyncComputeConfig,
     /// Whether chain is enabled
     enabled: bool,
@@ -846,8 +847,11 @@ impl PostFxEffect for BloomEffect {
 /// Built-in simple blur effect for testing
 pub struct SimpleBlurEffect {
     config: PostFxConfig,
+    #[allow(dead_code)]
     bind_group_layout: BindGroupLayout,
+    #[allow(dead_code)]
     compute_pipeline: ComputePipeline,
+    #[allow(dead_code)]
     sampler: Sampler,
 }
 

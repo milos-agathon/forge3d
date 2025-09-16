@@ -65,7 +65,9 @@ pub struct BloomEffect {
     blur_uniform_buffer: Option<Buffer>,
 
     // Resource pool indices
+    #[allow(dead_code)]
     brightpass_texture_index: Option<usize>,
+    #[allow(dead_code)]
     blur_temp_texture_index: Option<usize>,
 }
 
@@ -120,7 +122,7 @@ impl PostFxEffect for BloomEffect {
     fn initialize(
         &mut self,
         device: &Device,
-        resource_pool: &mut PostFxResourcePool,
+        _resource_pool: &mut PostFxResourcePool,
     ) -> RenderResult<()> {
         // Create bind group layouts
         let brightpass_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -279,45 +281,45 @@ impl PostFxEffect for BloomEffect {
         &self,
         _device: &Device,
         encoder: &mut CommandEncoder,
-        input: &TextureView,
-        output: &TextureView,
+        _input: &TextureView,
+        _output: &TextureView,
         _resource_pool: &PostFxResourcePool,
-        timing_manager: Option<&mut GpuTimingManager>,
+        mut timing_manager: Option<&mut GpuTimingManager>,
     ) -> RenderResult<()> {
-        let timing_scope = if let Some(timer) = timing_manager {
+        let timing_scope = if let Some(timer) = timing_manager.as_mut() {
             Some(timer.begin_scope(encoder, "bloom"))
         } else {
             None
         };
 
         // Get pipeline references
-        let brightpass_pipeline = self
+        let _brightpass_pipeline = self
             .brightpass_pipeline
             .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
-        let blur_h_pipeline = self
+        let _blur_h_pipeline = self
             .blur_h_pipeline
             .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
-        let blur_v_pipeline = self
+        let _blur_v_pipeline = self
             .blur_v_pipeline
             .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
 
-        let brightpass_layout = self
+        let _brightpass_layout = self
             .brightpass_layout
             .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
-        let blur_layout = self
+        let _blur_layout = self
             .blur_layout
             .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
 
-        let brightpass_uniform_buffer = self
+        let _brightpass_uniform_buffer = self
             .brightpass_uniform_buffer
             .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
-        let blur_uniform_buffer = self
+        let _blur_uniform_buffer = self
             .blur_uniform_buffer
             .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
@@ -330,7 +332,7 @@ impl PostFxEffect for BloomEffect {
         // This should be replaced with the full 3-pass bloom implementation
 
         // End timing scope
-        drop(timing_scope);
+        let _ = timing_scope;
 
         Ok(())
     }

@@ -3,10 +3,9 @@
 //! Provides GPU pipeline for rendering meshes with tangent-space normal mapping
 //! support using the TBN vertex attributes from the mesh module.
 
-use crate::mesh::{TbnData, TbnVertex};
+use crate::mesh::TbnVertex;
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3, Vec4};
-use std::sync::Arc;
+use glam::Mat4;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferAddress, BufferBinding,

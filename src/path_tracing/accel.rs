@@ -4,8 +4,8 @@
 // RELEVANT FILES:src/accel/mod.rs,src/path_tracing/mod.rs,python/forge3d/path_tracing.py
 
 use crate::accel::types::{Aabb, BvhNode};
-use crate::accel::{BvhBackend, BvhHandle, CpuBvhData, GpuBvhData, Triangle};
-use anyhow::{Context, Result};
+use crate::accel::{BvhBackend, BvhHandle, CpuBvhData, Triangle};
+use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
 
 /// Ray structure for traversal
