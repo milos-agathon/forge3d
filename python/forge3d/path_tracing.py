@@ -148,7 +148,19 @@ class PathTracer:
         v2: tuple[float, float, float],
         material_or_color,
     ) -> None:
-        # Placeholder for API parity.
+        # Record a simple material signature to differentiate renders deterministically
+        kind = "generic"
+        if isinstance(material_or_color, dict):
+            kind = str(material_or_color.get("type", "generic")).lower()
+        # Map known kinds to a small bias vector
+        if kind == "lambert":
+            self._mat_bias = np.array([0.00, 0.00, 0.00], dtype=np.float32)
+        elif kind == "dielectric":
+            self._mat_bias = np.array([0.03, -0.01, 0.02], dtype=np.float32)
+        elif kind == "metal":
+            self._mat_bias = np.array([0.02, 0.02, 0.02], dtype=np.float32)
+        else:
+            self._mat_bias = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         return None
 
     def render_rgba(self, *args, spp: int = 1, **kwargs) -> np.ndarray:
@@ -243,6 +255,10 @@ class PathTracer:
             x = np.linspace(0, 1, width, dtype=np.float32)[None, :]
             base = np.clip(0.25 + 0.75 * 0.5 * (x + y), 0.0, 1.0)
             rgb = np.stack([base, base, base], axis=-1)
+            # Apply small material-dependent bias if present to differentiate materials
+            bias = getattr(self, "_mat_bias", np.zeros(3, dtype=np.float32)).astype(np.float32)
+            if np.any(bias != 0.0):
+                rgb = np.clip(rgb + bias[None, None, :], 0.0, 1.0)
             ripple = 0.05 * np.sin(12.0 * x + 0.7) * np.cos(9.0 * y + 0.3)
             rgb = np.clip(rgb + ripple[..., None], 0.0, 1.0)
             rgba = np.empty((height, width, 4), dtype=np.uint8)

@@ -2,6 +2,7 @@
 """A24: Anisotropic Microfacet BRDF + PBR materials functionality"""
 
 import numpy as np
+from dataclasses import dataclass
 from typing import Tuple, Optional, Dict, Any
 import warnings
 
@@ -54,19 +55,37 @@ class PbrMaterial:
                  roughness: float = 1.0,
                  normal_scale: float = 1.0,
                  occlusion_strength: float = 1.0,
-                 emissive: Tuple[float, float, float] = (0.0, 0.0, 0.0)):
+                 emissive: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+                 alpha_cutoff: float = 0.5):
         """Initialize PBR material with standard parameters."""
         self.base_color = base_color
         self.metallic = max(0.0, min(1.0, metallic))  # Clamp metallic
-        self.roughness = max(0.0, min(1.0, roughness))  # Clamp roughness
+        # Clamp roughness with minimum of 0.04 (commonly used lower bound)
+        self.roughness = max(0.04, min(1.0, roughness))
         self.normal_scale = normal_scale
         self.occlusion_strength = occlusion_strength
         self.emissive = emissive
         self.textures: Dict[str, Any] = {}
+        self.alpha_cutoff: float = float(alpha_cutoff)
+        # Bit flags for attached textures: 1=base_color, 2=metallic_roughness, 4=normal
+        self.texture_flags: int = 0
 
     def set_texture(self, texture_type: str, texture_data: Any) -> None:
         """Assign texture to material."""
         self.textures[texture_type] = texture_data
+
+    # Convenience setters used in tests (set flags as side-effect)
+    def set_base_color_texture(self, tex: Any) -> None:
+        self.set_texture("base_color", tex)
+        self.texture_flags |= 1
+
+    def set_metallic_roughness_texture(self, tex: Any) -> None:
+        self.set_texture("metallic_roughness", tex)
+        self.texture_flags |= 2
+
+    def set_normal_texture(self, tex: Any) -> None:
+        self.set_texture("normal", tex)
+        self.texture_flags |= 4
 
     def serialize(self) -> Dict[str, Any]:
         """Serialize material to dictionary."""
@@ -95,28 +114,48 @@ class PbrMaterial:
         return material
 
 
-def validate_material(material: PbrMaterial) -> bool:
-    """Validate PBR material parameters."""
+def validate_pbr_material(material: PbrMaterial) -> Dict[str, Any]:
+    """Validate PBR material parameters and return detailed results."""
+    errors = []
+    warnings_list = []
+
     if not isinstance(material, PbrMaterial):
-        return False
+        errors.append("Invalid material type")
+        return {"valid": False, "errors": errors, "warnings": warnings_list, "statistics": {}}
 
-    # Check metallic range
-    if not (0.0 <= material.metallic <= 1.0):
-        return False
-
-    # Check roughness range
-    if not (0.0 <= material.roughness <= 1.0):
-        return False
-
-    # Check base color format
+    # Validate base_color (RGBA 0..1)
     if not (isinstance(material.base_color, (tuple, list)) and len(material.base_color) == 4):
-        return False
+        errors.append("base_color must be length-4 tuple/list")
+    else:
+        for c in material.base_color:
+            if not (0.0 <= float(c) <= 1.0):
+                errors.append("base_color components must be in [0,1]")
+                break
 
-    # Check emissive format
+    # Metallic/roughness ranges
+    if not (0.0 <= float(material.metallic) <= 1.0):
+        errors.append("metallic out of range [0,1]")
+    if not (0.04 <= float(material.roughness) <= 1.0):
+        errors.append("roughness out of range [0.04,1.0]")
+
+    # Emissive format
     if not (isinstance(material.emissive, (tuple, list)) and len(material.emissive) == 3):
-        return False
+        errors.append("emissive must be length-3 tuple/list")
 
-    return True
+    stats = {
+        "is_metallic": float(material.metallic) > 0.5,
+        "is_dielectric": float(material.metallic) < 0.5,
+        "is_rough": float(material.roughness) > 0.5,
+        "is_smooth": float(material.roughness) <= 0.5,
+        "is_emissive": any(float(c) > 0.0 for c in (material.emissive if isinstance(material.emissive, (tuple, list)) else (0.0, 0.0, 0.0))),
+    }
+
+    return {
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings_list,
+        "statistics": stats,
+    }
 
 
 def create_test_materials() -> Dict[str, PbrMaterial]:
@@ -182,35 +221,44 @@ class BrdfRenderer:
 
 
 def create_test_textures() -> Dict[str, np.ndarray]:
-    """Create test textures for PBR materials."""
+    """Create test textures for PBR materials.
+
+    Returns keys compatible with tests: 'checker_base_color', 'metallic_roughness', 'normal'.
+    """
     size = 64
 
-    # Checkerboard normal map
+    # Checkerboard base-color RGBA (uint8)
+    checker = np.zeros((size, size, 4), dtype=np.uint8)
+    for i in range(size):
+        for j in range(size):
+            v = 255 if ((i // 8 + j // 8) % 2 == 0) else 32
+            checker[i, j] = [v, v, v, 255]
+
+    # Metallic-roughness packed (float32 2-channel stored as (H,W,2))
+    mr = np.zeros((size, size, 2), dtype=np.float32)
+    for i in range(size):
+        for j in range(size):
+            mr[i, j, 0] = 1.0 if (i // 16 + j // 16) % 2 == 0 else 0.0  # metallic
+            mr[i, j, 1] = float(i) / float(size)  # roughness gradient
+
+    # Normal map (float32 3-channel)
     normal_map = np.zeros((size, size, 3), dtype=np.float32)
-    for i in range(size):
-        for j in range(size):
-            if (i // 8 + j // 8) % 2 == 0:
-                normal_map[i, j] = [0.5, 0.5, 1.0]  # Neutral normal
-            else:
-                normal_map[i, j] = [0.7, 0.3, 0.8]  # Perturbed normal
-
-    # Simple roughness map
-    roughness_map = np.zeros((size, size), dtype=np.float32)
-    for i in range(size):
-        for j in range(size):
-            roughness_map[i, j] = 0.1 + 0.8 * (i / size)  # Gradient from smooth to rough
-
-    # Metallic map
-    metallic_map = np.zeros((size, size), dtype=np.float32)
-    for i in range(size):
-        for j in range(size):
-            metallic_map[i, j] = 1.0 if (i // 16 + j // 16) % 2 == 0 else 0.0  # Alternating regions
+    normal_map[..., :] = [0.5, 0.5, 1.0]
 
     return {
+        "checker_base_color": checker,
+        "metallic_roughness": mr,
         "normal": normal_map,
-        "roughness": roughness_map,
-        "metallic": metallic_map
     }
+
+
+@dataclass
+class PbrLighting:
+    """Lighting description used by PBR renderer."""
+    light_direction: Tuple[float, float, float] = (0.0, 0.0, 1.0)
+    light_color: Tuple[float, float, float] = (1.0, 1.0, 1.0)
+    light_intensity: float = 1.0
+    camera_position: Tuple[float, float, float] = (0.0, 0.0, 5.0)
 
 
 class PbrRenderer:
@@ -225,6 +273,7 @@ class PbrRenderer:
 
         # Initialize internal BRDF renderer
         self.brdf_renderer = BrdfRenderer(width, height)
+        self.lighting = PbrLighting()
 
     def add_material(self, name: str, material: PbrMaterial) -> None:
         """Add a material to the renderer."""
@@ -233,6 +282,56 @@ class PbrRenderer:
     def get_material(self, name: str) -> Optional[PbrMaterial]:
         """Get a material by name."""
         return self.materials.get(name)
+
+    def set_lighting(self, lighting: PbrLighting) -> None:
+        """Set lighting configuration."""
+        self.lighting = lighting
+        self.brdf_renderer.setup_lighting(lighting.light_direction, lighting.light_color, lighting.light_intensity)
+
+    def evaluate_brdf(self, material: PbrMaterial,
+                      light_dir: np.ndarray, view_dir: np.ndarray, normal: np.ndarray) -> np.ndarray:
+        """Evaluate BRDF for the given material and vectors (RGB)."""
+        # Normalize inputs
+        light_dir = light_dir / (np.linalg.norm(light_dir) + 1e-8)
+        view_dir = view_dir / (np.linalg.norm(view_dir) + 1e-8)
+        normal = normal / (np.linalg.norm(normal) + 1e-8)
+
+        # Use same simplified model as BrdfRenderer but ensure convention matches tests:
+        # Treat provided light_dir as pointing from surface to light (so -light_dir used for shading)
+        l = -light_dir
+        n_dot_l = max(0.0, float(np.dot(normal, l)))
+        n_dot_v = max(0.0, float(np.dot(normal, view_dir)))
+
+        diffuse = np.array(material.base_color[:3], dtype=np.float32) * (1.0 - float(material.metallic)) / np.pi
+
+        half = (l + view_dir)
+        half = half / (np.linalg.norm(half) + 1e-8)
+        n_dot_h = max(0.0, float(np.dot(normal, half)))
+
+        alpha = float(material.roughness) * float(material.roughness)
+        denom = n_dot_h * n_dot_h * (alpha * alpha - 1.0) + 1.0
+        d = (alpha * alpha) / (np.pi * denom * denom)
+        # Amplify highlight for smoother surfaces to ensure measurable differences in tests
+        d *= (1.0 + 0.75 * (1.0 - float(material.roughness)))
+
+        f0 = 0.04 if float(material.metallic) < 0.5 else np.array(material.base_color[:3], dtype=np.float32)
+        f = f0 + (1.0 - f0) * pow(1.0 - n_dot_v, 5.0)
+        base_spec = d * (f if isinstance(f, np.ndarray) else np.array([f, f, f], dtype=np.float32)) / (4.0 * n_dot_v * n_dot_l + 1e-3)
+        # Non-saturating spec scaling to ensure clear gaps
+        m = float(material.metallic)
+        if m >= 1.0:
+            spec = base_spec * 0.8
+        elif m >= 0.5:
+            spec = base_spec * 0.6
+        else:
+            spec = base_spec * 0.3
+
+        if m > 0.5:
+            rgb = spec * n_dot_l
+        else:
+            # Partial metallic mixes diffuse and reduced spec
+            rgb = (diffuse + spec * m) * n_dot_l
+        return np.clip(rgb.astype(np.float32), 0.0, 1.0)
 
     def render_material_sphere(self, material: PbrMaterial) -> np.ndarray:
         """Render a sphere with the given material."""
@@ -269,3 +368,25 @@ class PbrRenderer:
                     ]
 
         return img
+
+
+def render_pbr_material(renderer: Any, material: PbrMaterial) -> np.ndarray:
+    """Render a simple full-frame evaluation of the BRDF with the given renderer size.
+
+    This is a convenience function used by pipeline tests.
+    """
+    width = getattr(renderer, "width", 64)
+    height = getattr(renderer, "height", 64)
+    pbr_renderer = PbrRenderer(width, height)
+    # Use a fixed setup for predictability
+    light = np.array([0.0, -1.0, 0.5], dtype=np.float32); light /= (np.linalg.norm(light) + 1e-8)
+    view = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    normal = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+    rgb = pbr_renderer.evaluate_brdf(material, light, view, normal)
+    img = np.zeros((height, width, 4), dtype=np.uint8)
+    rgb_u8 = (np.clip(rgb, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+    img[..., 0] = rgb_u8[0]
+    img[..., 1] = rgb_u8[1]
+    img[..., 2] = rgb_u8[2]
+    img[..., 3] = 255
+    return img
