@@ -3,6 +3,9 @@
 // Provides SDF primitives, CSG operations, hybrid traversal, and path tracing
 // RELEVANT FILES:src/sdf/mod.rs,src/path_tracing/mod.rs,python/forge3d/__init__.py
 
+#[cfg(feature = "extension-module")]
+use pyo3::prelude::*;
+
 // Core modules
 pub mod math {
     /// Orthonormalize a tangent `t` against normal `n` and return (tangent, bitangent).
@@ -76,3 +79,14 @@ pub use sdf::{
     CsgOperation, HybridHitResult, HybridScene, SdfPrimitive, SdfPrimitiveType, SdfScene,
     SdfSceneBuilder,
 };
+
+// PyO3 module entry point so Python can `import forge3d._forge3d`
+// This must be named exactly `_forge3d` to match [tool.maturin].module-name in pyproject.toml
+#[cfg(feature = "extension-module")]
+#[pymodule]
+fn _forge3d(_py: Python, m: &PyModule) -> PyResult<()> {
+    // Basic metadata so users can sanity-check the native module is loaded
+    m.add("__doc__", "forge3d native module")?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    Ok(())
+}
