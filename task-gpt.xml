@@ -1,216 +1,156 @@
-<task id="ws-A19-auto" version="1.0">
-  <title>Workstream A · Task A19 — Implement per roadmap2.csv (derive deliverables → code/tests/docs)</title>
+<task id="forge3d-workstream-audit" version="1.1">
+  <title>Audit repo against roadmap2.csv for a specified workstream (presence, readiness, evidence; no code edits)</title>
 
   <role>
-    You are OpenAI Codex CLI in <b>Verification → Implementation Mode</b>, acting as a senior graphics/runtime engineer.
-    Stack: WebGPU/wgpu + WGSL, Rust, Python ≥3.8 (PyO3/maturin abi3), CMake ≥3.24, VMA, Sphinx.
-    Project: forge3d — Rust backend + Python frontend for interactive/offline 3D visualization (terrain, maps, graphs).
+    You are Claude Code in <b>Audit Mode</b>. Act as an elite graphics/runtime engineer (Vulkan ≥1.2, WebGPU/WGSL, RAII, Rust, Python ≥3.8, CMake ≥3.24, VMA, Sphinx).
+    Project: forge3d — Rust backend + Python frontend (PyO3), targeting interactive/offline 3D visualization.
   </role>
-
-  <switches>
-    <WRITE_CHANGES>true</WRITE_CHANGES>
-    <USE_TESTS>true</USE_TESTS>
-    <ENSURE_CI>true</ENSURE_CI>
-  </switches>
 
   <constraints>
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
+    <build>cmake>=3.24, cargo/rustc, PyO3, VMA</build>
+    <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
+    <docs>Sphinx preferred</docs>
+    <uncertainRule>If essential CSV fields or feature details are missing/ambiguous, reply <b>UNCERTAIN</b> and list the exact headers/rows/paths needed.</uncertainRule>
     <safety>
-      - Make only the minimal, additive changes required to satisfy A19’s Deliverables and Acceptance Criteria.
-      - Preserve existing public APIs unless A19 explicitly calls for a breaking change; prefer opt-in flags/parameters.
-      - Never delete custom user code; for generated artifacts, prefer adding .gitignore entries instead of removing tracked files.
-      - If a required tool is missing, mark the step SKIPPED with the exact command to run locally.
-      - If the A19 row is missing/ambiguous, reply <b>UNCERTAIN</b> listing the exact headers/rows/fields needed, then STOP with no edits.
+      - <b>Audit-only:</b> Do not modify repository contents.
+      - No third-party code changes; skip binaries/large assets.
+      - Prefer structured searches and header-aware CSV parsing.
     </safety>
-    <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz, out, diag_out</exclusions>
+    <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz</exclusions>
   </constraints>
 
   <inputs>
     <repoRoot>./</repoRoot>
     <roadmapPath>./roadmap2.csv</roadmapPath>
+    <!-- Provide either Workstream ID (e.g., "A") or exact Workstream Title -->
     <workstreamSelector>
       <![CDATA[
-      Workstream ID: A
-      Task ID: A19
+      ID: A
+      Title: Path Tracing (WebGPU Compute, Offline HQ)
       ]]>
     </workstreamSelector>
   </inputs>
 
-  <!-- 1) Verify A19 exists and extract Title/Deliverables/Acceptance -->
-  <prechecks>
-    <command>
-      <![CDATA[
-python - <<'PY'
-import csv, codecs, sys, json
-row=None
-try:
-  with codecs.open("roadmap2.csv","r","utf-8-sig") as f:
-    rdr=csv.DictReader(f)
-    for r in rdr:
-      wid=(r.get("Workstream ID","") or "").strip().lower()
-      tid=(r.get("Task ID","") or "").strip().lower()
-      ttl=(r.get("Task Title","") or "").strip().lower()
-      if wid=="a" and (tid=="a19" or "a19" in ttl):
-        row=r; break
-except FileNotFoundError:
-  print("UNCERTAIN: roadmap2.csv not found", file=sys.stderr); sys.exit(2)
-if not row:
-  print("UNCERTAIN: A19 not found in roadmap2.csv (Workstream A). Provide the exact row with headers.", file=sys.stderr); sys.exit(3)
-meta={
-  "Title": (row.get("Task Title","") or "").strip(),
-  "Rationale": (row.get("Rationale","") or "").strip(),
-  "Deliverables": (row.get("Deliverables","") or "").strip(),
-  "Acceptance": (row.get("Acceptance Criteria","") or "").strip(),
-  "Priority": (row.get("Priority","") or "").strip(),
-  "Phase": (row.get("Phase","") or "").strip(),
-  "Missing": (row.get("Missing Features","") or "").strip(),
-  "Dependencies": (row.get("Dependencies","") or "").strip(),
-  "Risks": (row.get("Risks/Mitigations","") or "").strip()
-}
-print("WORKSTREAM_TASK_FOUND:A19")
-print("A19_META:"+json.dumps(meta, ensure_ascii=False))
-PY
-      ]]>
-    </command>
-  </prechecks>
+  <!-- Exact structure of your roadmap2.csv -->
+  <csvSchema>
+    <encoding>utf-8</encoding>
+    <delimiter>comma</delimiter>
+    <columns order="fixed">
+      <col index="0">Workstream ID</col>
+      <col index="1">Workstream Title</col>
+      <col index="2">Task ID</col>
+      <col index="3">Task Title</col>
+      <col index="4">Rationale</col>
+      <col index="5">Deliverables</col>
+      <col index="6">Acceptance Criteria</col>
+      <col index="7">Priority</col>
+      <col index="8">Phase</col>
+      <col index="9">Missing Features</col>
+      <col index="10">Dependencies</col>
+      <col index="11">Risks/Mitigations</col>
+      <!-- Trailing column observed in file; treat as ignorable/empty -->
+      <col index="12" optional="true" ignore="true">Unnamed: 12</col>
+    </columns>
+    <cellConventions>
+      <!-- Inside some cells, items are separated by semicolons; DO NOT split columns by this; use only for keyword extraction -->
+      <listSeparator>semicolon-inside-cell</listSeparator>
+      <markdownInline>allowed (e.g., backticks)</markdownInline>
+      <emptyTrailingColumn>ignore if entirely blank</emptyTrailingColumn>
+    </cellConventions>
+    <validation>
+      <!-- Expected controlled vocabularies; report anomalies in hygiene output (do not mutate file) -->
+      <priorityAllowed>High,Medium,Low</priorityAllowed>
+      <phaseAllowed>MVP,Beyond MVP</phaseAllowed>
+    </validation>
+  </csvSchema>
 
-  <design>
-    <mappingRules>
-      <![CDATA[
-Turn A19 “Deliverables” text into concrete artifacts using these keyword→path rules (use exact filenames if the CSV specifies them; otherwise apply heuristics):
-
-Core rendering & kernels:
-- "WGSL", "compute", "shader", "kernel", "AOV" → src/shaders/<feature>.wgsl (add header docs: bind groups/bindings, formats).
-- "BVH", "accel", "traversal" → src/accel/*.rs; src/path_tracing/accel.rs (+ WGSL hooks).
-- "intersection", "ray-triangle", "ray-sphere", "ray-aabb" → src/path_tracing/intersect.rs; src/shaders/pt_intersect_*.wgsl.
-- "materials", "BSDF", "PBR", "GGX", "clearcoat", "sheen" → src/pbr/*.rs; shaders/pbr_*.wgsl; python/forge3d/pbr.py.
-- "sampling", "NEE", "MIS", "alias table", "reservoir", "light tree" → src/lighting/*.rs; shaders/lighting_*.wgsl; python/forge3d/lighting.py.
-- "denoise", "SVGF", "temporal", "TAA", "spatial" → src/denoise/*; shaders/svgf_*.wgsl; python/forge3d/path_tracing.py (flags).
-- "wavefront", "queues", "compaction" → src/path_tracing/wavefront/**/*.rs; shaders/pt_*.wgsl.
-
-Scene, IO & content:
-- "camera", "DOF", "thin lens", "motion vectors" → src/camera/*.rs; shaders/camera_*.wgsl; python/forge3d/camera.py.
-- "textures", "image", "mipmap", "sampler", "image io" → src/textures/*.rs; shaders/texture_*.wgsl; python/forge3d/textures.py.
-- "mesh", "OBJ", "PLY", "glTF", "USD", "tangents" → src/mesh/*.rs; python/forge3d/mesh_io.py.
-- "terrain", "heightmap", "tile", "geospatial", "map" → src/terrain/*.rs; python/forge3d/terrain.py; shaders/terrain_*.wgsl.
-- "graphs", "layouts", "instancing", "colorscale" → src/scene/graph.rs; python/forge3d/graph.py; shaders/instancing_*.wgsl.
-
-Pipelines, docs & UX:
-- "tonemap", "ACES", "Reinhard", "exposure" → src/post/tonemap.rs; src/shaders/tonemap.wgsl; python bridge.
-- "examples" → examples/<feature>_*.py (write to out/; ensure .gitignore ignores out/).
-- "docs" → README.md + docs/api/<feature>.md (if Sphinx present).
-- "Python API" → python/forge3d/<feature>.py (public class/functions + type hints).
-
-Tests:
-- "tests", "validation", "golden", "bench" → tests/<feature>_*.rs or tests/test_<feature>*.py (GPU tests @skip if no adapter).
-If a deliverable is ambiguous or lacks keywords, mark UNCERTAIN for that bullet with the minimal clarification needed.
-      ]]>
-    </mappingRules>
-  </design>
-
-  <acceptanceCriteria>
-    <ac id="AC-0">A19 row is present; meta printed as A19_META JSON.</ac>
-    <ac id="AC-1">Every concrete deliverable item from A19’s Deliverables cell exists as code/docs/tests artifacts with appropriate header/inline docs (bind groups for WGSL, public APIs for Python/Rust, type hints for Python).</ac>
-    <ac id="AC-2">Public Python API exposes the functions/classes required by A19’s Acceptance Criteria; deterministic behavior documented for frames=1 with fixed seed where applicable.</ac>
-    <ac id="AC-3">Unit/integration tests exist for all implemented deliverables; GPU-dependent tests are skipped when no compatible adapter is available; at least one failure/validation path is covered.</ac>
-    <ac id="AC-4">Docs updated: README + docs/api/<feature>.md (if Sphinx present) clearly describing usage, parameters, conventions, and limitations; examples added if referenced.</ac>
-    <ac id="AC-5">Validation run passes: fmt, clippy -D warnings, cargo test, pytest, sphinx-build (if docs), maturin build; CI ensured if missing.</ac>
-  </acceptanceCriteria>
-
-  <changes>
-    <createOrModify>
-      <!-- Final paths depend on A19 deliverables; these directories are typical targets -->
-      <file path="src/shaders/" kind="modify-or-new"/>
-      <file path="src/path_tracing/" kind="modify-or-new"/>
-      <file path="src/accel/" kind="modify-or-new-optional"/>
-      <file path="src/lighting/" kind="modify-or-new-optional"/>
-      <file path="src/pbr/" kind="modify-or-new-optional"/>
-      <file path="src/camera/" kind="modify-or-new-optional"/>
-      <file path="src/textures/" kind="modify-or-new-optional"/>
-      <file path="src/mesh/" kind="modify-or-new-optional"/>
-      <file path="src/scene/" kind="modify-or-new-optional"/>
-      <file path="src/terrain/" kind="modify-or-new-optional"/>
-      <file path="src/denoise/" kind="modify-or-new-optional"/>
-      <file path="python/forge3d/" kind="modify-or-new"/>
-      <file path="tests/" kind="modify-or-new"/>
-      <file path="examples/" kind="modify-or-new-optional"/>
-      <file path="README.md" kind="modify-append"/>
-      <file path="docs/api/" kind="modify-or-new-optional"/>
-      <file path=".gitignore" kind="modify-append"/>
-    </createOrModify>
-  </changes>
-
-  <tests>
-    <templates>
-      <![CDATA[
-- GPU feature tests (pytest): skip if no adapter; assert shapes/dtypes; determinism for frames=1 with fixed seed; numeric assertions aligned with A19 Acceptance Criteria.
-- Rust unit tests: struct packing/layout (assert_eq!(size_of::<T>(), ...)), math helpers, and error handling (no panics across FFI).
-- Docs build test: sphinx-build succeeds (or SKIPPED if docs absent).
-- Example smoke test (optional): script runs headless and writes to out/ (gitignored).
-      ]]>
-    </templates>
-  </tests>
-
-  <!-- EXACTLY INCLUDE THESE STEPS -->
   <plan>
-    5) Implementation (Write mode only if &lt;WRITE_CHANGES&gt;true&lt;/WRITE_CHANGES&gt;)
-       - Create branch: <code>git checkout -b ws-&lt;ID-or-slug&gt;-implementation</code>
-       - For each task in deterministic order (by Priority then Task ID):
-         * Apply minimal changes.
-         * Add/update tests when <USE_TESTS>true</USE_TESTS>.
-         * Update docs (Sphinx/README) and example scripts if referenced by AC.
-         * Update CI if <ENSURE_CI>true</ENSURE_CI> and AC requires.
-         * Keep one commit per task: <code>git commit -am "WS&lt;ID&gt; &lt;TaskID&gt;: &lt;short summary&gt;"</code>
-       - Maintain safety: never delete custom user code; only remove generated artifacts (.pyd/.so, build/ etc.) when explicitly required by AC; otherwise add .gitignore entries.
+    1) Validate & Load CSV
+       - Open <roadmapPath> with UTF-8; delimiter comma.
+       - Confirm exact header names and order per <csvSchema>. If mismatch → <b>UNCERTAIN</b> listing differences.
+       - Drop/ignore column "Unnamed: 13" if entirely empty.
+       - Produce a brief CSV hygiene report:
+         * Rows with Priority not in {High, Medium, Low}.
+         * Rows with Phase not in {MVP, Beyond MVP}.
+         * Missing Task ID/Title/Deliverables/Acceptance Criteria.
 
-    6) Validation Run
-       - Commands (skip gracefully if tool missing; record SKIPPED):
-         * <code>cargo fmt -- --check</code>
-         * <code>cargo clippy --all-targets --all-features -D warnings</code>
-         * <code>cargo test -q</code>
-         * <code>pytest -q</code> (when <USE_TESTS>true</USE_TESTS>)
-         * <code>sphinx-build -b html docs _build/html</code>
-         * <code>maturin build --release</code>
-         * <code>cmake -S . -B build && cmake --build build</code> (if CMake wrapper is part of AC)
-       - Re-run the audit matrix; all tasks should now be <b>Present & Wired</b>.
-       - If any still failing → fix or mark explicitly BLOCKED with reason.
+    2) Select Workstream
+       - Filter rows where Workstream ID == provided ID OR Workstream Title == provided Title (case-insensitive).
+       - If none match → <b>UNCERTAIN</b> and list discovered workstreams (ID → Title).
 
-    7) PR Preparation
-       - Generate <b>PR_BODY.md</b> summarizing: scope, tasks addressed, evidence, risks/mitigations, and validation output.
-       - Print final change summary: <code>git status -s</code>, <code>git log --oneline -n 50</code>.
+    3) Derive Audit Keywords per Task
+       - From Deliverables/Acceptance Criteria/Dependencies, extract filenames (e.g., *.wgsl), symbols (create_render_pipeline, bind_group), Python API entry points (forge3d.*), example script names, and doc page slugs.
+       - Use semicolon-separated items inside cells as hints; do not alter CSV.
+
+    4) Repository Scan (read-only)
+       - Search src/, shaders/, python/forge3d/, examples/, docs/ with ripgrep.
+       - Collect evidence per task: file paths + line numbers/snippets that match expected artifacts and wiring (e.g., shader referenced by pipeline; Python API exposed; example present).
+
+    5) Readiness Classification (per task)
+       - <b>Present & Wired</b>: artifacts exist and appear integrated (pipeline + API + example/test/doc).
+       - <b>Present but Partial</b>: artifacts exist but missing wiring/exposure/tests/docs.
+       - <b>Absent</b>: no meaningful artifacts found.
+
+    6) Minimal Change Plan (No Edits)
+       - For Partial/Absent: list the minimal file-level actions (paths/symbols) needed to reach “Present & Wired,” respecting platform/build/memory constraints.
+
+    7) Outputs
+       - Emit a Markdown audit report and a machine-readable audit matrix CSV. Include CSV hygiene observations.
   </plan>
 
+  <deliverables>
+    - <b>reports/audit_&lt;workstream&gt;.md</b> — Markdown:
+      1) Scope (workstream, matched rows count) & CSV Hygiene summary
+      2) Readiness Verdict per task (Present & Wired / Partial / Absent)
+      3) Evidence Map (file paths + line refs/snippets)
+      4) Blocking Gaps
+      5) Minimal Change Plan (file-level)
+      6) Validation Runbook (commands to verify after implementation)
+    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b> — Columns:
+      <code>Workstream ID,Workstream Title,Task ID,Task Title,Readiness,Evidence Paths,Missing Pieces,Minimal Changes,Priority,Phase,Dependencies,Risks/Mitigations,Original Ref</code>
+    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b> — Detected anomalies (Priority/Phase out-of-vocab, missing required cells).
+  </deliverables>
+
+  <acceptanceCriteria>
+    - AC-001: Exact headers match those specified (including ignorable "Unnamed: 13"); else returns <b>UNCERTAIN</b> with diffs.
+    - AC-002: Report states selected workstream and matched tasks count.
+    - AC-003: Each audited task has a single Readiness Verdict and at least one evidence reference (or explicit “no evidence found”).
+    - AC-004: Minimal Change Plan lists concrete file paths/symbols for all Partial/Absent items.
+    - AC-005: Validation Runbook includes build, headless demo/test, and docs build commands if applicable.
+    - AC-006: No repository modifications were made (audit-only).
+  </acceptanceCriteria>
+
   <execution>
-    <steps>
-      <step>Create feature branch: <code>git checkout -b ws-A19-implementation</code></step>
-      <step>Parse A19_META into bullet items (split by newlines/semicolons). Save mapping to <code>reports/a19_plan.json</code> (deliverable → files/symbols) using the mapping rules.</step>
-      <step>For each mapped deliverable:
-        <ul>
-          <li>Implement minimal, correct code in WGSL/Rust/Python as indicated by A19 Deliverables and Acceptance Criteria.</li>
-          <li>Add/modify tests (Rust/Python) covering success paths and at least one failure/validation path tied to the AC.</li>
-          <li>Update README and docs/api/&lt;feature&gt;.md (if Sphinx present) with usage, parameters, conventions, and limitations.</li>
-          <li>If examples requested: add example(s) in <code>examples/</code>, writing outputs to <code>out/</code> (ensure .gitignore ignores it).</li>
-        </ul>
-      </step>
-      <step>Append <code>.gitignore</code> entries for out/, diag_out/, and build artifacts if needed.</step>
-      <step>Run the Validation Run commands; fix non-flaky failures; mark SKIPPED where tools are absent and record the exact command.</step>
-      <step>Create <code>PR_BODY.md</code> summarizing A19 implementation with references to files/lines and validation results; print <code>git status -s</code> and <code>git log --oneline -n 50</code>.</step>
-    </steps>
+    <commands>
+      - python - <<'PY'
+import csv, sys, pathlib, codecs
+p = pathlib.Path("{{roadmapPath}}")
+if not p.exists():
+    print("UNCERTAIN: roadmap2.csv not found at", p, file=sys.stderr); sys.exit(2)
+with codecs.open(p, "r", "utf-8-sig") as f:
+    reader = csv.reader(f)
+    headers = next(reader, [])
+print("CSV_HEADERS:", headers)
+PY
+      - rg --version
+      - rg -n --stats --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node_modules' -g '!__pycache__' \
+        '(wgsl|create_render_pipeline|bind_group|sampler|texture|queue\\.write_(buffer|texture)|forge3d|import +forge3d|from +forge3d +import)' \
+        src/ shaders/ python/ examples/ docs/ || true
+    </commands>
+    <notes>
+      - Build keyword sets from Deliverables/Acceptance Criteria/Dependencies; use semicolons inside cells as list separators for extraction only.
+      - Document multiple candidate implementations if found; pick the best match by AC phrasing.
+      - Do not mutate or re-save the CSV.
+    </notes>
   </execution>
 
   <completion>
-    <print>
-      - reports/a19_plan.json
-      - All created/modified source files per mapping (WGSL/Rust/Python)
-      - tests/* for implemented features
-      - examples/* (if requested by A19)
-      - README.md (updated)
-      - docs/api/* (if Sphinx present)
-      - PR_BODY.md
-    </print>
-    <fallback>
-      If A19 is not found or its Deliverables/Acceptance text is empty/ambiguous, respond <b>UNCERTAIN</b> listing the exact missing fields and STOP without changes.
-    </fallback>
+    Provide:
+    - <b>reports/audit_&lt;workstream&gt;.md</b>
+    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b>
+    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b>
+    If headers or the workstream filter are invalid, reply <b>UNCERTAIN</b> with exact corrections needed.
   </completion>
 </task>

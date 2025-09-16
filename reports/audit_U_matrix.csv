@@ -1,4 +1,0 @@
-Workstream ID,Workstream Title,Task ID,Task Title,Readiness,Evidence Paths,Missing Pieces,Minimal Changes,Priority,Phase,Dependencies,Risks/Mitigations,Original Ref
-U,Basemaps & Tiles,U1,XYZ/WMTS tile fetch + cache,Absent,,python/forge3d/tiles/client.py; cache dir; WMTS/XYZ; tests,Add tile client with cache and retries; mocked tests,Medium,Beyond MVP,O3;N4,"Network variability → retries; licensing → attribution",
-U,Basemaps & Tiles,U2,Attribution overlay & extent management,Absent,,overlay renderer; position presets; provider docs,Add tiles/overlay.py and tests; docs,Low,Beyond MVP,Q1;N4,"Provider policy changes → templates",
-U,Basemaps & Tiles,U3,Cartopy GeoAxes interop example,Absent,,examples/cartopy_overlay.py; docs/integration/cartopy.md,Add cartopy example and docs; Agg backend,Low,Beyond MVP,N4,"Matplotlib backend differences → Agg in CI",
