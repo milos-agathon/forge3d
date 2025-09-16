@@ -201,23 +201,74 @@ class SdfScene:
         if not self.primitives:
             return (float('inf'), 0)
 
-        # Simple evaluation: just return the first primitive's result
-        # A full implementation would evaluate the CSG tree
-        if len(self.primitives) == 1:
-            distance = self.primitives[0].evaluate(point)
-            return (distance, self.primitives[0].material_id)
+        # If no operations, use simple union
+        if not self.operations:
+            if len(self.primitives) == 1:
+                distance = self.primitives[0].evaluate(point)
+                return (distance, self.primitives[0].material_id)
 
-        # For multiple primitives, use simple union
-        best_distance = float('inf')
-        best_material = 0
+            # For multiple primitives, use simple union
+            best_distance = float('inf')
+            best_material = 0
 
-        for prim in self.primitives:
+            for prim in self.primitives:
+                distance = prim.evaluate(point)
+                if distance < best_distance:
+                    best_distance = distance
+                    best_material = prim.material_id
+
+            return (best_distance, best_material)
+
+        # Evaluate CSG tree
+        return self._evaluate_csg_tree(point)
+
+    def _evaluate_csg_tree(self, point: Tuple[float, float, float]) -> Tuple[float, int]:
+        """Evaluate the full CSG tree at a point."""
+        # Create evaluation results for all nodes (primitives + operations)
+        results = {}
+
+        # Evaluate all primitives first
+        for i, prim in enumerate(self.primitives):
             distance = prim.evaluate(point)
-            if distance < best_distance:
-                best_distance = distance
-                best_material = prim.material_id
+            results[i] = (distance, prim.material_id)
 
-        return (best_distance, best_material)
+        # Evaluate all operations in order
+        for i, op in enumerate(self.operations):
+            op_id = len(self.primitives) + i
+            left_result = results[op['left']]
+            right_result = results[op['right']]
+
+            left_dist, left_mat = left_result
+            right_dist, right_mat = right_result
+
+            if op['operation'] == CsgOperation.UNION:
+                if left_dist < right_dist:
+                    result_dist = left_dist
+                    result_mat = left_mat
+                else:
+                    result_dist = right_dist
+                    result_mat = right_mat
+            elif op['operation'] == CsgOperation.SUBTRACTION:
+                # Subtract right from left: max(left, -right)
+                result_dist = max(left_dist, -right_dist)
+                result_mat = left_mat if result_dist == left_dist else op['material_id']
+            elif op['operation'] == CsgOperation.INTERSECTION:
+                result_dist = max(left_dist, right_dist)
+                result_mat = left_mat if left_dist > right_dist else right_mat
+            else:
+                # Default to union for unsupported operations
+                result_dist = min(left_dist, right_dist)
+                result_mat = left_mat if left_dist < right_dist else right_mat
+
+            results[op_id] = (result_dist, result_mat)
+
+        # Return the result of the last operation
+        if self.operations:
+            last_op_id = len(self.primitives) + len(self.operations) - 1
+            return results[last_op_id]
+        else:
+            # Fallback to simple union
+            return self.evaluate(point)
 
     def primitive_count(self) -> int:
         """Get number of primitives"""

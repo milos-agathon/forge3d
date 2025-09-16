@@ -542,9 +542,13 @@ def save_aovs(
 
 def render_rgba(*args, **kwargs) -> np.ndarray:
     """Render RGBA image (fallback implementation)."""
-    # Simple fallback - create a test pattern
-    width = kwargs.get('width', 256)
-    height = kwargs.get('height', 256)
+    # Handle positional arguments for width/height
+    if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
+        width = int(args[0])
+        height = int(args[1])
+    else:
+        width = kwargs.get('width', 256)
+        height = kwargs.get('height', 256)
 
     img = np.zeros((height, width, 4), dtype=np.uint8)
     # Create a simple gradient pattern
@@ -560,8 +564,13 @@ def render_rgba(*args, **kwargs) -> np.ndarray:
 
 def render_aovs(*args, **kwargs) -> dict:
     """Render AOVs (fallback implementation)."""
-    width = kwargs.get('width', 256)
-    height = kwargs.get('height', 256)
+    # Handle positional arguments for width/height
+    if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
+        width = int(args[0])
+        height = int(args[1])
+    else:
+        width = kwargs.get('width', 256)
+        height = kwargs.get('height', 256)
 
     return {
         'beauty': render_rgba(width=width, height=height),
@@ -602,12 +611,12 @@ class BvhHandle:
             'memory_usage_bytes': self.triangle_count * 64 + self.node_count * 32  # Estimated memory usage
         }
 
-        # Backend type
-        self.backend_type = "gpu" if use_gpu else "cpu"
+        # Backend type - always CPU since this is a fallback implementation
+        self.backend_type = "cpu"
 
-        # Memory usage metrics
-        self.memory_usage_gpu = self.memory_usage if use_gpu else 0
-        self.memory_usage_cpu = 0 if use_gpu else self.memory_usage
+        # Memory usage metrics - always CPU since this is a fallback implementation
+        self.memory_usage_gpu = 0
+        self.memory_usage_cpu = self.memory_usage
 
         # Error handling
         if not triangles:
@@ -638,6 +647,18 @@ class BvhHandle:
             "build_stats": self.build_stats,
             "world_aabb": self.world_aabb
         }
+
+    def is_cpu(self) -> bool:
+        """Check if this BVH uses CPU backend."""
+        return self.backend_type == "cpu"
+
+    def is_gpu(self) -> bool:
+        """Check if this BVH uses GPU backend."""
+        return self.backend_type == "gpu"
+
+    def __repr__(self) -> str:
+        """String representation of BvhHandle."""
+        return f"BvhHandle(triangles={self.triangle_count}, nodes={self.node_count}, backend={self.backend_type})"
 
 def build_bvh(triangles=None, use_gpu=True, seed=None, *args, **kwargs) -> BvhHandle:
     """Build BVH (fallback implementation)."""
@@ -673,3 +694,22 @@ class TracerEngine:
     """Tracer engine enumeration."""
     MEGAKERNEL = "megakernel"
     WAVEFRONT = "wavefront"
+
+
+# BSDF utility functions
+def _fresnel_schlick(cos_theta: float, f0: float) -> float:
+    """Fresnel-Schlick approximation."""
+    return f0 + (1.0 - f0) * pow(1.0 - cos_theta, 5.0)
+
+def _smith_g1(cos_theta: float, alpha: float) -> float:
+    """Smith G1 masking/shadowing function."""
+    cos_theta2 = cos_theta * cos_theta
+    tan_theta2 = (1.0 - cos_theta2) / cos_theta2
+    return 2.0 / (1.0 + np.sqrt(1.0 + alpha * alpha * tan_theta2))
+
+def _ggx_distribution(cos_theta_h: float, alpha: float) -> float:
+    """GGX/Trowbridge-Reitz normal distribution function."""
+    alpha2 = alpha * alpha
+    cos_theta_h2 = cos_theta_h * cos_theta_h
+    denom = cos_theta_h2 * (alpha2 - 1.0) + 1.0
+    return alpha2 / (np.pi * denom * denom)
