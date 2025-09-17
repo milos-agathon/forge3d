@@ -5,9 +5,9 @@
 
 use crate::core::memory_tracker::global_tracker;
 use crate::error::RenderError;
+use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
-use std::num::NonZeroU32;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device, Queue, Texture};
 
 /// Configuration for async readback operations
@@ -279,14 +279,16 @@ impl AsyncReadbackManager {
             layout: wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(
-                    NonZeroU32::new(padded_bpr).ok_or_else(|| {
-                        RenderError::Upload("bytes_per_row cannot be zero".to_string())
-                    })?.into(),
+                    NonZeroU32::new(padded_bpr)
+                        .ok_or_else(|| {
+                            RenderError::Upload("bytes_per_row cannot be zero".to_string())
+                        })?
+                        .into(),
                 ),
                 rows_per_image: Some(
-                    NonZeroU32::new(height).ok_or_else(|| {
-                        RenderError::Upload("height cannot be zero".to_string())
-                    })?.into(),
+                    NonZeroU32::new(height)
+                        .ok_or_else(|| RenderError::Upload("height cannot be zero".to_string()))?
+                        .into(),
                 ),
             },
         };

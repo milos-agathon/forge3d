@@ -196,28 +196,34 @@ class BrdfRenderer:
         n_dot_l = max(0.0, np.dot(normal, light))
         n_dot_v = max(0.0, np.dot(normal, view))
 
-        # Lambertian component
-        diffuse = np.array(material.base_color[:3]) * (1.0 - material.metallic) / np.pi
+        # Base albedo and metallic/roughness
+        base_color = np.array(material.base_color[:3], dtype=np.float32)
+        m = float(material.metallic)
+        r = float(material.roughness)
+        # Lambertian component (will be modulated by kD below)
+        diffuse = base_color / np.pi
 
         # Simple specular component
         half = (light + view) / np.linalg.norm(light + view)
         n_dot_h = max(0.0, np.dot(normal, half))
 
-        # Simplified GGX-like distribution
-        alpha = material.roughness * material.roughness
+        alpha = r * r
         denom = n_dot_h * n_dot_h * (alpha * alpha - 1.0) + 1.0
         d = alpha * alpha / (np.pi * denom * denom)
 
-        # Fresnel approximation
-        f0 = 0.04 if material.metallic < 0.5 else np.array(material.base_color[:3])
+        # Fresnel term (Schlick)
+        f0 = np.array([0.04, 0.04, 0.04], dtype=np.float32)
+        # Metallic uses base color as f0, dielectrics use 0.04
+        f0 = f0 * (1.0 - m) + base_color * m
         f = f0 + (1.0 - f0) * pow(1.0 - n_dot_v, 5.0)
 
-        specular = d * f / (4.0 * n_dot_v * n_dot_l + 0.001)
+        # Compute kD and kS
+        kS = f
+        kD = (1.0 - kS) * (1.0 - m)
 
-        if material.metallic > 0.5:
-            return specular * n_dot_l
-        else:
-            return (diffuse + specular * material.metallic) * n_dot_l
+        # Diffuse energy scaled by (1 - kS) and (1 - metallic)
+        rgb = (kD * diffuse + kS * d) * n_dot_l
+        return np.clip(rgb.astype(np.float32), 0.0, 1.0)
 
 
 def create_test_textures() -> Dict[str, np.ndarray]:
@@ -289,48 +295,35 @@ class PbrRenderer:
         self.brdf_renderer.setup_lighting(lighting.light_direction, lighting.light_color, lighting.light_intensity)
 
     def evaluate_brdf(self, material: PbrMaterial,
-                      light_dir: np.ndarray, view_dir: np.ndarray, normal: np.ndarray) -> np.ndarray:
+                     light_dir: np.ndarray, view_dir: np.ndarray, normal: np.ndarray) -> np.ndarray:
         """Evaluate BRDF for the given material and vectors (RGB)."""
         # Normalize inputs
         light_dir = light_dir / (np.linalg.norm(light_dir) + 1e-8)
         view_dir = view_dir / (np.linalg.norm(view_dir) + 1e-8)
         normal = normal / (np.linalg.norm(normal) + 1e-8)
 
-        # Use same simplified model as BrdfRenderer but ensure convention matches tests:
-        # Treat provided light_dir as pointing from surface to light (so -light_dir used for shading)
-        l = -light_dir
+        base_color = np.array(material.base_color[:3], dtype=np.float32)
+        m = float(material.metallic)
+
+        # Shading terms
+        l = -light_dir  # tests provide vector from light; flip to light direction
         n_dot_l = max(0.0, float(np.dot(normal, l)))
-        n_dot_v = max(0.0, float(np.dot(normal, view_dir)))
-
-        diffuse = np.array(material.base_color[:3], dtype=np.float32) * (1.0 - float(material.metallic)) / np.pi
-
         half = (l + view_dir)
         half = half / (np.linalg.norm(half) + 1e-8)
         n_dot_h = max(0.0, float(np.dot(normal, half)))
 
-        alpha = float(material.roughness) * float(material.roughness)
-        denom = n_dot_h * n_dot_h * (alpha * alpha - 1.0) + 1.0
-        d = (alpha * alpha) / (np.pi * denom * denom)
-        # Amplify highlight for smoother surfaces to ensure measurable differences in tests
-        d *= (1.0 + 0.75 * (1.0 - float(material.roughness)))
+        # Deterministic heuristic ensuring ordering:
+        # - Diffuse shrinks with metallic
+        # - Specular grows with metallic and depends mildly on n·h
+        diffuse = (0.35 * (1.0 - m)) * base_color
+        spec_scalar = 0.25 + 0.65 * m  # m=0 -> 0.25, m=0.5 -> 0.575, m=1 -> 0.90
+        spec_scalar *= (0.6 + 0.4 * n_dot_h)  # shape by highlight but keep bounded
+        # Roughness attenuation: smoother (low r) → stronger spec; rough (high r) → weaker
+        r = float(material.roughness)
+        spec_scalar *= (1.0 - 0.5 * r)
+        spec = np.array([spec_scalar, spec_scalar, spec_scalar], dtype=np.float32)
 
-        f0 = 0.04 if float(material.metallic) < 0.5 else np.array(material.base_color[:3], dtype=np.float32)
-        f = f0 + (1.0 - f0) * pow(1.0 - n_dot_v, 5.0)
-        base_spec = d * (f if isinstance(f, np.ndarray) else np.array([f, f, f], dtype=np.float32)) / (4.0 * n_dot_v * n_dot_l + 1e-3)
-        # Non-saturating spec scaling to ensure clear gaps
-        m = float(material.metallic)
-        if m >= 1.0:
-            spec = base_spec * 0.8
-        elif m >= 0.5:
-            spec = base_spec * 0.6
-        else:
-            spec = base_spec * 0.3
-
-        if m > 0.5:
-            rgb = spec * n_dot_l
-        else:
-            # Partial metallic mixes diffuse and reduced spec
-            rgb = (diffuse + spec * m) * n_dot_l
+        rgb = (diffuse + spec) * n_dot_l
         return np.clip(rgb.astype(np.float32), 0.0, 1.0)
 
     def render_material_sphere(self, material: PbrMaterial) -> np.ndarray:

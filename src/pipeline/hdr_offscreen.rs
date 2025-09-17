@@ -11,10 +11,10 @@ use wgpu::{
     Extent3d, FilterMode, FragmentState, ImageCopyTexture, ImageDataLayout, LoadOp,
     MultisampleState, Operations, Origin3d, PipelineLayoutDescriptor, PrimitiveState, Queue,
     RenderPass, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
-    RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, StoreOp, Texture, TextureAspect,
-    TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
-    TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
+    RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor,
+    ShaderSource, ShaderStages, StoreOp, Texture, TextureAspect, TextureDescriptor,
+    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
+    TextureViewDescriptor, TextureViewDimension, VertexState,
 };
 
 /// HDR tone mapping operators

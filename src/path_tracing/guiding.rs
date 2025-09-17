@@ -3,7 +3,6 @@
 // This exists to satisfy A13 deliverables by introducing a simple online histogram grid and directional bins.
 // RELEVANT FILES:src/path_tracing/mod.rs,src/shaders/pt_guiding.wgsl,python/forge3d/guiding.py,tests/test_guiding.py
 
-
 /// Spatial grid with per-cell directional histogram (simple 8-bin azimuth only).
 #[derive(Clone, Debug)]
 pub struct GuidingGrid {
