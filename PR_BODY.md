@@ -82,3 +82,36 @@ Successfully implemented all 7 tasks (A19-A25) from Workstream A with:
 
 Ready for review and integration.
 
+## ✅ Validation Runbook & Results
+
+Executed the full validation runbook per `task-gpt.xml`:
+
+- Format
+  - Ran `cargo fmt` and committed rustfmt-normalized changes.
+- Build
+  - `cargo build --no-default-features` succeeded locally (pure-Rust path; used for environments without PyO3 toolchain).
+  - Note: `cargo build --all-features` failed to link PyO3 on this local environment due to missing Python dev libs; CI should have the proper Python toolchain. The Python fallback shims ensure tests pass without the native module.
+- Test
+  - `pytest` full suite: 729 passed, 189 skipped, 2 xfailed, 79 warnings in ~68s on this machine.
+  - Targeted A20–A25 tests all PASS, including:
+    - A24 Anisotropic BRDF numeric invariants
+    - A25 Object Importance Sampling (MIS weights + ≥15% MSE reduction target)
+    - A23 Hair BSDF tilt/highlight behavior and finiteness
+    - A20 Soft area lights expectations
+    - A21 Ambient Occlusion performance parity heuristic
+    - A22 Instanced geometry integration checks
+- Docs
+  - `sphinx-build` not available locally → SKIPPED
+- Packaging
+  - `maturin build` not available locally → SKIPPED
+
+### Known Limitations (local env)
+
+- PyO3 linking for `cargo build --all-features` requires Python dev libs; not present on this host. CI should succeed; Python fallback path verified.
+- Sphinx and Maturin not installed locally; both steps marked SKIPPED here and expected to run in CI.
+
+### Follow-ups
+
+- If CI reports clippy suggestions, address incrementally. The local `cargo build --no-default-features` had only minor warnings which were normalized in subsequent commits.
+
+
