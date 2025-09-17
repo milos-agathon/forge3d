@@ -73,6 +73,40 @@ fn tent_filter(u: f32) -> f32 {
     return select(1.0 + t, 1.0 - t, t < 0.0);
 }
 
+// -----------------------------------------------------------------------------
+// QMC helpers (A16): Halton sequence + Cranley-Patterson rotation
+// -----------------------------------------------------------------------------
+fn radical_inverse_vdc(mut n: u32) -> f32 {
+    // Van der Corput base 2
+    n = (n << 16u) | (n >> 16u);
+    n = ((n & 0x5555_5555u) << 1u) | ((n & 0xAAAA_AAAAu) >> 1u);
+    n = ((n & 0x3333_3333u) << 2u) | ((n & 0xCCCC_CCCCu) >> 2u);
+    n = ((n & 0x0F0F_0F0Fu) << 4u) | ((n & 0xF0F0_F0F0u) >> 4u);
+    n = ((n & 0x00FF_00FFu) << 8u) | ((n & 0xFF00_FF00u) >> 8u);
+    return f32(n) * 2.3283064365386963e-10; // 1/2^32
+}
+
+fn halton_base3(i: u32) -> f32 {
+    var f: f32 = 1.0;
+    var r: f32 = 0.0;
+    var n: u32 = i;
+    let b: f32 = 3.0;
+    loop {
+        if (n == 0u) { break; }
+        f = f / b;
+        let digit: f32 = f32(n % 3u);
+        r = r + digit * f;
+        n = n / 3u;
+    }
+    return r;
+}
+
+fn cp_rotate(u: f32, r: f32) -> f32 {
+    // Cranley-Patterson rotation in [0,1)
+    let x = u + r;
+    return x - floor(x);
+}
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pixel_idx = gid.x;
@@ -85,14 +119,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let px = pixel_idx % uniforms.width;
     let py = pixel_idx / uniforms.width;
     
-    // Generate multiple samples per pixel for SPP > 1
+    // Generate multiple samples per pixel for SPP > 1 (A16: QMC + CP rotation)
     for (var sample: u32 = 0u; sample < uniforms.spp; sample = sample + 1u) {
-        // Initialize per-pixel, per-sample RNG state
-        var rng_state = uniforms.seed_hi ^ px ^ (py * 1664525u) ^ (sample * 1013904223u) ^ uniforms.frame_index;
-        
-        // Anti-aliasing jitter
-        let jx = tent_filter(xorshift32(&rng_state)) * 0.5;
-        let jy = tent_filter(xorshift32(&rng_state)) * 0.5;
+        // Sample index with frame offset to vary sequences over time
+        let sidx = sample + uniforms.frame_index * max(1u, uniforms.spp);
+        // Low-discrepancy samples in [0,1)
+        let u1 = radical_inverse_vdc(sidx);
+        let u2 = halton_base3(sidx);
+        // Per-pixel rotation using hashed seed for blue-noise-like decorrelation
+        var rr_state = uniforms.seed_lo ^ (px * 9781u) ^ (py * 6271u) ^ (uniforms.seed_hi * 13007u);
+        let r1 = xorshift32(&rr_state);
+        let r2 = xorshift32(&rr_state);
+        // Apply Cranley-Patterson rotation and tent-filter to concentrate around pixel center
+        let jx = tent_filter(cp_rotate(u1, r1)) * 0.5;
+        let jy = tent_filter(cp_rotate(u2, r2)) * 0.5;
         
         // Generate camera ray
         let ndc_x = ((f32(px) + 0.5 + jx) / f32(uniforms.width)) * 2.0 - 1.0;
