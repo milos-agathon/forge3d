@@ -52,6 +52,8 @@ pub struct Hit {
     pub p: [f32; 3],          // hit position
     pub t: f32,               // ray parameter
     pub n: [f32; 3],          // surface normal
+    pub wo: [f32; 3],         // outgoing (to camera) direction at hit
+    pub _pad_wo: f32,         // alignment
     pub mat: u32,             // material index
     pub throughput: [f32; 3], // inherited throughput
     pub pdf: f32,             // inherited pdf

@@ -12,6 +12,7 @@ use wgpu::util::DeviceExt;
 use crate::error::RenderError;
 use crate::gpu::{align_copy_bpr, ctx};
 use crate::path_tracing::aov::{AovFrames, AovKind};
+use crate::path_tracing::mesh::create_empty_mesh_buffers;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
@@ -272,29 +273,8 @@ impl PathTracerGPU {
                 contents: scene_bytes,
                 usage: wgpu::BufferUsages::STORAGE,
             });
-        // Dummy mesh buffers to satisfy shader bindings
-        let dummy_u32: [u32; 1] = [0];
-        let mesh_vertices = g
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("pt-mesh-verts"),
-                contents: bytemuck::cast_slice(&dummy_u32),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-        let mesh_indices = g
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("pt-mesh-indices"),
-                contents: bytemuck::cast_slice(&dummy_u32),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-        let mesh_bvh = g
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("pt-mesh-bvh"),
-                contents: bytemuck::cast_slice(&dummy_u32),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
+        // Empty mesh buffers to satisfy shader bindings (A3 prep)
+        let (mesh_vertices, mesh_indices, mesh_bvh) = create_empty_mesh_buffers(&g.device);
 
         let accum_size = (width as u64) * (height as u64) * 16; // vec4<f32>
         let accum_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
@@ -774,28 +754,7 @@ impl PathTracerGPU {
                 resource: ubo.as_entire_binding(),
             }],
         });
-        let dummy_u32: [u32; 1] = [0];
-        let mesh_vertices = g
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("pt-mesh-verts"),
-                contents: bytemuck::cast_slice(&dummy_u32),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-        let mesh_indices = g
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("pt-mesh-indices"),
-                contents: bytemuck::cast_slice(&dummy_u32),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-        let mesh_bvh = g
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("pt-mesh-bvh"),
-                contents: bytemuck::cast_slice(&dummy_u32),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
+        let (mesh_vertices, mesh_indices, mesh_bvh) = create_empty_mesh_buffers(&g.device);
         let bg1 = g.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("pt-bg1"),
             layout: &bgl1,

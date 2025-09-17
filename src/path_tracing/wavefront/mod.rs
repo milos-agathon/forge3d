@@ -288,4 +288,25 @@ impl WavefrontScheduler {
     pub fn reset_frame_index(&mut self) {
         self.frame_index = 0;
     }
+
+    /// Create scene bind group (Group 1) binding spheres/materials and mesh buffers
+    pub fn create_scene_bind_group(
+        &self,
+        spheres_buffer: &Buffer,
+        mesh_vertices: &Buffer,
+        mesh_indices: &Buffer,
+        mesh_bvh: &Buffer,
+    ) -> Result<BindGroup, Box<dyn std::error::Error>> {
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("wavefront-scene-bind-group"),
+            layout: &self.pipelines.scene_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: spheres_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: mesh_vertices.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: mesh_indices.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: mesh_bvh.as_entire_binding() },
+            ],
+        });
+        Ok(bind_group)
+    }
 }
