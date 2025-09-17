@@ -225,8 +225,10 @@ impl PbrMaterialGpu {
         sampler: &Sampler,
     ) {
         // Create default textures for missing ones
-        let default_white = create_default_texture(device, queue, "default_white", [255, 255, 255, 255]);
-        let default_normal = create_default_texture(device, queue, "default_normal", [128, 128, 255, 255]);
+        let default_white =
+            create_default_texture(device, queue, "default_white", [255, 255, 255, 255]);
+        let default_normal =
+            create_default_texture(device, queue, "default_normal", [128, 128, 255, 255]);
         let default_metallic_roughness =
             create_default_texture(device, queue, "default_mr", [0, 255, 0, 255]); // No metallic, full roughness
         let default_black = create_default_texture(device, queue, "default_black", [0, 0, 0, 0]);
@@ -399,7 +401,15 @@ fn create_texture_from_data(
 
 /// Create default 1x1 texture with specific color
 fn create_default_texture(device: &Device, queue: &Queue, label: &str, color: [u8; 4]) -> Texture {
-    create_texture_from_data(device, queue, label, &color, 1, 1, TextureFormat::Rgba8Unorm)
+    create_texture_from_data(
+        device,
+        queue,
+        label,
+        &color,
+        1,
+        1,
+        TextureFormat::Rgba8Unorm,
+    )
 }
 
 /// Create PBR material sampler
