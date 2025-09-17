@@ -97,15 +97,19 @@ def create_demo_g_buffer(width=512, height=512):
         y_grid, x_grid = np.ogrid[:height, :width]
         mask = (x_grid - x) ** 2 + (y_grid - y) ** 2 <= radius ** 2
 
-        # Spherical normals
-        dx = (x_grid - x)[mask].astype(np.float32)
-        dy = (y_grid - y)[mask].astype(np.float32)
-        dz = np.sqrt(np.maximum(0, radius**2 - dx**2 - dy**2))
+        # Broadcast ogrid to full grid so boolean mask indexing has matching shape
+        xg = np.broadcast_to(x_grid, (height, width))
+        yg = np.broadcast_to(y_grid, (height, width))
 
-        normal_length = np.sqrt(dx**2 + dy**2 + dz**2)
-        normals[mask, 0] = dx / (normal_length + 1e-8)
-        normals[mask, 1] = dz / (normal_length + 1e-8)  # Y is up
-        normals[mask, 2] = dy / (normal_length + 1e-8)
+        # Spherical normals
+        dx = (xg - x)[mask].astype(np.float32)
+        dy = (yg - y)[mask].astype(np.float32)
+        dz = np.sqrt(np.maximum(0.0, radius**2 - dx**2 - dy**2)).astype(np.float32)
+
+        normal_length = np.sqrt(dx**2 + dy**2 + dz**2) + 1e-8
+        normals[mask, 0] = dx / normal_length
+        normals[mask, 1] = dz / normal_length  # Y is up
+        normals[mask, 2] = dy / normal_length
 
     # Create world positions from depth
     # Simple perspective projection inverse
@@ -345,7 +349,7 @@ def save_images_and_stats(mis_image, restir_image, restir_scene, output_dir):
         },
         "quality": {
             "variance_reduction_percent": float(variance_reduction),
-            "target_met": variance_reduction >= 40.0,
+            "target_met": bool(variance_reduction >= 40.0),
             "mis_variance": float(np.var(mis_image)),
             "restir_variance": float(np.var(restir_image))
         },
