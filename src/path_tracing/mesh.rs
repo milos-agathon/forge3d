@@ -4,10 +4,10 @@
 // RELEVANT FILES:src/accel/cpu_bvh.rs,src/shaders/pt_intersect_mesh.wgsl,python/forge3d/mesh.py
 
 use crate::accel::cpu_bvh::{MeshCPU, BvhCPU, BvhNode, Aabb};
-use anyhow::{Result, Context};
+use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
 use wgpu::{Device, Queue, Buffer, BufferUsages};
-use std::sync::Arc;
+use wgpu::util::DeviceExt;
 
 /// GPU-compatible vertex layout (matches WGSL Vertex struct)
 #[repr(C)]
@@ -59,7 +59,7 @@ impl GpuMesh {
 /// This is the main integration point for getting CPU mesh data into GPU format
 pub fn upload_mesh_and_bvh(
     device: &Device,
-    queue: &Queue,
+    _queue: &Queue,
     mesh: &MeshCPU,
     bvh: &BvhCPU,
 ) -> Result<GpuMesh> {

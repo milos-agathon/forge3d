@@ -210,7 +210,7 @@ impl BvhNode {
 
 // Verify the struct layout matches expected GPU layout at compile time
 const _: () = {
-    assert!(std::mem::size_of::<BvhNode>() == 32); // 8 * 4 bytes
+    assert!(std::mem::size_of::<BvhNode>() == 40); // 16 + 16 + 8 bytes
     assert!(std::mem::align_of::<BvhNode>() == 4);
 };
 

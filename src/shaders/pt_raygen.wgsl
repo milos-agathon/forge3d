@@ -22,11 +22,15 @@ struct Uniforms {
 }
 
 // Bind Group 1: Scene (readonly storage: materials, textures/handles, accel/BVH)
-struct Sphere { 
-    center: vec3<f32>, 
-    radius: f32, 
-    albedo: vec3<f32>, 
-    _pad0: f32 
+struct Sphere {
+    center: vec3<f32>,
+    radius: f32,
+    albedo: vec3<f32>,
+    metallic: f32,
+    roughness: f32,
+    ior: f32,
+    emissive: vec3<f32>,
+    _pad0: f32,
 }
 
 // Bind Group 2: Queues (read/write storage buffers with atomic counters)
