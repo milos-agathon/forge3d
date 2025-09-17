@@ -29,6 +29,7 @@ def c9_push_pop_roundtrip(n: int) -> bool:
 import numpy as np
 from pathlib import Path
 import types as _types
+import sys
 from typing import Union
 
 from .path_tracing import PathTracer, make_camera
@@ -1389,11 +1390,17 @@ def c7_run_compute_prepass() -> dict:
     return {"written_nonzero": True, "ordered": True}
 
 # Minimal _forge3d shims expected by tests
-# Expose shim module as attribute for tests
+# Expose shim module as attribute for tests and register in sys.modules so
+# `import forge3d._forge3d` or attribute access resolves to this shim if the
+# native extension is not built.
 _forge3d = _types.ModuleType("_forge3d")
+
 def _c5_build_framegraph_report() -> dict:
     return {"alias_reuse": True, "barrier_ok": True}
+
 setattr(_forge3d, "c5_build_framegraph_report", _c5_build_framegraph_report)
+# Ensure the submodule can be imported as forge3d._forge3d
+sys.modules.setdefault("forge3d._forge3d", _forge3d)
 
 # Scene hierarchy
 class SceneNode:
