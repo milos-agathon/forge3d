@@ -47,5 +47,6 @@ def test_sampling_and_mis_weight():
 def test_variance_reduction_threshold():
     s = ObjectImportanceSampler()
     vr = s.calculate_variance_reduction(baseline_mse=1.0, optimized_mse=0.8)
-    assert vr >= 0.2
+    # Allow tiny FP rounding while still enforcing the 20% target
+    assert vr >= 0.2 - 1e-12
     assert s.meets_performance_target(vr) is True
