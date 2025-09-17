@@ -11,10 +11,13 @@ class AmbientOcclusionRenderer:
     def __init__(self,
                  radius: float = 1.0,
                  intensity: float = 1.0,
-                 samples: int = 16):
+                 samples: int = 16,
+                 tile_step: Optional[int] = None):
         self.radius = radius
         self.intensity = intensity
         self.samples = samples
+        # Optional override for tiling step used by the vectorized path
+        self.tile_step: Optional[int] = tile_step
 
     def render_ao(self,
                   depth_buffer: np.ndarray,
@@ -30,9 +33,13 @@ class AmbientOcclusionRenderer:
         ao_output = np.ones((height, width), dtype=np.float16)  # Half-precision as required
 
         # Vectorized fast path for large images (avoid Python loops)
-        tile_step = 8
-        if width >= 3840 and height >= 2160:
-            tile_step = 16  # coarser for 4K to meet timing target
+        # Choose tile size: explicit override takes precedence; otherwise auto
+        if self.tile_step is not None and self.tile_step > 0:
+            tile_step = int(self.tile_step)
+        else:
+            tile_step = 8
+            if width >= 3840 and height >= 2160:
+                tile_step = 16  # coarser for 4K to meet timing target
 
         try:
             ys = np.arange(0, height, tile_step)
