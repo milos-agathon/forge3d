@@ -578,21 +578,8 @@ def render_rgba(*args, **kwargs) -> np.ndarray:
             ]
     return img
 
-def render_aovs(*args, **kwargs) -> dict:
-    """Render AOVs (fallback implementation)."""
-    # Handle positional arguments for width/height
-    if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
-        width = int(args[0])
-        height = int(args[1])
-    else:
-        width = kwargs.get('width', 256)
-        height = kwargs.get('height', 256)
-
-    return {
-        'beauty': render_rgba(width=width, height=height),
-        'depth': np.ones((height, width), dtype=np.float32),
-        'normal': np.zeros((height, width, 3), dtype=np.float32),
-    }
+# Note: render_aovs() full implementation is defined above. Avoid redefining it here
+# to keep the API and returned keys consistent with tests (e.g., 'albedo', 'normal', 'depth', etc.).
 
 class BvhHandle:
     """BVH handle placeholder."""
