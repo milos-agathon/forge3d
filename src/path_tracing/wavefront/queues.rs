@@ -23,7 +23,6 @@ impl QueueHeader {
             _pad: 0,
         }
     }
-
     pub fn active_count(&self) -> u32 {
         self.in_count.saturating_sub(self.out_count)
     }
@@ -61,6 +60,8 @@ pub struct Hit {
     pub depth: u32,           // bounce depth
     pub rng_hi: u32,          // RNG state high
     pub rng_lo: u32,          // RNG state low
+    pub tangent: [f32; 3],    // strand/surface tangent
+    pub flags: u32,           // bit0 = is_hair
 }
 
 /// Scatter ray structure matching WGSL layout
@@ -79,6 +80,20 @@ pub struct ScatterRay {
     pub rng_lo: u32,          // updated RNG state low
 }
 
+/// Shadow ray structure (NEE visibility test) matching WGSL layout
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ShadowRay {
+    pub o: [f32; 3],          // origin
+    pub tmin: f32,            // minimum ray parameter
+    pub d: [f32; 3],          // direction
+    pub tmax: f32,            // maximum ray parameter
+    pub contrib: [f32; 3],    // precomputed RGB contribution if visible
+    pub _pad0: f32,
+    pub pixel: u32,           // pixel index to accumulate into
+    pub _pad1: [u32; 3],      // alignment padding
+}
+
 /// All GPU buffers for wavefront queues
 pub struct QueueBuffers {
     pub capacity: u32,
@@ -94,6 +109,10 @@ pub struct QueueBuffers {
     pub hit_queue: Buffer,
     pub scatter_queue: Buffer,
     pub miss_queue: Buffer,
+
+    // Shadow queue buffers
+    pub shadow_queue_header: Buffer,
+    pub shadow_queue: Buffer,
 
     // Compaction buffers
     pub ray_queue_compacted: Buffer,
@@ -134,6 +153,13 @@ impl QueueBuffers {
             mapped_at_creation: false,
         });
 
+        let shadow_queue_header = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shadow-queue-header"),
+            size: header_size,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
         // Create queue data buffers
         let ray_size = (std::mem::size_of::<Ray>() * capacity as usize) as u64;
         let ray_queue = device.create_buffer(&wgpu::BufferDescriptor {
@@ -162,6 +188,14 @@ impl QueueBuffers {
         let miss_queue = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("miss-queue"),
             size: ray_size, // Same as ray queue
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let shadow_size = (std::mem::size_of::<ShadowRay>() * capacity as usize) as u64;
+        let shadow_queue = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shadow-queue"),
+            size: shadow_size,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -199,6 +233,8 @@ impl QueueBuffers {
             hit_queue,
             scatter_queue,
             miss_queue,
+            shadow_queue_header,
+            shadow_queue,
             ray_queue_compacted,
             ray_flags,
             prefix_sums,
@@ -217,6 +253,7 @@ impl QueueBuffers {
         queue.write_buffer(&self.hit_queue_header, 0, header_data);
         queue.write_buffer(&self.scatter_queue_header, 0, header_data);
         queue.write_buffer(&self.miss_queue_header, 0, header_data);
+        queue.write_buffer(&self.shadow_queue_header, 0, header_data);
     }
 
     /// Get active ray count (requires GPU readback)
@@ -274,6 +311,49 @@ impl QueueBuffers {
                     binding: 1,
                     resource: self.ray_queue.as_entire_binding(),
                 },
+            ],
+        });
+
+        Ok(bind_group)
+    }
+
+    /// Create bind group for shadow stage
+    pub fn create_shadow_bind_group(
+        &self,
+        device: &Device,
+    ) -> Result<BindGroup, Box<dyn std::error::Error>> {
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("shadow-queue-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow-queue-bind-group"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: self.shadow_queue_header.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: self.shadow_queue.as_entire_binding() },
             ],
         });
 
@@ -433,6 +513,28 @@ impl QueueBuffers {
                     },
                     count: None,
                 },
+                // Shadow queue header
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Shadow queue
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -455,6 +557,14 @@ impl QueueBuffers {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: self.scatter_queue.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: self.shadow_queue_header.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: self.shadow_queue.as_entire_binding(),
                 },
             ],
         });

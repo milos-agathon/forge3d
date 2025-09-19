@@ -36,10 +36,20 @@ pub struct Uniforms {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
 pub struct Sphere {
+    // 16-byte group 0
     pub center: [f32; 3],
     pub radius: f32,
+    // 16-byte group 1
     pub albedo: [f32; 3],
-    pub _pad0: f32,
+    pub metallic: f32,
+    // 16-byte group 2
+    pub emissive: [f32; 3],
+    pub roughness: f32,
+    // 16-byte group 3
+    pub ior: f32,
+    pub ax: f32,
+    pub ay: f32,
+    pub _pad1: f32,
 }
 
 pub struct PathTracerGPU;

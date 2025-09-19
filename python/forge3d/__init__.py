@@ -44,7 +44,7 @@ from .sdf import (
 )
 
 # Version information
-__version__ = "0.14.0"
+__version__ = "0.39.0"
 _CURRENT_PALETTE = "viridis"
 
 # ----------------------------------------------------------------------------

@@ -46,10 +46,10 @@ fn delta(i: i32, j: i32) -> i32 {
         // Same Morton code, use primitive indices to break ties
         let idx_i = sorted_indices[i];
         let idx_j = sorted_indices[j];
-        return 32 + countLeadingZeros(idx_i ^ idx_j);
+        return i32(32u + countLeadingZeros(idx_i ^ idx_j));
     }
     
-    return countLeadingZeros(code_i ^ code_j);
+    return i32(countLeadingZeros(code_i ^ code_j));
 }
 
 fn sign(x: i32) -> i32 {
@@ -91,7 +91,7 @@ fn find_split(first: i32, last: i32) -> i32 {
         return (first + last) >> 1;
     }
     
-    let common_prefix = countLeadingZeros(first_code ^ last_code);
+    let common_prefix: u32 = countLeadingZeros(first_code ^ last_code);
     var split = first;
     let step = last - first;
     
@@ -102,7 +102,7 @@ fn find_split(first: i32, last: i32) -> i32 {
         
         if new_split < last {
             let split_code = sorted_codes[new_split];
-            let split_prefix = countLeadingZeros(first_code ^ split_code);
+            let split_prefix: u32 = countLeadingZeros(first_code ^ split_code);
             if split_prefix > common_prefix {
                 split = new_split;
             }

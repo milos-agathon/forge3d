@@ -67,6 +67,144 @@ fn generate_primary_ray(px: u32, py: u32) -> vec3<f32> {
   return cam_dir;
 }
 
+// ---------------------
+// Scene sphere buffer (PBR materials)
+// ---------------------
+struct SphereMat {
+  // 16-byte groups aligned with Rust struct in src/path_tracing/compute.rs
+  center: vec3<f32>, radius: f32,
+  albedo: vec3<f32>, metallic: f32,
+  emissive: vec3<f32>, roughness: f32,
+  ior: f32, ax: f32, ay: f32, _pad1: f32,
+};
+
+@group(1) @binding(0) var<storage, read> spheres: array<SphereMat>;
+
+struct HitRec {
+  hit: bool,
+  t: f32,
+  n: vec3<f32>,
+  p: vec3<f32>,
+  mat: SphereMat,
+};
+
+fn intersect_sphere(ro: vec3<f32>, rd: vec3<f32>, s: SphereMat) -> HitRec {
+  let oc = ro - s.center;
+  let b = dot(oc, rd);
+  let c = dot(oc, oc) - s.radius * s.radius;
+  let disc = b*b - c;
+  if (disc < 0.0) {
+    return HitRec(false, 1e30, vec3<f32>(0.0), ro, s);
+  }
+  let sd = sqrt(max(disc, 0.0));
+  // Choose nearest positive root
+  var t = -b - sd;
+  if (t <= 1e-4) { t = -b + sd; }
+  if (t <= 1e-4) {
+    return HitRec(false, 1e30, vec3<f32>(0.0), ro, s);
+  }
+  let p = ro + t * rd;
+  let n = normalize(p - s.center);
+  return HitRec(true, t, n, p, s);
+}
+
+fn make_tangent_basis(n: vec3<f32>) -> mat3x3<f32> {
+  let sign = select(1.0, -1.0, n.z < 0.0);
+  let a = -1.0 / (sign + n.z);
+  let b = n.x * n.y * a;
+  let t = vec3<f32>(1.0 + sign * n.x * n.x * a, sign * b, -sign * n.x);
+  let bvec = vec3<f32>(b, sign + n.y * n.y * a, -n.y);
+  return mat3x3<f32>(t, bvec, n);
+}
+
+fn fresnel_schlick(cos_theta: f32, F0: vec3<f32>) -> vec3<f32> {
+  return F0 + (vec3<f32>(1.0) - F0) * pow(1.0 - clamp(cos_theta,0.0,1.0), 5.0);
+}
+
+fn ggx_D(n_dot_h: f32, alpha: f32) -> f32 {
+  let a2 = alpha * alpha;
+  let ndh2 = n_dot_h * n_dot_h;
+  let denom = 3.141592653589793 * pow(ndh2 * (a2 - 1.0) + 1.0, 2.0);
+  return a2 / max(denom, 1e-6);
+}
+
+fn smith_G1(n_dot_v: f32, alpha: f32) -> f32 {
+  let k = pow(alpha + 1.0, 2.0) / 8.0;
+  return n_dot_v / (n_dot_v * (1.0 - k) + k);
+}
+
+fn smith_G(n_dot_l: f32, n_dot_v: f32, alpha: f32) -> f32 {
+  return smith_G1(n_dot_l, alpha) * smith_G1(n_dot_v, alpha);
+}
+
+fn ggx_D_aniso(h: vec3<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f32>, ax: f32, ay: f32) -> f32 {
+  let hx = dot(h, t);
+  let hy = dot(h, b);
+  let hz = max(dot(h, n), 0.0);
+  let x2 = (hx * hx) / max(ax * ax, 1e-8);
+  let y2 = (hy * hy) / max(ay * ay, 1e-8);
+  let denom = (x2 + y2 + hz * hz);
+  return 1.0 / max(3.141592653589793 * ax * ay * denom * denom, 1e-6);
+}
+
+fn smith_G_aniso(v: vec3<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f32>, ax: f32, ay: f32) -> f32 {
+  let vx = dot(v, t);
+  let vy = dot(v, b);
+  let vz = max(dot(v, n), 0.0);
+  let alpha_v = sqrt((vx*vx) * (ax*ax) + (vy*vy) * (ay*ay)) / max(vz, 1e-6);
+  return 2.0 / (1.0 + sqrt(1.0 + alpha_v * alpha_v));
+}
+
+fn shade_pbr(v: vec3<f32>, n: vec3<f32>, p: vec3<f32>, m: SphereMat) -> struct {
+  color: vec3<f32>, albedo: vec3<f32>, direct: vec3<f32>, indirect: vec3<f32>
+} {
+  let albedo = max(m.albedo, vec3<f32>(0.0));
+  let metallic = clamp(m.metallic, 0.0, 1.0);
+  let rough = clamp(m.roughness, 0.0, 1.0);
+  let ax = max(0.002, m.ax);
+  let ay = max(0.002, m.ay);
+
+  let l = normalize(vec3<f32>(0.4, 1.0, 0.2));
+  let Li = vec3<f32>(1.0, 0.95, 0.90) * 2.5;
+  let h = normalize(l + v);
+  let n_dot_l = max(dot(n, l), 0.0);
+  let n_dot_v = max(dot(n, v), 0.0);
+  let n_dot_h = max(dot(n, h), 0.0);
+  let v_dot_h = max(dot(v, h), 0.0);
+
+  var D: f32;
+  var G: f32;
+  if (abs(ax - ay) < 1e-4) {
+    let a = max(0.02, rough*rough);
+    D = ggx_D(n_dot_h, a);
+    G = smith_G(n_dot_l, n_dot_v, a);
+  } else {
+    let basis = make_tangent_basis(n);
+    let t = vec3<f32>(basis[0][0], basis[1][0], basis[2][0]);
+    let b = vec3<f32>(basis[0][1], basis[1][1], basis[2][1]);
+    let nn = vec3<f32>(basis[0][2], basis[1][2], basis[2][2]);
+    D = ggx_D_aniso(h, t, b, nn, ax, ay);
+    G = smith_G_aniso(l, t, b, nn, ax, ay) * smith_G_aniso(v, t, b, nn, ax, ay);
+  }
+  let F0 = mix(vec3<f32>(0.04), albedo, metallic);
+  let F = fresnel_schlick(v_dot_h, F0);
+  let spec = (D * G) / max(4.0 * n_dot_l * n_dot_v, 1e-6) * F;
+  let kS = F;
+  let kD = (vec3<f32>(1.0) - kS) * (1.0 - metallic);
+  let diffuse = kD * albedo / 3.141592653589793;
+  let direct = (diffuse + spec) * Li * n_dot_l;
+
+  // Simple env for indirect
+  let r = reflect(-v, n);
+  let env = env_color(r);
+  let F_ibl = F0 + (max(vec3<f32>(1.0 - rough), F0) - F0) * pow(1.0 - n_dot_v, 5.0);
+  let indirect = env * (F_ibl * 0.5 + 0.5 * kD * albedo);
+
+  // Add emissive
+  let color = direct + indirect + max(m.emissive, vec3<f32>(0.0));
+  return .{ color, albedo, direct, indirect };
+}
+
 struct Hit {
   hit: bool,
   t: f32,
@@ -144,7 +282,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   let ro = ubo.cam_origin;
   let rd = generate_primary_ray(gid.x, gid.y);
-  let hit = intersect_ground_plane(ro, rd);
+  // Intersect spheres
+  var best: HitRec;
+  best.hit = false; best.t = 1e30; best.n = vec3<f32>(0.0); best.p = ro; best.mat = SphereMat(vec3<f32>(0.0),0.0, vec3<f32>(0.0),0.0, vec3<f32>(0.0),0.0, 1.5, 0.2, 0.2, 0.0);
+  let count = arrayLength(&spheres);
+  for (var i: u32 = 0u; i < count; i = i + 1u) {
+    let s = spheres[i];
+    let h = intersect_sphere(ro, rd, s);
+    if (h.hit && h.t < best.t) { best = h; }
+  }
 
   var color = vec3<f32>(0.0);
   var albedo = vec3<f32>(0.0);
@@ -153,21 +299,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var depth = 1.0;
   var vis: f32 = 0.0;
 
-  if (hit.hit) {
-    let s = shade_ground(ro, rd, hit);
+  if (best.hit) {
+    let v = normalize(-rd);
+    let s = shade_pbr(v, best.n, best.p, best.mat);
     color = s.color;
     albedo = s.albedo;
     direct = s.direct;
     indirect = s.indirect;
-    depth = hit.t;
+    depth = best.t;
     vis = 1.0;
   } else {
-    color = env_color(rd);
-    albedo = vec3<f32>(0.0);
-    direct = vec3<f32>(0.0);
-    indirect = color;
-    depth = 1.0;
-    vis = 0.0;
+    // fallback to ground plane for simple background shading
+    let hit = intersect_ground_plane(ro, rd);
+    if (hit.hit) {
+      let s = shade_ground(ro, rd, hit);
+      color = s.color; albedo = s.albedo; direct = s.direct; indirect = s.indirect; depth = hit.t; vis = 1.0;
+    } else {
+      color = env_color(rd); indirect = color; vis = 0.0; depth = 1.0;
+    }
   }
 
   // Tonemap and output RGBA16F
@@ -177,8 +326,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // AOV writes (optional)
   if (aov_enabled(0u)) { textureStore(aov_albedo, xy, vec4<f16>(vec4<f32>(albedo, 1.0))); }
   if (aov_enabled(1u)) {
-    let n = normalize(select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), hit.hit));
-    textureStore(aov_normal, xy, vec4<f16>(vec4<f32>(n, 1.0)));
+    var n_out = vec3<f32>(0.0, 1.0, 0.0);
+    if (best.hit) {
+      n_out = best.n;
+    } else {
+      let ph = intersect_ground_plane(ro, rd);
+      if (ph.hit) { n_out = vec3<f32>(0.0, 1.0, 0.0); }
+    }
+    textureStore(aov_normal, xy, vec4<f16>(vec4<f32>(normalize(n_out), 1.0)));
   }
   if (aov_enabled(2u)) { textureStore(aov_depth, xy, vec4<f32>(depth, 0.0, 0.0, 0.0)); }
   if (aov_enabled(3u)) { textureStore(aov_direct, xy, vec4<f16>(vec4<f32>(direct, 1.0))); }

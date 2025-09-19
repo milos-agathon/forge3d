@@ -1,11 +1,11 @@
 [package]
 name = "forge3d"
-version = "0.14.0"
+version = "0.39.0"
 edition = "2021"
 
 [lib]
 name = "forge3d"
-crate-type = ["cdylib", "lib"]
+crate-type = ["lib"]
 
 # A2-BEGIN:cargo-features
 [features]

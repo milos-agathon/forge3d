@@ -1,0 +1,95 @@
+name: Python Examples
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      enable_gpu:
+        description: "Enable GPU jobs"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+env:
+  # Set to '1' on a GPU-capable runner to enable the optional GPU job (fallback)
+  ENABLE_GPU: "0"
+
+jobs:
+  python-examples:
+    name: Run Python example drivers (build-only if GPU disabled)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install -U pip
+          python -m pip install maturin pytest
+
+      - name: Build crate (no default features)
+        run: cargo build --no-default-features --features images
+
+      - name: Run wavefront instances Python example (gated)
+        env:
+          FORGE3D_RUN_WAVEFRONT: "0"
+        run: python examples/wavefront_instances.py
+
+      - name: Run hair demo Python example (gated)
+        env:
+          FORGE3D_RUN_WAVEFRONT: "0"
+        run: python examples/hair_demo.py --dry-run
+
+      - name: Run perf split_vs_single_bg Python example (gated)
+        env:
+          FORGE3D_CI_GPU: "0"
+        run: python examples/perf/split_vs_single_bg.py --frames 10 --objects 100 --out artifacts/perf/ci.csv
+
+  gpu-examples:
+    name: Run GPU Python examples and GPU tests (optional)
+    if: ${{ env.ENABLE_GPU == '1' || inputs.enable_gpu == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      FORGE3D_RUN_WAVEFRONT: "1"
+      FORGE3D_CI_GPU: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install -U pip
+          python -m pip install maturin pytest
+
+      - name: Build crate
+        run: cargo build --no-default-features --features images
+
+      - name: Run wavefront instances (GPU)
+        run: python examples/wavefront_instances.py --hair-demo --hair-width=0.03 --hair-mat=1
+
+      - name: Run hair demo (GPU)
+        run: python examples/hair_demo.py --enable-hair --hair-width=0.04 --hair-mat=0
+
+      - name: Run perf benchmark (GPU)
+        run: python examples/perf/split_vs_single_bg.py --frames 50 --objects 500 --out artifacts/perf/ci_gpu.csv
+
+      - name: Run hair GPU test
+        run: pytest -q tests/test_p5_hair_gpu.py

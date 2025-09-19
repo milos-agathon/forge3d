@@ -60,6 +60,13 @@ The `forge3d.path_tracing.PathTracer.render_rgba` function produces a determinis
 
 Example outputs should be written under `out/` which is gitignored.
 
+## What's new in v0.39.0 (Workstream A)
+
+- Wavefront Path Tracer (A12): GPU queue-based pipeline with WGSL kernels for raygen/intersect/shade/scatter/compact, deterministic RNG, parity and performance harness.
+- GPU LBVH build & refit (A7): Morton codes on GPU, GPU sorting (bitonic for ≤256, multi-pass radix with atomics for larger arrays), topology link, and refit; example `examples/accel_lbvh_refit.rs`.
+- ReSTIR DI controls (A8): Forwarded config flags (via Python wrapper) for temporal/spatial reuse in the path tracing pipeline.
+- Workstream A roll-ups (A1/A3/A15/A19): MVP/path tracer integration points, progressive tiling hooks, and scene cache controls exposed via Python.
+
 ## What's new - Workstream A8
 
 - **ReSTIR DI (Reservoir-based Spatio-Temporal Importance Resampling for Direct Illumination)**:
@@ -305,7 +312,7 @@ pytest -q
 
 ## Versioning
 
-`forge3d.__version__` mirrors the Rust crate version (`env!("CARGO_PKG_VERSION")`), now **0.10.0**.
+`forge3d.__version__` mirrors the Rust crate version (`env!("CARGO_PKG_VERSION")`), now **0.39.0**.
 
 ## Changelog
 

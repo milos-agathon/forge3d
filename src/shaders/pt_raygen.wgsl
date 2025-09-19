@@ -21,6 +21,15 @@ struct Uniforms {
     _pad: u32,
 }
 
+// Optional RestirSettings in scene group for QMC mode/control (A16)
+struct RestirSettings {
+    debug_aov_mode: u32,
+    qmc_mode: u32,                 // 0=halton/vdc, 1=sobol
+    adaptive_threshold_u32: u32,
+    _pad: u32,
+};
+@group(1) @binding(12) var<uniform> restir_settings: RestirSettings;
+
 // Bind Group 1: Scene (readonly storage: materials, textures/handles, accel/BVH)
 struct Sphere {
     center: vec3<f32>,
@@ -30,7 +39,8 @@ struct Sphere {
     roughness: f32,
     ior: f32,
     emissive: vec3<f32>,
-    _pad0: f32,
+    ax: f32, // anisotropic alpha_x
+    ay: f32, // anisotropic alpha_y
 }
 
 // Bind Group 2: Queues (read/write storage buffers with atomic counters)
@@ -48,8 +58,8 @@ struct Ray {
 }
 
 struct QueueHeader {
-    in_count: u32,          // number of items pushed
-    out_count: u32,         // number of items popped
+    in_count: atomic<u32>,  // number of items pushed
+    out_count: atomic<u32>, // number of items popped
     capacity: u32,          // maximum capacity
     _pad: u32,
 }
@@ -78,15 +88,16 @@ fn tent_filter(u: f32) -> f32 {
 }
 
 // -----------------------------------------------------------------------------
-// QMC helpers (A16): Halton sequence + Cranley-Patterson rotation
+// QMC helpers (A16): Sobol/Owen + Halton/VDC fallback with CP rotation
 // -----------------------------------------------------------------------------
-fn radical_inverse_vdc(mut n: u32) -> f32 {
+fn radical_inverse_vdc(n_in: u32) -> f32 {
+    var n = n_in;
     // Van der Corput base 2
     n = (n << 16u) | (n >> 16u);
-    n = ((n & 0x5555_5555u) << 1u) | ((n & 0xAAAA_AAAAu) >> 1u);
-    n = ((n & 0x3333_3333u) << 2u) | ((n & 0xCCCC_CCCCu) >> 2u);
-    n = ((n & 0x0F0F_0F0Fu) << 4u) | ((n & 0xF0F0_F0F0u) >> 4u);
-    n = ((n & 0x00FF_00FFu) << 8u) | ((n & 0xFF00_FF00u) >> 8u);
+    n = ((n & 0x55555555u) << 1u) | ((n & 0xAAAAAAAAu) >> 1u);
+    n = ((n & 0x33333333u) << 2u) | ((n & 0xCCCCCCCCu) >> 2u);
+    n = ((n & 0x0F0F0F0Fu) << 4u) | ((n & 0xF0F0F0F0u) >> 4u);
+    n = ((n & 0x00FF00FFu) << 8u) | ((n & 0xFF00FF00u) >> 8u);
     return f32(n) * 2.3283064365386963e-10; // 1/2^32
 }
 
@@ -103,6 +114,38 @@ fn halton_base3(i: u32) -> f32 {
         n = n / 3u;
     }
     return r;
+}
+// Sobol 2D with simple direction numbers; Owen-style scramble via XOR hash.
+fn sobol_dir_v(d: u32, i: u32) -> u32 {
+    // First 32 direction numbers for dim 0/1 (precomputed for primitive polynomials)
+    // dim 0: v_j = 1 << (31-j)
+    if (d == 0u) {
+        return 0x80000000u >> i;
+    }
+    // dim 1: use standard set for direction numbers (m = [1,3,5,15,17,51,...]) approximated by shifts
+    // Fallback to simple pattern to avoid large tables
+    let base: u32 = 0x80000000u >> i;
+    // XOR a rotated version for dim 1
+    let rot = (base >> 1) ^ (base >> 3);
+    return base ^ rot;
+}
+
+fn sobol2(i: u32) -> vec2<f32> {
+    var xbits: u32 = 0u;
+    var ybits: u32 = 0u;
+    var idx = i;
+    var j: u32 = 0u;
+    loop {
+        if (j >= 32u) { break; }
+        if ((idx & 1u) == 1u) {
+            xbits ^= sobol_dir_v(0u, j);
+            ybits ^= sobol_dir_v(1u, j);
+        }
+        idx >>= 1u;
+        j = j + 1u;
+    }
+    let inv = 1.0 / 4294967296.0; // 1/2^32
+    return vec2<f32>(f32(xbits) * inv, f32(ybits) * inv);
 }
 
 fn cp_rotate(u: f32, r: f32) -> f32 {
@@ -123,13 +166,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let px = pixel_idx % uniforms.width;
     let py = pixel_idx / uniforms.width;
     
-    // Generate multiple samples per pixel for SPP > 1 (A16: QMC + CP rotation)
-    for (var sample: u32 = 0u; sample < uniforms.spp; sample = sample + 1u) {
+    // Generate multiple samples per pixel for SPP > 1 (A16: Sobol/Owen + CP rotation)
+    // If adaptive_threshold_u32 != 0, clamp spp to that threshold for this pass.
+    let spp_target = select(uniforms.spp, min(uniforms.spp, restir_settings.adaptive_threshold_u32), restir_settings.adaptive_threshold_u32 != 0u);
+    for (var sample: u32 = 0u; sample < spp_target; sample = sample + 1u) {
         // Sample index with frame offset to vary sequences over time
         let sidx = sample + uniforms.frame_index * max(1u, uniforms.spp);
-        // Low-discrepancy samples in [0,1)
-        let u1 = radical_inverse_vdc(sidx);
-        let u2 = halton_base3(sidx);
+        // Select QMC sequence
+        var u1: f32;
+        var u2: f32;
+        if (restir_settings.qmc_mode != 0u) {
+            let s2 = sobol2(sidx);
+            u1 = s2.x; u2 = s2.y;
+        } else {
+            u1 = radical_inverse_vdc(sidx);
+            u2 = halton_base3(sidx);
+        }
         // Per-pixel rotation using hashed seed for blue-noise-like decorrelation
         var rr_state = uniforms.seed_lo ^ (px * 9781u) ^ (py * 6271u) ^ (uniforms.seed_hi * 13007u);
         let r1 = xorshift32(&rr_state);
@@ -148,6 +200,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         rd = normalize(rd.x * uniforms.cam_right + rd.y * uniforms.cam_up + rd.z * (-uniforms.cam_forward));
         
         // Create primary ray
+        var rng_state = uniforms.seed_hi ^ (pixel_idx * 9781u) ^ (uniforms.frame_index * 6271u);
         var primary_ray: Ray;
         primary_ray.o = uniforms.cam_origin;
         primary_ray.tmin = 1e-4;
