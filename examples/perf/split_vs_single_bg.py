@@ -60,6 +60,22 @@ def run_rust_benchmark(frames, objects, output_path):
     # Find the project root (directory containing Cargo.toml)
     project_root = Path(__file__).parent.parent.parent
     logger.info(f"Project root: {project_root}")
+    # GPU gating: only execute if FORGE3D_CI_GPU=1; otherwise build-only and skip run
+    if os.environ.get("FORGE3D_CI_GPU", "0") != "1":
+        logger.info("FORGE3D_CI_GPU != 1 -> building only (skipping benchmark run)")
+        try:
+            result = subprocess.run([
+                "cargo", "build", "--example", "split_vs_single_bg", "--release"
+            ], cwd=project_root, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.error("Build failed")
+                if result.stderr:
+                    logger.error(result.stderr)
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Build exception: {e}")
+            return False
     
     # Build the command
     cmd = [

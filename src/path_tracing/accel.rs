@@ -7,6 +7,8 @@ use crate::accel::types::{Aabb, BvhNode};
 use crate::accel::{BvhBackend, BvhHandle, CpuBvhData, Triangle};
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
+use std::sync::Arc;
+use wgpu::{Device, Queue};
 
 /// Ray structure for traversal
 #[repr(C)]
@@ -16,6 +18,30 @@ pub struct Ray {
     pub t_min: f32,
     pub direction: [f32; 3],
     pub t_max: f32,
+}
+
+// ----------------------------------------------------------------------------
+// A7: Begin GPU LBVH/SAH refit entry (thin wrapper around lbvh_gpu::GpuBvhBuilder)
+// ----------------------------------------------------------------------------
+/// Thin wrapper to expose GPU BVH refit to the path tracing layer.
+/// This starts wiring for A7 (LBVH/SAH builder & refit). The underlying builder
+/// stub exists in `src/accel/lbvh_gpu.rs`; this wrapper provides a stable API.
+pub struct GpuBvhRefitter {
+    inner: crate::accel::lbvh_gpu::GpuBvhBuilder,
+}
+
+impl GpuBvhRefitter {
+    /// Create a new GPU BVH refitter.
+    pub fn new(device: Arc<Device>, queue: Arc<Queue>) -> Result<Self> {
+        let inner = crate::accel::lbvh_gpu::GpuBvhBuilder::new(device, queue)?;
+        Ok(Self { inner })
+    }
+
+    /// Refit an existing GPU BVH handle with updated triangle data.
+    /// Triangle count must match the original primitive count.
+    pub fn refit(&mut self, handle: &mut BvhHandle, triangles: &[Triangle]) -> Result<()> {
+        self.inner.refit(handle, triangles)
+    }
 }
 
 impl Ray {

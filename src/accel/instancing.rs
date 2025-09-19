@@ -1,6 +1,6 @@
 //! A22: Instanced Geometry (PT) - TLAS-style instances with per-instance transforms
 
-use glam::{Mat4, Vec3};
+use glam::Mat4;
 use wgpu::*;
 
 #[repr(C)]
@@ -16,6 +16,7 @@ pub struct InstanceData {
 pub struct TLAS {
     instances: Vec<InstanceData>,
     max_instances: usize,
+    #[allow(dead_code)]
     device: std::sync::Arc<Device>,
 }
 

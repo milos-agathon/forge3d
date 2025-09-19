@@ -49,8 +49,8 @@ struct ScatterRay {
 }
 
 struct QueueHeader {
-    in_count: u32,          // number of items pushed
-    out_count: u32,         // number of items popped
+    in_count: atomic<u32>,  // number of items pushed
+    out_count: atomic<u32>, // number of items popped
     capacity: u32,          // maximum capacity
     _pad: u32,
 }

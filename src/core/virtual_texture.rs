@@ -392,7 +392,7 @@ impl VirtualTexture {
     /// Upload tile data to atlas texture
     fn upload_tile_to_atlas(
         &self,
-        device: &Device,
+        _device: &Device,
         queue: &Queue,
         tile_data: &TileData,
         atlas_slot: crate::core::tile_cache::AtlasSlot,
@@ -415,7 +415,7 @@ impl VirtualTexture {
 
                     // Copy from staging buffer to atlas texture
                     let mut encoder =
-                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        _device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("VirtualTexture_TileUpload"),
                         });
 

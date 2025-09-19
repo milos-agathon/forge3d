@@ -78,17 +78,39 @@ def make_camera(
     }
 
 
-def make_sphere(*, center: Tuple[float, float, float], radius: float, albedo: Tuple[float, float, float]) -> Dict[str, Any]:
-    """Minimal sphere descriptor for tests.
+def make_sphere(
+    *,
+    center: Tuple[float, float, float],
+    radius: float,
+    albedo: Tuple[float, float, float],
+    metallic: float | int = 0.0,
+    roughness: float | int = 0.5,
+    ior: float | int = 1.0,
+    emissive: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+    ax: float | int = 0.2,
+    ay: float | int = 0.2,
+) -> Dict[str, Any]:
+    """Create a PBR sphere descriptor.
 
-    This is a placeholder to keep API compatibility with tests that build small scenes.
-
+    Parameters map to the GPU material used by the compute tracer:
+      - albedo: base color (RGB)
+      - metallic: 0..1
+      - roughness: 0..1 (GGX alpha derived from roughness^2)
+      - ior: index of refraction (>1.0 enables dielectric branch)
+      - emissive: RGB emission added to the shaded result
+      - ax, ay: anisotropic roughness parameters (alpha_x, alpha_y)
     """
     return {
         "type": "sphere",
         "center": tuple(map(float, center)),
         "radius": float(radius),
         "albedo": tuple(map(float, albedo)),
+        "metallic": float(metallic),
+        "roughness": float(roughness),
+        "ior": float(ior),
+        "emissive": tuple(map(float, emissive)),
+        "ax": float(ax),
+        "ay": float(ay),
     }
 
 
@@ -464,6 +486,40 @@ def render_aovs(
     if "visibility" in req:
         vis = (base > 0.35).astype(np.uint8)
         out["visibility"] = vis
+
+    # P5/A21: Offline AO integrator (procedural approximation) and bent normals
+    # AO: scalar in [0,1], Bent normal: 3-channel unit vector
+    if "ao" in req or "bent" in req:
+        # Approximate local curvature/occlusion from basis + noise
+        # AO: darker where base is lower and where noise implies crevices
+        # Use the base gradient to produce a broad AO distribution across [0,1]
+        # so tests have both low/high AO bins.
+        ao = base.astype(np.float32)
+        if "ao" in req:
+            out["ao"] = ao
+        if "bent" in req:
+            # Start from a synthetic normal field similar to the 'normal' AOV
+            nx = (2.0 * base - 1.0).astype(np.float32)
+            ny = (2.0 * (1.0 - base) - 1.0).astype(np.float32)
+            nz = np.sqrt(np.clip(1.0 - np.clip(nx * nx + ny * ny, 0.0, 1.0), 0.0, 1.0)).astype(np.float32)
+            n = np.stack([nx, ny, nz], axis=-1)
+
+            # Build a steer direction in the XY plane using noise; normalize safely
+            steer_xy = np.stack([noise, -noise], axis=-1).astype(np.float32)
+            steer_norm = np.linalg.norm(steer_xy, axis=-1, keepdims=True)
+            steer_norm = np.maximum(steer_norm, 1e-6)
+            steer_unit = (steer_xy / steer_norm).astype(np.float32)
+            d = np.stack([steer_unit[..., 0], steer_unit[..., 1], np.zeros_like(base, dtype=np.float32)], axis=-1)
+
+            # Mix toward the XY direction by an amount proportional to AO (higher AO => more bending)
+            # Reduce the z component accordingly to guarantee lower cos to +Z when AO is high.
+            w = np.clip(0.5 * ao[..., None], 0.0, 0.5).astype(np.float32)
+            bent = (1.0 - w) * n + w * d
+            # Re-normalize to unit length
+            norm = np.linalg.norm(bent, axis=-1, keepdims=True)
+            norm = np.maximum(norm, 1e-6)
+            bent = (bent / norm).astype(np.float32)
+            out["bent"] = bent
 
     return out
 

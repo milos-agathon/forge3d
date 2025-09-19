@@ -6,15 +6,161 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## [Unreleased]
 
 ### Added
+- Placeholder for upcoming changes
+
+## [0.39.0] - 2025-09-19
+
+### Added
+- Workstream A25 – End-to-end GPU LBVH with fully GPU radix sort
+  - Enabled a complete GPU build-and-refit path for triangle BVHs
+  - Morton codes on GPU; sorting on GPU (bitonic for ≤256, multi-pass radix with atomics for larger arrays)
+  - Topology link (`init_leaves`, `link_nodes`) and iterative refit kernels
+  - Example: `examples/accel_lbvh_refit.rs` (prints world AABB before/after)
+  - Validation: GPU-gated tests for refit and BVH node invariants
+
+## [0.38.0]
+
+### Added
+- Workstream A24 – Wavefront parity and performance stabilization
+  - Tightened parity between MEGAKERNEL and WAVEFRONT engines; performance harness refinements
+
+## [0.37.0]
+
+### Added
+- Workstream A23 – Queue compaction and scheduling tuning
+  - Improved scatter/compact stages and queue depth heuristics for wavefront PT
+
+## [0.36.0]
+
+### Added
+- Workstream A22 – Triangle mesh traversal parity
+  - BVH traversal tweaks and CPU-GPU parity checks for mesh rendering
+
+## [0.35.0]
+
+### Added
+- Workstream A21 – Scene cache controls
+  - `enable_scene_cache`, `reset_scene_cache`, `cache_stats` exposed for offline re-renders
+
+## [0.34.0]
+
+### Added
+- Workstream A20 – Engine selection API unification
+  - `TracerEngine` selection and CLI forwarding in example wrappers
+
+## [0.33.0]
+
+### Added
+- Workstream A19 – Scene cache infrastructure
+  - Reuse scene-dependent precomputations for deterministic parity
+
+## [0.32.0]
+
+### Added
+- Workstream A18 – Progressive tiling refinements
+  - Hooks for large offline renders with progress callbacks
+
+## [0.31.0]
+
+### Added
+- Workstream A17 – RNG & determinism hardening
+  - Seed plumbing and test harness consistency across engines
+
+## [0.30.0]
+
+### Added
+- Workstream A16 – Ray and hit buffers optimization
+  - Memory layout and bandwidth improvements for path tracing queues
+
+## [0.29.0]
+
+### Added
+- Workstream A15 – Progressive tiling (initial)
+  - Tiled rendering support for high-resolution outputs
+
+## [0.28.0]
+
+### Added
+- Workstream A14 – Material/shader interop
+  - Consistent CPU/WGSL paths for selected BRDF features
+
+## [0.27.0]
+
+### Added
+- Workstream A13 – Lighting utilities
+  - Shared helpers for MIS-friendly direct lighting integration
+
+## [0.26.0]
+
+### Added
 - Workstream A12 – Wavefront Path Tracer
-  - Queue-based GPU path tracing architecture with persistent threads
-  - WGSL compute kernels for raygen, intersect, shade, scatter, and compact stages
-  - Stream compaction to remove terminated rays and maintain efficiency
-  - Rust scheduler orchestrating wavefront execution with atomic queue management
-  - Python API extended with `TracerEngine` enum for selecting MEGAKERNEL or WAVEFRONT
-  - Deterministic rendering with XorShift RNG for consistent results across engines
-  - Comprehensive parity tests ensuring identical output between engines
-  - Performance tests validating compaction behavior under various scenarios
+  - Raygen/intersect/shade/scatter/compact kernels and scheduler
+
+## [0.25.0]
+
+### Added
+- Workstream A11 – Participating media helpers (CPU)
+  - HG phase, sampling, and height-fog utilities for prototyping
+
+## [0.24.0]
+
+### Added
+- Workstream A10 – Tonemap integration for PT outputs
+  - HDR → tonemap flow unification for parity tests
+
+## [0.23.0]
+
+### Added
+- Workstream A9 – PBR texture inputs (test scaffold)
+  - Deterministic effect of textures in CPU fallback
+
+## [0.22.0]
+
+### Added
+- Workstream A8 – ReSTIR DI controls and integration
+  - Temporal/spatial reuse toggles and example wrapper flags
+
+## [0.21.0]
+
+### Added
+- Workstream A7 – GPU LBVH foundations
+  - Morton codes and BVH link scaffolding for triangle meshes
+
+## [0.20.0]
+
+### Added
+- Workstream A6 – Dielectric water (offline shading)
+  - Schlick Fresnel and Beer–Lambert helpers
+
+## [0.19.0]
+
+### Added
+- Workstream A5 – Camera & sampling paths
+  - Camera RNG sampling alignment between CPU and GPU paths
+
+## [0.18.0]
+
+### Added
+- Workstream A4 – RNG plumbing
+  - Deterministic XorShift wiring for repeatable renders
+
+## [0.17.0]
+
+### Added
+- Workstream A3 – Triangle mesh pipeline integration points
+  - Mesh upload/BVH hooks for future GPU traversal
+
+## [0.16.0]
+
+### Added
+- Workstream A2 – Path tracer API surface (Python)
+  - Minimal tracer interface, camera constructors, and flags
+
+## [0.15.0]
+
+### Added
+- Workstream A1 – Path tracer MVP
+  - Single-sphere baseline and deterministic CPU fallback
 
 ## [0.14.0] - 2025-09-12
 

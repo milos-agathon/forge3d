@@ -7,6 +7,7 @@ pub mod lbvh_gpu;
 pub mod sah_cpu;
 pub mod types;
 pub mod cpu_bvh;
+pub mod instancing;
 
 pub use lbvh_gpu::GpuBvhBuilder;
 pub use sah_cpu::CpuSahBuilder;

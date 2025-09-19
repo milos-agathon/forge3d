@@ -20,7 +20,7 @@ struct Reservoir {
 
 struct AliasEntry {
     prob: f32,
-    alias: u32,
+    alias_idx: u32,
 }
 
 // Bind groups
@@ -65,7 +65,7 @@ fn sample_alias_table(u1: f32, u2: f32) -> u32 {
     if (frac < entry.prob) {
         return bin;
     } else {
-        return entry.alias;
+        return entry.alias_idx;
     }
 }
 

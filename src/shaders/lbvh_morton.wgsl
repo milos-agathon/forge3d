@@ -20,13 +20,13 @@ struct Uniforms {
 @group(2) @binding(0) var<storage, read_write> morton_codes: array<u32>;
 @group(2) @binding(1) var<storage, read_write> sorted_indices: array<u32>;
 
-fn expand_bits(mut v: u32) -> u32 {
-    v &= 0x000003ffu;                  // mask to 10 bits
-    v = (v | (v << 16u)) & 0x030000ffu; // x = ---- ---- ---- ---- ---- --98 ---- ---- 7654 3210
-    v = (v | (v << 8u))  & 0x0300f00fu; // x = ---- ---- 98-- ---- ---- 7654 ---- ---- 3210
-    v = (v | (v << 4u))  & 0x030c30c3u; // x = ---- --98 ---- 76-- ---- 54-- ---- 32-- ---- 10
-    v = (v | (v << 2u))  & 0x09249249u; // x = ---- 9--8 --7- -6-- 5--4 --3- -2-- 1--0
-    return v;
+fn expand_bits(v: u32) -> u32 {
+    var x: u32 = v & 0x000003ffu;                  // mask to 10 bits
+    x = (x | (x << 16u)) & 0x030000ffu; // x = ---- ---- ---- ---- ---- --98 ---- ---- 7654 3210
+    x = (x | (x << 8u))  & 0x0300f00fu; // x = ---- ---- 98-- ---- ---- 7654 ---- ---- 3210
+    x = (x | (x << 4u))  & 0x030c30c3u; // x = ---- --98 ---- 76-- ---- 54-- ---- 32-- ---- 10
+    x = (x | (x << 2u))  & 0x09249249u; // x = ---- 9--8 --7- -6-- 5--4 --3- -2-- 1--0
+    return x;
 }
 
 fn morton3d(x: u32, y: u32, z: u32) -> u32 {

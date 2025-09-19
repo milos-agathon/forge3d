@@ -17,6 +17,118 @@ pub struct GpuVertex {
     pub _pad: f32,
 }
 
+/// BLAS descriptor matching WGSL `BlasDesc` layout
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct BlasDesc {
+    pub node_offset: u32,
+    pub node_count: u32,
+    pub tri_offset: u32,
+    pub tri_count: u32,
+    pub vtx_offset: u32,
+    pub vtx_count: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
+/// Mesh atlas buffers (concatenated vertices/indices/BVH) + descriptor table
+#[derive(Debug)]
+pub struct MeshAtlas {
+    pub vertex_buffer: Buffer,
+    pub index_buffer: Buffer,
+    pub bvh_buffer: Buffer,
+    pub descs_buffer: Buffer,
+    pub desc_count: u32,
+}
+
+/// Build a mesh atlas from multiple MeshCPU/BvhCPU pairs.
+/// The atlas concatenates all vertices, indices (triangles), and BVH nodes into three buffers,
+/// and creates a descriptor table describing offsets/counts for each BLAS.
+pub fn build_mesh_atlas(device: &Device, items: &[(MeshCPU, BvhCPU)]) -> anyhow::Result<MeshAtlas> {
+    if items.is_empty() {
+        anyhow::bail!("build_mesh_atlas: items must be non-empty");
+    }
+
+    // Concatenate vertices, indices, nodes
+    let mut all_vertices: Vec<GpuVertex> = Vec::new();
+    let mut all_indices: Vec<u32> = Vec::new(); // triangle index stream (3 per triangle)
+    let mut all_nodes: Vec<BvhNode> = Vec::new();
+    let mut descs: Vec<BlasDesc> = Vec::with_capacity(items.len());
+
+    let mut vtx_ofs: u32 = 0;
+    let mut tri_ofs: u32 = 0; // measured in triangles, not u32s
+    let mut node_ofs: u32 = 0;
+
+    for (mesh, bvh) in items.iter() {
+        // Vertices
+        let start_vtx = vtx_ofs;
+        let vtx_count = mesh.vertex_count();
+        all_vertices.extend(mesh.vertices.iter().copied().map(GpuVertex::from));
+        vtx_ofs += vtx_count;
+
+        // Indices (triangles) in the exact order referenced by BVH leaves
+        // BVH nodes refer to triangle ranges by index into bvh.tri_indices
+        let start_tri = tri_ofs;
+        let tri_count = mesh.triangle_count();
+        for &tri_idx in &bvh.tri_indices {
+            let tri = mesh.indices[tri_idx as usize];
+            all_indices.extend_from_slice(&[tri[0], tri[1], tri[2]]);
+        }
+        tri_ofs += tri_count;
+
+        // BVH nodes
+        let start_node = node_ofs;
+        let node_count = bvh.node_count();
+        all_nodes.extend_from_slice(&bvh.nodes);
+        node_ofs += node_count;
+
+        // Descriptor entry
+        descs.push(BlasDesc {
+            node_offset: start_node,
+            node_count,
+            tri_offset: start_tri,
+            tri_count,
+            vtx_offset: start_vtx,
+            vtx_count,
+            _pad0: 0,
+            _pad1: 0,
+        });
+    }
+
+    // Create GPU buffers
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("atlas-vertex-buffer"),
+        contents: bytemuck::cast_slice(&all_vertices),
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+    });
+
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("atlas-index-buffer"),
+        contents: bytemuck::cast_slice(&all_indices),
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+    });
+
+    let bvh_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("atlas-bvh-buffer"),
+        contents: bytemuck::cast_slice(&all_nodes),
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+    });
+
+    let descs_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("atlas-blas-descs"),
+        contents: bytemuck::cast_slice(&descs),
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+    });
+
+    Ok(MeshAtlas {
+        vertex_buffer,
+        index_buffer,
+        bvh_buffer,
+        descs_buffer,
+        desc_count: descs.len() as u32,
+    })
+}
+
 impl From<[f32; 3]> for GpuVertex {
     fn from(position: [f32; 3]) -> Self {
         Self {
