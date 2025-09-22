@@ -1,5 +1,8 @@
 # python/forge3d/lighting.py
-# ReSTIR DI (Reservoir-based Spatio-Temporal Importance Resampling) Python bindings and basic media utilities
+# Lighting controls and ReSTIR utilities for Workstream B.
+# Exists to expose lighting toggles and exposure helpers to Python.
+# RELEVANT FILES:python/forge3d/pbr.py,src/pipeline/pbr.rs,shaders/tone_map.wgsl,tests/test_b2_tonemap.py
+
 
 """ReSTIR DI lighting system with basic participating media helpers (HG phase, height fog).
 
@@ -13,6 +16,8 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Union
 from enum import Enum
+import math
+import warnings
 
 try:
     from . import _forge3d  # Rust bindings
@@ -20,6 +25,9 @@ except ImportError:
     _forge3d = None
 
 _PI = 3.14159265358979323846
+
+_EXPOSURE_STOPS: float = 0.0
+_EXPOSURE_SCALE: float = 1.0
 
 
 def _to_float_array(x: Union[float, np.ndarray]) -> np.ndarray:
@@ -29,6 +37,22 @@ def _to_float_array(x: Union[float, np.ndarray]) -> np.ndarray:
     """
     arr = np.asarray(x, dtype=np.float32)
     return arr
+
+
+def set_exposure_stops(stops: float) -> float:
+    """Set exposure in stops and return the linear scale (2**stops)."""
+    global _EXPOSURE_STOPS, _EXPOSURE_SCALE
+    stops_f = float(stops)
+    _EXPOSURE_STOPS = stops_f
+    _EXPOSURE_SCALE = float(math.pow(2.0, stops_f))
+    if _forge3d is not None:
+        setter = getattr(_forge3d, "set_exposure_scale", None)
+        if setter is not None:
+            try:
+                setter(_EXPOSURE_SCALE)
+            except Exception as exc:  # pragma: no cover - optional binding
+                warnings.warn(f"forge3d.set_exposure_scale failed: {exc}")
+    return _EXPOSURE_SCALE
 
 
 def hg_phase(cos_theta: Union[float, np.ndarray], g: float) -> np.ndarray:
@@ -619,7 +643,307 @@ def create_area_light_test_scene() -> AreaLightManager:
 
     return manager
 
+# --- B4: Cascaded Shadow Maps (CSM) Controls ---
+
+@dataclass
+class CsmConfig:
+    """Configuration for Cascaded Shadow Maps.
+
+    Controls shadow quality, cascade setup, and performance settings for B4 implementation.
+    """
+    cascade_count: int = 3
+    shadow_map_size: int = 2048
+    max_shadow_distance: float = 200.0
+    pcf_kernel_size: int = 3
+    depth_bias: float = 0.005
+    slope_bias: float = 0.01
+    peter_panning_offset: float = 0.001
+    enable_evsm: bool = False
+    debug_mode: int = 0
+
+    def __post_init__(self):
+        """Validate CSM configuration parameters."""
+        if not (2 <= self.cascade_count <= 4):
+            raise ValueError(f"cascade_count must be 2-4, got {self.cascade_count}")
+        if not (512 <= self.shadow_map_size <= 8192):
+            raise ValueError(f"shadow_map_size must be 512-8192, got {self.shadow_map_size}")
+        if self.max_shadow_distance <= 0:
+            raise ValueError(f"max_shadow_distance must be positive, got {self.max_shadow_distance}")
+        if self.pcf_kernel_size not in [1, 3, 5, 7]:
+            raise ValueError(f"pcf_kernel_size must be 1, 3, 5, or 7, got {self.pcf_kernel_size}")
+
+class CsmQualityPreset(Enum):
+    """Quality presets for CSM configuration."""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    ULTRA = "ultra"
+
+def create_csm_config(preset: CsmQualityPreset) -> CsmConfig:
+    """Create CSM configuration from quality preset."""
+    configs = {
+        CsmQualityPreset.LOW: CsmConfig(
+            cascade_count=3,
+            shadow_map_size=1024,
+            pcf_kernel_size=1,  # No PCF
+            depth_bias=0.01,
+            slope_bias=0.02,
+            peter_panning_offset=0.002,
+            enable_evsm=False,
+            debug_mode=0
+        ),
+        CsmQualityPreset.MEDIUM: CsmConfig(
+            cascade_count=3,
+            shadow_map_size=2048,
+            pcf_kernel_size=3,  # 3x3 PCF
+            depth_bias=0.005,
+            slope_bias=0.01,
+            peter_panning_offset=0.001,
+            enable_evsm=False,
+            debug_mode=0
+        ),
+        CsmQualityPreset.HIGH: CsmConfig(
+            cascade_count=4,
+            shadow_map_size=4096,
+            pcf_kernel_size=5,  # 5x5 PCF
+            depth_bias=0.003,
+            slope_bias=0.005,
+            peter_panning_offset=0.0005,
+            enable_evsm=False,
+            debug_mode=0
+        ),
+        CsmQualityPreset.ULTRA: CsmConfig(
+            cascade_count=4,
+            shadow_map_size=4096,
+            pcf_kernel_size=7,  # Poisson disk PCF
+            depth_bias=0.002,
+            slope_bias=0.003,
+            peter_panning_offset=0.0003,
+            enable_evsm=True,
+            debug_mode=0
+        )
+    }
+    return configs[preset]
+
+class CsmController:
+    """Python controller for Cascaded Shadow Maps.
+
+    Provides high-level interface for configuring and debugging CSM rendering.
+    """
+
+    def __init__(self, config: Optional[CsmConfig] = None):
+        """Initialize CSM controller with configuration."""
+        self.config = config or CsmConfig()
+        self._enabled = False
+        self._light_direction = np.array([0.0, -1.0, 0.0], dtype=np.float32)
+        self._cascade_splits = []
+        self._sync_native_state()
+
+    def _sync_native_state(self) -> None:
+        """Push the current configuration to the native module when available."""
+        if _forge3d is None:
+            return
+        sync = getattr(_forge3d, "configure_csm", None)
+        if sync is None:
+            return
+        try:
+            sync(
+                int(self.config.cascade_count),
+                int(self.config.shadow_map_size),
+                float(self.config.max_shadow_distance),
+                int(self.config.pcf_kernel_size),
+                float(self.config.depth_bias),
+                float(self.config.slope_bias),
+                float(self.config.peter_panning_offset),
+                bool(self.config.enable_evsm),
+                int(self.config.debug_mode),
+            )
+        except Exception as exc:  # pragma: no cover
+            warnings.warn(f"forge3d.configure_csm failed: {exc}")
+
+    def set_quality_preset(self, preset: CsmQualityPreset) -> None:
+        """Set CSM quality from preset."""
+        self.config = create_csm_config(preset)
+        self._sync_native_state()
+
+    def enable_shadows(self, enabled: bool = True) -> None:
+        """Enable or disable shadow rendering."""
+        self._enabled = enabled
+        if _forge3d is not None:
+            setter = getattr(_forge3d, "set_csm_enabled", None)
+            if setter is not None:
+                try:
+                    setter(enabled)
+                except Exception as exc:  # pragma: no cover
+                    warnings.warn(f"forge3d.set_csm_enabled failed: {exc}")
+        self._sync_native_state()
+
+    def set_light_direction(self, direction: Tuple[float, float, float]) -> None:
+        """Set directional light direction for shadow casting."""
+        self._light_direction = np.array(direction, dtype=np.float32)
+        self._light_direction /= np.linalg.norm(self._light_direction)
+
+        if _forge3d is not None:
+            setter = getattr(_forge3d, "set_csm_light_direction", None)
+            if setter is not None:
+                try:
+                    setter(tuple(self._light_direction))
+                except Exception as exc:  # pragma: no cover
+                    warnings.warn(f"forge3d.set_csm_light_direction failed: {exc}")
+
+    def configure_pcf(self, kernel_size: int) -> None:
+        """Configure PCF filtering quality."""
+        if kernel_size not in [1, 3, 5, 7]:
+            raise ValueError(f"PCF kernel size must be 1, 3, 5, or 7, got {kernel_size}")
+        self.config.pcf_kernel_size = kernel_size
+
+        if _forge3d is not None:
+            setter = getattr(_forge3d, "set_csm_pcf_kernel", None)
+            if setter is not None:
+                try:
+                    setter(kernel_size)
+                except Exception as exc:  # pragma: no cover
+                    warnings.warn(f"forge3d.set_csm_pcf_kernel failed: {exc}")
+        self._sync_native_state()
+
+    def set_bias_parameters(self, depth_bias: float, slope_bias: float, peter_panning_offset: float) -> None:
+        """Configure shadow bias parameters to prevent artifacts."""
+        self.config.depth_bias = depth_bias
+        self.config.slope_bias = slope_bias
+        self.config.peter_panning_offset = peter_panning_offset
+
+        if _forge3d is not None:
+            setter = getattr(_forge3d, "set_csm_bias_params", None)
+            if setter is not None:
+                try:
+                    setter(depth_bias, slope_bias, peter_panning_offset)
+                except Exception as exc:  # pragma: no cover
+                    warnings.warn(f"forge3d.set_csm_bias_params failed: {exc}")
+        self._sync_native_state()
+
+    def set_debug_mode(self, mode: int) -> None:
+        """Set CSM debug visualization mode.
+
+        Args:
+            mode: Debug mode (0=off, 1=cascade colors, 2=overdraw)
+        """
+        if not (0 <= mode <= 2):
+            raise ValueError(f"Debug mode must be 0-2, got {mode}")
+        self.config.debug_mode = mode
+
+        if _forge3d is not None:
+            setter = getattr(_forge3d, "set_csm_debug_mode", None)
+            if setter is not None:
+                try:
+                    setter(mode)
+                except Exception as exc:  # pragma: no cover
+                    warnings.warn(f"forge3d.set_csm_debug_mode failed: {exc}")
+        self._sync_native_state()
+
+    def get_cascade_info(self) -> List[Tuple[float, float, float]]:
+        """Get cascade information for debugging.
+
+        Returns:
+            List of (near_dist, far_dist, texel_size) for each cascade
+        """
+        if _forge3d is not None:
+            getter = getattr(_forge3d, "get_csm_cascade_info", None)
+            if getter is not None:
+                try:
+                    return getter()
+                except Exception as exc:  # pragma: no cover
+                    warnings.warn(f"forge3d.get_csm_cascade_info failed: {exc}")
+
+        # Fallback: calculate expected splits
+        splits = calculate_cascade_splits(0.1, self.config.max_shadow_distance, self.config.cascade_count)
+        return [(splits[i], splits[i+1], 1.0) for i in range(len(splits)-1)]
+
+    def validate_peter_panning_prevention(self) -> bool:
+        """Validate that peter-panning artifacts are prevented."""
+        if _forge3d is not None:
+            validator = getattr(_forge3d, "validate_csm_peter_panning", None)
+            if validator is not None:
+                try:
+                    return validator()
+                except Exception as exc:  # pragma: no cover
+                    warnings.warn(f"forge3d.validate_csm_peter_panning failed: {exc}")
+
+        # Fallback validation
+        return (self.config.peter_panning_offset > 0.0001 and
+                self.config.depth_bias > 0.0001)
+
+    def is_enabled(self) -> bool:
+        """Check if shadows are currently enabled."""
+        return self._enabled
+
+def calculate_cascade_splits(near_plane: float, far_plane: float, cascade_count: int, lambda_blend: float = 0.75) -> List[float]:
+    """Calculate cascade split distances using Practical Split Scheme.
+
+    Args:
+        near_plane: Camera near plane distance
+        far_plane: Maximum shadow distance
+        cascade_count: Number of cascades
+        lambda_blend: Blend factor between uniform (0.0) and logarithmic (1.0) splits
+
+    Returns:
+        List of split distances including near and far planes
+    """
+    splits = [near_plane]
+
+    range_dist = far_plane - near_plane
+    ratio = far_plane / near_plane
+
+    for i in range(1, cascade_count):
+        # Uniform split
+        uniform_split = near_plane + (i / cascade_count) * range_dist
+
+        # Logarithmic split
+        log_split = near_plane * (ratio ** (i / cascade_count))
+
+        # Blend the two schemes
+        split = lambda_blend * log_split + (1.0 - lambda_blend) * uniform_split
+        splits.append(split)
+
+    splits.append(far_plane)
+    return splits
+
+def detect_peter_panning_cpu(shadow_factor: float, surface_normal: Tuple[float, float, float],
+                            light_direction: Tuple[float, float, float]) -> bool:
+    """CPU-side peter-panning detection for debugging.
+
+    Args:
+        shadow_factor: Shadow occlusion factor [0, 1]
+        surface_normal: Surface normal vector
+        light_direction: Light direction vector
+
+    Returns:
+        True if peter-panning artifact is detected
+    """
+    normal = np.array(surface_normal, dtype=np.float32)
+    light_dir = np.array(light_direction, dtype=np.float32)
+
+    # Normalize vectors
+    normal = normal / np.linalg.norm(normal)
+    light_dir = light_dir / np.linalg.norm(light_dir)
+
+    # Calculate dot product (surface facing light)
+    n_dot_l = np.dot(normal, -light_dir)
+
+    # Peter-panning occurs when shadows are cast on surfaces facing away from light
+    return n_dot_l <= 0.01 and shadow_factor < 0.5
+
+# Create default CSM controller instance
+_default_csm_controller = None
+
+def get_csm_controller() -> CsmController:
+    """Get or create default CSM controller instance."""
+    global _default_csm_controller
+    if _default_csm_controller is None:
+        _default_csm_controller = CsmController()
+    return _default_csm_controller
+
 __all__ = [
+    "set_exposure_stops",
     "LightType",
     "LightSample",
     "RestirConfig",
@@ -629,5 +953,14 @@ __all__ = [
     "AreaLightType",
     "AreaLight",
     "AreaLightManager",
-    "create_area_light_test_scene"
+    "create_area_light_test_scene",
+    # B4: Cascaded Shadow Maps
+    "CsmConfig",
+    "CsmQualityPreset",
+    "CsmController",
+    "create_csm_config",
+    "calculate_cascade_splits",
+    "detect_peter_panning_cpu",
+    "get_csm_controller"
 ]
+

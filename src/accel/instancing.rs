@@ -6,7 +6,7 @@ use wgpu::*;
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct InstanceData {
-    pub transform: [f32; 16],  // 4x4 matrix
+    pub transform: [f32; 16], // 4x4 matrix
     pub inv_transform: [f32; 16],
     pub blas_index: u32,
     pub material_id: u32,
@@ -30,7 +30,12 @@ impl TLAS {
     }
 
     // A22: 10k instances with one BLAS; ≤512MiB VRAM
-    pub fn add_instance(&mut self, transform: Mat4, blas_index: u32, material_id: u32) -> Result<usize, String> {
+    pub fn add_instance(
+        &mut self,
+        transform: Mat4,
+        blas_index: u32,
+        material_id: u32,
+    ) -> Result<usize, String> {
         if self.instances.len() >= self.max_instances {
             return Err("Maximum instances exceeded".to_string());
         }

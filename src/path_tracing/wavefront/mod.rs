@@ -5,23 +5,19 @@
 pub mod pipeline;
 pub mod queues;
 
-use crate::path_tracing::TracerParams;
 use crate::path_tracing::restir::{
-    create_reservoir_buffer,
+    create_debug_aov_buffer, create_diag_flags_buffer, create_reservoir_buffer,
+    create_restir_gbuffer, create_restir_gbuffer_pos, empty_alias_entries_buffer,
     empty_light_samples_buffer,
-    empty_alias_entries_buffer,
-    create_diag_flags_buffer,
-    create_debug_aov_buffer,
-    create_restir_gbuffer,
-    create_restir_gbuffer_pos,
 };
+use crate::path_tracing::TracerParams;
 use crate::scene::Scene;
+use glam::Mat4;
 use pipeline::WavefrontPipelines;
 use queues::*;
 use std::sync::Arc;
-use wgpu::{BindGroup, Buffer, CommandEncoder, Device, Queue};
-use glam::Mat4;
 use wgpu::util::DeviceExt;
+use wgpu::{BindGroup, Buffer, CommandEncoder, Device, Queue};
 
 // Constants from task specification
 const MAX_DEPTH: u32 = 8;
@@ -79,7 +75,8 @@ impl WavefrontScheduler {
         let pipelines = WavefrontPipelines::new(&device)?;
         let queue_capacity = width * height * QUEUE_CAPACITY_SCALE;
         let queue_buffers = QueueBuffers::new(&device, queue_capacity)?;
-        let restir_reservoirs = create_reservoir_buffer(&device, (width as usize) * (height as usize));
+        let restir_reservoirs =
+            create_reservoir_buffer(&device, (width as usize) * (height as usize));
         let restir_prev = create_reservoir_buffer(&device, (width as usize) * (height as usize));
         let restir_out = create_reservoir_buffer(&device, (width as usize) * (height as usize));
         // Initialize light samples buffer with one padded element to satisfy binding size
@@ -97,10 +94,13 @@ impl WavefrontScheduler {
         );
         let restir_alias_entries = empty_alias_entries_buffer(&device);
         let restir_light_probs = crate::path_tracing::restir::empty_light_probs_buffer(&device);
-        let restir_diag_flags = create_diag_flags_buffer(&device, (width as usize) * (height as usize));
-        let restir_debug_aov = create_debug_aov_buffer(&device, (width as usize) * (height as usize));
+        let restir_diag_flags =
+            create_diag_flags_buffer(&device, (width as usize) * (height as usize));
+        let restir_debug_aov =
+            create_debug_aov_buffer(&device, (width as usize) * (height as usize));
         let restir_gbuffer = create_restir_gbuffer(&device, (width as usize) * (height as usize));
-        let restir_gbuffer_pos = create_restir_gbuffer_pos(&device, (width as usize) * (height as usize));
+        let restir_gbuffer_pos =
+            create_restir_gbuffer_pos(&device, (width as usize) * (height as usize));
         // RestirSettings uniform defaults:
         // [debug_aov_mode=0, qmc_mode=1 (Sobol), adaptive_threshold=0.25f, pad]
         let settings_init: [u32; 4] = [0, 1, f32::to_bits(0.25f32), 0];
@@ -114,16 +114,15 @@ impl WavefrontScheduler {
         let restir_gbuffer_mat = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("restir-gbuffer-mat"),
             contents: bytemuck::cast_slice(&mat_zero),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         });
 
         // Create a minimal instances buffer with one identity instance to satisfy binding
         // Layout matches accel::instancing::InstanceData and WGSL Instance
         let ident: [f32; 16] = [
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            0.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
         let inst0 = crate::accel::instancing::InstanceData {
             transform: ident,
@@ -161,19 +160,25 @@ impl WavefrontScheduler {
         let aov_albedo = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("aov-albedo"),
             size: aov_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let aov_depth = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("aov-depth"),
             size: aov_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let aov_normal = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("aov-normal"),
             size: aov_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -243,9 +248,15 @@ impl WavefrontScheduler {
             layout: &self.pipelines.restir_spatial_bind_group_layout,
             entries: &[
                 // in: current prev (temporal result)
-                wgpu::BindGroupEntry { binding: 0, resource: self.restir_prev.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.restir_prev.as_entire_binding(),
+                },
                 // out: spatial output buffer
-                wgpu::BindGroupEntry { binding: 1, resource: self.restir_out.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.restir_out.as_entire_binding(),
+                },
             ],
         });
         Ok(bind_group)
@@ -262,13 +273,25 @@ impl WavefrontScheduler {
             layout: &self.pipelines.restir_scene_spatial_bind_group_layout,
             entries: &[
                 // 4: area lights (RO)
-                wgpu::BindGroupEntry { binding: 4, resource: area_lights.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: area_lights.as_entire_binding(),
+                },
                 // 5: directional lights (RO)
-                wgpu::BindGroupEntry { binding: 5, resource: directional_lights.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: directional_lights.as_entire_binding(),
+                },
                 // 10: G-buffer normal/roughness (RO)
-                wgpu::BindGroupEntry { binding: 10, resource: self.restir_gbuffer.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: self.restir_gbuffer.as_entire_binding(),
+                },
                 // 11: G-buffer position (RO)
-                wgpu::BindGroupEntry { binding: 11, resource: self.restir_gbuffer_pos.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: self.restir_gbuffer_pos.as_entire_binding(),
+                },
             ],
         });
         self.restir_scene_spatial_bind_group = Some(bg);
@@ -281,51 +304,71 @@ impl WavefrontScheduler {
         self.height = height;
         let queue_capacity = width * height * QUEUE_CAPACITY_SCALE;
         self.queue_buffers = QueueBuffers::new(&self.device, queue_capacity)?;
-        self.restir_reservoirs = create_reservoir_buffer(&self.device, (width as usize) * (height as usize));
+        self.restir_reservoirs =
+            create_reservoir_buffer(&self.device, (width as usize) * (height as usize));
         self.restir_light_samples = empty_light_samples_buffer(&self.device);
         self.restir_alias_entries = empty_alias_entries_buffer(&self.device);
-        self.restir_light_probs = crate::path_tracing::restir::empty_light_probs_buffer(&self.device);
-        self.restir_prev = create_reservoir_buffer(&self.device, (width as usize) * (height as usize));
-        self.restir_out = create_reservoir_buffer(&self.device, (width as usize) * (height as usize));
-        self.restir_diag_flags = create_diag_flags_buffer(&self.device, (width as usize) * (height as usize));
-        self.restir_debug_aov = create_debug_aov_buffer(&self.device, (width as usize) * (height as usize));
-        self.restir_gbuffer = create_restir_gbuffer(&self.device, (width as usize) * (height as usize));
-        self.restir_gbuffer_pos = create_restir_gbuffer_pos(&self.device, (width as usize) * (height as usize));
+        self.restir_light_probs =
+            crate::path_tracing::restir::empty_light_probs_buffer(&self.device);
+        self.restir_prev =
+            create_reservoir_buffer(&self.device, (width as usize) * (height as usize));
+        self.restir_out =
+            create_reservoir_buffer(&self.device, (width as usize) * (height as usize));
+        self.restir_diag_flags =
+            create_diag_flags_buffer(&self.device, (width as usize) * (height as usize));
+        self.restir_debug_aov =
+            create_debug_aov_buffer(&self.device, (width as usize) * (height as usize));
+        self.restir_gbuffer =
+            create_restir_gbuffer(&self.device, (width as usize) * (height as usize));
+        self.restir_gbuffer_pos =
+            create_restir_gbuffer_pos(&self.device, (width as usize) * (height as usize));
         // Recreate mat-id buffer
         let mat_zero: Vec<u32> = vec![0u32; (width as usize) * (height as usize)];
-        self.restir_gbuffer_mat = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("restir-gbuffer-mat"),
-            contents: bytemuck::cast_slice(&mat_zero),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
-        });
+        self.restir_gbuffer_mat =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("restir-gbuffer-mat"),
+                    contents: bytemuck::cast_slice(&mat_zero),
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC,
+                });
         // Recreate SVGF AOV buffers
         let px_count = (width as usize) * (height as usize);
         let aov_bytes: u64 = (px_count * std::mem::size_of::<[f32; 4]>()) as u64;
         self.aov_albedo = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("aov-albedo"),
             size: aov_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         self.aov_depth = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("aov-depth"),
             size: aov_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         self.aov_normal = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("aov-normal"),
             size: aov_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         // Recreate medium params to keep alignment (copy previous if needed)
         let medium_init: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
-        self.medium_params = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("medium-params-uniform"),
-            contents: bytemuck::cast_slice(&medium_init),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        self.medium_params = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("medium-params-uniform"),
+                contents: bytemuck::cast_slice(&medium_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
         // Keep hair_segments as-is on resize
         Ok(())
     }
@@ -510,7 +553,12 @@ impl WavefrontScheduler {
             )?;
 
             // Stage 5: Scatter - convert scatter rays back to regular rays
-            self.dispatch_scatter(&mut encoder, uniforms_buffer, scene_bind_group, accum_bind_group)?;
+            self.dispatch_scatter(
+                &mut encoder,
+                uniforms_buffer,
+                scene_bind_group,
+                accum_bind_group,
+            )?;
 
             // Stage 6: Compaction - remove terminated rays (optional, every N iterations)
             if iteration % 2 == 0 && iteration > 0 {
@@ -686,10 +734,22 @@ impl WavefrontScheduler {
             label: Some("restir-bind-group"),
             layout: &self.pipelines.restir_bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.restir_reservoirs.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: self.restir_light_samples.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: self.restir_alias_entries.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: self.restir_light_probs.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.restir_reservoirs.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.restir_light_samples.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.restir_alias_entries.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self.restir_light_probs.as_entire_binding(),
+                },
             ],
         });
         Ok(bind_group)
@@ -701,9 +761,18 @@ impl WavefrontScheduler {
             label: Some("restir-temporal-bind-group"),
             layout: &self.pipelines.restir_temporal_bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.restir_prev.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: self.restir_reservoirs.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: self.restir_out.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.restir_prev.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.restir_reservoirs.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.restir_out.as_entire_binding(),
+                },
             ],
         });
         Ok(bind_group)
@@ -754,39 +823,33 @@ impl WavefrontScheduler {
     /// Copy the full RGBA32F depth AOV buffer into dst
     ///
     /// The destination buffer must be at least 16 bytes * pixel_count in size and have COPY_DST usage.
-    pub fn copy_aov_depth_to(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        dst: &wgpu::Buffer,
-    ) {
-        let bytes = (self.aov_pixel_count() * core::mem::size_of::<[f32;4]>()) as u64;
+    pub fn copy_aov_depth_to(&self, encoder: &mut wgpu::CommandEncoder, dst: &wgpu::Buffer) {
+        let bytes = (self.aov_pixel_count() * core::mem::size_of::<[f32; 4]>()) as u64;
         encoder.copy_buffer_to_buffer(&self.aov_depth, 0, dst, 0, bytes);
     }
 
     /// Copy the full RGBA32F albedo AOV buffer into dst
-    pub fn copy_aov_albedo_to(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        dst: &wgpu::Buffer,
-    ) {
-        let bytes = (self.aov_pixel_count() * core::mem::size_of::<[f32;4]>()) as u64;
+    pub fn copy_aov_albedo_to(&self, encoder: &mut wgpu::CommandEncoder, dst: &wgpu::Buffer) {
+        let bytes = (self.aov_pixel_count() * core::mem::size_of::<[f32; 4]>()) as u64;
         encoder.copy_buffer_to_buffer(&self.aov_albedo, 0, dst, 0, bytes);
     }
 
     /// Copy the full RGBA32F normal AOV buffer into dst
-    pub fn copy_aov_normal_to(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        dst: &wgpu::Buffer,
-    ) {
-        let bytes = (self.aov_pixel_count() * core::mem::size_of::<[f32;4]>()) as u64;
+    pub fn copy_aov_normal_to(&self, encoder: &mut wgpu::CommandEncoder, dst: &wgpu::Buffer) {
+        let bytes = (self.aov_pixel_count() * core::mem::size_of::<[f32; 4]>()) as u64;
         encoder.copy_buffer_to_buffer(&self.aov_normal, 0, dst, 0, bytes);
     }
 
     /// Getters for AOV buffers (read-only references)
-    pub fn aov_depth_buffer(&self) -> &Buffer { &self.aov_depth }
-    pub fn aov_normal_buffer(&self) -> &Buffer { &self.aov_normal }
-    pub fn aov_albedo_buffer(&self) -> &Buffer { &self.aov_albedo }
+    pub fn aov_depth_buffer(&self) -> &Buffer {
+        &self.aov_depth
+    }
+    pub fn aov_normal_buffer(&self) -> &Buffer {
+        &self.aov_normal
+    }
+    pub fn aov_albedo_buffer(&self) -> &Buffer {
+        &self.aov_albedo
+    }
 
     /// Create scene bind group (Group 1) binding spheres/materials and mesh buffers
     pub fn create_scene_bind_group(
@@ -803,41 +866,104 @@ impl WavefrontScheduler {
             label: Some("wavefront-scene-bind-group"),
             layout: &self.pipelines.scene_bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: spheres_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: mesh_vertices.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: mesh_indices.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: mesh_bvh.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: area_lights.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: directional_lights.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 6, resource: object_importance.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: spheres_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: mesh_vertices.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: mesh_indices.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: mesh_bvh.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: area_lights.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: directional_lights.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: object_importance.as_entire_binding(),
+                },
                 // ReSTIR reservoirs (temporal/spatial result) for shading
-                wgpu::BindGroupEntry { binding: 7, resource: self.restir_prev.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: self.restir_prev.as_entire_binding(),
+                },
                 // Diagnostics flags buffer (read-only view in shading)
-                wgpu::BindGroupEntry { binding: 8, resource: self.restir_diag_flags.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: self.restir_diag_flags.as_entire_binding(),
+                },
                 // Debug AOV buffer (read-only in shading)
-                wgpu::BindGroupEntry { binding: 9, resource: self.restir_debug_aov.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: self.restir_debug_aov.as_entire_binding(),
+                },
                 // ReSTIR G-buffer (normal.xyz, roughness) (RW in shading)
-                wgpu::BindGroupEntry { binding: 10, resource: self.restir_gbuffer.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: self.restir_gbuffer.as_entire_binding(),
+                },
                 // ReSTIR G-buffer position (RW in shading)
-                wgpu::BindGroupEntry { binding: 11, resource: self.restir_gbuffer_pos.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: self.restir_gbuffer_pos.as_entire_binding(),
+                },
                 // ReSTIR settings (uniforms/toggles)
-                wgpu::BindGroupEntry { binding: 12, resource: self.restir_settings.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: self.restir_settings.as_entire_binding(),
+                },
                 // ReSTIR material-id buffer (RW in shading)
-                wgpu::BindGroupEntry { binding: 13, resource: self.restir_gbuffer_mat.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: self.restir_gbuffer_mat.as_entire_binding(),
+                },
                 // Instances buffer (read-only)
-                wgpu::BindGroupEntry { binding: 14, resource: self.instances_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: self.instances_buffer.as_entire_binding(),
+                },
                 // BLAS descriptor table (read-only)
-                wgpu::BindGroupEntry { binding: 15, resource: self.blas_descs.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: self.blas_descs.as_entire_binding(),
+                },
                 // AOV albedo (RW by shading at primary hit)
-                wgpu::BindGroupEntry { binding: 16, resource: self.aov_albedo.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: self.aov_albedo.as_entire_binding(),
+                },
                 // AOV depth (RW by shading at primary hit)
-                wgpu::BindGroupEntry { binding: 17, resource: self.aov_depth.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 17,
+                    resource: self.aov_depth.as_entire_binding(),
+                },
                 // AOV normal (RW by shading at primary hit)
-                wgpu::BindGroupEntry { binding: 18, resource: self.aov_normal.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 18,
+                    resource: self.aov_normal.as_entire_binding(),
+                },
                 // Medium params (uniform)
-                wgpu::BindGroupEntry { binding: 19, resource: self.medium_params.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 19,
+                    resource: self.medium_params.as_entire_binding(),
+                },
                 // Hair segments (RO)
-                wgpu::BindGroupEntry { binding: 20, resource: self.hair_segments.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 20,
+                    resource: self.hair_segments.as_entire_binding(),
+                },
             ],
         });
         Ok(bind_group)
@@ -858,7 +984,8 @@ impl WavefrontScheduler {
     /// Toggle preview of ReSTIR debug AOV in shading
     pub fn set_restir_debug_aov_mode(&self, enabled: bool) {
         let val: [u32; 4] = [if enabled { 1 } else { 0 }, 0, 0, 0];
-        self.queue.write_buffer(&self.restir_settings, 0, bytemuck::cast_slice(&val));
+        self.queue
+            .write_buffer(&self.restir_settings, 0, bytemuck::cast_slice(&val));
     }
 
     /// Set QMC mode (0=off/default, 1=sobol) in RestirSettings
@@ -896,9 +1023,12 @@ impl WavefrontScheduler {
     /// NOTE: After calling this, recreate the scene bind group via create_scene_bind_group()
     /// so the new buffer is picked up by the shader dispatch.
     pub fn upload_instances(&mut self, transforms: &[Mat4]) {
-        if transforms.is_empty() { return; }
+        if transforms.is_empty() {
+            return;
+        }
         // Back-compat: build InstanceData with default blas_index=0, material_id=0
-        let mut inst: Vec<crate::accel::instancing::InstanceData> = Vec::with_capacity(transforms.len());
+        let mut inst: Vec<crate::accel::instancing::InstanceData> =
+            Vec::with_capacity(transforms.len());
         for m in transforms {
             let inv = m.inverse();
             inst.push(crate::accel::instancing::InstanceData {
@@ -916,7 +1046,9 @@ impl WavefrontScheduler {
     /// Convenience wrapper that accepts tuples of (transform, blas_index, material_id).
     /// NOTE: After calling this, recreate the scene bind group via create_scene_bind_group().
     pub fn upload_instances_with_meta(&mut self, items: &[(Mat4, u32, u32)]) {
-        if items.is_empty() { return; }
+        if items.is_empty() {
+            return;
+        }
         let mut inst: Vec<crate::accel::instancing::InstanceData> = Vec::with_capacity(items.len());
         for (m, blas_index, material_id) in items.iter().copied() {
             let inv = m.inverse();
@@ -934,12 +1066,16 @@ impl WavefrontScheduler {
     /// Upload pre-built InstanceData array (matches WGSL Instance layout)
     /// NOTE: After calling this, recreate the scene bind group via create_scene_bind_group().
     pub fn upload_instances_data(&mut self, instances: &[crate::accel::instancing::InstanceData]) {
-        if instances.is_empty() { return; }
-        let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("instances-buffer"),
-            contents: bytemuck::cast_slice(instances),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
+        if instances.is_empty() {
+            return;
+        }
+        let buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("instances-buffer"),
+                contents: bytemuck::cast_slice(instances),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
         self.instances_buffer = buffer;
     }
 
@@ -991,20 +1127,34 @@ impl WavefrontScheduler {
             seed,
             _pad0: 0,
         };
-        let ubuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("ao-uniforms"),
-            contents: bytemuck::bytes_of(&u),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let ubuf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("ao-uniforms"),
+                contents: bytemuck::bytes_of(&u),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("ao-bind-group"),
             layout: &self.pipelines.ao_bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.aov_depth.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: self.aov_normal.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: ao_out.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: ubuf.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.aov_depth.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.aov_normal.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: ao_out.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: ubuf.as_entire_binding(),
+                },
             ],
         });
 
@@ -1062,9 +1212,9 @@ impl WavefrontScheduler {
         let max_iterations = MAX_DEPTH * 2;
         let mut did_any = false;
         for iteration in 0..max_iterations {
-            let ray_count = self
-                .queue_buffers
-                .get_active_ray_count(&self.device, &self.queue, &mut encoder)?;
+            let ray_count =
+                self.queue_buffers
+                    .get_active_ray_count(&self.device, &self.queue, &mut encoder)?;
             if ray_count == 0 && did_any {
                 break;
             }
@@ -1082,7 +1232,12 @@ impl WavefrontScheduler {
                 scene_bind_group,
                 accum_bind_group,
             )?;
-            self.dispatch_scatter(&mut encoder, uniforms_buffer, scene_bind_group, accum_bind_group)?;
+            self.dispatch_scatter(
+                &mut encoder,
+                uniforms_buffer,
+                scene_bind_group,
+                accum_bind_group,
+            )?;
 
             did_any = true;
             if iteration % 2 == 0 && iteration > 0 {

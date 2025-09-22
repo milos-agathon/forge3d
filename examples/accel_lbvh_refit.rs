@@ -6,7 +6,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use wgpu::{Instance, InstanceDescriptor, RequestAdapterOptions};
 
-use forge3d::accel::types::{BuildOptions, Triangle, BvhNode};
+use forge3d::accel::types::{BuildOptions, BvhNode, Triangle};
 use forge3d::accel::{lbvh_gpu::GpuBvhBuilder, BvhBackend};
 
 fn fmt_aabb(min: [f32; 3], max: [f32; 3]) -> String {
@@ -23,7 +23,8 @@ fn main() -> Result<()> {
     let instance = Instance::new(InstanceDescriptor::default());
     let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions::default()))
         .ok_or_else(|| anyhow::anyhow!("No GPU adapter found"))?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))?;
+    let (device, queue) =
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))?;
 
     let device = Arc::new(device);
     let queue = Arc::new(queue);
@@ -38,7 +39,10 @@ fn main() -> Result<()> {
     let opts = BuildOptions::default();
 
     let mut handle = builder.build(&tris, &opts)?;
-    println!("AABB before: {}", fmt_aabb(handle.world_aabb.min, handle.world_aabb.max));
+    println!(
+        "AABB before: {}",
+        fmt_aabb(handle.world_aabb.min, handle.world_aabb.max)
+    );
 
     // Dump nodes/indices after build for tests
     if let BvhBackend::Gpu(gpu) = &handle.backend {
@@ -58,7 +62,9 @@ fn main() -> Result<()> {
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
-        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("dump-enc") });
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("dump-enc"),
+        });
         enc.copy_buffer_to_buffer(&gpu.nodes_buffer, 0, &rb_nodes, 0, nodes_size);
         enc.copy_buffer_to_buffer(&gpu.indices_buffer, 0, &rb_indices, 0, indices_size);
         queue.submit(Some(enc.finish()));
@@ -76,14 +82,20 @@ fn main() -> Result<()> {
         drop(data_indices);
         rb_nodes.unmap();
         rb_indices.unmap();
-        println!("Dumped: out/lbvh_nodes.bin ({} bytes), out/lbvh_indices.bin ({} bytes)", nodes_size, indices_size);
+        println!(
+            "Dumped: out/lbvh_nodes.bin ({} bytes), out/lbvh_indices.bin ({} bytes)",
+            nodes_size, indices_size
+        );
     }
 
     // Perturb a vertex to expand world AABB
     tris[0].v2 = [2.0, 2.0, 0.0];
 
     builder.refit(&mut handle, &tris)?;
-    println!("AABB after: {}", fmt_aabb(handle.world_aabb.min, handle.world_aabb.max));
+    println!(
+        "AABB after: {}",
+        fmt_aabb(handle.world_aabb.min, handle.world_aabb.max)
+    );
 
     Ok(())
 }

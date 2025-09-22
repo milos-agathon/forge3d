@@ -60,7 +60,14 @@ pub fn create_area_lights_buffer(device: &wgpu::Device, lights: &[GpuAreaLight])
 /// Create an empty area lights buffer (0 elements) that still satisfies binding requirements
 pub fn empty_area_lights_buffer(device: &wgpu::Device) -> wgpu::Buffer {
     // Allocate a single zeroed element for portability; WGSL can treat length as 0 if not used
-    let zero = [GpuAreaLight::disc([0.0; 3], [0.0, 1.0, 0.0], 0.0, 0.0, [0.0; 3], 0.0)];
+    let zero = [GpuAreaLight::disc(
+        [0.0; 3],
+        [0.0, 1.0, 0.0],
+        0.0,
+        0.0,
+        [0.0; 3],
+        0.0,
+    )];
     create_area_lights_buffer(device, &zero[..0])
 }
 
@@ -84,7 +91,10 @@ pub struct GpuDirectionalLight {
 impl GpuDirectionalLight {
     pub fn new(direction: [f32; 3], intensity: f32, color: [f32; 3], importance: f32) -> Self {
         // Ensure direction is normalized on CPU side for consistency
-        let len = (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]).sqrt();
+        let len = (direction[0] * direction[0]
+            + direction[1] * direction[1]
+            + direction[2] * direction[2])
+            .sqrt();
         let dir = if len > 0.0 {
             [direction[0] / len, direction[1] / len, direction[2] / len]
         } else {
@@ -99,7 +109,10 @@ impl GpuDirectionalLight {
     }
 }
 
-pub fn create_directional_lights_buffer(device: &wgpu::Device, lights: &[GpuDirectionalLight]) -> wgpu::Buffer {
+pub fn create_directional_lights_buffer(
+    device: &wgpu::Device,
+    lights: &[GpuDirectionalLight],
+) -> wgpu::Buffer {
     let bytes = bytemuck::cast_slice(lights);
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("directional-lights-buffer"),
@@ -109,6 +122,11 @@ pub fn create_directional_lights_buffer(device: &wgpu::Device, lights: &[GpuDire
 }
 
 pub fn empty_directional_lights_buffer(device: &wgpu::Device) -> wgpu::Buffer {
-    let zero = [GpuDirectionalLight::new([0.0, -1.0, 0.0], 0.0, [0.0; 3], 0.0)];
+    let zero = [GpuDirectionalLight::new(
+        [0.0, -1.0, 0.0],
+        0.0,
+        [0.0; 3],
+        0.0,
+    )];
     create_directional_lights_buffer(device, &zero[..0])
 }

@@ -1,3 +1,7 @@
+# python/forge3d/__init__.py
+# Public Python API shim and fallbacks for forge3d terrain renderer
+# Exists to provide typed fallbacks when the native module is unavailable
+# RELEVANT FILES: python/forge3d/__init__.pyi, src/core/dof.rs, tests/test_b6_dof.py, examples/dof_demo.py
 def list_palettes() -> list[str]:
     return colormap_supported()
 
@@ -30,7 +34,8 @@ import numpy as np
 from pathlib import Path
 import types as _types
 import sys
-from typing import Union
+import weakref
+from typing import Union, Tuple
 
 from .path_tracing import PathTracer, make_camera
 from . import _validate as validate
@@ -58,10 +63,8 @@ _GLOBAL_MEMORY = {
     "texture_bytes": 0,
 }
 
-
 def _aligned_row_size(row_bytes: int, alignment: int = 256) -> int:
     return ((int(row_bytes) + alignment - 1) // alignment) * alignment
-
 
 def _mem_update(*, buffer_bytes_delta: int = 0, texture_bytes_delta: int = 0,
                 buffer_count_delta: int = 0, texture_count_delta: int = 0) -> None:
@@ -69,7 +72,6 @@ def _mem_update(*, buffer_bytes_delta: int = 0, texture_bytes_delta: int = 0,
     _GLOBAL_MEMORY["texture_bytes"] = max(0, _GLOBAL_MEMORY["texture_bytes"] + int(texture_bytes_delta))
     _GLOBAL_MEMORY["buffer_count"] = max(0, _GLOBAL_MEMORY["buffer_count"] + int(buffer_count_delta))
     _GLOBAL_MEMORY["texture_count"] = max(0, _GLOBAL_MEMORY["texture_count"] + int(texture_count_delta))
-
 
 def _mem_metrics() -> dict:
     buffer_bytes = int(_GLOBAL_MEMORY["buffer_bytes"])
@@ -91,9 +93,14 @@ def _mem_metrics() -> dict:
         "utilization_ratio": float(utilization),
     }
 
+_SUPPORTED_MSAA = (1, 2, 4, 8)
+
 # Basic Renderer class for triangle rendering (fallback implementation)
 class Renderer:
     """Basic renderer for triangle rendering and terrain."""
+
+    _instances = weakref.WeakSet()
+    _default_msaa = 1
 
     def __init__(self, width: int, height: int):
         self.width = width
@@ -107,6 +114,8 @@ class Renderer:
         self._height_range = (0.0, 1.0)
         self._height_uploaded = False
         self._last_height_ptr = 0
+        self._msaa_samples = Renderer._default_msaa
+        Renderer._instances.add(self)
 
         # Simulate initial allocations (framebuffer + small LUT)
         fb_row = _aligned_row_size(self.width * 4)
@@ -151,6 +160,10 @@ class Renderer:
                     bg_g = (y * 32) // self.height
                     img[y, x] = [bg_r, bg_g, 16, 255]
 
+        samples = getattr(self, "_msaa_samples", 1)
+        if samples > 1:
+            img = _apply_msaa_smoothing(img, samples)
+
         # Account for a readback-sized buffer allocation
         row = _aligned_row_size(self.width * 4)
         _mem_update(buffer_bytes_delta=row * self.height)
@@ -160,6 +173,19 @@ class Renderer:
         """Render a triangle to PNG file."""
         rgba = self.render_triangle_rgba()
         numpy_to_png(path, rgba)
+
+    def set_msaa_samples(self, samples: int) -> int:
+        """Set MSAA sample count for this renderer instance."""
+        if samples not in _SUPPORTED_MSAA:
+            raise ValueError(f"Unsupported MSAA sample count: {samples}")
+        self._msaa_samples = int(samples)
+        return self._msaa_samples
+
+    @classmethod
+    def _set_default_msaa(cls, samples: int) -> None:
+        cls._default_msaa = int(samples)
+        for renderer in list(cls._instances):
+            renderer._msaa_samples = int(samples)
 
     def add_terrain(self, heightmap: np.ndarray, spacing, exaggeration: float, colormap: str) -> None:
         """Add terrain to renderer."""
@@ -443,7 +469,6 @@ class Renderer:
 
     # (removed duplicate stub upload_height_r32f; the earlier version accepts optional array)
 
-
 class Scene:
     """Scene renderer with camera and terrain support."""
 
@@ -466,6 +491,57 @@ class Scene:
         self._uniforms[37] = 1.0
         self._uniforms[38] = 1.0
         self._uniforms[39] = 0.0
+        self._ssao_enabled = False
+        self._ssao_params = {
+            'radius': 1.0,
+            'intensity': 1.0,
+            'bias': 0.025,
+        }
+        self._reflection_state = None
+        self._reflection_quality = 'medium'
+
+        self._msaa_samples = 1
+        self._dof_quality_presets = {
+            'low': {'max_radius': 6, 'blur_scale': 0.9},
+            'medium': {'max_radius': 12, 'blur_scale': 1.5},
+            'high': {'max_radius': 18, 'blur_scale': 1.9},
+            'ultra': {'max_radius': 24, 'blur_scale': 2.4},
+        }
+        self._dof_params = {
+            'aperture': 1.0 / 10.0,
+            'focus_distance': 2.5,
+            'focal_length': 50.0,
+            'near_range': 2.0,
+            'far_range': 5.0,
+            'coc_bias': 0.0,
+            'bokeh_rotation': 0.0,
+        }
+        self._dof_state: dict | None = None
+        self._cloud_shadows_enabled = False
+        self._cloud_shadow_quality = 'medium'
+        self._cloud_shadow_params = {
+            'density': 0.6,
+            'coverage': 0.4,
+            'intensity': 0.7,
+            'softness': 0.25,
+            'scale': 1.0,
+            'speed': np.array([0.02, 0.01], dtype=np.float32),
+            'time': 0.0,
+            'noise_frequency': 1.4,
+            'noise_amplitude': 1.0,
+            'wind_direction': 0.0,
+            'wind_strength': 1.0,
+            'turbulence': 0.1,
+            'debug_mode': 0,
+            'show_clouds_only': False,
+        }
+        self._cloud_shadow_state: dict | None = None
+        self._clouds_enabled = False
+        self._cloud_rt_quality = 'medium'
+        self._cloud_rt_mode = 'hybrid'
+        self._cloud_rt_time = 0.0
+
+
 
     def set_camera_look_at(self, eye, target, up, fovy_deg: float, znear: float, zfar: float) -> None:
         """Set camera parameters."""
@@ -525,7 +601,818 @@ class Scene:
                     b = int((np.sin(x * 0.03) * np.cos(y * 0.04)) * 127 + 128)
                     img[y, x] = [r & 255, g & 255, b & 255, 255]
 
+        if self._ssao_enabled:
+            self._apply_ssao(img)
+
+        if self._reflection_state is not None:
+            self._apply_planar_reflections(img)
+
+
+        if self._cloud_shadows_enabled and self._cloud_shadow_state is not None:
+            self._apply_cloud_shadows(img)
+
+        if self._dof_state is not None:
+            self._apply_dof(img)
         return img
+
+    def set_msaa_samples(self, samples: int) -> int:
+        valid = (1, 2, 4, 8)
+        if samples not in valid:
+            raise ValueError(f"Unsupported MSAA sample count: {samples}")
+        self._msaa_samples = int(samples)
+        return self._msaa_samples
+
+    def _apply_cloud_shadows(self, img: np.ndarray) -> None:
+        state = self._cloud_shadow_state
+        if not self._cloud_shadows_enabled or state is None:
+            return
+        height, width = img.shape[:2]
+        if height == 0 or width == 0:
+            return
+        density = float(np.clip(state.get('density', 0.6), 0.0, 1.0))
+        intensity = float(np.clip(state.get('intensity', 0.7), 0.0, 1.0))
+        if density <= 1e-4 or intensity <= 1e-4:
+            return
+        coverage = float(np.clip(state.get('coverage', 0.4), 0.0, 1.0))
+        softness = float(np.clip(state.get('softness', 0.25), 0.0, 1.0))
+        scale = float(max(state.get('scale', 1.0), 0.1))
+        freq = float(max(state.get('noise_frequency', 1.4), 0.05))
+        amp = float(max(state.get('noise_amplitude', 1.0), 0.0))
+        quality_scale = float(state.get('quality_scale', 1.0))
+        time = float(state.get('time', 0.0))
+        wind_dir = float(state.get('wind_direction', 0.0))
+        wind_strength = float(max(state.get('wind_strength', 0.0), 0.0))
+        speed = np.array(state.get('speed', (0.02, 0.01)), dtype=np.float32).reshape(2)
+        wind_vec = np.array([np.cos(wind_dir), np.sin(wind_dir)], dtype=np.float32)
+        combined_speed = speed + wind_vec * wind_strength * 0.35
+        coord_scale = quality_scale / max(scale, 0.1)
+        xs = np.linspace(0.0, 1.0, width, dtype=np.float32)
+        ys = np.linspace(0.0, 1.0, height, dtype=np.float32)
+        u = xs[None, :] * coord_scale + combined_speed[0] * time
+        v = ys[:, None] * coord_scale + combined_speed[1] * time
+        base_phase = (u * freq * 6.28318530718) + (v * freq * 3.14159265359)
+        secondary_phase = (u + v) * (freq * 1.7) + time * 1.1
+        diagonal_phase = (u * 0.87 - v * 1.73) * (freq * 2.5) + time * (1.3 + state.get('turbulence', 0.0))
+        base_noise = 0.5 + 0.5 * np.sin(base_phase)
+        secondary_noise = 0.5 + 0.5 * np.sin(secondary_phase)
+        detail_noise = 0.5 + 0.5 * np.sin(diagonal_phase)
+        ripple_noise = 0.5 + 0.5 * np.sin((u * 4.0 + v * 2.5) + time * 0.75)
+        noise = base_noise * 0.55 + secondary_noise * 0.25 + detail_noise * 0.15 + ripple_noise * 0.05 * (1.0 + amp)
+        noise /= 0.55 + 0.25 + 0.15 + 0.05 * (1.0 + amp)
+        dither = 0.5 + 0.5 * np.sin((u * 9.1 + v * 7.3) * 0.5 + time * 2.4)
+        noise = np.clip(noise * 0.85 + dither * 0.15, 0.0, 1.0)
+        threshold = 1.0 - coverage
+        if threshold < 1e-4:
+            raw_mask = np.ones_like(noise, dtype=np.float32)
+        else:
+            raw_mask = np.clip((noise - threshold) / (1.0 - threshold), 0.0, 1.0)
+        mask = np.clip(raw_mask * density, 0.0, 1.0)
+        if softness > 1e-3:
+            blurred = mask.copy()
+            for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)):
+                blurred += np.roll(np.roll(mask, dy, axis=0), dx, axis=1)
+            blurred /= 9.0
+            mask = mask * (1.0 - softness) + blurred * softness
+        shade = np.clip(1.0 - intensity * mask, 0.1, 1.0)
+        rgb = img[..., :3].astype(np.float32) / 255.0
+        if state.get('show_clouds_only', False):
+            cloud_vis = np.clip(mask, 0.0, 1.0)
+            rgb = np.stack([cloud_vis, np.clip(1.0 - mask * 0.6, 0.0, 1.0), np.clip(0.4 + mask * 0.6, 0.0, 1.0)], axis=2)
+        else:
+            rgb *= shade[..., None]
+            bounce = (1.0 - shade) * 0.08
+            rgb += bounce[..., None]
+        debug_mode = int(state.get('debug_mode', 0))
+        if debug_mode == 1:
+            rgb = np.repeat(mask[:, :, None], 3, axis=2)
+        elif debug_mode == 2:
+            rgb = np.repeat(shade[:, :, None], 3, axis=2)
+        elif debug_mode == 3:
+            rgb = np.stack([base_noise, secondary_noise, detail_noise], axis=2)
+        elif debug_mode == 4:
+            rgb = np.stack([noise, mask, shade], axis=2)
+        img[..., :3] = np.clip(rgb * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+    def _apply_ssao(self, img: np.ndarray) -> None:
+        radius = float(max(self._ssao_params.get('radius', 1.0), 0.05))
+        intensity = float(max(self._ssao_params.get('intensity', 1.0), 0.0))
+        bias = float(max(self._ssao_params.get('bias', 0.025), 0.0))
+        if intensity <= 0.0:
+            return
+
+        rgb = img[..., :3].astype(np.float32) / 255.0
+        gray = rgb[..., 0] * 0.299 + rgb[..., 1] * 0.587 + rgb[..., 2] * 0.114
+        height, width = gray.shape
+
+        def downsample(arr: np.ndarray, scale: int) -> np.ndarray:
+            if scale == 1:
+                return arr
+            h = (arr.shape[0] // scale) * scale
+            w = (arr.shape[1] // scale) * scale
+            trimmed = arr[:h, :w]
+            return trimmed.reshape(h // scale, scale, w // scale, scale).mean(axis=(1, 3))
+
+        def upsample(arr: np.ndarray, scale: int, target_shape: tuple[int, int]) -> np.ndarray:
+            if scale == 1:
+                return arr[:target_shape[0], :target_shape[1]]
+            up = np.repeat(np.repeat(arr, scale, axis=0), scale, axis=1)
+            return up[:target_shape[0], :target_shape[1]]
+
+        def blur9(arr: np.ndarray) -> np.ndarray:
+            padded = np.pad(arr, 1, mode='edge')
+            return (
+                padded[:-2, :-2]
+                + 2.0 * padded[:-2, 1:-1]
+                + padded[:-2, 2:]
+                + 2.0 * padded[1:-1, :-2]
+                + 4.0 * padded[1:-1, 1:-1]
+                + 2.0 * padded[1:-1, 2:]
+                + padded[2:, :-2]
+                + 2.0 * padded[2:, 1:-1]
+                + padded[2:, 2:]
+            ) / 16.0
+
+        def compute_occlusion(depth: np.ndarray) -> np.ndarray:
+            radius_px = 1 if radius <= 1.5 else 2 if radius <= 2.5 else 3
+            pad = radius_px
+            padded = np.pad(depth, pad, mode='edge')
+            occ = np.zeros_like(depth, dtype=np.float32)
+            norm = np.zeros_like(depth, dtype=np.float32)
+            offsets = []
+            for dy in range(-pad, pad + 1):
+                for dx in range(-pad, pad + 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    spatial = 1.0 / (1.0 + float((dx * dx + dy * dy) ** 0.5))
+                    offsets.append((dy, dx, spatial))
+            for dy, dx, spatial in offsets:
+                sample = padded[pad + dy:pad + dy + depth.shape[0], pad + dx:pad + dx + depth.shape[1]]
+                depth_diff = sample - depth
+                pos_diff = np.clip(depth_diff, 0.0, None).astype(np.float32)
+                range_weight = np.exp(-np.abs(depth_diff) * (1.5 / max(radius, 0.1))).astype(np.float32)
+                weight = spatial * range_weight
+                occ += pos_diff * weight
+                norm += weight
+            return np.where(norm > 1e-6, occ / norm, 0.0)
+
+        longest = max(height, width)
+        if longest >= 1024:
+            scale = 8
+        elif longest >= 512:
+            scale = 4
+        elif longest >= 256:
+            scale = 2
+        else:
+            scale = 1
+
+        depth_small = downsample(gray, scale)
+        occlusion_small = compute_occlusion(depth_small) * (1.0 / max(bias + 1e-3, 0.01))
+        occlusion_small = np.clip(occlusion_small, 0.0, 2.0)
+        ao_small = np.clip(1.0 - occlusion_small * intensity, 0.0, 1.0)
+        ao_small = blur9(ao_small)
+        ao_full = upsample(ao_small, scale, (height, width))
+        shading = np.clip(ao_full[..., None], 0.1, 1.0)
+        shaded_rgb = np.clip(rgb * shading, 0.0, 1.0)
+        img[..., :3] = np.clip(shaded_rgb * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+    def _ensure_reflections_enabled(self) -> dict:
+        state = self._reflection_state
+        if state is None:
+            raise RuntimeError("Reflections not enabled. Call enable_reflections() first.")
+        return state
+
+    def _reflection_quality_settings(self, quality: str) -> dict:
+        presets = {
+            'low': {'blur_radius': 1, 'cost': 6.0},
+            'medium': {'blur_radius': 2, 'cost': 10.0},
+            'high': {'blur_radius': 3, 'cost': 18.0},
+            'ultra': {'blur_radius': 4, 'cost': 24.0},
+        }
+        return presets[quality]
+
+    def enable_reflections(self, quality: str | None = None) -> None:
+        """Enable planar reflections with the requested quality preset."""
+        quality_name = (quality or 'medium').lower()
+        try:
+            self._reflection_quality_settings(quality_name)
+        except KeyError:
+            valid = ['low', 'medium', 'high', 'ultra']
+            raise ValueError(f"Invalid quality '{quality}'. Valid options: {valid}") from None
+
+        self._reflection_quality = quality_name
+        self._reflection_state = {
+            'quality': quality_name,
+            'intensity': 0.8,
+            'fresnel_power': 5.0,
+            'distance_fade_start': 20.0,
+            'distance_fade_end': 100.0,
+            'debug_mode': 0,
+            'plane_normal': np.array([0.0, 1.0, 0.0], dtype=np.float32),
+            'plane_point': np.zeros(3, dtype=np.float32),
+            'plane_size': np.array([4.0, 4.0, 0.0], dtype=np.float32),
+        }
+
+    def disable_reflections(self) -> None:
+        """Disable planar reflections."""
+        self._reflection_state = None
+
+    def set_reflection_plane(
+        self,
+        normal: Tuple[float, float, float],
+        point: Tuple[float, float, float],
+        size: Tuple[float, float, float],
+    ) -> None:
+        state = self._ensure_reflections_enabled()
+        normal_vec = np.asarray(normal, dtype=np.float32)
+        norm = float(np.linalg.norm(normal_vec))
+        if norm < 1e-6:
+            raise ValueError("Plane normal must be non-zero.")
+        state['plane_normal'] = normal_vec / norm
+        state['plane_point'] = np.asarray(point, dtype=np.float32)
+        state['plane_size'] = np.asarray(size, dtype=np.float32)
+
+    def set_reflection_intensity(self, intensity: float) -> None:
+        state = self._ensure_reflections_enabled()
+        state['intensity'] = float(np.clip(intensity, 0.0, 1.0))
+
+    def set_reflection_fresnel_power(self, power: float) -> None:
+        if power <= 0.0:
+            raise ValueError("Fresnel power must be positive.")
+        state = self._ensure_reflections_enabled()
+        state['fresnel_power'] = float(power)
+
+    def set_reflection_distance_fade(self, start: float, end: float) -> None:
+        if end <= 0.0:
+            raise ValueError("distance_fade_end must be positive.")
+        start = float(max(start, 0.0))
+        end = float(max(end, start + 1e-3))
+        state = self._ensure_reflections_enabled()
+        state['distance_fade_start'] = start
+        state['distance_fade_end'] = end
+
+    def set_reflection_debug_mode(self, mode: int) -> None:
+        if mode not in (0, 1, 2, 3, 4):
+            raise ValueError("Debug mode must be an integer in [0, 4].")
+        state = self._ensure_reflections_enabled()
+        state['debug_mode'] = int(mode)
+
+    def reflection_performance_info(self) -> tuple[float, bool]:
+        state = self._ensure_reflections_enabled()
+        settings = self._reflection_quality_settings(state['quality'])
+        cost = float(settings['cost'])
+        return cost, cost <= 15.0
+
+
+
+    def enable_dof(self, quality: str | None = None) -> None:
+        quality_name = (quality or 'medium').lower()
+        if quality_name not in self._dof_quality_presets:
+            valid = list(self._dof_quality_presets.keys())
+            raise ValueError(f"Invalid quality '{quality}'. Valid options: {valid}")
+        if self._msaa_samples <= 1:
+            raise RuntimeError('DOF requires MSAA samples > 1 for depth buffer.')
+        state = dict(self._dof_params)
+        state.update({
+            'quality': quality_name,
+            'method': 'gather',
+            'show_coc': False,
+            'debug_mode': 0,
+        })
+        self._dof_state = state
+
+    def disable_dof(self) -> None:
+        self._dof_state = None
+
+    def dof_enabled(self) -> bool:
+        return self._dof_state is not None
+
+    def set_dof_camera_params(self, aperture: float, focus_distance: float, focal_length: float) -> None:
+        if aperture <= 0.0 or not np.isfinite(aperture):
+            raise RuntimeError('aperture must be positive and finite')
+        if focus_distance <= 0.0 or not np.isfinite(focus_distance):
+            raise RuntimeError('focus_distance must be positive and finite')
+        if focal_length <= 0.0 or not np.isfinite(focal_length):
+            raise RuntimeError('focal_length must be positive and finite')
+        self._dof_params.update({
+            'aperture': float(aperture),
+            'focus_distance': float(focus_distance),
+            'focal_length': float(focal_length),
+        })
+        if self._dof_state is not None:
+            self._dof_state.update({
+                'aperture': float(aperture),
+                'focus_distance': float(focus_distance),
+                'focal_length': float(focal_length),
+            })
+
+    def set_dof_f_stop(self, f_stop: float) -> None:
+        if f_stop <= 0.0 or not np.isfinite(f_stop):
+            raise RuntimeError('f_stop must be positive and finite')
+        aperture = 1.0 / f_stop
+        self.set_dof_camera_params(aperture, self._dof_params['focus_distance'], self._dof_params['focal_length'])
+
+    def set_dof_focus_distance(self, distance: float) -> None:
+        self.set_dof_camera_params(
+            self._dof_params['aperture'],
+            float(distance),
+            self._dof_params['focal_length'],
+        )
+
+    def set_dof_focal_length(self, focal_length: float) -> None:
+        self.set_dof_camera_params(
+            self._dof_params['aperture'],
+            self._dof_params['focus_distance'],
+            float(focal_length),
+        )
+
+    def _require_dof_state(self) -> dict:
+        if self._dof_state is None:
+            raise RuntimeError('DOF not enabled. Call enable_dof() first.')
+        return self._dof_state
+
+    def set_dof_bokeh_rotation(self, rotation: float) -> None:
+        state = self._require_dof_state()
+        state['bokeh_rotation'] = float(rotation)
+        self._dof_params['bokeh_rotation'] = float(rotation)
+
+    def set_dof_transition_ranges(self, near_range: float, far_range: float) -> None:
+        state = self._require_dof_state()
+        state['near_range'] = float(max(near_range, 0.0))
+        state['far_range'] = float(max(far_range, 0.0))
+        self._dof_params['near_range'] = state['near_range']
+        self._dof_params['far_range'] = state['far_range']
+
+    def set_dof_coc_bias(self, bias: float) -> None:
+        state = self._require_dof_state()
+        state['coc_bias'] = float(bias)
+        self._dof_params['coc_bias'] = float(bias)
+
+    def set_dof_method(self, method: str) -> None:
+        state = self._require_dof_state()
+        method_name = method.lower()
+        if method_name not in ('gather', 'separable'):
+            raise ValueError(f"Invalid method '{method}'. Use 'gather' or 'separable'")
+        state['method'] = method_name
+
+    def set_dof_debug_mode(self, mode: int) -> None:
+        state = self._require_dof_state()
+        if mode not in (0, 1, 2, 3):
+            raise ValueError('Debug mode must be in [0,3]')
+        state['debug_mode'] = int(mode)
+
+    def set_dof_show_coc(self, show: bool) -> None:
+        state = self._require_dof_state()
+        state['show_coc'] = bool(show)
+
+    def get_dof_params(self) -> tuple[float, float, float]:
+        params = self._dof_params
+        return (
+            float(params['aperture']),
+            float(params['focus_distance']),
+            float(params['focal_length']),
+        )
+
+    def _apply_planar_reflections(self, img: np.ndarray) -> None:
+        state = self._reflection_state
+        if not state:
+            return
+
+        base = img[..., :3].astype(np.float32) / 255.0
+        height, width = base.shape[:2]
+        settings = self._reflection_quality_settings(state['quality'])
+        blur_radius = settings['blur_radius']
+
+        reflection = self._generate_reflection_image(base, state)
+        if blur_radius > 0:
+            reflection = self._box_blur(reflection, blur_radius)
+            if state['quality'] in ('high', 'ultra'):
+                reflection = self._box_blur(reflection, max(1, blur_radius - 1))
+        if state['quality'] in ('medium', 'high', 'ultra'):
+            reflection = (reflection + np.roll(reflection, 1, axis=0) + np.roll(reflection, -1, axis=0)) / 3.0
+
+        v_coords = np.linspace(0.0, 1.0, height, endpoint=True, dtype=np.float32)[:, None]
+        fresnel = np.power(np.clip(v_coords, 0.0, 1.0), state['fresnel_power'])
+
+        start = float(state['distance_fade_start'])
+        end = float(state['distance_fade_end'])
+        end = max(end, start + 1e-3)
+        start_norm = np.clip(start / end, 0.0, 1.0)
+        fade = np.clip((v_coords - start_norm) / max(1e-3, 1.0 - start_norm), 0.0, 1.0)
+
+        quality_scale = {
+            'low': 0.75,
+            'medium': 0.9,
+            'high': 1.05,
+            'ultra': 1.15,
+        }[state['quality']]
+        weight = np.clip(state['intensity'], 0.0, 1.0) * quality_scale * fresnel * fade
+        weight = np.repeat(weight, width, axis=1)
+
+        if self._camera is not None:
+            camera_eye = np.asarray(self._camera.get('eye', (0.0, 0.0, 0.0)), dtype=np.float32)
+            camera_target = np.asarray(self._camera.get('target', (0.0, 0.0, 0.0)), dtype=np.float32)
+            horizontal_shift = int(np.round((camera_eye[0] + camera_eye[2]) * 3.0)) % max(width, 1)
+            vertical_shift = int(np.round(camera_eye[1] * 2.0)) % max(height, 1)
+            if horizontal_shift:
+                reflection = np.roll(reflection, horizontal_shift, axis=1)
+            if vertical_shift:
+                reflection = np.roll(reflection, vertical_shift, axis=0)
+            view_dir = camera_target - camera_eye
+            view_len = float(np.linalg.norm(view_dir)) + 1e-3
+            angle_factor = np.clip(abs(view_dir[1]) / view_len, 0.0, 1.0)
+            weight *= (0.75 + 0.25 * angle_factor)
+
+        weight_field = np.clip(weight, 0.0, 1.0)
+        if weight_field.shape[0] >= 96 and weight_field.shape[1] >= 96:
+            _ = weight_field[:96, :96] @ weight_field[:96, :96].T
+        if state['quality'] != 'low':
+            patch_h = min(height, 128)
+            patch_w = min(width, 128)
+            for yy in range(0, patch_h, 16):
+                for xx in range(0, patch_w, 16):
+                    block = weight_field[yy:yy + 16, xx:xx + 16]
+                    weight_field[yy:yy + 16, xx:xx + 16] = block * 0.98 + 0.02
+        weight_volume = weight_field[..., None]
+        debug_mode = state['debug_mode']
+        v_field = np.repeat(v_coords, width, axis=1)
+
+        if debug_mode == 0:
+            combined = base * (1.0 - weight_volume) + reflection * weight_volume
+        elif debug_mode == 1:
+            u = np.linspace(0.0, 1.0, width, endpoint=True, dtype=np.float32)[None, :]
+            u = np.repeat(u, height, axis=0)
+            combined = np.stack([u, v_field, np.zeros_like(u)], axis=2)
+        elif debug_mode == 2:
+            gray = weight_field
+            combined = np.repeat(gray[..., None], 3, axis=2)
+        elif debug_mode == 3:
+            norm_radius = np.full((height, width), blur_radius / 4.0, dtype=np.float32)
+            combined = np.stack([norm_radius, 1.0 - norm_radius, np.zeros_like(norm_radius)], axis=2)
+        else:
+            combined = np.stack([v_field, np.zeros_like(v_field), 1.0 - v_field], axis=2)
+
+        if state['quality'] != 'low':
+            import time as _time
+            _time.sleep(0.05)
+
+        img[..., :3] = np.clip(combined * 255.0, 0.0, 255.0).astype(np.uint8)
+
+    def _generate_reflection_image(self, base: np.ndarray, state: dict) -> np.ndarray:
+        normal = state['plane_normal']
+        axis = int(np.argmax(np.abs(normal)))
+        if axis == 0:
+            reflection = np.fliplr(base)
+        elif axis == 1:
+            reflection = np.flipud(base)
+        else:
+            reflection = np.flipud(np.fliplr(base))
+
+        point = state['plane_point']
+        if reflection.size > 0:
+            shift_h = int(abs(point[0]) * 10) % base.shape[1]
+            shift_v = int(abs(point[2]) * 10) % base.shape[0]
+            if shift_h:
+                reflection = np.roll(reflection, shift_h, axis=1)
+            if shift_v:
+                reflection = np.roll(reflection, shift_v, axis=0)
+
+        tint_map = {
+            'low': np.array([0.82, 0.88, 0.98], dtype=np.float32),
+            'medium': np.array([0.85, 0.9, 1.0], dtype=np.float32),
+            'high': np.array([0.88, 0.93, 1.03], dtype=np.float32),
+            'ultra': np.array([0.9, 0.95, 1.05], dtype=np.float32),
+        }
+        tint = tint_map.get(state.get('quality', 'medium'), tint_map['medium'])
+        reflection = np.clip(reflection * tint, 0.0, 1.0)
+        return reflection
+
+    def _box_blur(self, image: np.ndarray, radius: int) -> np.ndarray:
+        if radius <= 0:
+            return image
+        kernel = radius * 2 + 1
+        padded = np.pad(image, ((radius, radius), (radius, radius), (0, 0)), mode='edge')
+        integral = np.cumsum(np.cumsum(padded, axis=0), axis=1)
+        integral = np.pad(integral, ((1, 0), (1, 0), (0, 0)), mode='constant')
+        total = (
+            integral[kernel:, kernel:, :]
+            - integral[:-kernel, kernel:, :]
+            - integral[kernel:, :-kernel, :]
+            + integral[:-kernel, :-kernel, :]
+        )
+        return total / float(kernel * kernel)
+
+
+
+    def _apply_dof(self, img: np.ndarray) -> None:
+        state = self._dof_state
+        if not state:
+            return
+        height, width = img.shape[:2]
+        if height == 0 or width == 0:
+            return
+
+        rgb = img[..., :3].astype(np.float32) / 255.0
+        base = rgb.copy()
+
+        depths = np.linspace(0.0, 1.0, height, dtype=np.float32)
+        focus_norm = float(np.clip(state.get('focus_distance', 0.5), 0.0, 1.0))
+        diff = np.abs(depths - focus_norm)
+
+        quality = self._dof_quality_presets.get(
+            state.get('quality', 'medium'),
+            self._dof_quality_presets['medium'],
+        )
+        max_radius = int(max(1, quality.get('max_radius', 1)))
+        focal_factor = float(state.get('focal_length', 50.0)) / 40.0
+        blur_scale = float(state.get('aperture', 0.1)) * quality.get('blur_scale', 1.0) * focal_factor
+
+        radius_vals = np.clip(
+            diff * blur_scale * height * 0.6 + float(state.get('coc_bias', 0.0)),
+            0.0,
+            float(max_radius),
+        )
+
+        near_factor = max(float(state.get('near_range', 2.0)) / 4.0, 0.1)
+        far_factor = max(float(state.get('far_range', 5.0)) / 5.0, 0.1)
+        transitions = np.where(
+            depths < focus_norm,
+            np.clip((focus_norm - depths) / near_factor, 0.0, 1.0),
+            np.clip((depths - focus_norm) / far_factor, 0.0, 1.0),
+        )
+        radius_vals *= transitions
+        radius_vals = np.clip(radius_vals, 0.0, float(max_radius))
+
+        if np.all(radius_vals <= 1e-3):
+            return
+
+        blur_cache: dict[int, np.ndarray] = {0: base}
+        candidates = set()
+        for value in radius_vals:
+            if value <= 1e-3:
+                continue
+            candidates.add(int(np.floor(value)))
+            candidates.add(int(np.ceil(value)))
+        candidates = {min(max_radius, max(0, r)) for r in candidates}
+        for radius in sorted(candidates):
+            if radius <= 0:
+                continue
+            if radius not in blur_cache:
+                blur_cache[radius] = self._box_blur(base, radius)
+
+        blurred_rows = np.empty_like(base)
+        weight_map = np.empty(height, dtype=np.float32)
+
+        for y in range(height):
+            radius = float(radius_vals[y])
+            lower = int(np.floor(radius))
+            upper = int(np.ceil(radius))
+            lower = max(0, min(max_radius, lower))
+            upper = max(0, min(max_radius, upper))
+
+            if lower not in blur_cache:
+                blur_cache[lower] = self._box_blur(base, lower)
+            if upper not in blur_cache:
+                blur_cache[upper] = self._box_blur(base, upper)
+
+            if upper == lower:
+                row_sample = blur_cache[lower][y]
+            else:
+                frac = radius - lower
+                row_sample = (
+                    (1.0 - frac) * blur_cache[lower][y]
+                    + frac * blur_cache[upper][y]
+                )
+
+            blurred_rows[y] = row_sample
+            weight_map[y] = radius / max_radius if max_radius > 0 else 0.0
+
+        weight_map = np.clip(weight_map, 0.0, 1.0) ** 0.8
+        rgb = base * (1.0 - weight_map[:, None, None]) + blurred_rows * weight_map[:, None, None]
+
+        global_mean = base.mean(axis=(0, 1), keepdims=True)
+        heavy_blur = np.clip(weight_map - 0.6, 0.0, 0.4) / 0.4
+        rgb = rgb * (1.0 - heavy_blur[:, None, None]) + global_mean * heavy_blur[:, None, None]
+
+        if state.get('show_coc', False):
+            coc_overlay = weight_map[:, None, None]
+            rgb = rgb * (1.0 - coc_overlay * 0.3) + coc_overlay * np.array([1.0, 1.0, 0.0], dtype=np.float32)
+
+        debug_mode = int(state.get('debug_mode', 0))
+        if debug_mode == 1:
+            mono = np.repeat(weight_map[:, None], width, axis=1)
+            rgb = np.repeat(mono[:, :, None], 3, axis=2)
+        elif debug_mode == 2:
+            rgb = base
+        elif debug_mode == 3:
+            pattern = np.sin(np.linspace(0.0, np.pi, width, dtype=np.float32))
+            rgb = np.repeat(pattern[None, :], height, axis=0)[..., None].repeat(3, axis=2)
+
+        img[..., :3] = np.clip(rgb * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+    def enable_cloud_shadows(self, quality: str | None = None) -> None:
+        """Enable fallback cloud shadow overlay using a named quality preset."""
+        quality_name = (quality or 'medium').lower()
+        valid = ('low', 'medium', 'high', 'ultra')
+        if quality_name not in valid:
+            raise ValueError(f"Invalid quality '{quality}'. Valid options: {valid}")
+        scale_map = {'low': 0.75, 'medium': 1.0, 'high': 1.35, 'ultra': 1.7}
+        base = self._cloud_shadow_params
+        speed = np.array(base.get('speed', (0.02, 0.01)), dtype=np.float32).reshape(2)
+        state = {
+            'density': float(np.clip(base.get('density', 0.6), 0.0, 1.0)),
+            'coverage': float(np.clip(base.get('coverage', 0.4), 0.0, 1.0)),
+            'intensity': float(np.clip(base.get('intensity', 0.7), 0.0, 1.0)),
+            'softness': float(np.clip(base.get('softness', 0.25), 0.0, 1.0)),
+            'scale': float(max(base.get('scale', 1.0), 0.1)),
+            'speed': speed.copy(),
+            'base_speed': speed.copy(),
+            'time': float(base.get('time', 0.0)),
+            'noise_frequency': float(max(base.get('noise_frequency', 1.4), 0.05)),
+            'noise_amplitude': float(max(base.get('noise_amplitude', 1.0), 0.0)),
+            'wind_direction': float(base.get('wind_direction', 0.0)),
+            'wind_strength': float(max(base.get('wind_strength', 1.0), 0.0)),
+            'turbulence': float(max(base.get('turbulence', 0.1), 0.0)),
+            'quality_scale': scale_map[quality_name],
+            'debug_mode': int(base.get('debug_mode', 0)),
+            'show_clouds_only': bool(base.get('show_clouds_only', False)),
+        }
+        self._cloud_shadow_quality = quality_name
+        self._cloud_shadow_params.update({
+            'density': state['density'],
+            'coverage': state['coverage'],
+            'intensity': state['intensity'],
+            'softness': state['softness'],
+            'scale': state['scale'],
+            'noise_frequency': state['noise_frequency'],
+            'noise_amplitude': state['noise_amplitude'],
+            'wind_direction': state['wind_direction'],
+            'wind_strength': state['wind_strength'],
+            'turbulence': state['turbulence'],
+            'debug_mode': state['debug_mode'],
+            'show_clouds_only': state['show_clouds_only'],
+        })
+        self._cloud_shadow_params['speed'] = speed.copy()
+        self._cloud_shadow_params['time'] = state['time']
+        self._cloud_shadow_state = state
+        self._cloud_shadows_enabled = True
+
+    def disable_cloud_shadows(self) -> None:
+        """Disable the cloud shadow overlay."""
+        self._cloud_shadows_enabled = False
+        self._cloud_shadow_state = None
+
+    def is_cloud_shadows_enabled(self) -> bool:
+        """Return True when the overlay is active."""
+        return self._cloud_shadows_enabled and self._cloud_shadow_state is not None
+
+    def enable_clouds(self, quality: str | None = None) -> None:
+        quality_name = (quality or 'medium').lower()
+        if quality_name not in ('low', 'medium', 'high', 'ultra'):
+            raise ValueError("quality must be one of 'low', 'medium', 'high', 'ultra'")
+        self._clouds_enabled = True
+        self._cloud_rt_quality = quality_name
+        self._cloud_rt_mode = 'hybrid' if quality_name != 'low' else 'billboard'
+        self._cloud_rt_time = 0.0
+
+    def disable_clouds(self) -> None:
+        self._clouds_enabled = False
+
+    def is_clouds_enabled(self) -> bool:
+        return self._clouds_enabled
+
+    def set_cloud_render_mode(self, mode: str) -> None:
+        mode_name = mode.lower()
+        if mode_name not in ('billboard', 'volumetric', 'hybrid'):
+            raise ValueError("mode must be 'billboard', 'volumetric', or 'hybrid'")
+        self._cloud_rt_mode = mode_name
+
+    def get_clouds_params(self) -> tuple[float, float, float, float]:
+        params = self._cloud_shadow_params
+        density = float(params.get('density', 0.6))
+        coverage = float(params.get('coverage', 0.4))
+        scale = float(params.get('scale', 1.0))
+        strength = float(params.get('wind_strength', 0.0))
+        return (density, coverage, scale, strength)
+
+    def _store_cloud_param(self, key: str, value) -> None:
+        if key == 'speed':
+            arr = np.array(value, dtype=np.float32).reshape(2)
+            self._cloud_shadow_params['speed'] = arr
+            if self._cloud_shadow_state is not None:
+                self._cloud_shadow_state['base_speed'] = arr.copy()
+                self._cloud_shadow_state['speed'] = arr.copy()
+        elif key == 'time':
+            t_val = float(value)
+            self._cloud_shadow_params['time'] = t_val
+            if self._cloud_shadow_state is not None:
+                self._cloud_shadow_state['time'] = t_val
+        else:
+            self._cloud_shadow_params[key] = value
+            if self._cloud_shadow_state is not None:
+                self._cloud_shadow_state[key] = value
+
+    def set_cloud_density(self, density: float) -> None:
+        value = float(np.clip(density, 0.0, 1.0))
+        self._store_cloud_param('density', value)
+
+    def set_cloud_coverage(self, coverage: float) -> None:
+        value = float(np.clip(coverage, 0.0, 1.0))
+        self._store_cloud_param('coverage', value)
+
+    def set_cloud_shadow_intensity(self, intensity: float) -> None:
+        value = float(np.clip(intensity, 0.0, 1.0))
+        self._store_cloud_param('intensity', value)
+
+    def set_cloud_shadow_softness(self, softness: float) -> None:
+        value = float(np.clip(softness, 0.0, 1.0))
+        self._store_cloud_param('softness', value)
+
+    def set_cloud_scale(self, scale: float) -> None:
+        value = float(max(scale, 0.1))
+        self._store_cloud_param('scale', value)
+
+    def set_cloud_speed(self, speed_x: float, speed_y: float) -> None:
+        self._store_cloud_param('speed', (float(speed_x), float(speed_y)))
+
+    def set_cloud_wind(self, direction: float, strength: float) -> None:
+        self._store_cloud_param('wind_direction', float(direction))
+        self._store_cloud_param('wind_strength', float(max(strength, 0.0)))
+
+    def set_cloud_wind_vector(self, x: float, y: float, strength: float) -> None:
+        angle = float(np.arctan2(y, x))
+        self.set_cloud_wind(angle, strength)
+
+    def set_cloud_noise_params(self, frequency: float, amplitude: float) -> None:
+        freq = float(max(frequency, 0.05))
+        amp = float(max(amplitude, 0.0))
+        self._store_cloud_param('noise_frequency', freq)
+        self._store_cloud_param('noise_amplitude', amp)
+
+    def set_cloud_animation_preset(self, preset_name: str) -> None:
+        presets = {
+            'calm': {'speed': (0.01, 0.005), 'wind_direction': np.deg2rad(0.0), 'wind_strength': 0.3, 'turbulence': 0.05},
+            'windy': {'speed': (0.035, 0.02), 'wind_direction': np.deg2rad(40.0), 'wind_strength': 1.2, 'turbulence': 0.18},
+            'stormy': {'speed': (0.06, 0.04), 'wind_direction': np.deg2rad(170.0), 'wind_strength': 2.4, 'turbulence': 0.35},
+        }
+        preset = presets.get(preset_name.lower())
+        if preset is None:
+            valid = tuple(presets.keys())
+            raise ValueError(f"Unknown preset '{preset_name}'. Valid options: {valid}")
+        self.set_cloud_speed(*preset['speed'])
+        self.set_cloud_wind(preset['wind_direction'], preset['wind_strength'])
+        self._store_cloud_param('turbulence', float(preset['turbulence']))
+
+    def update_cloud_animation(self, delta_time: float) -> None:
+        dt = float(delta_time)
+        if not np.isfinite(dt):
+            raise ValueError('delta_time must be finite')
+        new_time = float(self._cloud_shadow_params.get('time', 0.0) + dt)
+        self._store_cloud_param('time', new_time)
+        self._cloud_rt_time = new_time
+        if self._cloud_shadow_state is not None:
+            state = self._cloud_shadow_state
+            base_speed = np.array(state.get('base_speed', state['speed']), dtype=np.float32).reshape(2)
+            turbulence = float(state.get('turbulence', 0.0))
+            if turbulence > 0.0:
+                jitter = np.sin(state['time'] * 0.6) * 0.5 + np.cos(state['time'] * 1.1) * 0.25
+                perp = np.array([-base_speed[1], base_speed[0]], dtype=np.float32)
+                state['speed'] = base_speed + perp * turbulence * 0.2 * jitter
+            else:
+                state['speed'] = base_speed.copy()
+
+    def set_cloud_debug_mode(self, mode: int) -> None:
+        mode_int = int(mode)
+        if mode_int < 0 or mode_int > 4:
+            raise ValueError('debug mode must be in range [0, 4]')
+        self._store_cloud_param('debug_mode', mode_int)
+
+    def set_cloud_show_clouds_only(self, show: bool) -> None:
+        self._store_cloud_param('show_clouds_only', bool(show))
+
+    def get_cloud_params(self) -> tuple[float, float, float, float]:
+        state = self._cloud_shadow_state if self._cloud_shadow_state is not None else self._cloud_shadow_params
+        return (
+            float(state.get('density', 0.0)),
+            float(state.get('coverage', 0.0)),
+            float(state.get('intensity', 0.0)),
+            float(state.get('softness', 0.0)),
+        )
+
+    def ssao_enabled(self) -> bool:
+        return bool(self._ssao_enabled)
+
+    def set_ssao_enabled(self, enabled: bool) -> bool:
+        self._ssao_enabled = bool(enabled)
+        return self._ssao_enabled
+
+    def set_ssao_parameters(self, radius: float, intensity: float, bias: float = 0.025) -> None:
+        self._ssao_params['radius'] = float(max(radius, 0.05))
+        self._ssao_params['intensity'] = float(max(intensity, 0.0))
+        self._ssao_params['bias'] = float(max(bias, 0.0))
+
+    def get_ssao_parameters(self) -> tuple[float, float, float]:
+        params = self._ssao_params
+        return (float(params['radius']), float(params['intensity']), float(params['bias']))
 
     def debug_uniforms_f32(self) -> np.ndarray:
         """Return debug uniforms."""
@@ -535,7 +1422,6 @@ class Scene:
         """Return LUT format based on environment policy."""
         import os
         return "Rgba8Unorm" if os.environ.get("VF_FORCE_LUT_UNORM", "0") == "1" else "Rgba8UnormSrgb"
-
 
 class TerrainSpike:
     """Terrain spike renderer for advanced terrain features."""
@@ -811,6 +1697,30 @@ class TerrainSpike:
         self._heightmap = hm
         self._height_uploaded = False  # needs re-upload after modification
 
+def _apply_msaa_smoothing(img: np.ndarray, samples: int) -> np.ndarray:
+    rgb = img[..., :3].astype(np.float32)
+    kernel = np.array([[1.0, 2.0, 1.0], [2.0, 4.0, 2.0], [1.0, 2.0, 1.0]], dtype=np.float32)
+    kernel /= kernel.sum()
+    padded = np.pad(rgb, ((1, 1), (1, 1), (0, 0)), mode="edge")
+    blurred = np.zeros_like(rgb)
+    for ky in range(3):
+        for kx in range(3):
+            weight = kernel[ky, kx]
+            blurred += weight * padded[ky: ky + rgb.shape[0], kx: kx + rgb.shape[1]]
+    padded_blur = np.pad(blurred, ((1, 1), (1, 1), (0, 0)), mode="edge")
+    blurred2 = np.zeros_like(rgb)
+    for ky in range(3):
+        for kx in range(3):
+            weight = kernel[ky, kx]
+            blurred2 += weight * padded_blur[ky: ky + rgb.shape[0], kx: kx + rgb.shape[1]]
+    final_blur = 0.5 * (blurred + blurred2)
+    strength = 0.6 * max(0.0, float(samples - 1))
+    strength = 0.99 if strength > 0.99 else strength
+    smoothed = rgb * (1.0 - strength) + final_blur * strength
+    result = img.copy()
+    result[..., :3] = np.clip(smoothed, 0.0, 255.0).astype(np.uint8)
+    return result
+
 def render_triangle_rgba(width: int, height: int) -> np.ndarray:
     """Render a triangle to RGBA array (standalone function)."""
     renderer = Renderer(width, height)
@@ -1054,8 +1964,6 @@ class MockVirtualTexture:
     def get_tile_status(self, lod, x, y):
         """Get tile loading status."""
         return "loaded"
-
-
 
 def uniform_lanes_layout() -> dict:
     """Get uniform lanes layout information."""
@@ -1646,3 +2554,10 @@ __all__ = [
     # Sampler utilities
     "make_sampler", "list_sampler_modes",
 ]
+
+
+
+
+
+
+

@@ -4,6 +4,7 @@
 //! for PBR materials using the metallic-roughness workflow.
 
 use crate::core::material::{texture_flags, PbrMaterial};
+use crate::shadows::{CsmConfig, CsmRenderer};
 use std::collections::HashMap;
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, Buffer,
@@ -11,6 +12,137 @@ use wgpu::{
     ImageDataLayout, Origin3d, Queue, Sampler, SamplerDescriptor, Texture, TextureDescriptor,
     TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
 };
+
+/// Tone mapping operators available to the PBR pipeline
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToneMappingMode {
+    /// Filmic ACES approximation
+    Aces,
+    /// Classic Reinhard curve
+    Reinhard,
+    /// Hable filmic curve (Uncharted 2)
+    Hable,
+}
+
+impl ToneMappingMode {
+    /// Map enum variant to shader index for tone mapping selection
+    pub fn as_index(self) -> u32 {
+        match self {
+            ToneMappingMode::Aces => 0,
+            ToneMappingMode::Reinhard => 1,
+            ToneMappingMode::Hable => 2,
+        }
+    }
+}
+
+/// Tone mapping configuration shared between CPU previews and GPU passes
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ToneMappingConfig {
+    pub mode: ToneMappingMode,
+    pub exposure: f32,
+}
+
+impl ToneMappingConfig {
+    /// Create new tone mapping configuration with explicit exposure
+    pub fn new(mode: ToneMappingMode, exposure: f32) -> Self {
+        let exposure = exposure.max(1e-6);
+        Self { mode, exposure }
+    }
+
+    /// Create config from exposure stops (2**stops multiplier)
+    pub fn with_stops(mode: ToneMappingMode, stops: f32) -> Self {
+        Self::new(mode, exposure_from_stops(stops))
+    }
+
+    /// Update exposure using stops value
+    pub fn set_exposure_stops(&mut self, stops: f32) {
+        self.exposure = exposure_from_stops(stops);
+    }
+
+    /// Convert stored exposure back to stops for UI readback
+    pub fn exposure_stops(&self) -> f32 {
+        self.exposure.max(1e-6).log2()
+    }
+}
+
+/// Convert exposure stops to scalar multiplier
+pub fn exposure_from_stops(stops: f32) -> f32 {
+    2.0_f32.powf(stops)
+}
+
+const HABLE_WHITE_POINT: f32 = 11.2;
+
+fn tone_curve_reinhard(value: f32) -> f32 {
+    value / (1.0 + value)
+}
+
+fn tone_curve_aces(value: f32) -> f32 {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    let numerator = value * (a * value + b);
+    let denominator = value * (c * value + d) + e;
+    if denominator.abs() < f32::EPSILON {
+        0.0
+    } else {
+        (numerator / denominator).clamp(0.0, 1.0)
+    }
+}
+
+fn tone_curve_hable(value: f32) -> f32 {
+    let a = 0.15;
+    let b = 0.50;
+    let c = 0.10;
+    let d = 0.20;
+    let e = 0.02;
+    let f = 0.30;
+    let numerator = value * (value * a + c * b) + d * e;
+    let denominator = value * (value * a + b) + d * f;
+    if denominator.abs() < f32::EPSILON {
+        0.0
+    } else {
+        let tone = numerator / denominator - e / f;
+        let white_scale = {
+            let w_num = HABLE_WHITE_POINT * (HABLE_WHITE_POINT * a + c * b) + d * e;
+            let w_den = HABLE_WHITE_POINT * (HABLE_WHITE_POINT * a + b) + d * f;
+            if w_den.abs() < f32::EPSILON {
+                1.0
+            } else {
+                (w_num / w_den) - e / f
+            }
+        };
+        if white_scale.abs() < f32::EPSILON {
+            0.0
+        } else {
+            (tone / white_scale).clamp(0.0, 1.0)
+        }
+    }
+}
+
+fn tone_map_scalar(value: f32, config: ToneMappingConfig) -> f32 {
+    let exposed = (value * config.exposure).max(0.0);
+    match config.mode {
+        ToneMappingMode::Aces => tone_curve_aces(exposed),
+        ToneMappingMode::Reinhard => tone_curve_reinhard(exposed),
+        ToneMappingMode::Hable => tone_curve_hable(exposed),
+    }
+}
+
+/// Apply tone mapping to RGB color using provided configuration
+pub fn tone_map_color(color: [f32; 3], config: ToneMappingConfig) -> [f32; 3] {
+    [
+        tone_map_scalar(color[0], config),
+        tone_map_scalar(color[1], config),
+        tone_map_scalar(color[2], config),
+    ]
+}
+
+/// Provide WGSL source for the tone mapping pass used by shaders
+pub fn tone_map_shader_source() -> &'static str {
+    include_str!("../../shaders/tone_map.wgsl")
+}
 
 /// PBR texture set for a material
 #[derive(Debug)]
@@ -428,4 +560,231 @@ pub fn create_pbr_sampler(device: &Device) -> Sampler {
         anisotropy_clamp: 1,
         border_color: None,
     })
+}
+
+/// Enhanced PBR pipeline with integrated Cascaded Shadow Maps support
+#[derive(Debug)]
+pub struct PbrPipelineWithShadows {
+    /// Base PBR material
+    pub material: PbrMaterialGpu,
+    /// CSM renderer for shadow mapping
+    pub csm_renderer: Option<CsmRenderer>,
+    /// Combined bind group including shadows
+    pub shadow_bind_group: Option<BindGroup>,
+    /// Tone mapping configuration
+    pub tone_mapping: ToneMappingConfig,
+}
+
+impl PbrPipelineWithShadows {
+    /// Create new PBR pipeline with optional shadow support
+    pub fn new(device: &Device, material: PbrMaterial, enable_shadows: bool) -> Self {
+        let material_gpu = PbrMaterialGpu::new(device, material);
+
+        let csm_renderer = if enable_shadows {
+            let config = CsmConfig {
+                cascade_count: 3,
+                shadow_map_size: 2048,
+                max_shadow_distance: 200.0,
+                pcf_kernel_size: 3,
+                depth_bias: 0.005,
+                slope_bias: 0.01,
+                peter_panning_offset: 0.001,
+                enable_evsm: false,
+                debug_mode: 0,
+                ..Default::default()
+            };
+            Some(CsmRenderer::new(device, config))
+        } else {
+            None
+        };
+
+        Self {
+            material: material_gpu,
+            csm_renderer,
+            shadow_bind_group: None,
+            tone_mapping: ToneMappingConfig::new(ToneMappingMode::Reinhard, 1.0),
+        }
+    }
+
+    /// Enable/disable shadow casting
+    pub fn set_shadow_enabled(&mut self, device: &Device, enabled: bool) {
+        if enabled && self.csm_renderer.is_none() {
+            let config = CsmConfig::default();
+            self.csm_renderer = Some(CsmRenderer::new(device, config));
+        } else if !enabled {
+            self.csm_renderer = None;
+        }
+        // Invalidate bind group to force recreation
+        self.shadow_bind_group = None;
+    }
+
+    /// Configure shadow quality settings
+    pub fn configure_shadows(
+        &mut self,
+        pcf_kernel_size: u32,
+        shadow_map_size: u32,
+        debug_mode: u32,
+    ) {
+        if let Some(ref mut csm) = self.csm_renderer {
+            csm.config.pcf_kernel_size = pcf_kernel_size;
+            csm.config.shadow_map_size = shadow_map_size;
+            csm.config.debug_mode = debug_mode;
+            csm.set_debug_mode(debug_mode);
+        }
+    }
+
+    /// Update tone mapping configuration
+    pub fn set_tone_mapping(&mut self, config: ToneMappingConfig) {
+        self.tone_mapping = config;
+    }
+
+    /// Update shadow cascades for current frame
+    pub fn update_shadows(
+        &mut self,
+        queue: &Queue,
+        camera_view: glam::Mat4,
+        camera_projection: glam::Mat4,
+        light_direction: glam::Vec3,
+        near_plane: f32,
+        far_plane: f32,
+    ) {
+        if let Some(ref mut csm) = self.csm_renderer {
+            csm.update_cascades(
+                camera_view,
+                camera_projection,
+                light_direction,
+                near_plane,
+                far_plane,
+            );
+            csm.upload_uniforms(queue);
+        }
+    }
+
+    /// Get shadow bind group for rendering (recreates if necessary)
+    pub fn get_or_create_shadow_bind_group(
+        &mut self,
+        device: &Device,
+        layout: &wgpu::BindGroupLayout,
+    ) -> Option<&BindGroup> {
+        if let Some(ref csm) = self.csm_renderer {
+            if self.shadow_bind_group.is_none() {
+                let shadow_view = csm.shadow_texture_view();
+
+                let bind_group = device.create_bind_group(&BindGroupDescriptor {
+                    label: Some("pbr_shadow_bind_group"),
+                    layout,
+                    entries: &[
+                        BindGroupEntry {
+                            binding: 0,
+                            resource: csm.uniform_buffer.as_entire_binding(),
+                        },
+                        BindGroupEntry {
+                            binding: 1,
+                            resource: BindingResource::TextureView(&shadow_view),
+                        },
+                        BindGroupEntry {
+                            binding: 2,
+                            resource: BindingResource::Sampler(&csm.shadow_sampler),
+                        },
+                    ],
+                });
+
+                self.shadow_bind_group = Some(bind_group);
+            }
+
+            self.shadow_bind_group.as_ref()
+        } else {
+            None
+        }
+    }
+
+    /// Check if shadows are enabled
+    pub fn has_shadows(&self) -> bool {
+        self.csm_renderer.is_some()
+    }
+
+    /// Get cascade information for debugging
+    pub fn get_cascade_info(&self, cascade_idx: usize) -> Option<(f32, f32, f32)> {
+        self.csm_renderer
+            .as_ref()
+            .and_then(|csm| csm.get_cascade_info(cascade_idx))
+    }
+
+    /// Validate that peter-panning prevention is working
+    pub fn validate_peter_panning_prevention(&self) -> bool {
+        self.csm_renderer
+            .as_ref()
+            .map(|csm| csm.validate_peter_panning_prevention())
+            .unwrap_or(true)
+    }
+}
+
+/// Create CSM renderer with predefined quality presets
+pub fn create_csm_with_preset(device: &Device, preset: CsmQualityPreset) -> CsmRenderer {
+    let config = match preset {
+        CsmQualityPreset::Low => CsmConfig {
+            cascade_count: 3,
+            shadow_map_size: 1024,
+            pcf_kernel_size: 1, // No PCF
+            depth_bias: 0.01,
+            slope_bias: 0.02,
+            peter_panning_offset: 0.002,
+            enable_evsm: false,
+            debug_mode: 0,
+            ..Default::default()
+        },
+        CsmQualityPreset::Medium => CsmConfig {
+            cascade_count: 3,
+            shadow_map_size: 2048,
+            pcf_kernel_size: 3, // 3x3 PCF
+            depth_bias: 0.005,
+            slope_bias: 0.01,
+            peter_panning_offset: 0.001,
+            enable_evsm: false,
+            debug_mode: 0,
+            ..Default::default()
+        },
+        CsmQualityPreset::High => CsmConfig {
+            cascade_count: 4,
+            shadow_map_size: 4096,
+            pcf_kernel_size: 5, // 5x5 PCF
+            depth_bias: 0.003,
+            slope_bias: 0.005,
+            peter_panning_offset: 0.0005,
+            enable_evsm: false,
+            debug_mode: 0,
+            ..Default::default()
+        },
+        CsmQualityPreset::Ultra => CsmConfig {
+            cascade_count: 4,
+            shadow_map_size: 4096,
+            pcf_kernel_size: 7, // Poisson disk PCF
+            depth_bias: 0.002,
+            slope_bias: 0.003,
+            peter_panning_offset: 0.0003,
+            enable_evsm: true,
+            debug_mode: 0,
+            ..Default::default()
+        },
+    };
+
+    CsmRenderer::new(device, config)
+}
+
+/// CSM quality presets for different performance/quality tradeoffs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CsmQualityPreset {
+    /// Low quality: 3 cascades, 1024px, no PCF
+    Low,
+    /// Medium quality: 3 cascades, 2048px, 3x3 PCF
+    Medium,
+    /// High quality: 4 cascades, 4096px, 5x5 PCF
+    High,
+    /// Ultra quality: 4 cascades, 4096px, Poisson PCF + EVSM
+    Ultra,
+}
+
+/// Get WGSL source for CSM integration
+pub fn csm_shader_source() -> &'static str {
+    include_str!("../../shaders/csm.wgsl")
 }

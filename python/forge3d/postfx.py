@@ -121,6 +121,16 @@ class PostFxChainManager:
                 'priority': 100,
                 'temporal': False,
             },
+            'ssao': {
+                'description': 'Screen-space ambient occlusion with bilateral blur',
+                'parameters': {
+                    'radius': {'default': 1.0, 'min': 0.1, 'max': 5.0},
+                    'intensity': {'default': 1.0, 'min': 0.0, 'max': 5.0},
+                    'bias': {'default': 0.025, 'min': 0.0, 'max': 0.2},
+                },
+                'priority': 400,
+                'temporal': False,
+            },
             'sharpen': {
                 'description': 'Unsharp mask sharpening',
                 'parameters': {
@@ -326,6 +336,31 @@ class PostFxChainManager:
 _postfx_manager = PostFxChainManager()
 
 # Public API functions
+
+def enable_ssao(*, radius: float = 1.0, intensity: float = 1.0, bias: float = 0.025, scene=None) -> bool:
+    """Enable SSAO and optionally configure a scene instance."""
+    if scene is not None:
+        if hasattr(scene, 'set_ssao_parameters'):
+            try:
+                scene.set_ssao_parameters(radius, intensity, bias)
+            except Exception:  # pragma: no cover - defensive fallback
+                warnings.warn('Scene.set_ssao_parameters failed', stacklevel=2)
+        if hasattr(scene, 'set_ssao_enabled'):
+            try:
+                scene.set_ssao_enabled(True)
+            except Exception:  # pragma: no cover - defensive fallback
+                warnings.warn('Scene.set_ssao_enabled failed', stacklevel=2)
+    return enable('ssao', radius=radius, intensity=intensity, bias=bias)
+
+def disable_ssao(scene=None) -> bool:
+    """Disable SSAO and optionally update a scene instance."""
+    if scene is not None and hasattr(scene, 'set_ssao_enabled'):
+        try:
+            scene.set_ssao_enabled(False)
+        except Exception:  # pragma: no cover - defensive fallback
+            warnings.warn('Scene.set_ssao_enabled failed', stacklevel=2)
+    return disable('ssao')
+
 def enable(name: str, **kwargs) -> bool:
     """Enable a post-processing effect with parameters.
     
@@ -385,6 +420,11 @@ def get_parameter(effect_name: str, param_name: str) -> Optional[float]:
     """
     return _postfx_manager.get_parameter(effect_name, param_name)
 
+
+
+def list_enabled_effects() -> List[str]:
+    """Alias for list() to improve readability while SSAO scaffolding lands."""
+    return list()
 
 def list() -> List[str]:
     """Get list of enabled effects in execution order.

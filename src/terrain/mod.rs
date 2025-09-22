@@ -509,6 +509,7 @@ impl Globals {
 // ---------- Render spike object used by tests ----------
 
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+const NORMAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 #[pyclass(module = "_vulkan_forge", name = "TerrainSpike")]
 pub struct TerrainSpike {
@@ -535,6 +536,8 @@ pub struct TerrainSpike {
 
     color: wgpu::Texture,
     color_view: wgpu::TextureView,
+    normal: wgpu::Texture,
+    normal_view: wgpu::TextureView,
 
     globals: Globals,
     last_uniforms: TerrainUniforms,
@@ -616,6 +619,21 @@ impl TerrainSpike {
             view_formats: &[],
         });
         let color_view = color.create_view(&Default::default());
+        let normal = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain-normal"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: NORMAL_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let normal_view = normal.create_view(&Default::default());
 
         // Shader + pipeline - using T33 shared pipeline
 
@@ -625,7 +643,13 @@ impl TerrainSpike {
 
         // T33-BEGIN:terrainspike-use-t33
         // Use shared T33 pipeline
-        let tp = crate::terrain::pipeline::TerrainPipeline::create(&device, TEXTURE_FORMAT);
+        let tp = crate::terrain::pipeline::TerrainPipeline::create(
+            &device,
+            TEXTURE_FORMAT,
+            NORMAL_FORMAT,
+            1,
+            None,
+        );
         // T33-END:terrainspike-use-t33
 
         // Mesh + uniforms
@@ -748,6 +772,8 @@ impl TerrainSpike {
             lut_format,
             color,
             color_view,
+            normal,
+            normal_view,
             globals,
             last_uniforms: uniforms,
             height_view: Some(hview),
@@ -768,19 +794,34 @@ impl TerrainSpike {
         {
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain-rp"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.color_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.02,
-                            g: 0.02,
-                            b: 0.03,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.02,
+                                g: 0.02,
+                                b: 0.03,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.normal_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.0,
+                                g: 0.0,
+                                b: 0.0,
+                                a: 0.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                ],
                 depth_stencil_attachment: None,
                 ..Default::default()
             });

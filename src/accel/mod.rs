@@ -3,11 +3,11 @@
 // This module provides LBVH GPU construction, SAH CPU fallback, and unified API for path tracing integration.
 // RELEVANT FILES:src/shaders/lbvh_*.wgsl,src/path_tracing/accel.rs,python/forge3d/path_tracing.py
 
+pub mod cpu_bvh;
+pub mod instancing;
 pub mod lbvh_gpu;
 pub mod sah_cpu;
 pub mod types;
-pub mod cpu_bvh;
-pub mod instancing;
 
 pub use lbvh_gpu::GpuBvhBuilder;
 pub use sah_cpu::CpuSahBuilder;

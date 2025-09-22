@@ -95,14 +95,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut restir_debug = false;
     let mut restir_spatial = false;
     let mut swap_materials = false; // P2: validation toggle
-    let mut skinny_blas1 = false;   // P2: near-edge skinny triangles in BLAS 1
+    let mut skinny_blas1 = false; // P2: near-edge skinny triangles in BLAS 1
     let mut camera_jitter: f32 = 0.0; // P2: small camera jitter along X
     let mut force_blas: Option<u32> = None; // P2: force all instances to use the same BLAS
     let mut dump_aov_depth: Option<String> = None; // P2: dump raw RGBA32F AOV depth to file
     let mut dump_aov_albedo: Option<String> = None; // P2: dump raw RGBA32F AOV albedo to file
     let mut dump_aov_normal: Option<String> = None; // P2: dump raw RGBA32F AOV normal to file
     let mut dump_aov_with_header: bool = false; // P2: prefix dumps with header containing (width,height,channels)
-    // P4: medium HG (single scatter) parameters
+                                                // P4: medium HG (single scatter) parameters
     let mut medium_enable: bool = false;
     let mut medium_g: f32 = 0.0;
     let mut medium_sigma_t: f32 = 0.0;
@@ -140,7 +140,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             s if s.starts_with("--force-blas=") => {
                 if let Some(eq) = s.split_once('=') {
                     if let Ok(idx) = eq.1.parse::<u32>() {
-                        if idx <= 1 { force_blas = Some(idx); }
+                        if idx <= 1 {
+                            force_blas = Some(idx);
+                        }
                     }
                 }
             }
@@ -162,38 +164,84 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--dump-aov-with-header" => {
                 dump_aov_with_header = true;
             }
-            "--medium-enable" | "--medium=on" => { medium_enable = true; }
+            "--medium-enable" | "--medium=on" => {
+                medium_enable = true;
+            }
             s if s.starts_with("--medium-g=") => {
-                if let Some((_, v)) = s.split_once('=') { if let Ok(f) = v.parse::<f32>() { medium_g = f; } }
+                if let Some((_, v)) = s.split_once('=') {
+                    if let Ok(f) = v.parse::<f32>() {
+                        medium_g = f;
+                    }
+                }
             }
             s if s.starts_with("--medium-sigma-t=") => {
-                if let Some((_, v)) = s.split_once('=') { if let Ok(f) = v.parse::<f32>() { medium_sigma_t = f; } }
+                if let Some((_, v)) = s.split_once('=') {
+                    if let Ok(f) = v.parse::<f32>() {
+                        medium_sigma_t = f;
+                    }
+                }
             }
             s if s.starts_with("--medium-density=") => {
-                if let Some((_, v)) = s.split_once('=') { if let Ok(f) = v.parse::<f32>() { medium_density = f; } }
+                if let Some((_, v)) = s.split_once('=') {
+                    if let Ok(f) = v.parse::<f32>() {
+                        medium_density = f;
+                    }
+                }
             }
-            "--compute-ao" => { compute_ao = true; }
+            "--compute-ao" => {
+                compute_ao = true;
+            }
             s if s.starts_with("--ao-samples=") => {
-                if let Some((_, v)) = s.split_once('=') { if let Ok(u) = v.parse::<u32>() { ao_samples = u.max(1); } }
+                if let Some((_, v)) = s.split_once('=') {
+                    if let Ok(u) = v.parse::<u32>() {
+                        ao_samples = u.max(1);
+                    }
+                }
             }
             s if s.starts_with("--ao-intensity=") => {
-                if let Some((_, v)) = s.split_once('=') { if let Ok(f) = v.parse::<f32>() { ao_intensity = f; } }
+                if let Some((_, v)) = s.split_once('=') {
+                    if let Ok(f) = v.parse::<f32>() {
+                        ao_intensity = f;
+                    }
+                }
             }
             s if s.starts_with("--ao-bias=") => {
-                if let Some((_, v)) = s.split_once('=') { if let Ok(f) = v.parse::<f32>() { ao_bias = f; } }
+                if let Some((_, v)) = s.split_once('=') {
+                    if let Ok(f) = v.parse::<f32>() {
+                        ao_bias = f;
+                    }
+                }
             }
-            "--hair-demo" => { hair_demo = true; }
+            "--hair-demo" => {
+                hair_demo = true;
+            }
             s if s.starts_with("--hair-width=") => {
-                if let Some((_, v)) = s.split_once('=') { if let Ok(f) = v.parse::<f32>() { hair_width = f.max(0.0); } }
+                if let Some((_, v)) = s.split_once('=') {
+                    if let Ok(f) = v.parse::<f32>() {
+                        hair_width = f.max(0.0);
+                    }
+                }
             }
             s if s.starts_with("--hair-mat=") => {
-                if let Some((_, v)) = s.split_once('=') { if let Ok(u) = v.parse::<u32>() { hair_mat = if u > 0 { 1 } else { 0 }; } }
+                if let Some((_, v)) = s.split_once('=') {
+                    if let Ok(u) = v.parse::<u32>() {
+                        hair_mat = if u > 0 { 1 } else { 0 };
+                    }
+                }
             }
             s if s.starts_with("--qmc-mode=") => {
-                if let Some((_, v)) = s.split_once('=') { if let Ok(u) = v.parse::<u32>() { qmc_mode = if u > 0 { 1 } else { 0 }; } }
+                if let Some((_, v)) = s.split_once('=') {
+                    if let Ok(u) = v.parse::<u32>() {
+                        qmc_mode = if u > 0 { 1 } else { 0 };
+                    }
+                }
             }
             s if s.starts_with("--spp-limit=") => {
-                if let Some((_, v)) = s.split_once('=') { if let Ok(u) = v.parse::<u32>() { spp_limit = Some(u); } }
+                if let Some((_, v)) = s.split_once('=') {
+                    if let Ok(u) = v.parse::<u32>() {
+                        spp_limit = Some(u);
+                    }
+                }
             }
             "--help" | "-h" => {
                 println!(
@@ -213,8 +261,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create wgpu device/queue
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-        .ok_or("No suitable GPU adapter")?;
+    let adapter =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .ok_or("No suitable GPU adapter")?;
     // Request the adapter's supported limits to enable enough storage buffers per stage
     let adapter_limits = adapter.limits();
     let (device, queue) = pollster::block_on(adapter.request_device(
@@ -298,10 +347,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hair_dark = Sphere {
         center: [0.0, 0.0, 0.0],
         radius: 0.0,
-        albedo: [0.30, 0.20, 0.12],   // dark brown base color
-        metallic: 0.1,                // slight tinting of spec for demo
+        albedo: [0.30, 0.20, 0.12], // dark brown base color
+        metallic: 0.1,              // slight tinting of spec for demo
         roughness: 0.35,
-        ior: 1.55,                    // hair-like IOR (not used in hair branch yet)
+        ior: 1.55, // hair-like IOR (not used in hair branch yet)
         emissive: [0.0, 0.0, 0.0],
         ax: 0.2,
         ay: 0.3,
@@ -309,7 +358,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hair_blond = Sphere {
         center: [0.0, 0.0, 0.0],
         radius: 0.0,
-        albedo: [0.90, 0.80, 0.50],   // warm blond
+        albedo: [0.90, 0.80, 0.50], // warm blond
         metallic: 0.1,
         roughness: 0.28,
         ior: 1.55,
@@ -330,11 +379,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Create a very skinny quad (near-degenerate along X) to stress near-edge intersections
         let v: Vec<[f32; 3]> = vec![
             [-0.01, -1.0, 0.0],
-            [ 0.01, -1.0, 0.0],
-            [ 0.01,  1.0, 0.0],
-            [-0.01,  1.0, 0.0],
+            [0.01, -1.0, 0.0],
+            [0.01, 1.0, 0.0],
+            [-0.01, 1.0, 0.0],
         ];
-        let idx: Vec<[u32; 3]> = vec![ [0,1,2], [0,2,3] ];
+        let idx: Vec<[u32; 3]> = vec![[0, 1, 2], [0, 2, 3]];
         MeshCPU::new(v, idx)
     } else {
         MeshBuilder::quad()
@@ -342,11 +391,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bvh1 = build_bvh_cpu(&mesh1, &BuildOptions::default())?;
     let atlas = build_mesh_atlas(device.as_ref(), &[(mesh0, bvh0), (mesh1, bvh1)])?;
     // Move atlas buffers out so we can hand descs to the scheduler and bind V/I/BVH
-    let MeshAtlas { vertex_buffer, index_buffer, bvh_buffer, descs_buffer, .. } = atlas;
+    let MeshAtlas {
+        vertex_buffer,
+        index_buffer,
+        bvh_buffer,
+        descs_buffer,
+        ..
+    } = atlas;
 
     // Instances: create two transforms placing the quad at different positions
-    let t_left = Mat4::from_translation(Vec3::new(-0.8, 0.3, 0.0)) * Mat4::from_scale(Vec3::splat(0.75));
-    let t_right = Mat4::from_translation(Vec3::new(0.9, 0.7, -0.2)) * Mat4::from_scale(Vec3::splat(0.5));
+    let t_left =
+        Mat4::from_translation(Vec3::new(-0.8, 0.3, 0.0)) * Mat4::from_scale(Vec3::splat(0.75));
+    let t_right =
+        Mat4::from_translation(Vec3::new(0.9, 0.7, -0.2)) * Mat4::from_scale(Vec3::splat(0.5));
 
     // Area and directional lights (disabled by intensity=0 to keep image stable)
     let area_l = AreaLightWGSL {
@@ -386,7 +443,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let accum_hdr = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("accum-hdr"),
         size: accum_size,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
 
@@ -410,7 +469,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     // Apply QMC/Owen mode and adaptive SPP clamp for raygen (P6)
     sched.set_qmc_mode(qmc_mode);
-    if let Some(limit) = spp_limit { sched.set_adaptive_spp_limit(limit); } else { sched.set_adaptive_spp_limit(0); }
+    if let Some(limit) = spp_limit {
+        sched.set_adaptive_spp_limit(limit);
+    } else {
+        sched.set_adaptive_spp_limit(0);
+    }
     // Provide BLAS descriptor table to scheduler (binding 15)
     sched.set_blas_descs_buffer(descs_buffer);
     // Optional: hair segments demo (upload before creating scene bind group so binding 20 points to correct buffer)
@@ -524,7 +587,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Optional: dump AOV buffers (RGBA32F) to raw files for numeric analysis in tests
     if let Some(path) = dump_aov_depth {
-        let aov_bytes = (sched.aov_pixel_count() * core::mem::size_of::<[f32;4]>()) as u64;
+        let aov_bytes = (sched.aov_pixel_count() * core::mem::size_of::<[f32; 4]>()) as u64;
         let depth_readback = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("aov-depth-readback"),
             size: aov_bytes,
@@ -561,14 +624,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Some(path) = dump_aov_albedo {
-        let aov_bytes = (sched.aov_pixel_count() * core::mem::size_of::<[f32;4]>()) as u64;
+        let aov_bytes = (sched.aov_pixel_count() * core::mem::size_of::<[f32; 4]>()) as u64;
         let rb = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("aov-albedo-readback"),
             size: aov_bytes,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("aov-albedo-enc") });
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("aov-albedo-enc"),
+        });
         sched.copy_aov_albedo_to(&mut enc, &rb);
         queue.submit(Some(enc.finish()));
         let sl = rb.slice(..);
@@ -592,14 +657,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Some(path) = dump_aov_normal {
-        let aov_bytes = (sched.aov_pixel_count() * core::mem::size_of::<[f32;4]>()) as u64;
+        let aov_bytes = (sched.aov_pixel_count() * core::mem::size_of::<[f32; 4]>()) as u64;
         let rb = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("aov-normal-readback"),
             size: aov_bytes,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("aov-normal-enc") });
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("aov-normal-enc"),
+        });
         sched.copy_aov_normal_to(&mut enc, &rb);
         queue.submit(Some(enc.finish()));
         let sl = rb.slice(..);
@@ -624,15 +691,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Optional: compute AO from AOVs and write grayscale PNG
     if compute_ao {
-        let ao_bytes = (sched.aov_pixel_count() * core::mem::size_of::<[f32;4]>()) as u64;
+        let ao_bytes = (sched.aov_pixel_count() * core::mem::size_of::<[f32; 4]>()) as u64;
         let ao_out = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ao-out"),
             size: ao_bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::MAP_READ
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut ao_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("ao-encoder") });
-        sched.dispatch_ao_from_aovs(&mut ao_encoder, ao_samples, ao_intensity, ao_bias, 1337, &ao_out)?;
+        let mut ao_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("ao-encoder"),
+        });
+        sched.dispatch_ao_from_aovs(
+            &mut ao_encoder,
+            ao_samples,
+            ao_intensity,
+            ao_bias,
+            1337,
+            &ao_out,
+        )?;
         queue.submit(Some(ao_encoder.finish()));
         let sl = ao_out.slice(..);
         sl.map_async(wgpu::MapMode::Read, |_| {});
@@ -641,7 +719,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let px: &[[f32; 4]] = bytemuck::cast_slice(&data);
         let mut img_ao: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(width, height);
         let mut i = 0usize;
-        for y in 0..height { for x in 0..width { let v = px[i][0].clamp(0.0, 1.0); let g = (v * 255.0 + 0.5) as u8; img_ao.put_pixel(x, y, Rgba([g, g, g, 255])); i += 1; }}
+        for y in 0..height {
+            for x in 0..width {
+                let v = px[i][0].clamp(0.0, 1.0);
+                let g = (v * 255.0 + 0.5) as u8;
+                img_ao.put_pixel(x, y, Rgba([g, g, g, 255]));
+                i += 1;
+            }
+        }
         drop(data);
         ao_out.unmap();
         std::fs::create_dir_all("out").ok();

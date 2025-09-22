@@ -2,11 +2,11 @@
 // ReSTIR DI (Reservoir-based Spatio-Temporal Importance Resampling for Direct Illumination) implementation
 
 use crate::path_tracing::alias_table::AliasTable;
-use bytemuck::{Pod, Zeroable};
-use wgpu::{Buffer, BufferUsages, Device};
-use wgpu::util::DeviceExt;
 use crate::path_tracing::lighting::{GpuAreaLight, GpuDirectionalLight};
+use bytemuck::{Pod, Zeroable};
 use std::f32::consts::PI;
+use wgpu::util::DeviceExt;
+use wgpu::{Buffer, BufferUsages, Device};
 
 /// Light sample for ReSTIR
 #[repr(C)]
@@ -142,7 +142,11 @@ pub fn build_light_samples_and_alias(
         let idx = i as u32;
         let lum = luminance(a.color);
         let area = PI * a.radius * a.radius;
-        let imp = if a.importance > 0.0 { a.importance } else { 1.0 };
+        let imp = if a.importance > 0.0 {
+            a.importance
+        } else {
+            1.0
+        };
         let w = (a.intensity * lum * area * imp).max(0.0);
         weights.push(w);
 
@@ -164,7 +168,11 @@ pub fn build_light_samples_and_alias(
     for (i, d) in directional_lights.iter().enumerate() {
         let idx = i as u32;
         let lum = luminance(d.color);
-        let imp = if d.importance > 0.0 { d.importance } else { 1.0 };
+        let imp = if d.importance > 0.0 {
+            d.importance
+        } else {
+            1.0
+        };
         let w = (d.intensity * lum * imp).max(0.0);
         weights.push(w);
 
