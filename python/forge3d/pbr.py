@@ -1,10 +1,90 @@
 #!/usr/bin/env python3
+# python/forge3d/pbr.py
+# High-level PBR material helpers and tone mapping utilities for Workstream B.
+# Exists to expose Python controls for tone mapping and BRDF configuration.
+# RELEVANT FILES:python/forge3d/lighting.py,src/pipeline/pbr.rs,shaders/tone_map.wgsl,tests/test_b2_tonemap.py
 """A24: Anisotropic Microfacet BRDF + PBR materials functionality"""
 
 import numpy as np
 from dataclasses import dataclass
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, Dict, Any, Literal, Callable
 import warnings
+
+try:
+    from . import _forge3d  # type: ignore[attr-defined]
+except ImportError:
+    _forge3d = None
+
+_TONE_MAPPING_MODES = ("aces", "reinhard", "hable")
+
+_CURRENT_TONE_MAPPING: str = "reinhard"
+
+def _as_float_array(data):
+    arr = np.asarray(data, dtype=np.float32)
+    return arr
+
+def _curve_reinhard(color):
+    arr = _as_float_array(color)
+    return arr / (arr + 1.0)
+
+def _curve_aces(color):
+    arr = _as_float_array(color)
+    a = 2.51
+    b = 0.03
+    c = 2.43
+    d = 0.59
+    e = 0.14
+    numerator = arr * (a * arr + b)
+    denominator = arr * (c * arr + d) + e
+    out = numerator / np.where(denominator == 0.0, 1.0, denominator)
+    return np.clip(out, 0.0, 1.0)
+
+def _curve_hable(color):
+    arr = _as_float_array(color)
+    a = 0.15
+    b = 0.50
+    c = 0.10
+    d = 0.20
+    e = 0.02
+    f = 0.30
+    numer = arr * (arr * a + c * b) + d * e
+    denom = arr * (arr * a + b) + d * f
+    tone = numer / np.where(denom == 0.0, 1.0, denom) - e / f
+    white_num = 11.2 * (11.2 * a + c * b) + d * e
+    white_den = 11.2 * (11.2 * a + b) + d * f
+    white = (white_num / white_den) - e / f if abs(white_den) > 1e-6 else 1.0
+    if abs(white) < 1e-6:
+        white = 1.0
+    out = tone / white
+    return np.clip(out, 0.0, 1.0)
+
+_TONE_CURVE_FUNCTIONS: Dict[str, Callable[[np.ndarray], np.ndarray]] = {
+    "reinhard": _curve_reinhard,
+    "aces": _curve_aces,
+    "hable": _curve_hable,
+}
+
+def set_tone_mapping(mode: Literal["aces", "reinhard", "hable"]) -> str:
+    """Set the active tone mapping mode for Workstream B controls."""
+    normalized = mode.lower()
+    if normalized not in _TONE_MAPPING_MODES:
+        raise ValueError(f"Unsupported tone mapping mode: {mode}")
+    global _CURRENT_TONE_MAPPING
+    _CURRENT_TONE_MAPPING = normalized
+    if _forge3d is not None:
+        setter = getattr(_forge3d, "set_tone_mapping_mode", None)
+        if setter is not None:
+            try:
+                setter(normalized)
+            except Exception as exc:  # pragma: no cover - optional binding
+                warnings.warn(f"forge3d.set_tone_mapping_mode failed: {exc}")
+    return _CURRENT_TONE_MAPPING
+
+def _apply_current_tone_mapping(color, *, exposure_scale: float = 1.0) -> np.ndarray:
+    arr = _as_float_array(color) * float(exposure_scale)
+    curve = _TONE_CURVE_FUNCTIONS[_CURRENT_TONE_MAPPING]
+    mapped = curve(arr)
+    return np.clip(mapped, 0.0, 1.0)
 
 class AnisotropicBRDF:
     """A24: GGX/Beckmann αx/αy."""

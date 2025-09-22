@@ -84,14 +84,14 @@ pub struct ScatterRay {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShadowRay {
-    pub o: [f32; 3],          // origin
-    pub tmin: f32,            // minimum ray parameter
-    pub d: [f32; 3],          // direction
-    pub tmax: f32,            // maximum ray parameter
-    pub contrib: [f32; 3],    // precomputed RGB contribution if visible
+    pub o: [f32; 3],       // origin
+    pub tmin: f32,         // minimum ray parameter
+    pub d: [f32; 3],       // direction
+    pub tmax: f32,         // maximum ray parameter
+    pub contrib: [f32; 3], // precomputed RGB contribution if visible
     pub _pad0: f32,
-    pub pixel: u32,           // pixel index to accumulate into
-    pub _pad1: [u32; 3],      // alignment padding
+    pub pixel: u32,      // pixel index to accumulate into
+    pub _pad1: [u32; 3], // alignment padding
 }
 
 /// All GPU buffers for wavefront queues
@@ -352,8 +352,14 @@ impl QueueBuffers {
             label: Some("shadow-queue-bind-group"),
             layout: &layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.shadow_queue_header.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: self.shadow_queue.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.shadow_queue_header.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.shadow_queue.as_entire_binding(),
+                },
             ],
         });
 

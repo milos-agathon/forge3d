@@ -3,7 +3,7 @@
 // This file provides a median-split BVH builder that produces a flattened layout suitable for GPU traversal.
 // RELEVANT FILES:src/path_tracing/mesh.rs,src/shaders/pt_intersect_mesh.wgsl,python/forge3d/mesh.py
 
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
 use std::time::Instant;
 
@@ -128,9 +128,7 @@ impl Aabb {
     }
 
     pub fn is_valid(&self) -> bool {
-        self.min[0] <= self.max[0] &&
-        self.min[1] <= self.max[1] &&
-        self.min[2] <= self.max[2]
+        self.min[0] <= self.max[0] && self.min[1] <= self.max[1] && self.min[2] <= self.max[2]
     }
 }
 
@@ -140,11 +138,11 @@ impl Aabb {
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct BvhNode {
     pub aabb_min: [f32; 3],
-    pub left: u32,      // if internal: left child index; if leaf: first triangle index
+    pub left: u32, // if internal: left child index; if leaf: first triangle index
     pub aabb_max: [f32; 3],
-    pub right: u32,     // if internal: right child index; if leaf: triangle count
-    pub flags: u32,     // bit 0: leaf flag (1 = leaf, 0 = internal)
-    pub _pad: u32,      // padding for 16-byte alignment
+    pub right: u32, // if internal: right child index; if leaf: triangle count
+    pub flags: u32, // bit 0: leaf flag (1 = leaf, 0 = internal)
+    pub _pad: u32,  // padding for 16-byte alignment
 }
 
 impl BvhNode {
@@ -282,9 +280,11 @@ pub fn build_bvh_cpu(mesh: &MeshCPU, options: &BuildOptions) -> Result<BvhCPU> {
     let mut tri_centroids = Vec::with_capacity(triangle_count as usize);
 
     for i in 0..triangle_count {
-        let aabb = mesh.triangle_aabb(i as usize)
+        let aabb = mesh
+            .triangle_aabb(i as usize)
             .context("Failed to compute triangle AABB")?;
-        let centroid = mesh.triangle_centroid(i as usize)
+        let centroid = mesh
+            .triangle_centroid(i as usize)
             .context("Failed to compute triangle centroid")?;
         tri_aabbs.push(aabb);
         tri_centroids.push(centroid);
@@ -327,8 +327,8 @@ pub fn build_bvh_cpu(mesh: &MeshCPU, options: &BuildOptions) -> Result<BvhCPU> {
     stats.build_time_ms = start_time.elapsed().as_secs_f32() * 1000.0;
     stats.node_count = nodes.len() as u32;
     stats.internal_count = stats.node_count - stats.leaf_count;
-    stats.memory_usage_bytes = (nodes.len() * std::mem::size_of::<BvhNode>() +
-                               tri_indices.len() * std::mem::size_of::<u32>()) as u64;
+    stats.memory_usage_bytes = (nodes.len() * std::mem::size_of::<BvhNode>()
+        + tri_indices.len() * std::mem::size_of::<u32>()) as u64;
 
     if stats.leaf_count > 0 {
         stats.avg_leaf_size = triangle_count as f32 / stats.leaf_count as f32;
@@ -371,7 +371,11 @@ fn build_recursive(
     }
 
     // Find split axis and position using median split
-    let split_result = find_median_split(tri_centroids, &tri_indices[info.first as usize..(info.first + info.count) as usize], &info.aabb);
+    let split_result = find_median_split(
+        tri_centroids,
+        &tri_indices[info.first as usize..(info.first + info.count) as usize],
+        &info.aabb,
+    );
 
     if split_result.is_none() {
         // Cannot split, create leaf
@@ -405,8 +409,14 @@ fn build_recursive(
     }
 
     // Compute child AABBs
-    let left_aabb = compute_bounds(tri_aabbs, &tri_indices[info.first as usize..split_index as usize]);
-    let right_aabb = compute_bounds(tri_aabbs, &tri_indices[split_index as usize..(info.first + info.count) as usize]);
+    let left_aabb = compute_bounds(
+        tri_aabbs,
+        &tri_indices[info.first as usize..split_index as usize],
+    );
+    let right_aabb = compute_bounds(
+        tri_aabbs,
+        &tri_indices[split_index as usize..(info.first + info.count) as usize],
+    );
 
     // Build left and right subtrees
     let left_info = BuildInfo {
@@ -424,16 +434,32 @@ fn build_recursive(
     };
 
     let left_child_idx = build_recursive(
-        tri_aabbs, tri_centroids, tri_indices, nodes, left_info, options, stats
+        tri_aabbs,
+        tri_centroids,
+        tri_indices,
+        nodes,
+        left_info,
+        options,
+        stats,
     )?;
 
     let right_child_idx = build_recursive(
-        tri_aabbs, tri_centroids, tri_indices, nodes, right_info, options, stats
+        tri_aabbs,
+        tri_centroids,
+        tri_indices,
+        nodes,
+        right_info,
+        options,
+        stats,
     )?;
 
     // Create internal node
     let node_idx = nodes.len() as u32;
-    nodes.push(BvhNode::internal(info.aabb, left_child_idx, right_child_idx));
+    nodes.push(BvhNode::internal(
+        info.aabb,
+        left_child_idx,
+        right_child_idx,
+    ));
 
     Ok(node_idx)
 }
@@ -460,7 +486,8 @@ fn find_median_split(
     };
 
     // Compute median centroid position along axis
-    let mut centroids: Vec<f32> = indices.iter()
+    let mut centroids: Vec<f32> = indices
+        .iter()
         .map(|&idx| tri_centroids[idx as usize][axis])
         .collect();
     centroids.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -531,11 +558,7 @@ mod tests {
     #[test]
     fn test_mesh_simple() {
         // Simple triangle mesh (single triangle)
-        let vertices = vec![
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.5, 1.0, 0.0],
-        ];
+        let vertices = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]];
         let indices = vec![[0, 1, 2]];
 
         let mesh = MeshCPU::new(vertices, indices);
@@ -548,17 +571,13 @@ mod tests {
 
         let centroid = mesh.triangle_centroid(0).unwrap();
         assert!((centroid[0] - 0.5).abs() < 1e-6);
-        assert!((centroid[1] - 1.0/3.0).abs() < 1e-6);
+        assert!((centroid[1] - 1.0 / 3.0).abs() < 1e-6);
         assert_eq!(centroid[2], 0.0);
     }
 
     #[test]
     fn test_bvh_build_single_triangle() {
-        let vertices = vec![
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.5, 1.0, 0.0],
-        ];
+        let vertices = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]];
         let indices = vec![[0, 1, 2]];
         let mesh = MeshCPU::new(vertices, indices);
 
@@ -575,22 +594,34 @@ mod tests {
     fn test_bvh_build_cube() {
         // Simple cube mesh (12 triangles, 8 vertices)
         let vertices = vec![
-            [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0],
         ];
         let indices = vec![
             // Front face
-            [0, 1, 2], [0, 2, 3],
+            [0, 1, 2],
+            [0, 2, 3],
             // Right face
-            [1, 5, 6], [1, 6, 2],
+            [1, 5, 6],
+            [1, 6, 2],
             // Back face
-            [5, 4, 7], [5, 7, 6],
+            [5, 4, 7],
+            [5, 7, 6],
             // Left face
-            [4, 0, 3], [4, 3, 7],
+            [4, 0, 3],
+            [4, 3, 7],
             // Top face
-            [3, 2, 6], [3, 6, 7],
+            [3, 2, 6],
+            [3, 6, 7],
             // Bottom face
-            [4, 5, 1], [4, 1, 0],
+            [4, 5, 1],
+            [4, 1, 0],
         ];
 
         let mesh = MeshCPU::new(vertices, indices);

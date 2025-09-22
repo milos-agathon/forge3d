@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# examples/pbr_spheres.py
+# PBR materials demo with tone mapping exposure controls.
+# Exists to exercise Workstream B tone mapping toggles inside the gallery.
+# RELEVANT FILES:python/forge3d/pbr.py,python/forge3d/lighting.py,tests/test_b2_tonemap.py,shaders/tone_map.wgsl
 """
 PBR Materials Demonstration
 
@@ -25,11 +29,28 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 try:
     import forge3d as f3d
     import forge3d.pbr as pbr
+    import forge3d.lighting as lighting
 except ImportError as e:
     print(f"ERROR: Could not import forge3d: {e}")
     print("Run: maturin develop --release")
     sys.exit(1)
 
+TONE_MAPPING_MODES = ("reinhard", "aces", "hable")
+EXPOSURE_STOPS = (-1.0, 0.0, 1.0)
+
+def cycle_tone_mapping_preview() -> None:
+    """Print sampled tone mapping outputs for Workstream B update."""
+    samples = np.linspace(0.0, 4.0, 9, dtype=np.float32)
+    print('\n7. Previewing tone mapping curves (Workstream B2)...')
+    for mode in TONE_MAPPING_MODES:
+        selected = pbr.set_tone_mapping(mode)
+        print(f"  Mode: {selected}")
+        for stops in EXPOSURE_STOPS:
+            scale = lighting.set_exposure_stops(stops)
+            mapped = pbr._apply_current_tone_mapping(samples, exposure_scale=scale)
+            print(f"    stops={stops:+.1f} scale={scale:0.3f} -> {np.round(mapped, 3)}")
+    lighting.set_exposure_stops(0.0)
+    pbr.set_tone_mapping('reinhard')
 
 def create_pbr_material_gallery():
     """Create a gallery of different PBR materials."""
@@ -53,7 +74,6 @@ def create_pbr_material_gallery():
             print(f"    {'':17s} WARNINGS: {validation['warnings']}")
     
     return materials
-
 
 def test_brdf_evaluation(materials):
     """Test BRDF evaluation for different materials."""
@@ -95,7 +115,6 @@ def test_brdf_evaluation(materials):
     
     return brdf_results
 
-
 def test_material_textures():
     """Test PBR material textures."""
     print("\nTesting PBR material textures...")
@@ -126,7 +145,6 @@ def test_material_textures():
     print(f"  Has normal map: {bool(material.texture_flags & 4)}")
     
     return material, textures
-
 
 def render_material_spheres(materials, output_path, width=800, height=600):
     """Render spheres with different PBR materials."""
@@ -224,7 +242,6 @@ def render_material_spheres(materials, output_path, width=800, height=600):
     save_image(image, output_path)
     return image
 
-
 def save_image(image, output_path):
     """Save image to PNG file."""
     output_path = Path(output_path)
@@ -238,7 +255,6 @@ def save_image(image, output_path):
         # Fallback to numpy save
         np.save(str(output_path.with_suffix('.npy')), image)
         print(f"Saved as numpy array: {output_path.with_suffix('.npy')}")
-
 
 def test_material_validation():
     """Test material validation functionality."""
@@ -273,7 +289,6 @@ def test_material_validation():
         print(f"    - {warning}")
     
     return validation['valid'], len(validation['errors']), len(validation['warnings'])
-
 
 def compare_metallic_vs_dielectric():
     """Compare metallic vs dielectric materials."""
@@ -314,7 +329,6 @@ def compare_metallic_vs_dielectric():
     
     # Validate that metallics and dielectrics behave differently
     return brdf_diff > 0.1  # Should have significant difference
-
 
 def main():
     parser = argparse.ArgumentParser(description="PBR materials demonstration")
@@ -364,6 +378,7 @@ def main():
         # Step 6: Render material spheres
         print("\n6. Rendering PBR material spheres...")
         image = render_material_spheres(materials, args.out, args.width, args.height)
+        cycle_tone_mapping_preview()
         
         # Summary
         print("\n=== PBR Materials Demo Complete ===")
@@ -421,7 +436,6 @@ def main():
             import traceback
             traceback.print_exc()
         return 0
-
 
 if __name__ == "__main__":
     exit(main())

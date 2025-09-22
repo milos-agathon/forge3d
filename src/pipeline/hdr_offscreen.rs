@@ -1,3 +1,7 @@
+// src/pipeline/hdr_offscreen.rs
+// HDR off-screen rendering pipeline implementation with MSAA resolve.
+// Exists to provide HDR render targets and tone mapping for off-screen workflows.
+// RELEVANT FILES:src/pipeline/mod.rs,python/forge3d/viewer.py,tests/test_b1_msaa.py,docs/hdr_offscreen.md
 //! HDR off-screen rendering pipeline
 //!
 //! Provides high dynamic range off-screen rendering to RGBA16Float textures with
@@ -49,6 +53,7 @@ pub struct HdrOffscreenConfig {
     pub exposure: f32,
     pub white_point: f32,
     pub gamma: f32,
+    pub sample_count: u32,
 }
 
 impl Default for HdrOffscreenConfig {
@@ -62,6 +67,7 @@ impl Default for HdrOffscreenConfig {
             exposure: 1.0,
             white_point: 4.0,
             gamma: 2.2,
+            sample_count: 1,
         }
     }
 }
@@ -80,11 +86,14 @@ pub struct ToneMappingUniforms {
 pub struct HdrOffscreenPipeline {
     pub hdr_texture: Texture,
     pub hdr_view: TextureView,
+    pub msaa_texture: Option<Texture>,
+    pub msaa_view: Option<TextureView>,
     pub ldr_texture: Texture,
     pub ldr_view: TextureView,
     pub depth_texture: Texture,
     pub depth_view: TextureView,
     pub config: HdrOffscreenConfig,
+    pub sample_count: u32,
     pub tonemap_uniforms: Buffer,
     pub tonemap_bind_group: BindGroup,
     pub tonemap_pipeline: RenderPipeline,
@@ -92,8 +101,20 @@ pub struct HdrOffscreenPipeline {
 
 impl HdrOffscreenPipeline {
     /// Create new HDR off-screen pipeline
-    pub fn new(device: &Device, config: HdrOffscreenConfig) -> Result<Self, String> {
-        // Create HDR texture (RGBA16Float color target)
+    pub fn new(device: &Device, mut config: HdrOffscreenConfig) -> Result<Self, String> {
+        let sample_count = match config.sample_count {
+            0 | 1 => 1,
+            2 | 4 | 8 => config.sample_count,
+            other => {
+                return Err(format!(
+                    "Unsupported MSAA sample count: {} (allowed: 1, 2, 4, 8)",
+                    other
+                ));
+            }
+        };
+        config.sample_count = sample_count;
+
+        // Create resolved HDR texture (always single-sample)
         let hdr_texture = device.create_texture(&TextureDescriptor {
             label: Some("hdr_offscreen_texture"),
             size: Extent3d {
@@ -115,6 +136,31 @@ impl HdrOffscreenPipeline {
             label: Some("hdr_offscreen_view"),
             ..Default::default()
         });
+
+        // Optional multisampled color target when MSAA is requested
+        let (msaa_texture, msaa_view) = if sample_count > 1 {
+            let texture = device.create_texture(&TextureDescriptor {
+                label: Some("hdr_offscreen_msaa_color"),
+                size: Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count,
+                dimension: TextureDimension::D2,
+                format: config.hdr_format,
+                usage: TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&TextureViewDescriptor {
+                label: Some("hdr_offscreen_msaa_view"),
+                ..Default::default()
+            });
+            (Some(texture), Some(view))
+        } else {
+            (None, None)
+        };
 
         // Create LDR output texture (sRGB8 output buffer suitable for readback)
         let ldr_texture = device.create_texture(&TextureDescriptor {
@@ -139,7 +185,7 @@ impl HdrOffscreenPipeline {
             ..Default::default()
         });
 
-        // Create depth texture
+        // Create depth texture matching the MSAA sample count
         let depth_texture = device.create_texture(&TextureDescriptor {
             label: Some("hdr_offscreen_depth"),
             size: Extent3d {
@@ -148,7 +194,7 @@ impl HdrOffscreenPipeline {
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
-            sample_count: 1,
+            sample_count: sample_count.max(1),
             dimension: TextureDimension::D2,
             format: TextureFormat::Depth32Float,
             usage: TextureUsages::RENDER_ATTACHMENT,
@@ -270,11 +316,14 @@ impl HdrOffscreenPipeline {
         Ok(Self {
             hdr_texture,
             hdr_view,
+            msaa_texture,
+            msaa_view,
             ldr_texture,
             ldr_view,
             depth_texture,
             depth_view,
             config,
+            sample_count,
             tonemap_uniforms,
             tonemap_bind_group,
             tonemap_pipeline,
@@ -283,9 +332,22 @@ impl HdrOffscreenPipeline {
 
     /// Begin HDR render pass - renders to off-screen HDR texture
     pub fn begin_hdr_pass<'a>(&'a self, encoder: &'a mut CommandEncoder) -> RenderPass<'a> {
-        encoder.begin_render_pass(&RenderPassDescriptor {
-            label: Some("hdr_offscreen_pass"),
-            color_attachments: &[Some(RenderPassColorAttachment {
+        let color_attachment = if let Some(msaa_view) = &self.msaa_view {
+            RenderPassColorAttachment {
+                view: msaa_view,
+                resolve_target: Some(&self.hdr_view),
+                ops: Operations {
+                    load: LoadOp::Clear(wgpu::Color {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 1.0,
+                    }),
+                    store: StoreOp::Store,
+                },
+            }
+        } else {
+            RenderPassColorAttachment {
                 view: &self.hdr_view,
                 resolve_target: None,
                 ops: Operations {
@@ -297,7 +359,12 @@ impl HdrOffscreenPipeline {
                     }),
                     store: StoreOp::Store,
                 },
-            })],
+            }
+        };
+
+        encoder.begin_render_pass(&RenderPassDescriptor {
+            label: Some("hdr_offscreen_pass"),
+            color_attachments: &[Some(color_attachment)],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth_view,
                 depth_ops: Some(Operations {
@@ -373,17 +440,23 @@ impl HdrOffscreenPipeline {
 
     /// Get estimated VRAM usage in bytes
     pub fn get_vram_usage(&self) -> u64 {
-        let hdr_size = (self.config.width * self.config.height) as u64
-            * match self.config.hdr_format {
-                TextureFormat::Rgba16Float => 8,  // 4 channels * 2 bytes
-                TextureFormat::Rgba32Float => 16, // 4 channels * 4 bytes
-                _ => 8,                           // Default to 16-bit
-            };
+        let pixel_count = (self.config.width * self.config.height) as u64;
+        let hdr_bytes_per_pixel = match self.config.hdr_format {
+            TextureFormat::Rgba16Float => 8,  // 4 channels * 2 bytes
+            TextureFormat::Rgba32Float => 16, // 4 channels * 4 bytes
+            _ => 8,                           // Default to 16-bit
+        };
 
-        let ldr_size = (self.config.width * self.config.height * 4) as u64; // RGBA8
-        let depth_size = (self.config.width * self.config.height * 4) as u64; // Depth32Float
+        let resolved_hdr = pixel_count * hdr_bytes_per_pixel;
+        let msaa_extra = if self.sample_count > 1 {
+            resolved_hdr * self.sample_count as u64
+        } else {
+            0
+        };
+        let ldr_size = pixel_count * 4; // RGBA8
+        let depth_size = pixel_count * 4 * self.sample_count.max(1) as u64; // Depth32Float
 
-        hdr_size + ldr_size + depth_size
+        resolved_hdr + msaa_extra + ldr_size + depth_size
     }
 
     /// Resolve to sRGB8 output buffer suitable for readback

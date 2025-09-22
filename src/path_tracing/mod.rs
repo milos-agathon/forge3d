@@ -10,10 +10,10 @@ pub mod compute;
 pub mod guiding;
 pub mod hybrid_compute;
 pub mod io;
+pub mod lighting;
+pub mod mesh;
 pub mod restir;
 pub mod wavefront;
-pub mod mesh;
-pub mod lighting;
 
 // Note: SVGF integration stubs live under src/denoise/svgf for future wiring.
 // Keeping this file unchanged functionally to avoid build impact.

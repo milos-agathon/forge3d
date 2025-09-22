@@ -69,22 +69,30 @@ impl WavefrontPipelines {
 
         let restir_init_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("pt-restir-init-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/pt_restir_init.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../shaders/pt_restir_init.wgsl").into(),
+            ),
         });
 
         let restir_temporal_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("pt-restir-temporal-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/pt_restir_temporal.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../shaders/pt_restir_temporal.wgsl").into(),
+            ),
         });
 
         let restir_spatial_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("pt-restir-spatial-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/pt_restir_spatial.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../shaders/pt_restir_spatial.wgsl").into(),
+            ),
         });
 
         let ao_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ao-from-aovs-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/ao_from_aovs.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../shaders/ao_from_aovs.wgsl").into(),
+            ),
         });
 
         // Create shared bind group layouts
@@ -92,61 +100,64 @@ impl WavefrontPipelines {
         let scene_bind_group_layout = Self::create_scene_bind_group_layout(device);
         let accum_bind_group_layout = Self::create_accum_bind_group_layout(device);
         let restir_bind_group_layout = Self::create_restir_bind_group_layout(device);
-        let restir_temporal_bind_group_layout = Self::create_restir_temporal_bind_group_layout(device);
-        let restir_spatial_bind_group_layout = Self::create_restir_spatial_bind_group_layout(device);
+        let restir_temporal_bind_group_layout =
+            Self::create_restir_temporal_bind_group_layout(device);
+        let restir_spatial_bind_group_layout =
+            Self::create_restir_spatial_bind_group_layout(device);
         let restir_scene_spatial_bind_group_layout =
             Self::create_restir_scene_spatial_bind_group_layout(device);
 
         // AO bind group layout (Group 0)
-        let ao_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("ao-bind-group-layout"),
-            entries: &[
-                // 0: AOV depth buffer (read-only storage)
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+        let ao_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("ao-bind-group-layout"),
+                entries: &[
+                    // 0: AOV depth buffer (read-only storage)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                // 1: AOV normal buffer (read-only storage)
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    // 1: AOV normal buffer (read-only storage)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                // 2: AO output buffer (read_write storage)
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    // 2: AO output buffer (read_write storage)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                // 3: AO params (uniform)
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    // 3: AO params (uniform)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
-        });
+                ],
+            });
 
         // Create pipelines for each stage
         let raygen = Self::create_raygen_pipeline(

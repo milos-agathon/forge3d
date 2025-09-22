@@ -3,11 +3,11 @@
 // This file handles uploading CPU BVH and mesh data to GPU buffers for path tracing integration.
 // RELEVANT FILES:src/accel/cpu_bvh.rs,src/shaders/pt_intersect_mesh.wgsl,python/forge3d/mesh.py
 
-use crate::accel::cpu_bvh::{MeshCPU, BvhCPU, BvhNode, Aabb};
+use crate::accel::cpu_bvh::{Aabb, BvhCPU, BvhNode, MeshCPU};
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
-use wgpu::{Device, Queue, Buffer, BufferUsages};
 use wgpu::util::DeviceExt;
+use wgpu::{Buffer, BufferUsages, Device, Queue};
 
 /// GPU-compatible vertex layout (matches WGSL Vertex struct)
 #[repr(C)]
@@ -187,12 +187,16 @@ pub fn upload_mesh_and_bvh(
     }
 
     // Convert vertices to GPU format
-    let gpu_vertices: Vec<GpuVertex> = mesh.vertices.iter()
+    let gpu_vertices: Vec<GpuVertex> = mesh
+        .vertices
+        .iter()
         .map(|&pos| GpuVertex::from(pos))
         .collect();
 
     // Flatten triangle indices to u32 array
-    let flat_indices: Vec<u32> = mesh.indices.iter()
+    let flat_indices: Vec<u32> = mesh
+        .indices
+        .iter()
         .flat_map(|tri| tri.iter().copied())
         .collect();
 
@@ -217,10 +221,18 @@ pub fn upload_mesh_and_bvh(
         usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
     });
 
-    log::info!("Uploaded mesh to GPU: {} vertices, {} triangles, {} BVH nodes",
-              gpu_vertices.len(), mesh.indices.len(), bvh.nodes.len());
-    log::info!("GPU memory usage: vertices={} bytes, indices={} bytes, BVH={} bytes",
-              vertex_buffer.size(), index_buffer.size(), bvh_buffer.size());
+    log::info!(
+        "Uploaded mesh to GPU: {} vertices, {} triangles, {} BVH nodes",
+        gpu_vertices.len(),
+        mesh.indices.len(),
+        bvh.nodes.len()
+    );
+    log::info!(
+        "GPU memory usage: vertices={} bytes, indices={} bytes, BVH={} bytes",
+        vertex_buffer.size(),
+        index_buffer.size(),
+        bvh_buffer.size()
+    );
 
     Ok(GpuMesh {
         vertex_buffer,
@@ -358,11 +370,7 @@ pub struct MeshBuilder;
 impl MeshBuilder {
     /// Create a simple triangle mesh
     pub fn triangle() -> MeshCPU {
-        let vertices = vec![
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.5, 1.0, 0.0],
-        ];
+        let vertices = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]];
         let indices = vec![[0, 1, 2]];
         MeshCPU::new(vertices, indices)
     }
@@ -371,23 +379,35 @@ impl MeshBuilder {
     pub fn cube() -> MeshCPU {
         let vertices = vec![
             // Front face
-            [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
             // Back face
-            [0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0],
         ];
         let indices = vec![
             // Front face
-            [0, 1, 2], [0, 2, 3],
+            [0, 1, 2],
+            [0, 2, 3],
             // Right face
-            [1, 5, 6], [1, 6, 2],
+            [1, 5, 6],
+            [1, 6, 2],
             // Back face
-            [5, 4, 7], [5, 7, 6],
+            [5, 4, 7],
+            [5, 7, 6],
             // Left face
-            [4, 0, 3], [4, 3, 7],
+            [4, 0, 3],
+            [4, 3, 7],
             // Top face
-            [3, 2, 6], [3, 6, 7],
+            [3, 2, 6],
+            [3, 6, 7],
             // Bottom face
-            [4, 5, 1], [4, 1, 0],
+            [4, 5, 1],
+            [4, 1, 0],
         ];
         MeshCPU::new(vertices, indices)
     }
@@ -396,9 +416,9 @@ impl MeshBuilder {
     pub fn quad() -> MeshCPU {
         let vertices = vec![
             [-1.0, -1.0, 0.0],
-            [ 1.0, -1.0, 0.0],
-            [ 1.0,  1.0, 0.0],
-            [-1.0,  1.0, 0.0],
+            [1.0, -1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [-1.0, 1.0, 0.0],
         ];
         let indices = vec![
             [0, 1, 2], // First triangle
@@ -425,7 +445,10 @@ pub fn validate_mesh(mesh: &MeshCPU) -> Result<()> {
             if vertex_idx as usize >= vertex_count {
                 anyhow::bail!(
                     "Triangle {} corner {} references invalid vertex {} (max {})",
-                    tri_idx, corner_idx, vertex_idx, vertex_count - 1
+                    tri_idx,
+                    corner_idx,
+                    vertex_idx,
+                    vertex_count - 1
                 );
             }
         }
@@ -486,7 +509,8 @@ pub fn compute_mesh_stats(mesh: &MeshCPU) -> MeshStats {
                 edge1[2] * edge2[0] - edge1[0] * edge2[2],
                 edge1[0] * edge2[1] - edge1[1] * edge2[0],
             ];
-            let area = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt() * 0.5;
+            let area =
+                (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt() * 0.5;
             total_area += area;
         }
     }
@@ -497,8 +521,8 @@ pub fn compute_mesh_stats(mesh: &MeshCPU) -> MeshStats {
         0.0
     };
 
-    let memory_usage = (mesh.vertices.len() * std::mem::size_of::<[f32; 3]>() +
-                       mesh.indices.len() * std::mem::size_of::<[u32; 3]>()) as u64;
+    let memory_usage = (mesh.vertices.len() * std::mem::size_of::<[f32; 3]>()
+        + mesh.indices.len() * std::mem::size_of::<[u32; 3]>()) as u64;
 
     MeshStats {
         vertex_count: mesh.vertex_count(),

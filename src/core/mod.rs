@@ -78,6 +78,39 @@ pub mod cascade_split;
 pub mod shadow_mapping;
 pub mod shadows;
 
+// B5: Planar reflections
+pub mod reflections;
+
+// B6: Depth of Field
+pub mod dof;
+
+// B7: Cloud Shadows
+pub mod cloud_shadows;
+
+// B8: Realtime Clouds
+pub mod clouds;
+
+// B10: Ground Plane (Raster)
+pub mod ground_plane;
+
+// B11: Water Surface Color Toggle
+pub mod water_surface;
+
+// B12: Soft Light Radius (Raster)
+pub mod soft_light_radius;
+
+// B13: Point & Spot Lights (Realtime)
+pub mod point_spot_lights;
+
+// B14: Rect Area Lights (LTC)
+pub mod ltc_area_lights;
+
+// B15: Image-Based Lighting (IBL) Polish
+pub mod ibl;
+
+// B16: Dual-source blending OIT
+pub mod dual_source_oit;
+
 // N4: Render bundles
 pub mod render_bundles;
 

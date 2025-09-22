@@ -4,6 +4,7 @@
 //! and a render pipeline targeting Rgba8UnormSrgb. No integration/draw in this task.
 //! Supports optional descriptor indexing for texture arrays when available.
 
+use crate::core::reflections::PlanarReflectionRenderer;
 use crate::device_caps::DeviceCaps;
 use std::borrow::Cow;
 use wgpu::*;
@@ -14,13 +15,24 @@ pub struct TerrainPipeline {
     pub bgl_globals: BindGroupLayout,
     pub bgl_height: BindGroupLayout,
     pub bgl_lut: BindGroupLayout,
+    pub bgl_cloud_shadows: BindGroupLayout, // B7: Cloud shadows bind group layout
+    pub bgl_reflection: BindGroupLayout,    // B5: Planar reflections bind group layout
     pub descriptor_indexing: bool,
     pub max_palette_textures: u32,
+    pub sample_count: u32,
+    pub depth_format: Option<TextureFormat>,
+    pub normal_format: TextureFormat,
 }
 
 impl TerrainPipeline {
     /// Create the terrain pipeline. Does **not** record commands or create bind groups.
-    pub fn create(device: &Device, color_format: TextureFormat) -> Self {
+    pub fn create(
+        device: &Device,
+        color_format: TextureFormat,
+        normal_format: TextureFormat,
+        sample_count: u32,
+        depth_format: Option<TextureFormat>,
+    ) -> Self {
         // Detect descriptor indexing capabilities
         let device_caps = DeviceCaps::from_current_device().unwrap_or_else(|_| {
             // Fallback if capability detection fails
@@ -41,6 +53,7 @@ impl TerrainPipeline {
         });
 
         let descriptor_indexing = device_caps.descriptor_indexing;
+        let sample_count = sample_count.max(1);
         let max_palette_textures = if descriptor_indexing {
             device_caps.max_texture_array_layers.min(64) // Reasonable limit for palettes
         } else {
@@ -133,9 +146,80 @@ impl TerrainPipeline {
             })
         };
 
+        // B7: group(3) — Cloud shadow texture + sampler
+        let bgl_cloud_shadows = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("vf.Terrain.bgl.cloud_shadows"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        // B5: group(4) - Planar reflection uniforms + textures
+        let bgl_reflection = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("vf.Terrain.bgl.reflection"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Depth,
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
         let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("vf.Terrain.pipelineLayout"),
-            bind_group_layouts: &[&bgl_globals, &bgl_height, &bgl_lut],
+            bind_group_layouts: &[
+                &bgl_globals,
+                &bgl_height,
+                &bgl_lut,
+                &bgl_cloud_shadows,
+                &bgl_reflection,
+            ],
             push_constant_ranges: &[],
         });
 
@@ -176,11 +260,18 @@ impl TerrainPipeline {
             fragment: Some(FragmentState {
                 module: &shader,
                 entry_point: "fs_main", // must match T3.2
-                targets: &[Some(ColorTargetState {
-                    format: color_format, // Rgba8UnormSrgb recommended
-                    blend: None, // straight alpha by default; no blending for opaque terrain
-                    write_mask: ColorWrites::ALL,
-                })],
+                targets: &[
+                    Some(ColorTargetState {
+                        format: color_format, // Rgba8UnormSrgb recommended
+                        blend: None, // straight alpha by default; no blending for opaque terrain
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: normal_format,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                ],
             }),
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::TriangleList,
@@ -191,9 +282,15 @@ impl TerrainPipeline {
                 polygon_mode: PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: None, // no depth for single-layer terrain in spike
+            depth_stencil: depth_format.map(|format| DepthStencilState {
+                format,
+                depth_write_enabled: true,
+                depth_compare: CompareFunction::LessEqual,
+                stencil: StencilState::default(),
+                bias: DepthBiasState::default(),
+            }),
             multisample: MultisampleState {
-                count: 1, // MSAA=1 per roadmap
+                count: sample_count,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -206,8 +303,13 @@ impl TerrainPipeline {
             bgl_globals,
             bgl_height,
             bgl_lut,
+            bgl_cloud_shadows, // B7: Add cloud shadows bind group layout
+            bgl_reflection,    // B5: Planar reflection bind group layout
             descriptor_indexing,
             max_palette_textures,
+            sample_count,
+            depth_format,
+            normal_format,
         }
     }
 
@@ -279,6 +381,58 @@ impl TerrainPipeline {
                 BindGroupEntry {
                     binding: 1,
                     resource: BindingResource::Sampler(samp),
+                },
+            ],
+        })
+    }
+
+    // B7: Cloud shadow bind group helper
+    pub fn make_bg_cloud_shadows(
+        &self,
+        device: &Device,
+        view: &TextureView,
+        samp: &Sampler,
+    ) -> BindGroup {
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some("vf.Terrain.bg.cloud_shadows"),
+            layout: &self.bgl_cloud_shadows,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(samp),
+                },
+            ],
+        })
+    }
+
+    pub fn make_bg_reflection(
+        &self,
+        device: &Device,
+        renderer: &PlanarReflectionRenderer,
+    ) -> BindGroup {
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some("vf.Terrain.bg.reflection"),
+            layout: &self.bgl_reflection,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: renderer.uniform_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&renderer.reflection_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::Sampler(&renderer.reflection_sampler),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::TextureView(&renderer.reflection_depth_view),
                 },
             ],
         })

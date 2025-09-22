@@ -118,7 +118,8 @@
       "Bash(cmake:*)",
       "Bash(maturin:*)",
       "Bash(dir:*)",
-      "Bash(cargo fmt:*)"
+      "Bash(cargo fmt:*)",
+      "Bash(VF_ENABLE_TERRAIN_TESTS=1 python -m pytest tests/test_b7_cloud_shadows.py -v)"
     ],
     "deny": [],
     "additionalDirectories": [
