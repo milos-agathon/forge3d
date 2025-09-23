@@ -83,6 +83,7 @@ cargo-extra-args = "--profile release-lto"
 strip = true
 # Generate abi3 wheels for broader compatibility
 compatibility = "linux"  # Add other platforms as needed
+features = ["extension-module"]
 
 # Note: Cargo profiles are defined in Cargo.toml
 

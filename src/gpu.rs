@@ -1,9 +1,10 @@
 use once_cell::sync::OnceCell;
+use std::sync::Arc;
 
 pub struct GpuContext {
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
-    pub adapter: wgpu::Adapter,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+    pub adapter: Arc<wgpu::Adapter>,
 }
 
 static CTX: OnceCell<GpuContext> = OnceCell::new();
@@ -32,9 +33,9 @@ pub fn ctx() -> &'static GpuContext {
         .expect("request_device failed");
 
         GpuContext {
-            device,
-            queue,
-            adapter,
+            device: Arc::new(device),
+            queue: Arc::new(queue),
+            adapter: Arc::new(adapter),
         }
     })
 }

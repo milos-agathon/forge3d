@@ -79,7 +79,7 @@ pub struct DualSourceOITRenderer {
 
     // Hardware support detection
     dual_source_supported: bool,
-    max_dual_source_targets: u32,
+    _max_dual_source_targets: u32,
 
     // GPU resources
     uniforms_buffer: wgpu::Buffer,
@@ -97,22 +97,22 @@ pub struct DualSourceOITRenderer {
 
     // Shaders and pipelines
     dual_source_shader: wgpu::ShaderModule,
-    compose_shader: wgpu::ShaderModule,
+    _compose_shader: wgpu::ShaderModule,
 
     // Bind group layouts
     dual_source_bind_group_layout: wgpu::BindGroupLayout,
-    compose_bind_group_layout: wgpu::BindGroupLayout,
+    _compose_bind_group_layout: wgpu::BindGroupLayout,
 
     // Render pipelines
     dual_source_pipeline: Option<wgpu::RenderPipeline>,
     compose_pipeline: wgpu::RenderPipeline,
 
     // Bind groups
-    dual_source_bind_group: Option<wgpu::BindGroup>,
+    _dual_source_bind_group: Option<wgpu::BindGroup>,
     compose_bind_group: Option<wgpu::BindGroup>,
 
     // Sampler
-    sampler: wgpu::Sampler,
+    _sampler: wgpu::Sampler,
 
     // Performance metrics
     frame_stats: DualSourceOITStats,
@@ -334,7 +334,7 @@ impl DualSourceOITRenderer {
             width,
             height,
             dual_source_supported,
-            max_dual_source_targets,
+            _max_dual_source_targets: max_dual_source_targets,
             uniforms_buffer,
             compose_uniforms_buffer,
             dual_source_color_texture: None,
@@ -344,14 +344,14 @@ impl DualSourceOITRenderer {
             wboit_color_view: None,
             wboit_reveal_view: None,
             dual_source_shader,
-            compose_shader,
+            _compose_shader: compose_shader,
             dual_source_bind_group_layout,
-            compose_bind_group_layout,
+            _compose_bind_group_layout: compose_bind_group_layout,
             dual_source_pipeline: None,
             compose_pipeline,
-            dual_source_bind_group: None,
+            _dual_source_bind_group: None,
             compose_bind_group: None,
-            sampler,
+            _sampler: sampler,
             frame_stats: DualSourceOITStats::default(),
             uniforms,
             compose_uniforms,

@@ -136,7 +136,7 @@ pub struct IBLRenderer {
     irradiance_pipeline: wgpu::RenderPipeline,
     specular_pipeline: wgpu::RenderPipeline,
     brdf_pipeline: wgpu::RenderPipeline,
-    equirect_to_cube_pipeline: wgpu::RenderPipeline,
+    _equirect_to_cube_pipeline: wgpu::RenderPipeline,
 
     // Bind group layouts
     ibl_bind_group_layout: wgpu::BindGroupLayout,
@@ -441,7 +441,7 @@ impl IBLRenderer {
             irradiance_pipeline,
             specular_pipeline,
             brdf_pipeline,
-            equirect_to_cube_pipeline,
+            _equirect_to_cube_pipeline: equirect_to_cube_pipeline,
             ibl_bind_group_layout,
             pbr_bind_group_layout,
             uniforms_buffer,

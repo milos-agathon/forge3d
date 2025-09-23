@@ -3,14 +3,18 @@
 // Provides SDF primitives, CSG operations, hybrid traversal, and path tracing
 // RELEVANT FILES:src/sdf/mod.rs,src/path_tracing/mod.rs,python/forge3d/__init__.py
 
+#[cfg(feature = "extension-module")]
 use once_cell::sync::Lazy;
+#[cfg(feature = "extension-module")]
 use std::sync::Mutex;
 
+#[cfg(feature = "extension-module")]
 use shadows::state::{CpuCsmConfig, CpuCsmState};
 
 #[cfg(feature = "extension-module")]
 use pyo3::{exceptions::PyValueError, prelude::*, wrap_pyfunction};
 
+#[cfg(feature = "extension-module")]
 static GLOBAL_CSM_STATE: Lazy<Mutex<CpuCsmState>> =
     Lazy::new(|| Mutex::new(CpuCsmState::default()));
 

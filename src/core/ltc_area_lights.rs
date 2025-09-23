@@ -179,6 +179,7 @@ impl Default for LTCUniforms {
 
 /// LTC matrix and scale data structure for lookup
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct LTCData {
     /// Transform matrix (3x3 flattened to 4 floats with padding)
     pub matrix: [f32; 12], // 3x4 with padding for GPU alignment

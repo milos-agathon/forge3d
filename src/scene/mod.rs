@@ -3,7 +3,9 @@
 #![allow(deprecated)]
 use crate::device_caps::DeviceCaps;
 use bytemuck::{Pod, Zeroable};
+#[cfg(feature = "extension-module")]
 use numpy::{IntoPyArray, PyUntypedArrayMethods};
+#[cfg(feature = "extension-module")]
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use wgpu::util::DeviceExt;
@@ -34,7 +36,7 @@ impl Default for SceneGlobals {
     }
 }
 
-#[pyclass(module = "_vulkan_forge", name = "Scene")]
+#[cfg_attr(feature = "extension-module", pyclass(module = "forge3d._forge3d", name = "Scene"))]
 pub struct Scene {
     width: u32,
     height: u32,
@@ -587,6 +589,7 @@ fn create_ssao_texture(
     (texture, view)
 }
 
+#[cfg(feature = "extension-module")]
 #[pymethods]
 impl Scene {
     #[new]
@@ -1195,6 +1198,7 @@ impl Scene {
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
         }
 
+        // B8: Render realtime clouds overlay (if enabled)
         if let Err(e) = self.render_clouds(&mut encoder) {
             return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
                 "Cloud rendering failed: {}",
@@ -1562,7 +1566,9 @@ impl Scene {
         }
 
         self.sample_count = samples;
-        self.rebuild_msaa_state()?;
+        self
+            .rebuild_msaa_state()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
         Ok(samples)
     }
     #[pyo3(text_signature = "($self)")]
@@ -3441,7 +3447,7 @@ impl Scene {
         let max_lights = max_lights.unwrap_or(16);
 
         let renderer = crate::core::ltc_area_lights::LTCRectAreaLightRenderer::new(
-            std::sync::Arc::new(g.device.clone()),
+            g.device.clone(),
             max_lights
         ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!(
             "Failed to create LTC rect area light renderer: {}",
@@ -4241,7 +4247,7 @@ impl Scene {
         camera_pos + forward // Target is camera position + forward direction
     }
 
-    fn rebuild_msaa_state(&mut self) -> PyResult<()> {
+    fn rebuild_msaa_state(&mut self) -> Result<(), String> {
         let g = crate::gpu::ctx();
         let depth_format = if self.sample_count > 1 {
             Some(wgpu::TextureFormat::Depth32Float)
@@ -4278,7 +4284,7 @@ impl Scene {
                 &self.color,
                 &self.normal,
             )
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+            .map_err(|e| e)?;
 
         self.tp = crate::terrain::pipeline::TerrainPipeline::create(
             &g.device,
@@ -4305,7 +4311,7 @@ impl Scene {
                 &self.color,
                 &self.normal,
             )
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+            .map_err(|e| e)?;
 
         if let Some(ref mut renderer) = self.reflection_renderer {
             renderer.create_bind_group(&g.device, &self.tp.bgl_reflection);

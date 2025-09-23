@@ -90,7 +90,7 @@ def test_slope_aspect_input_validation():
     heights_2d = np.array([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 
                           [7.0, 8.0, 9.0, 10.0, 11.0, 12.0], 
                           [13.0, 14.0, 15.0, 16.0, 17.0, 18.0]], dtype=np.float32)
-    heights_non_contig = heights_2d[:, ::2].flatten()  # Non-contiguous, gives 9 elements
+    heights_non_contig = heights_2d[:, ::2]  # Non-contiguous 2D view (size 9)
     with pytest.raises(Exception, match="Heights array must be C-contiguous"):
         ts.slope_aspect_compute(heights_non_contig, 3, 3)
 

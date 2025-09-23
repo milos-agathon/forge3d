@@ -175,6 +175,7 @@ pub struct CascadeStatistics {
 }
 
 /// Cascaded Shadow Maps renderer
+#[derive(Debug)]
 pub struct CsmRenderer {
     /// Configuration
     pub config: CsmConfig,
