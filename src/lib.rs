@@ -13,6 +13,8 @@ use shadows::state::{CpuCsmConfig, CpuCsmState};
 
 #[cfg(feature = "extension-module")]
 use pyo3::{exceptions::PyValueError, prelude::*, wrap_pyfunction};
+#[cfg(feature = "extension-module")]
+use pyo3::types::PyDict;
 
 #[cfg(feature = "extension-module")]
 static GLOBAL_CSM_STATE: Lazy<Mutex<CpuCsmState>> =
@@ -217,6 +219,69 @@ fn validate_csm_peter_panning() -> PyResult<bool> {
     Ok(state.validate_peter_panning())
 }
 
+// ---------------------------------------------------------------------------
+// GPU adapter enumeration and device probe (for Python fallbacks and examples)
+// ---------------------------------------------------------------------------
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn enumerate_adapters(py: Python<'_>) -> PyResult<Vec<PyObject>> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::all(),
+        dx12_shader_compiler: Default::default(),
+        flags: wgpu::InstanceFlags::default(),
+        gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
+    });
+
+    let mut out: Vec<PyObject> = Vec::new();
+    for adapter in instance.enumerate_adapters(wgpu::Backends::all()) {
+        let info = adapter.get_info();
+        let d = PyDict::new(py);
+        d.set_item("name", info.name.clone())?;
+        d.set_item("vendor", info.vendor)?;
+        d.set_item("device", info.device)?;
+        d.set_item("device_type", format!("{:?}", info.device_type))?;
+        d.set_item("backend", format!("{:?}", info.backend))?;
+        out.push(d.into_py(py));
+    }
+    Ok(out)
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
+    let mask = match backend.as_deref().map(|s| s.to_ascii_lowercase()) {
+        Some(ref s) if s == "metal" => wgpu::Backends::METAL,
+        Some(ref s) if s == "vulkan" => wgpu::Backends::VULKAN,
+        Some(ref s) if s == "dx12" => wgpu::Backends::DX12,
+        Some(ref s) if s == "gl" => wgpu::Backends::GL,
+        Some(ref s) if s == "webgpu" => wgpu::Backends::BROWSER_WEBGPU,
+        _ => wgpu::Backends::all(),
+    };
+
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: mask,
+        dx12_shader_compiler: Default::default(),
+        flags: wgpu::InstanceFlags::default(),
+        gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
+    });
+
+    let d = PyDict::new(py);
+    let mut adapters = instance.enumerate_adapters(mask);
+    if let Some(adapter) = adapters.into_iter().next() {
+        let info = adapter.get_info();
+        d.set_item("status", "ok")?;
+        d.set_item("name", info.name.clone())?;
+        d.set_item("vendor", info.vendor)?;
+        d.set_item("device", info.device)?;
+        d.set_item("device_type", format!("{:?}", info.device_type))?;
+        d.set_item("backend", format!("{:?}", info.backend))?;
+    } else {
+        d.set_item("status", "unavailable")?;
+        d.set_item("backend", format!("{:?}", mask))?;
+    }
+    Ok(d.into_py(py))
+}
+
 // PyO3 module entry point so Python can `import forge3d._forge3d`
 // This must be named exactly `_forge3d` to match [tool.maturin].module-name in pyproject.toml
 #[cfg(feature = "extension-module")]
@@ -233,6 +298,10 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_csm_debug_mode, m)?)?;
     m.add_function(wrap_pyfunction!(get_csm_cascade_info, m)?)?;
     m.add_function(wrap_pyfunction!(validate_csm_peter_panning, m)?)?;
+
+    // GPU utilities (adapter enumeration and probe)
+    m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
+    m.add_function(wrap_pyfunction!(device_probe, m)?)?;
 
     // Add main classes
     m.add_class::<crate::scene::Scene>()?;
