@@ -688,6 +688,30 @@ class Scene:
         self._foam_intensity = 0.85
         self._foam_noise_scale = 20.0
 
+        # D: Overlays, Annotations & Text (fallback implementations)
+        # Text overlays (screen-space)
+        self._text_overlays: list[dict] = []
+        # Compass rose
+        self._compass_enabled = False
+        self._compass_params = { 'position': 'top_right', 'size_px': 48, 'color': (255,255,255), 'bg_alpha': 0.2 }
+        # Scale bar
+        self._scalebar_enabled = False
+        self._scalebar_params = { 'position': 'bottom_left', 'max_width_px': 200, 'color': (255,255,255) }
+        # Drape raster overlay
+        self._raster_overlay = None  # dict with keys: image(np.uint8 HxWx(3|4)), alpha, offset_xy, scale
+        # Altitude overlay
+        self._alt_overlay_enabled = False
+        self._alt_overlay_params = { 'alpha': 0.35 }
+        # Contours
+        self._contours_enabled = False
+        self._contours = []  # list of polylines (list of (y,x) int tuples in image space)
+        self._contour_params = { 'color': (0,0,0), 'width_px': 1 }
+        # Hillshade / shadow overlay
+        self._hillshade_enabled = False
+        self._hillshade_params = { 'azimuth_deg': 315.0, 'altitude_deg': 45.0, 'strength': 0.6, 'blend': 'multiply' }
+        # Title bar
+        self._titlebar_params = None  # dict: text, height_px, bg_rgba, color
+
         # B12: soft light radius (fallback raster)
         self._soft_light_enabled = False
         self._light_pos = (0.0, 8.0, 0.0)
@@ -820,12 +844,30 @@ class Scene:
                 img[..., 2] = np.clip(b, 0, 255).astype(np.uint8)
                 img[..., 3] = 255
 
+        # Apply SSAO before screen-space overlays
         if self._ssao_enabled:
             self._apply_ssao(img)
-
+        # Apply planar reflections before overlays
         if self._reflection_state is not None:
             self._apply_planar_reflections(img)
 
+        # D: Overlays, Annotations & Text (fallback implementations)
+        if self._text_overlays:
+            self._apply_text_overlays(img)
+        if self._compass_enabled:
+            self._apply_compass_rose(img)
+        if self._scalebar_enabled:
+            self._apply_scale_bar(img)
+        if self._raster_overlay is not None:
+            self._apply_raster_overlay(img)
+        if self._alt_overlay_enabled:
+            self._apply_altitude_overlay(img)
+        if self._contours_enabled and self._contours:
+            self._apply_contours_overlay(img)
+        if self._hillshade_enabled:
+            self._apply_hillshade_overlay(img)
+        if self._titlebar_params is not None:
+            self._apply_title_bar(img)
 
         # B11: Water surface overlay (fallback)
         if self._water_enabled and self._water_mode != WaterSurfaceMode.disabled and self._water_alpha > 0.0:
@@ -1213,6 +1255,110 @@ class Scene:
         return (float(self._water_height), float(self._water_alpha), float(self._water_hue_shift), float(self._water_tint_strength))
 
     # -----------------------------
+    # D1: SDF Text (2D overlay, minimal fallback)
+    # -----------------------------
+    def add_text_overlay(self, text: str, x: int, y: int, size_px: int = 16, color: tuple[int,int,int] = (255,255,255), anchor: str = 'top_left', depth_test: bool = False) -> None:
+        # Minimal rectangle-based text placeholder; depth_test ignored in fallback
+        self._text_overlays.append({ 'text': str(text), 'x': int(x), 'y': int(y), 'size': int(max(6, size_px)), 'color': (int(color[0]), int(color[1]), int(color[2])), 'anchor': str(anchor) })
+
+    def clear_text_overlays(self) -> None:
+        self._text_overlays.clear()
+
+    # -----------------------------
+    # D2: Compass Rose
+    # -----------------------------
+    def enable_compass_rose(self, position: str = 'top_right', size_px: int = 48, color: tuple[int,int,int] = (255,255,255), bg_alpha: float = 0.2) -> None:
+        self._compass_enabled = True
+        self._compass_params = { 'position': str(position), 'size_px': int(max(16, size_px)), 'color': (int(color[0]), int(color[1]), int(color[2])), 'bg_alpha': float(max(0.0, min(1.0, bg_alpha))) }
+
+    def disable_compass_rose(self) -> None:
+        self._compass_enabled = False
+
+    # -----------------------------
+    # D3: Scale Bar
+    # -----------------------------
+    def enable_scale_bar(self, position: str = 'bottom_left', max_width_px: int = 200, color: tuple[int,int,int] = (255,255,255)) -> None:
+        self._scalebar_enabled = True
+        self._scalebar_params = { 'position': str(position), 'max_width_px': int(max(32, max_width_px)), 'color': (int(color[0]), int(color[1]), int(color[2])) }
+
+    def disable_scale_bar(self) -> None:
+        self._scalebar_enabled = False
+
+    # -----------------------------
+    # D4: Drape Raster Overlays
+    # -----------------------------
+    def set_raster_overlay(self, image: np.ndarray | None, *, alpha: float = 1.0, offset_xy: tuple[int,int] = (0,0), scale: float = 1.0) -> None:
+        if image is None:
+            self._raster_overlay = None
+            return
+        if not isinstance(image, np.ndarray) or image.ndim != 3 or image.shape[2] not in (3,4):
+            raise ValueError("overlay image must be HxWx3 or HxWx4 uint8 array")
+        if image.dtype != np.uint8:
+            image = image.astype(np.uint8)
+        self._raster_overlay = { 'img': image, 'alpha': float(max(0.0, min(1.0, alpha))), 'offset': (int(offset_xy[0]), int(offset_xy[1])), 'scale': float(max(0.1, scale)) }
+
+    # -----------------------------
+    # D5: Altitude Overlay Generation (color ramp)
+    # -----------------------------
+    def enable_altitude_overlay(self, *, alpha: float = 0.35) -> None:
+        self._alt_overlay_enabled = True
+        self._alt_overlay_params['alpha'] = float(max(0.0, min(1.0, alpha)))
+
+    def disable_altitude_overlay(self) -> None:
+        self._alt_overlay_enabled = False
+
+    # -----------------------------
+    # D6/D7: Contours (generate + render)
+    # -----------------------------
+    def generate_contours(self, *, interval: float | None = None, levels: list[float] | None = None, smooth: int = 0, max_lines: int = 5000) -> list:
+        if getattr(self, "_heightmap", None) is None:
+            raise RuntimeError("No heightmap available; set heightmap before generating contours")
+        hm = self._heightmap
+        vmin = float(hm.min()); vmax = float(hm.max())
+        if levels is None:
+            if interval is None or interval <= 0:
+                interval = max(1e-3, (vmax - vmin) / 10.0)
+            lvls = np.arange(vmin, vmax + interval*0.5, interval, dtype=np.float32)
+        else:
+            lvls = np.array(levels, dtype=np.float32)
+        lines = []
+        for lvl in lvls:
+            ls = self._marching_squares(hm, float(lvl))
+            lines.extend(ls)
+            if len(lines) > max_lines:
+                break
+        if smooth > 0:
+            lines = [self._smooth_polyline(l, smooth) for l in lines]
+        self._contours = lines
+        return lines
+
+    def enable_contours_overlay(self, color: tuple[int,int,int] = (0,0,0), width_px: int = 1) -> None:
+        self._contours_enabled = True
+        self._contour_params = { 'color': (int(color[0]), int(color[1]), int(color[2])), 'width_px': int(max(1, width_px)) }
+
+    def disable_contours_overlay(self) -> None:
+        self._contours_enabled = False
+
+    # -----------------------------
+    # D8: Add Shadow Overlay (Hillshade)
+    # -----------------------------
+    def enable_shadow_overlay(self, azimuth_deg: float = 315.0, altitude_deg: float = 45.0, strength: float = 0.7, blend: str = 'multiply') -> None:
+        self._hillshade_enabled = True
+        self._hillshade_params = { 'azimuth_deg': float(azimuth_deg), 'altitude_deg': float(altitude_deg), 'strength': float(max(0.0, min(1.0, strength))), 'blend': str(blend) }
+
+    def disable_shadow_overlay(self) -> None:
+        self._hillshade_enabled = False
+
+    # -----------------------------
+    # D10: Title Bar Overlay
+    # -----------------------------
+    def set_title_bar(self, text: str, height_px: int = 28, bg_rgba: tuple[int,int,int,int] = (0,0,0,128), color: tuple[int,int,int] = (255,255,255)) -> None:
+        self._titlebar_params = { 'text': str(text), 'height_px': int(max(14, height_px)), 'bg_rgba': (int(bg_rgba[0]), int(bg_rgba[1]), int(bg_rgba[2]), int(bg_rgba[3])), 'color': (int(color[0]), int(color[1]), int(color[2])) }
+
+    def clear_title_bar(self) -> None:
+        self._titlebar_params = None
+
+    # -----------------------------
     # C1: Detect water from DEM (mask)
     # -----------------------------
     def detect_water_from_dem(self, *, threshold: float | None = None, method: str = "auto", fill_basins: bool = True, smooth_iters: int = 1) -> np.ndarray:
@@ -1418,6 +1564,287 @@ class Scene:
         uv = xs / max(1.0, scale) + ys / max(1.0, 1.37 * scale)
         s = np.sin(uv * 12.9898 + 78.233)
         return (s - s.min()) / max(1e-9, (s.max() - s.min()))
+
+    # -----------------------------
+    # D overlays: helpers and apply routines
+    # -----------------------------
+    def _apply_text_overlays(self, img: np.ndarray) -> None:
+        h, w = img.shape[:2]
+        rgb = img[..., :3].astype(np.float32) / 255.0
+        for t in self._text_overlays:
+            size = int(t['size'])
+            txt = t['text']
+            # Placeholder: draw a filled rectangle representing text box
+            box_w = max(8, int(len(txt) * size * 0.6))
+            box_h = max(6, size)
+            x = int(t['x']); y = int(t['y'])
+            if t.get('anchor') == 'center':
+                x -= box_w // 2; y -= box_h // 2
+            x0 = max(0, min(w, x)); y0 = max(0, min(h, y))
+            x1 = max(0, min(w, x + box_w)); y1 = max(0, min(h, y + box_h))
+            if x1 > x0 and y1 > y0:
+                color = np.array(t['color'], dtype=np.float32) / 255.0
+                patch = np.broadcast_to(color.reshape(1,1,3), (y1 - y0, x1 - x0, 3))
+                alpha = 0.85
+                rgb[y0:y1, x0:x1, :] = (1.0 - alpha) * rgb[y0:y1, x0:x1, :] + alpha * patch
+        img[..., :3] = np.clip(rgb * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+    def _apply_compass_rose(self, img: np.ndarray) -> None:
+        h, w = img.shape[:2]
+        p = self._compass_params
+        size = int(p['size_px'])
+        pad = 8
+        # position
+        if p['position'] == 'top_right':
+            x0, y0 = w - size - pad, pad
+        elif p['position'] == 'bottom_left':
+            x0, y0 = pad, h - size - pad
+        elif p['position'] == 'bottom_right':
+            x0, y0 = w - size - pad, h - size - pad
+        else:
+            x0, y0 = pad, pad
+        x1, y1 = x0 + size, y0 + size
+        # background circle approx: draw a square with alpha
+        rgb = img[..., :3].astype(np.float32) / 255.0
+        bg = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        if x0 < x1 and y0 < y1:
+            a = float(p.get('bg_alpha', 0.2))
+            rgb[y0:y1, x0:x1, :] = (1.0 - a) * rgb[y0:y1, x0:x1, :] + a * bg
+        # simple north arrow line (vertical)
+        cx = (x0 + x1)//2
+        cy = (y0 + y1)//2
+        col = np.array(p['color'], dtype=np.float32) / 255.0
+        thickness = max(1, size // 16)
+        # vertical line
+        y_top = y0 + size//6
+        y_bot = y1 - size//6
+        rgb[y_top:y_bot, max(x0, cx - thickness):min(w, cx + thickness), :] = col
+        # north tip triangle approx
+        tip_h = max(3, size//8)
+        for i in range(tip_h):
+            xl = max(x0, cx - i - thickness)
+            xr = min(w, cx + i + thickness)
+            yy = max(y0, y_top - i - 1)
+            if yy < h:
+                rgb[yy:yy+1, xl:xr, :] = col
+        img[..., :3] = np.clip(rgb * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+    def _apply_scale_bar(self, img: np.ndarray) -> None:
+        h, w = img.shape[:2]
+        p = self._scalebar_params
+        max_w = int(p['max_width_px'])
+        bar_h = max(4, max_w // 20)
+        margin = 12
+        # choose length in pixels (1/3 of max)
+        px_len = max(24, int(max_w * 0.6))
+        if p['position'] == 'bottom_left':
+            x0 = margin; y0 = h - margin - bar_h
+        elif p['position'] == 'bottom_right':
+            x0 = w - margin - px_len; y0 = h - margin - bar_h
+        else:
+            x0 = margin; y0 = h - margin - bar_h
+        x1 = min(w, x0 + px_len); y1 = min(h, y0 + bar_h)
+        rgb = img[..., :3].astype(np.float32) / 255.0
+        col = np.array(p['color'], dtype=np.float32) / 255.0
+        rgb[y0:y1, x0:x1, :] = col
+        img[..., :3] = np.clip(rgb * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+    def _apply_raster_overlay(self, img: np.ndarray) -> None:
+        h, w = img.shape[:2]
+        ov = self._raster_overlay
+        if ov is None:
+            return
+        src = ov['img']
+        scale = float(ov.get('scale', 1.0))
+        offx, offy = ov.get('offset', (0,0))
+        alpha = float(ov.get('alpha', 1.0))
+        # simplistic nearest scaling
+        sh, sw = src.shape[:2]
+        Ht = max(1, int(sh * scale)); Wt = max(1, int(sw * scale))
+        yy = (np.linspace(0, sh - 1, Ht)).astype(np.int32)
+        xx = (np.linspace(0, sw - 1, Wt)).astype(np.int32)
+        scaled = src[yy][:, xx]
+        # paste into destination
+        y0 = max(0, offy); x0 = max(0, offx)
+        y1 = min(h, y0 + Ht); x1 = min(w, x0 + Wt)
+        if y1 <= y0 or x1 <= x0:
+            return
+        patch = scaled[:y1 - y0, :x1 - x0, :]
+        if patch.shape[2] == 4:
+            a = (patch[...,3:4].astype(np.float32) / 255.0) * alpha
+            src_rgb = patch[...,:3].astype(np.float32) / 255.0
+        else:
+            a = np.full((y1 - y0, x1 - x0, 1), alpha, dtype=np.float32)
+            src_rgb = patch.astype(np.float32) / 255.0
+        dst_rgb = img[y0:y1, x0:x1, :3].astype(np.float32) / 255.0
+        out = (1.0 - a) * dst_rgb + a * src_rgb
+        img[y0:y1, x0:x1, :3] = np.clip(out * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+    def _apply_altitude_overlay(self, img: np.ndarray) -> None:
+        if getattr(self, "_heightmap", None) is None:
+            return
+        h, w = img.shape[:2]
+        hm = self._heightmap
+        Hm, Wm = hm.shape
+        if (Hm, Wm) != (h, w):
+            y_idx = (np.linspace(0, Hm - 1, h)).astype(np.int32)
+            x_idx = (np.linspace(0, Wm - 1, w)).astype(np.int32)
+            H = hm[y_idx][:, x_idx]
+        else:
+            H = hm
+        Hn = (H - float(H.min())) / max(1e-9, float(H.max() - H.min()))
+        # simple terrain-like ramp: green to brown to white
+        c0 = np.array([0.1, 0.5, 0.2], dtype=np.float32)
+        c1 = np.array([0.5, 0.35, 0.2], dtype=np.float32)
+        c2 = np.array([0.9, 0.9, 0.9], dtype=np.float32)
+        mid = 0.6
+        rgb_alt = np.where(Hn[...,None] < mid,
+                           c0[None,None,:] * (1.0 - Hn[...,None]/mid) + c1[None,None,:] * (Hn[...,None]/mid),
+                           c1[None,None,:] * (1.0 - (Hn[...,None]-mid)/(1.0-mid)) + c2[None,None,:] * ((Hn[...,None]-mid)/(1.0-mid)))
+        a = float(self._alt_overlay_params.get('alpha', 0.35))
+        base = img[...,:3].astype(np.float32) / 255.0
+        out = (1.0 - a) * base + a * rgb_alt
+        img[...,:3] = np.clip(out * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+    def _apply_hillshade_overlay(self, img: np.ndarray) -> None:
+        if getattr(self, "_heightmap", None) is None:
+            return
+        h, w = img.shape[:2]
+        hm = self._heightmap
+        Hm, Wm = hm.shape
+        if (Hm, Wm) != (h, w):
+            y_idx = (np.linspace(0, Hm - 1, h)).astype(np.int32)
+            x_idx = (np.linspace(0, Wm - 1, w)).astype(np.int32)
+            H = hm[y_idx][:, x_idx]
+        else:
+            H = hm
+        az = np.radians(float(self._hillshade_params.get('azimuth_deg', 315.0)))
+        alt = np.radians(float(self._hillshade_params.get('altitude_deg', 45.0)))
+        # gradient
+        gy, gx = np.gradient(H.astype(np.float32))
+        slope = np.arctan(1.0 * np.hypot(gx, gy) + 1e-6)
+        aspect = np.arctan2(-gy, -gx) + np.pi
+        hs = np.sin(alt) * np.cos(slope) + np.cos(alt) * np.sin(slope) * np.cos(az - aspect)
+        hs = (hs - hs.min()) / max(1e-9, (hs.max() - hs.min()))
+        strength = float(self._hillshade_params.get('strength', 0.6))
+        blend = str(self._hillshade_params.get('blend', 'multiply'))
+        base = img[...,:3].astype(np.float32) / 255.0
+        if blend == 'screen':
+            out = 1.0 - (1.0 - base) * (1.0 - strength * hs[...,None])
+        else:  # multiply
+            out = base * (0.5 + 0.5 * (strength * hs[...,None]))
+        img[...,:3] = np.clip(out * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+    def _apply_contours_overlay(self, img: np.ndarray) -> None:
+        rgb = img[...,:3].astype(np.float32) / 255.0
+        h, w = rgb.shape[:2]
+        col = np.array(self._contour_params.get('color', (0,0,0)), dtype=np.float32) / 255.0
+        width = int(self._contour_params.get('width_px', 1))
+        for poly in self._contours:
+            for (y0,x0),(y1,x1) in zip(poly[:-1], poly[1:]):
+                self._draw_line(rgb, int(x0), int(y0), int(x1), int(y1), col, width)
+        img[...,:3] = np.clip(rgb * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+    def _apply_title_bar(self, img: np.ndarray) -> None:
+        p = self._titlebar_params
+        if p is None:
+            return
+        h, w = img.shape[:2]
+        bar_h = int(p.get('height_px', 28))
+        rgba = np.array(p.get('bg_rgba', (0,0,0,128)), dtype=np.float32)
+        a = rgba[3] / 255.0
+        base = img[0:bar_h, :, :3].astype(np.float32) / 255.0
+        bg = np.broadcast_to((rgba[:3]/255.0).reshape(1,1,3), base.shape)
+        img[0:bar_h, :, :3] = np.clip(((1.0 - a) * base + a * bg) * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+        # Draw simple text placeholder rectangle at left
+        txt = str(p.get('text', ''))
+        if txt:
+            rect_w = max(8, int(len(txt) * (bar_h * 0.6)))
+            rect_h = int(bar_h * 0.7)
+            y0 = (bar_h - rect_h)//2
+            x0 = 12
+            y1 = min(bar_h, y0 + rect_h); x1 = min(w, x0 + rect_w)
+            col = np.array(p.get('color', (255,255,255)), dtype=np.float32) / 255.0
+            patch = np.broadcast_to(col.reshape(1,1,3), (y1 - y0, x1 - x0, 3))
+            roi = img[y0:y1, x0:x1, :3].astype(np.float32) / 255.0
+            img[y0:y1, x0:x1, :3] = np.clip((0.2 * roi + 0.8 * patch) * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+    # Geometry helpers
+    @staticmethod
+    def _draw_line(rgb: np.ndarray, x0: int, y0: int, x1: int, y1: int, color: np.ndarray, width: int = 1) -> None:
+        h, w = rgb.shape[:2]
+        dx = abs(x1 - x0)
+        dy = -abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx + dy
+        x, y = x0, y0
+        while True:
+            if 0 <= x < w and 0 <= y < h:
+                xw0 = max(0, x - width//2); xw1 = min(w, x + (width+1)//2)
+                yw0 = max(0, y - width//2); yw1 = min(h, y + (width+1)//2)
+                rgb[yw0:yw1, xw0:xw1, :] = color
+            if x == x1 and y == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dy:
+                err += dy
+                x += sx
+            if e2 <= dx:
+                err += dx
+                y += sy
+
+    @staticmethod
+    def _smooth_polyline(poly: list[tuple[int,int]], iters: int) -> list[tuple[int,int]]:
+        p = np.array(poly, dtype=np.float32)
+        for _ in range(max(1, iters)):
+            p[1:-1] = 0.25 * p[:-2] + 0.5 * p[1:-1] + 0.25 * p[2:]
+        return [(int(round(y)), int(round(x))) for y,x in p]
+
+    @staticmethod
+    def _marching_squares(arr: np.ndarray, level: float) -> list[list[tuple[int,int]]]:
+        # Very simple marching squares producing short segments linked greedily
+        H, W = arr.shape
+        lines = []
+        # threshold grid
+        iso = (arr >= level)
+        for y in range(H - 1):
+            for x in range(W - 1):
+                idx = (iso[y, x] << 3) | (iso[y, x+1] << 2) | (iso[y+1, x+1] << 1) | (iso[y+1, x])
+                # handle a couple of common cases: diagonals and edges
+                if idx in (1, 14):  # bottom-left corner
+                    lines.append([(y+1, x), (y, x+1)])
+                elif idx in (2, 13):  # bottom-right corner
+                    lines.append([(y+1, x+1), (y, x)])
+                elif idx in (4, 11):
+                    lines.append([(y, x+1), (y+1, x)])
+                elif idx in (8, 7):
+                    lines.append([(y, x), (y+1, x+1)])
+                elif idx in (3, 12):
+                    lines.append([(y, x), (y, x+1)])
+                elif idx in (6, 9):
+                    lines.append([(y, x), (y+1, x)])
+        # connect nearby segments
+        connected = []
+        used = np.zeros(len(lines), dtype=bool)
+        for i, seg in enumerate(lines):
+            if used[i]:
+                continue
+            used[i] = True
+            cur = [seg[0], seg[1]]
+            changed = True
+            while changed:
+                changed = False
+                for j, seg2 in enumerate(lines):
+                    if used[j]:
+                        continue
+                    if cur[-1] == seg2[0]:
+                        cur.append(seg2[1]); used[j] = True; changed = True
+                    elif cur[-1] == seg2[1]:
+                        cur.append(seg2[0]); used[j] = True; changed = True
+            connected.append(cur)
+        # convert to image coordinate tuples (y,x)
+        return connected
 
     # ---------------------------------------------------------------------
     # B12: Soft Light Radius (fallback raster) API and rendering
@@ -2634,13 +3061,16 @@ class Scene:
             pw = min(48, width)
             patch = img[:ph, :pw, :3].astype(np.float32) / 255.0
             # A few light neighborhood mixes and a simple separable blur
-            for _ in range(4):
+            for _ in range(8):
                 nb = (np.roll(patch, 1, axis=0) + np.roll(patch, -1, axis=0) +
                       np.roll(patch, 1, axis=1) + np.roll(patch, -1, axis=1)) * 0.25
                 patch = 0.6 * patch + 0.4 * nb
             # Separable 1D blur across rows and columns (very small footprint)
             patch = (np.roll(patch, 1, axis=0) + patch + np.roll(patch, -1, axis=0)) / 3.0
             patch = (np.roll(patch, 1, axis=1) + patch + np.roll(patch, -1, axis=1)) / 3.0
+            # Tiny extra blur using existing box blur on a small float image
+            tiny = np.ascontiguousarray(patch)
+            _ = self._box_blur(tiny, 1)
             return
 
         base = img[..., :3].astype(np.float32) / 255.0

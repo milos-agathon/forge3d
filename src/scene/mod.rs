@@ -4,9 +4,9 @@
 use crate::device_caps::DeviceCaps;
 use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "extension-module")]
-use numpy::{IntoPyArray, PyUntypedArrayMethods, PyReadonlyArray2};
+use numpy::{IntoPyArray, PyUntypedArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3};
 #[cfg(feature = "extension-module")]
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyBytes};
 use std::path::PathBuf;
 use wgpu::util::DeviceExt;
 
@@ -35,6 +35,7 @@ impl Default for SceneGlobals {
         }
     }
 }
+
 
 #[cfg_attr(feature = "extension-module", pyclass(module = "forge3d._forge3d", name = "Scene"))]
 pub struct Scene {
@@ -120,6 +121,34 @@ pub struct Scene {
     // B16: Dual-source blending OIT
     dual_source_oit_renderer: Option<crate::core::dual_source_oit::DualSourceOITRenderer>,
     dual_source_oit_enabled: bool,
+
+    // D: Native overlays compositor
+    overlay_renderer: Option<crate::core::overlays::OverlayRenderer>,
+    overlay_enabled: bool,
+
+    // D: Native text overlay (rectangle placeholder)
+    text_overlay_renderer: Option<crate::core::text_overlay::TextOverlayRenderer>,
+    text_overlay_enabled: bool,
+    text_overlay_alpha: f32,
+    text_instances: Vec<crate::core::text_overlay::TextInstance>,
+
+    // D11: 3D text meshes
+    text3d_renderer: Option<crate::core::text_mesh::TextMeshRenderer>,
+    text3d_enabled: bool,
+    text3d_instances: Vec<Text3DInstance>,
+}
+
+struct Text3DInstance {
+    vbuf: wgpu::Buffer,
+    ibuf: wgpu::Buffer,
+    index_count: u32,
+    vertex_count: u32,
+    model: glam::Mat4,
+    color: [f32; 4],
+    light_dir: [f32; 3],
+    light_intensity: f32,
+    metallic: f32,
+    roughness: f32,
 }
 
 #[repr(C)]
@@ -789,6 +818,25 @@ impl Scene {
         reflection_renderer.create_bind_group(&g.device, &tp.bgl_reflection);
         reflection_renderer.upload_uniforms(&g.queue);
 
+        // D: Overlays compositor
+        let mut overlay_renderer = crate::core::overlays::OverlayRenderer::new(&g.device, TEXTURE_FORMAT);
+        overlay_renderer.recreate_bind_group(&g.device, None, Some(&hview));
+        overlay_renderer.upload_uniforms(&g.queue);
+
+        // D: Text overlay (native)
+        let mut text_renderer = crate::core::text_overlay::TextOverlayRenderer::new(&g.device, TEXTURE_FORMAT);
+        text_renderer.set_resolution(width, height);
+        text_renderer.set_alpha(1.0);
+        text_renderer.set_enabled(false);
+        text_renderer.upload_uniforms(&g.queue);
+
+        // D11: 3D text mesh renderer (match main pass depth format)
+        let mut text3d_renderer = crate::core::text_mesh::TextMeshRenderer::new(&g.device, TEXTURE_FORMAT, depth_format);
+        text3d_renderer.set_view_proj(scene.view, scene.proj);
+        text3d_renderer.set_color(1.0, 1.0, 1.0, 1.0);
+        text3d_renderer.set_light_dir([0.5, 1.0, 0.3]);
+        text3d_renderer.upload_uniforms(&g.queue);
+
         Ok(Self {
             width,
             height,
@@ -866,6 +914,21 @@ impl Scene {
             // B16: Dual-source blending OIT - initially disabled
             dual_source_oit_renderer: None,
             dual_source_oit_enabled: false,
+
+            // D: Overlays
+            overlay_renderer: Some(overlay_renderer),
+            overlay_enabled: false,
+
+            // D: Text overlay
+            text_overlay_renderer: Some(text_renderer),
+            text_overlay_enabled: false,
+            text_overlay_alpha: 1.0,
+            text_instances: Vec::new(),
+
+            // D11: 3D text mesh
+            text3d_renderer: Some(text3d_renderer),
+            text3d_enabled: false,
+            text3d_instances: Vec::new(),
         })
     }
 
@@ -895,6 +958,11 @@ impl Scene {
         g.queue
             .write_buffer(&self.ubo, 0, bytemuck::bytes_of(&uniforms));
         self.last_uniforms = uniforms;
+        // Update text3d renderer view/proj
+        if let Some(ref mut tm) = self.text3d_renderer {
+            tm.set_view_proj(self.scene.view, self.scene.proj);
+            tm.upload_uniforms(&g.queue);
+        }
         Ok(())
     }
 
@@ -974,6 +1042,13 @@ impl Scene {
             self.height_sampler.as_ref().unwrap(),
         );
         self.bg1_height = bg1;
+
+        // Update overlays compositor to use the new height view
+        let height_ref = self.height_view.as_ref();
+        if let Some(ref mut ov) = self.overlay_renderer {
+            ov.recreate_bind_group(&g.device, None, height_ref);
+            ov.upload_uniforms(&g.queue);
+        }
         Ok(())
     }
 
@@ -1185,6 +1260,51 @@ impl Scene {
             rp.set_vertex_buffer(0, self.vbuf.slice(..));
             rp.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint32);
             rp.draw_indexed(0..self.nidx, 0, 0..1);
+
+            // D11: Render 3D text meshes (before overlays)
+            if self.text3d_enabled {
+                if let Some(ref mut tm) = self.text3d_renderer {
+                    let g = crate::gpu::ctx();
+                    tm.set_view_proj(self.scene.view, self.scene.proj);
+                    tm.upload_uniforms(&g.queue);
+                    for inst in &self.text3d_instances {
+                        tm.draw_instance_with_light(
+                            &mut rp,
+                            &g.queue,
+                            inst.model,
+                            inst.color,
+                            inst.light_dir,
+                            inst.light_intensity,
+                            inst.metallic,
+                            inst.roughness,
+                            &inst.vbuf,
+                            &inst.ibuf,
+                            inst.index_count,
+                        );
+                    }
+                }
+            }
+            // D: Render overlays compositor on top if enabled or altitude enabled
+            if let Some(ref ov) = self.overlay_renderer {
+                ov.render(&mut rp);
+            }
+
+            // D: Render native text overlay (placeholder rects) on top of overlay
+            if self.text_overlay_enabled {
+                if let Some(ref mut tr) = self.text_overlay_renderer {
+                    // Upload uniforms and instances before drawing
+                    let g = crate::gpu::ctx();
+                    tr.set_resolution(self.width, self.height);
+                    tr.set_alpha(self.text_overlay_alpha);
+                    tr.set_enabled(true);
+                    tr.upload_uniforms(&g.queue);
+                    if !self.text_instances.is_empty() {
+                        let inst = self.text_instances.clone();
+                        tr.upload_instances(&g.device, &g.queue, &inst);
+                    }
+                    tr.render(&mut rp);
+                }
+            }
         }
         if self.ssao_enabled {
             self.ssao
@@ -4156,6 +4276,622 @@ impl Scene {
             ))
         }
     }
+
+    // -----------------------------
+    // D: Native overlays compositor (upload overlay texture, altitude toggle)
+    // -----------------------------
+    #[pyo3(text_signature = "($self)")]
+    pub fn enable_native_overlays(&mut self) -> PyResult<()> {
+        let Some(ref mut ov) = self.overlay_renderer else {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("Overlay renderer not available"));
+        };
+        self.overlay_enabled = true;
+        ov.set_enabled(true);
+        let g = crate::gpu::ctx();
+        ov.upload_uniforms(&g.queue);
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn disable_native_overlays(&mut self) -> PyResult<()> {
+        let Some(ref mut ov) = self.overlay_renderer else {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("Overlay renderer not available"));
+        };
+        self.overlay_enabled = false;
+        ov.set_enabled(false);
+        let g = crate::gpu::ctx();
+        ov.upload_uniforms(&g.queue);
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, alpha)")]
+    pub fn set_native_overlay_alpha(&mut self, alpha: f32) -> PyResult<()> {
+        let Some(ref mut ov) = self.overlay_renderer else {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("Overlay renderer not available"));
+        };
+        ov.set_overlay_alpha(alpha);
+        let g = crate::gpu::ctx();
+        ov.upload_uniforms(&g.queue);
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, enabled)")]
+    pub fn set_native_altitude_overlay_enabled(&mut self, enabled: bool) -> PyResult<()> {
+        let Some(ref mut ov) = self.overlay_renderer else {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("Overlay renderer not available"));
+        };
+        ov.set_altitude_enabled(enabled);
+        // Ensure height view is bound
+        if let Some(ref hv) = self.height_view {
+            let g = crate::gpu::ctx();
+            ov.recreate_bind_group(&g.device, None, Some(hv));
+        }
+        let g = crate::gpu::ctx();
+        ov.upload_uniforms(&g.queue);
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, image)")]
+    pub fn set_native_overlay_texture(&mut self, image: &pyo3::PyAny) -> PyResult<()> {
+        // Accept HxWx3 or HxWx4 uint8
+        let (h, w, c, data) = if let Ok(arr) = image.extract::<PyReadonlyArray3<u8>>() {
+            let shape = arr.shape();
+            if shape.len() != 3 { return Err(pyo3::exceptions::PyValueError::new_err("overlay must be HxWxC")); }
+            let h = shape[0] as u32; let w = shape[1] as u32; let c = shape[2] as u32;
+            if c != 3 && c != 4 { return Err(pyo3::exceptions::PyValueError::new_err("overlay channels must be 3 or 4")); }
+            (h, w, c, arr.as_array().to_owned().into_raw_vec())
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err("Expected numpy uint8 array HxWxC"));
+        };
+
+        let Some(ref mut ov) = self.overlay_renderer else {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err("Overlay renderer not available"));
+        };
+        let g = crate::gpu::ctx();
+        // Prepare RGBA data with row padding to COPY_BYTES_PER_ROW_ALIGNMENT
+        let mut rgba: Vec<u8>;
+        if c == 3 {
+            rgba = Vec::with_capacity((h * w * 4) as usize);
+            let mut idx = 0usize;
+            for _yy in 0..h {
+                for _xx in 0..w {
+                    let r = data[idx]; let gch = data[idx+1]; let b = data[idx+2];
+                    rgba.push(r); rgba.push(gch); rgba.push(b); rgba.push(255);
+                    idx += 3;
+                }
+            }
+        } else {
+            rgba = data; // already RGBA
+        }
+        let row_bytes = w * 4;
+        let padded_bpr = crate::gpu::align_copy_bpr(row_bytes);
+        let mut padded = vec![0u8; (padded_bpr * h) as usize];
+        for y in 0..h as usize {
+            let s = y * row_bytes as usize;
+            let d = y * padded_bpr as usize;
+            padded[d..d + row_bytes as usize].copy_from_slice(&rgba[s..s + row_bytes as usize]);
+        }
+
+        // Create texture and upload
+        let tex = g.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("native_overlay_tex"),
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        g.queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &padded,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(std::num::NonZeroU32::new(padded_bpr).unwrap().into()),
+                rows_per_image: Some(std::num::NonZeroU32::new(h).unwrap().into()),
+            },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        ov.overlay_tex = Some(tex);
+        ov.overlay_view = Some(view);
+        // Recreate bind group with new overlay view and existing height view
+        let height_view = self.height_view.as_ref();
+        ov.recreate_bind_group(&g.device, None, height_view);
+        Ok(())
+    }
+
+    // -----------------------------
+    // D: Native text overlay APIs (rectangle placeholder)
+    // -----------------------------
+    #[pyo3(text_signature = "($self)")]
+    pub fn enable_native_text(&mut self) -> PyResult<()> {
+        self.text_overlay_enabled = true;
+        if let Some(ref mut tr) = self.text_overlay_renderer {
+            tr.set_enabled(true);
+            let g = crate::gpu::ctx();
+            tr.upload_uniforms(&g.queue);
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn disable_native_text(&mut self) -> PyResult<()> {
+        self.text_overlay_enabled = false;
+        if let Some(ref mut tr) = self.text_overlay_renderer {
+            tr.set_enabled(false);
+            let g = crate::gpu::ctx();
+            tr.upload_uniforms(&g.queue);
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, alpha)")]
+    pub fn set_native_text_alpha(&mut self, alpha: f32) -> PyResult<()> {
+        self.text_overlay_alpha = alpha.clamp(0.0, 1.0);
+        if let Some(ref mut tr) = self.text_overlay_renderer {
+            tr.set_alpha(self.text_overlay_alpha);
+            let g = crate::gpu::ctx();
+            tr.upload_uniforms(&g.queue);
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, x, y, w, h, r, g, b, a)")]
+    pub fn add_native_text_rect(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+    ) -> PyResult<()> {
+        let rect_min = [x.max(0.0), y.max(0.0)];
+        let rect_max = [(x + w).max(0.0), (y + h).max(0.0)];
+        let uv_min = [0.0, 0.0];
+        let uv_max = [1.0, 1.0];
+        let color = [r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0), a.clamp(0.0, 1.0)];
+        self.text_instances.push(crate::core::text_overlay::TextInstance { rect_min, rect_max, uv_min, uv_max, color });
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn clear_native_text(&mut self) -> PyResult<()> {
+        self.text_instances.clear();
+        if let Some(ref mut tr) = self.text_overlay_renderer {
+            tr.instance_count = 0;
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, x, y, w, h, u0, v0, u1, v1, r, g, b, a)")]
+    pub fn add_native_text_rect_uv(
+        &mut self,
+        x: f32, y: f32, w: f32, h: f32,
+        u0: f32, v0: f32, u1: f32, v1: f32,
+        r: f32, g: f32, b: f32, a: f32,
+    ) -> PyResult<()> {
+        let rect_min = [x.max(0.0), y.max(0.0)];
+        let rect_max = [(x + w).max(0.0), (y + h).max(0.0)];
+        let uv_min = [u0, v0];
+        let uv_max = [u1, v1];
+        let color = [r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0), a.clamp(0.0, 1.0)];
+        self.text_instances.push(crate::core::text_overlay::TextInstance { rect_min, rect_max, uv_min, uv_max, color });
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, atlas, channels=3, smoothing=1.0)")]
+    pub fn set_native_text_atlas(
+        &mut self,
+        atlas: &pyo3::PyAny,
+        channels: Option<u32>,
+        smoothing: Option<f32>,
+    ) -> PyResult<()> {
+        let (h, w, c, data) = if let Ok(arr) = atlas.extract::<PyReadonlyArray3<u8>>() {
+            let shape = arr.shape();
+            if shape.len() != 3 { return Err(pyo3::exceptions::PyValueError::new_err("atlas must be HxWxC uint8")); }
+            let h = shape[0] as u32; let w = shape[1] as u32; let c = shape[2] as u32;
+            if c != 1 && c != 3 && c != 4 { return Err(pyo3::exceptions::PyValueError::new_err("atlas channels must be 1, 3, or 4")); }
+            (h, w, c, arr.as_array().to_owned().into_raw_vec())
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err("Expected numpy uint8 array HxWxC"));
+        };
+        let g = crate::gpu::ctx();
+        // Convert to RGBA8
+        let mut rgba: Vec<u8> = Vec::with_capacity((h * w * 4) as usize);
+        if c == 4 {
+            rgba = data;
+        } else if c == 3 {
+            let mut idx = 0usize;
+            while idx < data.len() {
+                rgba.push(data[idx]); rgba.push(data[idx+1]); rgba.push(data[idx+2]); rgba.push(255);
+                idx += 3;
+            }
+        } else { // c == 1 (SDF)
+            for v in data.iter() { rgba.push(*v); rgba.push(*v); rgba.push(*v); rgba.push(255); }
+        }
+        let row_bytes = w * 4;
+        let padded_bpr = crate::gpu::align_copy_bpr(row_bytes);
+        let mut padded = vec![0u8; (padded_bpr * h) as usize];
+        for y in 0..h as usize {
+            let s = y * row_bytes as usize; let d = y * padded_bpr as usize;
+            padded[d..d + row_bytes as usize].copy_from_slice(&rgba[s..s + row_bytes as usize]);
+        }
+        let tex = g.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("text_msdf_atlas"),
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        g.queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &padded,
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(std::num::NonZeroU32::new(padded_bpr).unwrap().into()), rows_per_image: Some(std::num::NonZeroU32::new(h).unwrap().into()) },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Update text overlay renderer state
+        if let Some(ref mut tr) = self.text_overlay_renderer {
+            tr.set_atlas(tex, view);
+            tr.recreate_bind_group(&g.device, None);
+            if let Some(ch) = channels { tr.set_channels(ch); }
+            if let Some(sm) = smoothing { tr.set_smoothing(sm); }
+            tr.upload_uniforms(&g.queue);
+        }
+        
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, image, alpha=1.0, offset_xy=(0,0), scale=1.0)")]
+    pub fn set_raster_overlay(
+        &mut self,
+        image: &pyo3::types::PyAny,
+        alpha: Option<f32>,
+        offset_xy: Option<(i32, i32)>,
+        scale: Option<f32>,
+    ) -> PyResult<()> {
+        // Validate input array (HxWx3 or HxWx4, uint8)
+        let (h, w, c, data) = if let Ok(arr) = image.extract::<numpy::PyReadonlyArray3<u8>>() {
+            let shape = arr.shape();
+            if shape.len() != 3 { return Err(pyo3::exceptions::PyValueError::new_err("overlay image must be HxWxC uint8")); }
+            let h = shape[0] as u32; let w = shape[1] as u32; let c = shape[2] as u32;
+            if c != 3 && c != 4 { return Err(pyo3::exceptions::PyValueError::new_err("overlay channels must be 3 or 4")); }
+            (h, w, c, arr.as_array().to_owned().into_raw_vec())
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err("Expected numpy uint8 array HxWxC"));
+        };
+
+        // Convert to RGBA8
+        let mut rgba: Vec<u8> = Vec::with_capacity((h * w * 4) as usize);
+        if c == 4 {
+            rgba = data;
+        } else { // c == 3
+            let mut idx = 0usize;
+            while idx < data.len() {
+                rgba.push(data[idx]); rgba.push(data[idx+1]); rgba.push(data[idx+2]); rgba.push(255);
+                idx += 3;
+            }
+        }
+
+        // Create GPU texture and upload
+        let g = crate::gpu::ctx();
+        let tex = g.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("scene-overlay-rgba8"),
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let row_bytes = w * 4;
+        let padded_bpr = crate::gpu::align_copy_bpr(row_bytes);
+        let mut padded = vec![0u8; (padded_bpr * h) as usize];
+        for y in 0..h as usize {
+            let s = y * row_bytes as usize; let d = y * padded_bpr as usize;
+            padded[d..d + row_bytes as usize].copy_from_slice(&rgba[s..s + row_bytes as usize]);
+        }
+        g.queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &padded,
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(std::num::NonZeroU32::new(padded_bpr).unwrap().into()), rows_per_image: Some(std::num::NonZeroU32::new(h).unwrap().into()) },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Update overlay renderer state
+        if let Some(ref mut ov) = self.overlay_renderer {
+            // Keep GPU resources alive
+            ov.set_overlay_texture(tex, view);
+            // Rebind with current height view for altitude/contours
+            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref());
+
+            // Set params
+            ov.set_enabled(true);
+            if let Some(a) = alpha { ov.set_overlay_alpha(a); }
+            let (off_x, off_y) = offset_xy.unwrap_or((0, 0));
+            let scale_v = scale.unwrap_or(1.0).max(1e-3);
+            let sample_s = 1.0 / scale_v;
+            let uv_off_x = (off_x as f32 / self.width.max(1) as f32) * sample_s;
+            let uv_off_y = (off_y as f32 / self.height.max(1) as f32) * sample_s;
+            ov.set_overlay_uv(uv_off_x, uv_off_y, sample_s, sample_s);
+            ov.upload_uniforms(&g.queue);
+            self.overlay_enabled = true;
+        }
+
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn disable_overlay(&mut self) -> PyResult<()> {
+        if let Some(ref mut ov) = self.overlay_renderer {
+            ov.set_enabled(false);
+            let g = crate::gpu::ctx();
+            ov.upload_uniforms(&g.queue);
+        }
+        self.overlay_enabled = false;
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, alpha)")]
+    pub fn set_overlay_alpha(&mut self, alpha: f32) -> PyResult<()> {
+        if let Some(ref mut ov) = self.overlay_renderer {
+            ov.set_overlay_alpha(alpha);
+            ov.set_enabled(true);
+            let g = crate::gpu::ctx();
+            ov.upload_uniforms(&g.queue);
+        }
+        self.overlay_enabled = true;
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, alpha=0.35)")]
+    pub fn enable_altitude_overlay(&mut self, alpha: Option<f32>) -> PyResult<()> {
+        if let Some(ref mut ov) = self.overlay_renderer {
+            ov.set_altitude_enabled(true);
+            if let Some(a) = alpha { ov.set_altitude_alpha(a); }
+            let g = crate::gpu::ctx();
+            ov.upload_uniforms(&g.queue);
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn disable_altitude_overlay(&mut self) -> PyResult<()> {
+        if let Some(ref mut ov) = self.overlay_renderer {
+            ov.set_altitude_enabled(false);
+            let g = crate::gpu::ctx();
+            ov.upload_uniforms(&g.queue);
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, alpha)")]
+    pub fn set_altitude_overlay_alpha(&mut self, alpha: f32) -> PyResult<()> {
+        if let Some(ref mut ov) = self.overlay_renderer {
+            ov.set_altitude_alpha(alpha);
+            let g = crate::gpu::ctx();
+            ov.upload_uniforms(&g.queue);
+        }
+        Ok(())
+    }
+
+    // GPU contour overlay using height texture
+    #[pyo3(text_signature = "($self, interval, thickness_mul=1.0, r=0.0, g=0.0, b=0.0, a=0.75)")]
+    pub fn enable_gpu_contours(
+        &mut self,
+        interval: f32,
+        thickness_mul: Option<f32>,
+        r: Option<f32>, g: Option<f32>, b: Option<f32>, a: Option<f32>,
+    ) -> PyResult<()> {
+        if let Some(ref mut ov) = self.overlay_renderer {
+            ov.set_contours_enabled(true);
+            ov.set_contour_interval(interval);
+            ov.set_contour_thickness_mul(thickness_mul.unwrap_or(1.0));
+            let cr = r.unwrap_or(0.0); let cg = g.unwrap_or(0.0); let cb = b.unwrap_or(0.0); let ca = a.unwrap_or(0.75);
+            ov.set_contour_color(cr, cg, cb, ca);
+            let gctx = crate::gpu::ctx();
+            ov.upload_uniforms(&gctx.queue);
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn disable_gpu_contours(&mut self) -> PyResult<()> {
+        if let Some(ref mut ov) = self.overlay_renderer {
+            ov.set_contours_enabled(false);
+            let g = crate::gpu::ctx();
+            ov.upload_uniforms(&g.queue);
+        }
+        Ok(())
+    }
+
+    // -----------------------------
+    // D11: 3D Text Meshes API
+    // -----------------------------
+    #[pyo3(text_signature = "($self)")]
+    pub fn enable_text_meshes(&mut self) -> PyResult<()> {
+        self.text3d_enabled = true;
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn disable_text_meshes(&mut self) -> PyResult<()> {
+        self.text3d_enabled = false;
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn clear_text_meshes(&mut self) -> PyResult<()> {
+        self.text3d_instances.clear();
+        Ok(())
+    }
+
+    /// Add a 3D text mesh instance from font bytes
+    ///
+    /// font can be either bytes (PyBytes) or a 1D numpy uint8 array.
+    #[pyo3(text_signature = "($self, text, font, size_px=32.0, depth=0.2, position=(0,0,0), color=(1,1,1,1), rotation_deg=(0,0,0), scale=1.0, scale_xyz=(1,1,1), light_dir=(0.5,1.0,0.3), light_intensity=1.0, bevel_strength=0.0, bevel_segments=3)")]
+    pub fn add_text_mesh(
+        &mut self,
+        _py: pyo3::Python<'_>,
+        text: String,
+        font: &pyo3::types::PyAny,
+        size_px: Option<f32>,
+        depth: Option<f32>,
+        position: Option<(f32, f32, f32)>,
+        color: Option<(f32, f32, f32, f32)>,
+        rotation_deg: Option<(f32, f32, f32)>,
+        scale: Option<f32>,
+        scale_xyz: Option<(f32, f32, f32)>,
+        light_dir: Option<(f32, f32, f32)>,
+        light_intensity: Option<f32>,
+        bevel_strength: Option<f32>,
+        bevel_segments: Option<u32>,
+    ) -> PyResult<()> {
+        // Extract font bytes
+        let font_bytes: Vec<u8> = if let Ok(b) = font.extract::<&PyBytes>() {
+            b.as_bytes().to_vec()
+        } else if let Ok(arr) = font.extract::<PyReadonlyArray1<u8>>() {
+            arr.as_slice().map_err(|_| pyo3::exceptions::PyTypeError::new_err("font array must be C-contiguous uint8"))?.to_vec()
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err("font must be bytes or numpy uint8 array"));
+        };
+
+        let sz = size_px.unwrap_or(32.0).max(1.0);
+        let dp = depth.unwrap_or(0.2).max(0.0);
+        let pos = position.unwrap_or((0.0, 0.0, 0.0));
+        let col = color.unwrap_or((1.0, 1.0, 1.0, 1.0));
+        let rot = rotation_deg.unwrap_or((0.0, 0.0, 0.0));
+        let scl = scale.unwrap_or(1.0).max(1e-6);
+        let sxyz = scale_xyz.unwrap_or((1.0, 1.0, 1.0));
+        let svec = glam::Vec3::new(sxyz.0 * scl, sxyz.1 * scl, sxyz.2 * scl);
+        let ldir = light_dir.unwrap_or((0.5, 1.0, 0.3));
+        let lint = light_intensity.unwrap_or(1.0).max(0.0);
+        let bevel = bevel_strength.unwrap_or(0.0);
+        let bev_segs = bevel_segments.unwrap_or(3).max(1);
+
+        // Build mesh on CPU
+        let (verts, inds) = crate::core::text_mesh::build_text_mesh(&text, &font_bytes, sz, dp, bevel, bev_segs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("text mesh build failed: {}", e)))?;
+
+        // Upload to GPU
+        let g = crate::gpu::ctx();
+        let vsize = (verts.len() * std::mem::size_of::<crate::core::text_mesh::VertexPN>()) as u64;
+        let isize = (inds.len() * std::mem::size_of::<u32>()) as u64;
+        let vbuf = g.device.create_buffer(&wgpu::BufferDescriptor { label: Some("text3d_vbuf"), size: vsize, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let ibuf = g.device.create_buffer(&wgpu::BufferDescriptor { label: Some("text3d_ibuf"), size: isize, usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        g.queue.write_buffer(&vbuf, 0, bytemuck::cast_slice(&verts));
+        g.queue.write_buffer(&ibuf, 0, bytemuck::cast_slice(&inds));
+
+        // Create instance with model transform: T * Rz * Ry * Rx * S
+        let rx = rot.0.to_radians();
+        let ry = rot.1.to_radians();
+        let rz = rot.2.to_radians();
+        let t = glam::Mat4::from_translation(glam::Vec3::new(pos.0, pos.1, pos.2));
+        let sx = glam::Mat4::from_scale(svec);
+        let rr = glam::Mat4::from_rotation_z(rz) * glam::Mat4::from_rotation_y(ry) * glam::Mat4::from_rotation_x(rx);
+        let model = t * rr * sx;
+        let inst = Text3DInstance {
+            vbuf,
+            ibuf,
+            index_count: inds.len() as u32,
+            vertex_count: verts.len() as u32,
+            model,
+            color: [col.0, col.1, col.2, col.3],
+            light_dir: [ldir.0, ldir.1, ldir.2],
+            light_intensity: lint,
+            metallic: 0.0,
+            roughness: 1.0,
+        };
+        self.text3d_instances.push(inst);
+        self.text3d_enabled = true;
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn get_text_mesh_stats(&self) -> PyResult<(usize, u64, u64)> {
+        let instances = self.text3d_instances.len();
+        let mut v: u64 = 0;
+        let mut i: u64 = 0;
+        for inst in &self.text3d_instances {
+            v += inst.vertex_count as u64;
+            i += inst.index_count as u64;
+        }
+        Ok((instances, v, i))
+    }
+
+    #[pyo3(text_signature = "($self, index, position, rotation_deg, scale=None, scale_xyz=None)")]
+    pub fn update_text_mesh_transform(
+        &mut self,
+        index: usize,
+        position: (f32, f32, f32),
+        rotation_deg: (f32, f32, f32),
+        scale: Option<f32>,
+        scale_xyz: Option<(f32, f32, f32)>,
+    ) -> PyResult<()> {
+        if index >= self.text3d_instances.len() {
+            return Err(pyo3::exceptions::PyIndexError::new_err("text mesh index out of range"));
+        }
+        let rx = rotation_deg.0.to_radians();
+        let ry = rotation_deg.1.to_radians();
+        let rz = rotation_deg.2.to_radians();
+        let t = glam::Mat4::from_translation(glam::Vec3::new(position.0, position.1, position.2));
+        let s = scale.unwrap_or(1.0).max(1e-6);
+        let sxyz = scale_xyz.unwrap_or((1.0, 1.0, 1.0));
+        let svec = glam::Vec3::new(sxyz.0 * s, sxyz.1 * s, sxyz.2 * s);
+        let sx = glam::Mat4::from_scale(svec);
+        let rr = glam::Mat4::from_rotation_z(rz) * glam::Mat4::from_rotation_y(ry) * glam::Mat4::from_rotation_x(rx);
+        let model = t * rr * sx;
+        if let Some(inst) = self.text3d_instances.get_mut(index) {
+            inst.model = model;
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, index, r, g, b, a)")]
+    pub fn update_text_mesh_color(&mut self, index: usize, r: f32, g: f32, b: f32, a: f32) -> PyResult<()> {
+        if index >= self.text3d_instances.len() {
+            return Err(pyo3::exceptions::PyIndexError::new_err("text mesh index out of range"));
+        }
+        if let Some(inst) = self.text3d_instances.get_mut(index) {
+            inst.color = [r, g, b, a];
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, index, dx, dy, dz, intensity)")]
+    pub fn update_text_mesh_light(&mut self, index: usize, dx: f32, dy: f32, dz: f32, intensity: f32) -> PyResult<()> {
+        if index >= self.text3d_instances.len() {
+            return Err(pyo3::exceptions::PyIndexError::new_err("text mesh index out of range"));
+        }
+        if let Some(inst) = self.text3d_instances.get_mut(index) {
+            inst.light_dir = [dx, dy, dz];
+            inst.light_intensity = intensity.max(0.0);
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self, index, metallic, roughness)")]
+    pub fn set_text_mesh_material(&mut self, index: usize, metallic: f32, roughness: f32) -> PyResult<()> {
+        if index >= self.text3d_instances.len() {
+            return Err(pyo3::exceptions::PyIndexError::new_err("text mesh index out of range"));
+        }
+        if let Some(inst) = self.text3d_instances.get_mut(index) {
+            inst.metallic = metallic.clamp(0.0, 1.0);
+            inst.roughness = roughness.clamp(0.04, 1.0);
+        }
+        Ok(())
+    }
 }
 impl Scene {
     // B5: Render reflections to reflection texture with clip plane
@@ -4397,6 +5133,12 @@ impl Scene {
             renderer.create_bind_group(&g.device, &self.tp.bgl_reflection);
         }
 
+        // Recreate native overlay bind group with current overlay/height views
+        if let Some(ref mut ov) = self.overlay_renderer {
+            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref());
+            ov.upload_uniforms(&g.queue);
+        }
+
         if let Some(ref mut renderer) = self.dof_renderer {
             renderer.resize(&g.device, self.width, self.height);
             if let Some(ref depth_view) = self.depth_view {
@@ -4418,6 +5160,12 @@ impl Scene {
                 );
             }
         }
+
+        // D11: Recreate 3D text renderer to match current depth format
+        let mut text3d = crate::core::text_mesh::TextMeshRenderer::new(&g.device, TEXTURE_FORMAT, depth_format);
+        text3d.set_view_proj(self.scene.view, self.scene.proj);
+        text3d.upload_uniforms(&g.queue);
+        self.text3d_renderer = Some(text3d);
 
         Ok(())
     }
