@@ -155,8 +155,16 @@ class Renderer:
         self._gp_alpha = 255
 
     def info(self) -> str:
-        """Return renderer information."""
-        return f"Renderer({self.width}x{self.height}, fallback=True)"
+        """Return renderer information using engine context when available."""
+        backend = "cpu"
+        try:
+            from . import _forge3d as _native
+            if hasattr(_native, "engine_info"):
+                ei = _native.engine_info()
+                backend = str(ei.get("backend", backend))
+        except Exception:
+            pass
+        return f"Renderer({self.width}x{self.height}, backend={backend})"
 
     def render_triangle_rgba(self) -> np.ndarray:
         """Render a triangle to RGBA array."""
@@ -1244,6 +1252,12 @@ class Scene:
             x, y, z = args
             self._light_pos = (float(x), float(y), float(z))
             return
+        if len(args) == 4:
+            light_id, x, y, z = args
+            self._require_lights_enabled()
+            self._get_light(int(light_id))['pos'] = (float(x), float(y), float(z))
+            return
+        raise TypeError("set_light_position expected (x,y,z) or (light_id,x,y,z)")
 
     def set_reflection_small_frame_fast_path(self, enabled: bool) -> None:
         """Enable/disable the small-frame (≤256) reflections fast path at runtime."""
@@ -1252,12 +1266,6 @@ class Scene:
     def is_reflection_small_frame_fast_path_enabled(self) -> bool:
         """Return whether the reflections small-frame fast path is enabled."""
         return bool(getattr(self, '_reflection_small_fast_path', True))
-        if len(args) == 4:
-            light_id, x, y, z = args
-            self._require_lights_enabled()
-            self._get_light(int(light_id))['pos'] = (float(x), float(y), float(z))
-            return
-        raise TypeError("set_light_position expected (x,y,z) or (light_id,x,y,z)")
 
     def set_light_intensity(self, *args) -> None:
         """Set light intensity.
@@ -4509,6 +4517,18 @@ def _c5_build_framegraph_report() -> dict:
     return {"alias_reuse": True, "barrier_ok": True}
 
 setattr(_forge3d, "c5_build_framegraph_report", _c5_build_framegraph_report)
+
+def _engine_info_shim() -> dict:
+    # Fallback engine info when native extension is unavailable
+    return {
+        "backend": "cpu",
+        "adapter_name": "Fallback CPU Adapter",
+        "device_name": "Fallback CPU Device",
+        "max_texture_dimension_2d": 16384,
+        "max_buffer_size": 1024 * 1024 * 256,
+    }
+
+setattr(_forge3d, "engine_info", _engine_info_shim)
 # Ensure the submodule can be imported as forge3d._forge3d
 sys.modules.setdefault("forge3d._forge3d", _forge3d)
 

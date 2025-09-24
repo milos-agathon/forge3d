@@ -1,266 +1,156 @@
-<task>
-  <title>Implement & wire missing/partial items for Workstream B</title>
+<task id="forge3d-workstream-audit" version="1.1">
+  <title>Audit repo against roadmap2.csv for a specified workstream (presence, readiness, evidence; no code edits)</title>
 
-  <inputs>
-    <repoRoot>.</repoRoot>
-    <paths>
-      <path>src/</path>
-      <path>shaders/</path>
-      <path>python/forge3d/</path>
-      <path>examples/</path>
-      <path>docs/</path>
-      <path>tests/</path>
-    </paths>
-
-    <!-- Workstream B tasks synthesized from roadmap2.csv -->
-    <workstreamB id="B" title="Realtime PBR &amp; Lighting">
-      <task id="B1">MSAA &amp; Super-Sampling</task>
-      <task id="B2">Tone-Mapping &amp; Exposure v2</task>
-      <task id="B3">SSAO Pass</task>
-      <task id="B4">Cascaded Shadow Maps</task>
-      <task id="B5">Planar Reflections (Realtime)</task>
-      <task id="B6">Depth of Field (Realtime)</task>
-      <task id="B7">Cloud Shade Overlay</task>
-      <task id="B8">Render Clouds (Realtime)</task>
-      <task id="B10">Ground Plane (Raster)</task>
-      <task id="B11">Water Surface Color Toggle</task>
-      <task id="B12">Soft Light Radius (Raster)</task>
-      <task id="B13">Point &amp; Spot Lights (Realtime)</task>
-      <task id="B14">Rect Area Lights (LTC) — verify only</task>
-      <task id="B15">Image-Based Lighting (IBL)</task>
-      <task id="B16">Dual-source blending OIT (Realtime)</task>
-      <task id="B17">Depth-clip control for CSM</task>
-    </workstreamB>
-  </inputs>
+  <role>
+    You are Claude Code in <b>Audit Mode</b>. Act as an elite graphics/runtime engineer (Vulkan ≥1.2, WebGPU/WGSL, RAII, Rust, Python ≥3.8, CMake ≥3.24, VMA, Sphinx).
+    Project: forge3d — Rust backend + Python frontend (PyO3), targeting interactive/offline 3D visualization.
+  </role>
 
   <constraints>
     <platforms>win_amd64, linux_x86_64, macos_universal2</platforms>
     <gpuBudget>≤ 512 MiB host-visible heap</gpuBudget>
-    <toolchain>cmake≥3.24, cargo/rustc, PyO3, VMA</toolchain>
+    <build>cmake>=3.24, cargo/rustc, PyO3, VMA</build>
     <apis>WebGPU/WGSL primary; Vulkan 1.2 compatible design</apis>
-    <docs>Sphinx</docs>
+    <docs>Sphinx preferred</docs>
+    <uncertainRule>If essential CSV fields or feature details are missing/ambiguous, reply <b>UNCERTAIN</b> and list the exact headers/rows/paths needed.</uncertainRule>
+    <safety>
+      - <b>Audit-only:</b> Do not modify repository contents.
+      - No third-party code changes; skip binaries/large assets.
+      - Prefer structured searches and header-aware CSV parsing.
+    </safety>
+    <exclusions>.git, dist, build, .venv, venv, node_modules, __pycache__, *.png, *.jpg, *.pdf, *.whl, *.zip, *.tar.gz</exclusions>
   </constraints>
 
-  <safety>
-    <step>Create branch: <code>git checkout -b wsB-pbr-lighting-integration</code></step>
-    <step>Audit-first: list existing files touching PBR/lighting to avoid duplication.</step>
-    <step>Never modify generated/binary dirs (target/, dist/, build/, _build/).</step>
-    <step>No blind search/replace; small commits per feature with tests.</step>
-    <step>Enforce memory budget in examples (texture sizes, sample counts).</step>
-  </safety>
+  <inputs>
+    <repoRoot>./</repoRoot>
+    <roadmapPath>./roadmap2.csv</roadmapPath>
+    <!-- Provide either Workstream ID (e.g., "A") or exact Workstream Title -->
+    <workstreamSelector>
+      <![CDATA[
+      ID: C
+      Title: Water & Hydrology
+      ]]>
+    </workstreamSelector>
+  </inputs>
+
+  <!-- Exact structure of your roadmap2.csv -->
+  <csvSchema>
+    <encoding>utf-8</encoding>
+    <delimiter>comma</delimiter>
+    <columns order="fixed">
+      <col index="0">Workstream ID</col>
+      <col index="1">Workstream Title</col>
+      <col index="2">Task ID</col>
+      <col index="3">Task Title</col>
+      <col index="4">Rationale</col>
+      <col index="5">Deliverables</col>
+      <col index="6">Acceptance Criteria</col>
+      <col index="7">Priority</col>
+      <col index="8">Phase</col>
+      <col index="9">Missing Features</col>
+      <col index="10">Dependencies</col>
+      <col index="11">Risks/Mitigations</col>
+      <!-- Trailing column observed in file; treat as ignorable/empty -->
+      <col index="12" optional="true" ignore="true">Unnamed: 12</col>
+    </columns>
+    <cellConventions>
+      <!-- Inside some cells, items are separated by semicolons; DO NOT split columns by this; use only for keyword extraction -->
+      <listSeparator>semicolon-inside-cell</listSeparator>
+      <markdownInline>allowed (e.g., backticks)</markdownInline>
+      <emptyTrailingColumn>ignore if entirely blank</emptyTrailingColumn>
+    </cellConventions>
+    <validation>
+      <!-- Expected controlled vocabularies; report anomalies in hygiene output (do not mutate file) -->
+      <priorityAllowed>High,Medium,Low</priorityAllowed>
+      <phaseAllowed>MVP,Beyond MVP</phaseAllowed>
+    </validation>
+  </csvSchema>
 
   <plan>
-    <!-- Order reflects CSV deps: K (Docs & QA), I (Viewer/Offscreen), F (Geometry & IO);
-         plus specific edges: B16 depends on N4/H4; B17 depends on N5 and B4. -->
-    <step id="P0-setup">Establish test/docs scaffolding for Workstream B (pytest markers: pbr, lighting; Sphinx stubs).</step>
+    1) Validate & Load CSV
+       - Open <roadmapPath> with UTF-8; delimiter comma.
+       - Confirm exact header names and order per <csvSchema>. If mismatch → <b>UNCERTAIN</b> listing differences.
+       - Drop/ignore column "Unnamed: 13" if entirely empty.
+       - Produce a brief CSV hygiene report:
+         * Rows with Priority not in {High, Medium, Low}.
+         * Rows with Phase not in {MVP, Beyond MVP}.
+         * Missing Task ID/Title/Deliverables/Acceptance Criteria.
 
-    <!-- Foundational real-time post stack -->
-    <step id="B2">Implement Tone-Mapping &amp; Exposure v2:
-      <actions>
-        <action>Add <file>shaders/tone_map.wgsl</file> (ACES/Reinhard/Hable) and unit curves.</action>
-        <action>Wire into <file>src/pipeline/pbr.rs</file> with runtime toggle via Python API <file>python/forge3d/pbr.py</file>.</action>
-        <action>Expose exposure (stops) in <file>python/forge3d/lighting.py</file>.</action>
-      </actions>
-    </step>
+    2) Select Workstream
+       - Filter rows where Workstream ID == provided ID OR Workstream Title == provided Title (case-insensitive).
+       - If none match → <b>UNCERTAIN</b> and list discovered workstreams (ID → Title).
 
-    <step id="B1">Add MSAA &amp; resolve path:
-      <actions>
-        <action>Enable multisampled color/depth targets; resolve at frame end.</action>
-        <action>Python toggle: <code>set_msaa(samples: {1,2,4,8})</code> in <file>python/forge3d/viewer.py</file>.</action>
-      </actions>
-    </step>
+    3) Derive Audit Keywords per Task
+       - From Deliverables/Acceptance Criteria/Dependencies, extract filenames (e.g., *.wgsl), symbols (create_render_pipeline, bind_group), Python API entry points (forge3d.*), example script names, and doc page slugs.
+       - Use semicolon-separated items inside cells as hints; do not alter CSV.
 
-    <!-- Screen-space + shadows backbone -->
-    <step id="B3">Complete SSAO:
-      <actions>
-        <action>Introduce G-buffer normals/depth if missing; add <file>shaders/ssao.wgsl</file> + bilateral blur.</action>
-        <action>Wire pass in offscreen path; expose radius/intensity in Python.</action>
-      </actions>
-    </step>
+    4) Repository Scan (read-only)
+       - Search src/, shaders/, python/forge3d/, examples/, docs/ with ripgrep.
+       - Collect evidence per task: file paths + line numbers/snippets that match expected artifacts and wiring (e.g., shader referenced by pipeline; Python API exposed; example present).
 
-    <step id="B4">Implement Cascaded Shadow Maps:
-      <actions>
-        <action>Add 3–4 cascades, PCF/EVSM kernels (<file>shaders/csm.wgsl</file>).</action>
-        <action>Split computation and sampling; integrate into PBR pipeline.</action>
-      </actions>
-    </step>
+    5) Readiness Classification (per task)
+       - <b>Present & Wired</b>: artifacts exist and appear integrated (pipeline + API + example/test/doc).
+       - <b>Present but Partial</b>: artifacts exist but missing wiring/exposure/tests/docs.
+       - <b>Absent</b>: no meaningful artifacts found.
 
-    <!-- Features that build on the backbone -->
-    <step id="B5">Planar Reflections:
-      <actions>
-        <action>Add reflection render-to-texture with clip plane; roughness-aware blur.</action>
-        <action>WGSL: <file>shaders/planar_reflections.wgsl</file>; viewer toggle/API.</action>
-      </actions>
-    </step>
+    6) Minimal Change Plan (No Edits)
+       - For Partial/Absent: list the minimal file-level actions (paths/symbols) needed to reach “Present & Wired,” respecting platform/build/memory constraints.
 
-    <step id="B6">Realtime DOF:
-      <actions>
-        <action>Circle-of-confusion pass; near/far blur with gather; <file>shaders/dof.wgsl</file>.</action>
-        <action>Camera API: aperture, focus distance.</action>
-      </actions>
-    </step>
-
-    <step id="B7">Cloud Shade Overlay:
-      <actions>
-        <action>Add 2D shadow texture modulation over terrain; parametric density/speed.</action>
-      </actions>
-    </step>
-
-    <step id="B8">Realtime Clouds:
-      <actions>
-        <action>Billboard/volumetric lite path in <file>shaders/clouds.wgsl</file>.</action>
-        <action>IBL-aware scattering approximation; tie into sky parameters.</action>
-      </actions>
-    </step>
-
-    <step id="B10">Ground Plane (Raster):
-      <actions>
-        <action>Simple raster ground plane with grid/albedo; toggle in viewer.</action>
-      </actions>
-    </step>
-
-    <step id="B11">Water Surface Color Toggle:
-      <actions>
-        <action>Pipeline uniform controlling water albedo/hue; Python setter.</action>
-      </actions>
-    </step>
-
-    <step id="B12">Soft Light Radius (Raster):
-      <actions>
-        <action>Radius parameter to raster lights; falloff function in WGSL.</action>
-      </actions>
-    </step>
-
-    <step id="B13">Point &amp; Spot Lights:
-      <actions>
-        <action>Complete per-light buffers &amp; shadowing toggles; penumbra shaping.</action>
-      </actions>
-    </step>
-
-    <step id="B15">IBL polish:
-      <actions>
-        <action>Add irradiance/specular prefilter + BRDF LUT generation; verify rough/spec behavior.</action>
-      </actions>
-    </step>
-
-    <!-- Special dep: B16 has external deps (N4/H4) but we provide runtime path + fallback -->
-    <step id="B16">Dual-source blending OIT:
-      <actions>
-        <action>Enable dual-source path where supported; maintain WBOIT fallback; runtime switch.</action>
-        <action>Examples validating ΔE vs reference.</action>
-      </actions>
-    </step>
-
-    <!-- Depends on B4; turn on unclipped depth when available -->
-    <step id="B17" dependsOn="B4">Depth-clip control for CSM:
-      <actions>
-        <action>Support <code>unclippedDepth</code> where available; retune cascades; add regression tests.</action>
-      </actions>
-    </step>
-
-    <!-- Docs & examples last -->
-    <step id="Docs">Author Sphinx pages for PBR/lighting; add how-to guides per feature.</step>
-    <step id="Examples">Add runnable examples for each major feature with low-VRAM presets.</step>
-    <step id="CI">Wire tests to CI across 3 OS; add markers to allow headless runs.</step>
+    7) Outputs
+       - Emit a Markdown audit report and a machine-readable audit matrix CSV. Include CSV hygiene observations.
   </plan>
 
   <deliverables>
-    <!-- Per task, drawn from roadmap2.csv wording -->
-    <item task="B1">Multisampled targets + resolve; API toggle.</item>
-    <item task="B2">ACES/Reinhard/Hable; exposure in stops.</item>
-    <item task="B3">G-buffer normals/depth; bilateral blur.</item>
-    <item task="B4">3–4 cascades; PCF/EVSM.</item>
-    <item task="B5">Reflection pass; clip plane; rough blur.</item>
-    <item task="B6">Realtime DOF shaders + camera params.</item>
-    <item task="B7">Cloud shade overlay uniforms + pass.</item>
-    <item task="B8">Realtime clouds WGSL + integration.</item>
-    <item task="B10">Raster ground plane + toggle.</item>
-    <item task="B11">Water surface color toggle path.</item>
-    <item task="B12">Soft light radius control (raster).</item>
-    <item task="B13">Point/spot lights with controls.</item>
-    <item task="B14">(Verify) LTC rect area lights path intact.</item>
-    <item task="B15">Irradiance/spec prefilter; BRDF LUT.</item>
-    <item task="B16">Enable dual-source path; runtime switch; maintain WBOIT fallback; examples.</item>
-    <item task="B17">Unclipped depth toggle; cascade retune; regression tests.</item>
-
-    <!-- Concrete files/APIs/tests/docs -->
-    <file>shaders/tone_map.wgsl</file>
-    <file>shaders/ssao.wgsl</file>
-    <file>shaders/csm.wgsl</file>
-    <file>shaders/planar_reflections.wgsl</file>
-    <file>shaders/dof.wgsl</file>
-    <file>shaders/clouds.wgsl</file>
-    <file>python/forge3d/viewer.py</file>
-    <file>python/forge3d/pbr.py</file>
-    <file>python/forge3d/lighting.py</file>
-    <file>examples/pbr_spheres.py</file>
-    <file>examples/advanced_terrain_shadows_pbr.py</file>
-    <file>examples/ssao_demo.py</file>
-    <file>examples/csm_demo.py</file>
-    <file>examples/reflective_plane_demo.py</file>
-    <file>examples/dof_demo.py</file>
-    <file>examples/clouds_demo.py</file>
-    <file>examples/oit_dual_source_demo.py</file>
-    <file>docs/api/pbr.md</file>
-    <file>docs/api/lighting.md</file>
-    <file>tests/test_b1_msaa.py</file>
-    <file>tests/test_b2_tonemap.py</file>
-    <file>tests/test_b3_ssao.py</file>
-    <file>tests/test_b4_csm.py</file>
-    <file>tests/test_b5_reflections.py</file>
-    <file>tests/test_b6_dof.py</file>
-    <file>tests/test_b7_cloudshade.py</file>
-    <file>tests/test_b8_clouds.py</file>
-    <file>tests/test_b10_groundplane.py</file>
-    <file>tests/test_b11_water_toggle.py</file>
-    <file>tests/test_b12_softlight.py</file>
-    <file>tests/test_b13_point_spot.py</file>
-    <file>tests/test_b15_ibl.py</file>
-    <file>tests/test_b16_oit_dual_source.py</file>
-    <file>tests/test_b17_depthclip.py</file>
+    - <b>reports/audit_&lt;workstream&gt;.md</b> — Markdown:
+      1) Scope (workstream, matched rows count) & CSV Hygiene summary
+      2) Readiness Verdict per task (Present & Wired / Partial / Absent)
+      3) Evidence Map (file paths + line refs/snippets)
+      4) Blocking Gaps
+      5) Minimal Change Plan (file-level)
+      6) Validation Runbook (commands to verify after implementation)
+    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b> — Columns:
+      <code>Workstream ID,Workstream Title,Task ID,Task Title,Readiness,Evidence Paths,Missing Pieces,Minimal Changes,Priority,Phase,Dependencies,Risks/Mitigations,Original Ref</code>
+    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b> — Detected anomalies (Priority/Phase out-of-vocab, missing required cells).
   </deliverables>
 
   <acceptanceCriteria>
-    <ac task="B1">Edge metric improves ≥20% vs 1x; no artifacts.</ac>
-    <ac task="B2">Deterministic toggles; curve tests pass.</ac>
-    <ac task="B3">Perceptible depth cue; 60 FPS 1080p.</ac>
-    <ac task="B4">No peter-panning; stable during motion.</ac>
-    <ac task="B5">≤15% frame cost; correct reflection.</ac>
-    <ac task="B6">Bokeh size matches aperture; no haloing.</ac>
-    <ac task="B7">Shading modulates irradiance without banding.</ac>
-    <ac task="B8">Clouds render at 60 FPS 1080p with low-VRAM profile.</ac>
-    <ac task="B10">Ground plane draws beneath geometry; z-fighting guarded.</ac>
-    <ac task="B11">Water tint toggles predictably; scenes round-trip.</ac>
-    <ac task="B12">Radius control visibly softens falloff; raster path remains stable.</ac>
-    <ac task="B13">Point/spot lights illuminate correctly; shadow toggles verified.</ac>
-    <ac task="B14">(Verify) LTC path renders as before.</ac>
-    <ac task="B15">Roughness/spec behave correctly.</ac>
-    <ac task="B16">ΔE ≤ 2 vs dual-source reference; FPS stable at 1080p.</ac>
-    <ac task="B17">CSM clipping artifacts removed on supported GPUs; no regressions.</ac>
-
-    <!-- Build/test/docs runbook -->
-    <runbook>
-      cargo fmt --check
-      cargo clippy --all-targets --all-features -D warnings
-      cargo test -q
-      pytest -q
-      pytest -k "pbr or lighting" -v
-      sphinx-build -b html docs _build/html
-      maturin build --release
-      python examples/pbr_spheres.py
-      python examples/advanced_terrain_shadows_pbr.py
-    </runbook>
+    - AC-001: Exact headers match those specified (including ignorable "Unnamed: 13"); else returns <b>UNCERTAIN</b> with diffs.
+    - AC-002: Report states selected workstream and matched tasks count.
+    - AC-003: Each audited task has a single Readiness Verdict and at least one evidence reference (or explicit “no evidence found”).
+    - AC-004: Minimal Change Plan lists concrete file paths/symbols for all Partial/Absent items.
+    - AC-005: Validation Runbook includes build, headless demo/test, and docs build commands if applicable.
+    - AC-006: No repository modifications were made (audit-only).
   </acceptanceCriteria>
 
-  <completion>
-    <summary>All Workstream B items shifted to "Present &amp; Wired" with tests, docs, examples, and constrained VRAM presets.</summary>
+  <execution>
     <commands>
-      <cmd>git add -A &amp;&amp; git commit -m "WS-B: integrate PBR/lighting passes, docs, tests, examples"</cmd>
-      <cmd>pytest -q &amp;&amp; cargo test -q</cmd>
-      <cmd>sphinx-build -b html docs _build/html</cmd>
-      <cmd>python examples/ssao_demo.py</cmd>
-      <cmd>python examples/csm_demo.py</cmd>
-      <cmd>python examples/oit_dual_source_demo.py</cmd>
+      - python - <<'PY'
+import csv, sys, pathlib, codecs
+p = pathlib.Path("{{roadmapPath}}")
+if not p.exists():
+    print("UNCERTAIN: roadmap2.csv not found at", p, file=sys.stderr); sys.exit(2)
+with codecs.open(p, "r", "utf-8-sig") as f:
+    reader = csv.reader(f)
+    headers = next(reader, [])
+print("CSV_HEADERS:", headers)
+PY
+      - rg --version
+      - rg -n --stats --hidden -g '!.git' -g '!dist' -g '!build' -g '!.venv' -g '!venv' -g '!node_modules' -g '!__pycache__' \
+        '(wgsl|create_render_pipeline|bind_group|sampler|texture|queue\\.write_(buffer|texture)|forge3d|import +forge3d|from +forge3d +import)' \
+        src/ shaders/ python/ examples/ docs/ || true
     </commands>
+    <notes>
+      - Build keyword sets from Deliverables/Acceptance Criteria/Dependencies; use semicolons inside cells as list separators for extraction only.
+      - Document multiple candidate implementations if found; pick the best match by AC phrasing.
+      - Do not mutate or re-save the CSV.
+    </notes>
+  </execution>
+
+  <completion>
+    Provide:
+    - <b>reports/audit_&lt;workstream&gt;.md</b>
+    - <b>reports/audit_&lt;workstream&gt;_matrix.csv</b>
+    - <b>reports/csv_hygiene_&lt;workstream&gt;.md</b>
+    If headers or the workstream filter are invalid, reply <b>UNCERTAIN</b> with exact corrections needed.
   </completion>
 </task>
