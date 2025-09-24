@@ -12,9 +12,14 @@ struct WaterSurfaceUniforms {
     tint_params: vec4<f32>,                    // tint_color (rgb) + tint_strength (w)
     lighting_params: vec4<f32>,                // reflection_strength (x), refraction_strength (y), fresnel_power (z), roughness (w)
     animation_params: vec4<f32>,               // ripple_scale (x), ripple_speed (y), flow_direction (xy)
+    foam_params: vec4<f32>,                    // foam_width_px (x), foam_intensity (y), foam_noise_scale (z), mask_enabled (w)
 };
 
 @group(0) @binding(0) var<uniform> water_uniforms : WaterSurfaceUniforms;
+
+// Mask bind group (group 1)
+@group(1) @binding(0) var water_mask_tex : texture_2d<f32>;
+@group(1) @binding(1) var water_mask_samp : sampler;
 
 // ---------- Vertex Input/Output ----------
 struct VsIn {
@@ -30,6 +35,7 @@ struct VsOut {
     @location(2) normal: vec3<f32>,
     @location(3) view_distance: f32,           // Distance to camera
     @location(4) wave_offset: vec2<f32>,       // Animated wave offset
+    @location(5) wave_height: f32,             // Current wave height (for foam)
 };
 
 // ---------- Utility Functions ----------
@@ -104,6 +110,7 @@ fn vs_main(in: VsIn) -> VsOut {
     out.normal = water_normal(in.uv, time, amplitude, frequency, speed);
     out.view_distance = view_distance;
     out.wave_offset = wave_offset;
+    out.wave_height = wave_height;
 
     return out;
 }
@@ -154,7 +161,41 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Distance-based alpha fading (optional)
     let fade_distance = 1000.0;
     let distance_alpha = clamp(1.0 - (in.view_distance / fade_distance), 0.0, 1.0);
-    let final_alpha = water_uniforms.surface_params.w * distance_alpha;
+    var final_alpha = water_uniforms.surface_params.w * distance_alpha;
+
+    // Optional water mask gating
+    let mask_enabled = water_uniforms.foam_params.w > 0.5;
+    if (mask_enabled) {
+        let dims : vec2<u32> = textureDimensions(water_mask_tex, 0u);
+        if (dims.x > 0u && dims.y > 0u) {
+            let mask_val = textureSampleLevel(water_mask_tex, water_mask_samp, in.uv, 0.0).r; // 0..1
+            final_alpha = final_alpha * mask_val;
+        }
+    }
+
+    // Shoreline foam overlay (uses mask gradient and wave height)
+    if (mask_enabled) {
+        let dims : vec2<u32> = textureDimensions(water_mask_tex, 0u);
+        if (dims.x > 1u && dims.y > 1u) {
+            let inv_dims = 1.0 / vec2<f32>(vec2<i32>(dims));
+            let off = inv_dims; // ~1 texel
+            let c  = textureSampleLevel(water_mask_tex, water_mask_samp, in.uv, 0.0).r;
+            let rx = textureSampleLevel(water_mask_tex, water_mask_samp, in.uv + vec2<f32>(off.x, 0.0), 0.0).r;
+            let lx = textureSampleLevel(water_mask_tex, water_mask_samp, in.uv - vec2<f32>(off.x, 0.0), 0.0).r;
+            let uy = textureSampleLevel(water_mask_tex, water_mask_samp, in.uv + vec2<f32>(0.0, off.y), 0.0).r;
+            let dy = textureSampleLevel(water_mask_tex, water_mask_samp, in.uv - vec2<f32>(0.0, off.y), 0.0).r;
+            let grad = length(vec2<f32>(rx - lx, uy - dy));
+            let width_px = max(water_uniforms.foam_params.x, 1.0);
+            // Ring emphasis near boundary, scaled subtly by width hint
+            let ring = smoothstep(0.02, 0.02 + 0.06 * (width_px / 4.0), grad);
+            // Procedural breakup noise
+            let scale = max(1.0, water_uniforms.foam_params.z);
+            let n = sin(dot(in.uv * scale, vec2<f32>(12.9898, 78.233))) * 43758.5453;
+            let foam_noise = fract(n);
+            let foam_strength = ring * (0.6 + 0.4 * foam_noise) * water_uniforms.foam_params.y;
+            final_color = mix(final_color, vec3<f32>(1.0), clamp(foam_strength, 0.0, 1.0));
+        }
+    }
 
     return vec4<f32>(final_color, final_alpha);
 }

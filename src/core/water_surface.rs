@@ -5,13 +5,15 @@
 use glam::{Mat4, Vec2, Vec3};
 use std::borrow::Cow;
 use wgpu::{
-    vertex_attr_array, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
+    vertex_attr_array, AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BlendComponent, BlendFactor,
     BlendOperation, BlendState, Buffer, BufferAddress, BufferBindingType, BufferDescriptor,
-    BufferUsages, ColorTargetState, ColorWrites, Device, FragmentState, PipelineLayoutDescriptor,
-    PrimitiveState, PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, TextureFormat, VertexBufferLayout,
-    VertexState, VertexStepMode,
+    BufferUsages, ColorTargetState, ColorWrites, Device, Extent3d, FilterMode, FragmentState,
+    ImageCopyTexture, ImageDataLayout, Origin3d, PipelineLayoutDescriptor, PrimitiveState,
+    PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, Sampler, SamplerBindingType,
+    SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages, Texture, TextureDescriptor,
+    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
+    TextureViewDescriptor, TextureViewDimension, VertexBufferLayout, VertexState, VertexStepMode,
 };
 
 /// Water surface rendering modes
@@ -50,6 +52,12 @@ pub struct WaterSurfaceParams {
     pub refraction_strength: f32, // Strength of refraction effect
     pub fresnel_power: f32,       // Fresnel effect power
     pub roughness: f32,           // Surface roughness
+
+    // Foam overlay (screen-space, uses mask texture if provided)
+    pub foam_enabled: bool,
+    pub foam_width_px: f32,   // hint only (used to scale effect)
+    pub foam_intensity: f32,  // blend weight
+    pub foam_noise_scale: f32, // procedural breakup
 }
 
 impl Default for WaterSurfaceParams {
@@ -79,6 +87,12 @@ impl Default for WaterSurfaceParams {
             refraction_strength: 0.3, // Moderate refraction
             fresnel_power: 5.0,       // Standard fresnel
             roughness: 0.1,           // Smooth water surface
+
+            // Foam defaults
+            foam_enabled: false,
+            foam_width_px: 2.0,
+            foam_intensity: 0.85,
+            foam_noise_scale: 20.0,
         }
     }
 }
@@ -95,6 +109,7 @@ pub struct WaterSurfaceUniforms {
     pub tint_params: [f32; 4], // 16 bytes - tint_color (rgb) + tint_strength (w)
     pub lighting_params: [f32; 4], // 16 bytes - reflection_strength (x), refraction_strength (y), fresnel_power (z), roughness (w)
     pub animation_params: [f32; 4], // 16 bytes - ripple_scale (x), ripple_speed (y), flow_direction (zw)
+    pub foam_params: [f32; 4], // 16 bytes - foam_width_px (x), foam_intensity (y), foam_noise_scale (z), mask_enabled (w)
 }
 
 impl Default for WaterSurfaceUniforms {
@@ -134,6 +149,12 @@ impl Default for WaterSurfaceUniforms {
                 params.flow_direction.x,
                 params.flow_direction.y,
             ],
+            foam_params: [
+                params.foam_width_px,
+                params.foam_intensity,
+                params.foam_noise_scale,
+                0.0, // mask_enabled off by default
+            ],
         };
 
         // Set world transform to position the water surface
@@ -156,6 +177,14 @@ pub struct WaterSurfaceRenderer {
     // Bind groups and layouts
     pub bind_group_layout: BindGroupLayout,
     pub bind_group: BindGroup,
+
+    // Optional water mask (R8Unorm), always bound (defaults to 1x1)
+    pub mask_bind_group_layout: BindGroupLayout,
+    pub mask_bind_group: BindGroup,
+    pub mask_texture: Texture,
+    pub mask_view: TextureView,
+    pub mask_sampler: Sampler,
+    pub mask_size: (u32, u32),
 
     // Geometry
     pub vertex_buffer: Buffer,
@@ -188,7 +217,7 @@ impl WaterSurfaceRenderer {
             mapped_at_creation: false,
         });
 
-        // Create bind group layout
+        // Create bind group layout (uniforms)
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("water_surface_bind_group_layout"),
             entries: &[BindGroupLayoutEntry {
@@ -203,7 +232,7 @@ impl WaterSurfaceRenderer {
             }],
         });
 
-        // Create bind group
+        // Create bind group (uniforms)
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("water_surface_bind_group"),
             layout: &bind_group_layout,
@@ -211,6 +240,65 @@ impl WaterSurfaceRenderer {
                 binding: 0,
                 resource: uniform_buffer.as_entire_binding(),
             }],
+        });
+
+        // Create mask sampler
+        let mask_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("water_mask_sampler"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        // Create a default 1x1 white mask texture
+        let mask_size = (1u32, 1u32);
+        let mask_texture = device.create_texture(&TextureDescriptor {
+            label: Some("water_mask_texture"),
+            size: Extent3d { width: mask_size.0, height: mask_size.1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let mask_view = mask_texture.create_view(&TextureViewDescriptor::default());
+
+        // Create mask bind group layout
+        let mask_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("water_surface_mask_bind_group_layout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: TextureViewDimension::D2,
+                        sample_type: TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        // Create mask bind group
+        let mask_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("water_surface_mask_bind_group"),
+            layout: &mask_bind_group_layout,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&mask_view) },
+                BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&mask_sampler) },
+            ],
         });
 
         // Create shader module
@@ -221,10 +309,10 @@ impl WaterSurfaceRenderer {
             ))),
         });
 
-        // Create pipeline layout
+        // Create pipeline layout (uniforms + mask)
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("water_surface_pipeline_layout"),
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[&bind_group_layout, &mask_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -299,6 +387,12 @@ impl WaterSurfaceRenderer {
             water_pipeline,
             bind_group_layout,
             bind_group,
+            mask_bind_group_layout,
+            mask_bind_group,
+            mask_texture,
+            mask_view,
+            mask_sampler,
+            mask_size,
             vertex_buffer,
             index_buffer,
             index_count,
@@ -453,6 +547,63 @@ impl WaterSurfaceRenderer {
         self.update_uniforms();
     }
 
+    /// Set foam (shoreline) parameters
+    pub fn set_foam_params(&mut self, width_px: f32, intensity: f32, noise_scale: f32) {
+        self.params.foam_width_px = width_px.max(0.0);
+        self.params.foam_intensity = intensity.clamp(0.0, 1.0);
+        self.params.foam_noise_scale = noise_scale.max(1.0);
+        self.update_uniforms();
+    }
+
+    pub fn set_foam_enabled(&mut self, enabled: bool) {
+        self.params.foam_enabled = enabled;
+        self.update_uniforms();
+    }
+
+    /// Upload an external water mask (R8Unorm, 0=land, 255=water)
+    pub fn upload_water_mask(&mut self, device: &Device, queue: &Queue, data: &[u8], width: u32, height: u32) {
+        assert_eq!(data.len() as u32, width * height, "mask data must be width*height bytes");
+        self.mask_size = (width, height);
+        self.mask_texture = device.create_texture(&TextureDescriptor {
+            label: Some("water_mask_texture"),
+            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.mask_view = self.mask_texture.create_view(&TextureViewDescriptor::default());
+        // Update bind group with new view
+        self.mask_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("water_surface_mask_bind_group"),
+            layout: &self.mask_bind_group_layout,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.mask_view) },
+                BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.mask_sampler) },
+            ],
+        });
+        // Upload pixel data
+        queue.write_texture(
+            ImageCopyTexture {
+                texture: &self.mask_texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(width),
+                rows_per_image: Some(height),
+            },
+            Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        // Enable mask usage in uniforms
+        self.uniforms.foam_params[3] = 1.0;
+    }
+
     /// Enable/disable water surface
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
@@ -529,6 +680,14 @@ impl WaterSurfaceRenderer {
             self.params.ripple_speed,
             self.params.flow_direction.x,
             self.params.flow_direction.y,
+        ];
+
+        // Update foam params: width_px, intensity, noise_scale, mask_enabled
+        self.uniforms.foam_params = [
+            self.params.foam_width_px,
+            if self.params.foam_enabled { self.params.foam_intensity } else { 0.0 },
+            self.params.foam_noise_scale,
+            self.uniforms.foam_params[3],
         ];
 
         // Update world transform
@@ -611,6 +770,7 @@ impl WaterSurfaceRenderer {
         // Set pipeline and bind group
         render_pass.set_pipeline(&self.water_pipeline);
         render_pass.set_bind_group(0, &self.bind_group, &[]);
+        render_pass.set_bind_group(1, &self.mask_bind_group, &[]);
 
         // Set vertex and index buffers
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));

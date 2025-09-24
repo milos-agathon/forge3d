@@ -4,7 +4,7 @@
 use crate::device_caps::DeviceCaps;
 use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "extension-module")]
-use numpy::{IntoPyArray, PyUntypedArrayMethods};
+use numpy::{IntoPyArray, PyUntypedArrayMethods, PyReadonlyArray2};
 #[cfg(feature = "extension-module")]
 use pyo3::prelude::*;
 use std::path::PathBuf;
@@ -2828,6 +2828,86 @@ impl Scene {
     pub fn get_water_surface_params(&self) -> PyResult<(f32, f32, f32, f32)> {
         if let Some(ref renderer) = self.water_surface_renderer {
             Ok(renderer.get_params())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Water surface not enabled. Call enable_water_surface() first.",
+            ))
+        }
+    }
+
+    // C3 (native): Shoreline foam controls (mirror fallback API names)
+    #[pyo3(text_signature = "($self)")]
+    pub fn enable_shoreline_foam(&mut self) -> PyResult<()> {
+        if let Some(ref mut renderer) = self.water_surface_renderer {
+            renderer.set_foam_enabled(true);
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Water surface not enabled. Call enable_water_surface() first.",
+            ))
+        }
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn disable_shoreline_foam(&mut self) -> PyResult<()> {
+        if let Some(ref mut renderer) = self.water_surface_renderer {
+            renderer.set_foam_enabled(false);
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Water surface not enabled. Call enable_water_surface() first.",
+            ))
+        }
+    }
+
+    #[pyo3(text_signature = "($self, width_px, intensity, noise_scale)")]
+    pub fn set_shoreline_foam_params(
+        &mut self,
+        width_px: f32,
+        intensity: f32,
+        noise_scale: f32,
+    ) -> PyResult<()> {
+        if let Some(ref mut renderer) = self.water_surface_renderer {
+            renderer.set_foam_params(width_px, intensity, noise_scale);
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Water surface not enabled. Call enable_water_surface() first.",
+            ))
+        }
+    }
+
+    // C1 (native): Upload a water mask from a numpy array (u8 or bool)
+    //  - dtype=uint8: values interpreted in [0,255]
+    //  - dtype=bool : True->255, False->0
+    #[pyo3(text_signature = "($self, mask)")]
+    pub fn set_water_mask(&mut self, _py: pyo3::Python<'_>, mask: &pyo3::PyAny) -> PyResult<()> {
+        let (height, width, data_vec_u8) = if let Ok(arr_u8) = mask.extract::<PyReadonlyArray2<u8>>() {
+            let shape = arr_u8.shape();
+            let h = shape[0] as u32;
+            let w = shape[1] as u32;
+            // Ensure contiguous data
+            let v = arr_u8.as_array().to_owned().into_raw_vec();
+            (h, w, v)
+        } else if let Ok(arr_b) = mask.extract::<PyReadonlyArray2<bool>>() {
+            let a = arr_b.as_array();
+            let h = a.shape()[0] as u32;
+            let w = a.shape()[1] as u32;
+            let mut v = Vec::<u8>::with_capacity((h as usize) * (w as usize));
+            for &b in a.iter() {
+                v.push(if b { 255 } else { 0 });
+            }
+            (h, w, v)
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "mask must be a 2D numpy array of dtype uint8 or bool",
+            ));
+        };
+
+        if let Some(ref mut renderer) = self.water_surface_renderer {
+            let g = crate::gpu::ctx();
+            renderer.upload_water_mask(&g.device, &g.queue, &data_vec_u8, width, height);
+            Ok(())
         } else {
             Err(pyo3::exceptions::PyRuntimeError::new_err(
                 "Water surface not enabled. Call enable_water_surface() first.",

@@ -455,7 +455,7 @@ fn enumerate_adapters(py: Python<'_>) -> PyResult<Vec<PyObject>> {
     let mut out: Vec<PyObject> = Vec::new();
     for adapter in instance.enumerate_adapters(wgpu::Backends::all()) {
         let info = adapter.get_info();
-        let d = PyDict::new(py);
+        let d = PyDict::new_bound(py);
         d.set_item("name", info.name.clone())?;
         d.set_item("vendor", info.vendor)?;
         d.set_item("device", info.device)?;

@@ -680,6 +680,13 @@ class Scene:
             'speed': 1.0,
         }
         self._water_flow = np.array([1.0, 0.0], dtype=np.float32)
+        # C1/C2/C3: Hydrology state
+        self._water_mask = None  # Optional boolean mask (H,W) where water is present
+        self._water_depth_colors = ((0.0, 0.6, 1.0), (0.0, 0.12, 0.25))  # (shallow_rgb, deep_rgb)
+        self._foam_enabled = False
+        self._foam_width_px = 2
+        self._foam_intensity = 0.85
+        self._foam_noise_scale = 20.0
 
         # B12: soft light radius (fallback raster)
         self._soft_light_enabled = False
@@ -1205,25 +1212,212 @@ class Scene:
             raise RuntimeError("Water surface not enabled")
         return (float(self._water_height), float(self._water_alpha), float(self._water_hue_shift), float(self._water_tint_strength))
 
+    # -----------------------------
+    # C1: Detect water from DEM (mask)
+    # -----------------------------
+    def detect_water_from_dem(self, *, threshold: float | None = None, method: str = "auto", fill_basins: bool = True, smooth_iters: int = 1) -> np.ndarray:
+        """Detect water regions from the current heightmap and store a boolean mask.
+
+        Args:
+            threshold: Height threshold in normalized [0,1] (if None and method='auto', use 15th percentile).
+            method: 'auto' uses quantile; 'fixed' uses given threshold; 'flat' combines gradient flatness with threshold.
+            fill_basins: If True, performs a simple morphological closing on the mask to fill small holes.
+            smooth_iters: Number of smoothing iterations on the mask boundary.
+
+        Returns:
+            A boolean numpy array of shape (H, W) marking water pixels.
+        """
+        if getattr(self, "_heightmap", None) is None:
+            raise RuntimeError("No heightmap available; upload heightmap before detecting water")
+        hm = self._heightmap.astype(np.float32, copy=False)
+        H, W = hm.shape
+        # Normalize to [0,1] for thresholding
+        hmin = float(hm.min()); hmax = float(hm.max()); denom = max(hmax - hmin, 1e-9)
+        n = (hm - hmin) / denom
+
+        thr = float(threshold) if (threshold is not None) else float(np.quantile(n, 0.15))
+        base = (n <= thr)
+
+        if method.lower() in ("flat", "auto_flat"):
+            # Combine with flatness (low gradient magnitude)
+            gy, gx = np.gradient(hm)
+            g = np.sqrt(gx * gx + gy * gy)
+            g_norm = g / max(float(g.max()), 1e-9)
+            flat = g_norm <= 0.05
+            mask = np.logical_or(base, flat)
+        else:
+            mask = base
+
+        if fill_basins:
+            mask = self._binary_close(mask, iterations=max(1, smooth_iters))
+
+        # Optional smooth boundary
+        if smooth_iters > 0:
+            for _ in range(smooth_iters):
+                mask = self._binary_smooth(mask)
+
+        self._water_mask = mask
+        return mask
+
+    def set_water_mask(self, mask: np.ndarray | None) -> None:
+        """Set external water mask. Pass None to clear."""
+        if mask is None:
+            self._water_mask = None
+            return
+        if not isinstance(mask, np.ndarray) or mask.ndim != 2:
+            raise ValueError("water mask must be a 2D numpy array")
+        if getattr(self, "_heightmap", None) is not None and mask.shape != self._heightmap.shape:
+            raise ValueError(f"mask shape {mask.shape} must match heightmap shape {self._heightmap.shape}")
+        self._water_mask = mask.astype(bool, copy=False)
+
+    def set_water_depth_colors(self, shallow_rgb: tuple[float, float, float], deep_rgb: tuple[float, float, float]) -> None:
+        """Set shallow and deep water colors used for depth attenuation in fallback overlay."""
+        def c3(t):
+            r, g, b = t; return (float(max(0.0, min(1.0, r))), float(max(0.0, min(1.0, g))), float(max(0.0, min(1.0, b))))
+        self._water_depth_colors = (c3(shallow_rgb), c3(deep_rgb))
+
+    # -----------------------------
+    # C3: Shoreline foam overlay controls
+    # -----------------------------
+    def enable_shoreline_foam(self) -> None:
+        self._foam_enabled = True
+
+    def disable_shoreline_foam(self) -> None:
+        self._foam_enabled = False
+
+    def set_shoreline_foam_params(self, *, width_px: int = 2, intensity: float = 0.85, noise_scale: float = 20.0) -> None:
+        self._foam_width_px = int(max(1, width_px))
+        self._foam_intensity = float(max(0.0, min(1.0, intensity)))
+        self._foam_noise_scale = float(max(1.0, noise_scale))
+
     def _apply_water_surface(self, img: np.ndarray) -> None:
-        # Very simple overlay based on base + tint color and alpha; mode influences strength slightly
+        """Depth-aware water coloration with optional mask and shoreline foam (fallback path)."""
         h, w = img.shape[:2]
         rgb = img[..., :3].astype(np.float32) / 255.0
         base = np.array(self._water_base_color, dtype=np.float32)
         tint = np.array(self._water_tint, dtype=np.float32)
         color = (1.0 - self._water_tint_strength) * base + self._water_tint_strength * tint
-        # Mode weighting
+        # Mode weighting for alpha
         alpha = float(self._water_alpha)
         if self._water_mode == WaterSurfaceMode.reflective:
             alpha = min(1.0, alpha * 1.1)
         elif self._water_mode == WaterSurfaceMode.transparent:
             alpha = alpha * 0.8
         elif self._water_mode == WaterSurfaceMode.animated:
-            # tiny oscillation for change
             alpha = float(max(0.0, min(1.0, alpha * (0.9 + 0.1 * np.sin(self._water_time)))))
-        water_rgb = np.broadcast_to(color.reshape(1, 1, 3), (h, w, 3))
-        out = (1.0 - alpha) * rgb + alpha * water_rgb
+
+        # Optional mask
+        if self._water_mask is not None:
+            mask = self._water_mask.astype(bool, copy=False)
+            if mask.shape != (h, w):
+                # If heightmap differs from render size, nearest upsample
+                y_idx = (np.linspace(0, mask.shape[0] - 1, h)).astype(np.int32)
+                x_idx = (np.linspace(0, mask.shape[1] - 1, w)).astype(np.int32)
+                mask = mask[y_idx][:, x_idx]
+        else:
+            mask = np.ones((h, w), dtype=bool)
+
+        # Depth coloration based on water height and heightmap if available
+        shallow_rgb, deep_rgb = self._water_depth_colors
+        shallow = np.array(shallow_rgb, dtype=np.float32)
+        deep = np.array(deep_rgb, dtype=np.float32)
+        if getattr(self, "_heightmap", None) is not None:
+            Hm, Wm = self._heightmap.shape
+            if (Hm, Wm) != (h, w):
+                y_idx = (np.linspace(0, Hm - 1, h)).astype(np.int32)
+                x_idx = (np.linspace(0, Wm - 1, w)).astype(np.int32)
+                hm = self._heightmap[y_idx][:, x_idx]
+            else:
+                hm = self._heightmap
+            # Effective water depth in world units
+            depth = np.clip(self._water_height - hm.astype(np.float32), 0.0, None)
+            # Map to [0,1] with soft scale
+            df = depth / (1.0 + depth)
+            depth_color = (1.0 - df)[..., None] * shallow[None, None, :] + df[..., None] * deep[None, None, :]
+        else:
+            depth_color = np.broadcast_to(color.reshape(1, 1, 3), (h, w, 3))
+
+        # Combine base+tint color with depth coloration
+        water_rgb = 0.5 * (depth_color + color[None, None, :])
+
+        # Apply only where masked
+        out = rgb.copy()
+        out[mask] = (1.0 - alpha) * rgb[mask] + alpha * water_rgb[mask]
         img[..., :3] = np.clip(out * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+        # Optional shoreline foam overlay (post water blend)
+        if self._foam_enabled and self._water_mask is not None:
+            self._apply_shoreline_foam(img)
+
+    # -----------------------------
+    # C3: Foam overlay implementation
+    # -----------------------------
+    def _apply_shoreline_foam(self, img: np.ndarray) -> None:
+        h, w = img.shape[:2]
+        mask = self._water_mask
+        if mask is None:
+            return
+        if mask.shape != (h, w):
+            y_idx = (np.linspace(0, mask.shape[0] - 1, h)).astype(np.int32)
+            x_idx = (np.linspace(0, mask.shape[1] - 1, w)).astype(np.int32)
+            mask = mask[y_idx][:, x_idx]
+        # Boundary where water meets land
+        boundary = np.logical_and(mask, self._neighbor_count(mask) < 9)
+        ring = boundary.copy()
+        for _ in range(max(1, self._foam_width_px - 1)):
+            ring = np.logical_or(ring, self._binary_dilate(ring))
+        # Procedural noise for foam breakup
+        noise = self._white_noise_2d(h, w, scale=self._foam_noise_scale)
+        foam_alpha = (self._foam_intensity * (0.6 + 0.4 * noise)).astype(np.float32)
+        # Blend foam (white) where ring
+        roi = ring
+        rgb = img[..., :3].astype(np.float32) / 255.0
+        white = np.ones_like(rgb)
+        alpha = foam_alpha[..., None]
+        rgb[roi] = (1.0 - alpha[roi]) * rgb[roi] + alpha[roi] * white[roi]
+        img[..., :3] = np.clip(rgb * 255.0 + 0.5, 0.0, 255.0).astype(np.uint8)
+
+    # -----------------------------
+    # Morphology helpers (numpy-only)
+    # -----------------------------
+    @staticmethod
+    def _neighbor_count(mask: np.ndarray) -> np.ndarray:
+        m = mask.astype(np.uint8)
+        # 3x3 sum via shifts
+        s = m
+        s = s + np.roll(m, 1, 0) + np.roll(m, -1, 0)
+        s = s + np.roll(m, 1, 1) + np.roll(m, -1, 1)
+        s = s + np.roll(np.roll(m, 1, 0), 1, 1) + np.roll(np.roll(m, 1, 0), -1, 1)
+        s = s + np.roll(np.roll(m, -1, 0), 1, 1) + np.roll(np.roll(m, -1, 0), -1, 1)
+        return s
+
+    def _binary_dilate(self, mask: np.ndarray, iterations: int = 1) -> np.ndarray:
+        out = mask.copy()
+        for _ in range(max(1, iterations)):
+            out = self._neighbor_count(out) > 0
+        return out
+
+    def _binary_erode(self, mask: np.ndarray, iterations: int = 1) -> np.ndarray:
+        out = mask.copy()
+        for _ in range(max(1, iterations)):
+            out = self._neighbor_count(out) == 9
+        return out
+
+    def _binary_close(self, mask: np.ndarray, iterations: int = 1) -> np.ndarray:
+        return self._binary_erode(self._binary_dilate(mask, iterations), iterations)
+
+    def _binary_smooth(self, mask: np.ndarray) -> np.ndarray:
+        # Majority filter over 3x3 neighborhood
+        return self._neighbor_count(mask) >= 5
+
+    @staticmethod
+    def _white_noise_2d(h: int, w: int, scale: float = 20.0) -> np.ndarray:
+        # Hash-based simple noise from UV grid
+        ys = np.arange(h, dtype=np.float32)[:, None]
+        xs = np.arange(w, dtype=np.float32)[None, :]
+        uv = xs / max(1.0, scale) + ys / max(1.0, 1.37 * scale)
+        s = np.sin(uv * 12.9898 + 78.233)
+        return (s - s.min()) / max(1e-9, (s.max() - s.min()))
 
     # ---------------------------------------------------------------------
     # B12: Soft Light Radius (fallback raster) API and rendering
@@ -2439,11 +2633,14 @@ class Scene:
             ph = min(48, height)
             pw = min(48, width)
             patch = img[:ph, :pw, :3].astype(np.float32) / 255.0
-            # Two light neighborhood mixes
-            for _ in range(2):
+            # A few light neighborhood mixes and a simple separable blur
+            for _ in range(4):
                 nb = (np.roll(patch, 1, axis=0) + np.roll(patch, -1, axis=0) +
                       np.roll(patch, 1, axis=1) + np.roll(patch, -1, axis=1)) * 0.25
                 patch = 0.6 * patch + 0.4 * nb
+            # Separable 1D blur across rows and columns (very small footprint)
+            patch = (np.roll(patch, 1, axis=0) + patch + np.roll(patch, -1, axis=0)) / 3.0
+            patch = (np.roll(patch, 1, axis=1) + patch + np.roll(patch, -1, axis=1)) / 3.0
             return
 
         base = img[..., :3].astype(np.float32) / 255.0
