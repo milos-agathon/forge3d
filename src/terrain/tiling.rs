@@ -321,11 +321,32 @@ impl TilingSystem {
         }
     }
 
+    /// Public accessor for the configured maximum LOD level
+    pub fn max_lod(&self) -> u32 {
+        self.max_lod
+    }
+
     /// Generate list of visible tiles for a given frustum
     pub fn get_visible_tiles(&mut self, frustum: &Frustum) -> Vec<TileId> {
         let mut visible_tiles = Vec::new();
         self.collect_visible_tiles_recursive(TileId::new(0, 0, 0), &frustum, &mut visible_tiles);
         visible_tiles
+    }
+
+    /// Generate visible tiles at a fixed LOD level
+    pub fn get_visible_tiles_at_lod(&self, frustum: &Frustum, lod: u32) -> Vec<TileId> {
+        let n = 1u32 << lod;
+        let mut out = Vec::new();
+        for y in 0..n {
+            for x in 0..n {
+                let id = TileId::new(lod, x, y);
+                let bounds = QuadTreeNode::calculate_bounds(&self.root_bounds, id, self.tile_size);
+                if frustum.intersects_bounds(&bounds) {
+                    out.push(id);
+                }
+            }
+        }
+        out
     }
 
     /// Recursive function to collect visible tiles
@@ -409,6 +430,11 @@ impl TilingSystem {
     /// Get tile data from cache
     pub fn get_tile_data(&mut self, tile_id: &TileId) -> Option<&TileData> {
         self.tile_cache.get(tile_id)
+    }
+
+    /// Insert externally prepared tile data into the cache
+    pub fn insert_tile_data(&mut self, tile_data: TileData) -> Result<(), String> {
+        self.tile_cache.insert(tile_data)
     }
 
     /// Get cache statistics

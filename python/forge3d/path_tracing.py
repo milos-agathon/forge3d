@@ -435,6 +435,7 @@ def render_aovs(
     seed: int = 1,
     frames: int = 1,
     use_gpu: bool = True,
+    mesh: Any | None = None,
 ) -> Dict[str, np.ndarray]:
     """Render a deterministic set of AOVs for testing and API conformance.
 

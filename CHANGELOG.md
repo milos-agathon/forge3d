@@ -8,6 +8,140 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ### Added
 - Placeholder for upcoming changes
 
+## [0.60.0]
+
+### Added
+- Workstream E1m – Loader diagnostics counters
+  - Added per-loader counters (requests, enqueued, dropped_by_policy, canceled, send_fail, completed) for height and overlay async loaders
+  - Python diagnostics: `debug_async_loader_counters()`, `debug_async_overlay_loader_counters()`
+
+## [0.59.0]
+
+### Added
+- Workstream E1k – Coalescing policy selection and request prioritization
+  - Coalescing policy configurable: `coalesce_policy='coarse'|'fine'` for height and overlay loaders
+  - Near-to-far priority ordering of visible tiles before issuing requests/uploads
+  - Request queue switched to bounded `sync_channel` with non-blocking `try_send()`
+
+## [0.58.0]
+
+### Added
+- Workstream E1j – Pluggable real data ingestion
+  - File-backed readers: `FileHeightReader(template, scale, offset)` and `FileOverlayReader(template)`
+  - Python: `enable_async_loader(..., template=..., scale=..., offset=...)`, `enable_async_overlay_loader(..., template=...)`
+
+## [0.57.0]
+
+### Added
+- Workstream E1i – Cancellation and LOD-aware coalescing
+  - Cancel requests for tiles leaving visibility; drop results if canceled
+  - Coalescing rules: Prefer coarse (cancel descendants) or prefer fine (cancel ancestors)
+
+## [0.56.0]
+
+### Added
+- Workstream E1h – Overlay async IO parity
+  - `AsyncOverlayLoader` (pool, dedup/backpressure, cancellation)
+  - `stream_tiles_to_overlay_mosaic_at_lod(...)` with neighbor prefetch and per-frame upload budget
+
+## [0.55.0]
+
+### Added
+- Workstream E1g – Neighbor prefetch
+  - 4-neighborhood prefetch under in-flight budget for smoother streaming
+
+## [0.54.0]
+
+### Added
+- Workstream E1f – Thread pool and Python API
+  - Dispatcher + N worker threads; tunable `pool_size`
+  - Python: `enable_async_loader(tile_resolution, max_in_flight, pool_size)` and `debug_async_loader_stats()`
+
+## [0.53.0]
+
+### Added
+- Workstream E1e – Deduplication and backpressure
+  - Pending set eliminates duplicate in-flight requests
+  - In-flight cap limits outstanding requests; per-frame upload budget enforced
+
+## [0.52.0]
+
+### Added
+- Workstream E1c – Async tile IO (height)
+  - `AsyncTileLoader` and integration in `stream_tiles_to_height_mosaic_at_lod(...)`
+
+## [0.51.0]
+
+### Added
+- Workstream E1b – Shader-side UVs via TileSlot + MosaicParams
+  - Removed CPU `uv_remap`; shaders compute UVs from page table entries
+
+## [0.50.0]
+
+### Added
+- Workstream D10 – Title/Compass/Scale/Text overlays
+  - Title bar, compass rose, scale bar, and text overlays with enable/disable APIs
+
+## [0.49.0]
+
+### Added
+- Workstream D8 – Hillshade/Shadow overlay
+  - Azimuth/altitude-driven shadow overlay with blend modes
+
+## [0.48.0]
+
+### Added
+- Workstream D6/D7 – Contours
+  - Contour generation and contour overlay rendering
+
+## [0.47.0]
+
+### Added
+- Workstream D5 – Altitude overlay
+  - Altitude/height-based overlay composited over terrain
+
+## [0.46.0]
+
+### Added
+- Workstream D4 – Drape raster overlay
+  - Offset/scale controls; alpha blending
+
+## [0.45.0]
+
+### Added
+- Workstream D3 – Compass overlay
+  - Compass rose overlay with positioning and styling controls
+
+## [0.44.0]
+
+### Added
+- Workstream D2 – Text and scale overlays
+  - Text overlay API; scale bar overlay support
+
+## [0.43.0]
+
+### Added
+- Workstream D1 – Overlays infrastructure
+  - Overlay composition scaffolding and renderer wiring
+
+## [0.42.0]
+
+### Added
+- Workstream C3 – Shoreline foam overlay
+  - Foam overlay controls: width, intensity, noise scale; enable/disable API
+
+## [0.41.0]
+
+### Added
+- Workstream C2 – Water material and depth-aware coloration
+  - Water surface material with depth colors and alpha
+
+## [0.40.0]
+
+### Added
+- Workstream C1 – Water detection & masking
+  - `detect_water_from_dem(method='auto'|'flat', smooth_iters)` and external mask support with validation
+
 ## [0.39.0] - 2025-09-19
 
 ### Added

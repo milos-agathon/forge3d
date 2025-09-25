@@ -7,10 +7,10 @@ use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType, BufferDescriptor, BufferUsages,
     ColorTargetState, ColorWrites, Device, FragmentState, PipelineLayoutDescriptor, PrimitiveState,
-    PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, Sampler,
-    SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages,
-    Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
-    TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
+    PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, Sampler, SamplerBindingType,
+    SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages, Texture, TextureDescriptor,
+    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView, TextureViewDescriptor,
+    TextureViewDimension, VertexState,
 };
 
 #[repr(C)]
@@ -54,7 +54,7 @@ pub struct OverlayRenderer {
 }
 
 impl OverlayRenderer {
-    pub fn new(device: &Device, color_format: TextureFormat) -> Self {
+    pub fn new(device: &Device, color_format: TextureFormat, height_filterable: bool) -> Self {
         let uniforms = OverlayUniforms::default();
         let uniform_buffer = device.create_buffer(&BufferDescriptor {
             label: Some("overlay_uniforms"),
@@ -102,7 +102,7 @@ impl OverlayRenderer {
                     ty: BindingType::Texture {
                         multisampled: false,
                         view_dimension: TextureViewDimension::D2,
-                        sample_type: TextureSampleType::Float { filterable: false },
+                        sample_type: TextureSampleType::Float { filterable: height_filterable },
                     },
                     count: None,
                 },
@@ -110,7 +110,14 @@ impl OverlayRenderer {
                 BindGroupLayoutEntry {
                     binding: 4,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                    ty: BindingType::Sampler(if height_filterable { SamplerBindingType::Filtering } else { SamplerBindingType::NonFiltering }),
+                    count: None,
+                },
+                // E1: Page table storage buffer (read-only)
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer { ty: BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
                     count: None,
                 },
             ],
@@ -126,8 +133,8 @@ impl OverlayRenderer {
         });
         let height_sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("overlay_height_sampler"),
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
+            mag_filter: if height_filterable { wgpu::FilterMode::Linear } else { wgpu::FilterMode::Nearest },
+            min_filter: if height_filterable { wgpu::FilterMode::Linear } else { wgpu::FilterMode::Nearest },
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
@@ -145,6 +152,14 @@ impl OverlayRenderer {
         });
         let dummy_view = dummy_tex.create_view(&TextureViewDescriptor::default());
 
+        // Dummy 1x1 storage buffer for page table when not provided
+        let pt_dummy = device.create_buffer(&BufferDescriptor {
+            label: Some("overlay_page_table_dummy"),
+            size: 16,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("overlay_bg"),
             layout: &bind_group_layout,
@@ -154,6 +169,7 @@ impl OverlayRenderer {
                 BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&overlay_sampler) },
                 BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&dummy_view) },
                 BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&height_sampler) },
+                BindGroupEntry { binding: 5, resource: pt_dummy.as_entire_binding() },
             ],
         });
 
@@ -230,6 +246,7 @@ impl OverlayRenderer {
         device: &Device,
         overlay_view: Option<&TextureView>,
         height_view: Option<&TextureView>,
+        page_table: Option<&Buffer>,
     ) {
         // fallback to dummy 1x1 white created via a small temporary texture
         // Prefer provided view, then stored view, else dummy
@@ -252,6 +269,17 @@ impl OverlayRenderer {
         let overlay_view = use_overlay_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());
         let height_view = height_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());
 
+        // Fallback dummy storage buffer if page table is not provided
+        let pt_dummy = device.create_buffer(&BufferDescriptor {
+            label: Some("overlay_page_table_dummy_recreate"),
+            size: 16,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let pt_binding = page_table
+            .map(|b| b.as_entire_binding())
+            .unwrap_or_else(|| pt_dummy.as_entire_binding());
+
         self.bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("overlay_bg"),
             layout: &self.bind_group_layout,
@@ -261,6 +289,7 @@ impl OverlayRenderer {
                 BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.overlay_sampler) },
                 BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(height_view) },
                 BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&self.height_sampler) },
+                BindGroupEntry { binding: 5, resource: pt_binding },
             ],
         });
 

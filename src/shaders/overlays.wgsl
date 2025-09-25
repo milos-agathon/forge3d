@@ -14,6 +14,9 @@ struct OverlayUniforms {
 @group(0) @binding(2) var overlay_samp : sampler;
 @group(0) @binding(3) var height_tex : texture_2d<f32>;
 @group(0) @binding(4) var height_samp : sampler;
+// E1: Page table storage buffer — tile->slot entries (matches Rust layout)
+struct PageTableEntry { lod: u32, x: u32, y: u32, _pad0: u32, sx: u32, sy: u32, slot: u32, _pad1: u32 };
+@group(0) @binding(5) var<storage, read> PageTable : array<PageTableEntry>;
 
 struct VsOut {
   @builtin(position) pos : vec4<f32>,
@@ -88,6 +91,12 @@ fn fs_overlay(in: VsOut) -> @location(0) vec4<f32> {
     let c_a = clamp(U.contour_color.a, 0.0, 1.0) * line;
     col = mix(col, c_col, c_a);
     a = clamp(a + c_a * (1.0 - a), 0.0, 1.0);
+  }
+
+  // E1: Demonstrate reading from page table (no visual change)
+  if (arrayLength(&PageTable) > 0u) {
+    let dbg_slot = f32(PageTable[0u].slot);
+    a = a + 0.0 * dbg_slot;
   }
 
   return vec4<f32>(col, a);

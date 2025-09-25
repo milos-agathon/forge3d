@@ -648,12 +648,17 @@ impl Scene {
         };
 
         // Pipeline
+        let height_filterable = g
+            .device
+            .features()
+            .contains(wgpu::Features::FLOAT32_FILTERABLE);
         let tp = crate::terrain::pipeline::TerrainPipeline::create(
             &g.device,
             TEXTURE_FORMAT,
             NORMAL_FORMAT,
             sample_count,
             depth_format,
+            height_filterable,
         );
 
         let ssao = SsaoResources::new(&g.device, &g.queue, width, height, &color, &normal)
@@ -819,8 +824,8 @@ impl Scene {
         reflection_renderer.upload_uniforms(&g.queue);
 
         // D: Overlays compositor
-        let mut overlay_renderer = crate::core::overlays::OverlayRenderer::new(&g.device, TEXTURE_FORMAT);
-        overlay_renderer.recreate_bind_group(&g.device, None, Some(&hview));
+        let mut overlay_renderer = crate::core::overlays::OverlayRenderer::new(&g.device, TEXTURE_FORMAT, height_filterable);
+        overlay_renderer.recreate_bind_group(&g.device, None, Some(&hview), None);
         overlay_renderer.upload_uniforms(&g.queue);
 
         // D: Text overlay (native)
@@ -1046,7 +1051,7 @@ impl Scene {
         // Update overlays compositor to use the new height view
         let height_ref = self.height_view.as_ref();
         if let Some(ref mut ov) = self.overlay_renderer {
-            ov.recreate_bind_group(&g.device, None, height_ref);
+            ov.recreate_bind_group(&g.device, None, height_ref, None);
             ov.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -4324,7 +4329,7 @@ impl Scene {
         // Ensure height view is bound
         if let Some(ref hv) = self.height_view {
             let g = crate::gpu::ctx();
-            ov.recreate_bind_group(&g.device, None, Some(hv));
+            ov.recreate_bind_group(&g.device, None, Some(hv), None);
         }
         let g = crate::gpu::ctx();
         ov.upload_uniforms(&g.queue);
@@ -4398,7 +4403,7 @@ impl Scene {
         ov.overlay_view = Some(view);
         // Recreate bind group with new overlay view and existing height view
         let height_view = self.height_view.as_ref();
-        ov.recreate_bind_group(&g.device, None, height_view);
+        ov.recreate_bind_group(&g.device, None, height_view, None);
         Ok(())
     }
 
@@ -4614,7 +4619,7 @@ impl Scene {
             // Keep GPU resources alive
             ov.set_overlay_texture(tex, view);
             // Rebind with current height view for altitude/contours
-            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref());
+            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref(), None);
 
             // Set params
             ov.set_enabled(true);
@@ -5102,12 +5107,17 @@ impl Scene {
             )
             .map_err(|e| e)?;
 
+        let height_filterable = g
+            .device
+            .features()
+            .contains(wgpu::Features::FLOAT32_FILTERABLE);
         self.tp = crate::terrain::pipeline::TerrainPipeline::create(
             &g.device,
             TEXTURE_FORMAT,
             NORMAL_FORMAT,
             self.sample_count,
             depth_format,
+            height_filterable,
         );
 
         self.bg0_globals = self.tp.make_bg_globals(&g.device, &self.ubo);
@@ -5135,7 +5145,7 @@ impl Scene {
 
         // Recreate native overlay bind group with current overlay/height views
         if let Some(ref mut ov) = self.overlay_renderer {
-            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref());
+            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref(), None);
             ov.upload_uniforms(&g.queue);
         }
 

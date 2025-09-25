@@ -44,6 +44,8 @@ pub struct DeviceCaps {
 
     /// Vertex shader texture array support
     pub vertex_shader_array_support: bool,
+    /// Support for linear filtering on 32-bit float textures (e.g., R32Float)
+    pub float32_filterable: bool,
 }
 
 impl DeviceCaps {
@@ -81,6 +83,8 @@ impl DeviceCaps {
             && device_features.contains(
                 wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING,
             );
+        // Detect float32 filterable textures support
+        let float32_filterable = device_features.contains(wgpu::Features::FLOAT32_FILTERABLE);
 
         // Backend-specific array limits
         let (max_texture_array_layers, max_sampler_array_size, vertex_shader_array_support) =
@@ -99,6 +103,7 @@ impl DeviceCaps {
             max_texture_array_layers,
             max_sampler_array_size,
             vertex_shader_array_support,
+            float32_filterable,
         })
     }
 
@@ -161,6 +166,7 @@ impl DeviceCaps {
             "vertex_shader_array_support",
             self.vertex_shader_array_support,
         )?;
+        dict.set_item("float32_filterable", self.float32_filterable)?;
 
         Ok(dict.into())
     }
