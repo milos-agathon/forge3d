@@ -115,7 +115,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // P5: Hair demo
     let mut hair_demo: bool = false;
     let mut hair_width: f32 = 0.02;
-    let mut hair_mat: u32 = 1;
+    let mut hair_scale: f32 = 1.0; // scales segment radius via WGSL override
+    let mut hair_mat: u32 = 1; // 0=dark,1=blond
+    let mut hair_style: String = "arc".to_string(); // arc|grid
     // P6: QMC/Owen + adaptive SPP in raygen
     let mut qmc_mode: u32 = 0; // 0=Halton/VDC, 1=Sobol
     let mut spp_limit: Option<u32> = None;
@@ -224,9 +226,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             s if s.starts_with("--hair-mat=") => {
                 if let Some((_, v)) = s.split_once('=') {
-                    if let Ok(u) = v.parse::<u32>() {
-                        hair_mat = if u > 0 { 1 } else { 0 };
+                    match v {
+                        "dark" => hair_mat = 0,
+                        "blond" => hair_mat = 1,
+                        _ => {
+                            if let Ok(u) = v.parse::<u32>() { hair_mat = if u > 0 { 1 } else { 0 }; }
+                        }
                     }
+                }
+            }
+            s if s.starts_with("--hair-scale=") => {
+                if let Some((_, v)) = s.split_once('=') {
+                    if let Ok(f) = v.parse::<f32>() { hair_scale = f.max(0.0); }
+                }
+            }
+            s if s.starts_with("--hair-style=") => {
+                if let Some((_, v)) = s.split_once('=') {
+                    let vv = v.to_lowercase();
+                    if vv == "arc" || vv == "grid" { hair_style = vv; }
                 }
             }
             s if s.starts_with("--qmc-mode=") => {
@@ -249,7 +266,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                      [--swap-materials] [--skinny-blas1] [--camera-jitter=<f>] [--force-blas=<0|1>] \
                      [--dump-aov-depth=<path>] [--dump-aov-albedo=<path>] [--dump-aov-normal=<path>] [--dump-aov-with-header] \
                      [--medium-enable] [--medium-g=<f>] [--medium-sigma-t=<f>] [--medium-density=<f>] \
-                     [--compute-ao] [--ao-samples=<u>] [--ao-intensity=<f>] [--ao-bias=<f>] [--hair-demo] [--hair-width=<f>] [--hair-mat=<0|1>] \
+                     [--compute-ao] [--ao-samples=<u>] [--ao-intensity=<f>] [--ao-bias=<f>] [--hair-demo] [--hair-width=<f>] [--hair-scale=<f>] [--hair-style=arc|grid] [--hair-mat=<dark|blond|0|1>] \
                      [--qmc-mode=<0|1>] [--spp-limit=<u>]\n\
                      Defaults: ReSTIR disabled; spatial disabled; swap-materials off; skinny-blas1 off; jitter 0; no force-blas"
                 );
@@ -478,29 +495,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     sched.set_blas_descs_buffer(descs_buffer);
     // Optional: hair segments demo (upload before creating scene bind group so binding 20 points to correct buffer)
     if hair_demo {
-        // Create a simple arc of segments above the origin using material 0
+        // Populate hair segments
         let mut segs: Vec<HairSegment> = Vec::new();
         let base_y = 0.5f32;
-        let radius = hair_width.max(0.0);
-        let count = 12;
-        for i in 0..count {
-            let t0 = i as f32 / count as f32;
-            let t1 = (i + 1) as f32 / count as f32;
-            // Quadratic bezier-like arc in XZ plane
-            let x0 = -0.6 + 1.2 * t0;
-            let z0 = 0.4 * (1.0 - (2.0 * t0 - 1.0).abs());
-            let x1 = -0.6 + 1.2 * t1;
-            let z1 = 0.4 * (1.0 - (2.0 * t1 - 1.0).abs());
-            segs.push(HairSegment {
-                p0: [x0, base_y + 0.2 * z0, 0.1 * z0],
-                r0: radius,
-                p1: [x1, base_y + 0.2 * z1, 0.1 * z1],
-                r1: radius,
-                material_id: (2 + hair_mat.min(1)),
-                _pad0: 0,
-                _pad1: 0,
-                _pad2: 0,
-            });
+        let radius = (hair_width * hair_scale).max(0.0);
+        if hair_style == "grid" {
+            // Simple grid of short vertical segments
+            let nx = 7;
+            let nz = 5;
+            for iz in 0..nz {
+                for ix in 0..nx {
+                    let fx = -0.7 + 1.4 * (ix as f32 / (nx as f32 - 1.0));
+                    let fz = -0.3 + 0.6 * (iz as f32 / (nz as f32 - 1.0));
+                    let p0 = [fx, base_y, 0.2 * fz];
+                    let p1 = [fx, base_y + 0.25, 0.2 * fz];
+                    segs.push(HairSegment { p0, r0: radius, p1, r1: radius, material_id: (2 + hair_mat.min(1)), _pad0: 0, _pad1: 0, _pad2: 0 });
+                }
+            }
+        } else {
+            // Arc style
+            let count = 12;
+            for i in 0..count {
+                let t0 = i as f32 / count as f32;
+                let t1 = (i + 1) as f32 / count as f32;
+                // Quadratic bezier-like arc in XZ plane
+                let x0 = -0.6 + 1.2 * t0;
+                let z0 = 0.4 * (1.0 - (2.0 * t0 - 1.0).abs());
+                let x1 = -0.6 + 1.2 * t1;
+                let z1 = 0.4 * (1.0 - (2.0 * t1 - 1.0).abs());
+                segs.push(HairSegment {
+                    p0: [x0, base_y + 0.2 * z0, 0.1 * z0],
+                    r0: radius,
+                    p1: [x1, base_y + 0.2 * z1, 0.1 * z1],
+                    r1: radius,
+                    material_id: (2 + hair_mat.min(1)),
+                    _pad0: 0,
+                    _pad1: 0,
+                    _pad2: 0,
+                });
+            }
         }
         let hair_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("hair-segments"),
@@ -537,8 +570,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create accumulation bind group (Group 3)
     let accum_bg = sched.create_accum_bind_group(&accum_hdr);
 
-    // Render one frame
-    sched.render_frame_simple(&uniforms_buffer, &scene_bg, &accum_bg)?;
+    // Render one frame (with optional hair width scaling via pipeline constant override)
+    {
+        // If hair_scale != 1, rebuild intersect pipeline with HAIR_RADIUS_SCALE override
+        if hair_demo && (hair_scale - 1.0).abs() > 1e-6 {
+            // The current scheduler does not expose pipeline overrides; future work could teach it to.
+            // For now, hair_scale can still be applied by setting wider radii in buffers, but we've kept
+            // the WGSL override for engines that support specialization constants.
+        }
+        sched.render_frame_simple(&uniforms_buffer, &scene_bg, &accum_bg)?;
+    }
 
     // Read back HDR buffer and write a PNG (simple tonemap)
     let readback = device.create_buffer(&wgpu::BufferDescriptor {

@@ -102,9 +102,10 @@ def test_contour_extraction_input_validation():
     with pytest.raises(Exception, match="Heights array length .* does not match dimensions"):
         ts.contour_extract(heights, 3, 3, dx=1.0, dy=1.0, levels=levels)
     
-    # Test non-contiguous array
-    heights_2d = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
-    heights_non_contig = heights_2d[:, ::2].flatten()  # Non-contiguous
+    # Test non-contiguous array: construct a 2x4 and stride columns to 2x2 view
+    heights_2d = np.array([[1.0, 2.0, 3.0, 4.0],
+                           [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)
+    heights_non_contig = heights_2d[:, ::2]  # Non-contiguous 2D view (shape 2x2)
     with pytest.raises(Exception, match="Heights array must be C-contiguous"):
         ts.contour_extract(heights_non_contig, 2, 2, dx=1.0, dy=1.0, levels=levels)
     

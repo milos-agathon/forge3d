@@ -915,7 +915,16 @@ impl CloudRenderer {
                 depth_or_array_layers: 6,
             },
         );
-        let irradiance_view = irradiance.create_view(&wgpu::TextureViewDescriptor::default());
+        let irradiance_view = irradiance.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("cloud_ibl_irradiance_view"),
+            format: Some(TextureFormat::Rgba8Unorm),
+            dimension: Some(TextureViewDimension::Cube),
+            aspect: wgpu::TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: Some(1),
+            base_array_layer: 0,
+            array_layer_count: Some(6),
+        });
 
         let prefilter = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("cloud_ibl_prefilter"),
@@ -950,7 +959,16 @@ impl CloudRenderer {
                 depth_or_array_layers: 6,
             },
         );
-        let prefilter_view = prefilter.create_view(&wgpu::TextureViewDescriptor::default());
+        let prefilter_view = prefilter.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("cloud_ibl_prefilter_view"),
+            format: Some(TextureFormat::Rgba8Unorm),
+            dimension: Some(TextureViewDimension::Cube),
+            aspect: wgpu::TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: Some(1),
+            base_array_layer: 0,
+            array_layer_count: Some(6),
+        });
 
         self.ibl_irradiance_texture = Some(irradiance);
         self.ibl_irradiance_view = Some(irradiance_view);

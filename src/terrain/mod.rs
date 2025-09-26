@@ -11,6 +11,12 @@ pub mod pipeline;
 pub use pipeline::TerrainPipeline;
 // T33-END:terrain-mod
 
+// E1/E3: streaming mosaics
+pub mod stream;
+// E1 (scaffolding): GPU page table for tile→slot mapping
+pub mod page_table;
+pub use page_table::PageTable;
+
 // B11-BEGIN:tiling-mod
 pub mod tiling;
 pub use tiling::{
@@ -34,6 +40,7 @@ pub use analysis::{
 // B13/B14-END:analysis-mod
 
 use numpy::IntoPyArray;
+use std::collections::HashSet;
 use pyo3::prelude::*;
 use std::num::NonZeroU32;
 use wgpu::util::DeviceExt;
@@ -48,6 +55,32 @@ pub struct PointLight {
     pub intensity: f32,
     pub radius: f32,
     pub _pad1: [f32; 3],
+}
+
+// E2: Per-tile uniforms (matches WGSL TileUniforms)
+#[repr(C, align(16))]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct TileUniformsCPU {
+    world_remap: [f32; 4],  // (scale_x, scale_y, offset_x, offset_y)
+}
+
+// E1b: Tile slot UBO and mosaic params UBO (match WGSL TileSlot, MosaicParams)
+#[repr(C, align(16))]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct TileSlotCPU {
+    lod: u32,
+    x: u32,
+    y: u32,
+    slot: u32,
+}
+
+#[repr(C, align(16))]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct MosaicParamsCPU {
+    inv_tiles_x: f32,
+    inv_tiles_y: f32,
+    tiles_x: u32,
+    tiles_y: u32,
 }
 
 #[repr(C)]
@@ -77,6 +110,9 @@ impl Default for PointLight {
         }
     }
 }
+
+    // [methods moved into impl TerrainSpike]
+
 
 impl Default for SpotLight {
     fn default() -> Self {
@@ -471,6 +507,11 @@ pub struct Globals {
     pub exaggeration: f32,
     pub view_world_position: glam::Vec3,
     pub palette_index: u32, // L2: Palette selection index
+    // E2: LOD morphing & skirts
+    pub lod_morph: f32,      // [0..1], 1=full detail, 0=coarse
+    pub coarse_factor: f32,  // >=1, quantization factor for coarse sampling
+    pub skirt_depth: f32,    // >=0, units to pull skirt vertices down
+    pub skirt_mask: u32,     // bitmask: 1=left,2=right,4=bottom,8=top
 }
 
 impl Default for Globals {
@@ -485,6 +526,11 @@ impl Default for Globals {
             exaggeration: 1.0,
             view_world_position: glam::Vec3::new(0.0, 0.0, 5.0), // Default camera position
             palette_index: 0,                                    // Default to first palette
+            // E2 defaults: no morphing, no skirts
+            lod_morph: 1.0,
+            coarse_factor: 1.0,
+            skirt_depth: 0.0,
+            skirt_mask: 0xF, // default: enable skirts on all edges
         }
     }
 }
@@ -492,8 +538,7 @@ impl Default for Globals {
 impl Globals {
     pub fn to_uniforms(&self, view: glam::Mat4, proj: glam::Mat4) -> TerrainUniforms {
         let h_range = self.h_max - self.h_min;
-
-        TerrainUniforms::new_with_palette(
+        let mut u = TerrainUniforms::new_with_palette(
             view,
             proj,
             self.sun_dir,
@@ -502,7 +547,15 @@ impl Globals {
             h_range,
             self.exaggeration,
             self.palette_index,
-        )
+        );
+        // E2: write morphing/skirts into tail padding [X=morph, Y=coarse_factor, Z=skirt_depth, W=0]
+        u._pad_tail = [
+            self.lod_morph,
+            self.coarse_factor.max(1.0),
+            self.skirt_depth.max(0.0),
+            self.skirt_mask as f32,
+        ];
+        u
     }
 }
 
@@ -511,7 +564,7 @@ impl Globals {
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const NORMAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
-#[pyclass(module = "_vulkan_forge", name = "TerrainSpike")]
+#[pyclass(module = "forge3d._forge3d", name = "TerrainSpike")]
 pub struct TerrainSpike {
     width: u32,
     height: u32,
@@ -531,6 +584,9 @@ pub struct TerrainSpike {
     nidx: u32,
 
     ubo: wgpu::Buffer,
+    tile_ubo: wgpu::Buffer,          // E2: per-tile uniforms buffer
+    tile_slot_ubo: wgpu::Buffer,     // E1b: per-draw tile slot buffer
+    mosaic_params_ubo: wgpu::Buffer, // E1b: mosaic params buffer
     colormap_lut: ColormapLUT,
     lut_format: &'static str,
 
@@ -545,9 +601,30 @@ pub struct TerrainSpike {
     // T33: optional height texture state
     height_view: Option<wgpu::TextureView>,
     height_sampler: Option<wgpu::Sampler>,
+    // E6: whether the current pipeline expects a filterable height sampler
+    height_filterable: bool,
 
     // B11: Tiling system for large DEMs
     tiling_system: Option<TilingSystem>,
+
+    // E1: GPU height mosaic (R32Float) for streamed tiles
+    height_mosaic: Option<crate::terrain::stream::HeightMosaic>,
+    // E3: Optional overlay mosaic (RGBA8) for basemap streaming
+    #[allow(dead_code)]
+    overlay_mosaic: Option<crate::terrain::stream::ColorMosaic>,
+    // E3: Overlay compositor
+    overlay_renderer: Option<crate::core::overlays::OverlayRenderer>,
+    // E2: tile uniforms bind group
+    bg5_tile: wgpu::BindGroup,
+    // E1: Optional page table buffer
+    page_table: Option<PageTable>,
+    // E1c: Optional background async tile loader
+    async_loader: Option<crate::terrain::page_table::AsyncTileLoader>,
+    // E1c/E1e: Optional background async overlay loader
+    async_overlay_loader: Option<crate::terrain::page_table::AsyncOverlayLoader>,
+    // E1e: track previous visible tiles for cancellation (height/overlay)
+    prev_visible_height: HashSet<TileId>,
+    prev_visible_overlay: HashSet<TileId>,
 }
 
 #[pymethods]
@@ -643,12 +720,16 @@ impl TerrainSpike {
 
         // T33-BEGIN:terrainspike-use-t33
         // Use shared T33 pipeline
+        let init_height_filterable = device
+            .features()
+            .contains(wgpu::Features::FLOAT32_FILTERABLE);
         let tp = crate::terrain::pipeline::TerrainPipeline::create(
             &device,
             TEXTURE_FORMAT,
             NORMAL_FORMAT,
             1,
             None,
+            init_height_filterable,
         );
         // T33-END:terrainspike-use-t33
 
@@ -676,6 +757,28 @@ impl TerrainSpike {
             label: Some("terrain-ubo"),
             contents: bytemuck::cast_slice(&[uniforms]),
             usage: ubo_usage,
+        });
+
+        // E2: Create a default tile uniforms buffer
+        let tile_init = TileUniformsCPU { world_remap: [globals.spacing, globals.spacing, 0.0, 0.0] };
+        let tile_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain-tile-ubo"),
+            contents: bytemuck::bytes_of(&tile_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // E1b: Create default tile slot and mosaic params UBOs
+        let tile_slot_init = TileSlotCPU { lod: 0, x: 0, y: 0, slot: 0 };
+        let tile_slot_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain-tile-slot-ubo"),
+            contents: bytemuck::bytes_of(&tile_slot_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let mosaic_params_init = MosaicParamsCPU { inv_tiles_x: 1.0, inv_tiles_y: 1.0, tiles_x: 1, tiles_y: 1 };
+        let mosaic_params_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain-mosaic-params-ubo"),
+            contents: bytemuck::bytes_of(&mosaic_params_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
         // B15: Track UBO allocation (not host-visible)
@@ -715,59 +818,46 @@ impl TerrainSpike {
                     bytes_per_row: Some(std::num::NonZeroU32::new(4).unwrap().into()),
                     rows_per_image: Some(std::num::NonZeroU32::new(1).unwrap().into()),
                 },
-                wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
+                wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
             );
             let view = tex.create_view(&Default::default());
-            // T33-BEGIN:height-sampler-doc
-            // NOTE on height sampling:
-            // The height texture is R32Float and bound with:
-            //   - sample_type = Float { filterable: false }
-            //   - sampler     = SamplerBindingType::NonFiltering
-            // Many backends disallow linear filtering on 32-bit float textures,
-            // so we must use a *non-filtering* sampler (nearest). The sampler
-            // descriptor uses NEAREST modes, matching the NonFiltering binding.
-            // T33-END:height-sampler-doc
+            // Sampler type matches current pipeline expectation (filterable vs non-filterable)
             let samp = device.create_sampler(&wgpu::SamplerDescriptor {
                 label: Some("dummy-height-sampler"),
                 address_mode_u: wgpu::AddressMode::ClampToEdge,
                 address_mode_v: wgpu::AddressMode::ClampToEdge,
                 address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Nearest,
-                min_filter: wgpu::FilterMode::Nearest,
+                mag_filter: if init_height_filterable { wgpu::FilterMode::Linear } else { wgpu::FilterMode::Nearest },
+                min_filter: if init_height_filterable { wgpu::FilterMode::Linear } else { wgpu::FilterMode::Nearest },
                 mipmap_filter: wgpu::FilterMode::Nearest,
                 ..Default::default()
             });
             (view, samp)
         };
-        // T33-END:bg1-height-dummy
 
-        // T33-BEGIN:bg-build-and-cache
-        // Build bind groups once from the created pipeline layouts
+        // Create bind groups
         let bg0_globals = tp.make_bg_globals(&device, &ubo);
         let bg1_height = tp.make_bg_height(&device, &hview, &hsamp);
         let bg2_lut = tp.make_bg_lut(&device, &lut.view, &lut.sampler);
-        // T33-END:bg-build-and-cache
+        let bg5_tile = tp.make_bg_tile(&device, &tile_ubo, None, &tile_slot_ubo, &mosaic_params_ubo);
 
-        Ok(Self {
+        return Ok(Self {
             width,
             height,
             grid,
             device,
             queue,
-            // T33-BEGIN:store-tp-and-bgs
             tp,
             bg0_globals,
             bg1_height,
             bg2_lut,
-            // T33-END:store-tp-and-bgs
             vbuf,
             ibuf,
             nidx,
             ubo,
+            tile_ubo,
+            tile_slot_ubo,
+            mosaic_params_ubo,
             colormap_lut: lut,
             lut_format,
             color,
@@ -778,9 +868,18 @@ impl TerrainSpike {
             last_uniforms: uniforms,
             height_view: Some(hview),
             height_sampler: Some(hsamp),
-            // B11: Initialize tiling system as None (enabled via separate method)
+            height_filterable: init_height_filterable,
             tiling_system: None,
-        })
+            height_mosaic: None,
+            overlay_mosaic: None,
+            overlay_renderer: None,
+            bg5_tile,
+            page_table: None,
+            async_loader: None,
+            async_overlay_loader: None,
+            prev_visible_height: HashSet::new(),
+            prev_visible_overlay: HashSet::new(),
+        });
     }
 
     #[pyo3(text_signature = "($self, path)")]
@@ -830,10 +929,38 @@ impl TerrainSpike {
             rp.set_bind_group(0, &self.bg0_globals, &[]);
             rp.set_bind_group(1, &self.bg1_height, &[]);
             rp.set_bind_group(2, &self.bg2_lut, &[]);
+            // E2: tile uniforms (identity by default) at group(3)
+            rp.set_bind_group(3, &self.bg5_tile, &[]);
             // T33-END:set-bgs-0-1-2
             rp.set_vertex_buffer(0, self.vbuf.slice(..));
             rp.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint32);
             rp.draw_indexed(0..self.nidx, 0, 0..1);
+        }
+
+        // E3: Overlay compositor pass (optional)
+        if let Some(ref mut ov) = self.overlay_renderer {
+            // Recreate bind group to reflect latest overlay/height views
+            let overlay_view_opt = self.overlay_mosaic.as_ref().map(|m| &m.view);
+            // Prefer height mosaic view if present, else None (renderer will use dummy)
+            let height_view_opt = self.height_mosaic.as_ref().map(|m| &m.view);
+            let pt_buf_opt = self.page_table.as_ref().map(|pt| &pt.buffer);
+            ov.recreate_bind_group(&self.device, overlay_view_opt, height_view_opt, pt_buf_opt);
+            ov.upload_uniforms(&self.queue);
+
+            let mut rp2 = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("overlay-rp"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            ov.render(&mut rp2);
         }
         self.queue.submit(Some(encoder.finish()));
 
@@ -915,6 +1042,430 @@ impl TerrainSpike {
         img.save(path)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(())
+    }
+
+    // E1c/E1e: Enable async tile loader with dedup/backpressure
+    #[pyo3(text_signature = "($self, tile_resolution=64, max_in_flight=32, pool_size=4, template=None, scale=None, offset=None, coalesce_policy='coarse')")]
+    pub fn enable_async_loader(
+        &mut self,
+        tile_resolution: Option<u32>,
+        max_in_flight: Option<usize>,
+        pool_size: Option<usize>,
+        template: Option<String>,
+        scale: Option<f32>,
+        offset: Option<f32>,
+        coalesce_policy: Option<String>,
+    ) -> PyResult<()> {
+        let tiling_system = self.tiling_system.as_ref().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "Tiling system not enabled. Call enable_tiling() first.",
+            )
+        })?;
+        let res = tile_resolution.unwrap_or(64).max(1);
+        let inflight = max_in_flight.unwrap_or(32).max(1);
+        let pool = pool_size.unwrap_or(4).max(1);
+        let policy = match coalesce_policy.as_deref() {
+            None | Some("coarse") => crate::terrain::page_table::CoalescePolicy::PreferCoarse,
+            Some("fine") => crate::terrain::page_table::CoalescePolicy::PreferFine,
+            Some(other) => {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Invalid coalesce_policy '{}'. Expected 'coarse' or 'fine'",
+                    other
+                )));
+            }
+        };
+        let loader = if let Some(tmpl) = template {
+            let s = scale.unwrap_or(1.0);
+            let o = offset.unwrap_or(0.0);
+            let rdr = std::sync::Arc::new(crate::terrain::page_table::FileHeightReader::new(tmpl, s, o));
+            crate::terrain::page_table::AsyncTileLoader::new_with_reader(
+                tiling_system.root_bounds.clone(),
+                tiling_system.tile_size,
+                res,
+                inflight,
+                pool,
+                rdr,
+                policy,
+            )
+        } else {
+            let rdr = std::sync::Arc::new(crate::terrain::page_table::SyntheticHeightReader);
+            crate::terrain::page_table::AsyncTileLoader::new_with_reader(
+                tiling_system.root_bounds.clone(),
+                tiling_system.tile_size,
+                res,
+                inflight,
+                pool,
+                rdr,
+                policy,
+            )
+        };
+        self.async_loader = Some(loader);
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn debug_async_loader_stats(&self) -> PyResult<(usize, usize, usize)> {
+        if let Some(loader) = &self.async_loader {
+            let stats = loader.stats();
+            Ok(stats)
+        } else {
+            Ok((0, 0, 0))
+        }
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn debug_async_loader_counters(&self) -> PyResult<(usize, usize, usize, usize, usize, usize)> {
+        if let Some(loader) = &self.async_loader {
+            let c = loader.counters();
+            Ok(c)
+        } else {
+            Ok((0, 0, 0, 0, 0, 0))
+        }
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn debug_async_overlay_loader_stats(&self) -> PyResult<(usize, usize, usize)> {
+        if let Some(loader) = &self.async_overlay_loader {
+            let stats = loader.stats();
+            Ok(stats)
+        } else {
+            Ok((0, 0, 0))
+        }
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn debug_async_overlay_loader_counters(&self) -> PyResult<(usize, usize, usize, usize, usize, usize)> {
+        if let Some(loader) = &self.async_overlay_loader {
+            let c = loader.counters();
+            Ok(c)
+        } else {
+            Ok((0, 0, 0, 0, 0, 0))
+        }
+    }
+
+    // E3: Enable GPU overlay mosaic (RGBA8 atlas) and wire overlay compositor
+    #[pyo3(text_signature = "($self, tile_px, tiles_x, tiles_y, srgb=True, filter_linear=True)")]
+    pub fn enable_overlay_mosaic(
+        &mut self,
+        tile_px: u32,
+        tiles_x: u32,
+        tiles_y: u32,
+        srgb: Option<bool>,
+        filter_linear: Option<bool>,
+    ) -> PyResult<()> {
+        let srgb = srgb.unwrap_or(true);
+        let filter_linear = filter_linear.unwrap_or(true);
+        let cfg = crate::terrain::stream::MosaicConfig { tile_size_px: tile_px, tiles_x, tiles_y, fixed_lod: None };
+        let mosaic = crate::terrain::stream::ColorMosaic::new(&self.device, cfg, srgb, filter_linear);
+
+        // Lazy-create overlay renderer if needed
+        if self.overlay_renderer.is_none() {
+            let ov = crate::core::overlays::OverlayRenderer::new(&self.device, TEXTURE_FORMAT, self.height_filterable);
+            self.overlay_renderer = Some(ov);
+        }
+        // Bind overlay view; use height mosaic if available for altitude/contour paths
+        if let Some(ref mut ov) = self.overlay_renderer {
+            let height_view_opt = self.height_mosaic.as_ref().map(|m| &m.view);
+            let pt_buf_opt = self.page_table.as_ref().map(|pt| &pt.buffer);
+            ov.recreate_bind_group(&self.device, Some(&mosaic.view), height_view_opt, pt_buf_opt);
+            // Enable overlay by default with alpha 1.0
+            ov.set_enabled(true);
+            ov.set_overlay_alpha(1.0);
+            ov.upload_uniforms(&self.queue);
+        }
+        self.overlay_mosaic = Some(mosaic);
+        Ok(())
+    }
+
+    // E3/E1 parity: enable async overlay loader (RGBA8)
+    #[pyo3(text_signature = "($self, tile_resolution=64, max_in_flight=32, pool_size=4, template=None, coalesce_policy='coarse')")]
+    pub fn enable_async_overlay_loader(
+        &mut self,
+        tile_resolution: Option<u32>,
+        max_in_flight: Option<usize>,
+        pool_size: Option<usize>,
+        template: Option<String>,
+        coalesce_policy: Option<String>,
+    ) -> PyResult<()> {
+        let tiling_system = self.tiling_system.as_ref().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "Tiling system not enabled. Call enable_tiling() first.",
+            )
+        })?;
+        let res = tile_resolution.unwrap_or(64).max(1);
+        let inflight = max_in_flight.unwrap_or(32).max(1);
+        let pool = pool_size.unwrap_or(4).max(1);
+        let policy = match coalesce_policy.as_deref() {
+            None | Some("coarse") => crate::terrain::page_table::CoalescePolicy::PreferCoarse,
+            Some("fine") => crate::terrain::page_table::CoalescePolicy::PreferFine,
+            Some(other) => {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Invalid coalesce_policy '{}'. Expected 'coarse' or 'fine'",
+                    other
+                )));
+            }
+        };
+        let loader = if let Some(tmpl) = template {
+            let rdr = std::sync::Arc::new(crate::terrain::page_table::FileOverlayReader::new(tmpl));
+            crate::terrain::page_table::AsyncOverlayLoader::new_with_reader(
+                tiling_system.root_bounds.clone(),
+                tiling_system.tile_size,
+                res,
+                inflight,
+                pool,
+                rdr,
+                policy,
+            )
+        } else {
+            let rdr = std::sync::Arc::new(crate::terrain::page_table::SyntheticOverlayReader);
+            crate::terrain::page_table::AsyncOverlayLoader::new_with_reader(
+                tiling_system.root_bounds.clone(),
+                tiling_system.tile_size,
+                res,
+                inflight,
+                pool,
+                rdr,
+                policy,
+            )
+        };
+        self.async_overlay_loader = Some(loader);
+        Ok(())
+    }
+
+    // E2: Render multi-LOD tiles with per-edge skirts (crack-free)
+    #[pyo3(text_signature = "($self, path, camera_pos, camera_dir, pixel_error=1.5, fov_deg=45.0, aspect=None, near=0.1, far=1000.0, max_uploads=64)")]
+    pub fn render_multi_lod_png(
+        &mut self,
+        path: String,
+        camera_pos: (f32, f32, f32),
+        camera_dir: (f32, f32, f32),
+        pixel_error: Option<f32>,
+        fov_deg: Option<f32>,
+        aspect: Option<f32>,
+        near: Option<f32>,
+        far: Option<f32>,
+        max_uploads: Option<usize>,
+    ) -> PyResult<()> {
+        use glam::Vec3;
+
+        let tiling = self.tiling_system.as_mut().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
+            "Tiling system not enabled. Call enable_tiling() first.",
+        ))?;
+        let mosaic = self.height_mosaic.as_mut().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
+            "Height mosaic not enabled. Call enable_height_mosaic() first.",
+        ))?;
+
+        let fov = fov_deg.unwrap_or(45.0).to_radians();
+        let aspect = aspect.unwrap_or(self.width as f32 / self.height as f32);
+        let near = near.unwrap_or(0.1);
+        let far = far.unwrap_or(1000.0);
+        let peb = pixel_error.unwrap_or(1.5);
+        let max_uploads = max_uploads.unwrap_or(64);
+
+        // Build frustum & LOD config
+        let frustum = Frustum::new(
+            Vec3::new(camera_pos.0, camera_pos.1, camera_pos.2),
+            Vec3::new(camera_dir.0, camera_dir.1, camera_dir.2).normalize(),
+            fov,
+            aspect,
+            near,
+            far,
+        );
+
+        let view = glam::Mat4::from_cols_array_2d(&self.last_uniforms.view);
+        let proj = glam::Mat4::from_cols_array_2d(&self.last_uniforms.proj);
+        let lod_cfg = LodConfig::new(peb, self.width, self.height, fov);
+
+        // Recursive selection of tiles meeting the error budget
+        let mut draw_list: Vec<TileId> = Vec::new();
+        fn select_tiles(
+            tiling: &TilingSystem,
+            id: TileId,
+            frustum: &Frustum,
+            view: glam::Mat4,
+            proj: glam::Mat4,
+            cfg: &LodConfig,
+            max_lod: u32,
+            out: &mut Vec<TileId>,
+        ) {
+            let bounds = QuadTreeNode::calculate_bounds(&tiling.root_bounds, id, tiling.tile_size);
+            if !frustum.intersects_bounds(&bounds) { return; }
+            let sse = screen_space_error(&bounds, id, frustum.position, view, proj, cfg);
+            if sse.within_budget || id.lod >= max_lod { out.push(id); return; }
+            for child in id.children().iter() { select_tiles(tiling, *child, frustum, view, proj, cfg, max_lod, out); }
+        }
+        select_tiles(tiling, TileId::new(0,0,0), &frustum, view, proj, &lod_cfg, tiling.max_lod(), &mut draw_list);
+
+        // Upload required tiles to mosaic (budgeted)
+        let mut uploaded = 0usize;
+        for id in &draw_list {
+            let mut present = mosaic.slot_of(id).is_some();
+            if !present && uploaded < max_uploads {
+                tiling.load_tile(*id).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+                let td = tiling.get_tile_data(id).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Tile data missing after load"))?;
+                if (td.width * td.height) as usize != td.height_data.len() {
+                    return Err(pyo3::exceptions::PyRuntimeError::new_err("Tile height buffer size mismatch"));
+                }
+                mosaic.upload_tile(&self.queue, *id, &td.height_data)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+                uploaded += 1;
+                present = true;
+            }
+            if present { mosaic.mark_used(*id); }
+        }
+
+        // Begin render pass
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("terrain-mlod-encoder") });
+        {
+            let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terrain-mlod-rp"),
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color{r:0.02,g:0.02,b:0.03,a:1.0}), store: wgpu::StoreOp::Store },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.normal_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color{r:0.0,g:0.0,b:0.0,a:0.0}), store: wgpu::StoreOp::Store },
+                    }),
+                ],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            rp.set_pipeline(&self.tp.pipeline);
+            rp.set_bind_group(0, &self.bg0_globals, &[]);
+            rp.set_bind_group(1, &self.bg1_height, &[]);
+            rp.set_bind_group(2, &self.bg2_lut, &[]);
+            rp.set_vertex_buffer(0, self.vbuf.slice(..));
+            rp.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint32);
+
+            // E1b: Shader computes mosaic UVs from TileSlot+MosaicParams
+
+            // Build a quick lookup set for neighbor skirts
+            use std::collections::HashSet;
+            let draw_set: HashSet<(u32,u32,u32)> = draw_list.iter().map(|t| (t.lod, t.x, t.y)).collect();
+
+            for id in &draw_list {
+                // Slot used only for TileSlotU
+                let Some((sx, sy)) = mosaic.slot_of(id) else { continue; };
+
+                // Compute world remap from tile bounds
+                let bounds = QuadTreeNode::calculate_bounds(&tiling.root_bounds, *id, tiling.tile_size);
+                let size = bounds.size();
+                let center = bounds.center();
+                let scale_x = size.x / 3.0; // maps in.pos_xy.x in [-1.5,+1.5] to [min,max]
+                let scale_y = size.y / 3.0;
+                let world_remap = [scale_x, scale_y, center.x, center.y];
+
+                let tu = TileUniformsCPU { world_remap };
+                self.queue.write_buffer(&self.tile_ubo, 0, bytemuck::bytes_of(&tu));
+                // E1b: Write tile slot UBO (lod, x, y, slot)
+                let slot_index = sy * mosaic.config.tiles_x + sx;
+                let ts = TileSlotCPU { lod: id.lod, x: id.x, y: id.y, slot: slot_index };
+                self.queue.write_buffer(&self.tile_slot_ubo, 0, bytemuck::bytes_of(&ts));
+                // Tile BG is constant; updating buffer is enough (group 3)
+                rp.set_bind_group(3, &self.bg5_tile, &[]);
+
+                // Compute per-edge skirt mask based on same-LOD neighbors presence
+                let mut mask: u32 = 0xF;
+                let l = id.lod; let x = id.x; let y = id.y;
+                let left_present = draw_set.contains(&(l, x.saturating_sub(1), y));
+                let right_present = draw_set.contains(&(l, x+1, y));
+                let bottom_present = draw_set.contains(&(l, x, y.saturating_sub(1)));
+                let top_present = draw_set.contains(&(l, x, y+1));
+                if left_present { mask &= !0x1; }
+                if right_present { mask &= !0x2; }
+                if bottom_present { mask &= !0x4; }
+                if top_present { mask &= !0x8; }
+
+                // Update skirt mask into globals tail and re-upload UBO
+                let mut g = self.globals.clone();
+                g.skirt_mask = mask & 0xF;
+                let uniforms = g.to_uniforms(view, proj);
+                self.queue.write_buffer(&self.ubo, 0, bytemuck::bytes_of(&uniforms));
+                self.last_uniforms = uniforms;
+
+                rp.draw_indexed(0..self.nidx, 0, 0..1);
+            }
+        }
+        self.queue.submit(Some(encoder.finish()));
+
+        // Readback to PNG (reuse existing code)
+        self.render_png(path)
+    }
+
+    // E2: Set morph factor (0..1) and optional coarse_factor (>=1)
+    #[pyo3(text_signature = "($self, morph, coarse_factor=None)")]
+    pub fn set_lod_morph(&mut self, morph: f32, coarse_factor: Option<f32>) -> PyResult<()> {
+        let m = morph.clamp(0.0, 1.0);
+        self.globals.lod_morph = m;
+        if let Some(cf) = coarse_factor {
+            if !cf.is_finite() || cf < 1.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "coarse_factor must be finite and >= 1.0",
+                ));
+            }
+            self.globals.coarse_factor = cf;
+        }
+
+        // Rebuild uniforms with same view/proj but updated tail
+        let view = glam::Mat4::from_cols_array_2d(&self.last_uniforms.view);
+        let proj = glam::Mat4::from_cols_array_2d(&self.last_uniforms.proj);
+        let uniforms = self.globals.to_uniforms(view, proj);
+        self.queue.write_buffer(&self.ubo, 0, bytemuck::bytes_of(&uniforms));
+        self.last_uniforms = uniforms;
+        Ok(())
+    }
+
+    // E2: Set skirt depth (>=0)
+    #[pyo3(text_signature = "($self, depth)")]
+    pub fn set_skirt_depth(&mut self, depth: f32) -> PyResult<()> {
+        if !depth.is_finite() || depth < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "skirt depth must be finite and >= 0",
+            ));
+        }
+        self.globals.skirt_depth = depth;
+        // Rebuild uniforms with same view/proj but updated tail
+        let view = glam::Mat4::from_cols_array_2d(&self.last_uniforms.view);
+        let proj = glam::Mat4::from_cols_array_2d(&self.last_uniforms.proj);
+        let uniforms = self.globals.to_uniforms(view, proj);
+        self.queue.write_buffer(&self.ubo, 0, bytemuck::bytes_of(&uniforms));
+        self.last_uniforms = uniforms;
+        Ok(())
+    }
+
+    // E2: Set per-edge skirt mask (bitmask: 1=left, 2=right, 4=bottom, 8=top)
+    #[pyo3(text_signature = "($self, mask)")]
+    pub fn set_skirt_mask(&mut self, mask: u32) -> PyResult<()> {
+        let m = mask & 0xF;
+        self.globals.skirt_mask = m;
+        // Rebuild uniforms with same view/proj but updated tail
+        let view = glam::Mat4::from_cols_array_2d(&self.last_uniforms.view);
+        let proj = glam::Mat4::from_cols_array_2d(&self.last_uniforms.proj);
+        let uniforms = self.globals.to_uniforms(view, proj);
+        self.queue.write_buffer(&self.ubo, 0, bytemuck::bytes_of(&uniforms));
+        self.last_uniforms = uniforms;
+        Ok(())
+    }
+
+    // E2: Convenience method to set skirt edges using booleans
+    #[pyo3(text_signature = "($self, left, right, bottom, top)")]
+    pub fn set_skirt_edges(
+        &mut self,
+        left: bool,
+        right: bool,
+        bottom: bool,
+        top: bool,
+    ) -> PyResult<()> {
+        let mut mask = 0u32;
+        if left { mask |= 0x1; }
+        if right { mask |= 0x2; }
+        if bottom { mask |= 0x4; }
+        if top { mask |= 0x8; }
+        self.set_skirt_mask(mask)
     }
 
     #[pyo3(text_signature = "($self)")]
@@ -1159,6 +1710,325 @@ impl TerrainSpike {
         }
 
         Ok(visible_tiles)
+    }
+
+    // E1: Enable GPU height mosaic (R32Float atlas) and bind it as the active height texture
+    #[pyo3(text_signature = "($self, tile_px, tiles_x, tiles_y, fixed_lod=None, filter_linear=True)")]
+    pub fn enable_height_mosaic(
+        &mut self,
+        tile_px: u32,
+        tiles_x: u32,
+        tiles_y: u32,
+        fixed_lod: Option<u32>,
+        filter_linear: Option<bool>,
+    ) -> PyResult<()> {
+        let want_linear = filter_linear.unwrap_or(true);
+        let cfg = crate::terrain::stream::MosaicConfig { tile_size_px: tile_px, tiles_x, tiles_y, fixed_lod };
+        let mosaic = crate::terrain::stream::HeightMosaic::new(&self.device, cfg, want_linear);
+
+        // If filter policy changed (e.g., RG16F fallback enables filtering), recreate pipeline accordingly
+        let mosaic_filterable = want_linear;
+        if mosaic_filterable != self.height_filterable {
+            self.tp = crate::terrain::pipeline::TerrainPipeline::create(
+                &self.device,
+                TEXTURE_FORMAT,
+                NORMAL_FORMAT,
+                1,
+                None,
+                mosaic_filterable,
+            );
+            // Recreate dependent bind groups with the new layouts
+            self.bg0_globals = self.tp.make_bg_globals(&self.device, &self.ubo);
+            self.bg2_lut = self.tp.make_bg_lut(&self.device, &self.colormap_lut.view, &self.colormap_lut.sampler);
+            let pt_buf_opt = self.page_table.as_ref().map(|pt| &pt.buffer);
+            self.bg5_tile = self.tp.make_bg_tile(&self.device, &self.tile_ubo, pt_buf_opt, &self.tile_slot_ubo, &self.mosaic_params_ubo);
+            self.height_filterable = mosaic_filterable;
+        }
+
+        // Rebind group(1) to the mosaic texture/sampler
+        self.bg1_height = self.tp.make_bg_height(&self.device, &mosaic.view, &mosaic.sampler);
+        // Upload mosaic params (inv tiles and dims)
+        let inv_tiles_x = if tiles_x > 0 { 1.0 / tiles_x as f32 } else { 1.0 };
+        let inv_tiles_y = if tiles_y > 0 { 1.0 / tiles_y as f32 } else { 1.0 };
+        let mp = MosaicParamsCPU { inv_tiles_x, inv_tiles_y, tiles_x, tiles_y };
+        self.queue.write_buffer(&self.mosaic_params_ubo, 0, bytemuck::bytes_of(&mp));
+        // We no longer mirror handles in height_view/sampler (bind group is authoritative)
+        self.height_view = None;
+        self.height_sampler = None;
+        self.height_mosaic = Some(mosaic);
+        Ok(())
+    }
+
+    // E1: Stream tiles visible at a fixed LOD into the height mosaic; returns list of visible tiles
+    #[pyo3(text_signature = "($self, camera_pos, camera_dir, lod, fov_deg=45.0, aspect=1.0, near=0.1, far=1000.0, max_uploads=8)")]
+    pub fn stream_tiles_to_height_mosaic_at_lod(
+        &mut self,
+        camera_pos: (f32, f32, f32),
+        camera_dir: (f32, f32, f32),
+        lod: u32,
+        fov_deg: Option<f32>,
+        aspect: Option<f32>,
+        near: Option<f32>,
+        far: Option<f32>,
+        max_uploads: Option<usize>,
+    ) -> PyResult<Vec<(u32, u32, u32)>> {
+        use glam::Vec3;
+
+        let tiling = self.tiling_system.as_mut().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
+            "Tiling system not enabled. Call enable_tiling() first.",
+        ))?;
+        let mosaic = self.height_mosaic.as_mut().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
+            "Height mosaic not enabled. Call enable_height_mosaic() first.",
+        ))?;
+
+        // Build frustum
+        let frustum = Frustum::new(
+            Vec3::new(camera_pos.0, camera_pos.1, camera_pos.2),
+            Vec3::new(camera_dir.0, camera_dir.1, camera_dir.2).normalize(),
+            fov_deg.unwrap_or(45.0).to_radians(),
+            aspect.unwrap_or(1.0),
+            near.unwrap_or(0.1),
+            far.unwrap_or(1000.0),
+        );
+
+        // Enumerate visible tiles at requested LOD
+        let mut visible_ids = tiling.get_visible_tiles_at_lod(&frustum, lod);
+        // Priority: near-to-far (distance to tile center)
+        visible_ids.sort_by(|a, b| {
+            let ba = QuadTreeNode::calculate_bounds(&tiling.root_bounds, *a, tiling.tile_size);
+            let bb = QuadTreeNode::calculate_bounds(&tiling.root_bounds, *b, tiling.tile_size);
+            let da = glam::Vec2::new(frustum.position.x, frustum.position.z).distance(ba.center());
+            let db = glam::Vec2::new(frustum.position.x, frustum.position.z).distance(bb.center());
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        // E1e: cancellation of height requests that left visibility
+        if let Some(loader) = self.async_loader.as_ref() {
+            let to_cancel: Vec<TileId> = self
+                .prev_visible_height
+                .difference(&visible_ids.iter().copied().collect())
+                .copied()
+                .collect();
+            if !to_cancel.is_empty() { let _ = loader.cancel(&to_cancel); }
+        }
+        let max_uploads = max_uploads.unwrap_or(8).max(0) as usize;
+        let mut uploaded = 0usize;
+
+        // Request loads for missing tiles (non-blocking) and upload any cached tiles immediately
+        for id in &visible_ids {
+            let present = mosaic.slot_of(id).is_some();
+            if !present {
+                // Request async load if not in cache yet
+                let in_cache = tiling.get_tile_data(id).is_some();
+                if !in_cache {
+                    if let Some(loader) = self.async_loader.as_ref() {
+                        let _ = loader.request(*id);
+                    } else {
+                        // Fallback: synchronous load
+                        tiling.load_tile(*id).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+                    }
+                }
+                // If now in cache and budget allows, upload
+                if uploaded < max_uploads {
+                    if let Some(td) = tiling.get_tile_data(id) {
+                        if (td.width * td.height) as usize != td.height_data.len() {
+                            return Err(pyo3::exceptions::PyRuntimeError::new_err("Tile height buffer size mismatch"));
+                        }
+                        mosaic
+                            .upload_tile(&self.queue, *id, &td.height_data)
+                            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+                        uploaded += 1;
+                    }
+                }
+            }
+            if mosaic.slot_of(id).is_some() { mosaic.mark_used(*id); }
+        }
+
+        // Drain async completions and upload under remaining budget
+        if let Some(loader) = self.async_loader.as_ref() {
+            let to_drain = max_uploads.saturating_sub(uploaded);
+            if to_drain > 0 {
+                let completed = loader.drain_completed(to_drain);
+                for td in completed {
+                    let id = td.tile_id;
+                    // Insert into cache (ignore errors, continue)
+                    let _ = tiling.insert_tile_data(td);
+                    // Upload if visible and not yet present
+                    if uploaded >= max_uploads { break; }
+                    if visible_ids.iter().any(|t| *t == id) && mosaic.slot_of(&id).is_none() {
+                        if let Some(td2) = tiling.get_tile_data(&id) {
+                            if (td2.width * td2.height) as usize == td2.height_data.len() {
+                                mosaic
+                                    .upload_tile(&self.queue, id, &td2.height_data)
+                                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+                                uploaded += 1;
+                                mosaic.mark_used(id);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // E1g: Prefetch heuristics — request 4-neighborhood tiles around visible set (same LOD)
+            use std::collections::HashSet;
+            let vis_set: HashSet<(u32,u32,u32)> = visible_ids.iter().map(|t| (t.lod, t.x, t.y)).collect();
+            let n = 1u32 << lod;
+            let (pending, max_in_flight, _pool) = loader.stats();
+            let mut in_flight_budget = max_in_flight.saturating_sub(pending);
+            if in_flight_budget > 0 {
+                for id in &visible_ids {
+                    if in_flight_budget == 0 { break; }
+                    let l = id.lod; let x = id.x; let y = id.y;
+                    let neighbors = [
+                        (l, x.saturating_sub(1), y),
+                        (l, x+1, y),
+                        (l, x, y.saturating_sub(1)),
+                        (l, x, y+1),
+                    ];
+                    for (nl, nx, ny) in neighbors {
+                        if in_flight_budget == 0 { break; }
+                        if nx >= n || ny >= n { continue; }
+                        if vis_set.contains(&(nl, nx, ny)) { continue; }
+                        let nid = TileId::new(nl, nx, ny);
+                        if mosaic.slot_of(&nid).is_some() { continue; }
+                        if tiling.get_tile_data(&nid).is_some() { continue; }
+                        if loader.request(nid) {
+                            in_flight_budget = in_flight_budget.saturating_sub(1);
+                        }
+                    }
+                }
+            }
+        }
+
+        // E1: If page table is enabled, sync it from the current mosaic state
+        if let Some(ref mut pt) = self.page_table {
+            if let Some(ref mosaic) = self.height_mosaic {
+                pt.sync_from_mosaic(&self.queue, mosaic);
+            }
+        }
+
+        // Update previous visible set for cancellation
+        self.prev_visible_height = visible_ids.iter().copied().collect();
+        let result: Vec<(u32, u32, u32)> = visible_ids.iter().map(|t| (t.lod, t.x, t.y)).collect();
+        Ok(result)
+    }
+
+    // E3/E1 parity: stream overlay tiles asynchronously into ColorMosaic
+    #[pyo3(text_signature = "($self, camera_pos, camera_dir, lod, fov_deg=45.0, aspect=1.0, near=0.1, far=1000.0, max_uploads=8)")]
+    pub fn stream_tiles_to_overlay_mosaic_at_lod(
+        &mut self,
+        camera_pos: (f32, f32, f32),
+        camera_dir: (f32, f32, f32),
+        lod: u32,
+        fov_deg: Option<f32>,
+        aspect: Option<f32>,
+        near: Option<f32>,
+        far: Option<f32>,
+        max_uploads: Option<usize>,
+    ) -> PyResult<Vec<(u32, u32, u32)>> {
+        use glam::Vec3;
+        let tiling = self.tiling_system.as_ref().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Tiling system not enabled. Call enable_tiling() first."))?;
+        let mosaic = self.overlay_mosaic.as_mut().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Overlay mosaic not enabled. Call enable_overlay_mosaic() first."))?;
+        let loader = self.async_overlay_loader.as_ref().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Async overlay loader not enabled. Call enable_async_overlay_loader() first."))?;
+
+        // Build frustum
+        let frustum = Frustum::new(
+            Vec3::new(camera_pos.0, camera_pos.1, camera_pos.2),
+            Vec3::new(camera_dir.0, camera_dir.1, camera_dir.2).normalize(),
+            fov_deg.unwrap_or(45.0).to_radians(),
+            aspect.unwrap_or(1.0),
+            near.unwrap_or(0.1),
+            far.unwrap_or(1000.0),
+        );
+
+        // Visible tiles (priority-ordered: near-to-far)
+        let mut visible_ids = tiling.get_visible_tiles_at_lod(&frustum, lod);
+        visible_ids.sort_by(|a, b| {
+            let ba = QuadTreeNode::calculate_bounds(&tiling.root_bounds, *a, tiling.tile_size);
+            let bb = QuadTreeNode::calculate_bounds(&tiling.root_bounds, *b, tiling.tile_size);
+            let da = glam::Vec2::new(frustum.position.x, frustum.position.z).distance(ba.center());
+            let db = glam::Vec2::new(frustum.position.x, frustum.position.z).distance(bb.center());
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Cancel requests that are no longer visible
+        {
+            let prev: HashSet<TileId> = self.prev_visible_overlay.clone();
+            let curr: HashSet<TileId> = visible_ids.iter().copied().collect();
+            let to_cancel: Vec<TileId> = prev.difference(&curr).copied().collect();
+            if !to_cancel.is_empty() { let _ = loader.cancel(&to_cancel); }
+        }
+
+        // Request loads for missing tiles and drain/upload under budget
+        let max_uploads = max_uploads.unwrap_or(8).max(0) as usize;
+        let mut uploaded = 0usize;
+
+        for id in &visible_ids {
+            if mosaic.slot_of(id).is_none() {
+                let _ = loader.request(*id); // dedup/backpressure inside
+            } else {
+                mosaic.mark_used(*id);
+            }
+        }
+
+        // Drain and upload
+        let completed = loader.drain_completed(max_uploads);
+        for td in completed {
+            if uploaded >= max_uploads { break; }
+            if visible_ids.iter().any(|t| *t == td.tile_id) && mosaic.slot_of(&td.tile_id).is_none() {
+                mosaic.upload_tile(&self.queue, td.tile_id, &td.rgba_data)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+                mosaic.mark_used(td.tile_id);
+                uploaded += 1;
+            }
+        }
+
+        // Neighbor prefetch (overlay) under in-flight budget
+        let (pending, max_in_flight, _pool) = loader.stats();
+        let mut in_flight_budget = max_in_flight.saturating_sub(pending);
+        if in_flight_budget > 0 {
+            let vis_set: HashSet<(u32,u32,u32)> = visible_ids.iter().map(|t| (t.lod, t.x, t.y)).collect();
+            let n = 1u32 << lod;
+            for id in &visible_ids {
+                if in_flight_budget == 0 { break; }
+                let l = id.lod; let x = id.x; let y = id.y;
+                let neighbors = [
+                    (l, x.saturating_sub(1), y),
+                    (l, x+1, y),
+                    (l, x, y.saturating_sub(1)),
+                    (l, x, y+1),
+                ];
+                for (nl, nx, ny) in neighbors {
+                    if in_flight_budget == 0 { break; }
+                    if nx >= n || ny >= n { continue; }
+                    if vis_set.contains(&(nl, nx, ny)) { continue; }
+                    let nid = TileId::new(nl, nx, ny);
+                    if mosaic.slot_of(&nid).is_some() { continue; }
+                    if loader.request(nid) { in_flight_budget = in_flight_budget.saturating_sub(1); }
+                }
+            }
+        }
+
+        // Update previous visible overlay set
+        self.prev_visible_overlay = visible_ids.iter().copied().collect();
+        Ok(visible_ids.iter().map(|t| (t.lod, t.x, t.y)).collect())
+    }
+
+    // E1: Enable page table scaffolding (GPU buffer updated from current height mosaic)
+    #[pyo3(text_signature = "($self)")]
+    pub fn enable_page_table(&mut self) -> PyResult<()> {
+        let mosaic = self.height_mosaic.as_ref().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
+            "Height mosaic not enabled. Call enable_height_mosaic() first.",
+        ))?;
+        let capacity = (mosaic.config.tiles_x * mosaic.config.tiles_y) as usize;
+        let pt = PageTable::new(&self.device, capacity);
+        // initial sync
+        let mut pt = pt;
+        pt.sync_from_mosaic(&self.queue, mosaic);
+        self.page_table = Some(pt);
+        // Recreate tile bind group to include the page table buffer at binding(1)
+        let pt_buf_opt = self.page_table.as_ref().map(|pt| &pt.buffer);
+        self.bg5_tile = self.tp.make_bg_tile(&self.device, &self.tile_ubo, pt_buf_opt, &self.tile_slot_ubo, &self.mosaic_params_ubo);
+        Ok(())
     }
 
     // B12: Calculate screen-space error for a tile
@@ -1467,33 +2337,57 @@ impl TerrainSpike {
 /// Minimal grid that matches T3.1/T3.3 vertex layout: interleaved [x, z, u, v] (Float32x4) => 16-byte stride.
 fn build_grid_xyuv(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, wgpu::Buffer, u32) {
     let n = n.max(2) as usize;
-    let (w, h) = (n, n);
+    let (w, h) = (n, n); // base grid resolution (without skirts)
 
     // Domain: [-1.5, +1.5] in X and Z; we feed (x,z) into position.xy.
     let scale = 1.5f32;
     let step_x = (2.0 * scale) / (w as f32 - 1.0);
     let step_z = (2.0 * scale) / (h as f32 - 1.0);
 
+    // Expanded grid with one-vertex skirt ring around the base grid
+    let ew = w + 2; // expanded width
+    let eh = h + 2; // expanded height
+
     // Interleaved verts: [x, z, u, v]
-    let mut verts = Vec::<f32>::with_capacity(w * h * 4);
-    for j in 0..h {
-        for i in 0..w {
-            let x = -scale + i as f32 * step_x;
-            let z = -scale + j as f32 * step_z;
-            let u = i as f32 / (w as f32 - 1.0);
-            let v = j as f32 / (h as f32 - 1.0);
+    let mut verts = Vec::<f32>::with_capacity(ew * eh * 4);
+    for j in 0..eh {
+        for i in 0..ew {
+            // Convert expanded indices to base grid relative index (can be -1..w)
+            let bi = i as isize - 1;
+            let bj = j as isize - 1;
+
+            // Position extends one step beyond base domain on each side
+            let x = -scale + (bi as f32) * step_x;
+            let z = -scale + (bj as f32) * step_z;
+
+            // UVs are in [0,1] for interior; outside ring goes slightly beyond [0,1]
+            let u = if bi < 0 {
+                -1.0 / (w as f32 - 1.0)
+            } else if bi >= w as isize {
+                1.0 + 1.0 / (w as f32 - 1.0)
+            } else {
+                (bi as f32) / (w as f32 - 1.0)
+            };
+            let v = if bj < 0 {
+                -1.0 / (h as f32 - 1.0)
+            } else if bj >= h as isize {
+                1.0 + 1.0 / (h as f32 - 1.0)
+            } else {
+                (bj as f32) / (h as f32 - 1.0)
+            };
+
             verts.extend_from_slice(&[x, z, u, v]);
         }
     }
 
-    // Indexed triangles (CCW)
-    let mut idx = Vec::<u32>::with_capacity((w - 1) * (h - 1) * 6);
-    for j in 0..h - 1 {
-        for i in 0..w - 1 {
-            let a = (j * w + i) as u32;
-            let b = (j * w + i + 1) as u32;
-            let c = ((j + 1) * w + i) as u32;
-            let d = ((j + 1) * w + i + 1) as u32;
+    // Indexed triangles (CCW) over expanded grid
+    let mut idx = Vec::<u32>::with_capacity((ew - 1) * (eh - 1) * 6);
+    for j in 0..eh - 1 {
+        for i in 0..ew - 1 {
+            let a = (j * ew + i) as u32;
+            let b = (j * ew + i + 1) as u32;
+            let c = ((j + 1) * ew + i) as u32;
+            let d = ((j + 1) * ew + i + 1) as u32;
             idx.extend_from_slice(&[a, c, b, b, c, d]);
         }
     }
@@ -1668,3 +2562,31 @@ mod tests {
 }
 
 // A2-END:terrain-module
+
+// E3: Simple synthetic overlay from height — maps height to RGBA8 for demo
+fn synth_overlay_from_height(height: &[f32], w: u32, h: u32) -> (Vec<u8>, f32, f32) {
+    let n = (w as usize) * (h as usize);
+    let mut min_v = f32::INFINITY;
+    let mut max_v = f32::NEG_INFINITY;
+    for &v in height.iter() {
+        if v.is_finite() {
+            if v < min_v { min_v = v; }
+            if v > max_v { max_v = v; }
+        }
+    }
+    if !min_v.is_finite() || !max_v.is_finite() || max_v <= min_v { min_v = 0.0; max_v = 1.0; }
+    let inv = 1.0 / (max_v - min_v);
+    let mut out = vec![0u8; n * 4];
+    for i in 0..n {
+        let v = ((height[i] - min_v) * inv).clamp(0.0, 1.0);
+        // simple blue-green-brown ramp
+        let r = (v * 255.0) as u8;
+        let g = ((0.5 + 0.5 * v) * 255.0) as u8;
+        let b = ((1.0 - v) * 255.0) as u8;
+        out[i * 4 + 0] = r;
+        out[i * 4 + 1] = g;
+        out[i * 4 + 2] = b;
+        out[i * 4 + 3] = 255;
+    }
+    (out, min_v, max_v)
+}

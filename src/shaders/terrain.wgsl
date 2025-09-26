@@ -9,7 +9,7 @@
 //   proj:                 mat4x4<f32> = 64 B  
 //   sun_exposure:         vec4<f32>   = 16 B (xyz = sun_dir normalized, w = exposure)
 //   spacing_h_exag_pad:   vec4<f32>   = 16 B (x=dx, y=dy, z=height_exaggeration, w=palette_index)
-//   _pad_tail:            vec4<f32>   = 16 B (tail padding)
+//   _pad_tail:            vec4<f32>   = 16 B (X: lod_morph [0..1], Y: coarse_factor (≥1), Z: skirt_depth, W: reserved)
 //   TOTAL:                            = 176 B
 struct Globals {
   view: mat4x4<f32>,                    // 64 B
@@ -28,9 +28,9 @@ struct Globals {
 @group(2) @binding(0) var lut_tex  : texture_2d<f32>;     // RGBA8 (sRGB/UNORM), filterable, 256×N multi-palette
 @group(2) @binding(1) var lut_samp : sampler;
 
-// B7: Cloud shadow overlay
-@group(3) @binding(0) var cloud_shadow_tex  : texture_2d<f32>;  // Cloud shadow texture
-@group(3) @binding(1) var cloud_shadow_samp : sampler;
+// B7: Cloud shadow overlay (moved to group(4) to allow tile at group(3))
+@group(4) @binding(0) var cloud_shadow_tex  : texture_2d<f32>;  // Cloud shadow texture
+@group(4) @binding(1) var cloud_shadow_samp : sampler;
 
 // B5: Planar reflections resources
 struct ReflectionPlane {
@@ -57,10 +57,25 @@ struct PlanarReflectionUniforms {
   _pad: vec3<f32>,
 };
 
-@group(4) @binding(0) var<uniform> reflection_uniforms : PlanarReflectionUniforms;
-@group(4) @binding(1) var reflection_texture : texture_2d<f32>;
-@group(4) @binding(2) var reflection_sampler : sampler;
-@group(4) @binding(3) var reflection_depth : texture_depth_2d;
+@group(5) @binding(0) var<uniform> reflection_uniforms : PlanarReflectionUniforms;
+@group(5) @binding(1) var reflection_texture : texture_2d<f32>;
+@group(5) @binding(2) var reflection_sampler : sampler;
+@group(5) @binding(3) var reflection_depth : texture_depth_2d;
+
+// E2: Per-tile uniforms for multi-LOD patch rendering (group 3)
+struct TileUniforms {
+  // world_remap = (scale_x, scale_y, offset_x, offset_y) to map local in.pos_xy → world plane xz
+  world_remap: vec4<f32>,
+};
+@group(3) @binding(0) var<uniform> tile : TileUniforms;
+// E1b: Per-draw tile slot (lod,x,y,slot index) and mosaic params
+struct TileSlot { lod: u32, x: u32, y: u32, slot: u32 };
+struct MosaicParams { inv_tiles_x: f32, inv_tiles_y: f32, tiles_x: u32, tiles_y: u32 };
+@group(3) @binding(2) var<uniform> TileSlotU : TileSlot;
+@group(3) @binding(3) var<uniform> MParams : MosaicParams;
+// E1: Page table storage buffer for tile->slot mapping (demonstration read only)
+struct PageTableEntry { lod: u32, x: u32, y: u32, _pad0: u32, sx: u32, sy: u32, slot: u32, _pad1: u32 };
+@group(3) @binding(1) var<storage, read> PageTable : array<PageTableEntry>;
 
 // ---------- IO ----------
 struct VsIn {
@@ -191,16 +206,53 @@ fn vs_main(in: VsIn) -> VsOut {
   let spacing      = max(globals.spacing_h_exag_pad.x, 1e-8);
   let exaggeration = globals.spacing_h_exag_pad.z;
 
+  // Remap UV into the tile's atlas sub-rect via slot + mosaic params
+  let inv = vec2<f32>(MParams.inv_tiles_x, MParams.inv_tiles_y);
+  let tiles_x = max(MParams.tiles_x, 1u);
+  let sx = f32(TileSlotU.slot % tiles_x);
+  let sy = f32(TileSlotU.slot / tiles_x);
+  let base = vec2<f32>(sx, sy) * inv;
+  let uv_tile = clamp(in.uv * inv + base, vec2<f32>(0.0), vec2<f32>(1.0));
   // Sample height with a NonFiltering sampler; level 0 to avoid filtering.
-  let h_tex = textureSampleLevel(height_tex, height_samp, in.uv, 0.0).r;
+  var h_tex = textureSampleLevel(height_tex, height_samp, uv_tile, 0.0).r;
+
+  // E2: Geomorphing — blend between a coarse (quantized) sample and fine sample
+  let morph = clamp(globals._pad_tail.x, 0.0, 1.0);
+  let coarse_factor = max(globals._pad_tail.y, 1.0);
+  if (morph < 1.0) {
+    // Quantize UVs to emulate a coarser grid without mips
+    let tex_dims = vec2<f32>(textureDimensions(height_tex, 0));
+    let step = vec2<f32>(coarse_factor) / max(tex_dims, vec2<f32>(1.0));
+    // Guard against zero step by clamping denominator above
+    let uv_q = (floor(uv_tile / step) + 0.5) * step;
+    let uv_qc = clamp(uv_q, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
+    let h_coarse = textureSampleLevel(height_tex, height_samp, uv_qc, 0.0).r;
+    h_tex = mix(h_coarse, h_tex, morph);
+  }
 
   // Deterministic analytic fallback guarantees variation even if height_tex is 1x1.
   let h_ana = analytic_height(in.pos_xy.x, in.pos_xy.y);
 
-  let h = h_tex + h_ana;
+  let h_base = h_tex + h_ana;
 
-  // Build world position (XY are plane coords, Y is height).
-  let world = vec3<f32>(in.pos_xy.x * spacing, h * exaggeration, in.pos_xy.y * spacing);
+  // E2: Skirts — apply only to the skirt ring (uv outside [0,1]) and honor per-edge mask
+  let skirt_depth = max(globals._pad_tail.z, 0.0);
+  let mask: u32 = u32(globals._pad_tail.w + 0.5);
+  let left_ring   = in.uv.x < 0.0;
+  let right_ring  = in.uv.x > 1.0;
+  let bottom_ring = in.uv.y < 0.0;
+  let top_ring    = in.uv.y > 1.0;
+  let do_left   = left_ring   && ((mask & 0x1u) != 0u);
+  let do_right  = right_ring  && ((mask & 0x2u) != 0u);
+  let do_bottom = bottom_ring && ((mask & 0x4u) != 0u);
+  let do_top    = top_ring    && ((mask & 0x8u) != 0u);
+  let is_skirt = do_left || do_right || do_bottom || do_top;
+  let h = select(h_base, h_base - skirt_depth, is_skirt);
+
+  // Build world position from per-tile remap
+  let plane_x = in.pos_xy.x * tile.world_remap.x + tile.world_remap.z;
+  let plane_z = in.pos_xy.y * tile.world_remap.y + tile.world_remap.w;
+  let world = vec3<f32>(plane_x, h * exaggeration, plane_z);
 
   var out : VsOut;
   out.clip_pos = globals.proj * (globals.view * vec4<f32>(world, 1.0));
@@ -218,15 +270,21 @@ fn fs_main(in: VsOut) -> FsOut {
   let h_range = max(globals.spacing_h_exag_pad.y, 1e-8);
 
   let uv = in.uv;
+  let inv = vec2<f32>(MParams.inv_tiles_x, MParams.inv_tiles_y);
+  let tiles_x = max(MParams.tiles_x, 1u);
+  let sx = f32(TileSlotU.slot % tiles_x);
+  let sy = f32(TileSlotU.slot / tiles_x);
+  let base = vec2<f32>(sx, sy) * inv;
+  let uv_tile = clamp(uv * inv + base, vec2<f32>(0.0), vec2<f32>(1.0));
   let tex_dims = vec2<f32>(textureDimensions(height_tex, 0));
   let texel = vec2<f32>(1.0) / tex_dims;
 
-  let h_left = sample_height_with_fallback(uv, vec2<f32>(-texel.x, 0.0), in.xz, spacing);
-  let h_right = sample_height_with_fallback(uv, vec2<f32>(texel.x, 0.0), in.xz, spacing);
-  let h_down = sample_height_with_fallback(uv, vec2<f32>(0.0, -texel.y), in.xz, spacing);
-  let h_up = sample_height_with_fallback(uv, vec2<f32>(0.0, texel.y), in.xz, spacing);
+  let h_left = sample_height_with_fallback(uv_tile, vec2<f32>(-texel.x, 0.0), in.xz, spacing);
+  let h_right = sample_height_with_fallback(uv_tile, vec2<f32>(texel.x, 0.0), in.xz, spacing);
+  let h_down = sample_height_with_fallback(uv_tile, vec2<f32>(0.0, -texel.y), in.xz, spacing);
+  let h_up = sample_height_with_fallback(uv_tile, vec2<f32>(0.0, texel.y), in.xz, spacing);
 
-  let spacing_step = spacing.max(1e-5);
+  let spacing_step = max(spacing, 1e-5);
   let grad_x = ((h_right - h_left) * exaggeration) / (2.0 * spacing_step);
   let grad_z = ((h_up - h_down) * exaggeration) / (2.0 * spacing_step);
   let normal_ws = normalize(vec3<f32>(-grad_x, 1.0, -grad_z));
@@ -262,6 +320,12 @@ fn fs_main(in: VsOut) -> FsOut {
   var out: FsOut;
   out.color = vec4<f32>(gamma_corrected, 1.0);
   out.normal_depth = vec4<f32>(normal_encoded, linear_depth);
+
+  // E1: No-op read from page table buffer to demonstrate binding (and prevent DCE)
+  if (arrayLength(&PageTable) > 0u) {
+    let _pt_dbg = f32(PageTable[0u].slot) * 0.0;
+    out.color = out.color + vec4<f32>(0.0) * _pt_dbg;
+  }
   return out;
 }
 

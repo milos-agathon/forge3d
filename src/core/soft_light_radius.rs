@@ -158,7 +158,7 @@ impl SoftLightPreset {
 /// Core renderer for soft light radius effects
 pub struct SoftLightRadiusRenderer {
     pipeline: wgpu::RenderPipeline,
-    multiple_lights_pipeline: wgpu::RenderPipeline,
+    _multiple_lights_pipeline: wgpu::RenderPipeline,
     soft_shadows_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     uniforms_buffer: wgpu::Buffer,
@@ -357,7 +357,7 @@ impl SoftLightRadiusRenderer {
 
         Self {
             pipeline,
-            multiple_lights_pipeline,
+            _multiple_lights_pipeline: multiple_lights_pipeline,
             soft_shadows_pipeline,
             bind_group_layout,
             uniforms_buffer,

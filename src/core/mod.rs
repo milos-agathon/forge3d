@@ -111,6 +111,15 @@ pub mod ibl;
 // B16: Dual-source blending OIT
 pub mod dual_source_oit;
 
+// D: Overlays compositor (native)
+pub mod overlays;
+
+// D: Text overlay (native)
+pub mod text_overlay;
+
+// D11: 3D Text Mesh (native)
+pub mod text_mesh;
+
 // N4: Render bundles
 pub mod render_bundles;
 

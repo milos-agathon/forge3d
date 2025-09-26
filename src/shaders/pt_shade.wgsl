@@ -35,7 +35,7 @@ struct MediumParams {
     g: f32,         // Henyey–Greenstein anisotropy (unused in MVP)
     sigma_t: f32,   // extinction coefficient
     density: f32,   // medium density scale
-    enable: f32,    // >0.5 to enable
+    enabled: f32,   // >0.5 to enable
 }
 
 // BRDF evaluation + PDF used for MIS against light sampling
@@ -315,6 +315,25 @@ struct RestirSettings {
 // -----------------------------------------------------------------------------
 const PI: f32 = 3.14159265358979323846;
 
+// Hair shading constants
+const HAIR_KD: f32 = 0.2;             // diffuse weight along N
+const HAIR_M1: f32 = 20.0;            // spec lobe 1 exponent
+const HAIR_M2: f32 = 80.0;            // spec lobe 2 exponent
+const HAIR_SPEC1_WEIGHT: f32 = 0.6;   // weight of lobe 1
+const HAIR_SPEC2_WEIGHT: f32 = 0.4;   // weight of lobe 2
+
+// Simple homogeneous media helpers
+fn media_transmittance(dist: f32, mu: f32) -> f32 {
+    let d = max(dist, 0.0);
+    let m = max(mu, 0.0);
+    return exp(-d * m);
+}
+
+fn media_fog_factor(dist: f32, mu: f32) -> f32 {
+    let T = media_transmittance(dist, mu);
+    return 1.0 - T;
+}
+
 // XorShift32 RNG for consistency with other stages
 fn xorshift32(state: ptr<function, u32>) -> f32 {
     var x = *state;
@@ -464,7 +483,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let n_dot_v = max(dot(n, wo), 0.0);
 
         // Media transmittance for primary segment (MVP): use hit distance h.t
-        let medium_on = (medium_params.enable > 0.5);
+        let medium_on = (medium_params.enabled > 0.5);
         let mu = medium_params.sigma_t * medium_params.density;
         let mtrans = select(1.0, media_transmittance(h.t, mu), medium_on);
 
@@ -686,14 +705,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             wi = normalize(basis * local_dir);
             let Lt = dot(wi, T);
             // Two specular lobes around tangent direction
-            let m1 = 20.0; // roughness lobe 1
-            let m2 = 80.0; // tighter highlight
-            let f1 = pow(max(0.0, dot(normalize(reflect(-wo, T)), wi)), m1);
-            let f2 = pow(max(0.0, dot(normalize(reflect(-wo, T)), wi)), m2);
-            let kd = 0.2; // small diffuse along normal
+            let f1 = pow(max(0.0, dot(normalize(reflect(-wo, T)), wi)), HAIR_M1);
+            let f2 = pow(max(0.0, dot(normalize(reflect(-wo, T)), wi)), HAIR_M2);
+            let kd = clamp(HAIR_KD, 0.0, 1.0);
             let ks = 1.0 - kd;
             let spec_col = mix(vec3<f32>(0.04), albedo, saturate(metallic));
-            let f = kd * (albedo / PI) + ks * spec_col * (0.6 * f1 + 0.4 * f2);
+            let f = kd * (albedo / PI) + ks * spec_col * (HAIR_SPEC1_WEIGHT * f1 + HAIR_SPEC2_WEIGHT * f2);
             let cos_theta = max(0.0, dot(n, wi));
             pdf = cos_theta / PI + 1e-8;
             new_throughput = h.throughput * f * (cos_theta / pdf);

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "forge3d"
-version = "0.39.0"
+version = "0.60.0"
 description = "forge3d: Rust/WebGPU core with PyO3 bindings"
 requires-python = ">=3.8"
 readme = "README.md"
@@ -83,6 +83,7 @@ cargo-extra-args = "--profile release-lto"
 strip = true
 # Generate abi3 wheels for broader compatibility
 compatibility = "linux"  # Add other platforms as needed
+features = ["extension-module"]
 
 # Note: Cargo profiles are defined in Cargo.toml
 

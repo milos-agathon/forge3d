@@ -353,8 +353,8 @@ impl LightPreset {
 pub struct PointSpotLightRenderer {
     // Rendering pipelines
     deferred_pipeline: wgpu::RenderPipeline,
-    forward_pipeline: wgpu::RenderPipeline,
-    shadow_pipeline: wgpu::RenderPipeline,
+    _forward_pipeline: wgpu::RenderPipeline,
+    _shadow_pipeline: wgpu::RenderPipeline,
 
     // Bind group layouts
     main_bind_group_layout: wgpu::BindGroupLayout,
@@ -365,7 +365,7 @@ pub struct PointSpotLightRenderer {
     lights_buffer: wgpu::Buffer,
 
     // Shadow mapping resources
-    shadow_map_array: Option<wgpu::Texture>,
+    _shadow_map_array: Option<wgpu::Texture>,
     shadow_map_view: Option<wgpu::TextureView>,
     shadow_sampler: wgpu::Sampler,
 
@@ -381,7 +381,7 @@ pub struct PointSpotLightRenderer {
 
     // Configuration
     uniforms: PointSpotLightUniforms,
-    shadow_map_size: u32,
+    _shadow_map_size: u32,
 }
 
 impl PointSpotLightRenderer {
@@ -657,13 +657,13 @@ impl PointSpotLightRenderer {
 
         Self {
             deferred_pipeline,
-            forward_pipeline,
-            shadow_pipeline,
+            _forward_pipeline: forward_pipeline,
+            _shadow_pipeline: shadow_pipeline,
             main_bind_group_layout,
             shadow_bind_group_layout,
             uniforms_buffer,
             lights_buffer,
-            shadow_map_array: None,
+            _shadow_map_array: None,
             shadow_map_view: None,
             shadow_sampler,
             main_bind_group: None,
@@ -673,7 +673,7 @@ impl PointSpotLightRenderer {
             light_id_map: HashMap::new(),
             max_lights,
             uniforms,
-            shadow_map_size: 1024,
+            _shadow_map_size: 1024,
         }
     }
 
