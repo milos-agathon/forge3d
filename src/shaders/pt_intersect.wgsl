@@ -8,6 +8,9 @@ struct HitResult {
     normal: vec3<f32>,
     hit: bool,
 }
+
+// Hair width multiplier (host can approximate by scaling CPU-provided radii)
+const HAIR_RADIUS_SCALE: f32 = 1.0;
 // Build a simple tangent from a normal
 fn tangent_from_normal(n: vec3<f32>) -> vec3<f32> {
     let a = select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), abs(n.x) > 0.9);
@@ -55,14 +58,14 @@ fn ray_cylinder_segment(ray: Ray, p0: vec3<f32>, p1: vec3<f32>, r: f32) -> HitRe
 
 // Hair curve segment (world-space)
 struct HairSegment {
-    p0: vec3<f32>;
-    r0: f32;
-    p1: vec3<f32>;
-    r1: f32;
-    material_id: u32;
-    _pad0: u32;
-    _pad1: u32;
-    _pad2: u32;
+    p0: vec3<f32>,
+    r0: f32,
+    p1: vec3<f32>,
+    r1: f32,
+    material_id: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 // Instance data for TLAS-style instancing (A22)
@@ -202,30 +205,6 @@ fn bvh_intersect_mesh(ray: Ray) -> HitResult {
                     closest = hit;
                     current_ray.tmax = hit.t; // tighten
                 }
-        
-        // Test hair segments (world-space cylinders)
-        let hcount = arrayLength(&hair_segments);
-        if (hcount > 0u) {
-            for (var hi: u32 = 0u; hi < hcount; hi = hi + 1u) {
-                let seg = hair_segments[hi];
-                let axis = seg.p1 - seg.p0;
-                let r = max(0.0, 0.5 * (seg.r0 + seg.r1));
-                var hseg = ray_cylinder_segment(ray, seg.p0, seg.p1, r);
-                if (hseg.hit && hseg.t < t_best) {
-                    t_best = hseg.t;
-                    hit_normal = hseg.normal;
-                    // Clamp material id
-                    let mat_count = arrayLength(&scene_spheres);
-                    if (mat_count > 0u) {
-                        material_idx = min(seg.material_id, mat_count - 1u);
-                    } else {
-                        material_idx = 0u;
-                    }
-                    is_hair = true;
-                    hair_tangent = normalize(axis);
-                }
-            }
-        }
             }
         } else {
             // Internal: push children
@@ -513,6 +492,30 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     } else {
                         material_idx = 0u;
                     }
+                }
+            }
+        }
+        
+        // Test hair segments (world-space cylinders)
+        let hcount = arrayLength(&hair_segments);
+        if (hcount > 0u) {
+            for (var hi: u32 = 0u; hi < hcount; hi = hi + 1u) {
+                let seg = hair_segments[hi];
+                let axis = seg.p1 - seg.p0;
+                let r = max(0.0, 0.5 * (seg.r0 + seg.r1) * HAIR_RADIUS_SCALE);
+                var hseg = ray_cylinder_segment(ray, seg.p0, seg.p1, r);
+                if (hseg.hit && hseg.t < t_best) {
+                    t_best = hseg.t;
+                    hit_normal = hseg.normal;
+                    // Clamp material id
+                    let mat_count = arrayLength(&scene_spheres);
+                    if (mat_count > 0u) {
+                        material_idx = min(seg.material_id, mat_count - 1u);
+                    } else {
+                        material_idx = 0u;
+                    }
+                    is_hair = true;
+                    hair_tangent = normalize(axis);
                 }
             }
         }

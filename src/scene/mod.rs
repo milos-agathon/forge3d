@@ -1,13 +1,16 @@
 // T41-BEGIN:scene-module
 #![allow(dead_code)]
 #![allow(deprecated)]
+#[cfg(feature = "extension-module")]
 use crate::device_caps::DeviceCaps;
 use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "extension-module")]
 use numpy::{IntoPyArray, PyUntypedArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3};
 #[cfg(feature = "extension-module")]
 use pyo3::{prelude::*, types::PyBytes};
+#[cfg(feature = "extension-module")]
 use std::path::PathBuf;
+#[cfg(feature = "extension-module")]
 use wgpu::util::DeviceExt;
 
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;

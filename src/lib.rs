@@ -16,11 +16,9 @@ use pyo3::{exceptions::PyValueError, prelude::*, wrap_pyfunction};
 #[cfg(feature = "extension-module")]
 use pyo3::types::PyDict;
 #[cfg(feature = "extension-module")]
-use numpy::{PyArray1, PyArray3};
+use numpy::PyArray1;
 #[cfg(feature = "extension-module")]
 use glam::Vec3;
-#[cfg(feature = "extension-module")]
-use pyo3::types::PyAnyMethods;
 #[cfg(feature = "extension-module")]
 use numpy::PyArrayMethods;
 
@@ -156,8 +154,8 @@ fn _pt_render_gpu(
     py: Python<'_>,
     width: u32,
     height: u32,
-    scene: &PyAny,
-    cam: &PyAny,
+    scene: &Bound<'_, PyAny>,
+    cam: &Bound<'_, PyAny>,
     seed: u32,
     _frames: u32,
 ) -> PyResult<Py<PyAny>> {
@@ -579,7 +577,7 @@ fn validate_csm_peter_panning() -> PyResult<bool> {
 // ---------------------------------------------------------------------------
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-fn enumerate_adapters(py: Python<'_>) -> PyResult<Vec<PyObject>> {
+fn enumerate_adapters(_py: Python<'_>) -> PyResult<Vec<PyObject>> {
     // Return an empty list to conservatively skip GPU-only tests in environments
     // where compute/storage features may not validate.
     Ok(Vec::new())
