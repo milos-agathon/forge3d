@@ -380,6 +380,7 @@ pub fn calculate_line_joins(path: &[Vec2], width: f32) -> Vec<Vec2> {
 mod tests {
     use super::*;
     use crate::vector::api::VectorStyle;
+    use glam::Vec2;
 
     #[test]
     fn test_pack_simple_polyline() {

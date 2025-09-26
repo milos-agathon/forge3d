@@ -5,7 +5,7 @@
 
 use crate::core::matrix_stack::MatrixStack;
 use crate::error::{RenderError, RenderResult};
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec3, Vec4Swizzles};
 use std::collections::{HashMap, HashSet};
 
 /// Unique identifier for a scene node

@@ -6,7 +6,9 @@
 pub mod csm;
 pub mod state;
 
-pub use csm::{detect_peter_panning, CascadeStatistics, CsmConfig, CsmRenderer, CsmUniforms, ShadowCascade};
+pub use csm::{
+    detect_peter_panning, CascadeStatistics, CsmConfig, CsmRenderer, CsmUniforms, ShadowCascade,
+};
 
 // Re-export common shadow types and utilities
 pub use csm::CsmRenderer as CascadedShadowMaps;

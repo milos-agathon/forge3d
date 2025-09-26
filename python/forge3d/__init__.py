@@ -2407,91 +2407,28 @@ def grid_generate(nx: int, nz: int, spacing=(1.0, 1.0), origin="center"):
 
 # Optional GPU adapter enumeration (provided by native extension when available).
 try:
-    from ._forge3d import enumerate_adapters, device_probe  # type: ignore
-except Exception:  # pragma: no cover
-    def enumerate_adapters() -> list[dict]:  # type: ignore
+    from ._forge3d import (
+        __doc__, __version__,
+        configure_csm, set_csm_enabled, set_csm_light_direction,
+        set_csm_pcf_kernel, set_csm_bias_params, set_csm_debug_mode,
+        get_csm_cascade_info, validate_csm_peter_panning,
+        extrude_polygon_py,
+        extrude_polygon_gpu_py,
+        Scene as NativeScene,
+        enumerate_adapters, device_probe
+    )
+    _NATIVE_AVAILABLE = True
+    Scene = NativeScene
+except ImportError as e:
+    print(e)
+    # Fallback implementation if native module is not available
+    _NATIVE_AVAILABLE = False
+    def enumerate_adapters() -> list[dict]:
         return []
 
-    def device_probe(backend: str | None = None) -> dict:  # type: ignore
+    def device_probe(backend: str | None = None) -> dict:
         return {"status": "unavailable"}
 
-def c10_parent_z90_child_unitx_world():
-    """Test function for scene hierarchy: parent rotated 90° around Z, child unit vector in X."""
-    import numpy as np
-
-    # Parent transform: 90-degree rotation around Z-axis
-    parent_rot = np.array([
-        [0.0, -1.0, 0.0],  # cos(90°) = 0, -sin(90°) = -1
-        [1.0,  0.0, 0.0],  # sin(90°) = 1,  cos(90°) = 0
-        [0.0,  0.0, 1.0]   # Z unchanged
-    ])
-
-    # Child local position: unit vector in X direction
-    child_local = np.array([1.0, 0.0, 0.0])
-
-    # Transform to world coordinates
-    world_pos = parent_rot @ child_local
-
-    return float(world_pos[0]), float(world_pos[1]), float(world_pos[2])
-
-# Sampler utilities
-def make_sampler(address_mode: str, mag_filter: str = "linear", mip_filter: str = "linear") -> dict:
-    """Create sampler configuration."""
-    valid_address_modes = ["clamp", "repeat", "mirror"]
-    valid_filters = ["linear", "nearest"]
-
-    if address_mode not in valid_address_modes:
-        raise ValueError(f"Invalid address mode: {address_mode}. Valid modes: {valid_address_modes}")
-
-    if mag_filter not in valid_filters:
-        raise ValueError(f"Invalid filter: {mag_filter}. Valid filters: {valid_filters}")
-
-    if mip_filter not in valid_filters:
-        raise ValueError(f"Invalid mip filter: {mip_filter}. Valid filters: {valid_filters}")
-
-    # min_filter defaults to mag_filter
-    min_filter = mag_filter
-
-    name = f"{address_mode}_{mag_filter}_{min_filter}_{mip_filter}"
-
-    return {
-        "address_mode": address_mode,
-        "mag_filter": mag_filter,
-        "min_filter": min_filter,
-        "mip_filter": mip_filter,
-        "name": name
-    }
-
-def list_sampler_modes() -> list[dict]:
-    """List supported sampler mode combinations (12 total)."""
-    address_modes = ["clamp", "repeat", "mirror"]
-    filters = ["linear", "nearest"]
-
-    modes: list[dict] = []
-    for addr in address_modes:
-        for filt in filters:
-            for mip in filters:
-                name = f"{addr}_{filt}_{filt}_{mip}"
-                modes.append({
-                    "address_mode": addr,
-                    "mag_filter": filt,
-                    "min_filter": filt,
-                    "mip_filter": mip,
-                    "name": name,
-                    "description": _get_sampler_use_case(addr, filt, filt, mip),
-                })
-    return modes
-
-def _get_sampler_use_case(addr: str, mag: str, min_f: str, mip: str) -> str:
-    """Get recommended use case for sampler configuration."""
-    if mag == "nearest" and min_f == "nearest" and mip == "nearest":
-        return "pixel_art"
-    elif addr == "repeat":
-        return "tiled_texture"
-    elif addr == "clamp":
-        return "ui_texture"
-    else:
-        return "general_purpose"
 
 __all__ = [
     # Basic rendering
@@ -2553,11 +2490,6 @@ __all__ = [
     "c10_parent_z90_child_unitx_world",
     # Sampler utilities
     "make_sampler", "list_sampler_modes",
+    "extrude_polygon_py",
+    "extrude_polygon_gpu_py",
 ]
-
-
-
-
-
-
-

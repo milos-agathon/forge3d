@@ -86,17 +86,11 @@ impl RectAreaLight {
     }
 
     /// Create a simple rectangular area light facing down
-    pub fn quad(
-        position: Vec3,
-        width: f32,
-        height: f32,
-        color: Vec3,
-        intensity: f32,
-    ) -> Self {
+    pub fn quad(position: Vec3, width: f32, height: f32, color: Vec3, intensity: f32) -> Self {
         Self::new(
             position,
-            Vec3::X,    // Right vector
-            Vec3::Z,    // Up vector
+            Vec3::X, // Right vector
+            Vec3::Z, // Up vector
             width,
             height,
             color,
@@ -405,10 +399,22 @@ impl LTCRectAreaLightRenderer {
 
                 // Pack matrix into RGBA32Float format (3x3 -> 4x4 with padding)
                 let matrix_bytes = [
-                    ltc_matrix.x_axis.x, ltc_matrix.x_axis.y, ltc_matrix.x_axis.z, 0.0,
-                    ltc_matrix.y_axis.x, ltc_matrix.y_axis.y, ltc_matrix.y_axis.z, 0.0,
-                    ltc_matrix.z_axis.x, ltc_matrix.z_axis.y, ltc_matrix.z_axis.z, 0.0,
-                    0.0, 0.0, 0.0, 1.0,
+                    ltc_matrix.x_axis.x,
+                    ltc_matrix.x_axis.y,
+                    ltc_matrix.x_axis.z,
+                    0.0,
+                    ltc_matrix.y_axis.x,
+                    ltc_matrix.y_axis.y,
+                    ltc_matrix.y_axis.z,
+                    0.0,
+                    ltc_matrix.z_axis.x,
+                    ltc_matrix.z_axis.y,
+                    ltc_matrix.z_axis.z,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
                 ];
 
                 // Convert to bytes
@@ -443,7 +449,10 @@ impl LTCRectAreaLightRenderer {
     /// Add a rectangular area light
     pub fn add_light(&mut self, mut light: RectAreaLight) -> Result<usize, String> {
         if self.lights.len() >= self.max_lights {
-            return Err(format!("Maximum number of lights ({}) exceeded", self.max_lights));
+            return Err(format!(
+                "Maximum number of lights ({}) exceeded",
+                self.max_lights
+            ));
         }
 
         light.validate()?;
@@ -538,8 +547,12 @@ impl LTCRectAreaLightRenderer {
     /// Update the bind group with current resources
     fn update_bind_group(&mut self) {
         if let Some(light_buffer) = &self.light_buffer {
-            let matrix_view = self.ltc_matrix_texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let scale_view = self.ltc_scale_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let matrix_view = self
+                .ltc_matrix_texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            let scale_view = self
+                .ltc_scale_texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
 
             self.bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("LTC Rect Area Lights Bind Group"),

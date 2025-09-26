@@ -421,6 +421,7 @@ impl PolygonOutlines {
 mod tests {
     use super::*;
     use crate::vector::api::VectorStyle;
+    use glam::Vec2;
 
     #[test]
     fn test_tessellate_simple_triangle() {

@@ -592,7 +592,7 @@ mod tests {
             draw_command_index: 0,
         };
 
-        let frustum = Frustum::from_view_proj(Mat4::IDENTITY);
+        let frustum = Frustum::from_view_proj(&Mat4::IDENTITY);
         let camera_pos = Vec3::ZERO;
         let max_distance = 50.0;
 

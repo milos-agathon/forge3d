@@ -90,20 +90,18 @@ pub use core::clouds::{
     CloudUniforms,
 };
 pub use core::dof::{CameraDofParams, DofMethod, DofQuality, DofRenderer, DofUniforms};
+pub use core::dual_source_oit::{
+    DualSourceComposeUniforms, DualSourceOITMode, DualSourceOITQuality, DualSourceOITRenderer,
+    DualSourceOITStats, DualSourceOITUniforms,
+};
 pub use core::ground_plane::{
     GroundPlaneMode, GroundPlaneParams, GroundPlaneRenderer, GroundPlaneUniforms,
 };
 pub use core::ibl::{EnvironmentMapType, IBLMaterial, IBLQuality, IBLRenderer, IBLUniforms};
-pub use core::dual_source_oit::{
-    DualSourceOITMode, DualSourceOITQuality, DualSourceOITRenderer, DualSourceOITStats,
-    DualSourceOITUniforms, DualSourceComposeUniforms,
-};
+pub use core::ltc_area_lights::{LTCRectAreaLightRenderer, LTCUniforms, RectAreaLight};
 pub use core::point_spot_lights::{
     DebugMode, Light, LightPreset, LightType, PointSpotLightRenderer, PointSpotLightUniforms,
     ShadowQuality,
-};
-pub use core::ltc_area_lights::{
-    LTCRectAreaLightRenderer, LTCUniforms, RectAreaLight,
 };
 pub use core::reflections::{PlanarReflectionRenderer, ReflectionQuality};
 pub use core::soft_light_radius::{
@@ -118,7 +116,9 @@ pub use sdf::{
     CsgOperation, HybridHitResult, HybridScene, SdfPrimitive, SdfPrimitiveType, SdfScene,
     SdfSceneBuilder,
 };
-pub use shadows::{detect_peter_panning, CascadeStatistics, CascadedShadowMaps, CsmConfig, CsmRenderer};
+pub use shadows::{
+    detect_peter_panning, CascadeStatistics, CascadedShadowMaps, CsmConfig, CsmRenderer,
+};
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
@@ -213,6 +213,11 @@ fn validate_csm_peter_panning() -> PyResult<bool> {
     Ok(state.validate_peter_panning())
 }
 
+#[pyfunction]
+fn dummy_function() -> PyResult<i32> {
+    Ok(42)
+}
+
 // PyO3 module entry point so Python can `import forge3d._forge3d`
 // This must be named exactly `_forge3d` to match [tool.maturin].module-name in pyproject.toml
 #[cfg(feature = "extension-module")]
@@ -229,6 +234,15 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_csm_debug_mode, m)?)?;
     m.add_function(wrap_pyfunction!(get_csm_cascade_info, m)?)?;
     m.add_function(wrap_pyfunction!(validate_csm_peter_panning, m)?)?;
+    m.add_function(wrap_pyfunction!(dummy_function, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::extrude_polygon_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::add_polygons_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::add_lines_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::add_points_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::add_graph_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::clear_vectors_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::get_vector_counts_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector::api::extrude_polygon_gpu_py, m)?)?;
 
     // Add main classes
     m.add_class::<crate::scene::Scene>()?;

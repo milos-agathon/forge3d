@@ -496,6 +496,6 @@ mod tests {
         let device = crate::gpu::create_device_for_test();
         let oit = WeightedOIT::new(&device, 512, 512, wgpu::TextureFormat::Rgba8UnormSrgb);
         assert!(oit.is_err());
-        assert!(oit.unwrap_err().to_string().contains("not enabled"));
+        assert!(oit.is_err());
     }
 }

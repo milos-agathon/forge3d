@@ -1,9 +1,14 @@
+// src/gpu.rs
+// Global GPU context helpers and utilities
+// Exists to share wgpu device creation across runtime and tests
+// RELEVANT FILES: src/vector/polygon.rs, src/vector/point.rs, src/vector/line.rs, src/vector/gpu_extrusion.rs
 use once_cell::sync::OnceCell;
+use std::sync::Arc;
 
 pub struct GpuContext {
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
-    pub adapter: wgpu::Adapter,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+    pub adapter: Arc<wgpu::Adapter>,
 }
 
 static CTX: OnceCell<GpuContext> = OnceCell::new();
@@ -32,9 +37,9 @@ pub fn ctx() -> &'static GpuContext {
         .expect("request_device failed");
 
         GpuContext {
-            device,
-            queue,
-            adapter,
+            device: Arc::new(device),
+            queue: Arc::new(queue),
+            adapter: Arc::new(adapter),
         }
     })
 }
@@ -44,4 +49,28 @@ pub fn ctx() -> &'static GpuContext {
 pub fn align_copy_bpr(unpadded: u32) -> u32 {
     let a = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     ((unpadded + a - 1) / a) * a
+}
+
+/// Create a small wgpu device for unit tests.
+pub fn create_device_for_test() -> wgpu::Device {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::all(),
+        ..Default::default()
+    });
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::LowPower,
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    }))
+    .expect("No suitable GPU adapter for tests");
+    let (device, _queue) = pollster::block_on(adapter.request_device(
+        &wgpu::DeviceDescriptor {
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::downlevel_defaults(),
+            label: Some("forge3d-test-device"),
+        },
+        None,
+    ))
+    .expect("request_device failed for tests");
+    device
 }
