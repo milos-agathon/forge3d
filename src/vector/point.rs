@@ -653,6 +653,7 @@ pub fn cluster_points(points: &[Vec2], cluster_radius: f32) -> Vec<(Vec2, u32)> 
 mod tests {
     use super::*;
     use crate::vector::api::VectorStyle;
+    use glam::Vec2;
 
     #[test]
     fn test_pack_simple_points() {

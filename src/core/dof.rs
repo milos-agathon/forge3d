@@ -627,23 +627,9 @@ mod tests {
         uniforms.focus_distance = 10.0;
         uniforms.focal_length = 50.0;
 
-        let renderer = DofRenderer {
-            uniforms,
-            // ... other fields would be created with device
-            uniform_buffer: unsafe { std::mem::zeroed() },
-            dof_texture: unsafe { std::mem::zeroed() },
-            dof_view: unsafe { std::mem::zeroed() },
-            dof_storage_view: unsafe { std::mem::zeroed() },
-            temp_texture: None,
-            temp_view: None,
-            sampler: unsafe { std::mem::zeroed() },
-            gather_pipeline: unsafe { std::mem::zeroed() },
-            separable_h_pipeline: unsafe { std::mem::zeroed() },
-            separable_v_pipeline: unsafe { std::mem::zeroed() },
-            bind_group: None,
-            quality: DofQuality::Medium,
-            method: DofMethod::Gather,
-        };
+        let device = crate::gpu::create_device_for_test();
+        let mut renderer = DofRenderer::new(&device, 128, 128, DofQuality::Medium);
+        renderer.uniforms = uniforms;
 
         // Test CoC at focus distance (should be near zero)
         let coc_at_focus = renderer.calculate_coc(10.0);

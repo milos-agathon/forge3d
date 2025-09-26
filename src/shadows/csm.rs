@@ -494,7 +494,11 @@ impl CsmRenderer {
 
         // Only enable if hardware supports it
         self.config.enable_unclipped_depth = enabled && supported;
-        self.uniforms.enable_unclipped_depth = if self.config.enable_unclipped_depth { 1 } else { 0 };
+        self.uniforms.enable_unclipped_depth = if self.config.enable_unclipped_depth {
+            1
+        } else {
+            0
+        };
 
         // Adjust depth clip factor for better cascade coverage when unclipped depth is enabled
         if self.config.enable_unclipped_depth {
@@ -612,7 +616,8 @@ impl CsmRenderer {
             cascade_overlaps,
             unclipped_depth_enabled: self.config.enable_unclipped_depth,
             depth_clip_factor: self.config.depth_clip_factor,
-            effective_shadow_distance: self.config.max_shadow_distance * self.config.depth_clip_factor,
+            effective_shadow_distance: self.config.max_shadow_distance
+                * self.config.depth_clip_factor,
         }
     }
 }
@@ -664,18 +669,8 @@ mod tests {
     #[test]
     fn test_cascade_splits() {
         let config = CsmConfig::default();
-        let renderer = CsmRenderer::new(
-            &wgpu::util::DeviceExt::create_device_from_adapter(
-                &pollster::block_on(
-                    wgpu::Instance::new(Default::default()).request_adapter(&Default::default()),
-                )
-                .unwrap(),
-                &Default::default(),
-            )
-            .unwrap()
-            .0,
-            config,
-        );
+        let device = crate::gpu::create_device_for_test();
+        let renderer = CsmRenderer::new(&device, config);
 
         let splits = renderer.calculate_cascade_splits(0.1, 100.0);
 

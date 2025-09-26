@@ -515,6 +515,7 @@ mod tests {
             intensity: 1.0,
             light_type: 0,
             params: [0.0; 3],
+            _pad: [0; 4],
         };
 
         let accepted = reservoir.update(sample, 1.0, 0.5);
@@ -535,6 +536,7 @@ mod tests {
             intensity: 1.0,
             light_type: 0,
             params: [0.0; 3],
+            _pad: [0; 4],
         };
 
         let sample2 = LightSample {
@@ -544,6 +546,7 @@ mod tests {
             intensity: 2.0,
             light_type: 0,
             params: [0.0; 3],
+            _pad: [0; 4],
         };
 
         reservoir1.update(sample1, 1.0, 0.5);

@@ -9,13 +9,11 @@ use wgpu::{
     vertex_attr_array, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType, Buffer,
     BufferAddress, BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState,
-    ColorWrites, ComputePipeline, Device, FragmentState, FrontFace,
-    IndexFormat, MultisampleState, PipelineLayoutDescriptor,
-    PolygonMode, PrimitiveState, PrimitiveTopology, Queue, RenderPipeline,
-    RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, Texture,
-    TextureFormat, TextureSampleType, TextureView, TextureViewDimension,
-    VertexBufferLayout, VertexState, VertexStepMode,
+    ColorWrites, ComputePipeline, Device, FragmentState, FrontFace, IndexFormat, MultisampleState,
+    PipelineLayoutDescriptor, PolygonMode, PrimitiveState, PrimitiveTopology, Queue,
+    RenderPipeline, RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
+    ShaderModuleDescriptor, ShaderSource, ShaderStages, Texture, TextureFormat, TextureSampleType,
+    TextureView, TextureViewDimension, VertexBufferLayout, VertexState, VertexStepMode,
 };
 
 /// Cloud rendering quality levels

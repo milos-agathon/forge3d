@@ -261,6 +261,7 @@ pub fn calculate_graph_bounds(graph: &GraphDef) -> Option<(Vec2, Vec2)> {
 mod tests {
     use super::*;
     use crate::vector::api::VectorStyle;
+    use glam::Vec2;
 
     #[test]
     fn test_pack_simple_graph() {

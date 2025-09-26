@@ -365,7 +365,7 @@ impl IBLRenderer {
                     module: &shader,
                     entry_point: "vs_irradiance",
                     buffers: &[],
-                    },
+                },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: "fs_equirect_to_cube",
@@ -374,12 +374,12 @@ impl IBLRenderer {
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
-                    }),
+                }),
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
                 multiview: None,
-                });
+            });
 
         // Create samplers
         let environment_sampler = device.create_sampler(&wgpu::SamplerDescriptor {

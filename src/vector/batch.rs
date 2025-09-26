@@ -119,6 +119,10 @@ impl Frustum {
 
         true // AABB is at least partially inside frustum
     }
+
+    pub fn from_view_proj(vp_matrix: &Mat4) -> Self {
+        Self::from_view_proj_matrix(vp_matrix)
+    }
 }
 
 /// Performance counters for batching system
@@ -163,12 +167,14 @@ pub struct Batch {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
 pub enum PrimitiveType {
     Polygon,
     Line,
     Point,
     GraphNode,
     GraphEdge,
+    Triangle,
 }
 
 /// Batching system for vector primitives

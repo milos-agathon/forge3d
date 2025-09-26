@@ -3656,11 +3656,14 @@ impl Scene {
 
         let renderer = crate::core::ltc_area_lights::LTCRectAreaLightRenderer::new(
             g.device.clone(),
-            max_lights
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!(
-            "Failed to create LTC rect area light renderer: {}",
-            e
-        )))?;
+            max_lights,
+        )
+        .map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Failed to create LTC rect area light renderer: {}",
+                e
+            ))
+        })?;
 
         self.ltc_area_lights_renderer = Some(renderer);
         self.ltc_area_lights_enabled = true;
@@ -3701,7 +3704,8 @@ impl Scene {
                 intensity,
             );
 
-            let light_id = renderer.add_light(light)
+            let light_id = renderer
+                .add_light(light)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
 
             Ok(light_id)
@@ -3712,7 +3716,9 @@ impl Scene {
         }
     }
 
-    #[pyo3(text_signature = "($self, position, right_vec, up_vec, width, height, r, g, b, intensity, two_sided=False)")]
+    #[pyo3(
+        text_signature = "($self, position, right_vec, up_vec, width, height, r, g, b, intensity, two_sided=False)"
+    )]
     pub fn add_custom_rect_area_light(
         &mut self,
         position: (f32, f32, f32),
@@ -3738,7 +3744,8 @@ impl Scene {
                 two_sided.unwrap_or(false),
             );
 
-            let light_id = renderer.add_light(light)
+            let light_id = renderer
+                .add_light(light)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
 
             Ok(light_id)
@@ -3752,7 +3759,8 @@ impl Scene {
     #[pyo3(text_signature = "($self, light_id)")]
     pub fn remove_rect_area_light(&mut self, light_id: usize) -> PyResult<()> {
         if let Some(ref mut renderer) = self.ltc_area_lights_renderer {
-            renderer.remove_light(light_id)
+            renderer
+                .remove_light(light_id)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
             Ok(())
         } else {
@@ -3785,7 +3793,8 @@ impl Scene {
                 intensity,
             );
 
-            renderer.update_light(light_id, light)
+            renderer
+                .update_light(light_id, light)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
 
             Ok(())
@@ -3835,7 +3844,11 @@ impl Scene {
     pub fn get_ltc_uniforms(&self) -> PyResult<(u32, f32, bool)> {
         if let Some(ref renderer) = self.ltc_area_lights_renderer {
             let uniforms = renderer.uniforms();
-            Ok((uniforms.light_count, uniforms.global_intensity, uniforms.enable_ltc > 0.5))
+            Ok((
+                uniforms.light_count,
+                uniforms.global_intensity,
+                uniforms.enable_ltc > 0.5,
+            ))
         } else {
             Err(pyo3::exceptions::PyRuntimeError::new_err(
                 "LTC rect area lights not enabled. Call enable_ltc_rect_area_lights() first.",
@@ -4091,17 +4104,25 @@ impl Scene {
     // B16: Dual-source blending OIT Methods
 
     #[pyo3(text_signature = "($self, mode, quality)")]
-    pub fn enable_dual_source_oit(&mut self, mode: Option<&str>, quality: Option<&str>) -> PyResult<()> {
+    pub fn enable_dual_source_oit(
+        &mut self,
+        mode: Option<&str>,
+        quality: Option<&str>,
+    ) -> PyResult<()> {
         let g = crate::gpu::ctx();
 
         // Parse mode
         let oit_mode = match mode {
             Some("dual_source") => crate::core::dual_source_oit::DualSourceOITMode::DualSource,
-            Some("wboit_fallback") => crate::core::dual_source_oit::DualSourceOITMode::WBOITFallback,
+            Some("wboit_fallback") => {
+                crate::core::dual_source_oit::DualSourceOITMode::WBOITFallback
+            }
             Some("automatic") | None => crate::core::dual_source_oit::DualSourceOITMode::Automatic,
-            _ => return Err(pyo3::exceptions::PyValueError::new_err(
-                "Invalid mode. Use 'dual_source', 'wboit_fallback', or 'automatic'.",
-            )),
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Invalid mode. Use 'dual_source', 'wboit_fallback', or 'automatic'.",
+                ))
+            }
         };
 
         // Parse quality
@@ -4110,9 +4131,11 @@ impl Scene {
             Some("medium") | None => crate::core::dual_source_oit::DualSourceOITQuality::Medium,
             Some("high") => crate::core::dual_source_oit::DualSourceOITQuality::High,
             Some("ultra") => crate::core::dual_source_oit::DualSourceOITQuality::Ultra,
-            _ => return Err(pyo3::exceptions::PyValueError::new_err(
-                "Invalid quality. Use 'low', 'medium', 'high', or 'ultra'.",
-            )),
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Invalid quality. Use 'low', 'medium', 'high', or 'ultra'.",
+                ))
+            }
         };
 
         // Create dual-source OIT renderer
@@ -4122,10 +4145,12 @@ impl Scene {
             self.height,
             wgpu::TextureFormat::Rgba8UnormSrgb,
         )
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!(
-            "Failed to create dual-source OIT renderer: {}",
-            e
-        )))?;
+        .map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Failed to create dual-source OIT renderer: {}",
+                e
+            ))
+        })?;
 
         renderer.set_mode(oit_mode);
         renderer.set_quality(oit_quality);
@@ -4196,9 +4221,11 @@ impl Scene {
                 "medium" => crate::core::dual_source_oit::DualSourceOITQuality::Medium,
                 "high" => crate::core::dual_source_oit::DualSourceOITQuality::High,
                 "ultra" => crate::core::dual_source_oit::DualSourceOITQuality::Ultra,
-                _ => return Err(pyo3::exceptions::PyValueError::new_err(
-                    "Invalid quality. Use 'low', 'medium', 'high', or 'ultra'.",
-                )),
+                _ => {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "Invalid quality. Use 'low', 'medium', 'high', or 'ultra'.",
+                    ))
+                }
             };
 
             renderer.set_quality(oit_quality);
@@ -4266,7 +4293,9 @@ impl Scene {
         }
     }
 
-    #[pyo3(text_signature = "($self, alpha_correction, depth_weight_scale, max_fragments, premultiply_factor)")]
+    #[pyo3(
+        text_signature = "($self, alpha_correction, depth_weight_scale, max_fragments, premultiply_factor)"
+    )]
     pub fn set_dual_source_oit_params(
         &mut self,
         _alpha_correction: f32,
