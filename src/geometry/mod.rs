@@ -95,24 +95,24 @@ use pyo3::{
 fn mesh_to_python<'py>(py: Python<'py>, mesh: &MeshBuffers) -> PyResult<PyObject> {
     let dict = PyDict::new_bound(py);
 
-    let positions = PyArray2::from_vec2(py, &to_vec3(mesh.positions.as_slice()))?;
+    let positions = PyArray2::from_vec2_bound(py, &to_vec3(mesh.positions.as_slice()))?;
     dict.set_item("positions", positions)?;
 
     let normals = if mesh.normals.len() == mesh.positions.len() {
-        PyArray2::from_vec2(py, &to_vec3(mesh.normals.as_slice()))?
+        PyArray2::from_vec2_bound(py, &to_vec3(mesh.normals.as_slice()))?
     } else {
-        PyArray2::from_vec2(py, &Vec::<Vec<f32>>::new())?
+        PyArray2::from_vec2_bound(py, &Vec::<Vec<f32>>::new())?
     };
     dict.set_item("normals", normals)?;
 
     let uvs = if mesh.uvs.len() == mesh.positions.len() {
-        PyArray2::from_vec2(py, &to_vec2(mesh.uvs.as_slice()))?
+        PyArray2::from_vec2_bound(py, &to_vec2(mesh.uvs.as_slice()))?
     } else {
-        PyArray2::from_vec2(py, &Vec::<Vec<f32>>::new())?
+        PyArray2::from_vec2_bound(py, &Vec::<Vec<f32>>::new())?
     };
     dict.set_item("uvs", uvs)?;
 
-    let indices = PyArray1::from_vec(py, mesh.indices.clone());
+    let indices = PyArray1::from_vec_bound(py, mesh.indices.clone());
     dict.set_item("indices", indices)?;
     dict.set_item("vertex_count", mesh.vertex_count())?;
     dict.set_item("triangle_count", mesh.triangle_count())?;
@@ -163,7 +163,7 @@ pub fn geometry_extrude_polygon_py(
 pub fn geometry_generate_primitive_py(
     py: Python<'_>,
     kind: &str,
-    params: Option<&PyDict>,
+    params: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<PyObject> {
     let primitive_kind = match kind.to_ascii_lowercase().as_str() {
         "plane" => PrimitiveType::Plane,
@@ -182,29 +182,29 @@ pub fn geometry_generate_primitive_py(
 
     let mut config = PrimitiveParams::default();
     if let Some(kwargs) = params {
-        if let Ok(Some(value)) = kwargs.get_item("resolution") {
+        if let Some(value) = kwargs.get_item("resolution")? {
             let tuple: (u32, u32) = value.extract()?;
             config.resolution = tuple;
         }
-        if let Ok(Some(value)) = kwargs.get_item("radial_segments") {
+        if let Some(value) = kwargs.get_item("radial_segments")? {
             config.radial_segments = value.extract()?;
         }
-        if let Ok(Some(value)) = kwargs.get_item("rings") {
+        if let Some(value) = kwargs.get_item("rings")? {
             config.rings = value.extract()?;
         }
-        if let Ok(Some(value)) = kwargs.get_item("height_segments") {
+        if let Some(value) = kwargs.get_item("height_segments")? {
             config.height_segments = value.extract()?;
         }
-        if let Ok(Some(value)) = kwargs.get_item("tube_segments") {
+        if let Some(value) = kwargs.get_item("tube_segments")? {
             config.tube_segments = value.extract()?;
         }
-        if let Ok(Some(value)) = kwargs.get_item("radius") {
+        if let Some(value) = kwargs.get_item("radius")? {
             config.radius = value.extract()?;
         }
-        if let Ok(Some(value)) = kwargs.get_item("tube_radius") {
+        if let Some(value) = kwargs.get_item("tube_radius")? {
             config.tube_radius = value.extract()?;
         }
-        if let Ok(Some(value)) = kwargs.get_item("include_caps") {
+        if let Some(value) = kwargs.get_item("include_caps")? {
             config.include_caps = value.extract()?;
         }
     }
@@ -281,7 +281,7 @@ pub fn geometry_weld_mesh_py(
     positions: PyReadonlyArray2<'_, f32>,
     indices: PyReadonlyArray2<'_, u32>,
     uvs: Option<PyReadonlyArray2<'_, f32>>,
-    options: Option<&PyDict>,
+    options: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<PyObject> {
     if positions.shape()[1] != 3 {
         return Err(PyValueError::new_err("positions must have shape (N, 3)"));
@@ -308,10 +308,10 @@ pub fn geometry_weld_mesh_py(
 
     let mut weld_options = WeldOptions::default();
     if let Some(opts) = options {
-        if let Ok(Some(value)) = opts.get_item("position_epsilon") {
+        if let Some(value) = opts.get_item("position_epsilon")? {
             weld_options.position_epsilon = value.extract()?;
         }
-        if let Ok(Some(value)) = opts.get_item("uv_epsilon") {
+        if let Some(value) = opts.get_item("uv_epsilon")? {
             weld_options.uv_epsilon = value.extract()?;
         }
     }
@@ -320,7 +320,7 @@ pub fn geometry_weld_mesh_py(
     let dict = PyDict::new_bound(py);
     let mesh_obj = mesh_to_python(py, &result.mesh)?;
     dict.set_item("mesh", mesh_obj)?;
-    let remap = PyArray1::from_vec(py, result.remap);
+    let remap = PyArray1::from_vec_bound(py, result.remap);
     dict.set_item("remap", remap)?;
     dict.set_item("collapsed", result.collapsed)?;
     Ok(dict.into_py(py))

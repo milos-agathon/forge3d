@@ -6,6 +6,9 @@ pub mod hybrid;
 pub mod operations;
 pub mod primitives;
 
+#[cfg(feature = "extension-module")]
+pub mod py;
+
 // Re-export commonly used types
 pub use primitives::{
     SdfBox, SdfCapsule, SdfCylinder, SdfPlane, SdfPrimitive, SdfPrimitiveType, SdfSphere, SdfTorus,
@@ -73,6 +76,11 @@ impl SdfScene {
         }
     }
 
+    /// Explicitly set scene bounds
+    pub fn set_bounds(&mut self, min: glam::Vec3, max: glam::Vec3) {
+        self.bounds = Some((min, max));
+    }
+
     /// Get the number of primitives in the scene
     pub fn primitive_count(&self) -> usize {
         self.csg_tree.primitives.len()
@@ -103,11 +111,42 @@ impl SdfSceneBuilder {
         }
     }
 
+    fn add_primitive_internal(
+        &mut self,
+        primitive: SdfPrimitive,
+        material_id: u32,
+    ) -> u32 {
+        let prim_idx = self.scene.csg_tree.add_primitive(primitive);
+        self.scene.csg_tree.add_leaf(prim_idx, material_id)
+    }
+
+    fn add_operation_internal(
+        &mut self,
+        operation: CsgOperation,
+        left: u32,
+        right: u32,
+        smoothing: f32,
+        material_id: u32,
+    ) -> u32 {
+        self.scene
+            .csg_tree
+            .add_operation(operation, left, right, smoothing, material_id)
+    }
+
+    /// In-place sphere primitive helper
+    pub fn add_sphere_mut(
+        &mut self,
+        center: glam::Vec3,
+        radius: f32,
+        material_id: u32,
+    ) -> u32 {
+        let primitive = SdfPrimitive::sphere(center, radius, material_id);
+        self.add_primitive_internal(primitive, material_id)
+    }
+
     /// Add a primitive and return a handle to it
     pub fn add_sphere(mut self, center: glam::Vec3, radius: f32, material_id: u32) -> (Self, u32) {
-        let primitive = SdfPrimitive::sphere(center, radius, material_id);
-        let prim_idx = self.scene.csg_tree.add_primitive(primitive);
-        let node_idx = self.scene.csg_tree.add_leaf(prim_idx, material_id);
+        let node_idx = self.add_sphere_mut(center, radius, material_id);
         (self, node_idx)
     }
 
@@ -118,10 +157,19 @@ impl SdfSceneBuilder {
         extents: glam::Vec3,
         material_id: u32,
     ) -> (Self, u32) {
-        let primitive = SdfPrimitive::box_primitive(center, extents, material_id);
-        let prim_idx = self.scene.csg_tree.add_primitive(primitive);
-        let node_idx = self.scene.csg_tree.add_leaf(prim_idx, material_id);
+        let node_idx = self.add_box_mut(center, extents, material_id);
         (self, node_idx)
+    }
+
+    /// In-place box primitive helper
+    pub fn add_box_mut(
+        &mut self,
+        center: glam::Vec3,
+        extents: glam::Vec3,
+        material_id: u32,
+    ) -> u32 {
+        let primitive = SdfPrimitive::box_primitive(center, extents, material_id);
+        self.add_primitive_internal(primitive, material_id)
     }
 
     /// Add a cylinder primitive
@@ -132,19 +180,101 @@ impl SdfSceneBuilder {
         height: f32,
         material_id: u32,
     ) -> (Self, u32) {
-        let primitive = SdfPrimitive::cylinder(center, radius, height, material_id);
-        let prim_idx = self.scene.csg_tree.add_primitive(primitive);
-        let node_idx = self.scene.csg_tree.add_leaf(prim_idx, material_id);
+        let node_idx = self.add_cylinder_mut(center, radius, height, material_id);
         (self, node_idx)
+    }
+
+    /// In-place cylinder primitive helper
+    pub fn add_cylinder_mut(
+        &mut self,
+        center: glam::Vec3,
+        radius: f32,
+        height: f32,
+        material_id: u32,
+    ) -> u32 {
+        let primitive = SdfPrimitive::cylinder(center, radius, height, material_id);
+        self.add_primitive_internal(primitive, material_id)
+    }
+
+    /// Add a plane primitive
+    pub fn add_plane(
+        mut self,
+        normal: glam::Vec3,
+        distance: f32,
+        material_id: u32,
+    ) -> (Self, u32) {
+        let node_idx = self.add_plane_mut(normal, distance, material_id);
+        (self, node_idx)
+    }
+
+    /// In-place plane primitive helper
+    pub fn add_plane_mut(
+        &mut self,
+        normal: glam::Vec3,
+        distance: f32,
+        material_id: u32,
+    ) -> u32 {
+        let primitive = SdfPrimitive::plane(normal, distance, material_id);
+        self.add_primitive_internal(primitive, material_id)
+    }
+
+    /// Add a torus primitive
+    pub fn add_torus(
+        mut self,
+        center: glam::Vec3,
+        major_radius: f32,
+        minor_radius: f32,
+        material_id: u32,
+    ) -> (Self, u32) {
+        let node_idx = self.add_torus_mut(center, major_radius, minor_radius, material_id);
+        (self, node_idx)
+    }
+
+    /// In-place torus primitive helper
+    pub fn add_torus_mut(
+        &mut self,
+        center: glam::Vec3,
+        major_radius: f32,
+        minor_radius: f32,
+        material_id: u32,
+    ) -> u32 {
+        let primitive = SdfPrimitive::torus(center, major_radius, minor_radius, material_id);
+        self.add_primitive_internal(primitive, material_id)
+    }
+
+    /// Add a capsule primitive
+    pub fn add_capsule(
+        mut self,
+        point_a: glam::Vec3,
+        point_b: glam::Vec3,
+        radius: f32,
+        material_id: u32,
+    ) -> (Self, u32) {
+        let node_idx = self.add_capsule_mut(point_a, point_b, radius, material_id);
+        (self, node_idx)
+    }
+
+    /// In-place capsule primitive helper
+    pub fn add_capsule_mut(
+        &mut self,
+        point_a: glam::Vec3,
+        point_b: glam::Vec3,
+        radius: f32,
+        material_id: u32,
+    ) -> u32 {
+        let primitive = SdfPrimitive::capsule(point_a, point_b, radius, material_id);
+        self.add_primitive_internal(primitive, material_id)
     }
 
     /// Union two nodes
     pub fn union(mut self, left: u32, right: u32, material_id: u32) -> (Self, u32) {
-        let node_idx =
-            self.scene
-                .csg_tree
-                .add_operation(CsgOperation::Union, left, right, 0.0, material_id);
+        let node_idx = self.union_mut(left, right, material_id);
         (self, node_idx)
+    }
+
+    /// In-place union operation helper
+    pub fn union_mut(&mut self, left: u32, right: u32, material_id: u32) -> u32 {
+        self.add_operation_internal(CsgOperation::Union, left, right, 0.0, material_id)
     }
 
     /// Smooth union two nodes
@@ -155,44 +285,115 @@ impl SdfSceneBuilder {
         smoothing: f32,
         material_id: u32,
     ) -> (Self, u32) {
-        let node_idx = self.scene.csg_tree.add_operation(
-            CsgOperation::SmoothUnion,
-            left,
-            right,
-            smoothing,
-            material_id,
-        );
+        let node_idx = self.smooth_union_mut(left, right, smoothing, material_id);
         (self, node_idx)
+    }
+
+    /// In-place smooth union helper
+    pub fn smooth_union_mut(
+        &mut self,
+        left: u32,
+        right: u32,
+        smoothing: f32,
+        material_id: u32,
+    ) -> u32 {
+        self.add_operation_internal(CsgOperation::SmoothUnion, left, right, smoothing, material_id)
     }
 
     /// Subtract right node from left node
     pub fn subtract(mut self, left: u32, right: u32, material_id: u32) -> (Self, u32) {
-        let node_idx = self.scene.csg_tree.add_operation(
-            CsgOperation::Subtraction,
-            left,
-            right,
-            0.0,
-            material_id,
-        );
+        let node_idx = self.subtract_mut(left, right, material_id);
         (self, node_idx)
+    }
+
+    /// In-place subtraction helper
+    pub fn subtract_mut(&mut self, left: u32, right: u32, material_id: u32) -> u32 {
+        self.add_operation_internal(CsgOperation::Subtraction, left, right, 0.0, material_id)
     }
 
     /// Intersect two nodes
     pub fn intersect(mut self, left: u32, right: u32, material_id: u32) -> (Self, u32) {
-        let node_idx = self.scene.csg_tree.add_operation(
-            CsgOperation::Intersection,
+        let node_idx = self.intersect_mut(left, right, material_id);
+        (self, node_idx)
+    }
+
+    /// In-place intersection helper
+    pub fn intersect_mut(&mut self, left: u32, right: u32, material_id: u32) -> u32 {
+        self.add_operation_internal(CsgOperation::Intersection, left, right, 0.0, material_id)
+    }
+
+    /// Smooth intersection of two nodes
+    pub fn smooth_intersection(
+        mut self,
+        left: u32,
+        right: u32,
+        smoothing: f32,
+        material_id: u32,
+    ) -> (Self, u32) {
+        let node_idx = self.smooth_intersection_mut(left, right, smoothing, material_id);
+        (self, node_idx)
+    }
+
+    /// In-place smooth intersection helper
+    pub fn smooth_intersection_mut(
+        &mut self,
+        left: u32,
+        right: u32,
+        smoothing: f32,
+        material_id: u32,
+    ) -> u32 {
+        self.add_operation_internal(
+            CsgOperation::SmoothIntersection,
             left,
             right,
-            0.0,
+            smoothing,
             material_id,
-        );
+        )
+    }
+
+    /// Smooth subtraction helper (left - right with smoothing)
+    pub fn smooth_subtraction(
+        mut self,
+        left: u32,
+        right: u32,
+        smoothing: f32,
+        material_id: u32,
+    ) -> (Self, u32) {
+        let node_idx = self.smooth_subtraction_mut(left, right, smoothing, material_id);
         (self, node_idx)
+    }
+
+    /// In-place smooth subtraction helper
+    pub fn smooth_subtraction_mut(
+        &mut self,
+        left: u32,
+        right: u32,
+        smoothing: f32,
+        material_id: u32,
+    ) -> u32 {
+        self.add_operation_internal(
+            CsgOperation::SmoothSubtraction,
+            left,
+            right,
+            smoothing,
+            material_id,
+        )
     }
 
     /// Set scene bounds
     pub fn with_bounds(mut self, min: glam::Vec3, max: glam::Vec3) -> Self {
-        self.scene.bounds = Some((min, max));
+        self.with_bounds_mut(min, max);
         self
+    }
+
+    /// In-place scene bounds setter
+    pub fn with_bounds_mut(&mut self, min: glam::Vec3, max: glam::Vec3) {
+        self.scene.set_bounds(min, max);
+    }
+
+    /// Reset builder to an empty scene
+    pub fn reset(&mut self) {
+        self.scene = SdfScene::new();
     }
 
     /// Build the final scene

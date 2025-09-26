@@ -8,9 +8,10 @@ from enum import Enum
 import warnings
 
 try:
-    from . import forge3d_native  # Rust extension module
+    # Use the actual native extension module name
+    from . import _forge3d as forge3d_native  # Rust extension module
     NATIVE_AVAILABLE = True
-except ImportError:
+except Exception:
     NATIVE_AVAILABLE = False
     warnings.warn("Native SDF module not available, using fallback implementation")
 
@@ -420,9 +421,13 @@ class HybridRenderer:
 
     def _render_native(self, scene: SdfScene, spheres: List) -> np.ndarray:
         """Render using native Rust implementation"""
-        # This would call into the Rust hybrid path tracer
-        # For now, return a placeholder
-        raise NotImplementedError("Native hybrid rendering not yet implemented")
+        # Call into the native placeholder implementation provided by the Rust module
+        # The function returns an (H, W, 4) uint8 numpy array
+        try:
+            return forge3d_native.hybrid_render(int(self.width), int(self.height), None, None)  # type: ignore[attr-defined]
+        except Exception as e:
+            # Surface a clear error so the caller can fall back to CPU path
+            raise RuntimeError(f"native hybrid_render failed: {e}")
 
     def _render_cpu_fallback(self, scene: SdfScene, spheres: List) -> np.ndarray:
         """CPU fallback raymarching implementation"""
