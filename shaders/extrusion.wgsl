@@ -43,16 +43,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    let meta = metas[polygon_index];
-    let base_vertex_offset = meta.base_vertex_offset;
-    let base_vertex_count = meta.base_vertex_count;
-    let base_index_offset = meta.base_index_offset;
-    let base_index_count = meta.base_index_count;
-    let ring_offset = meta.ring_offset;
-    let ring_count = meta.ring_count;
+    let polygon_meta = metas[polygon_index];
+    let base_vertex_offset = polygon_meta.base_vertex_offset;
+    let base_vertex_count = polygon_meta.base_vertex_count;
+    let base_index_offset = polygon_meta.base_index_offset;
+    let base_index_count = polygon_meta.base_index_count;
+    let ring_offset = polygon_meta.ring_offset;
+    let ring_count = polygon_meta.ring_count;
 
-    let vertex_offset = meta.output_vertex_offset;
-    let index_offset = meta.output_index_offset;
+    let vertex_offset = polygon_meta.output_vertex_offset;
+    let index_offset = polygon_meta.output_index_offset;
 
     let bottom_vertex_offset = vertex_offset;
     let top_vertex_offset = vertex_offset + base_vertex_count;
@@ -62,8 +62,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let top_index_offset = index_offset + base_index_count;
     let side_index_offset = top_index_offset + base_index_count;
 
-    let bbox_min = meta.bbox_min;
-    let bbox_scale = meta.bbox_scale;
+    let bbox_min = polygon_meta.bbox_min;
+    let bbox_scale = polygon_meta.bbox_scale;
     let height = params.height;
 
     for (var i: u32 = 0u; i < base_vertex_count; i = i + 1u) {

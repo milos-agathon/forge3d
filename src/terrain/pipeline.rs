@@ -38,9 +38,14 @@ impl TerrainPipeline {
         let features = device.features();
         let limits = device.limits();
         let descriptor_indexing = features.contains(Features::TEXTURE_BINDING_ARRAY)
-            && features.contains(Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING);
+            && features
+                .contains(Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING);
         let sample_count = sample_count.max(1);
-        let max_palette_textures = if descriptor_indexing { limits.max_texture_array_layers.min(64) } else { 1 };
+        let max_palette_textures = if descriptor_indexing {
+            limits.max_texture_array_layers.min(64)
+        } else {
+            1
+        };
         // ---- Bind group layouts -------------------------------------------------
         // group(0) — Globals UBO (@group(0) @binding(0) var<uniform> globals : Globals)
         let bgl_globals = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -68,7 +73,9 @@ impl TerrainPipeline {
                     binding: 0,
                     visibility: ShaderStages::VERTEX_FRAGMENT,
                     ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: height_filterable },
+                        sample_type: TextureSampleType::Float {
+                            filterable: height_filterable,
+                        },
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
@@ -77,7 +84,11 @@ impl TerrainPipeline {
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::VERTEX_FRAGMENT,
-                    ty: BindingType::Sampler(if height_filterable { SamplerBindingType::Filtering } else { SamplerBindingType::NonFiltering }),
+                    ty: BindingType::Sampler(if height_filterable {
+                        SamplerBindingType::Filtering
+                    } else {
+                        SamplerBindingType::NonFiltering
+                    }),
                     count: None,
                 },
             ],
@@ -100,7 +111,11 @@ impl TerrainPipeline {
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::VERTEX_FRAGMENT,
-                    ty: BindingType::Buffer { ty: BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     count: None,
                 },
                 BindGroupLayoutEntry {
@@ -248,7 +263,7 @@ impl TerrainPipeline {
         bgls.push(&bgl_tile);
         if !use_minimal_layout {
             bgls.push(&bgl_cloud_shadows); // group(4)
-            bgls.push(&bgl_reflection);    // group(5)
+            bgls.push(&bgl_reflection); // group(5)
         }
 
         let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
@@ -361,7 +376,14 @@ impl TerrainPipeline {
     }
 
     /// E2/E1: Per-tile uniform + page table bind group helper
-    pub fn make_bg_tile(&self, device: &Device, tile_ubo: &Buffer, page_table: Option<&Buffer>, tile_slot_ubo: &Buffer, mosaic_params_ubo: &Buffer) -> BindGroup {
+    pub fn make_bg_tile(
+        &self,
+        device: &Device,
+        tile_ubo: &Buffer,
+        page_table: Option<&Buffer>,
+        tile_slot_ubo: &Buffer,
+        mosaic_params_ubo: &Buffer,
+    ) -> BindGroup {
         let pt_dummy = device.create_buffer(&BufferDescriptor {
             label: Some("vf.Terrain.page_table.dummy"),
             size: 16,
@@ -376,10 +398,22 @@ impl TerrainPipeline {
             label: Some("vf.Terrain.bg.tile"),
             layout: &self.bgl_tile,
             entries: &[
-                BindGroupEntry { binding: 0, resource: tile_ubo.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: pt_binding },
-                BindGroupEntry { binding: 2, resource: tile_slot_ubo.as_entire_binding() },
-                BindGroupEntry { binding: 3, resource: mosaic_params_ubo.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: tile_ubo.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: pt_binding,
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: tile_slot_ubo.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: mosaic_params_ubo.as_entire_binding(),
+                },
             ],
         })
     }

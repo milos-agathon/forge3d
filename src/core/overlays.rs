@@ -7,10 +7,10 @@ use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType, BufferDescriptor, BufferUsages,
     ColorTargetState, ColorWrites, Device, FragmentState, PipelineLayoutDescriptor, PrimitiveState,
-    PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, Sampler, SamplerBindingType,
-    SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages, Texture, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView, TextureViewDescriptor,
-    TextureViewDimension, VertexState,
+    PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, Sampler,
+    SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages,
+    Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
+    TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
 };
 
 #[repr(C)]
@@ -102,7 +102,9 @@ impl OverlayRenderer {
                     ty: BindingType::Texture {
                         multisampled: false,
                         view_dimension: TextureViewDimension::D2,
-                        sample_type: TextureSampleType::Float { filterable: height_filterable },
+                        sample_type: TextureSampleType::Float {
+                            filterable: height_filterable,
+                        },
                     },
                     count: None,
                 },
@@ -110,14 +112,22 @@ impl OverlayRenderer {
                 BindGroupLayoutEntry {
                     binding: 4,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(if height_filterable { SamplerBindingType::Filtering } else { SamplerBindingType::NonFiltering }),
+                    ty: BindingType::Sampler(if height_filterable {
+                        SamplerBindingType::Filtering
+                    } else {
+                        SamplerBindingType::NonFiltering
+                    }),
                     count: None,
                 },
                 // E1: Page table storage buffer (read-only)
                 BindGroupLayoutEntry {
                     binding: 5,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer { ty: BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     count: None,
                 },
             ],
@@ -133,8 +143,16 @@ impl OverlayRenderer {
         });
         let height_sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("overlay_height_sampler"),
-            mag_filter: if height_filterable { wgpu::FilterMode::Linear } else { wgpu::FilterMode::Nearest },
-            min_filter: if height_filterable { wgpu::FilterMode::Linear } else { wgpu::FilterMode::Nearest },
+            mag_filter: if height_filterable {
+                wgpu::FilterMode::Linear
+            } else {
+                wgpu::FilterMode::Nearest
+            },
+            min_filter: if height_filterable {
+                wgpu::FilterMode::Linear
+            } else {
+                wgpu::FilterMode::Nearest
+            },
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
@@ -142,7 +160,11 @@ impl OverlayRenderer {
         // Dummy 1x1 RGBA texture for overlay
         let dummy_tex = device.create_texture(&TextureDescriptor {
             label: Some("overlay_dummy"),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
@@ -164,12 +186,30 @@ impl OverlayRenderer {
             label: Some("overlay_bg"),
             layout: &bind_group_layout,
             entries: &[
-                BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&dummy_view) },
-                BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&overlay_sampler) },
-                BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&dummy_view) },
-                BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&height_sampler) },
-                BindGroupEntry { binding: 5, resource: pt_dummy.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&dummy_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&overlay_sampler),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&dummy_view),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&height_sampler),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: pt_dummy.as_entire_binding(),
+                },
             ],
         });
 
@@ -187,8 +227,15 @@ impl OverlayRenderer {
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
             label: Some("overlays_pipeline"),
             layout: Some(&pipeline_layout),
-            vertex: VertexState { module: &module, entry_point: "vs_fullscreen", buffers: &[] },
-            primitive: PrimitiveState { topology: PrimitiveTopology::TriangleList, ..Default::default() },
+            vertex: VertexState {
+                module: &module,
+                entry_point: "vs_fullscreen",
+                buffers: &[],
+            },
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(FragmentState {
@@ -217,10 +264,18 @@ impl OverlayRenderer {
         }
     }
 
-    pub fn set_enabled(&mut self, enabled: bool) { self.uniforms.overlay_params[0] = if enabled { 1.0 } else { 0.0 }; }
-    pub fn set_overlay_alpha(&mut self, alpha: f32) { self.uniforms.overlay_params[1] = alpha.clamp(0.0, 1.0); }
-    pub fn set_altitude_enabled(&mut self, enabled: bool) { self.uniforms.overlay_params[2] = if enabled { 1.0 } else { 0.0 }; }
-    pub fn set_altitude_alpha(&mut self, alpha: f32) { self.uniforms.overlay_params[3] = alpha.clamp(0.0, 1.0); }
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.uniforms.overlay_params[0] = if enabled { 1.0 } else { 0.0 };
+    }
+    pub fn set_overlay_alpha(&mut self, alpha: f32) {
+        self.uniforms.overlay_params[1] = alpha.clamp(0.0, 1.0);
+    }
+    pub fn set_altitude_enabled(&mut self, enabled: bool) {
+        self.uniforms.overlay_params[2] = if enabled { 1.0 } else { 0.0 };
+    }
+    pub fn set_altitude_alpha(&mut self, alpha: f32) {
+        self.uniforms.overlay_params[3] = alpha.clamp(0.0, 1.0);
+    }
     pub fn set_overlay_uv(&mut self, off_x: f32, off_y: f32, scale_x: f32, scale_y: f32) {
         self.uniforms.overlay_uv = [off_x, off_y, scale_x, scale_y];
     }
@@ -234,7 +289,12 @@ impl OverlayRenderer {
         self.uniforms.contour_params[2] = thickness.max(0.1);
     }
     pub fn set_contour_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
-        self.uniforms.contour_color = [r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0), a.clamp(0.0, 1.0)];
+        self.uniforms.contour_color = [
+            r.clamp(0.0, 1.0),
+            g.clamp(0.0, 1.0),
+            b.clamp(0.0, 1.0),
+            a.clamp(0.0, 1.0),
+        ];
     }
 
     pub fn upload_uniforms(&self, queue: &Queue) {
@@ -254,7 +314,11 @@ impl OverlayRenderer {
         let (dummy_tex, dummy_view) = if use_overlay_view.is_none() || height_view.is_none() {
             let t = device.create_texture(&TextureDescriptor {
                 label: Some("overlay_dummy_tmp"),
-                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: TextureDimension::D2,
@@ -264,7 +328,9 @@ impl OverlayRenderer {
             });
             let v = t.create_view(&TextureViewDescriptor::default());
             (Some(t), Some(v))
-        } else { (None, None) };
+        } else {
+            (None, None)
+        };
 
         let overlay_view = use_overlay_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());
         let height_view = height_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());
@@ -284,12 +350,30 @@ impl OverlayRenderer {
             label: Some("overlay_bg"),
             layout: &self.bind_group_layout,
             entries: &[
-                BindGroupEntry { binding: 0, resource: self.uniform_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(overlay_view) },
-                BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.overlay_sampler) },
-                BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(height_view) },
-                BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&self.height_sampler) },
-                BindGroupEntry { binding: 5, resource: pt_binding },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(overlay_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.overlay_sampler),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(height_view),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.height_sampler),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: pt_binding,
+                },
             ],
         });
 
@@ -307,7 +391,9 @@ impl OverlayRenderer {
         let overlay_en = self.uniforms.overlay_params[0] >= 0.5;
         let altitude_en = self.uniforms.overlay_params[2] >= 0.5;
         let contours_en = self.uniforms.contour_params[0] >= 0.5;
-        if !overlay_en && !altitude_en && !contours_en { return; }
+        if !overlay_en && !altitude_en && !contours_en {
+            return;
+        }
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.draw(0..3, 0..1);

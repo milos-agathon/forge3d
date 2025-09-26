@@ -6,7 +6,8 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## [Unreleased]
 
 ### Added
-- Placeholder for upcoming changes
+- Geometry core module with extrusion, primitive generation, validation, and welding helpers (Workstream F phase 1)
+- Python geometry facade exposing mesh helpers with new demos and pytest coverage
 
 ## [0.60.0]
 

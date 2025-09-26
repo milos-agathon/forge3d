@@ -5,15 +5,16 @@
 use glam::{Mat4, Vec2, Vec3};
 use std::borrow::Cow;
 use wgpu::{
-    vertex_attr_array, AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
-    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BlendComponent, BlendFactor,
-    BlendOperation, BlendState, Buffer, BufferAddress, BufferBindingType, BufferDescriptor,
-    BufferUsages, ColorTargetState, ColorWrites, Device, Extent3d, FilterMode, FragmentState,
-    ImageCopyTexture, ImageDataLayout, Origin3d, PipelineLayoutDescriptor, PrimitiveState,
-    PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, Sampler, SamplerBindingType,
-    SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages, Texture, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
-    TextureViewDescriptor, TextureViewDimension, VertexBufferLayout, VertexState, VertexStepMode,
+    vertex_attr_array, AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry,
+    BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BlendComponent,
+    BlendFactor, BlendOperation, BlendState, Buffer, BufferAddress, BufferBindingType,
+    BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, Device, Extent3d, FilterMode,
+    FragmentState, ImageCopyTexture, ImageDataLayout, Origin3d, PipelineLayoutDescriptor,
+    PrimitiveState, PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, Sampler,
+    SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages,
+    Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
+    TextureView, TextureViewDescriptor, TextureViewDimension, VertexBufferLayout, VertexState,
+    VertexStepMode,
 };
 
 /// Water surface rendering modes
@@ -55,8 +56,8 @@ pub struct WaterSurfaceParams {
 
     // Foam overlay (screen-space, uses mask texture if provided)
     pub foam_enabled: bool,
-    pub foam_width_px: f32,   // hint only (used to scale effect)
-    pub foam_intensity: f32,  // blend weight
+    pub foam_width_px: f32,    // hint only (used to scale effect)
+    pub foam_intensity: f32,   // blend weight
     pub foam_noise_scale: f32, // procedural breakup
 }
 
@@ -258,7 +259,11 @@ impl WaterSurfaceRenderer {
         let mask_size = (1u32, 1u32);
         let mask_texture = device.create_texture(&TextureDescriptor {
             label: Some("water_mask_texture"),
-            size: Extent3d { width: mask_size.0, height: mask_size.1, depth_or_array_layers: 1 },
+            size: Extent3d {
+                width: mask_size.0,
+                height: mask_size.1,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
@@ -296,8 +301,14 @@ impl WaterSurfaceRenderer {
             label: Some("water_surface_mask_bind_group"),
             layout: &mask_bind_group_layout,
             entries: &[
-                BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&mask_view) },
-                BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&mask_sampler) },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&mask_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&mask_sampler),
+                },
             ],
         });
 
@@ -561,12 +572,27 @@ impl WaterSurfaceRenderer {
     }
 
     /// Upload an external water mask (R8Unorm, 0=land, 255=water)
-    pub fn upload_water_mask(&mut self, device: &Device, queue: &Queue, data: &[u8], width: u32, height: u32) {
-        assert_eq!(data.len() as u32, width * height, "mask data must be width*height bytes");
+    pub fn upload_water_mask(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        data: &[u8],
+        width: u32,
+        height: u32,
+    ) {
+        assert_eq!(
+            data.len() as u32,
+            width * height,
+            "mask data must be width*height bytes"
+        );
         self.mask_size = (width, height);
         self.mask_texture = device.create_texture(&TextureDescriptor {
             label: Some("water_mask_texture"),
-            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
@@ -574,14 +600,22 @@ impl WaterSurfaceRenderer {
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        self.mask_view = self.mask_texture.create_view(&TextureViewDescriptor::default());
+        self.mask_view = self
+            .mask_texture
+            .create_view(&TextureViewDescriptor::default());
         // Update bind group with new view
         self.mask_bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("water_surface_mask_bind_group"),
             layout: &self.mask_bind_group_layout,
             entries: &[
-                BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.mask_view) },
-                BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.mask_sampler) },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&self.mask_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.mask_sampler),
+                },
             ],
         });
         // Upload pixel data
@@ -598,7 +632,11 @@ impl WaterSurfaceRenderer {
                 bytes_per_row: Some(width),
                 rows_per_image: Some(height),
             },
-            Extent3d { width, height, depth_or_array_layers: 1 },
+            Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
         // Enable mask usage in uniforms
         self.uniforms.foam_params[3] = 1.0;
@@ -685,7 +723,11 @@ impl WaterSurfaceRenderer {
         // Update foam params: width_px, intensity, noise_scale, mask_enabled
         self.uniforms.foam_params = [
             self.params.foam_width_px,
-            if self.params.foam_enabled { self.params.foam_intensity } else { 0.0 },
+            if self.params.foam_enabled {
+                self.params.foam_intensity
+            } else {
+                0.0
+            },
             self.params.foam_noise_scale,
             self.uniforms.foam_params[3],
         ];

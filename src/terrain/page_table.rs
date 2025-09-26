@@ -2,11 +2,11 @@
 // Lightweight GPU buffer storing tile->slot mappings for the current height mosaic.
 // Also includes a simple async tile request queue scaffold (main-thread drained).
 
-use wgpu::{Buffer, BufferDescriptor, BufferUsages, Queue};
 use bytemuck::{Pod, Zeroable};
+use wgpu::{Buffer, BufferDescriptor, BufferUsages, Queue};
 
 use crate::terrain::stream::HeightMosaic;
-use crate::terrain::tiling::{TileBounds, TileId, TileData};
+use crate::terrain::tiling::{TileBounds, TileData, TileId};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -24,16 +24,18 @@ pub struct PageTableEntry {
 }
 
 // E1c: Background async tile loader (request -> TileData)
-use std::sync::mpsc::{self, TryRecvError, SyncSender};
-use std::thread;
 use glam::Vec2;
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, SyncSender, TryRecvError};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 /// Return true if `child` is a strict descendant of `ancestor` in the quadtree.
 fn is_descendant_of(child: TileId, ancestor: TileId) -> bool {
-    if child.lod <= ancestor.lod { return false; }
+    if child.lod <= ancestor.lod {
+        return false;
+    }
     let shift = child.lod - ancestor.lod;
     (child.x >> shift) == ancestor.x && (child.y >> shift) == ancestor.y
 }
@@ -45,7 +47,9 @@ pub enum CoalescePolicy {
 }
 
 impl Default for CoalescePolicy {
-    fn default() -> Self { Self::PreferCoarse }
+    fn default() -> Self {
+        Self::PreferCoarse
+    }
 }
 
 pub struct AsyncTileLoader {
@@ -56,8 +60,8 @@ pub struct AsyncTileLoader {
     worker_txs: Vec<Sender<TileId>>,
     pool_size: usize,
     // E1e: dedup + backpressure
-    pending: Mutex<HashSet<TileId>>,   // TileIds currently in-flight
-    max_in_flight: usize,              // Backpressure limit
+    pending: Mutex<HashSet<TileId>>, // TileIds currently in-flight
+    max_in_flight: usize,            // Backpressure limit
     // E1e/E1f: cancellation
     cancelled: Mutex<HashSet<TileId>>, // Requests canceled by the main thread; results will be dropped
     policy: CoalescePolicy,
@@ -71,8 +75,22 @@ pub struct AsyncTileLoader {
 }
 
 impl AsyncTileLoader {
-    pub fn new(root_bounds: TileBounds, tile_size: Vec2, tile_resolution: u32, max_in_flight: usize, pool_size: usize) -> Self {
-        Self::new_with_reader(root_bounds, tile_size, tile_resolution, max_in_flight, pool_size, Arc::new(SyntheticHeightReader), CoalescePolicy::PreferCoarse)
+    pub fn new(
+        root_bounds: TileBounds,
+        tile_size: Vec2,
+        tile_resolution: u32,
+        max_in_flight: usize,
+        pool_size: usize,
+    ) -> Self {
+        Self::new_with_reader(
+            root_bounds,
+            tile_size,
+            tile_resolution,
+            max_in_flight,
+            pool_size,
+            Arc::new(SyntheticHeightReader),
+            CoalescePolicy::PreferCoarse,
+        )
     }
 
     pub fn new_with_reader(
@@ -115,7 +133,9 @@ impl AsyncTileLoader {
         let dispatcher = thread::spawn(move || {
             let mut idx: usize = 0;
             while let Ok(id) = req_rx.recv() {
-                if worker_txs_for_dispatcher.is_empty() { break; }
+                if worker_txs_for_dispatcher.is_empty() {
+                    break;
+                }
                 let _ = worker_txs_for_dispatcher[idx % worker_txs_for_dispatcher.len()].send(id);
                 idx = idx.wrapping_add(1);
             }
@@ -146,17 +166,26 @@ impl AsyncTileLoader {
         if let Ok(mut pend) = self.pending.lock() {
             self.c_requests.fetch_add(1, Ordering::Relaxed);
             // If previously canceled, clear that state when re-requested
-            if let Ok(mut can) = self.cancelled.lock() { can.remove(&id); }
+            if let Ok(mut can) = self.cancelled.lock() {
+                can.remove(&id);
+            }
             match self.policy {
                 CoalescePolicy::PreferCoarse => {
                     // Drop child if any ancestor pending
                     let mut p = id;
                     while let Some(parent) = p.parent() {
-                        if pend.contains(&parent) { self.c_dropped_by_policy.fetch_add(1, Ordering::Relaxed); return false; }
+                        if pend.contains(&parent) {
+                            self.c_dropped_by_policy.fetch_add(1, Ordering::Relaxed);
+                            return false;
+                        }
                         p = parent;
                     }
-                    if pend.contains(&id) { return false; }
-                    if pend.len() >= self.max_in_flight { return false; }
+                    if pend.contains(&id) {
+                        return false;
+                    }
+                    if pend.len() >= self.max_in_flight {
+                        return false;
+                    }
                     // Insert and cancel descendants
                     pend.insert(id);
                     let mut to_cancel: Vec<TileId> = Vec::new();
@@ -177,7 +206,8 @@ impl AsyncTileLoader {
                                 pend.remove(d);
                                 can.insert(*d);
                             }
-                            self.c_canceled.fetch_add(to_cancel.len(), Ordering::Relaxed);
+                            self.c_canceled
+                                .fetch_add(to_cancel.len(), Ordering::Relaxed);
                         }
                     }
                     true
@@ -185,10 +215,17 @@ impl AsyncTileLoader {
                 CoalescePolicy::PreferFine => {
                     // If any descendant pending, skip this coarser request
                     for &d in pend.iter() {
-                        if is_descendant_of(d, id) { self.c_dropped_by_policy.fetch_add(1, Ordering::Relaxed); return false; }
+                        if is_descendant_of(d, id) {
+                            self.c_dropped_by_policy.fetch_add(1, Ordering::Relaxed);
+                            return false;
+                        }
                     }
-                    if pend.contains(&id) { return false; }
-                    if pend.len() >= self.max_in_flight { return false; }
+                    if pend.contains(&id) {
+                        return false;
+                    }
+                    if pend.len() >= self.max_in_flight {
+                        return false;
+                    }
                     // Tentatively insert
                     pend.insert(id);
                     // Try-send; if fails, roll back and keep ancestors
@@ -202,7 +239,9 @@ impl AsyncTileLoader {
                     if let Ok(mut can) = self.cancelled.lock() {
                         let mut p = id;
                         while let Some(parent) = p.parent() {
-                            if pend.remove(&parent) { can.insert(parent); }
+                            if pend.remove(&parent) {
+                                can.insert(parent);
+                            }
                             p = parent;
                         }
                         self.c_canceled.fetch_add(1, Ordering::Relaxed);
@@ -226,7 +265,9 @@ impl AsyncTileLoader {
                     }
                     // If canceled, drop the result silently
                     if let Ok(mut can) = self.cancelled.lock() {
-                        if can.remove(&td.tile_id) { continue; }
+                        if can.remove(&td.tile_id) {
+                            continue;
+                        }
                     }
                     self.c_completed.fetch_add(1, Ordering::Relaxed);
                     out.push(td)
@@ -265,7 +306,9 @@ impl AsyncTileLoader {
                         n += 1;
                     }
                 }
-                if n > 0 { self.c_canceled.fetch_add(n, Ordering::Relaxed); }
+                if n > 0 {
+                    self.c_canceled.fetch_add(n, Ordering::Relaxed);
+                }
             }
         }
         n
@@ -279,7 +322,9 @@ pub struct FileOverlayReader {
 }
 
 impl FileOverlayReader {
-    pub fn new(template: String) -> Self { Self { template } }
+    pub fn new(template: String) -> Self {
+        Self { template }
+    }
     fn expand(&self, id: TileId) -> String {
         self.template
             .replace("{lod}", &id.lod.to_string())
@@ -289,14 +334,26 @@ impl FileOverlayReader {
 }
 
 impl OverlayReader for FileOverlayReader {
-    fn read(&self, _root_bounds: &TileBounds, _tile_size: Vec2, tile_id: TileId, width: u32, height: u32) -> Vec<u8> {
+    fn read(
+        &self,
+        _root_bounds: &TileBounds,
+        _tile_size: Vec2,
+        tile_id: TileId,
+        width: u32,
+        height: u32,
+    ) -> Vec<u8> {
         let path = self.expand(tile_id);
         match image::open(&path) {
             Ok(img) => {
                 let rgba = img.to_rgba8();
                 // If dimensions mismatch, rescale to expected size
                 if rgba.width() != width || rgba.height() != height {
-                    let resized = image::imageops::resize(&rgba, width, height, image::imageops::FilterType::Triangle);
+                    let resized = image::imageops::resize(
+                        &rgba,
+                        width,
+                        height,
+                        image::imageops::FilterType::Triangle,
+                    );
                     resized.into_raw()
                 } else {
                     rgba.into_raw()
@@ -318,7 +375,13 @@ pub struct FileHeightReader {
 }
 
 impl FileHeightReader {
-    pub fn new(template: String, scale: f32, offset: f32) -> Self { Self { template, scale, offset } }
+    pub fn new(template: String, scale: f32, offset: f32) -> Self {
+        Self {
+            template,
+            scale,
+            offset,
+        }
+    }
     fn expand(&self, id: TileId) -> String {
         self.template
             .replace("{lod}", &id.lod.to_string())
@@ -328,7 +391,14 @@ impl FileHeightReader {
 }
 
 impl HeightReader for FileHeightReader {
-    fn read(&self, _root_bounds: &TileBounds, _tile_size: Vec2, tile_id: TileId, width: u32, height: u32) -> Vec<f32> {
+    fn read(
+        &self,
+        _root_bounds: &TileBounds,
+        _tile_size: Vec2,
+        tile_id: TileId,
+        width: u32,
+        height: u32,
+    ) -> Vec<f32> {
         let path = self.expand(tile_id);
         let expected = (width * height) as usize;
         match image::open(&path) {
@@ -336,7 +406,12 @@ impl HeightReader for FileHeightReader {
                 let gray = img.to_luma16();
                 let (w, h) = gray.dimensions();
                 if w != width || h != height {
-                    let resized = image::imageops::resize(&gray, width, height, image::imageops::FilterType::Triangle);
+                    let resized = image::imageops::resize(
+                        &gray,
+                        width,
+                        height,
+                        image::imageops::FilterType::Triangle,
+                    );
                     let mut out = Vec::with_capacity(expected);
                     for &v16 in resized.as_raw().iter() {
                         let v = (v16 as f32) / 65535.0;
@@ -360,14 +435,29 @@ impl HeightReader for FileHeightReader {
 // ----- Pluggable Readers -----
 
 pub trait HeightReader: Send + Sync + 'static {
-    fn read(&self, root_bounds: &TileBounds, tile_size: Vec2, tile_id: TileId, width: u32, height: u32) -> Vec<f32>;
+    fn read(
+        &self,
+        root_bounds: &TileBounds,
+        tile_size: Vec2,
+        tile_id: TileId,
+        width: u32,
+        height: u32,
+    ) -> Vec<f32>;
 }
 
 pub struct SyntheticHeightReader;
 impl HeightReader for SyntheticHeightReader {
-    fn read(&self, root_bounds: &TileBounds, tile_size: Vec2, tile_id: TileId, width: u32, height: u32) -> Vec<f32> {
+    fn read(
+        &self,
+        root_bounds: &TileBounds,
+        tile_size: Vec2,
+        tile_id: TileId,
+        width: u32,
+        height: u32,
+    ) -> Vec<f32> {
         let mut heights = Vec::with_capacity((width * height) as usize);
-        let bounds = crate::terrain::tiling::QuadTreeNode::calculate_bounds(root_bounds, tile_id, tile_size);
+        let bounds =
+            crate::terrain::tiling::QuadTreeNode::calculate_bounds(root_bounds, tile_id, tile_size);
         for y in 0..height {
             for x in 0..width {
                 let u = x as f32 / (width - 1) as f32;
@@ -383,14 +473,29 @@ impl HeightReader for SyntheticHeightReader {
 }
 
 pub trait OverlayReader: Send + Sync + 'static {
-    fn read(&self, root_bounds: &TileBounds, tile_size: Vec2, tile_id: TileId, width: u32, height: u32) -> Vec<u8>;
+    fn read(
+        &self,
+        root_bounds: &TileBounds,
+        tile_size: Vec2,
+        tile_id: TileId,
+        width: u32,
+        height: u32,
+    ) -> Vec<u8>;
 }
 
 pub struct SyntheticOverlayReader;
 impl OverlayReader for SyntheticOverlayReader {
-    fn read(&self, root_bounds: &TileBounds, tile_size: Vec2, tile_id: TileId, width: u32, height: u32) -> Vec<u8> {
+    fn read(
+        &self,
+        root_bounds: &TileBounds,
+        tile_size: Vec2,
+        tile_id: TileId,
+        width: u32,
+        height: u32,
+    ) -> Vec<u8> {
         let mut px = Vec::with_capacity((width * height * 4) as usize);
-        let bounds = crate::terrain::tiling::QuadTreeNode::calculate_bounds(root_bounds, tile_id, tile_size);
+        let bounds =
+            crate::terrain::tiling::QuadTreeNode::calculate_bounds(root_bounds, tile_id, tile_size);
         for y in 0..height {
             for x in 0..width {
                 let u = x as f32 / (width - 1) as f32;
@@ -421,7 +526,13 @@ pub struct OverlayTileData {
 impl OverlayTileData {
     pub fn new(tile_id: TileId, rgba_data: Vec<u8>, width: u32, height: u32) -> Self {
         let host_memory_size = rgba_data.len() as u64;
-        Self { tile_id, rgba_data, width, height, host_memory_size }
+        Self {
+            tile_id,
+            rgba_data,
+            width,
+            height,
+            host_memory_size,
+        }
     }
 }
 
@@ -446,8 +557,22 @@ pub struct AsyncOverlayLoader {
 }
 
 impl AsyncOverlayLoader {
-    pub fn new(root_bounds: TileBounds, tile_size: Vec2, tile_resolution: u32, max_in_flight: usize, pool_size: usize) -> Self {
-        Self::new_with_reader(root_bounds, tile_size, tile_resolution, max_in_flight, pool_size, Arc::new(SyntheticOverlayReader), CoalescePolicy::PreferCoarse)
+    pub fn new(
+        root_bounds: TileBounds,
+        tile_size: Vec2,
+        tile_resolution: u32,
+        max_in_flight: usize,
+        pool_size: usize,
+    ) -> Self {
+        Self::new_with_reader(
+            root_bounds,
+            tile_size,
+            tile_resolution,
+            max_in_flight,
+            pool_size,
+            Arc::new(SyntheticOverlayReader),
+            CoalescePolicy::PreferCoarse,
+        )
     }
 
     pub fn new_with_reader(
@@ -490,7 +615,9 @@ impl AsyncOverlayLoader {
         let dispatcher = thread::spawn(move || {
             let mut idx: usize = 0;
             while let Ok(id) = req_rx.recv() {
-                if worker_txs_for_dispatcher.is_empty() { break; }
+                if worker_txs_for_dispatcher.is_empty() {
+                    break;
+                }
                 let _ = worker_txs_for_dispatcher[idx % worker_txs_for_dispatcher.len()].send(id);
                 idx = idx.wrapping_add(1);
             }
@@ -519,20 +646,31 @@ impl AsyncOverlayLoader {
     pub fn request(&self, id: TileId) -> bool {
         if let Ok(mut pend) = self.pending.lock() {
             self.c_requests.fetch_add(1, Ordering::Relaxed);
-            if let Ok(mut can) = self.cancelled.lock() { can.remove(&id); }
+            if let Ok(mut can) = self.cancelled.lock() {
+                can.remove(&id);
+            }
             match self.policy {
                 CoalescePolicy::PreferCoarse => {
                     let mut p = id;
                     while let Some(parent) = p.parent() {
-                        if pend.contains(&parent) { self.c_dropped_by_policy.fetch_add(1, Ordering::Relaxed); return false; }
+                        if pend.contains(&parent) {
+                            self.c_dropped_by_policy.fetch_add(1, Ordering::Relaxed);
+                            return false;
+                        }
                         p = parent;
                     }
-                    if pend.contains(&id) { return false; }
-                    if pend.len() >= self.max_in_flight { return false; }
+                    if pend.contains(&id) {
+                        return false;
+                    }
+                    if pend.len() >= self.max_in_flight {
+                        return false;
+                    }
                     pend.insert(id);
                     let mut to_cancel: Vec<TileId> = Vec::new();
                     for &d in pend.iter() {
-                        if d != id && is_descendant_of(d, id) { to_cancel.push(d); }
+                        if d != id && is_descendant_of(d, id) {
+                            to_cancel.push(d);
+                        }
                     }
                     if self.req_tx.try_send(id).is_err() {
                         pend.remove(&id);
@@ -542,22 +680,44 @@ impl AsyncOverlayLoader {
                     self.c_enqueued.fetch_add(1, Ordering::Relaxed);
                     if !to_cancel.is_empty() {
                         if let Ok(mut can) = self.cancelled.lock() {
-                            for d in to_cancel.iter() { pend.remove(d); can.insert(*d); }
-                            self.c_canceled.fetch_add(to_cancel.len(), Ordering::Relaxed);
+                            for d in to_cancel.iter() {
+                                pend.remove(d);
+                                can.insert(*d);
+                            }
+                            self.c_canceled
+                                .fetch_add(to_cancel.len(), Ordering::Relaxed);
                         }
                     }
                     true
                 }
                 CoalescePolicy::PreferFine => {
-                    for &d in pend.iter() { if is_descendant_of(d, id) { self.c_dropped_by_policy.fetch_add(1, Ordering::Relaxed); return false; } }
-                    if pend.contains(&id) { return false; }
-                    if pend.len() >= self.max_in_flight { return false; }
+                    for &d in pend.iter() {
+                        if is_descendant_of(d, id) {
+                            self.c_dropped_by_policy.fetch_add(1, Ordering::Relaxed);
+                            return false;
+                        }
+                    }
+                    if pend.contains(&id) {
+                        return false;
+                    }
+                    if pend.len() >= self.max_in_flight {
+                        return false;
+                    }
                     pend.insert(id);
-                    if self.req_tx.try_send(id).is_err() { pend.remove(&id); self.c_send_fail.fetch_add(1, Ordering::Relaxed); return false; }
+                    if self.req_tx.try_send(id).is_err() {
+                        pend.remove(&id);
+                        self.c_send_fail.fetch_add(1, Ordering::Relaxed);
+                        return false;
+                    }
                     self.c_enqueued.fetch_add(1, Ordering::Relaxed);
                     if let Ok(mut can) = self.cancelled.lock() {
                         let mut p = id;
-                        while let Some(parent) = p.parent() { if pend.remove(&parent) { can.insert(parent); } p = parent; }
+                        while let Some(parent) = p.parent() {
+                            if pend.remove(&parent) {
+                                can.insert(parent);
+                            }
+                            p = parent;
+                        }
                         self.c_canceled.fetch_add(1, Ordering::Relaxed);
                     }
                     true
@@ -588,8 +748,14 @@ impl AsyncOverlayLoader {
         while out.len() < limit {
             match self.done_rx.try_recv() {
                 Ok(td) => {
-                    if let Ok(mut pend) = self.pending.lock() { pend.remove(&td.tile_id); }
-                    if let Ok(mut can) = self.cancelled.lock() { if can.remove(&td.tile_id) { continue; } }
+                    if let Ok(mut pend) = self.pending.lock() {
+                        pend.remove(&td.tile_id);
+                    }
+                    if let Ok(mut can) = self.cancelled.lock() {
+                        if can.remove(&td.tile_id) {
+                            continue;
+                        }
+                    }
                     self.c_completed.fetch_add(1, Ordering::Relaxed);
                     out.push(td)
                 }
@@ -639,9 +805,20 @@ impl PageTable {
         let mut out: Vec<PageTableEntry> = Vec::with_capacity(self.capacity);
         let tiles_x = mosaic.config.tiles_x;
         for (id, (sx, sy)) in mosaic.entries().into_iter() {
-            if out.len() >= self.capacity { break; }
+            if out.len() >= self.capacity {
+                break;
+            }
             let slot = sy * tiles_x + sx;
-            out.push(PageTableEntry { lod: id.lod, x: id.x, y: id.y, _pad0: 0, sx, sy, slot, _pad1: 0 });
+            out.push(PageTableEntry {
+                lod: id.lod,
+                x: id.x,
+                y: id.y,
+                _pad0: 0,
+                sx,
+                sy,
+                slot,
+                _pad1: 0,
+            });
         }
         if out.is_empty() {
             return;
@@ -664,10 +841,14 @@ impl AsyncTileQueue {
         let (tx, rx) = mpsc::channel();
         Self { tx, rx }
     }
-    pub fn sender(&self) -> Sender<TileId> { self.tx.clone() }
+    pub fn sender(&self) -> Sender<TileId> {
+        self.tx.clone()
+    }
     pub fn drain(&self) -> Vec<TileId> {
         let mut v = Vec::new();
-        while let Ok(id) = self.rx.try_recv() { v.push(id); }
+        while let Ok(id) = self.rx.try_recv() {
+            v.push(id);
+        }
         v
     }
 }

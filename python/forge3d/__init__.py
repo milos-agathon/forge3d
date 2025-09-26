@@ -55,6 +55,7 @@ from . import _validate as validate
 from .guiding import OnlineGuidingGrid
 from .materials import PbrMaterial
 from .textures import load_texture, build_pbr_textures
+from . import geometry
 from .sdf import (
     SdfPrimitive, SdfScene, SdfSceneBuilder, HybridRenderer,
     SdfPrimitiveType, CsgOperation, TraversalMode,
@@ -5562,4 +5563,5 @@ __all__ = [
     "make_sampler", "list_sampler_modes",
     "extrude_polygon_py",
     "extrude_polygon_gpu_py",
+    "geometry",
 ]

@@ -8,9 +8,9 @@ use wgpu::{
     BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, Device,
     FragmentState, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, Queue,
     RenderPipeline, RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, Texture, TextureDescriptor, TextureDimension,
-    TextureFormat, TextureSampleType, TextureUsages, TextureView, TextureViewDescriptor,
-    VertexBufferLayout, VertexState, VertexStepMode,
+    ShaderModuleDescriptor, ShaderSource, ShaderStages, Texture, TextureDescriptor,
+    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
+    TextureViewDescriptor, VertexBufferLayout, VertexState, VertexStepMode,
 };
 
 #[repr(C)]
@@ -19,13 +19,19 @@ pub struct TextOverlayUniforms {
     pub resolution: [f32; 2], // (width, height)
     pub alpha: f32,
     pub enabled: f32,
-    pub channels: f32, // 1.0 for SDF, 3.0 for MSDF
+    pub channels: f32,  // 1.0 for SDF, 3.0 for MSDF
     pub smoothing: f32, // smoothing factor (pixels)
 }
 
 impl Default for TextOverlayUniforms {
     fn default() -> Self {
-        Self { resolution: [1.0, 1.0], alpha: 1.0, enabled: 0.0, channels: 3.0, smoothing: 1.0 }
+        Self {
+            resolution: [1.0, 1.0],
+            alpha: 1.0,
+            enabled: 0.0,
+            channels: 3.0,
+            smoothing: 1.0,
+        }
     }
 }
 
@@ -69,18 +75,45 @@ impl TextOverlayRenderer {
             label: Some("text_overlay_bgl"),
             entries: &[
                 // uniforms
-                BindGroupLayoutEntry { binding: 0, visibility: ShaderStages::VERTEX_FRAGMENT, ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
                 // atlas texture (optional)
-                BindGroupLayoutEntry { binding: 1, visibility: ShaderStages::FRAGMENT, ty: BindingType::Texture { multisampled: false, view_dimension: wgpu::TextureViewDimension::D2, sample_type: TextureSampleType::Float { filterable: true } }, count: None },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
                 // atlas sampler
-                BindGroupLayoutEntry { binding: 2, visibility: ShaderStages::FRAGMENT, ty: BindingType::Sampler(SamplerBindingType::Filtering), count: None },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
 
         // Dummy 1x1 white atlas
         let dummy_tex = device.create_texture(&TextureDescriptor {
             label: Some("text_dummy_atlas"),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
@@ -89,15 +122,30 @@ impl TextOverlayRenderer {
             view_formats: &[],
         });
         let dummy_view = dummy_tex.create_view(&TextureViewDescriptor::default());
-        let atlas_sampler = device.create_sampler(&SamplerDescriptor { label: Some("text_atlas_sampler"), mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, mipmap_filter: wgpu::FilterMode::Nearest, ..Default::default() });
+        let atlas_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("text_atlas_sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
 
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("text_overlay_bg"),
             layout: &bind_group_layout,
             entries: &[
-                BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&dummy_view) },
-                BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&atlas_sampler) },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&dummy_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&atlas_sampler),
+                },
             ],
         });
 
@@ -133,22 +181,37 @@ impl TextOverlayRenderer {
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
             label: Some("text_overlay_pipeline"),
             layout: Some(&pipeline_layout),
-            vertex: VertexState { module: &shader, entry_point: "vs_main", buffers: &[quad_layout, inst_layout] },
-            primitive: PrimitiveState { topology: PrimitiveTopology::TriangleList, ..Default::default() },
+            vertex: VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[quad_layout, inst_layout],
+            },
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
-                targets: &[Some(ColorTargetState { format: color_format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: ColorWrites::ALL })],
+                targets: &[Some(ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: ColorWrites::ALL,
+                })],
             }),
             multiview: None,
         });
 
         // Unit quad (0,0)-(1,1)
         let quad_data: [[f32; 2]; 6] = [
-            [0.0, 0.0], [1.0, 0.0], [0.0, 1.0],
-            [1.0, 0.0], [1.0, 1.0], [0.0, 1.0],
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [0.0, 1.0],
         ];
         let quad_vbuf = device.create_buffer(&BufferDescriptor {
             label: Some("text_overlay_quad"),
@@ -156,7 +219,10 @@ impl TextOverlayRenderer {
             usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
             mapped_at_creation: true,
         });
-        quad_vbuf.slice(..).get_mapped_range_mut().copy_from_slice(bytemuck::cast_slice(&quad_data));
+        quad_vbuf
+            .slice(..)
+            .get_mapped_range_mut()
+            .copy_from_slice(bytemuck::cast_slice(&quad_data));
         quad_vbuf.unmap();
 
         Self {
@@ -174,17 +240,36 @@ impl TextOverlayRenderer {
         }
     }
 
-    pub fn set_enabled(&mut self, enabled: bool) { self.uniforms.enabled = if enabled { 1.0 } else { 0.0 }; }
-    pub fn set_alpha(&mut self, alpha: f32) { self.uniforms.alpha = alpha.clamp(0.0, 1.0); }
-    pub fn set_resolution(&mut self, w: u32, h: u32) { self.uniforms.resolution = [w as f32, h as f32]; }
-    pub fn set_channels(&mut self, channels: u32) { self.uniforms.channels = if channels >= 3 { 3.0 } else { 1.0 }; }
-    pub fn set_smoothing(&mut self, px: f32) { self.uniforms.smoothing = px.max(0.1); }
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.uniforms.enabled = if enabled { 1.0 } else { 0.0 };
+    }
+    pub fn set_alpha(&mut self, alpha: f32) {
+        self.uniforms.alpha = alpha.clamp(0.0, 1.0);
+    }
+    pub fn set_resolution(&mut self, w: u32, h: u32) {
+        self.uniforms.resolution = [w as f32, h as f32];
+    }
+    pub fn set_channels(&mut self, channels: u32) {
+        self.uniforms.channels = if channels >= 3 { 3.0 } else { 1.0 };
+    }
+    pub fn set_smoothing(&mut self, px: f32) {
+        self.uniforms.smoothing = px.max(0.1);
+    }
 
-    pub fn upload_uniforms(&self, queue: &Queue) { queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&self.uniforms)); }
+    pub fn upload_uniforms(&self, queue: &Queue) {
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&self.uniforms));
+    }
 
-    pub fn upload_instances(&mut self, device: &Device, _queue: &Queue, instances: &[TextInstance]) {
+    pub fn upload_instances(
+        &mut self,
+        device: &Device,
+        _queue: &Queue,
+        instances: &[TextInstance],
+    ) {
         self.instance_count = instances.len() as u32;
-        if self.instance_count == 0 { return; }
+        if self.instance_count == 0 {
+            return;
+        }
         let size = (instances.len() * std::mem::size_of::<TextInstance>()) as u64;
         let buf = device.create_buffer(&BufferDescriptor {
             label: Some("text_overlay_instances"),
@@ -192,7 +277,9 @@ impl TextOverlayRenderer {
             usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
             mapped_at_creation: true,
         });
-        buf.slice(..).get_mapped_range_mut().copy_from_slice(bytemuck::cast_slice(instances));
+        buf.slice(..)
+            .get_mapped_range_mut()
+            .copy_from_slice(bytemuck::cast_slice(instances));
         buf.unmap();
         self.instance_buf = Some(buf);
     }
@@ -202,7 +289,11 @@ impl TextOverlayRenderer {
         let (dummy_tex, dummy_view) = if atlas_view.is_none() && self.atlas_view.is_none() {
             let t = device.create_texture(&TextureDescriptor {
                 label: Some("text_dummy_atlas_tmp"),
-                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: TextureDimension::D2,
@@ -212,15 +303,29 @@ impl TextOverlayRenderer {
             });
             let v = t.create_view(&TextureViewDescriptor::default());
             (Some(t), Some(v))
-        } else { (None, None) };
-        let view = atlas_view.or(self.atlas_view.as_ref()).or(dummy_view.as_ref()).unwrap();
+        } else {
+            (None, None)
+        };
+        let view = atlas_view
+            .or(self.atlas_view.as_ref())
+            .or(dummy_view.as_ref())
+            .unwrap();
         self.bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("text_overlay_bg"),
             layout: &self.bind_group_layout,
             entries: &[
-                BindGroupEntry { binding: 0, resource: self.uniform_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(view) },
-                BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.atlas_sampler) },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.atlas_sampler),
+                },
             ],
         });
         drop(dummy_tex);
@@ -232,7 +337,9 @@ impl TextOverlayRenderer {
     }
 
     pub fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-        if self.uniforms.enabled < 0.5 || self.instance_count == 0 { return; }
+        if self.uniforms.enabled < 0.5 || self.instance_count == 0 {
+            return;
+        }
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.quad_vbuf.slice(..));

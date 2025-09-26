@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Iterable, Tuple, Optional, Sequence, Any, overload, Union, Dict, Literal
 import os
 import numpy as np
+from . import geometry
 
 PathLikeStr = os.PathLike[str] | str
 

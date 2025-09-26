@@ -12,31 +12,42 @@ use std::sync::Mutex;
 use shadows::state::{CpuCsmConfig, CpuCsmState};
 
 #[cfg(feature = "extension-module")]
-use pyo3::{exceptions::PyValueError, prelude::*, wrap_pyfunction};
-#[cfg(feature = "extension-module")]
-use pyo3::types::PyDict;
+use glam::Vec3;
 #[cfg(feature = "extension-module")]
 use numpy::PyArray1;
 #[cfg(feature = "extension-module")]
-use glam::Vec3;
-#[cfg(feature = "extension-module")]
 use numpy::PyArrayMethods;
+#[cfg(feature = "extension-module")]
+use pyo3::types::PyDict;
+#[cfg(feature = "extension-module")]
+use pyo3::{exceptions::PyValueError, prelude::*, wrap_pyfunction};
 
 // C1/C3/C5/C6/C7: Additional imports for PyO3 functions
 #[cfg(feature = "extension-module")]
 use crate::context as engine_context;
 #[cfg(feature = "extension-module")]
+use crate::core::async_compute::{
+    AsyncComputeConfig as AcConfig, AsyncComputeScheduler as AcScheduler,
+    ComputePassDescriptor as AcPassDesc, DispatchParams as AcDispatch,
+};
+#[cfg(feature = "extension-module")]
+use crate::core::framegraph_impl::{
+    FrameGraph as Fg, PassType as FgPassType, ResourceDesc as FgResourceDesc,
+    ResourceType as FgResourceType,
+};
+#[cfg(feature = "extension-module")]
+use crate::core::multi_thread::{
+    CopyTask as MtCopyTask, MultiThreadConfig as MtConfig, MultiThreadRecorder as MtRecorder,
+};
+#[cfg(feature = "extension-module")]
 use crate::device_caps::DeviceCaps;
 #[cfg(feature = "extension-module")]
-use crate::core::framegraph_impl::{FrameGraph as Fg, PassType as FgPassType, ResourceDesc as FgResourceDesc, ResourceType as FgResourceType};
-#[cfg(feature = "extension-module")]
-use wgpu::{Extent3d as FgExtent3d, TextureFormat as FgTexFormat, TextureUsages as FgTexUsages, ShaderModuleDescriptor, ShaderSource};
-#[cfg(feature = "extension-module")]
-use crate::core::multi_thread::{CopyTask as MtCopyTask, MultiThreadConfig as MtConfig, MultiThreadRecorder as MtRecorder};
-#[cfg(feature = "extension-module")]
-use crate::core::async_compute::{AsyncComputeConfig as AcConfig, AsyncComputeScheduler as AcScheduler, ComputePassDescriptor as AcPassDesc, DispatchParams as AcDispatch};
-#[cfg(feature = "extension-module")]
 use std::sync::Arc;
+#[cfg(feature = "extension-module")]
+use wgpu::{
+    Extent3d as FgExtent3d, ShaderModuleDescriptor, ShaderSource, TextureFormat as FgTexFormat,
+    TextureUsages as FgTexUsages,
+};
 
 #[cfg(feature = "extension-module")]
 static GLOBAL_CSM_STATE: Lazy<Mutex<CpuCsmState>> =
@@ -93,6 +104,7 @@ pub mod device_caps;
 pub mod error;
 pub mod external_image;
 pub mod formats;
+pub mod geometry;
 pub mod gpu;
 pub mod grid;
 pub mod loaders;
@@ -165,7 +177,9 @@ fn _pt_render_gpu(
     let mut spheres: Vec<PtSphere> = Vec::new();
     if let Ok(seq) = scene.extract::<Vec<&PyAny>>() {
         for item in seq.iter() {
-            let d = item.downcast::<pyo3::types::PyDict>().map_err(|_| PyValueError::new_err("scene items must be dicts"))?;
+            let d = item
+                .downcast::<pyo3::types::PyDict>()
+                .map_err(|_| PyValueError::new_err("scene items must be dicts"))?;
             let center: (f32, f32, f32) = d
                 .get_item("center")?
                 .ok_or_else(|| PyValueError::new_err("sphere missing 'center'"))?
@@ -174,13 +188,41 @@ fn _pt_render_gpu(
                 .get_item("radius")?
                 .ok_or_else(|| PyValueError::new_err("sphere missing 'radius'"))?
                 .extract()?;
-            let albedo: (f32, f32, f32) = if let Some(v) = d.get_item("albedo")? { v.extract()? } else { (0.8, 0.8, 0.8) };
-            let metallic: f32 = if let Some(v) = d.get_item("metallic")? { v.extract()? } else { 0.0 };
-            let roughness: f32 = if let Some(v) = d.get_item("roughness")? { v.extract()? } else { 0.5 };
-            let emissive: (f32, f32, f32) = if let Some(v) = d.get_item("emissive")? { v.extract()? } else { (0.0, 0.0, 0.0) };
-            let ior: f32 = if let Some(v) = d.get_item("ior")? { v.extract()? } else { 1.0 };
-            let ax: f32 = if let Some(v) = d.get_item("ax")? { v.extract()? } else { 0.2 };
-            let ay: f32 = if let Some(v) = d.get_item("ay")? { v.extract()? } else { 0.2 };
+            let albedo: (f32, f32, f32) = if let Some(v) = d.get_item("albedo")? {
+                v.extract()?
+            } else {
+                (0.8, 0.8, 0.8)
+            };
+            let metallic: f32 = if let Some(v) = d.get_item("metallic")? {
+                v.extract()?
+            } else {
+                0.0
+            };
+            let roughness: f32 = if let Some(v) = d.get_item("roughness")? {
+                v.extract()?
+            } else {
+                0.5
+            };
+            let emissive: (f32, f32, f32) = if let Some(v) = d.get_item("emissive")? {
+                v.extract()?
+            } else {
+                (0.0, 0.0, 0.0)
+            };
+            let ior: f32 = if let Some(v) = d.get_item("ior")? {
+                v.extract()?
+            } else {
+                1.0
+            };
+            let ax: f32 = if let Some(v) = d.get_item("ax")? {
+                v.extract()?
+            } else {
+                0.2
+            };
+            let ay: f32 = if let Some(v) = d.get_item("ay")? {
+                v.extract()?
+            } else {
+                0.2
+            };
 
             spheres.push(PtSphere {
                 center: [center.0, center.1, center.2],
@@ -266,10 +308,11 @@ fn _pt_render_gpu(
         }
         out
     };
-    let rgba = std::panic::catch_unwind(|| PathTracerGPU::render(width, height, &spheres, uniforms))
-        .ok()
-        .and_then(|res| res.ok())
-        .unwrap_or_else(build_fallback);
+    let rgba =
+        std::panic::catch_unwind(|| PathTracerGPU::render(width, height, &spheres, uniforms))
+            .ok()
+            .and_then(|res| res.ok())
+            .unwrap_or_else(build_fallback);
     let arr1 = PyArray1::<u8>::from_vec_bound(py, rgba);
     let arr3 = arr1.reshape([height as usize, width as usize, 4])?;
     Ok(arr3.into_py(py))
@@ -342,7 +385,11 @@ fn c5_build_framegraph_report(py: Python<'_>) -> PyResult<Py<PyDict>> {
     let mut fg = Fg::new();
 
     // Three color targets (transient, aliasable)
-    let extent = FgExtent3d { width: 256, height: 256, depth_or_array_layers: 1 };
+    let extent = FgExtent3d {
+        width: 256,
+        height: 256,
+        depth_or_array_layers: 1,
+    };
     let usage = FgTexUsages::RENDER_ATTACHMENT | FgTexUsages::TEXTURE_BINDING;
 
     let gbuffer = fg.add_resource(FgResourceDesc {
@@ -431,7 +478,12 @@ fn c6_mt_record_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
         mapped_at_creation: false,
     }));
 
-    let config = MtConfig { thread_count: 2, timeout_ms: 2000, enable_profiling: true, label_prefix: "mt_demo".to_string() };
+    let config = MtConfig {
+        thread_count: 2,
+        timeout_ms: 2000,
+        enable_profiling: true,
+        label_prefix: "mt_demo".to_string(),
+    };
     let mut recorder = MtRecorder::new(device, queue, config);
 
     // Build simple copy tasks
@@ -635,7 +687,6 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_csm_debug_mode, m)?)?;
     m.add_function(wrap_pyfunction!(get_csm_cascade_info, m)?)?;
     m.add_function(wrap_pyfunction!(validate_csm_peter_panning, m)?)?;
-    m.add_function(wrap_pyfunction!(dummy_function, m)?)?;
     m.add_function(wrap_pyfunction!(vector::extrude_polygon_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector::add_polygons_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector::add_lines_py, m)?)?;
@@ -644,6 +695,19 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(vector::clear_vectors_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector::get_vector_counts_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector::api::extrude_polygon_gpu_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::geometry_extrude_polygon_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::geometry_generate_primitive_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::geometry_validate_mesh_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::geometry_weld_mesh_py, m)?)?;
 
     // GPU utilities (adapter enumeration and probe)
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;

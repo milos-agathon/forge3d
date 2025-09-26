@@ -118,7 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut hair_scale: f32 = 1.0; // scales segment radius via WGSL override
     let mut hair_mat: u32 = 1; // 0=dark,1=blond
     let mut hair_style: String = "arc".to_string(); // arc|grid
-    // P6: QMC/Owen + adaptive SPP in raygen
+                                                    // P6: QMC/Owen + adaptive SPP in raygen
     let mut qmc_mode: u32 = 0; // 0=Halton/VDC, 1=Sobol
     let mut spp_limit: Option<u32> = None;
     for arg in std::env::args().skip(1) {
@@ -230,20 +230,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "dark" => hair_mat = 0,
                         "blond" => hair_mat = 1,
                         _ => {
-                            if let Ok(u) = v.parse::<u32>() { hair_mat = if u > 0 { 1 } else { 0 }; }
+                            if let Ok(u) = v.parse::<u32>() {
+                                hair_mat = if u > 0 { 1 } else { 0 };
+                            }
                         }
                     }
                 }
             }
             s if s.starts_with("--hair-scale=") => {
                 if let Some((_, v)) = s.split_once('=') {
-                    if let Ok(f) = v.parse::<f32>() { hair_scale = f.max(0.0); }
+                    if let Ok(f) = v.parse::<f32>() {
+                        hair_scale = f.max(0.0);
+                    }
                 }
             }
             s if s.starts_with("--hair-style=") => {
                 if let Some((_, v)) = s.split_once('=') {
                     let vv = v.to_lowercase();
-                    if vv == "arc" || vv == "grid" { hair_style = vv; }
+                    if vv == "arc" || vv == "grid" {
+                        hair_style = vv;
+                    }
                 }
             }
             s if s.starts_with("--qmc-mode=") => {
@@ -509,7 +515,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let fz = -0.3 + 0.6 * (iz as f32 / (nz as f32 - 1.0));
                     let p0 = [fx, base_y, 0.2 * fz];
                     let p1 = [fx, base_y + 0.25, 0.2 * fz];
-                    segs.push(HairSegment { p0, r0: radius, p1, r1: radius, material_id: (2 + hair_mat.min(1)), _pad0: 0, _pad1: 0, _pad2: 0 });
+                    segs.push(HairSegment {
+                        p0,
+                        r0: radius,
+                        p1,
+                        r1: radius,
+                        material_id: (2 + hair_mat.min(1)),
+                        _pad0: 0,
+                        _pad1: 0,
+                        _pad2: 0,
+                    });
                 }
             }
         } else {
