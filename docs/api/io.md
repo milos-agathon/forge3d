@@ -1,0 +1,101 @@
+# IO: Wavefront OBJ Import/Export
+
+This document describes Forge3D's minimal Wavefront OBJ and MTL support implemented in Phase 2.
+
+Focus areas:
+- OBJ import: `v`, `vt`, `vn`, `f`, `usemtl`, `mtllib`, `g`, `o`
+- MTL import: `newmtl`, `Kd`, `Ka`, `Ks`, `map_Kd`
+- Triangulation of polygonal faces (fan method)
+- Negative indices support per OBJ spec
+- Export: write `.obj` and `.mtl`, including `mtllib`, `usemtl`, and optional `g`/`o` groups
+
+Related files:
+- Rust: `src/io/obj_read.rs`, `src/io/obj_write.rs`
+- Python: `python/forge3d/io.py`
+
+## Python API
+
+- `forge3d.io.load_obj(path: str, *, return_metadata: bool = False)`
+  - Returns `MeshBuffers` by default.
+  - If `return_metadata=True`, returns `(MeshBuffers, materials, material_groups, g_groups, o_groups)`.
+    - `materials`: list of `ObjMaterial` (name, diffuse_color, ambient_color, specular_color, diffuse_texture).
+    - `material_groups`: dict[str, np.ndarray] mapping material name to triangle ordinals.
+    - `g_groups`: dict[str, np.ndarray] for `g` groups.
+    - `o_groups`: dict[str, np.ndarray] for `o` groups.
+
+- `forge3d.io.save_obj(mesh: MeshBuffers, path: str, *, materials=None, material_groups=None, g_groups=None, o_groups=None)`
+  - Writes an OBJ with `v/vt/vn/f`.
+  - If `materials` provided, writes a sibling MTL file and emits `mtllib` and `usemtl`.
+  - If group maps provided, emits `g`/`o` statements before faces.
+
+## Examples
+
+### Basic import
+```python
+import forge3d.io as fio
+mesh = fio.load_obj("assets/bunny.obj")
+print(mesh.vertex_count, mesh.triangle_count)
+```
+
+### Import with materials and groups
+```python
+mesh, materials, mat_groups, g_groups, o_groups = fio.load_obj("scene.obj", return_metadata=True)
+print([m.name for m in materials])
+print(mat_groups.keys())
+```
+
+### Export without materials
+```python
+from forge3d.geometry import MeshBuffers
+import numpy as np
+mesh = MeshBuffers(
+    positions=np.array([[0,0,0],[1,0,0],[0,1,0]], dtype=np.float32),
+    uvs=np.empty((0,2), dtype=np.float32),
+    normals=np.empty((0,3), dtype=np.float32),
+    indices=np.array([[0,1,2]], dtype=np.uint32),
+)
+fio.save_obj(mesh, "triangle.obj")
+```
+
+### Export with materials and groups
+```python
+red = fio.ObjMaterial(
+    name="red",
+    diffuse_color=np.array([1.0, 0.0, 0.0], dtype=np.float32),
+    ambient_color=np.zeros(3, dtype=np.float32),
+    specular_color=np.zeros(3, dtype=np.float32),
+    diffuse_texture=None,
+)
+mat_groups = {"red": np.array([0], dtype=np.uint32)}
+g_groups = {"left": np.array([0], dtype=np.uint32)}
+o_groups = {"objectA": np.array([0], dtype=np.uint32)}
+fio.save_obj(mesh, "triangle.obj", materials=[red], material_groups=mat_groups, g_groups=g_groups, o_groups=o_groups)
+```
+
+## Behavior and Notes
+
+- Triangulation: faces with N vertices are converted into N-2 triangles using a fan around the first vertex.
+- Negative indices: `-1` refers to the most recently defined vertex/texcoord/normal; supported on import.
+- Missing UV/normal:
+  - If an OBJ contains no `vt` records, `mesh.uvs` will be an empty `(0,2)` array.
+  - If an OBJ contains no `vn` records, `mesh.normals` will be an empty `(0,3)` array.
+- Materials:
+  - MTL parsing is minimal (colors and diffuse texture only). Additional properties can be added incrementally.
+  - On export, if `materials` are provided, a sibling `.mtl` file is written using the OBJ filename stem.
+- Grouping:
+  - `material_groups` groups triangles by `usemtl` statements.
+  - `g_groups` collects triangles under `g` group names.
+  - `o_groups` collects triangles under `o` object names.
+- Error messages: include line numbers and explicit index bounds when indices are invalid.
+
+## Limitations
+
+- No smoothing groups (`s`) handling yet.
+- Tangent generation is not performed.
+- MTL coverage is minimal (`Kd`, `Ka`, `Ks`, `map_Kd`).
+
+## Extensibility
+
+- Add more MTL fields (`Ns`, `d`, `illum`, additional maps).
+- Optionally support multiple active groups and explicit range-based grouping.
+- Provide a flags parameter to control strictness and triangulation strategy.

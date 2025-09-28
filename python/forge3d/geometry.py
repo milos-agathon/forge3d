@@ -66,6 +66,30 @@ def _mesh_from_py(obj: Dict[str, Any]) -> MeshBuffers:
     )
 
 
+def _mesh_to_py(mesh: MeshBuffers) -> Dict[str, Any]:
+    positions = _to_float32(np.asarray(mesh.positions, dtype=np.float32), 3)
+    normals_arr = np.asarray(mesh.normals, dtype=np.float32)
+    if normals_arr.size:
+        normals = _to_float32(normals_arr, 3)
+    else:
+        normals = np.empty((0, 3), dtype=np.float32)
+
+    uvs_arr = np.asarray(mesh.uvs, dtype=np.float32)
+    if uvs_arr.size:
+        uvs = _to_float32(uvs_arr, 2)
+    else:
+        uvs = np.empty((0, 2), dtype=np.float32)
+
+    indices = _to_uint32(np.asarray(mesh.indices, dtype=np.uint32))
+
+    return {
+        "positions": positions,
+        "normals": normals,
+        "uvs": uvs,
+        "indices": indices,
+    }
+
+
 def extrude_polygon(polygon: np.ndarray, height: float, cap_uv_scale: float = 1.0) -> MeshBuffers:
     """Extrude a planar polygon into a prism mesh."""
 
@@ -134,3 +158,81 @@ def weld_mesh(
     remap = np.asarray(result["remap"], dtype=np.uint32)
     collapsed = int(result["collapsed"])
     return mesh, remap, collapsed
+
+
+def center_mesh(
+    mesh: MeshBuffers,
+    target: Optional[Tuple[float, float, float]] = None,
+) -> Tuple[MeshBuffers, np.ndarray]:
+    """Translate the mesh so that its bounding-box center matches ``target``.
+
+    Returns the transformed mesh and the original center.
+    """
+
+    _ensure_native()
+    payload = _mesh_to_py(mesh)
+    target_tuple = None if target is None else (float(target[0]), float(target[1]), float(target[2]))
+    transformed_dict, previous_center = _forge3d.geometry_transform_center_py(payload, target_tuple)
+    transformed_mesh = _mesh_from_py(transformed_dict)
+    return transformed_mesh, np.asarray(previous_center, dtype=np.float32)
+
+
+def scale_mesh(
+    mesh: MeshBuffers,
+    scale: Tuple[float, float, float],
+    pivot: Optional[Tuple[float, float, float]] = None,
+) -> Tuple[MeshBuffers, bool]:
+    """Apply a non-uniform scale about the given pivot.
+
+    Returns the transformed mesh and whether winding was flipped.
+    """
+
+    _ensure_native()
+    payload = _mesh_to_py(mesh)
+    scale_tuple = (float(scale[0]), float(scale[1]), float(scale[2]))
+    pivot_tuple = None if pivot is None else (float(pivot[0]), float(pivot[1]), float(pivot[2]))
+    transformed_dict, flipped = _forge3d.geometry_transform_scale_py(payload, scale_tuple, pivot_tuple)
+    return _mesh_from_py(transformed_dict), bool(flipped)
+
+
+def flip_mesh_axis(mesh: MeshBuffers, axis: int) -> Tuple[MeshBuffers, bool]:
+    """Flip the mesh across the specified axis (0=X, 1=Y, 2=Z).
+
+    Returns the transformed mesh and whether winding was flipped.
+    """
+
+    _ensure_native()
+    payload = _mesh_to_py(mesh)
+    transformed_dict, flipped = _forge3d.geometry_transform_flip_axis_py(payload, int(axis))
+    return _mesh_from_py(transformed_dict), bool(flipped)
+
+
+def swap_mesh_axes(mesh: MeshBuffers, axis_a: int, axis_b: int) -> Tuple[MeshBuffers, bool]:
+    """Swap the specified coordinate axes on the mesh.
+
+    Returns the transformed mesh and whether winding was flipped.
+    """
+
+    _ensure_native()
+    payload = _mesh_to_py(mesh)
+    transformed_dict, flipped = _forge3d.geometry_transform_swap_axes_py(
+        payload,
+        int(axis_a),
+        int(axis_b),
+    )
+    return _mesh_from_py(transformed_dict), bool(flipped)
+
+
+def mesh_bounds(mesh: MeshBuffers) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """Return the axis-aligned bounding box of the mesh as ``(min, max)`` arrays."""
+
+    _ensure_native()
+    payload = _mesh_to_py(mesh)
+    bounds = _forge3d.geometry_transform_bounds_py(payload)
+    if bounds is None:
+        return None
+    min_bounds, max_bounds = bounds
+    return (
+        np.asarray(min_bounds, dtype=np.float32),
+        np.asarray(max_bounds, dtype=np.float32),
+    )

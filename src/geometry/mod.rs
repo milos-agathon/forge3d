@@ -7,6 +7,7 @@
 
 mod extrude;
 mod primitives;
+mod transform;
 mod validate;
 mod weld;
 
@@ -15,6 +16,7 @@ pub use primitives::{
     generate_cone, generate_cylinder, generate_plane, generate_primitive, generate_sphere,
     generate_text3d_stub, generate_torus, generate_unit_box, PrimitiveParams, PrimitiveType,
 };
+pub use transform::{center_to_target, compute_bounds, flip_axis, scale_about_pivot, swap_axes};
 pub use validate::{validate_mesh, MeshStats, MeshValidationIssue, MeshValidationReport};
 pub use weld::{weld_mesh, WeldOptions, WeldResult};
 
@@ -83,16 +85,18 @@ impl std::error::Error for GeometryError {}
 /// Convenience alias for geometry results.
 pub type GeometryResult<T> = Result<T, GeometryError>;
 #[cfg(feature = "extension-module")]
-use numpy::{PyArray1, PyArray2, PyReadonlyArray2, PyUntypedArrayMethods};
+use glam::Vec3;
+#[cfg(feature = "extension-module")]
+use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
 #[cfg(feature = "extension-module")]
 use pyo3::{
     exceptions::PyValueError,
     prelude::*,
-    types::{PyDict, PyList},
+    types::{PyDict, PyList, PyAnyMethods},
 };
 
 #[cfg(feature = "extension-module")]
-fn mesh_to_python<'py>(py: Python<'py>, mesh: &MeshBuffers) -> PyResult<PyObject> {
+pub(crate) fn mesh_to_python<'py>(py: Python<'py>, mesh: &MeshBuffers) -> PyResult<PyObject> {
     let dict = PyDict::new_bound(py);
 
     let positions = PyArray2::from_vec2_bound(py, &to_vec3(mesh.positions.as_slice()))?;
@@ -101,14 +105,14 @@ fn mesh_to_python<'py>(py: Python<'py>, mesh: &MeshBuffers) -> PyResult<PyObject
     let normals = if mesh.normals.len() == mesh.positions.len() {
         PyArray2::from_vec2_bound(py, &to_vec3(mesh.normals.as_slice()))?
     } else {
-        PyArray2::from_vec2_bound(py, &Vec::<Vec<f32>>::new())?
+        PyArray2::<f32>::zeros_bound(py, [0, 3], false)
     };
     dict.set_item("normals", normals)?;
 
     let uvs = if mesh.uvs.len() == mesh.positions.len() {
         PyArray2::from_vec2_bound(py, &to_vec2(mesh.uvs.as_slice()))?
     } else {
-        PyArray2::from_vec2_bound(py, &Vec::<Vec<f32>>::new())?
+        PyArray2::<f32>::zeros_bound(py, [0, 2], false)
     };
     dict.set_item("uvs", uvs)?;
 
@@ -128,6 +132,102 @@ fn to_vec3(data: &[[f32; 3]]) -> Vec<Vec<f32>> {
 #[cfg(feature = "extension-module")]
 fn to_vec2(data: &[[f32; 2]]) -> Vec<Vec<f32>> {
     data.iter().map(|row| row.to_vec()).collect()
+}
+
+#[cfg(feature = "extension-module")]
+fn read_vec3_array(array: PyReadonlyArray2<'_, f32>) -> Vec<[f32; 3]> {
+    array
+        .as_array()
+        .outer_iter()
+        .map(|row| [row[0], row[1], row[2]])
+        .collect()
+}
+
+#[cfg(feature = "extension-module")]
+fn read_vec2_array(array: PyReadonlyArray2<'_, f32>) -> Vec<[f32; 2]> {
+    array
+        .as_array()
+        .outer_iter()
+        .map(|row| [row[0], row[1]])
+        .collect()
+}
+
+#[cfg(feature = "extension-module")]
+pub(crate) fn mesh_from_python(mesh: &Bound<'_, PyDict>) -> PyResult<MeshBuffers> {
+    let positions_obj = mesh
+        .get_item("positions")?
+        .ok_or_else(|| PyValueError::new_err("mesh dict missing 'positions'"))?;
+    let positions_array: PyReadonlyArray2<f32> = positions_obj.extract()?;
+    if positions_array.shape()[1] != 3 {
+        return Err(PyValueError::new_err(
+            "positions array must have shape (N, 3)",
+        ));
+    }
+    let positions = read_vec3_array(positions_array);
+
+    let normals = match mesh.get_item("normals")? {
+        Some(value) if !value.is_none() => {
+            let array: PyReadonlyArray2<f32> = value.extract()?;
+            if array.shape()[1] != 3 {
+                return Err(PyValueError::new_err(
+                    "normals array must have shape (N, 3)",
+                ));
+            }
+            read_vec3_array(array)
+        }
+        _ => Vec::new(),
+    };
+
+    let uvs = match mesh.get_item("uvs")? {
+        Some(value) if !value.is_none() => {
+            let array: PyReadonlyArray2<f32> = value.extract()?;
+            if array.shape()[1] != 2 {
+                return Err(PyValueError::new_err("uvs array must have shape (N, 2)"));
+            }
+            read_vec2_array(array)
+        }
+        _ => Vec::new(),
+    };
+
+    let indices_obj = mesh
+        .get_item("indices")?
+        .ok_or_else(|| PyValueError::new_err("mesh dict missing 'indices'"))?;
+    let indices: Vec<u32>;
+    if let Ok(array) = indices_obj.extract::<PyReadonlyArray2<u32>>() {
+        if array.shape()[1] != 3 {
+            return Err(PyValueError::new_err(
+                "indices array must have shape (M, 3) when 2D",
+            ));
+        }
+        indices = array.as_array().iter().copied().collect();
+    } else {
+        let array: PyReadonlyArray1<u32> = indices_obj.extract()?;
+        let slice = array.as_slice()?;
+        if slice.len() % 3 != 0 {
+            return Err(PyValueError::new_err(
+                "indices length must be a multiple of 3",
+            ));
+        }
+        indices = slice.to_vec();
+    }
+
+    if indices.len() % 3 != 0 {
+        return Err(PyValueError::new_err(
+            "indices length must be a multiple of 3",
+        ));
+    }
+
+    Ok(MeshBuffers {
+        positions,
+        normals,
+        uvs,
+        indices,
+    })
+}
+
+#[cfg(feature = "extension-module")]
+pub(crate) fn map_geometry_err<T>(result: GeometryResult<T>) -> PyResult<T> {
+    result.map_err(|err| PyValueError::new_err(err.message().to_string()))
 }
 
 #[cfg(feature = "extension-module")]
@@ -324,4 +424,79 @@ pub fn geometry_weld_mesh_py(
     dict.set_item("remap", remap)?;
     dict.set_item("collapsed", result.collapsed)?;
     Ok(dict.into_py(py))
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub fn geometry_transform_center_py(
+    py: Python<'_>,
+    mesh: &Bound<'_, PyDict>,
+    target: Option<(f32, f32, f32)>,
+) -> PyResult<(PyObject, (f32, f32, f32))> {
+    let mut mesh_buffers = mesh_from_python(mesh)?;
+    let target_vec = target
+        .map(|t| Vec3::new(t.0, t.1, t.2))
+        .unwrap_or(Vec3::ZERO);
+    let center = map_geometry_err(transform::center_to_target(&mut mesh_buffers, target_vec))?;
+    let py_mesh = mesh_to_python(py, &mesh_buffers)?;
+    Ok((py_mesh, (center.x, center.y, center.z)))
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub fn geometry_transform_scale_py(
+    py: Python<'_>,
+    mesh: &Bound<'_, PyDict>,
+    scale: (f32, f32, f32),
+    pivot: Option<(f32, f32, f32)>,
+) -> PyResult<(PyObject, bool)> {
+    let mut mesh_buffers = mesh_from_python(mesh)?;
+    let scale_vec = Vec3::new(scale.0, scale.1, scale.2);
+    let pivot_vec = pivot
+        .map(|p| Vec3::new(p.0, p.1, p.2))
+        .unwrap_or(Vec3::ZERO);
+    let flipped = map_geometry_err(transform::scale_about_pivot(
+        &mut mesh_buffers,
+        scale_vec,
+        pivot_vec,
+    ))?;
+    let py_mesh = mesh_to_python(py, &mesh_buffers)?;
+    Ok((py_mesh, flipped))
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub fn geometry_transform_flip_axis_py(
+    py: Python<'_>,
+    mesh: &Bound<'_, PyDict>,
+    axis: usize,
+) -> PyResult<(PyObject, bool)> {
+    let mut mesh_buffers = mesh_from_python(mesh)?;
+    let flipped = map_geometry_err(transform::flip_axis(&mut mesh_buffers, axis))?;
+    let py_mesh = mesh_to_python(py, &mesh_buffers)?;
+    Ok((py_mesh, flipped))
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub fn geometry_transform_swap_axes_py(
+    py: Python<'_>,
+    mesh: &Bound<'_, PyDict>,
+    axis_a: usize,
+    axis_b: usize,
+) -> PyResult<(PyObject, bool)> {
+    let mut mesh_buffers = mesh_from_python(mesh)?;
+    let flipped = map_geometry_err(transform::swap_axes(&mut mesh_buffers, axis_a, axis_b))?;
+    let py_mesh = mesh_to_python(py, &mesh_buffers)?;
+    Ok((py_mesh, flipped))
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub fn geometry_transform_bounds_py(
+    mesh: &Bound<'_, PyDict>,
+) -> PyResult<Option<((f32, f32, f32), (f32, f32, f32))>> {
+    let mesh_buffers = mesh_from_python(mesh)?;
+    Ok(transform::compute_bounds(&mesh_buffers)
+        .map(|(min, max)| ((min.x, min.y, min.z), (max.x, max.y, max.z))))
 }

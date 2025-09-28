@@ -5,7 +5,10 @@ use pyo3::types::PyType;
 
 use super::{SdfPrimitive, SdfScene, SdfSceneBuilder};
 
-#[cfg_attr(feature = "extension-module", pyclass(name = "SdfPrimitive", module = "forge3d._forge3d"))]
+#[cfg_attr(
+    feature = "extension-module",
+    pyclass(name = "SdfPrimitive", module = "forge3d._forge3d")
+)]
 #[derive(Clone)]
 pub struct PySdfPrimitive {
     pub primitive: SdfPrimitive,
@@ -100,7 +103,10 @@ impl PySdfPrimitive {
     }
 }
 
-#[cfg_attr(feature = "extension-module", pyclass(name = "SdfScene", module = "forge3d._forge3d"))]
+#[cfg_attr(
+    feature = "extension-module",
+    pyclass(name = "SdfScene", module = "forge3d._forge3d")
+)]
 #[derive(Clone)]
 pub struct PySdfScene(pub SdfScene);
 
@@ -144,7 +150,10 @@ impl PySdfScene {
     }
 }
 
-#[cfg_attr(feature = "extension-module", pyclass(name = "SdfSceneBuilder", module = "forge3d._forge3d"))]
+#[cfg_attr(
+    feature = "extension-module",
+    pyclass(name = "SdfSceneBuilder", module = "forge3d._forge3d")
+)]
 pub struct PySdfSceneBuilder {
     builder: Option<SdfSceneBuilder>,
 }
@@ -321,4 +330,3 @@ impl PySdfSceneBuilder {
         self.put_builder(SdfSceneBuilder::new());
     }
 }
-

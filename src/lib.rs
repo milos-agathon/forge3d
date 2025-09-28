@@ -24,10 +24,6 @@ use pyo3::{exceptions::PyValueError, prelude::*, wrap_pyfunction};
 #[cfg(feature = "extension-module")]
 use crate::context as engine_context;
 #[cfg(feature = "extension-module")]
-use crate::sdf::hybrid::Ray as HybridRay;
-#[cfg(feature = "extension-module")]
-use crate::sdf::py::PySdfScene;
-#[cfg(feature = "extension-module")]
 use crate::core::async_compute::{
     AsyncComputeConfig as AcConfig, AsyncComputeScheduler as AcScheduler,
     ComputePassDescriptor as AcPassDesc, DispatchParams as AcDispatch,
@@ -43,6 +39,10 @@ use crate::core::multi_thread::{
 };
 #[cfg(feature = "extension-module")]
 use crate::device_caps::DeviceCaps;
+#[cfg(feature = "extension-module")]
+use crate::sdf::hybrid::Ray as HybridRay;
+#[cfg(feature = "extension-module")]
+use crate::sdf::py::PySdfScene;
 #[cfg(feature = "extension-module")]
 use std::sync::Arc;
 #[cfg(feature = "extension-module")]
@@ -109,6 +109,7 @@ pub mod formats;
 pub mod geometry;
 pub mod gpu;
 pub mod grid;
+pub mod io; // IO: OBJ/PLY/glTF readers/writers
 pub mod loaders;
 pub mod mesh;
 pub mod path_tracing;
@@ -304,9 +305,9 @@ fn hybrid_render(
             let pixel_index = (y * w + x) * 4;
             if result.hit {
                 let color = match result.material_id {
-                    1 => [204u8, 51u8, 51u8],  // red-ish
-                    2 => [51u8, 204u8, 51u8],  // green-ish
-                    3 => [51u8, 51u8, 204u8],  // blue-ish
+                    1 => [204u8, 51u8, 51u8], // red-ish
+                    2 => [51u8, 204u8, 51u8], // green-ish
+                    3 => [51u8, 51u8, 204u8], // blue-ish
                     4 => [210u8, 210u8, 210u8],
                     _ => [230u8, 153u8, 76u8],
                 };
@@ -871,9 +872,33 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         m
     )?)?;
     m.add_function(wrap_pyfunction!(crate::geometry::geometry_weld_mesh_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::geometry_transform_center_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::geometry_transform_scale_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::geometry_transform_flip_axis_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::geometry_transform_swap_axes_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::geometry_transform_bounds_py,
+        m
+    )?)?;
 
     // Native SDF placeholder renderer
     m.add_function(wrap_pyfunction!(hybrid_render, m)?)?;
+
+    // IO: OBJ import/export
+    m.add_function(wrap_pyfunction!(crate::io::obj_read::io_import_obj_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::io::obj_write::io_export_obj_py, m)?)?;
 
     // GPU utilities (adapter enumeration and probe)
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;

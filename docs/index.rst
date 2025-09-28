@@ -16,6 +16,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    :caption: Core Documentation:
 
    api_reference
+   api/io
    color_management
    interop_zero_copy
    memory_budget

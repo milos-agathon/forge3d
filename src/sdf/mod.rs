@@ -111,11 +111,7 @@ impl SdfSceneBuilder {
         }
     }
 
-    fn add_primitive_internal(
-        &mut self,
-        primitive: SdfPrimitive,
-        material_id: u32,
-    ) -> u32 {
+    fn add_primitive_internal(&mut self, primitive: SdfPrimitive, material_id: u32) -> u32 {
         let prim_idx = self.scene.csg_tree.add_primitive(primitive);
         self.scene.csg_tree.add_leaf(prim_idx, material_id)
     }
@@ -134,12 +130,7 @@ impl SdfSceneBuilder {
     }
 
     /// In-place sphere primitive helper
-    pub fn add_sphere_mut(
-        &mut self,
-        center: glam::Vec3,
-        radius: f32,
-        material_id: u32,
-    ) -> u32 {
+    pub fn add_sphere_mut(&mut self, center: glam::Vec3, radius: f32, material_id: u32) -> u32 {
         let primitive = SdfPrimitive::sphere(center, radius, material_id);
         self.add_primitive_internal(primitive, material_id)
     }
@@ -197,23 +188,13 @@ impl SdfSceneBuilder {
     }
 
     /// Add a plane primitive
-    pub fn add_plane(
-        mut self,
-        normal: glam::Vec3,
-        distance: f32,
-        material_id: u32,
-    ) -> (Self, u32) {
+    pub fn add_plane(mut self, normal: glam::Vec3, distance: f32, material_id: u32) -> (Self, u32) {
         let node_idx = self.add_plane_mut(normal, distance, material_id);
         (self, node_idx)
     }
 
     /// In-place plane primitive helper
-    pub fn add_plane_mut(
-        &mut self,
-        normal: glam::Vec3,
-        distance: f32,
-        material_id: u32,
-    ) -> u32 {
+    pub fn add_plane_mut(&mut self, normal: glam::Vec3, distance: f32, material_id: u32) -> u32 {
         let primitive = SdfPrimitive::plane(normal, distance, material_id);
         self.add_primitive_internal(primitive, material_id)
     }
@@ -297,7 +278,13 @@ impl SdfSceneBuilder {
         smoothing: f32,
         material_id: u32,
     ) -> u32 {
-        self.add_operation_internal(CsgOperation::SmoothUnion, left, right, smoothing, material_id)
+        self.add_operation_internal(
+            CsgOperation::SmoothUnion,
+            left,
+            right,
+            smoothing,
+            material_id,
+        )
     }
 
     /// Subtract right node from left node
