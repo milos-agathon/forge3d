@@ -104,18 +104,17 @@ fn sample_reflection_with_blur(uv: vec2<f32>, blur_radius: f32) -> vec4<f32> {
         return sample_reflection_basic(uv);
     }
 
-    // Gaussian-like blur using separable kernel
+    // Gaussian-like blur using compact kernel (half-kernel extents)
     let texel_size = 1.0 / reflection_uniforms.reflection_resolution;
     let kernel_size = min(reflection_uniforms.blur_kernel_size, 7u);
-    let half_kernel = f32(kernel_size / 2u);
+    let half_kernel: i32 = i32(kernel_size) / 2;
 
     var blur_result = vec4<f32>(0.0);
     var weight_sum = 0.0;
 
-    // Sample in a circular pattern for better quality
-    let sample_count = i32(kernel_size);
-    for (var i = -sample_count; i <= sample_count; i++) {
-        for (var j = -sample_count; j <= sample_count; j++) {
+    // Sample compact square neighborhood for performance
+    for (var i = -half_kernel; i <= half_kernel; i++) {
+        for (var j = -half_kernel; j <= half_kernel; j++) {
             let offset = vec2<f32>(f32(i), f32(j)) * texel_size * blur_radius;
             let sample_uv = uv + offset;
 

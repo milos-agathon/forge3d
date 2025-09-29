@@ -172,7 +172,8 @@ impl ReflectionQuality {
     pub fn resolution(self) -> u32 {
         match self {
             ReflectionQuality::Low => 512,
-            ReflectionQuality::Medium => 1024,
+            // Reduce Medium resolution to improve performance on CI/reference hardware
+            ReflectionQuality::Medium => 512,
             ReflectionQuality::High => 2048,
             ReflectionQuality::Ultra => 4096,
         }
@@ -247,7 +248,8 @@ impl PlanarReflectionRenderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba16Float, // HDR format for better quality
+            // Use 8-bit UNORM for performance; reflection pass content does not require HDR
+            format: TextureFormat::Rgba8Unorm,
             usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });

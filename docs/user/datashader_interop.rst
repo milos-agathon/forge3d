@@ -50,7 +50,7 @@ Quick Start
    agg = canvas.points(df, 'x', 'y', ds.mean('value'))
    
    # Convert to forge3d overlay with zero-copy optimization
-   overlay = shade_to_overlay(agg, extent, cmap='viridis', how='linear')
+   overlay = shade_to_overlay(agg, extent, cmap='viridis', how='linear', premultiply=True)
    
    # Use overlay in forge3d rendering pipeline
    rgba_array = overlay['rgba']  # Ready for GPU upload
@@ -96,6 +96,18 @@ Core Functions
    **Zero-copy behavior**: When the input is already in RGBA uint8 format
    and C-contiguous, this function returns a view with no memory copying.
    
+   **Parameters**:
+
+   - ``premultiply`` (bool, default False): if True, returns a premultiplied-alpha
+     copy of the input (RGB pre-multiplied by A/255). This creates a copy.
+   - ``transform`` (optional): a transform object (e.g., rasterio Affine) used
+     to validate alignment and returned in the overlay metadata for downstream use.
+
+   **Returned metadata** additions:
+
+   - ``premultiplied``: whether RGB has been premultiplied by alpha.
+   - ``transform``: the transform object (if provided).
+
    **Example**:
    
    .. code-block:: python
@@ -167,13 +179,50 @@ Convenience Functions
    - ``extent``: Geographic bounds (xmin, ymin, xmax, ymax)
    - ``cmap``: Colormap name (viridis, plasma, inferno, etc.)
    - ``how``: Shading method (linear, log, eq_hist, cbrt)
+   - ``premultiply`` (bool): if True, premultiply the shaded RGBA before returning.
+   - ``transform`` (optional): pass-through transform used for alignment validation
+     and returned in overlay metadata.
    
    **Example**:
    
    .. code-block:: python
    
       # One-line conversion with validation
-      overlay = shade_to_overlay(agg, extent, cmap='magma', how='log')
+      overlay = shade_to_overlay(agg, extent, cmap='magma', how='log', premultiply=True)
+
+Premultiplied Alpha
+===================
+
+Some render paths and compositors prefer premultiplied-alpha textures. You can
+either request premultiplication from ``shade_to_overlay`` or apply it manually:
+
+.. code-block:: python
+
+   from forge3d.adapters import premultiply_rgba, to_overlay_texture
+
+   rgba = rgba_view_from_agg(tf.shade(agg, cmap='viridis'))
+   rgba_premult = premultiply_rgba(rgba)   # returns a new array
+   overlay = to_overlay_texture(rgba_premult, extent, premultiply=False)
+   assert overlay['premultiplied'] is False  # already premultiplied in data
+
+   # Alternatively, let to_overlay_texture do it for you
+   overlay2 = to_overlay_texture(rgba, extent, premultiply=True)
+   assert overlay2['premultiplied'] is True
+
+Coordinate Transforms
+=====================
+
+For precise geospatial alignment, you can pass a transform (e.g., rasterio
+``Affine``) into ``shade_to_overlay`` and ``to_overlay_texture``. The transform
+is used by ``validate_alignment`` and included in the returned metadata:
+
+.. code-block:: python
+
+   from rasterio.transform import from_bounds
+
+   transform = from_bounds(*extent, width=800, height=600)
+   overlay = shade_to_overlay(agg, extent, transform=transform)
+   assert overlay['transform'] is transform
 
 Adapter Class
 -------------
@@ -641,3 +690,59 @@ See Also
 - :doc:`../examples_guide` - General examples and usage patterns
 - `Datashader documentation <https://datashader.org/>`_ - Official datashader docs
 - `Holoviews <https://holoviews.org/>`_ - High-level datashader integration
+
+Benchmarks & Reproducing Performance
+====================================
+
+Workstream G2 provides a reproducible performance playbook. The repository
+includes performance tests and utilities to generate goldens and collect
+timing/memory metrics across zoom levels.
+
+Generate Goldens
+----------------
+
+.. code-block:: bash
+
+   # Generate golden reference images for SSIM comparisons
+   pytest tests/perf/test_datashader_zoom.py::TestDatashaderZoomPerformance --maxfail=1 -q
+
+Run Performance Tests
+---------------------
+
+.. code-block:: bash
+
+   # Run the zoom-level performance tests (requires datashader + skimage)
+   pytest tests/perf/test_datashader_zoom.py -q
+
+Plot Simple Time/Memory Charts
+------------------------------
+
+You can visualize the collected metrics by lightly editing the test to emit
+JSON or by calling the helper directly. A minimal plotting example:
+
+.. code-block:: python
+
+   import pandas as pd
+   from pathlib import Path
+   from forge3d.tests.perf.test_datashader_zoom import (
+       generate_deterministic_dataset, render_zoom_level
+   )
+
+   df = generate_deterministic_dataset(200_000, seed=123)
+   rows = []
+   for z in [0, 4, 8, 12]:
+       res = render_zoom_level(df, z)
+       m = res['metrics']
+       rows.append({
+           'zoom': z,
+           'frame_ms': m['total_frame_time_ms'],
+           'mem_mb': m['memory_peak_mb'],
+           'pps': m['points_per_second'],
+       })
+   pdf = pd.DataFrame(rows)
+   print(pdf)
+   ax = pdf.plot(x='zoom', y=['frame_ms', 'mem_mb'])
+   ax.figure.savefig('datashader_perf_summary.png', dpi=150)
+
+The above script writes a basic time/memory chart to
+``datashader_perf_summary.png`` which can be included in reports.

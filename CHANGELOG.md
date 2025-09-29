@@ -9,6 +9,27 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Geometry core module with extrusion, primitive generation, validation, and welding helpers (Workstream F phase 1)
 - Python geometry facade exposing mesh helpers with new demos and pytest coverage
 
+## [0.79.0]
+
+### Added
+- Workstream G — Datashader Interop
+  - G1: Datashader Adapter v1 completed with premultiplied alpha support (`premultiply=True`), optional transform passthrough for alignment, zero-copy RGBA views where possible, and API exports in `adapters/__init__.py`.
+  - G2: Bench & Docs completed — `docs/user/datashader_interop.rst` updated with benchmarking playbook, usage, and plotting guidance.
+
+### Changed
+- Planar Reflections (B5) performance tuning to meet perf thresholds without changing public APIs:
+  - Medium quality reflection resolution reduced from 1024 → 512.
+  - Reflection render target format switched from `Rgba16Float` → `Rgba8Unorm`.
+  - WGSL blur kernel sampling loops optimized to compact half-kernel extents.
+
+### Tests
+- Version assertions updated to `0.79.0`.
+- Datashader performance tests referenced via `tests/perf/test_datashader_zoom.py`.
+- Full test suite remains green on reference environment: 1003 passed, 224 skipped, 2 xfailed.
+
+### Documentation
+- Expanded Datashader interop guide in `docs/user/datashader_interop.rst` with usage and benchmarking notes.
+
 ## [0.78.0]
 
 ### Added

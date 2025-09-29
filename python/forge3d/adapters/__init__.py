@@ -45,6 +45,7 @@ try:
         DatashaderAdapter,
         is_datashader_available,
         rgba_view_from_agg,
+        premultiply_rgba,
         validate_alignment,
         to_overlay_texture,
         shade_to_overlay,
@@ -64,6 +65,7 @@ except ImportError:
     # Stub functions that provide helpful error messages  
     DatashaderAdapter = _datashader_unavailable
     rgba_view_from_agg = _datashader_unavailable
+    premultiply_rgba = _datashader_unavailable
     validate_alignment = _datashader_unavailable
     to_overlay_texture = _datashader_unavailable
     shade_to_overlay = _datashader_unavailable
@@ -81,6 +83,7 @@ __all__ = [
     'DatashaderAdapter',
     'is_datashader_available',
     'rgba_view_from_agg',
+    'premultiply_rgba',
     'validate_alignment', 
     'to_overlay_texture',
     'shade_to_overlay',

@@ -122,6 +122,32 @@ def rgba_view_from_agg(agg_or_img: Union[Any, np.ndarray]) -> np.ndarray:
     return rgba
 
 
+def premultiply_rgba(rgba: np.ndarray) -> np.ndarray:
+    """
+    Return a premultiplied-alpha copy of the given RGBA uint8 array.
+
+    - Input must be shape (H, W, 4), dtype=uint8, C-contiguous.
+    - Returns a new array (shares_memory=False) with RGB multiplied by A/255.
+    """
+    if rgba.ndim != 3 or rgba.shape[2] != 4:
+        raise ValueError(f"Expected (H,W,4) RGBA array, got shape {rgba.shape}")
+    if rgba.dtype != np.uint8:
+        raise ValueError(f"Expected uint8 dtype, got {rgba.dtype}")
+    if not rgba.flags.c_contiguous:
+        raise ValueError("RGBA array must be C-contiguous for premultiplication")
+
+    out = rgba.copy()
+    alpha = out[..., 3].astype(np.float32) / 255.0
+    if np.all(alpha == 1.0):
+        # Already effectively premultiplied (opaque), return copy
+        return out
+    # Multiply channels by alpha
+    for c in range(3):
+        channel = out[..., c].astype(np.float32) * alpha
+        out[..., c] = np.clip(channel + 0.5, 0.0, 255.0).astype(np.uint8)
+    return out
+
+
 def validate_alignment(extent: Tuple[float, float, float, float], 
                       transform: Optional[Any], 
                       width: int, 
@@ -219,8 +245,11 @@ def validate_alignment(extent: Tuple[float, float, float, float],
     }
 
 
-def to_overlay_texture(rgba: np.ndarray, 
-                      extent: Tuple[float, float, float, float]) -> Dict[str, Any]:
+def to_overlay_texture(rgba: np.ndarray,
+                      extent: Tuple[float, float, float, float],
+                      *,
+                      premultiply: bool = False,
+                      transform: Optional[Any] = None) -> Dict[str, Any]:
     """
     Prepare RGBA array and extent for forge3d overlay texture.
     
@@ -250,8 +279,15 @@ def to_overlay_texture(rgba: np.ndarray,
     
     if not rgba.flags.c_contiguous:
         raise ValueError("RGBA array must be C-contiguous for GPU upload")
+
+    # Premultiply alpha if requested (creates a copy)
+    premultiplied = False
+    prepared = rgba
+    if premultiply:
+        prepared = premultiply_rgba(rgba)
+        premultiplied = True
     
-    height, width = rgba.shape[:2]
+    height, width = prepared.shape[:2]
     xmin, ymin, xmax, ymax = extent
     
     # Calculate texture parameters
@@ -259,7 +295,7 @@ def to_overlay_texture(rgba: np.ndarray,
     pixel_height = (ymax - ymin) / height
     
     return {
-        'rgba': rgba,
+        'rgba': prepared,
         'width': width,
         'height': height,
         'extent': extent,
@@ -267,17 +303,22 @@ def to_overlay_texture(rgba: np.ndarray,
         'pixel_height': pixel_height,
         'format': 'RGBA8',
         'bytes_per_pixel': 4,
-        'total_bytes': rgba.nbytes,
-        'is_contiguous': rgba.flags.c_contiguous,
-        'shares_memory': True  # Indicates zero-copy where possible
+        'total_bytes': prepared.nbytes,
+        'is_contiguous': prepared.flags.c_contiguous,
+        'shares_memory': np.shares_memory(prepared, rgba),
+        'premultiplied': premultiplied,
+        'transform': transform,
     }
 
 
 # Convenience functions for common operations
-def shade_to_overlay(agg: Any, 
+def shade_to_overlay(agg: Any,
                     extent: Tuple[float, float, float, float],
                     cmap: str = 'viridis',
-                    how: str = 'linear') -> Dict[str, Any]:
+                    how: str = 'linear',
+                    *,
+                    premultiply: bool = False,
+                    transform: Optional[Any] = None) -> Dict[str, Any]:
     """
     Convert Datashader aggregation directly to forge3d overlay.
     
@@ -299,10 +340,10 @@ def shade_to_overlay(agg: Any,
     rgba = rgba_view_from_agg(img)
     
     # Validate alignment (basic check without transform)
-    validate_alignment(extent, None, rgba.shape[1], rgba.shape[0])
+    validate_alignment(extent, transform, rgba.shape[1], rgba.shape[0])
     
     # Prepare overlay texture
-    return to_overlay_texture(rgba, extent)
+    return to_overlay_texture(rgba, extent, premultiply=premultiply, transform=transform)
 
 
 def get_datashader_info() -> Dict[str, Any]:
@@ -338,6 +379,8 @@ def get_datashader_info() -> Dict[str, Any]:
         'version': version,
         'transfer_functions': ['linear', 'log', 'eq_hist', 'cbrt'],
         'colormaps': colormaps[:10] if len(colormaps) > 10 else colormaps,
+        'premultiply_supported': True,
+        'premultiply_default': False,
         'total_colormaps': len(colormaps)
     }
 
@@ -347,6 +390,7 @@ __all__ = [
     'DatashaderAdapter',
     'is_datashader_available', 
     'rgba_view_from_agg',
+    'premultiply_rgba',
     'validate_alignment',
     'to_overlay_texture',
     'shade_to_overlay',
