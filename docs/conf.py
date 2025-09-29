@@ -79,6 +79,9 @@ exclude_patterns = [
     'REPORT.md',
     'QUESTIONS.md',
     'CLAUDE_UPDATE_REPORT.md',
+    # Prefer Markdown versions of these docs
+    'interop_zero_copy.rst',
+    'memory_budget.rst',
 ]
 
 # The theme to use for HTML and HTML Help pages.
@@ -94,16 +97,23 @@ html_theme_options = {
     'style_nav_header_background': '#2980B9',
 }
 
-# Add any paths that contain custom static files (such as style sheets) here,
-# relative to this directory. They are copied after the builtin static files,
-# so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+# Add any paths that contain custom static files (such as style sheets) here.
+# Only include when the directory exists to avoid warnings.
+_HERE = os.path.dirname(__file__)
+_STATIC_DIR = os.path.join(_HERE, '_static')
+if os.path.isdir(_STATIC_DIR):
+    html_static_path = ['_static']
+else:
+    html_static_path = []
 
 # HTML output options
 html_title = 'forge3d Documentation'
 html_short_title = 'forge3d'
-html_logo = 'assets/logo-forge3d.png'  # If it exists
-html_favicon = 'assets/favicon.ico'    # If it exists
+# Guard logo and favicon to avoid warnings when assets are missing.
+_LOGO = os.path.join(_HERE, 'assets', 'logo-forge3d.png')
+_FAVICON = os.path.join(_HERE, 'assets', 'favicon.ico')
+html_logo = 'assets/logo-forge3d.png' if os.path.exists(_LOGO) else None
+html_favicon = 'assets/favicon.ico' if os.path.exists(_FAVICON) else None
 
 # HTML context
 html_context = {

@@ -1,21 +1,21 @@
-
-
 <!DOCTYPE html>
-<html class="writer-html5" lang="en" data-content_root="../../">
+<html class="writer-html5" lang="en" >
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>forge3d.postfx &mdash; forge3d Documentation</title>
-      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
-      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
-      <link rel="stylesheet" type="text/css" href="../../_static/custom.css" />
-
+      <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
   
-      <script src="../../_static/jquery.js?v=5d32c60e"></script>
-      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
-      <script src="../../_static/documentation_options.js?v=9e420a66"></script>
-      <script src="../../_static/doctools.js?v=9bcbadda"></script>
-      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="../../_static/jquery.js?v=5d32c60e"></script>
+        <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="../../_static/documentation_options.js?v=ee774964"></script>
+        <script src="../../_static/doctools.js?v=9a2dae69"></script>
+        <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" /> 
@@ -32,6 +32,9 @@
           <a href="../../index.html" class="icon icon-home">
             forge3d
           </a>
+              <div class="version">
+                0.39.0
+              </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
     <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
@@ -77,8 +80,14 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../../api_reference.html">API Reference</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="../../api_reference.html#core-classes">Core Classes</a><ul>
-<li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#renderer">Renderer</a></li>
-<li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#scene">Scene</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#renderer">Renderer</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.Renderer"><code class="docutils literal notranslate"><span class="pre">Renderer</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#scene">Scene</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.Scene"><code class="docutils literal notranslate"><span class="pre">Scene</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="../../api_reference.html#vector-graphics">Vector Graphics</a><ul>
@@ -97,15 +106,48 @@
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="../../api_reference.html#advanced-features">Advanced Features</a><ul>
-<li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#shadow-mapping">Shadow Mapping</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#module-forge3d.shadows">Shadow Mapping</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.has_shadows_support"><code class="docutils literal notranslate"><span class="pre">has_shadows_support()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.DirectionalLight"><code class="docutils literal notranslate"><span class="pre">DirectionalLight</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.CsmConfig"><code class="docutils literal notranslate"><span class="pre">CsmConfig</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.ShadowStats"><code class="docutils literal notranslate"><span class="pre">ShadowStats</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.CsmShadowMap"><code class="docutils literal notranslate"><span class="pre">CsmShadowMap</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.ShadowRenderer"><code class="docutils literal notranslate"><span class="pre">ShadowRenderer</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.create_test_scene"><code class="docutils literal notranslate"><span class="pre">create_test_scene()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.compare_shadow_techniques"><code class="docutils literal notranslate"><span class="pre">compare_shadow_techniques()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.validate_csm_setup"><code class="docutils literal notranslate"><span class="pre">validate_csm_setup()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.get_preset_config"><code class="docutils literal notranslate"><span class="pre">get_preset_config()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.calculate_shadow_atlas_memory"><code class="docutils literal notranslate"><span class="pre">calculate_shadow_atlas_memory()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.validate_shadow_memory_constraint"><code class="docutils literal notranslate"><span class="pre">validate_shadow_memory_constraint()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.build_shadow_atlas"><code class="docutils literal notranslate"><span class="pre">build_shadow_atlas()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.shadows.sample_shadow"><code class="docutils literal notranslate"><span class="pre">sample_shadow()</span></code></a></li>
+</ul>
+</li>
 <li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#pbr-materials">PBR Materials</a></li>
-<li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#async-readback">Async Readback</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#module-forge3d.async_readback">Async Readback</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.async_readback.AsyncReadbackConfig"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackConfig</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.async_readback.AsyncReadbackHandle"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackHandle</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.async_readback.AsyncReadbackManager"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackManager</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.async_readback.AsyncRenderer"><code class="docutils literal notranslate"><span class="pre">AsyncRenderer</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.async_readback.AsyncReadbackContext"><code class="docutils literal notranslate"><span class="pre">AsyncReadbackContext</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.async_readback.batch_readback"><code class="docutils literal notranslate"><span class="pre">batch_readback()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.async_readback.benchmark_readback_performance"><code class="docutils literal notranslate"><span class="pre">benchmark_readback_performance()</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="../../api_reference.html#utilities">Utilities</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#device-information">Device Information</a></li>
 <li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#environment-reporting">Environment Reporting</a></li>
-<li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#color-management">Color Management</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api_reference.html#module-forge3d.colormap">Color Management</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.colormap.decode_png_rgba8"><code class="docutils literal notranslate"><span class="pre">decode_png_rgba8()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.colormap.get_colormap_compression_stats"><code class="docutils literal notranslate"><span class="pre">get_colormap_compression_stats()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.colormap.check_compressed_colormap_support"><code class="docutils literal notranslate"><span class="pre">check_compressed_colormap_support()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.colormap.get_supported_compression_formats"><code class="docutils literal notranslate"><span class="pre">get_supported_compression_formats()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.colormap.estimate_compression_quality"><code class="docutils literal notranslate"><span class="pre">estimate_compression_quality()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api_reference.html#forge3d.colormap.calculate_memory_savings"><code class="docutils literal notranslate"><span class="pre">calculate_memory_savings()</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="../../api_reference.html#configuration">Configuration</a><ul>
@@ -120,6 +162,32 @@
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="../../api_reference.html#type-annotations">Type Annotations</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/io.html">IO: Wavefront OBJ Import/Export</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html#python-api">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html#examples">Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/io.html#basic-import">Basic import</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/io.html#import-with-materials-and-groups">Import with materials and groups</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/io.html#export-without-materials">Export without materials</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/io.html#export-with-materials-and-groups">Export with materials and groups</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html#behavior-and-notes">Behavior and Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html#limitations">Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html#extensibility">Extensibility</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/uv.html">UV Unwrap Helpers</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/uv.html#api-python">API (Python)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/uv.html#notes">Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/uv.html#example">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/converters.html">Converters: MultipolygonZ → Mesh</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/converters.html#api-python">API (Python)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/converters.html#example">Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/converters.html#notes-limitations">Notes &amp; Limitations</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="../../color_management.html">Color Management &amp; Tonemap Pipeline</a><ul>
@@ -822,6 +890,7 @@
   <ul class="wy-breadcrumbs">
       <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
           <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+          <li class="breadcrumb-item"><a href="../forge3d.html">forge3d</a></li>
       <li class="breadcrumb-item active">forge3d.postfx</li>
       <li class="wy-breadcrumbs-aside">
       </li>
@@ -970,6 +1039,16 @@
                     <span class="s1">&#39;strength&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;default&#39;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span> <span class="s1">&#39;min&#39;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span> <span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="mf">5.0</span><span class="p">},</span>
                 <span class="p">},</span>
                 <span class="s1">&#39;priority&#39;</span><span class="p">:</span> <span class="mi">100</span><span class="p">,</span>
+                <span class="s1">&#39;temporal&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="s1">&#39;ssao&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Screen-space ambient occlusion with bilateral blur&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;parameters&#39;</span><span class="p">:</span> <span class="p">{</span>
+                    <span class="s1">&#39;radius&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;default&#39;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span> <span class="s1">&#39;min&#39;</span><span class="p">:</span> <span class="mf">0.1</span><span class="p">,</span> <span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="mf">5.0</span><span class="p">},</span>
+                    <span class="s1">&#39;intensity&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;default&#39;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span> <span class="s1">&#39;min&#39;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span> <span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="mf">5.0</span><span class="p">},</span>
+                    <span class="s1">&#39;bias&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;default&#39;</span><span class="p">:</span> <span class="mf">0.025</span><span class="p">,</span> <span class="s1">&#39;min&#39;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span> <span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="mf">0.2</span><span class="p">},</span>
+                <span class="p">},</span>
+                <span class="s1">&#39;priority&#39;</span><span class="p">:</span> <span class="mi">400</span><span class="p">,</span>
                 <span class="s1">&#39;temporal&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
             <span class="p">},</span>
             <span class="s1">&#39;sharpen&#39;</span><span class="p">:</span> <span class="p">{</span>
@@ -1214,6 +1293,37 @@
 <span class="n">_postfx_manager</span> <span class="o">=</span> <span class="n">PostFxChainManager</span><span class="p">()</span>
 
 <span class="c1"># Public API functions</span>
+
+<div class="viewcode-block" id="enable_ssao">
+<a class="viewcode-back" href="../../postfx.html#forge3d.postfx.enable_ssao">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">enable_ssao</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">radius</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">intensity</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">bias</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.025</span><span class="p">,</span> <span class="n">scene</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Enable SSAO and optionally configure a scene instance.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">scene</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">scene</span><span class="p">,</span> <span class="s1">&#39;set_ssao_parameters&#39;</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">scene</span><span class="o">.</span><span class="n">set_ssao_parameters</span><span class="p">(</span><span class="n">radius</span><span class="p">,</span> <span class="n">intensity</span><span class="p">,</span> <span class="n">bias</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>  <span class="c1"># pragma: no cover - defensive fallback</span>
+                <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s1">&#39;Scene.set_ssao_parameters failed&#39;</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">scene</span><span class="p">,</span> <span class="s1">&#39;set_ssao_enabled&#39;</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">scene</span><span class="o">.</span><span class="n">set_ssao_enabled</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>  <span class="c1"># pragma: no cover - defensive fallback</span>
+                <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s1">&#39;Scene.set_ssao_enabled failed&#39;</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">enable</span><span class="p">(</span><span class="s1">&#39;ssao&#39;</span><span class="p">,</span> <span class="n">radius</span><span class="o">=</span><span class="n">radius</span><span class="p">,</span> <span class="n">intensity</span><span class="o">=</span><span class="n">intensity</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="n">bias</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="disable_ssao">
+<a class="viewcode-back" href="../../postfx.html#forge3d.postfx.disable_ssao">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">disable_ssao</span><span class="p">(</span><span class="n">scene</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Disable SSAO and optionally update a scene instance.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">scene</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">scene</span><span class="p">,</span> <span class="s1">&#39;set_ssao_enabled&#39;</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">scene</span><span class="o">.</span><span class="n">set_ssao_enabled</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>  <span class="c1"># pragma: no cover - defensive fallback</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s1">&#39;Scene.set_ssao_enabled failed&#39;</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">disable</span><span class="p">(</span><span class="s1">&#39;ssao&#39;</span><span class="p">)</span></div>
+
+
 <div class="viewcode-block" id="enable">
 <a class="viewcode-back" href="../../postfx.html#forge3d.postfx.enable">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">enable</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
@@ -1284,6 +1394,14 @@
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="n">_postfx_manager</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="n">effect_name</span><span class="p">,</span> <span class="n">param_name</span><span class="p">)</span></div>
 
+
+
+
+<div class="viewcode-block" id="list_enabled_effects">
+<a class="viewcode-back" href="../../postfx.html#forge3d.postfx.list_enabled_effects">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">list_enabled_effects</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Alias for list() to improve readability while SSAO scaffolding lands.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="nb">list</span><span class="p">()</span></div>
 
 
 <div class="viewcode-block" id="list">

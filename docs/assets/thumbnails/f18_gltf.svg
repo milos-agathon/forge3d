@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="480" height="270" viewBox="0 0 480 270" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#312e81"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#bg3)"/>
+  <g stroke="#c7d2fe" fill="none" stroke-width="3">
+    <polygon points="80,200 140,200 140,140 80,140"/>
+    <polygon points="160,200 220,200 220,120 160,120"/>
+    <polygon points="240,200 300,200 300,100 240,100"/>
+  </g>
+  <text x="24" y="36" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#e0e7ff">F18 glTF Import</text>
+</svg>

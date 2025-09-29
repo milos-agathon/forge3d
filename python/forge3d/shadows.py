@@ -767,33 +767,37 @@ def calculate_shadow_atlas_memory(cascade_count: int, shadow_map_size: int) -> i
 def validate_shadow_memory_constraint(config: CsmConfig) -> Dict[str, any]:
     """
     Validate that shadow configuration meets the critical 256 MiB memory constraint.
-    
+
     This function is the authoritative memory policy validator for shadow atlas
     configurations. It MUST be used before creating any shadow system to prevent
     GPU allocation failures at runtime.
-    
+
     POLICY ENFORCEMENT:
     - All shadow configurations MUST pass validation before use
     - Memory usage MUST be ≤ 256 MiB (MAX_SHADOW_ATLAS_MEMORY)
     - Headroom calculation helps prevent edge-case allocation failures
-    
-    Args:
-        config: CSM configuration to validate against memory policy
-        
-    Returns:
-        dict: {
-            'valid': bool,                    # True if config meets 256 MiB constraint
-            'memory_bytes': int,              # Actual memory usage (raw bytes)
-            'memory_mb': float,               # Memory usage in MiB for display
-            'constraint_mb': float,           # Policy limit: 256.0 MiB
-            'headroom_mb': float,             # Remaining budget (negative = over limit)
-        }
-        
-    Example:
-        config = CsmConfig(cascade_count=4, shadow_map_size=2048)
-        result = validate_shadow_memory_constraint(config)
-        if not result['valid']:
-            raise RuntimeError(f"Config exceeds memory limit: {result['memory_mb']:.1f} MiB")
+
+    Parameters
+    ----------
+    config : CsmConfig
+        CSM configuration to validate against memory policy.
+
+    Returns
+    -------
+    dict
+        Dictionary with the following fields:
+        - valid (bool): True if config meets the 256 MiB constraint
+        - memory_bytes (int): Actual memory usage (raw bytes)
+        - memory_mb (float): Memory usage in MiB for display
+        - constraint_mb (float): Policy limit (256.0 MiB)
+        - headroom_mb (float): Remaining budget (negative = over limit)
+
+    Examples
+    --------
+    >>> config = CsmConfig(cascade_count=4, shadow_map_size=2048)
+    >>> result = validate_shadow_memory_constraint(config)
+    >>> if not result['valid']:
+    ...     raise RuntimeError(f"Config exceeds memory limit: {result['memory_mb']:.1f} MiB")
     """
     # Use canonical memory calculation with all assertions enabled
     memory_bytes = calculate_shadow_atlas_memory(config.cascade_count, config.shadow_map_size)

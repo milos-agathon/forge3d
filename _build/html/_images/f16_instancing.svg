@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="480" height="270" viewBox="0 0 480 270" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#bg)"/>
+  <g fill="#9ca3af" stroke="#e5e7eb" stroke-width="1">
+    <rect x="70" y="150" width="40" height="40"/>
+    <rect x="130" y="150" width="40" height="40"/>
+    <rect x="190" y="150" width="40" height="40"/>
+    <rect x="70" y="100" width="40" height="40"/>
+    <rect x="130" y="100" width="40" height="40"/>
+    <rect x="190" y="100" width="40" height="40"/>
+  </g>
+  <text x="24" y="36" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#e2e8f0">F16 Instancing</text>
+</svg>

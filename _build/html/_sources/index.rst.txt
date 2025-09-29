@@ -1,5 +1,5 @@
 forge3d Documentation
-====================
+=====================
 
 Welcome to the forge3d documentation. This is a high-performance Rust-first WebGPU/wgpu renderer with comprehensive Python API for 3D visualization, terrain rendering, and GPU-accelerated graphics.
 
@@ -16,10 +16,16 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    :caption: Core Documentation:
 
    api_reference
+   api/io
+   api/uv
+   api/converters
+   api/subdivision
+   api/displacement
+   api/curves
    color_management
    interop_zero_copy
    memory_budget
-   gpu_memory_management
+   gpu_memory_guide
    memory/index
    api/path_tracing
 
@@ -34,6 +40,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    vector_graphics
    terrain_rendering
    async_operations
+   misc_topics
 
 .. toctree::
    :maxdepth: 1
@@ -49,6 +56,15 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    integration/matplotlib
    integration/external_images
    user/datashader_interop
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Examples:
+
+   examples/f3_thick_polyline
+   examples/f2_city_demo
+   examples/f16_instancing
+   examples/f18_gltf_import
 
 .. toctree::
    :maxdepth: 1

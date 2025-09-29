@@ -15,7 +15,7 @@ use std::path::PathBuf;
 #[cfg(feature = "extension-module")]
 use wgpu::util::DeviceExt;
 
-const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const NORMAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 #[derive(Debug, Clone)]
@@ -55,6 +55,12 @@ pub struct Scene {
     bg1_height: wgpu::BindGroup,
     bg2_lut: wgpu::BindGroup,
 
+    // E2/E1: Per-tile uniforms bind group (group 3)
+    bg3_tile: wgpu::BindGroup,
+    tile_ubo: wgpu::Buffer,
+    tile_slot_ubo: wgpu::Buffer,
+    mosaic_params_ubo: wgpu::Buffer,
+
     vbuf: wgpu::Buffer,
     ibuf: wgpu::Buffer,
     nidx: u32,
@@ -82,6 +88,9 @@ pub struct Scene {
     last_uniforms: crate::terrain::TerrainUniforms,
     ssao: SsaoResources,
     ssao_enabled: bool,
+
+    // Toggle base terrain rendering
+    terrain_enabled: bool,
 
     // B5: Planar reflections
     reflection_renderer: Option<crate::core::reflections::PlanarReflectionRenderer>,
@@ -143,6 +152,12 @@ pub struct Scene {
     text3d_renderer: Option<crate::core::text_mesh::TextMeshRenderer>,
     text3d_enabled: bool,
     text3d_instances: Vec<Text3DInstance>,
+
+    // F16: GPU Instancing (feature-gated)
+    #[cfg(feature = "enable-gpu-instancing")]
+    mesh_instanced_renderer: Option<crate::render::mesh_instanced::MeshInstancedRenderer>,
+    #[cfg(feature = "enable-gpu-instancing")]
+    instanced_batches: Vec<InstancedBatch>,
 }
 
 struct Text3DInstance {
@@ -156,6 +171,19 @@ struct Text3DInstance {
     light_intensity: f32,
     metallic: f32,
     roughness: f32,
+}
+
+// F16: GPU Instancing batch description
+#[cfg(feature = "enable-gpu-instancing")]
+struct InstancedBatch {
+    vbuf: wgpu::Buffer,
+    ibuf: wgpu::Buffer,
+    instbuf: wgpu::Buffer,
+    index_count: u32,
+    instance_count: u32,
+    color: [f32; 4],
+    light_dir: [f32; 3],
+    light_intensity: f32,
 }
 
 #[repr(C)]
@@ -339,8 +367,8 @@ impl SsaoResources {
             entry_point: "cs_ssao",
         });
 
-        // Create empty layout for group 0 (not used by blur shader but needed for indexing)
-        let empty_bind_group_layout =
+        // Create empty layout for group 0 (and reuse for lower groups when shader expects higher indices)
+        let empty_bgl =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("empty_bind_group_layout"),
                 entries: &[],
@@ -351,7 +379,8 @@ impl SsaoResources {
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("ssao-blur-pipeline-layout"),
-                    bind_group_layouts: &[&ssao_bind_group_layout], // Use ssao layout since cs_ssao works
+                    // Blur uses the same entry point and layout as SSAO (group 0)
+                    bind_group_layouts: &[&ssao_bind_group_layout],
                     push_constant_ranges: &[],
                 }),
             ),
@@ -364,7 +393,8 @@ impl SsaoResources {
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("ssao-composite-pipeline-layout"),
-                    bind_group_layouts: &[&composite_bind_group_layout],
+                    // Shader may address group 2; provide empty layouts for group 0 and 1
+                    bind_group_layouts: &[&empty_bgl, &empty_bgl, &composite_bind_group_layout],
                     push_constant_ranges: &[],
                 }),
             ),
@@ -504,8 +534,8 @@ impl SsaoResources {
             ],
         });
 
-        let blur_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("ssao-blur-bind-group"),
+        let _blur_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ssao-blur-bind_group"),
             layout: &self.blur_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -530,7 +560,7 @@ impl SsaoResources {
         let color_input_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let color_storage_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let composite_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("ssao-composite-bind-group"),
+            label: Some("ssao-composite-bind_group"),
             layout: &self.composite_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -543,7 +573,8 @@ impl SsaoResources {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&self.blur_view),
+                    // Use AO output directly as blurred AO input (blur pass disabled)
+                    resource: wgpu::BindingResource::TextureView(&self.ao_view),
                 },
             ],
         });
@@ -560,13 +591,14 @@ impl SsaoResources {
             pass.set_bind_group(0, &ssao_bind_group, &[]);
             pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
         }
+        // Optional blur pass disabled: reuse SSAO output directly
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("ssao-blur-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.blur_pipeline);
-            pass.set_bind_group(0, &blur_bind_group, &[]);
+            pass.set_pipeline(&self.ssao_pipeline);
+            pass.set_bind_group(0, &ssao_bind_group, &[]);
             pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
         }
         {
@@ -575,7 +607,8 @@ impl SsaoResources {
                 timestamp_writes: None,
             });
             pass.set_pipeline(&self.composite_pipeline);
-            pass.set_bind_group(0, &composite_bind_group, &[]);
+            // Composite pipeline layout expects the bind group at index 2
+            pass.set_bind_group(2, &composite_bind_group, &[]);
             pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
         }
 
@@ -821,6 +854,40 @@ impl Scene {
         let bg1_height = tp.make_bg_height(&g.device, &hview, &hsamp);
         let bg2_lut = tp.make_bg_lut(&g.device, &lut.view, &lut.sampler);
 
+        // E2/E1: Create default per-tile bind group (group 3)
+        // Minimal no-op values to satisfy pipeline layout
+        let tile_world_remap: [f32; 4] = [1.0, 1.0, 0.0, 0.0];
+        let tile_ubo = g
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("scene.tile_ubo"),
+                contents: bytemuck::cast_slice(&tile_world_remap),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        // 16 bytes zeroed for TileSlotU (u32 fields) and MosaicParams (2 floats + 2 u32)
+        let zero16 = [0u8; 16];
+        let tile_slot_ubo = g
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("scene.tile_slot_ubo"),
+                contents: &zero16,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let mosaic_params_ubo = g
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("scene.mosaic_params_ubo"),
+                contents: &zero16,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let bg3_tile = tp.make_bg_tile(
+            &g.device,
+            &tile_ubo,
+            None,
+            &tile_slot_ubo,
+            &mosaic_params_ubo,
+        );
+
         // B5: Create a default planar reflection renderer (disabled by default)
         let mut reflection_renderer = crate::core::reflections::PlanarReflectionRenderer::new(
             &g.device,
@@ -863,6 +930,10 @@ impl Scene {
             bg0_globals,
             bg1_height,
             bg2_lut,
+            bg3_tile,
+            tile_ubo,
+            tile_slot_ubo,
+            mosaic_params_ubo,
             vbuf,
             ibuf,
             nidx,
@@ -886,6 +957,7 @@ impl Scene {
             last_uniforms: uniforms,
             ssao,
             ssao_enabled: false,
+            terrain_enabled: true,
 
             // B5: Planar reflections - initially disabled
             reflection_renderer: None,
@@ -947,6 +1019,16 @@ impl Scene {
             text3d_renderer: Some(text3d_renderer),
             text3d_enabled: false,
             text3d_instances: Vec::new(),
+
+            // F16: GPU instancing state
+            #[cfg(feature = "enable-gpu-instancing")]
+            mesh_instanced_renderer: Some(crate::render::mesh_instanced::MeshInstancedRenderer::new(
+                &g.device,
+                TEXTURE_FORMAT,
+                depth_format,
+            )),
+            #[cfg(feature = "enable-gpu-instancing")]
+            instanced_batches: Vec::new(),
         })
     }
 
@@ -1238,6 +1320,31 @@ impl Scene {
                 }
             }
 
+            // F16: Draw any GPU-instanced mesh batches
+            #[cfg(feature = "enable-gpu-instancing")]
+            {
+                if self.mesh_instanced_renderer.is_some() && !self.instanced_batches.is_empty() {
+                    let view = self.scene.view;
+                    let proj = self.scene.proj;
+                    for b in &self.instanced_batches {
+                        self.mesh_instanced_renderer.as_ref().unwrap().draw_batch_params(
+                            &mut rp,
+                            &g.queue,
+                            view,
+                            proj,
+                            b.color,
+                            b.light_dir,
+                            b.light_intensity,
+                            &b.vbuf,
+                            &b.ibuf,
+                            &b.instbuf,
+                            b.index_count,
+                            b.instance_count,
+                        );
+                    }
+                }
+            }
+
             // B13: Render point and spot lights if enabled (deferred lighting)
             if self.point_spot_lights_enabled {
                 if let Some(ref mut lights_renderer) = self.point_spot_lights_renderer {
@@ -1260,24 +1367,35 @@ impl Scene {
                 }
             }
 
-            rp.set_pipeline(&self.tp.pipeline);
-            rp.set_bind_group(0, &self.bg0_globals, &[]);
-            rp.set_bind_group(1, &self.bg1_height, &[]);
-            rp.set_bind_group(2, &self.bg2_lut, &[]);
+            if self.terrain_enabled {
+                rp.set_pipeline(&self.tp.pipeline);
+                rp.set_bind_group(0, &self.bg0_globals, &[]);
+                rp.set_bind_group(1, &self.bg1_height, &[]);
+                rp.set_bind_group(2, &self.bg2_lut, &[]);
 
-            // B7: Set cloud shadow bind group if available
-            if let Some(ref cloud_bg) = self.bg3_cloud_shadows {
-                rp.set_bind_group(3, cloud_bg, &[]);
-            }
-            if let Some(ref renderer) = self.reflection_renderer {
-                if let Some(reflection_bg) = renderer.bind_group() {
-                    rp.set_bind_group(4, reflection_bg, &[]);
+                // E2/E1: Bind per-tile group at index 3
+                rp.set_bind_group(3, &self.bg3_tile, &[]);
+
+                let max_groups = crate::gpu::ctx().device.limits().max_bind_groups;
+                // B7: Cloud shadows at group 4 when available and supported
+                if max_groups >= 5 {
+                    if let Some(ref cloud_bg) = self.bg3_cloud_shadows {
+                        rp.set_bind_group(4, cloud_bg, &[]);
+                    }
                 }
-            }
+                // B5: Planar reflections at group 5 when available and supported
+                if max_groups >= 6 {
+                    if let Some(ref renderer) = self.reflection_renderer {
+                        if let Some(reflection_bg) = renderer.bind_group() {
+                            rp.set_bind_group(5, reflection_bg, &[]);
+                        }
+                    }
+                }
 
-            rp.set_vertex_buffer(0, self.vbuf.slice(..));
-            rp.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint32);
-            rp.draw_indexed(0..self.nidx, 0, 0..1);
+                rp.set_vertex_buffer(0, self.vbuf.slice(..));
+                rp.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                rp.draw_indexed(0..self.nidx, 0, 0..1);
+            }
 
             // D11: Render 3D text meshes (before overlays)
             if self.text3d_enabled {
@@ -1571,24 +1689,34 @@ impl Scene {
                 }
             }
 
-            rp.set_pipeline(&self.tp.pipeline);
-            rp.set_bind_group(0, &self.bg0_globals, &[]);
-            rp.set_bind_group(1, &self.bg1_height, &[]);
-            rp.set_bind_group(2, &self.bg2_lut, &[]);
+            if self.terrain_enabled {
+                rp.set_pipeline(&self.tp.pipeline);
+                rp.set_bind_group(0, &self.bg0_globals, &[]);
+                rp.set_bind_group(1, &self.bg1_height, &[]);
+                rp.set_bind_group(2, &self.bg2_lut, &[]);
 
-            // B7: Set cloud shadow bind group if available
-            if let Some(ref cloud_bg) = self.bg3_cloud_shadows {
-                rp.set_bind_group(3, cloud_bg, &[]);
-            }
-            if let Some(ref renderer) = self.reflection_renderer {
-                if let Some(reflection_bg) = renderer.bind_group() {
-                    rp.set_bind_group(4, reflection_bg, &[]);
+                // E2/E1: Bind per-tile group at index 3
+                rp.set_bind_group(3, &self.bg3_tile, &[]);
+                let max_groups = crate::gpu::ctx().device.limits().max_bind_groups;
+                // B7: Cloud shadows at group 4 when available and supported
+                if max_groups >= 5 {
+                    if let Some(ref cloud_bg) = self.bg3_cloud_shadows {
+                        rp.set_bind_group(4, cloud_bg, &[]);
+                    }
                 }
-            }
+                // B5: Planar reflections at group 5 when available and supported
+                if max_groups >= 6 {
+                    if let Some(ref renderer) = self.reflection_renderer {
+                        if let Some(reflection_bg) = renderer.bind_group() {
+                            rp.set_bind_group(5, reflection_bg, &[]);
+                        }
+                    }
+                }
 
-            rp.set_vertex_buffer(0, self.vbuf.slice(..));
-            rp.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint32);
-            rp.draw_indexed(0..self.nidx, 0, 0..1);
+                rp.set_vertex_buffer(0, self.vbuf.slice(..));
+                rp.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                rp.draw_indexed(0..self.nidx, 0, 0..1);
+            }
         }
         if self.ssao_enabled {
             self.ssao
@@ -4877,6 +5005,18 @@ impl Scene {
         Ok(())
     }
 
+    #[pyo3(text_signature = "($self)")]
+    pub fn disable_terrain(&mut self) -> PyResult<()> {
+        self.terrain_enabled = false;
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn enable_terrain(&mut self) -> PyResult<()> {
+        self.terrain_enabled = true;
+        Ok(())
+    }
+
     #[pyo3(text_signature = "($self, alpha)")]
     pub fn set_altitude_overlay_alpha(&mut self, alpha: f32) -> PyResult<()> {
         if let Some(ref mut ov) = self.overlay_renderer {
@@ -5152,6 +5292,190 @@ impl Scene {
             inst.metallic = metallic.clamp(0.0, 1.0);
             inst.roughness = roughness.clamp(0.04, 1.0);
         }
+        Ok(())
+    }
+
+    // -----------------------------
+    // F16: GPU Instanced Meshes API
+    // -----------------------------
+    #[cfg(feature = "enable-gpu-instancing")]
+    #[pyo3(text_signature = "($self, positions, indices, transforms, normals=None, color=(0.85,0.85,0.9,1.0), light_dir=(0.3,0.7,0.2), light_intensity=1.2)")]
+    pub fn add_instanced_mesh(
+        &mut self,
+        positions: PyReadonlyArray2<'_, f32>,   // (Nv,3)
+        indices: PyReadonlyArray2<'_, u32>,     // (Nt,3)
+        transforms: PyReadonlyArray2<'_, f32>,  // (Ni,16) row-major
+        normals: Option<PyReadonlyArray2<'_, f32>>, // (Nv,3) optional
+        color: Option<(f32, f32, f32, f32)>,
+        light_dir: Option<(f32, f32, f32)>,
+        light_intensity: Option<f32>,
+    ) -> PyResult<usize> {
+        let pos = positions.as_array();
+        if pos.ndim() != 2 || pos.shape()[1] != 3 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "positions must have shape (N,3)",
+            ));
+        }
+        let idx = indices.as_array();
+        if idx.ndim() != 2 || idx.shape()[1] != 3 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "indices must have shape (M,3)",
+            ));
+        }
+        let trs = transforms.as_array();
+        if trs.ndim() != 2 || trs.shape()[1] != 16 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "transforms must have shape (K,16) row-major 4x4",
+            ));
+        }
+
+        let g = crate::gpu::ctx();
+
+        // Build vertices (position, normal)
+        #[cfg(feature = "enable-gpu-instancing")]
+        use crate::render::mesh_instanced::VertexPN as Vpn;
+        let nv = pos.shape()[0];
+        let mut verts: Vec<Vpn> = Vec::with_capacity(nv);
+        let n_opt = normals.as_ref().map(|n| n.as_array());
+        for i in 0..nv {
+            let p = [pos[[i, 0]], pos[[i, 1]], pos[[i, 2]]];
+            let n = if let Some(nrm) = n_opt.as_ref() {
+                if nrm.ndim() == 2 && nrm.shape()[1] == 3 {
+                    [nrm[[i, 0]], nrm[[i, 1]], nrm[[i, 2]]]
+                } else {
+                    [0.0, 0.0, 1.0]
+                }
+            } else {
+                [0.0, 0.0, 1.0]
+            };
+            verts.push(Vpn { position: p, normal: n });
+        }
+
+        // Upload vertex/index buffers
+        let vsize = (verts.len() * std::mem::size_of::<Vpn>()) as u64;
+        let isize = (idx.len() * std::mem::size_of::<u32>()) as u64;
+        let vbuf = g.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("scene-instanced-vbuf"),
+            size: vsize,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let ibuf = g.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("scene-instanced-ibuf"),
+            size: isize,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        g.queue.write_buffer(&vbuf, 0, bytemuck::cast_slice(&verts));
+        // Flatten indices to u32
+        let mut inds: Vec<u32> = Vec::with_capacity(idx.len());
+        for t in idx.rows() {
+            inds.push(t[0]);
+            inds.push(t[1]);
+            inds.push(t[2]);
+        }
+        g.queue.write_buffer(&ibuf, 0, bytemuck::cast_slice(&inds));
+
+        // Instance buffer: pack row-major 4x4 to column-major (vec4 columns)
+        let ni = trs.shape()[0];
+        let mut packed: Vec<f32> = Vec::with_capacity(ni * 16);
+        for i in 0..ni {
+            let r = trs.row(i);
+            let cm = [
+                r[0], r[4], r[8], r[12],
+                r[1], r[5], r[9], r[13],
+                r[2], r[6], r[10], r[14],
+                r[3], r[7], r[11], r[15],
+            ];
+            packed.extend_from_slice(&cm);
+        }
+        let instbuf = g.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("scene-instanced-instbuf"),
+            size: (packed.len() * std::mem::size_of::<f32>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        g.queue.write_buffer(&instbuf, 0, bytemuck::cast_slice(&packed));
+
+        // Ensure renderer exists (defensive)
+        if self.mesh_instanced_renderer.is_none() {
+            let depth_format = if self.sample_count > 1 {
+                Some(wgpu::TextureFormat::Depth32Float)
+            } else {
+                None
+            };
+            self.mesh_instanced_renderer = Some(
+                crate::render::mesh_instanced::MeshInstancedRenderer::new(
+                    &g.device,
+                    TEXTURE_FORMAT,
+                    depth_format,
+                ),
+            );
+        }
+
+        let batch = InstancedBatch {
+            vbuf,
+            ibuf,
+            instbuf,
+            index_count: inds.len() as u32,
+            instance_count: ni as u32,
+            color: color
+                .map(|c| [c.0, c.1, c.2, c.3])
+                .unwrap_or([0.85, 0.85, 0.9, 1.0]),
+            light_dir: light_dir.map(|d| [d.0, d.1, d.2]).unwrap_or([0.3, 0.7, 0.2]),
+            light_intensity: light_intensity.unwrap_or(1.2).max(0.0),
+        };
+        self.instanced_batches.push(batch);
+        Ok(self.instanced_batches.len() - 1)
+    }
+
+    #[cfg(feature = "enable-gpu-instancing")]
+    #[pyo3(text_signature = "($self)")]
+    pub fn clear_instanced_meshes(&mut self) -> PyResult<()> {
+        self.instanced_batches.clear();
+        Ok(())
+    }
+
+    #[cfg(feature = "enable-gpu-instancing")]
+    #[pyo3(text_signature = "($self, batch_index, transforms)")]
+    pub fn update_instanced_transforms(
+        &mut self,
+        batch_index: usize,
+        transforms: PyReadonlyArray2<'_, f32>,
+    ) -> PyResult<()> {
+        if batch_index >= self.instanced_batches.len() {
+            return Err(pyo3::exceptions::PyIndexError::new_err(
+                "instanced batch index out of range",
+            ));
+        }
+        let trs = transforms.as_array();
+        if trs.ndim() != 2 || trs.shape()[1] != 16 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "transforms must have shape (K,16) row-major 4x4",
+            ));
+        }
+        let g = crate::gpu::ctx();
+        let ni = trs.shape()[0];
+        let mut packed: Vec<f32> = Vec::with_capacity(ni * 16);
+        for i in 0..ni {
+            let r = trs.row(i);
+            packed.extend_from_slice(&[
+                r[0], r[4], r[8], r[12],
+                r[1], r[5], r[9], r[13],
+                r[2], r[6], r[10], r[14],
+                r[3], r[7], r[11], r[15],
+            ]);
+        }
+        let b = &mut self.instanced_batches[batch_index];
+        // Recreate buffer if needed (simplified: recreate always to match size)
+        b.instbuf = g.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("scene-instanced-instbuf"),
+            size: (packed.len() * std::mem::size_of::<f32>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        g.queue.write_buffer(&b.instbuf, 0, bytemuck::cast_slice(&packed));
+        b.instance_count = ni as u32;
         Ok(())
     }
 }

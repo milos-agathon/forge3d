@@ -162,3 +162,99 @@ def save_obj(
     og = _groups_to_py(o_groups)
 
     _forge3d.io_export_obj_py(str(path), payload, mats_payload, mg, gg, og)
+
+
+def save_stl(mesh: MeshBuffers, path: str, *, validate: bool = False) -> bool:
+    """Export a mesh to binary STL.
+
+    Parameters
+    ----------
+    mesh: MeshBuffers
+        Geometry to export (triangle list).
+    path: str
+        Destination STL path.
+    validate: bool
+        If True, performs a watertight edge check and returns the result.
+
+    Returns
+    -------
+    bool
+        Watertightness result if `validate=True`, otherwise False.
+    """
+    _ensure_native()
+    payload = _mesh_to_py(mesh)
+    return bool(_forge3d.io_export_stl_py(str(path), payload, bool(validate)))
+
+
+def import_osm_buildings_extrude(
+    features: list[dict],
+    *,
+    default_height: float = 10.0,
+    height_key: str | None = None,
+) -> MeshBuffers:
+    """Extrude OSM building footprints into a merged mesh.
+
+    Parameters
+    ----------
+    features: list of dict
+        Each dict must contain 'coords' as an (N,2) float array in XY.
+        Optionally include 'height' (float) or a custom height_key.
+    default_height: float
+        Default height when none is provided per feature.
+    height_key: Optional[str]
+        Custom key in each feature dict to read the height from.
+    """
+    _ensure_native()
+    # Minimal sanity conversion: ensure coords are float32 (N,2)
+    conv: list[dict] = []
+    for f in features:
+        d: dict = {}
+        coords = np.asarray(f["coords"], dtype=np.float32)
+        if coords.ndim != 2 or coords.shape[1] != 2:
+            raise ValueError("feature 'coords' must have shape (N,2)")
+        d["coords"] = coords
+        if height_key is not None and height_key in f:
+            d[height_key] = float(f[height_key])
+        if "height" in f:
+            d["height"] = float(f["height"])
+        conv.append(d)
+
+    result = _forge3d.import_osm_buildings_extrude_py(conv, float(default_height), height_key)
+    return _mesh_from_py(result)  # type: ignore[arg-type]
+
+
+def import_osm_buildings_from_geojson(
+    geojson: str,
+    *,
+    default_height: float = 10.0,
+    height_key: str | None = None,
+) -> MeshBuffers:
+    """Parse a GeoJSON FeatureCollection of building footprints and extrude to a merged mesh.
+
+    Parameters
+    ----------
+    geojson: str
+        Full GeoJSON string for a FeatureCollection with Polygon/MultiPolygon features.
+    default_height: float
+        Default height when feature properties lack a height field.
+    height_key: Optional[str]
+        Name of a property field to read height from (fallback to "height" when None).
+    """
+    _ensure_native()
+    result = _forge3d.import_osm_buildings_from_geojson_py(
+        str(geojson), float(default_height), height_key
+    )
+    return _mesh_from_py(result)  # type: ignore[arg-type]
+
+
+def import_gltf(path: str) -> MeshBuffers:
+    """Import the first mesh primitive from a glTF 2.0 file (.gltf or .glb).
+
+    Parameters
+    ----------
+    path: str
+        Path to a .gltf (JSON) or .glb (binary) file. Supports embedded buffers and external.
+    """
+    _ensure_native()
+    result = _forge3d.io_import_gltf_py(str(path))
+    return _mesh_from_py(result)  # type: ignore[arg-type]

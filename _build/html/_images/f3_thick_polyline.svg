@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="480" height="270" viewBox="0 0 480 270" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#bg)"/>
+  <g stroke="#7dd3fc" stroke-width="18" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M60 200 L 200 200 L 200 80 L 360 80"/>
+  </g>
+  <text x="24" y="36" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#e2e8f0">F3 Thick Polyline</text>
+</svg>

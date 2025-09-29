@@ -6,6 +6,7 @@ import numpy as np
 from typing import Tuple, List, Optional, Union, Dict, Any
 from enum import Enum
 import warnings
+import os
 
 try:
     # Use the actual native extension module name
@@ -14,6 +15,9 @@ try:
 except Exception:
     NATIVE_AVAILABLE = False
     warnings.warn("Native SDF module not available, using fallback implementation")
+
+# Opt-in to native SDF via env var; default to CPU fallback for broader compatibility
+USE_NATIVE_SDF = os.environ.get("F3D_USE_NATIVE_SDF", "0") == "1"
 
 
 class SdfPrimitiveType(Enum):
@@ -409,7 +413,7 @@ class HybridRenderer:
         Returns:
             RGBA8 image as numpy array with shape (height, width, 4)
         """
-        if NATIVE_AVAILABLE and hasattr(forge3d_native, 'hybrid_render'):
+        if USE_NATIVE_SDF and NATIVE_AVAILABLE and hasattr(forge3d_native, 'hybrid_render'):
             # Use native implementation if available
             try:
                 return self._render_native(scene, spheres or [])

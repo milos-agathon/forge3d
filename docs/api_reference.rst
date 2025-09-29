@@ -57,68 +57,17 @@ High-level scene management for complex rendering scenarios.
    # Render terrain
    terrain_image = scene.render_terrain_rgba()
 
-Vector Graphics
----------------
+Vector Graphics (Overview)
+--------------------------
 
-Polygons
-~~~~~~~~
-
-.. autofunction:: forge3d.add_polygons
-
-Add polygon geometries to the vector layer.
-
-**Parameters:**
-
-- **coords** (*array_like*): Polygon coordinates as [N, M, 2] array
-- **colors** (*array_like*, optional): Colors as [N, 4] RGBA array
-- **stroke_widths** (*array_like*, optional): Stroke widths as [N] array
-
-**Example:**
-
-.. code-block:: python
-
-   # Create triangle polygon
-   triangle = np.array([[[0, 0], [100, 0], [50, 100]]])
-   colors = np.array([[1.0, 0.0, 0.0, 1.0]])  # Red
-   
-   f3d.add_polygons(triangle, colors=colors)
-
-Lines
-~~~~~
-
-.. autofunction:: forge3d.add_lines
-
-Add line geometries with optional styling.
-
-**Parameters:**
-
-- **coords** (*array_like*): Line coordinates as [N, M, 2] array
-- **colors** (*array_like*, optional): Colors as [N, 4] RGBA array  
-- **widths** (*array_like*, optional): Line widths as [N] array
-- **caps** (*str*, optional): Line cap style ('round', 'square', 'butt')
-- **joins** (*str*, optional): Line join style ('round', 'bevel', 'miter')
-
-Points
-~~~~~~
-
-.. autofunction:: forge3d.add_points
-
-Add point geometries with customizable sprites.
-
-**Parameters:**
-
-- **coords** (*array_like*): Point coordinates as [N, 2] array
-- **sizes** (*array_like*, optional): Point sizes in pixels as [N] array
-- **colors** (*array_like*, optional): Colors as [N, 4] RGBA array
-- **shapes** (*str*, optional): Point shape ('circle', 'square', 'diamond')
+The vector API (polygons, lines, points) is exposed via the native module and high-level helpers
+in examples. Refer to the examples section for usage patterns.
 
 Terrain Rendering
 -----------------
 
 Height Data Processing
-~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: forge3d.make_grid
+~~~~~~~~~~~~~~~~~~~~~~
 
 Generate coordinate grids for terrain rendering.
 
@@ -127,7 +76,8 @@ Generate coordinate grids for terrain rendering.
 - **y_coords** (*ndarray*): Y coordinate array  
 - **indices** (*ndarray*): Triangle indices for meshes
 
-.. autofunction:: forge3d.add_terrain
+.. automethod:: forge3d.Renderer.add_terrain
+   :noindex:
 
 Add terrain from height field data.
 
@@ -141,26 +91,7 @@ Add terrain from height field data.
 Memory Management
 -----------------
 
-GPU Memory Tracking
-~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: forge3d.core.memory_tracker.ResourceRegistry
-   :members:
-   :undoc-members:
-
-Resource tracking for GPU memory management.
-
-**Example:**
-
-.. code-block:: python
-
-   from forge3d.core.memory_tracker import global_tracker
-   
-   # Get current memory usage
-   metrics = global_tracker().get_metrics()
-   print(f"Buffer memory: {metrics.buffer_bytes / 1024 / 1024:.1f} MiB")
-   print(f"Texture memory: {metrics.texture_bytes / 1024 / 1024:.1f} MiB")
-   print(f"Within budget: {metrics.within_budget}")
+See the dedicated pages on memory budget and GPU memory guide for details on tracking and budgets.
 
 Budget Management
 ~~~~~~~~~~~~~~~~~
@@ -213,11 +144,7 @@ Cascaded shadow mapping with configurable quality presets.
 PBR Materials
 ~~~~~~~~~~~~~
 
-.. automodule:: forge3d.core.material
-   :members:
-   :undoc-members:
-
-Physically-based rendering materials following the metallic-roughness workflow.
+See :doc:`pbr_materials` for the Python-side PBR materials API and usage patterns.
 
 **Material Presets:**
 
@@ -234,11 +161,7 @@ Physically-based rendering materials following the metallic-roughness workflow.
 Async Readback
 ~~~~~~~~~~~~~~
 
-.. automodule:: forge3d.async_readback
-   :members:
-   :undoc-members:
-
-Asynchronous texture readback for improved performance.
+See :doc:`async_readback_guide` for guidance on asynchronous readback patterns.
 
 **Example:**
 
@@ -269,7 +192,7 @@ Utilities
 Device Information
 ~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: forge3d.device_diagnostics
+.. autofunction:: forge3d.device_probe
 
 Get information about available GPU devices.
 
@@ -279,11 +202,11 @@ Get information about available GPU devices.
 - Memory limits and capabilities
 
 Environment Reporting
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: forge3d.report_environment
+.. autofunction:: forge3d.enumerate_adapters
 
-Generate environment report for debugging.
+Enumerate available GPU adapters (may return an empty list on CPU-only builds).
 
 **Returns:**
 - System information
@@ -312,7 +235,7 @@ Configuration
 -------------
 
 Environment Variables
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 forge3d behavior can be controlled through environment variables:
 
@@ -341,7 +264,7 @@ forge3d behavior can be controlled through environment variables:
   - ``TRACE`` - Maximum verbosity
 
 GPU Backend Selection
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -359,7 +282,7 @@ Error Handling
 --------------
 
 Common Exceptions
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
 **RenderError**
   Base exception for rendering errors.
@@ -402,7 +325,7 @@ Debugging Tips
 5. **Size Limits:** Start with smaller textures and scale up as needed
 
 Performance Tips
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 
 1. **Reuse Renderers:** Create renderer once, call render methods multiple times
 2. **Batch Operations:** Group multiple render calls together
@@ -431,4 +354,4 @@ forge3d provides comprehensive type hints for better IDE support:
        scene.set_height_data(heights, spacing, exaggeration) 
        return scene.render_terrain_rgba()
 
-For more examples and detailed guides, see the :doc:`examples` section.
+For more examples and detailed guides, see the Examples section in the main index.

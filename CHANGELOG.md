@@ -9,6 +9,36 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Geometry core module with extrusion, primitive generation, validation, and welding helpers (Workstream F phase 1)
 - Python geometry facade exposing mesh helpers with new demos and pytest coverage
 
+## [0.78.0]
+
+### Added
+- Workstream F — Geometry & IO (recorded from `roadmap2.csv`)
+  - F1: Polygon Extrusion — GPU prism mesh generation; normals/UVs validated.
+  - F2: OSM Building Footprints — import footprints and apply heights.
+  - F3: Thick Polylines 3D — constant pixel/world width, joins/caps, no z-fighting.
+  - F4: Import OBJ + MTL — OBJ parser and materials.
+  - F5: Export to OBJ — round-trip tri/UV/normals; Blender opens.
+  - F6: Export STL (3D Print) — watertight meshes; binary STL.
+  - F7: MultipolygonZ → OBJ — extrude MultiPolygonZ with materials.
+  - F8: Consistent Normals & Weld — weld + smooth normals; deterministic import hygiene.
+  - F9: Primitive Mesh Library — planes/boxes/spheres/cylinders/cones/torus; text3D.
+  - F10: UV Unwrap Helpers — planar/spherical UVs; texel-density mindful.
+  - F11: Subdivision Surface — Loop subdivision with crease/boundary preservation; UV interpolation; normals recomputed.
+  - F12: Displacement Modifiers — heightmap/procedural displacement; tangent/normals workflow.
+  - F13: PLY Import — attributes import (pos/nrm/uv/color) with bbox/stats parity.
+  - F14: Mesh Transform Ops — center/scale/flip/swap and bounds reporting.
+  - F15: Mesh Info & Validate — diagnostics for duplicates/degenerates/non‑manifold edges and stats.
+  - F16: Mesh Instancing (Raster) — CPU and GPU paths; indirect draws; examples.
+  - F17: Curve & Tube Primitives — ribbons/tubes with joins (miter/bevel/round), caps, and UVs.
+  - F18: glTF 2.0 import (+Draco) — loader and PBR mapping.
+
+### Changed
+- Scene SSAO/blur/composite pipeline alignment and bind group corrections; fixed validation errors in demos.
+- Terrain tile bind group size fix (page table dummy buffer sized to 32 bytes) to satisfy WGSL struct layout.
+
+### Tests
+- All Workstream F tests enabled and passing: subdivision (including creases), UV/tangent generation, transforms, validate, instancing, and curves joins.
+
 ## [0.60.0]
 
 ### Added

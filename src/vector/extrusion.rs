@@ -120,7 +120,7 @@ fn build_prism(
         },
     );
 
-    // Bottom face vertices
+    // Bottom face vertices (Y=0 plane)
     for vertex in &tess.base_vertices {
         positions.push(Vec3::new(vertex.x, 0.0, vertex.y));
         normals.push(Vec3::new(0.0, -1.0, 0.0));
@@ -140,7 +140,7 @@ fn build_prism(
 
     let top_vertex_offset = positions.len();
 
-    // Top face vertices
+    // Top face vertices (Y=height plane)
     for vertex in &tess.base_vertices {
         positions.push(Vec3::new(vertex.x, height, vertex.y));
         normals.push(Vec3::new(0.0, 1.0, 0.0));

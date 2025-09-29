@@ -110,11 +110,15 @@ pub mod geometry;
 pub mod gpu;
 pub mod grid;
 pub mod io; // IO: OBJ/PLY/glTF readers/writers
+pub mod import; // Importers: OSM buildings, etc.
 pub mod loaders;
+pub mod uv; // UV unwrap helpers (planar, spherical)
+pub mod converters; // Geometry converters (e.g., MultipolygonZ -> OBJ)
 pub mod mesh;
 pub mod path_tracing;
 pub mod pipeline;
 pub mod renderer;
+pub mod render; // Rendering utilities (instancing)
 pub mod scene;
 pub mod sdf; // New SDF module
 pub mod shadows; // Shadow mapping implementations
@@ -892,6 +896,25 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         crate::geometry::geometry_transform_bounds_py,
         m
     )?)?;
+    // Phase 4: subdivision, displacement, curves
+    m.add_function(wrap_pyfunction!(crate::geometry::geometry_subdivide_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::geometry_displace_heightmap_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::geometry_displace_procedural_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::geometry_generate_ribbon_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::geometry_generate_tube_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::geometry_generate_thick_polyline_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::geometry_generate_tangents_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::geometry_attach_tangents_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::geometry_subdivide_adaptive_py, m)?)?;
+    // Phase 6: instancing
+    m.add_function(wrap_pyfunction!(crate::render::instancing::geometry_instance_mesh_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::render::instancing::gpu_instancing_available_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::render::instancing::geometry_instance_mesh_gpu_stub_py, m)?)?;
+    #[cfg(all(feature = "enable-gpu-instancing"))]
+    {
+        m.add_function(wrap_pyfunction!(crate::render::instancing::geometry_instance_mesh_gpu_py, m)?)?;
+        m.add_function(wrap_pyfunction!(crate::render::instancing::geometry_instance_mesh_gpu_render_py, m)?)?;
+    }
 
     // Native SDF placeholder renderer
     m.add_function(wrap_pyfunction!(hybrid_render, m)?)?;
@@ -899,6 +922,11 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // IO: OBJ import/export
     m.add_function(wrap_pyfunction!(crate::io::obj_read::io_import_obj_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::io::obj_write::io_export_obj_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::io::stl_write::io_export_stl_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::io::gltf_read::io_import_gltf_py, m)?)?;
+    // Import: OSM buildings helper
+    m.add_function(wrap_pyfunction!(crate::import::osm_buildings::import_osm_buildings_extrude_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::import::osm_buildings::import_osm_buildings_from_geojson_py, m)?)?;
 
     // GPU utilities (adapter enumeration and probe)
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
@@ -910,6 +938,11 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(c5_build_framegraph_report, m)?)?;
     m.add_function(wrap_pyfunction!(c6_mt_record_demo, m)?)?;
     m.add_function(wrap_pyfunction!(c7_async_compute_demo, m)?)?;
+
+    // UV unwrap helpers
+    m.add_function(wrap_pyfunction!(crate::uv::unwrap::uv_planar_unwrap_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::uv::unwrap::uv_spherical_unwrap_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::converters::multipolygonz_to_obj::converters_multipolygonz_to_obj_py, m)?)?;
     // Path tracing (GPU MVP)
     m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
 

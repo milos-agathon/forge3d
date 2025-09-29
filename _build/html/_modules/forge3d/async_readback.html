@@ -1,21 +1,21 @@
-
-
 <!DOCTYPE html>
-<html class="writer-html5" lang="en" data-content_root="../../">
+<html class="writer-html5" lang="en" >
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>forge3d.async_readback &mdash; forge3d Documentation</title>
-      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
-      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
-      <link rel="stylesheet" type="text/css" href="../../_static/custom.css" />
-
+      <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
   
-      <script src="../../_static/jquery.js?v=5d32c60e"></script>
-      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
-      <script src="../../_static/documentation_options.js?v=9e420a66"></script>
-      <script src="../../_static/doctools.js?v=9bcbadda"></script>
-      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="../../_static/jquery.js?v=5d32c60e"></script>
+        <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="../../_static/documentation_options.js?v=ee774964"></script>
+        <script src="../../_static/doctools.js?v=9a2dae69"></script>
+        <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" /> 
@@ -32,6 +32,9 @@
           <a href="../../index.html" class="icon icon-home">
             forge3d
           </a>
+              <div class="version">
+                0.39.0
+              </div>
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
     <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
@@ -159,6 +162,32 @@
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="../../api_reference.html#type-annotations">Type Annotations</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/io.html">IO: Wavefront OBJ Import/Export</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html#python-api">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html#examples">Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/io.html#basic-import">Basic import</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/io.html#import-with-materials-and-groups">Import with materials and groups</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/io.html#export-without-materials">Export without materials</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/io.html#export-with-materials-and-groups">Export with materials and groups</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html#behavior-and-notes">Behavior and Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html#limitations">Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html#extensibility">Extensibility</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/uv.html">UV Unwrap Helpers</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/uv.html#api-python">API (Python)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/uv.html#notes">Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/uv.html#example">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/converters.html">Converters: MultipolygonZ → Mesh</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/converters.html#api-python">API (Python)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/converters.html#example">Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/converters.html#notes-limitations">Notes &amp; Limitations</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="../../color_management.html">Color Management &amp; Tonemap Pipeline</a><ul>
@@ -498,6 +527,7 @@
 <li class="toctree-l1"><a class="reference internal" href="../../api/path_tracing.html">A1: GPU Path Tracer (MVP)</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="../../api/path_tracing.html#gpu-usage">GPU Usage</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../api/path_tracing.html#cpu-reference">CPU Reference</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/path_tracing.html#progressive-tiling-a15">Progressive Tiling (A15)</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../../api/path_tracing.html#limitations">Limitations</a></li>
 </ul>
 </li>
@@ -860,6 +890,7 @@
   <ul class="wy-breadcrumbs">
       <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
           <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+          <li class="breadcrumb-item"><a href="../forge3d.html">forge3d</a></li>
       <li class="breadcrumb-item active">forge3d.async_readback</li>
       <li class="wy-breadcrumbs-aside">
       </li>

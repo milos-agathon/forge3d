@@ -386,7 +386,8 @@ impl TerrainPipeline {
     ) -> BindGroup {
         let pt_dummy = device.create_buffer(&BufferDescriptor {
             label: Some("vf.Terrain.page_table.dummy"),
-            size: 16,
+            // Must be at least the size of one PageTableEntry (8 u32 = 32 bytes)
+            size: 32,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
