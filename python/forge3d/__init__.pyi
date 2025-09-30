@@ -76,9 +76,52 @@ class Scene:
     def get_cloud_params(self) -> Tuple[float, float, float, float]: ...
     def debug_lut_format(self) -> str: ...
 
+# Vector Picking & OIT helpers
+def set_point_shape_mode(mode: int) -> None: ...
+def set_point_lod_threshold(threshold: float) -> None: ...
+
+def is_weighted_oit_available() -> bool: ...
+
+def vector_oit_and_pick_demo(width: int = ..., height: int = ...) -> Tuple[np.ndarray, int]: ...
+
+def vector_render_oit_py(
+    width: int,
+    height: int,
+    *,
+    points_xy: Optional[Sequence[Tuple[float, float]]] = ...,
+    point_rgba: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
+    point_size: Optional[Sequence[float]] = ...,
+    polylines: Optional[Sequence[Sequence[Tuple[float, float]]]] = ...,
+    polyline_rgba: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
+    stroke_width: Optional[Sequence[float]] = ...,
+) -> np.ndarray: ...  # (H,W,4) uint8
+
+def vector_render_pick_map_py(
+    width: int,
+    height: int,
+    *,
+    points_xy: Optional[Sequence[Tuple[float, float]]] = ...,
+    polylines: Optional[Sequence[Sequence[Tuple[float, float]]]] = ...,
+    base_pick_id: Optional[int] = ...,
+) -> np.ndarray: ...  # (H,W) uint32
+
+def vector_render_oit_and_pick_py(
+    width: int,
+    height: int,
+    *,
+    points_xy: Optional[Sequence[Tuple[float, float]]] = ...,
+    point_rgba: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
+    point_size: Optional[Sequence[float]] = ...,
+    polylines: Optional[Sequence[Sequence[Tuple[float, float]]]] = ...,
+    polyline_rgba: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
+    stroke_width: Optional[Sequence[float]] = ...,
+    base_pick_id: Optional[int] = ...,
+) -> Tuple[np.ndarray, np.ndarray]: ...  # (H,W,4) uint8, (H,W) uint32
+
+def composite_rgba_over(bottom: np.ndarray, top: np.ndarray, *, premultiplied: bool = ...) -> np.ndarray: ...  # (H,W,4) uint8
+
 # Optional export if compiled with --features terrain_spike
 class TerrainSpike: ...
-def grid_generate(nx: int, nz: int, spacing: Tuple[float, float] = ..., origin: str = ...) -> Tuple[np.ndarray, np.ndarray, np.ndarray]: ...
 
 def png_to_numpy(path: PathLikeStr) -> np.ndarray: ...          # (H,W,4) uint8
 def numpy_to_png(path: PathLikeStr, array: np.ndarray) -> None: ...
@@ -135,6 +178,16 @@ def run_benchmark(
     colormap: str = ...,
     seed: int = ...,
 ) -> Dict[str, Any]: ...
+
+# Convenience vector scene wrapper (re-exported from forge3d.vector)
+class VectorScene:
+    def __init__(self) -> None: ...
+    def clear(self) -> None: ...
+    def add_point(self, x: float, y: float, rgba: Tuple[float, float, float, float] | None = ..., size: float | None = ...) -> None: ...
+    def add_polyline(self, path: Sequence[Tuple[float, float]], rgba: Tuple[float, float, float, float] | None = ..., width: float | None = ...) -> None: ...
+    def render_oit(self, width: int, height: int) -> np.ndarray: ...  # (H,W,4) uint8
+    def render_pick_map(self, width: int, height: int, base_pick_id: int = ...) -> np.ndarray: ...  # (H,W) uint32
+    def render_oit_and_pick(self, width: int, height: int, base_pick_id: int = ...) -> Tuple[np.ndarray, np.ndarray]: ...  # (H,W,4) uint8, (H,W) uint32
 
 # A13: Path guiding (Python utility)
 class OnlineGuidingGrid:

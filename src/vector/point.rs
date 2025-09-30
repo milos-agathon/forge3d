@@ -7,6 +7,8 @@ use crate::vector::data::{validate_point_instances, PointInstance};
 use crate::vector::layer::Layer;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec2;
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
 /// Instanced point renderer with H20,H21,H22 enhancements
 pub struct PointRenderer {
@@ -15,6 +17,12 @@ pub struct PointRenderer {
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     bind_group_layout: wgpu::BindGroupLayout,
+    // H5: Picking pipeline and resources
+    pick_pipeline: wgpu::RenderPipeline,
+    pick_uniform_buffer: wgpu::Buffer,
+    pick_bind_group: wgpu::BindGroup,
+    // H4: Weighted OIT pipeline for points
+    oit_pipeline: wgpu::RenderPipeline,
     instance_capacity: usize,
     // H20: Debug mode support
     debug_flags: DebugFlags,
@@ -23,6 +31,27 @@ pub struct PointRenderer {
     // H22: Clip.w scaling parameters
     enable_clip_w_scaling: bool,
     depth_range: (f32, f32), // (near, far)
+    // H2: Shape/Lod params
+    shape_mode: u32,
+    lod_threshold: f32,
+}
+
+// Global configuration for point rendering (shape mode & LOD threshold)
+static GLOBAL_POINT_CONFIG: Lazy<Mutex<(u32, f32)>> = Lazy::new(|| Mutex::new((0u32, 1.0f32)));
+
+pub fn set_global_shape_mode(mode: u32) {
+    let mut cfg = GLOBAL_POINT_CONFIG.lock().expect("point cfg poisoned");
+    cfg.0 = mode;
+}
+
+pub fn set_global_lod_threshold(threshold: f32) {
+    let mut cfg = GLOBAL_POINT_CONFIG.lock().expect("point cfg poisoned");
+    cfg.1 = threshold.max(0.0);
+}
+
+fn get_global_config() -> (u32, f32) {
+    let cfg = GLOBAL_POINT_CONFIG.lock().expect("point cfg poisoned");
+    *cfg
 }
 
 /// Point rendering uniforms with H20,H21,H22 enhancements
@@ -36,6 +65,8 @@ struct PointUniform {
     atlas_size: [f32; 2],       // H21: Texture atlas dimensions
     enable_clip_w_scaling: u32, // H22: Enable clip.w aware sizing
     depth_range: [f32; 2],      // H22: Near/far planes for clip.w scaling
+    shape_mode: u32,            // H2: shape/material mode (0=circle,4=texture,5=sphere impostor)
+    lod_threshold: f32,         // H2: pixel-size threshold for LOD
 }
 
 /// H20: Debug rendering mode flags
@@ -214,29 +245,62 @@ impl PointRenderer {
             mapped_at_creation: false,
         });
 
-        // Create bind group layout
+        // Create bind group layout with uniform + optional atlas texture/sampler
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vf.Vector.Point.BindGroupLayout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         });
 
-        // Create bind group
+        // Default fallback texture/sampler (1x1 white)
+        let default_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("vf.Vector.Point.DefaultTexture"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let default_view = default_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+
+        // Create bind group with defaults
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vf.Vector.Point.BindGroup"),
             layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&default_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&default_sampler) },
+            ],
         });
 
         // Create pipeline layout
@@ -316,12 +380,179 @@ impl PointRenderer {
             multiview: None,
         });
 
+        // H4: OIT pipeline for points (fs_oit, MRT)
+        let oit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("vf.Vector.Point.OITPipelineLayout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let oit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("vf.Vector.Point.OITPipeline"),
+            layout: Some(&oit_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<PointInstance>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &[
+                            wgpu::VertexAttribute { offset: 0, shader_location: 0, format: wgpu::VertexFormat::Float32x2 },
+                            wgpu::VertexAttribute { offset: 8, shader_location: 1, format: wgpu::VertexFormat::Float32 },
+                            wgpu::VertexAttribute { offset: 12, shader_location: 2, format: wgpu::VertexFormat::Float32x4 },
+                            wgpu::VertexAttribute { offset: 28, shader_location: 3, format: wgpu::VertexFormat::Float32 },
+                            wgpu::VertexAttribute { offset: 32, shader_location: 4, format: wgpu::VertexFormat::Float32x2 },
+                        ],
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_oit",
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
+                            alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R16Float,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
+                            alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
+        // H5: Picking bind group layout (binding 0 = uniform, binding 3 = pick uniform)
+        let pick_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("vf.Vector.Point.PickBindGroupLayout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        // H5: Picking uniform buffer (u32 pick_id + padding)
+        let pick_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vf.Vector.Point.PickUniform"),
+            size: 16, // 4 u32s for alignment
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // H5: Picking bind group
+        let pick_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vf.Vector.Point.PickBindGroup"),
+            layout: &pick_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: pick_uniform_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        // H5: Picking pipeline (R32Uint target, fs_pick)
+        let pick_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("vf.Vector.Point.PickPipelineLayout"),
+            bind_group_layouts: &[&pick_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let pick_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("vf.Vector.Point.PickPipeline"),
+            layout: Some(&pick_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<PointInstance>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &[
+                            wgpu::VertexAttribute { offset: 0, shader_location: 0, format: wgpu::VertexFormat::Float32x2 },
+                            wgpu::VertexAttribute { offset: 8, shader_location: 1, format: wgpu::VertexFormat::Float32 },
+                            wgpu::VertexAttribute { offset: 12, shader_location: 2, format: wgpu::VertexFormat::Float32x4 },
+                            wgpu::VertexAttribute { offset: 28, shader_location: 3, format: wgpu::VertexFormat::Float32 },
+                            wgpu::VertexAttribute { offset: 32, shader_location: 4, format: wgpu::VertexFormat::Float32x2 },
+                        ],
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_pick",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::R32Uint,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
         Ok(Self {
             render_pipeline,
             instance_buffer: None,
             uniform_buffer,
             bind_group,
             bind_group_layout,
+            pick_pipeline,
+            pick_uniform_buffer,
+            pick_bind_group,
+            oit_pipeline,
             instance_capacity: 0,
             // H20: Initialize with default debug flags
             debug_flags: DebugFlags::default(),
@@ -330,6 +561,8 @@ impl PointRenderer {
             // H22: Initialize with default clip.w scaling settings
             enable_clip_w_scaling: false,
             depth_range: (0.1, 1000.0), // Default near/far
+            shape_mode: get_global_config().0,
+            lod_threshold: get_global_config().1,
         })
     }
 
@@ -408,6 +641,90 @@ impl PointRenderer {
         Ok(())
     }
 
+    /// H4: Render points into OIT MRT attachments (Rgba16Float + R16Float)
+    pub fn render_oit<'pass>(
+        &'pass self,
+        render_pass: &mut wgpu::RenderPass<'pass>,
+        queue: &wgpu::Queue,
+        transform: &[[f32; 4]; 4],
+        viewport_size: [f32; 2],
+        pixel_scale: f32,
+        instance_count: u32,
+    ) -> Result<(), RenderError> {
+        if let Some(instance_buffer) = &self.instance_buffer {
+            let atlas_size = if let Some(atlas) = &self.texture_atlas {
+                [atlas.width as f32, atlas.height as f32]
+            } else {
+                [1.0, 1.0]
+            };
+
+            let uniform = PointUniform {
+                transform: *transform,
+                viewport_size,
+                pixel_scale,
+                debug_mode: self.debug_flags.to_bitfield(),
+                atlas_size,
+                enable_clip_w_scaling: self.enable_clip_w_scaling as u32,
+                depth_range: [self.depth_range.0, self.depth_range.1],
+                shape_mode: self.shape_mode,
+                lod_threshold: self.lod_threshold,
+            };
+
+            queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
+            render_pass.set_pipeline(&self.oit_pipeline);
+            render_pass.set_bind_group(0, &self.bind_group, &[]);
+            render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
+            render_pass.draw(0..4, 0..instance_count);
+        }
+        Ok(())
+    }
+
+    /// H5: Render picking IDs to an R32Uint attachment
+    pub fn render_pick<'pass>(
+        &'pass self,
+        render_pass: &mut wgpu::RenderPass<'pass>,
+        queue: &wgpu::Queue,
+        transform: &[[f32; 4]; 4],
+        viewport_size: [f32; 2],
+        pixel_scale: f32,
+        instance_count: u32,
+        base_pick_id: u32,
+    ) -> Result<(), RenderError> {
+        if let Some(instance_buffer) = &self.instance_buffer {
+            // Update uniforms
+            let atlas_size = if let Some(atlas) = &self.texture_atlas {
+                [atlas.width as f32, atlas.height as f32]
+            } else {
+                [1.0, 1.0]
+            };
+
+            let uniform = PointUniform {
+                transform: *transform,
+                viewport_size,
+                pixel_scale,
+                debug_mode: self.debug_flags.to_bitfield(),
+                atlas_size,
+                enable_clip_w_scaling: self.enable_clip_w_scaling as u32,
+                depth_range: [self.depth_range.0, self.depth_range.1],
+                shape_mode: self.shape_mode,
+                lod_threshold: self.lod_threshold,
+            };
+            queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
+
+            // Write pick uniform (u32 id + padding)
+            let pick_data: [u32; 4] = [base_pick_id, 0, 0, 0];
+            queue.write_buffer(&self.pick_uniform_buffer, 0, bytemuck::bytes_of(&pick_data));
+
+            // Draw
+            render_pass.set_pipeline(&self.pick_pipeline);
+            render_pass.set_bind_group(0, &self.pick_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
+            render_pass.draw(0..4, 0..instance_count);
+        }
+
+        Ok(())
+    }
+
     /// Render instanced points
     pub fn render<'pass>(
         &'pass self,
@@ -434,6 +751,8 @@ impl PointRenderer {
                 atlas_size,                                 // H21
                 enable_clip_w_scaling: self.enable_clip_w_scaling as u32, // H22
                 depth_range: [self.depth_range.0, self.depth_range.1], // H22
+                shape_mode: self.shape_mode,
+                lod_threshold: self.lod_threshold,
             };
 
             queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
@@ -474,42 +793,6 @@ impl PointRenderer {
 
     /// Recreate bind group with current texture atlas state
     fn recreate_bind_group(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        // Always create bind group layout with atlas texture and sampler
-        let entries = vec![
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-        ];
-
-        self.bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("vf.Vector.Point.BindGroupLayout"),
-                entries: &entries,
-            });
-
         // Use atlas texture if available, otherwise create a default 1x1 white texture
         let (texture_view, sampler) = if let Some(atlas) = &self.texture_atlas {
             (&atlas.view, &atlas.sampler)
@@ -603,6 +886,12 @@ impl PointRenderer {
     pub fn is_clip_w_scaling_enabled(&self) -> bool {
         self.enable_clip_w_scaling
     }
+
+    /// H2: Set shape mode (0=circle, 4=texture, 5=sphere impostor)
+    pub fn set_shape_mode(&mut self, mode: u32) { self.shape_mode = mode; }
+
+    /// H2: Set LOD threshold in pixels
+    pub fn set_lod_threshold(&mut self, threshold: f32) { self.lod_threshold = threshold; }
 
     /// Get layer for point rendering
     pub fn layer() -> Layer {

@@ -37,6 +37,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    pbr_materials
    shadow_mapping
    user/path_tracing
+   user/vector_picking_oit
    vector_graphics
    terrain_rendering
    async_operations

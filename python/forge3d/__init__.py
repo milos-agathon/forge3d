@@ -2,6 +2,22 @@
 # Public Python API shim and fallbacks for forge3d terrain renderer
 # Exists to provide typed fallbacks when the native module is unavailable
 # RELEVANT FILES: python/forge3d/__init__.pyi, src/core/dof.rs, tests/test_b6_dof.py, examples/dof_demo.py
+import numpy as np
+
+# Ensure a single native extension instance across both 'forge3d' and 'python.forge3d' import paths.
+# Some tests import modules as 'python.forge3d.*' while conftest imports 'forge3d'.
+# Without this alias, the relative import '. _forge3d' under 'python.forge3d' may attempt to
+# initialize the native module a second time under a different qualified name, which PyO3 forbids
+# for abi3 modules built for CPython 3.8+. We pre-import the canonical extension and alias it.
+try:  # pragma: no cover - import path and environment specific
+    import importlib as _importlib
+    import sys as _sys
+    _ext = _importlib.import_module("forge3d._forge3d")
+    _sys.modules[__name__ + "._forge3d"] = _ext
+except Exception:
+    # If the native extension isn't available (CPU-only environment), downstream modules gracefully
+    # handle its absence where applicable.
+    pass
 def list_palettes() -> list[str]:
     return colormap_supported()
 
@@ -26,6 +42,199 @@ def device_probe(backend: str | None = None) -> dict:
     in CI or environments without proper GPU setup.
     """
     return {"status": "unavailable"}
+
+# -----------------------------------------------------------------------------
+# Vector Picking & OIT helpers (Python shims around native functions if present)
+# -----------------------------------------------------------------------------
+def set_point_shape_mode(mode: int) -> None:
+    """Set global point shape mode.
+
+    Modes:
+    - 0: circle (default)
+    - 4: texture atlas sprite
+    - 5: sphere impostor (with LOD)
+    """
+    try:
+        from . import _forge3d as _native  # type: ignore[attr-defined]
+        if hasattr(_native, "set_point_shape_mode"):
+            _native.set_point_shape_mode(int(mode))
+    except Exception:
+        # Fallback: ignore in CPU-only builds
+        pass
+
+def set_point_lod_threshold(threshold: float) -> None:
+    """Set global LOD threshold in pixels for point impostors."""
+    try:
+        from . import _forge3d as _native  # type: ignore[attr-defined]
+        if hasattr(_native, "set_point_lod_threshold"):
+            _native.set_point_lod_threshold(float(threshold))
+    except Exception:
+        pass
+
+def is_weighted_oit_available() -> bool:
+    """Return True if weighted OIT pipelines are available in this build."""
+    try:
+        from . import _forge3d as _native  # type: ignore[attr-defined]
+        if hasattr(_native, "is_weighted_oit_available"):
+            return bool(_native.is_weighted_oit_available())
+    except Exception:
+        pass
+    return False
+
+def vector_oit_and_pick_demo(width: int = 512, height: int = 512):
+    """Render a small OIT composition and a picking pass, returning (rgba, pick_id).
+
+    Returns
+    -------
+    (np.ndarray(H,W,4) uint8, int)
+        Final composed image and pick id at center pixel.
+    """
+    try:
+        from . import _forge3d as _native  # type: ignore[attr-defined]
+        if hasattr(_native, "vector_oit_and_pick_demo"):
+            return _native.vector_oit_and_pick_demo(int(width), int(height))
+    except Exception as e:
+        raise RuntimeError(f"vector_oit_and_pick_demo unavailable: {e}")
+    raise RuntimeError("vector_oit_and_pick_demo unavailable in CPU-only build")
+
+def vector_render_oit_py(
+    width: int,
+    height: int,
+    *,
+    points_xy=None,
+    point_rgba=None,
+    point_size=None,
+    polylines=None,
+    polyline_rgba=None,
+    stroke_width=None,
+):
+    """Render user-provided vectors (points, polylines) using Weighted OIT.
+
+    Parameters
+    ----------
+    width, height : int
+        Target image size.
+    points_xy : sequence[(x,y)] | None
+    point_rgba : sequence[(r,g,b,a)] | None
+    point_size : sequence[float] | None
+    polylines : sequence[sequence[(x,y)]] | None
+    polyline_rgba : sequence[(r,g,b,a)] | None
+    stroke_width : sequence[float] | None
+    """
+    try:
+        from . import _forge3d as _native  # type: ignore[attr-defined]
+        if hasattr(_native, "vector_render_oit_py"):
+            return _native.vector_render_oit_py(
+                int(width), int(height),
+                points_xy, point_rgba, point_size,
+                polylines, polyline_rgba, stroke_width,
+            )
+    except Exception as e:
+        raise RuntimeError(f"vector_render_oit_py unavailable: {e}")
+    raise RuntimeError("vector_render_oit_py unavailable in CPU-only build")
+
+def vector_render_pick_map_py(
+    width: int,
+    height: int,
+    *,
+    points_xy=None,
+    polylines=None,
+    base_pick_id: int | None = None,
+):
+    """Render a full R32Uint pick map for user-provided vectors.
+
+    Returns
+    -------
+    np.ndarray(H, W) uint32
+    """
+    try:
+        from . import _forge3d as _native  # type: ignore[attr-defined]
+        if hasattr(_native, "vector_render_pick_map_py"):
+            return _native.vector_render_pick_map_py(
+                int(width), int(height), points_xy, polylines, base_pick_id
+            )
+    except Exception as e:
+        raise RuntimeError(f"vector_render_pick_map_py unavailable: {e}")
+    raise RuntimeError("vector_render_pick_map_py unavailable in CPU-only build")
+
+def vector_render_oit_and_pick_py(
+    width: int,
+    height: int,
+    *,
+    points_xy=None,
+    point_rgba=None,
+    point_size=None,
+    polylines=None,
+    polyline_rgba=None,
+    stroke_width=None,
+    base_pick_id: int | None = None,
+):
+    """Render OIT RGBA and full R32Uint pick map in one call.
+
+    Returns
+    -------
+    (np.ndarray(H,W,4) uint8, np.ndarray(H,W) uint32)
+    """
+    try:
+        from . import _forge3d as _native  # type: ignore[attr-defined]
+        if hasattr(_native, "vector_render_oit_and_pick_py"):
+            return _native.vector_render_oit_and_pick_py(
+                int(width), int(height),
+                points_xy, point_rgba, point_size,
+                polylines, polyline_rgba, stroke_width,
+                base_pick_id,
+            )
+    except Exception as e:
+        raise RuntimeError(f"vector_render_oit_and_pick_py unavailable: {e}")
+    raise RuntimeError("vector_render_oit_and_pick_py unavailable in CPU-only build")
+
+def composite_rgba_over(bottom: np.ndarray, top: np.ndarray, *, premultiplied: bool = True) -> np.ndarray:
+    """Composite top RGBA image over bottom RGBA image.
+
+    Parameters
+    ----------
+    bottom, top : np.ndarray (H,W,4) uint8
+        Bottom and top images. Must share the same shape and dtype.
+    premultiplied : bool
+        If True, treats input as premultiplied-alpha (RGB already multiplied by A/255).
+        If False, performs straight-alpha compositing.
+
+    Returns
+    -------
+    np.ndarray (H,W,4) uint8
+    """
+    b = np.asarray(bottom, dtype=np.uint8)
+    t = np.asarray(top, dtype=np.uint8)
+    if b.shape != t.shape or b.ndim != 3 or b.shape[2] != 4:
+        raise ValueError("bottom and top must have shape (H,W,4) and match")
+
+    H, W, _ = b.shape
+    out = np.empty_like(b)
+
+    # Convert to float for blending
+    bf = b.astype(np.float32) / 255.0
+    tf = t.astype(np.float32) / 255.0
+
+    a_b = bf[..., 3:4]
+    a_t = tf[..., 3:4]
+
+    if premultiplied:
+        # Premultiplied alpha
+        rgb = tf[..., :3] + bf[..., :3] * (1.0 - a_t)
+        a = a_t + a_b * (1.0 - a_t)
+    else:
+        # Straight alpha: multiply top RGB by its alpha for blending, then unpremultiply to 0..1 range
+        t_rgb_premul = tf[..., :3] * a_t
+        b_rgb_premul = bf[..., :3] * a_b
+        rgb_premul = t_rgb_premul + b_rgb_premul * (1.0 - a_t)
+        a = a_t + a_b * (1.0 - a_t)
+        # Avoid div-by-zero
+        safe_a = np.clip(a, 1e-6, 1.0)
+        rgb = rgb_premul / safe_a
+
+    out[..., :3] = np.clip(rgb * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    out[..., 3] = np.clip(a * 255.0 + 0.5, 0, 255).astype(np.uint8).squeeze(-1)
+    return out
 def c9_push_pop_roundtrip(n: int) -> bool:
     """Exercise matrix stack push/pop roundtrip n times and return True."""
     try:
@@ -56,6 +265,7 @@ from .guiding import OnlineGuidingGrid
 from .materials import PbrMaterial
 from .textures import load_texture, build_pbr_textures
 from . import geometry
+from .vector import VectorScene
 from .sdf import (
     SdfPrimitive, SdfScene, SdfSceneBuilder, HybridRenderer,
     SdfPrimitiveType, CsgOperation, TraversalMode,

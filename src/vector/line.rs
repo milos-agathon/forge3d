@@ -37,6 +37,12 @@ pub struct LineRenderer {
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     vertex_capacity: usize,
+    // H5: Picking resources
+    pick_pipeline: wgpu::RenderPipeline,
+    pick_uniform_buffer: wgpu::Buffer,
+    pick_bind_group: wgpu::BindGroup,
+    // H4: Weighted OIT pipeline (MRT)
+    oit_pipeline: wgpu::RenderPipeline,
 }
 
 /// Line rendering uniforms with H9 caps/joins support
@@ -188,12 +194,168 @@ impl LineRenderer {
             multiview: None,
         });
 
+        // H5: Picking bind group layout (binding 0 uniform, binding 3 pick uniform)
+        let pick_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("vf.Vector.Line.PickBindGroupLayout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        // H5: Picking uniform buffer (u32 + padding)
+        let pick_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vf.Vector.Line.PickUniform"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // H5: Picking bind group
+        let pick_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vf.Vector.Line.PickBindGroup"),
+            layout: &pick_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: pick_uniform_buffer.as_entire_binding() },
+            ],
+        });
+
+        // H5: Picking pipeline
+        let pick_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("vf.Vector.Line.PickPipelineLayout"),
+            bind_group_layouts: &[&pick_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pick_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("vf.Vector.Line.PickPipeline"),
+            layout: Some(&pick_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<LineInstance>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &[
+                            wgpu::VertexAttribute { offset: 0, shader_location: 0, format: wgpu::VertexFormat::Float32x2 },
+                            wgpu::VertexAttribute { offset: 8, shader_location: 1, format: wgpu::VertexFormat::Float32x2 },
+                            wgpu::VertexAttribute { offset: 16, shader_location: 2, format: wgpu::VertexFormat::Float32 },
+                            wgpu::VertexAttribute { offset: 20, shader_location: 3, format: wgpu::VertexFormat::Float32x4 },
+                            wgpu::VertexAttribute { offset: 36, shader_location: 4, format: wgpu::VertexFormat::Float32 },
+                        ],
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_pick",
+                targets: &[Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::R32Uint, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
+        // H4: OIT pipeline with MRT (Rgba16Float + R16Float)
+        let oit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("vf.Vector.Line.OITPipelineLayout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let oit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("vf.Vector.Line.OITPipeline"),
+            layout: Some(&oit_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<LineInstance>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &[
+                            wgpu::VertexAttribute { offset: 0, shader_location: 0, format: wgpu::VertexFormat::Float32x2 },
+                            wgpu::VertexAttribute { offset: 8, shader_location: 1, format: wgpu::VertexFormat::Float32x2 },
+                            wgpu::VertexAttribute { offset: 16, shader_location: 2, format: wgpu::VertexFormat::Float32 },
+                            wgpu::VertexAttribute { offset: 20, shader_location: 3, format: wgpu::VertexFormat::Float32x4 },
+                            wgpu::VertexAttribute { offset: 36, shader_location: 4, format: wgpu::VertexFormat::Float32 },
+                        ],
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_oit",
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
+                            alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R16Float,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
+                            alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
         Ok(Self {
             render_pipeline,
             vertex_buffer: None,
             uniform_buffer,
             bind_group,
             vertex_capacity: 0,
+            pick_pipeline,
+            pick_uniform_buffer,
+            pick_bind_group,
+            oit_pipeline,
         })
     }
 
@@ -287,6 +449,76 @@ impl LineRenderer {
             // by the calling renderer, not here
         }
 
+        Ok(())
+    }
+
+    /// H5: Render picking IDs to an R32Uint attachment
+    pub fn render_pick<'pass>(
+        &'pass self,
+        render_pass: &mut wgpu::RenderPass<'pass>,
+        queue: &wgpu::Queue,
+        transform: &[[f32; 4]; 4],
+        viewport_size: [f32; 2],
+        instance_count: u32,
+        base_pick_id: u32,
+    ) -> Result<(), RenderError> {
+        if let Some(vertex_buffer) = &self.vertex_buffer {
+            // Update uniforms
+            let uniform = LineUniform {
+                transform: *transform,
+                stroke_color: [1.0, 1.0, 1.0, 1.0],
+                stroke_width: 1.0,
+                viewport_size,
+                miter_limit: 4.0,
+                cap_style: LineCap::Butt as u32,
+                join_style: LineJoin::Miter as u32,
+                _pad: [0.0; 2],
+            };
+            queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
+
+            // Write pick uniform
+            let pick_data: [u32; 4] = [base_pick_id, 0, 0, 0];
+            queue.write_buffer(&self.pick_uniform_buffer, 0, bytemuck::bytes_of(&pick_data));
+
+            render_pass.set_pipeline(&self.pick_pipeline);
+            render_pass.set_bind_group(0, &self.pick_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            render_pass.draw(0..4, 0..instance_count);
+        }
+        Ok(())
+    }
+
+    /// H4: Render using weighted OIT MRT. Render pass must be created with color attachments
+    /// matching Rgba16Float and R16Float targets.
+    pub fn render_oit<'pass>(
+        &'pass self,
+        render_pass: &mut wgpu::RenderPass<'pass>,
+        queue: &wgpu::Queue,
+        transform: &[[f32; 4]; 4],
+        viewport_size: [f32; 2],
+        instance_count: u32,
+        cap_style: LineCap,
+        join_style: LineJoin,
+        miter_limit: f32,
+    ) -> Result<(), RenderError> {
+        if let Some(vertex_buffer) = &self.vertex_buffer {
+            let uniform = LineUniform {
+                transform: *transform,
+                stroke_color: [1.0, 1.0, 1.0, 1.0],
+                stroke_width: 1.0,
+                viewport_size,
+                miter_limit,
+                cap_style: cap_style as u32,
+                join_style: join_style as u32,
+                _pad: [0.0; 2],
+            };
+            queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
+
+            render_pass.set_pipeline(&self.oit_pipeline);
+            render_pass.set_bind_group(0, &self.bind_group, &[]);
+            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            render_pass.draw(0..4, 0..instance_count);
+        }
         Ok(())
     }
 

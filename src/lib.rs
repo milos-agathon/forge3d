@@ -64,6 +64,7 @@ pub mod math {
         fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
             a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
         }
+        
         fn norm(v: [f32; 3]) -> f32 {
             dot(v, v).sqrt()
         }
@@ -167,6 +168,811 @@ pub use shadows::{
     detect_peter_panning, CascadeStatistics, CascadedShadowMaps, CsmConfig, CsmRenderer,
 };
 
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn set_point_shape_mode(mode: u32) -> PyResult<()> {
+    crate::vector::point::set_global_shape_mode(mode);
+    Ok(())
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn set_point_lod_threshold(threshold: f32) -> PyResult<()> {
+    crate::vector::point::set_global_lod_threshold(threshold);
+    Ok(())
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn is_weighted_oit_available() -> PyResult<bool> {
+    Ok(crate::vector::oit::is_weighted_oit_enabled())
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn vector_render_oit_py(
+    py: Python<'_>,
+    width: u32,
+    height: u32,
+    points_xy: Option<&Bound<'_, PyAny>>,             // sequence of (x,y)
+    point_rgba: Option<&Bound<'_, PyAny>>,            // sequence of (r,g,b,a)
+    point_size: Option<&Bound<'_, PyAny>>,            // sequence of size
+    polylines: Option<&Bound<'_, PyAny>>,             // sequence of sequence of (x,y)
+    polyline_rgba: Option<&Bound<'_, PyAny>>,         // sequence of (r,g,b,a)
+    stroke_width: Option<&Bound<'_, PyAny>>,          // sequence of width
+    
+) -> PyResult<Py<PyAny>> {
+    #[cfg(not(feature = "weighted-oit"))]
+    {
+        let _ = (py, width, height, points_xy, point_rgba, point_size, polylines, polyline_rgba, stroke_width);
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "Weighted OIT feature not enabled. Build with --features weighted-oit",
+        ));
+    }
+    #[cfg(feature = "weighted-oit")]
+    {
+        use crate::vector::api::{PointDef, PolylineDef, VectorStyle};
+        use numpy::PyArray1;
+
+        // Helper extractors
+        fn extract_xy_list(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<glam::Vec2>> {
+            if let Some(obj) = list {
+                let pairs: Vec<(f32, f32)> = obj.extract()?;
+                Ok(pairs.into_iter().map(|(x,y)| glam::Vec2::new(x,y)).collect())
+            } else { Ok(Vec::new()) }
+        }
+        fn extract_rgba_list(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<[f32;4]>> {
+            if let Some(obj) = list {
+                let vals: Vec<(f32,f32,f32,f32)> = obj.extract()?;
+                Ok(vals.into_iter().map(|(r,g,b,a)| [r,g,b,a]).collect())
+            } else { Ok(Vec::new()) }
+        }
+        fn extract_f32_list(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f32>> {
+            if let Some(obj) = list { Ok(obj.extract()?) } else { Ok(Vec::new()) }
+        }
+        fn extract_polylines(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<Vec<glam::Vec2>>> {
+            if let Some(obj) = list {
+                let outer: Vec<Vec<(f32,f32)>> = obj.extract()?;
+                Ok(outer.into_iter().map(|path| path.into_iter().map(|(x,y)| glam::Vec2::new(x,y)).collect()).collect())
+            } else { Ok(Vec::new()) }
+        }
+
+        let pts = extract_xy_list(points_xy)?;
+        let pts_rgba = extract_rgba_list(point_rgba)?;
+        let pts_size = extract_f32_list(point_size)?;
+        let lines = extract_polylines(polylines)?;
+        let lines_rgba = extract_rgba_list(polyline_rgba)?;
+        let lines_w = extract_f32_list(stroke_width)?;
+
+        // Build defs
+        let mut point_defs: Vec<PointDef> = Vec::with_capacity(pts.len());
+        for i in 0..pts.len() {
+            let c = *pts_rgba.get(i).unwrap_or(&[1.0, 1.0, 1.0, 1.0]);
+            let s = *pts_size.get(i).unwrap_or(&8.0);
+            point_defs.push(PointDef { position: pts[i], style: VectorStyle { fill_color: c, stroke_color: [0.0,0.0,0.0,1.0], stroke_width: 1.0, point_size: s } });
+        }
+        let mut poly_defs: Vec<PolylineDef> = Vec::with_capacity(lines.len());
+        for i in 0..lines.len() {
+            let c = *lines_rgba.get(i).unwrap_or(&[0.2, 0.8, 0.2, 0.6]);
+            let w = *lines_w.get(i).unwrap_or(&2.0);
+            poly_defs.push(PolylineDef { path: lines[i].clone(), style: VectorStyle { fill_color: [0.0,0.0,0.0,0.0], stroke_color: c, stroke_width: w, point_size: 4.0 } });
+        }
+
+        // Acquire device/queue
+        let g = crate::gpu::ctx();
+        let device = std::sync::Arc::clone(&g.device);
+        let queue = std::sync::Arc::clone(&g.queue);
+
+        // Create renderers
+        let mut pr = crate::vector::PointRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        let mut lr = crate::vector::LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+        // Upload instances
+        if !point_defs.is_empty() {
+            let p_instances = pr.pack_points(&point_defs)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            pr.upload_points(&device, &queue, &p_instances)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        }
+        if !poly_defs.is_empty() {
+            let l_instances = lr.pack_polylines(&poly_defs)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            lr.upload_lines(&device, &l_instances)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        }
+
+        // Create OIT and final target
+        let oit = crate::vector::oit::WeightedOIT::new(&device, width, height, wgpu::TextureFormat::Rgba8UnormSrgb)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        let final_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("vf.Vector.RenderOIT.Final"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let final_view = final_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Accumulation and compose
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vf.Vector.RenderOIT.Encoder") });
+        {
+            let mut pass = oit.begin_accumulation(&mut encoder);
+            let vp = [[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]];
+            let viewport = [width as f32, height as f32];
+            if !poly_defs.is_empty() {
+                lr.render_oit(&mut pass, &queue, &vp, viewport, poly_defs.len() as u32, crate::vector::line::LineCap::Round, crate::vector::line::LineJoin::Round, 2.0)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            }
+            if !point_defs.is_empty() {
+                pr.render_oit(&mut pass, &queue, &vp, viewport, 1.0, point_defs.len() as u32)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            }
+        }
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("vf.Vector.RenderOIT.Compose"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &final_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            oit.compose(&mut pass);
+        }
+        queue.submit(Some(encoder.finish()));
+        device.poll(wgpu::Maintain::Wait);
+
+        // Readback final
+        let bpr = (width * 4 + 255) / 256 * 256;
+        let size = (bpr * height) as u64;
+        let buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("vf.Vector.RenderOIT.Read"), size, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vf.Vector.RenderOIT.Copy") });
+        enc.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture { texture: &final_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::ImageCopyBuffer { buffer: &buf, layout: wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(height) } },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 }
+        );
+        queue.submit(Some(enc.finish()));
+        device.poll(wgpu::Maintain::Wait);
+
+        let slice = buf.slice(..);
+        let (s, r) = futures_intrusive::channel::shared::oneshot_channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| { s.send(res).ok(); });
+        let recv = pollster::block_on(r.receive()).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("map_async cancelled"))?;
+        if let Err(e) = recv {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("map_async error: {:?}", e)));
+        }
+        let data = slice.get_mapped_range();
+        let mut rgba = vec![0u8; (width * height * 4) as usize];
+        for row in 0..height as usize {
+            let src = &data[(row as u32 * bpr) as usize..][..(width * 4) as usize];
+            let dst = &mut rgba[row * (width as usize) * 4..][..(width as usize) * 4];
+            dst.copy_from_slice(src);
+        }
+        drop(data);
+        buf.unmap();
+        let arr1 = PyArray1::<u8>::from_vec_bound(py, rgba);
+        let arr3 = arr1.reshape([height as usize, width as usize, 4])?;
+        Ok(arr3.into_py(py))
+    }
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn vector_render_pick_map_py(
+    py: Python<'_>,
+    width: u32,
+    height: u32,
+    points_xy: Option<&Bound<'_, PyAny>>,
+    polylines: Option<&Bound<'_, PyAny>>,
+    base_pick_id: Option<u32>,
+) -> PyResult<Py<PyAny>> {
+    use numpy::PyArray1;
+    use crate::vector::api::{PointDef, PolylineDef, VectorStyle};
+    // Parse inputs
+    fn extract_xy_list(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<glam::Vec2>> {
+        if let Some(obj) = list { Ok(obj.extract::<Vec<(f32,f32)>>()?.into_iter().map(|(x,y)| glam::Vec2::new(x,y)).collect()) } else { Ok(Vec::new()) }
+    }
+    fn extract_polylines(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<Vec<glam::Vec2>>> {
+        if let Some(obj) = list { Ok(obj.extract::<Vec<Vec<(f32,f32)>>>()?.into_iter().map(|path| path.into_iter().map(|(x,y)| glam::Vec2::new(x,y)).collect()).collect()) } else { Ok(Vec::new()) }
+    }
+    let pts = extract_xy_list(points_xy)?;
+    let lines = extract_polylines(polylines)?;
+    let mut point_defs = Vec::with_capacity(pts.len());
+    for p in &pts { point_defs.push(PointDef { position: *p, style: VectorStyle { fill_color: [1.0,1.0,1.0,1.0], stroke_color: [0.0,0.0,0.0,1.0], stroke_width: 1.0, point_size: 8.0 } }); }
+    let mut poly_defs = Vec::with_capacity(lines.len());
+    for path in lines { poly_defs.push(PolylineDef { path, style: VectorStyle { fill_color: [0.0,0.0,0.0,0.0], stroke_color: [1.0,1.0,1.0,1.0], stroke_width: 2.0, point_size: 4.0 } }); }
+
+    // Device
+    let g = crate::gpu::ctx();
+    let device = std::sync::Arc::clone(&g.device);
+    let queue = std::sync::Arc::clone(&g.queue);
+
+    let mut pr = crate::vector::PointRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    let mut lr = crate::vector::LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    if !point_defs.is_empty() {
+        let p_instances = pr.pack_points(&point_defs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        pr.upload_points(&device, &queue, &p_instances)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    }
+    if !poly_defs.is_empty() {
+        let l_instances = lr.pack_polylines(&poly_defs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        lr.upload_lines(&device, &l_instances)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    }
+
+    // Create pick target
+    let pick_tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("vf.Vector.RenderPick.Pick"),
+        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R32Uint,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = pick_tex.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vf.Vector.RenderPick.Encoder") });
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("vf.Vector.RenderPick.Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store } })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        let vp = [[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]];
+        let viewport = [width as f32, height as f32];
+        let mut base = base_pick_id.unwrap_or(1);
+        if !point_defs.is_empty() {
+            pr.render_pick(&mut pass, &queue, &vp, viewport, 1.0, point_defs.len() as u32, base)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            base += point_defs.len() as u32;
+        }
+        if !poly_defs.is_empty() {
+            lr.render_pick(&mut pass, &queue, &vp, viewport, poly_defs.len() as u32, base)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        }
+    }
+    queue.submit(Some(encoder.finish()));
+    device.poll(wgpu::Maintain::Wait);
+
+    // Readback full R32Uint map
+    let bpr = (width * 4 + 255) / 256 * 256;
+    let size = (bpr * height) as u64;
+    let buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("vf.Vector.RenderPick.Read"), size, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vf.Vector.RenderPick.Copy") });
+    enc.copy_texture_to_buffer(
+        wgpu::ImageCopyTexture { texture: &pick_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::ImageCopyBuffer { buffer: &buf, layout: wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(height) } },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 }
+    );
+    queue.submit(Some(enc.finish()));
+    device.poll(wgpu::Maintain::Wait);
+
+    let slice = buf.slice(..);
+    let (s, r) = futures_intrusive::channel::shared::oneshot_channel();
+    slice.map_async(wgpu::MapMode::Read, move |res| { s.send(res).ok(); });
+    let recv = pollster::block_on(r.receive()).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("map_async cancelled"))?;
+    if let Err(e) = recv {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("map_async error: {:?}", e)));
+    }
+    let data = slice.get_mapped_range();
+    let mut ids = vec![0u32; (width * height) as usize];
+    for row in 0..height as usize {
+        let src = &data[(row as u32 * bpr) as usize..][..(width * 4) as usize];
+        let row_ids = bytemuck::cast_slice::<u8, u32>(src);
+        let dst = &mut ids[row * (width as usize)..][..(width as usize)];
+        dst.copy_from_slice(row_ids);
+    }
+    drop(data);
+    buf.unmap();
+    let arr1 = PyArray1::<u32>::from_vec_bound(py, ids);
+    let arr2 = arr1.reshape([height as usize, width as usize])?;
+    Ok(arr2.into_py(py))
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn vector_render_oit_and_pick_py(
+    py: Python<'_>,
+    width: u32,
+    height: u32,
+    points_xy: Option<&Bound<'_, PyAny>>,             // sequence of (x,y)
+    point_rgba: Option<&Bound<'_, PyAny>>,            // sequence of (r,g,b,a)
+    point_size: Option<&Bound<'_, PyAny>>,            // sequence of size
+    polylines: Option<&Bound<'_, PyAny>>,             // sequence of sequence of (x,y)
+    polyline_rgba: Option<&Bound<'_, PyAny>>,         // sequence of (r,g,b,a)
+    stroke_width: Option<&Bound<'_, PyAny>>,          // sequence of width
+    base_pick_id: Option<u32>,
+) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
+    #[cfg(not(feature = "weighted-oit"))]
+    {
+        let _ = (py, width, height, points_xy, point_rgba, point_size, polylines, polyline_rgba, stroke_width, base_pick_id);
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "Weighted OIT feature not enabled. Build with --features weighted-oit",
+        ));
+    }
+    #[cfg(feature = "weighted-oit")]
+    {
+        use crate::vector::api::{PointDef, PolylineDef, VectorStyle};
+        use numpy::PyArray1;
+
+    // Helper extractors (same as above)
+    fn extract_xy_list(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<glam::Vec2>> {
+        if let Some(obj) = list {
+            let pairs: Vec<(f32, f32)> = obj.extract()?;
+            Ok(pairs.into_iter().map(|(x,y)| glam::Vec2::new(x,y)).collect())
+        } else { Ok(Vec::new()) }
+    }
+    fn extract_rgba_list(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<[f32;4]>> {
+        if let Some(obj) = list {
+            let vals: Vec<(f32,f32,f32,f32)> = obj.extract()?;
+            Ok(vals.into_iter().map(|(r,g,b,a)| [r,g,b,a]).collect())
+        } else { Ok(Vec::new()) }
+    }
+    fn extract_f32_list(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f32>> {
+        if let Some(obj) = list { Ok(obj.extract()?) } else { Ok(Vec::new()) }
+    }
+    fn extract_polylines(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<Vec<glam::Vec2>>> {
+        if let Some(obj) = list {
+            let outer: Vec<Vec<(f32,f32)>> = obj.extract()?;
+            Ok(outer.into_iter().map(|path| path.into_iter().map(|(x,y)| glam::Vec2::new(x,y)).collect()).collect())
+        } else { Ok(Vec::new()) }
+    }
+
+    let pts = extract_xy_list(points_xy)?;
+    let pts_rgba = extract_rgba_list(point_rgba)?;
+    let pts_size = extract_f32_list(point_size)?;
+    let lines = extract_polylines(polylines)?;
+    let lines_rgba = extract_rgba_list(polyline_rgba)?;
+    let lines_w = extract_f32_list(stroke_width)?;
+
+    // Build defs
+    let mut point_defs: Vec<PointDef> = Vec::with_capacity(pts.len());
+    for i in 0..pts.len() {
+        let c = *pts_rgba.get(i).unwrap_or(&[1.0, 1.0, 1.0, 1.0]);
+        let s = *pts_size.get(i).unwrap_or(&8.0);
+        point_defs.push(PointDef { position: pts[i], style: VectorStyle { fill_color: c, stroke_color: [0.0,0.0,0.0,1.0], stroke_width: 1.0, point_size: s } });
+    }
+    let mut poly_defs: Vec<PolylineDef> = Vec::with_capacity(lines.len());
+    for i in 0..lines.len() {
+        let c = *lines_rgba.get(i).unwrap_or(&[0.2, 0.8, 0.2, 0.6]);
+        let w = *lines_w.get(i).unwrap_or(&2.0);
+        poly_defs.push(PolylineDef { path: lines[i].clone(), style: VectorStyle { fill_color: [0.0,0.0,0.0,0.0], stroke_color: c, stroke_width: w, point_size: 4.0 } });
+    }
+
+    // Acquire device/queue
+    let g = crate::gpu::ctx();
+    let device = std::sync::Arc::clone(&g.device);
+    let queue = std::sync::Arc::clone(&g.queue);
+
+    // Create renderers
+    let mut pr = crate::vector::PointRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    let mut lr = crate::vector::LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    // Upload instances
+    if !point_defs.is_empty() {
+        let p_instances = pr.pack_points(&point_defs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        pr.upload_points(&device, &queue, &p_instances)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    }
+    if !poly_defs.is_empty() {
+        let l_instances = lr.pack_polylines(&poly_defs)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        lr.upload_lines(&device, &l_instances)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    }
+
+    // Weighted OIT accumulation buffers
+    #[cfg(not(feature = "weighted-oit"))]
+    {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "Weighted OIT feature not enabled. Build with --features weighted-oit",
+        ));
+    }
+    #[cfg(feature = "weighted-oit")]
+    let oit = crate::vector::oit::WeightedOIT::new(&device, width, height, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    // Final RGBA8 target
+    #[cfg(feature = "weighted-oit")]
+    let final_tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("vf.Vector.Combine.Final"),
+        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    #[cfg(feature = "weighted-oit")]
+    let final_view = final_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+    // Accumulation pass
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vf.Vector.Combine.Encoder") });
+    #[cfg(feature = "weighted-oit")]
+    {
+        let mut pass = oit.begin_accumulation(&mut encoder);
+        let vp = [[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]];
+        let viewport = [width as f32, height as f32];
+        if !poly_defs.is_empty() {
+            lr.render_oit(&mut pass, &queue, &vp, viewport, poly_defs.len() as u32, crate::vector::line::LineCap::Round, crate::vector::line::LineJoin::Round, 2.0)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        }
+        if !point_defs.is_empty() {
+            pr.render_oit(&mut pass, &queue, &vp, viewport, 1.0, point_defs.len() as u32)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        }
+    }
+    // Compose pass into final target
+    #[cfg(feature = "weighted-oit")]
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("vf.Vector.Combine.Compose"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &final_view,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        oit.compose(&mut pass);
+    }
+
+    // Picking pass
+    let pick_tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("vf.Vector.Combine.Pick"),
+        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R32Uint,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let pick_view = pick_tex.create_view(&wgpu::TextureViewDescriptor::default());
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("vf.Vector.Combine.PickPass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &pick_view,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        let vp = [[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]];
+        let viewport = [width as f32, height as f32];
+        let mut base = base_pick_id.unwrap_or(1);
+        if !point_defs.is_empty() {
+            pr.render_pick(&mut pass, &queue, &vp, viewport, 1.0, point_defs.len() as u32, base)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            base += point_defs.len() as u32;
+        }
+        if !poly_defs.is_empty() {
+            lr.render_pick(&mut pass, &queue, &vp, viewport, poly_defs.len() as u32, base)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        }
+    }
+
+    // Submit
+    queue.submit(Some(encoder.finish()));
+    device.poll(wgpu::Maintain::Wait);
+
+    // Read back final RGBA8
+    let bpr = (width * 4 + 255) / 256 * 256; // 256B align
+    let final_size = (bpr * height) as u64;
+    #[cfg(feature = "weighted-oit")]
+    let final_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vf.Vector.Combine.FinalRead"),
+        size: final_size,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    #[cfg(feature = "weighted-oit")]
+    let mut enc1 = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vf.Vector.Combine.CopyFinal") });
+    #[cfg(feature = "weighted-oit")]
+    enc1.copy_texture_to_buffer(
+        wgpu::ImageCopyTexture { texture: &final_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::ImageCopyBuffer { buffer: &final_buf, layout: wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(height) } },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 }
+    );
+    #[cfg(feature = "weighted-oit")]
+    {
+        queue.submit(Some(enc1.finish()));
+        device.poll(wgpu::Maintain::Wait);
+    }
+
+    #[cfg(feature = "weighted-oit")]
+    let mut rgba: Vec<u8> = Vec::new();
+    #[cfg(feature = "weighted-oit")]
+    {
+        let fslice = final_buf.slice(..);
+        let (s, r) = futures_intrusive::channel::shared::oneshot_channel();
+        fslice.map_async(wgpu::MapMode::Read, move |res| { s.send(res).ok(); });
+        let recv = pollster::block_on(r.receive()).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("final map cancelled"))?;
+        if let Err(e) = recv {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("map_async error: {:?}", e)));
+        }
+        let fdata = fslice.get_mapped_range();
+        rgba = vec![0u8; (width * height * 4) as usize];
+        for row in 0..height as usize {
+            let src = &fdata[(row as u32 * bpr) as usize..][..(width * 4) as usize];
+            let dst = &mut rgba[row * (width as usize) * 4..][..(width as usize) * 4];
+            dst.copy_from_slice(src);
+        }
+        drop(fdata);
+        final_buf.unmap();
+    }
+
+    // Read back pick map
+    let pick_bpr = (width * 4 + 255) / 256 * 256;
+    let pick_size = (pick_bpr * height) as u64;
+    let pick_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vf.Vector.Combine.PickRead"),
+        size: pick_size,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut enc2 = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vf.Vector.Combine.CopyPick") });
+    enc2.copy_texture_to_buffer(
+        wgpu::ImageCopyTexture { texture: &pick_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::ImageCopyBuffer { buffer: &pick_buf, layout: wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(pick_bpr), rows_per_image: Some(height) } },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 }
+    );
+    queue.submit(Some(enc2.finish()));
+    device.poll(wgpu::Maintain::Wait);
+
+    let pslice = pick_buf.slice(..);
+    let (s2, r2) = futures_intrusive::channel::shared::oneshot_channel();
+    pslice.map_async(wgpu::MapMode::Read, move |res| { s2.send(res).ok(); });
+    let recv = pollster::block_on(r2.receive()).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("pick map cancelled"))?;
+    if let Err(e) = recv {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("map_async error: {:?}", e)));
+    }
+    let pdata = pslice.get_mapped_range();
+    let mut ids = vec![0u32; (width * height) as usize];
+    for row in 0..height as usize {
+        let src = &pdata[(row as u32 * pick_bpr) as usize..][..(width * 4) as usize];
+        let row_ids = bytemuck::cast_slice::<u8, u32>(src);
+        let dst = &mut ids[row * (width as usize)..][..(width as usize)];
+        dst.copy_from_slice(row_ids);
+    }
+    drop(pdata);
+    pick_buf.unmap();
+
+    // Convert to numpy
+    #[cfg(feature = "weighted-oit")]
+    {
+        let arr_rgba_1 = PyArray1::<u8>::from_vec_bound(py, rgba);
+        let arr_rgba = arr_rgba_1.reshape([height as usize, width as usize, 4])?;
+        let arr_ids_1 = PyArray1::<u32>::from_vec_bound(py, ids);
+        let arr_ids = arr_ids_1.reshape([height as usize, width as usize])?;
+        return Ok((arr_rgba.into_py(py), arr_ids.into_py(py)));
+    }
+    #[cfg(not(feature = "weighted-oit"))]
+    {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "Weighted OIT feature not enabled. Build with --features weighted-oit",
+        ));
+    }
+}
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn vector_oit_and_pick_demo(py: Python<'_>, width: u32, height: u32) -> PyResult<(Py<PyAny>, u32)> {
+    #[cfg(not(feature = "weighted-oit"))]
+    {
+        let _ = (py, width, height);
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "Weighted OIT feature not enabled. Build with --features weighted-oit",
+        ));
+    }
+    #[cfg(feature = "weighted-oit")]
+    {
+        use crate::vector::{LineRenderer, PointRenderer};
+        use crate::vector::api::{PointDef, VectorStyle, PolylineDef};
+        use numpy::PyArray1;
+
+    // Acquire GPU device/queue
+    let g = crate::gpu::ctx();
+    let device = std::sync::Arc::clone(&g.device);
+    let queue = std::sync::Arc::clone(&g.queue);
+
+    // Create renderers
+    let mut pr = PointRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    let mut lr = LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    // Sample primitives
+    let points = vec![
+        PointDef { position: glam::Vec2::new(-0.5, -0.5), style: VectorStyle { fill_color: [1.0,0.2,0.2,0.9], stroke_color: [0.0,0.0,0.0,1.0], stroke_width: 1.0, point_size: 24.0 } },
+        PointDef { position: glam::Vec2::new(0.4, 0.2), style: VectorStyle { fill_color: [0.2,0.8,1.0,0.7], stroke_color: [0.0,0.0,0.0,1.0], stroke_width: 1.0, point_size: 32.0 } },
+    ];
+    let lines = vec![
+        PolylineDef { path: vec![glam::Vec2::new(-0.8,-0.8), glam::Vec2::new(0.8,0.5), glam::Vec2::new(0.4,0.8)], style: VectorStyle { fill_color: [0.0,0.0,0.0,0.0], stroke_color: [0.1,0.9,0.3,0.6], stroke_width: 8.0, point_size: 4.0 } }
+    ];
+
+    let p_instances = pr.pack_points(&points)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    pr.upload_points(&device, &queue, &p_instances)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    let l_instances = lr.pack_polylines(&lines)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    lr.upload_lines(&device, &l_instances)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    // Weighted OIT accumulation buffers
+    let oit = crate::vector::oit::WeightedOIT::new(&device, width, height, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    // Final RGBA8 target
+    let final_tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("vf.Vector.Demo.Final"),
+        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let final_view = final_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+    // Accumulation pass
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vf.Vector.Demo.Encoder") });
+        let mut pass = oit.begin_accumulation(&mut encoder);
+        let vp = [[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]];
+        let viewport = [width as f32, height as f32];
+        lr.render_oit(&mut pass, &queue, &vp, viewport, l_instances.len() as u32, crate::vector::line::LineCap::Round, crate::vector::line::LineJoin::Round, 2.0)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        pr.render_oit(&mut pass, &queue, &vp, viewport, 1.0, p_instances.len() as u32)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    
+    // Compose pass into final target
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("vf.Vector.Demo.Compose"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &final_view,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        oit.compose(&mut pass);
+    }
+
+    // Picking pass
+    let pick_tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("vf.Vector.Demo.Pick"),
+        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R32Uint,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let pick_view = pick_tex.create_view(&wgpu::TextureViewDescriptor::default());
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("vf.Vector.Demo.PickPass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &pick_view,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        let vp = [[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]];
+        let viewport = [width as f32, height as f32];
+        // Assign base ids 1..N for points, then continue for lines
+        pr.render_pick(&mut pass, &queue, &vp, viewport, 1.0, p_instances.len() as u32, 1)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        let base_line = 1 + p_instances.len() as u32;
+        lr.render_pick(&mut pass, &queue, &vp, viewport, l_instances.len() as u32, base_line)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    }
+
+    // Submit
+    queue.submit(Some(encoder.finish()));
+    device.poll(wgpu::Maintain::Wait);
+
+    // Read back final RGBA8
+    let bpr = (width * 4 + 255) / 256 * 256; // align to 256
+    let final_size = (bpr * height) as u64;
+    let final_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vf.Vector.Demo.FinalRead"),
+        size: final_size,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vf.Vector.Demo.CopyFinal") });
+    enc.copy_texture_to_buffer(
+        wgpu::ImageCopyTexture { texture: &final_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::ImageCopyBuffer { buffer: &final_buf, layout: wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(height) } },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 }
+    );
+    // Read one pick pixel at center
+    let pick_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vf.Vector.Demo.PickRead"),
+        size: 4,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let cx = width / 2; let cy = height / 2;
+    let mut enc2 = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vf.Vector.Demo.CopyPick") });
+    enc2.copy_texture_to_buffer(
+        wgpu::ImageCopyTexture { texture: &pick_tex, mip_level: 0, origin: wgpu::Origin3d { x: cx, y: cy, z: 0 }, aspect: wgpu::TextureAspect::All },
+        wgpu::ImageCopyBuffer { buffer: &pick_buf, layout: wgpu::ImageDataLayout { offset: 0, bytes_per_row: None, rows_per_image: None } },
+        wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 }
+    );
+    queue.submit([enc.finish(), enc2.finish()]);
+    device.poll(wgpu::Maintain::Wait);
+
+    // Map final image
+    let slice = final_buf.slice(..);
+    let (s, r) = futures_intrusive::channel::shared::oneshot_channel();
+    slice.map_async(wgpu::MapMode::Read, move |res| { s.send(res).ok(); });
+    let recv = pollster::block_on(r.receive()).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("map_async cancelled"))?;
+    if let Err(e) = recv {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("map_async error: {:?}", e)));
+    }
+    let data = slice.get_mapped_range();
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    for row in 0..height as usize {
+        let src = &data[(row as u32 * bpr) as usize..][..(width * 4) as usize];
+        let dst = &mut rgba[row * (width as usize) * 4..][..(width as usize) * 4];
+        dst.copy_from_slice(src);
+    }
+    drop(data);
+    final_buf.unmap();
+
+    // Map pick
+    let pslice = pick_buf.slice(..);
+    let (s2, r2) = futures_intrusive::channel::shared::oneshot_channel();
+    pslice.map_async(wgpu::MapMode::Read, move |res| { s2.send(res).ok(); });
+    let recv = pollster::block_on(r2.receive()).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("pick map cancelled"))?;
+    if let Err(e) = recv {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("map_async error: {:?}", e)));
+    }
+    let pdata = pslice.get_mapped_range();
+    let pick_id = bytemuck::from_bytes::<u32>(&pdata[..4]).to_owned();
+    drop(pdata);
+    pick_buf.unmap();
+
+    // Return numpy (H,W,4) uint8
+    let arr1 = PyArray1::<u8>::from_vec_bound(py, rgba);
+    let arr3 = arr1.reshape([height as usize, width as usize, 4])?;
+        Ok((arr3.into_py(py), pick_id))
+    }
+}
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 fn hybrid_render(
@@ -847,6 +1653,14 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Basic metadata so users can sanity-check the native module is loaded
     m.add("__doc__", "forge3d native module")?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    // Vector: point shape/LOD controls
+    m.add_function(wrap_pyfunction!(set_point_shape_mode, m)?)?;
+    m.add_function(wrap_pyfunction!(set_point_lod_threshold, m)?)?;
+    m.add_function(wrap_pyfunction!(is_weighted_oit_available, m)?)?;
+    m.add_function(wrap_pyfunction!(vector_oit_and_pick_demo, m)?)?;
+    m.add_function(wrap_pyfunction!(vector_render_oit_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector_render_pick_map_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector_render_oit_and_pick_py, m)?)?;
     m.add_function(wrap_pyfunction!(configure_csm, m)?)?;
     m.add_function(wrap_pyfunction!(set_csm_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(set_csm_light_direction, m)?)?;

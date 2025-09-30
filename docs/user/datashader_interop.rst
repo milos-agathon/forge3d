@@ -190,6 +190,59 @@ Convenience Functions
       # One-line conversion with validation
       overlay = shade_to_overlay(agg, extent, cmap='magma', how='log', premultiply=True)
 
+Vector Composition (OIT + Datashader)
+=====================================
+
+You can composite vector OIT results over a Datashader overlay. When the overlay
+is premultiplied (recommended), premultiply the vector RGBA before compositing.
+
+.. code-block:: python
+
+   import forge3d as f3d
+   from forge3d.adapters import shade_to_overlay, premultiply_rgba
+
+   # 1) Build Datashader aggregation and convert to premultiplied overlay
+   overlay = shade_to_overlay(agg, extent, cmap='viridis', how='linear', premultiply=True)
+   rgba_ds = overlay['rgba']  # (H,W,4) uint8, premultiplied
+
+   # 2) Render vectors with Weighted OIT
+   rgba_vec = f3d.vector_render_oit_py(
+       width, height,
+       points_xy=points,
+       point_rgba=point_colors,
+       point_size=point_sizes,
+       polylines=polylines,
+       polyline_rgba=poly_colors,
+       stroke_width=poly_widths,
+   )
+
+   # 3) Premultiply vector result and composite over Datashader overlay
+   rgba_vec_pm = premultiply_rgba(rgba_vec)
+   out = f3d.composite_rgba_over(rgba_ds, rgba_vec_pm, premultiplied=True)
+
+See the runnable example in ``examples/vector_datashader_oit_composite.py``.
+
+Picking
+-------
+
+If you need picking, render the vector pick map alongside OIT:
+
+.. code-block:: python
+
+   rgba, pick_map = f3d.vector_render_oit_and_pick_py(
+       width, height,
+       points_xy=points,
+       point_rgba=point_colors,
+       point_size=point_sizes,
+       polylines=polylines,
+       polyline_rgba=poly_colors,
+       stroke_width=poly_widths,
+       base_pick_id=1,
+   )
+
+The returned ``rgba`` can be premultiplied and composited over the Datashader
+overlay as shown above; ``pick_map`` provides per-pixel IDs for interaction.
+
 Premultiplied Alpha
 ===================
 

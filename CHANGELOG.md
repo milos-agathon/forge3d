@@ -15,12 +15,20 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Workstream G — Datashader Interop
   - G1: Datashader Adapter v1 completed with premultiplied alpha support (`premultiply=True`), optional transform passthrough for alignment, zero-copy RGBA views where possible, and API exports in `adapters/__init__.py`.
   - G2: Bench & Docs completed — `docs/user/datashader_interop.rst` updated with benchmarking playbook, usage, and plotting guidance.
+ - Workstream H — Points/Lines/Graphs
+   - H1/H2: Instanced billboard points and sphere impostor LOD in `point_instanced.wgsl` with `shape_mode` and `lod_threshold` uniforms.
+   - H3/H7: Anti-aliased polyline renderer with caps/joins and helpers in `vector/line.rs` + `shaders/line_aa.wgsl`.
+   - H4: Weighted blended OIT paths for points and lines with MRT targets (Rgba16Float + R16Float) and composition via `shaders/oit_compose.wgsl`.
+   - H5: Picking & ID buffer via R32Uint targets and `render_pick()` in point/line/graph renderers.
+   - H6: Point/Path material hooks prepared via `VectorStyle` and texture atlas plumbing.
+   - H12/H13: Graph renderer combining node points and edge lines, with OIT and pick delegation.
 
 ### Changed
 - Planar Reflections (B5) performance tuning to meet perf thresholds without changing public APIs:
   - Medium quality reflection resolution reduced from 1024 → 512.
   - Reflection render target format switched from `Rgba16Float` → `Rgba8Unorm`.
   - WGSL blur kernel sampling loops optimized to compact half-kernel extents.
+ - Vector module stabilized: consolidated bind group layout for points to always include atlas slots; added OIT/pick pipelines for vector primitives.
 
 ### Tests
 - Version assertions updated to `0.79.0`.

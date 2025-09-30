@@ -22,6 +22,7 @@ __all__ = [
     'add_graph',
     'clear_vectors',
     'get_vector_counts',
+    'VectorScene',
 ]
 
 def add_polygons(
@@ -335,3 +336,113 @@ def get_vector_counts() -> Tuple[int, int, int, int]:
         (polygons, lines, points, graphs) counts.
     """
     return get_vector_counts_py()
+
+
+class VectorScene:
+    """High-level batched vector scene for OIT rendering and GPU picking.
+
+    Collect points and polylines, then render using weighted blended OIT
+    or generate a full R32Uint picking map using Python helpers that call
+    into the native extension.
+    """
+
+    def __init__(self) -> None:
+        # Points
+        self._points: list[tuple[float, float]] = []
+        self._point_rgba: list[tuple[float, float, float, float]] = []
+        self._point_size: list[float] = []
+        # Polylines
+        self._polylines: list[list[tuple[float, float]]] = []
+        self._polyline_rgba: list[tuple[float, float, float, float]] = []
+        self._stroke_width: list[float] = []
+
+        # Defaults
+        self._default_point_rgba: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 1.0)
+        self._default_point_size: float = 8.0
+        self._default_polyline_rgba: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+        self._default_stroke_width: float = 2.0
+
+    # ------------------------------------------------------------------
+    # Mutators
+    # ------------------------------------------------------------------
+    def clear(self) -> None:
+        self._points.clear(); self._point_rgba.clear(); self._point_size.clear()
+        self._polylines.clear(); self._polyline_rgba.clear(); self._stroke_width.clear()
+
+    def add_point(self, x: float, y: float, rgba: tuple[float, float, float, float] | None = None, size: float | None = None) -> None:
+        if not (np.isfinite(x) and np.isfinite(y)):
+            raise ValueError("point coordinates must be finite")
+        col = rgba if rgba is not None else self._default_point_rgba
+        if len(col) != 4:
+            raise ValueError("rgba must be (r,g,b,a)")
+        if any((c < 0.0 or c > 1.0) for c in col):
+            raise ValueError("rgba components must be in [0,1]")
+        s = float(size) if size is not None else float(self._default_point_size)
+        if s <= 0.0:
+            raise ValueError("point size must be positive")
+        self._points.append((float(x), float(y)))
+        self._point_rgba.append((float(col[0]), float(col[1]), float(col[2]), float(col[3])))
+        self._point_size.append(s)
+
+    def add_polyline(self, path: list[tuple[float, float]] | tuple[tuple[float, float], ...], rgba: tuple[float, float, float, float] | None = None, width: float | None = None) -> None:
+        if not isinstance(path, (list, tuple)) or len(path) < 2:
+            raise ValueError("polyline path must be a sequence of at least 2 (x,y) points")
+        p2: list[tuple[float, float]] = []
+        for (x, y) in path:
+            if not (np.isfinite(x) and np.isfinite(y)):
+                raise ValueError("polyline coordinates must be finite")
+            p2.append((float(x), float(y)))
+        col = rgba if rgba is not None else self._default_polyline_rgba
+        if len(col) != 4:
+            raise ValueError("rgba must be (r,g,b,a)")
+        if any((c < 0.0 or c > 1.0) for c in col):
+            raise ValueError("rgba components must be in [0,1]")
+        w = float(width) if width is not None else float(self._default_stroke_width)
+        if w <= 0.0:
+            raise ValueError("stroke width must be positive")
+        self._polylines.append(p2)
+        self._polyline_rgba.append((float(col[0]), float(col[1]), float(col[2]), float(col[3])))
+        self._stroke_width.append(w)
+
+    # ------------------------------------------------------------------
+    # Rendering
+    # ------------------------------------------------------------------
+    def render_oit(self, width: int, height: int) -> np.ndarray:
+        """Render collected vectors using weighted blended OIT to an RGBA image."""
+        from . import vector_render_oit_py as _render
+        return _render(
+            int(width), int(height),
+            points_xy=self._points or None,
+            point_rgba=self._point_rgba or None,
+            point_size=self._point_size or None,
+            polylines=self._polylines or None,
+            polyline_rgba=self._polyline_rgba or None,
+            stroke_width=self._stroke_width or None,
+        )
+
+    def render_pick_map(self, width: int, height: int, base_pick_id: int = 1) -> np.ndarray:
+        """Render full R32Uint picking map for the collected vectors."""
+        from . import vector_render_pick_map_py as _pick
+        return _pick(
+            int(width), int(height),
+            points_xy=self._points or None,
+            polylines=self._polylines or None,
+            base_pick_id=int(base_pick_id),
+        )
+
+    def render_oit_and_pick(self, width: int, height: int, base_pick_id: int = 1) -> tuple[np.ndarray, np.ndarray]:
+        """Render combined OIT RGBA and full pick map in one call.
+
+        Returns (rgba: np.ndarray(H,W,4) uint8, picks: np.ndarray(H,W) uint32)
+        """
+        from . import vector_render_oit_and_pick_py as _both
+        return _both(
+            int(width), int(height),
+            points_xy=self._points or None,
+            point_rgba=self._point_rgba or None,
+            point_size=self._point_size or None,
+            polylines=self._polylines or None,
+            polyline_rgba=self._polyline_rgba or None,
+            stroke_width=self._stroke_width or None,
+            base_pick_id=int(base_pick_id),
+        )

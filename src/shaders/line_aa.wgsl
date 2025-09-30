@@ -28,15 +28,29 @@ struct VertexOutput {
     @location(2) distance: f32,          // Distance from line center
     @location(3) width: f32,             // Line width for AA
     @location(4) color: vec4<f32>,       // Per-instance color
+    @location(5) instance_id: u32,       // H5: instance id for picking
 }
 
 @group(0) @binding(0)
 var<uniform> uniforms: LineUniform;
 
+// Pick uniform (used only in fs_pick)
+struct PickUniform {
+    pick_id: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
+// Bind at a dedicated slot for picking pipeline
+@group(0) @binding(3)
+var<uniform> pick_uniform: PickUniform;
+
 @vertex
 fn vs_main(
     vertex: VertexInput,
-    @builtin(vertex_index) vertex_id: u32
+    @builtin(vertex_index) vertex_id: u32,
+    @builtin(instance_index) instance_index: u32,
 ) -> VertexOutput {
     var out: VertexOutput;
     
@@ -77,6 +91,7 @@ fn vs_main(
     out.distance = abs(normal_offset);
     out.width = half_width;
     out.color = vertex.color;
+    out.instance_id = instance_index;
     
     return out;
 }
@@ -161,4 +176,38 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     );
     
     return color;
+}
+
+// Fragment entry for picking to an R32Uint target
+@fragment
+fn fs_pick(in: VertexOutput) -> @location(0) u32 {
+    return pick_uniform.pick_id + in.instance_id;
+}
+
+// OIT output type: accumulation color (rgba: rgb accum, a weight) and revealage (single channel)
+struct OITOutput {
+    @location(0) accum: vec4<f32>,
+    @location(1) reveal: f32,
+}
+
+// Fragment entry for weighted OIT MRT
+@fragment
+fn fs_oit(in: VertexOutput) -> OITOutput {
+    // Recompute alpha similarly to fs_main but keep in linear space and without gamma correction
+    let edge_softness = 1.0;
+    let distance_from_center = abs(in.distance);
+    let line_half_width = in.width;
+
+    var alpha = 1.0;
+    // Base AA alpha
+    let edge_distance = distance_from_center - line_half_width;
+    let base_alpha = 1.0 - smoothstep(0.0, edge_softness, edge_distance);
+    alpha *= base_alpha;
+
+    // Compose outputs
+    let color = in.color;
+    var out: OITOutput;
+    out.accum = vec4<f32>(color.rgb * alpha, alpha);
+    out.reveal = 1.0 - alpha;
+    return out;
 }

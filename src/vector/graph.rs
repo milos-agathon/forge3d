@@ -134,6 +134,85 @@ impl GraphRenderer {
         Ok(())
     }
 
+    /// Render picking IDs for graph nodes and edges into R32Uint attachment.
+    /// Mapping: [base_pick_id, base_pick_id + node_count) -> node indices,
+    ///          [base_pick_id + node_count, base_pick_id + node_count + edge_count) -> edge indices
+    pub fn render_pick<'pass>(
+        &'pass self,
+        render_pass: &mut wgpu::RenderPass<'pass>,
+        queue: &wgpu::Queue,
+        transform: &[[f32; 4]; 4],
+        viewport_size: [f32; 2],
+        pixel_scale: f32,
+        packed_graph: &PackedGraph,
+        base_pick_id: u32,
+    ) -> Result<(), RenderError> {
+        // Edges pick IDs start after nodes
+        if packed_graph.node_count > 0 {
+            self.node_renderer.render_pick(
+                render_pass,
+                queue,
+                transform,
+                viewport_size,
+                pixel_scale,
+                packed_graph.node_count,
+                base_pick_id,
+            )?;
+        }
+
+        if packed_graph.edge_count > 0 {
+            let edge_base = base_pick_id + packed_graph.node_count;
+            self.edge_renderer.render_pick(
+                render_pass,
+                queue,
+                transform,
+                viewport_size,
+                packed_graph.edge_count,
+                edge_base,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Render nodes and edges into weighted OIT accumulation targets (MRT)
+    pub fn render_oit<'pass>(
+        &'pass self,
+        render_pass: &mut wgpu::RenderPass<'pass>,
+        queue: &wgpu::Queue,
+        transform: &[[f32; 4]; 4],
+        viewport_size: [f32; 2],
+        packed_graph: &PackedGraph,
+    ) -> Result<(), RenderError> {
+        // Render edges first into OIT buffers
+        if packed_graph.edge_count > 0 {
+            self.edge_renderer.render_oit(
+                render_pass,
+                queue,
+                transform,
+                viewport_size,
+                packed_graph.edge_count,
+                LineCap::Round,
+                LineJoin::Round,
+                2.0,
+            )?;
+        }
+
+        // Render nodes into OIT buffers (use pixel_scale=1.0)
+        if packed_graph.node_count > 0 {
+            self.node_renderer.render_oit(
+                render_pass,
+                queue,
+                transform,
+                viewport_size,
+                1.0,
+                packed_graph.node_count,
+            )?;
+        }
+
+        Ok(())
+    }
+
     /// Render graph with nodes and edges
     /// Edges are rendered first (behind nodes) for proper layering
     pub fn render<'pass>(
