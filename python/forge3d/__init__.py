@@ -272,6 +272,24 @@ from .sdf import (
     create_sphere, create_box, create_simple_scene, render_simple_scene
 )
 
+# Workstream I2: Offscreen + Jupyter helpers (export at top-level)
+from .helpers.offscreen import (
+    render_offscreen_rgba,
+    save_png_deterministic,
+    rgba_to_png_bytes,
+)
+try:  # Optional in non-notebook environments
+    from .helpers.ipython_display import (
+        display_rgba as ipy_display_rgba,
+        display_offscreen as ipy_display_offscreen,
+    )
+except Exception:
+    # Provide stubs that raise helpful ImportError when called
+    def ipy_display_rgba(*_args, **_kwargs):  # type: ignore
+        raise ImportError("IPython is required for ipy_display_rgba(); pip install ipython")
+    def ipy_display_offscreen(*_args, **_kwargs):  # type: ignore
+        raise ImportError("IPython is required for ipy_display_offscreen(); pip install ipython")
+
 # Version information
 __version__ = "0.80.0"
 _CURRENT_PALETTE = "viridis"
@@ -5835,6 +5853,61 @@ def enumerate_adapters() -> list[dict]:
         return {"status": "unavailable"}
 
 
+# Prefer native implementations when available (override Python fallbacks)
+try:  # pragma: no cover - native module availability varies
+    from ._forge3d import (
+        camera_look_at as _cam_look_at,
+        camera_perspective as _cam_persp,
+        camera_orthographic as _cam_ortho,
+        camera_view_proj as _cam_viewproj,
+        camera_dof_params as _cam_dof,
+        camera_f_stop_to_aperture as _cam_f2ap,
+        camera_aperture_to_f_stop as _cam_ap2f,
+        camera_hyperfocal_distance as _cam_hyper,
+        camera_depth_of_field_range as _cam_dof_range,
+        camera_circle_of_confusion as _cam_coc,
+        translate as _xf_translate,
+        rotate_x as _xf_rx,
+        rotate_y as _xf_ry,
+        rotate_z as _xf_rz,
+        scale as _xf_scale,
+        scale_uniform as _xf_scale_u,
+        compose_trs as _xf_trs,
+        look_at_transform as _xf_lookat,
+        multiply_matrices as _xf_mul,
+        invert_matrix as _xf_inv,
+        compute_normal_matrix as _xf_nmat,
+        grid_generate as _grid_generate,
+    )
+
+    camera_look_at = _cam_look_at
+    camera_perspective = _cam_persp
+    camera_orthographic = _cam_ortho
+    camera_view_proj = _cam_viewproj
+    camera_dof_params = _cam_dof
+    camera_f_stop_to_aperture = _cam_f2ap
+    camera_aperture_to_f_stop = _cam_ap2f
+    camera_hyperfocal_distance = _cam_hyper
+    camera_depth_of_field_range = _cam_dof_range
+    camera_circle_of_confusion = _cam_coc
+
+    translate = _xf_translate
+    rotate_x = _xf_rx
+    rotate_y = _xf_ry
+    rotate_z = _xf_rz
+    scale = _xf_scale
+    scale_uniform = _xf_scale_u
+    compose_trs = _xf_trs
+    look_at_transform = _xf_lookat
+    multiply_matrices = _xf_mul
+    invert_matrix = _xf_inv
+    compute_normal_matrix = _xf_nmat
+
+    grid_generate = _grid_generate
+except Exception:
+    pass
+
+
 __all__ = [
     # Basic rendering
     "Renderer",
@@ -5843,6 +5916,9 @@ __all__ = [
     "numpy_to_png",
     "png_to_numpy",
     "__version__",
+    # Workstream I2: Offscreen + Jupyter helpers
+    "render_offscreen_rgba", "save_png_deterministic", "rgba_to_png_bytes",
+    "ipy_display_rgba", "ipy_display_offscreen",
     # Scene and terrain
     "Scene",
     "TerrainSpike",

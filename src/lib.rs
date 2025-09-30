@@ -1757,6 +1757,34 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(crate::uv::unwrap::uv_planar_unwrap_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::uv::unwrap::uv_spherical_unwrap_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::converters::multipolygonz_to_obj::converters_multipolygonz_to_obj_py, m)?)?;
+
+    // Camera functions (expose Rust implementations to Python)
+    m.add_function(wrap_pyfunction!(crate::camera::camera_look_at, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::camera::camera_perspective, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::camera::camera_orthographic, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::camera::camera_view_proj, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::camera::camera_dof_params, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::camera::camera_f_stop_to_aperture, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::camera::camera_aperture_to_f_stop, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::camera::camera_hyperfocal_distance, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::camera::camera_depth_of_field_range, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::camera::camera_circle_of_confusion, m)?)?;
+
+    // Transform utilities
+    m.add_function(wrap_pyfunction!(crate::transforms::translate, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::transforms::rotate_x, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::transforms::rotate_y, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::transforms::rotate_z, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::transforms::scale, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::transforms::scale_uniform, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::transforms::compose_trs, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::transforms::look_at_transform, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::transforms::multiply_matrices, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::transforms::invert_matrix, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::transforms::compute_normal_matrix, m)?)?;
+
+    // Grid generator
+    m.add_function(wrap_pyfunction!(crate::grid::grid_generate, m)?)?;
     // Path tracing (GPU MVP)
     m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
 

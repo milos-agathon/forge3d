@@ -61,5 +61,4 @@ CI
 
 Notes
 - Outputs are written to `out/` or `artifacts/` and are gitignored.
-- If new Rust example targets are added, mirror them with a Python wrapper that forwards flags and respects the env gating above.
 
