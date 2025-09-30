@@ -9,7 +9,7 @@ def test_version_consistency():
     pkg = __import__(DIST)
     assert hasattr(pkg, "__version__"), "Package must expose __version__"
     # Project target version
-    expected = "0.79.0"
+    expected = "0.80.0"
     assert pkg.__version__ == expected
     # If a dist is installed in the venv, check it if it matches; otherwise, skip
     try:

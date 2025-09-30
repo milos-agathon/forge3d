@@ -273,7 +273,7 @@ from .sdf import (
 )
 
 # Version information
-__version__ = "0.79.0"
+__version__ = "0.80.0"
 _CURRENT_PALETTE = "viridis"
 
 # -----------------------------------------------------------------------------
@@ -5806,28 +5806,31 @@ def grid_generate(nx: int, nz: int, spacing=(1.0, 1.0), origin="center"):
 # Optional GPU adapter enumeration (provided by native extension when available).
 try:
     from ._forge3d import (
-        __doc__, __version__,
+        __doc__,
         configure_csm, set_csm_enabled, set_csm_light_direction,
         set_csm_pcf_kernel, set_csm_bias_params, set_csm_debug_mode,
         get_csm_cascade_info, validate_csm_peter_panning,
-        extrude_polygon_py,
-        extrude_polygon_gpu_py,
-        Scene as NativeScene,
-        enumerate_adapters, device_probe
+        engine_info, report_device,
+        c5_build_framegraph_report, c6_mt_record_demo, c7_async_compute_demo,
+        set_point_shape_mode, set_csm_pcf_kernel as _noop_alias,  # keep formatting stable
+        set_point_lod_threshold,
     )
-    _NATIVE_AVAILABLE = True
-    import os as _os
-    # Default to Python fallback Scene to maximize test coverage/portability.
-    # Opt-in to native Scene with F3D_USE_NATIVE_SCENE=1
-    if _os.environ.get("F3D_USE_NATIVE_SCENE", "0") == "1":
-        Scene = NativeScene
-except ImportError as e:
-    print(e)
-    # Fallback implementation if native module is not available
-    _NATIVE_AVAILABLE = False
-    def enumerate_adapters() -> list[dict]:
-        return []
+    del _noop_alias
+    __all__ += [
+        "configure_csm", "set_csm_enabled", "set_csm_light_direction",
+        "set_csm_pcf_kernel", "set_csm_bias_params", "set_csm_debug_mode",
+        "get_csm_cascade_info", "validate_csm_peter_panning",
+        "engine_info", "report_device",
+        "c5_build_framegraph_report", "c6_mt_record_demo", "c7_async_compute_demo",
+        "set_point_shape_mode", "set_point_lod_threshold",
+    ]
+except Exception:
+    pass
 
+# Fallback implementation if native module is not available
+_NATIVE_AVAILABLE = False
+def enumerate_adapters() -> list[dict]:
+    return []
     def device_probe(backend: str | None = None) -> dict:
         return {"status": "unavailable"}
 

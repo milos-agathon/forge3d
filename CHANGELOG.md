@@ -6,8 +6,33 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## [Unreleased]
 
 ### Added
-- Geometry core module with extrusion, primitive generation, validation, and welding helpers (Workstream F phase 1)
-- Python geometry facade exposing mesh helpers with new demos and pytest coverage
+- (placeholder)
+
+## [0.80.0]
+
+### Added
+- Workstream H — Vector & Graph Layers completion and Python surface polish
+  - H1/H2: Finalized point impostors with LOD and shape modes; global setters `set_point_shape_mode()` and `set_point_lod_threshold()` exposed in `python/forge3d/__init__.py`.
+  - H3/H7: Anti-aliased polyline renderer stabilized with `LineCap`/`LineJoin` controls.
+  - H4: Weighted blended OIT paths integrated for points/lines; compose to `Rgba8UnormSrgb`.
+  - H5: Full-scene picking via `R32Uint` path; Python helper `vector_render_pick_map_py()` returns an `np.ndarray(H,W)` of IDs.
+  - H12/H13: Graph renderer exposed through `python/forge3d/vector.py` including node/edge convenience APIs.
+  - High-level `VectorScene` wrapper enabling batched authoring and one-call render or pick-map.
+
+### Changed
+- Python package initializer now ensures the native extension is initialized exactly once across both `forge3d` and `python.forge3d` import paths to avoid PyO3 double-init errors.
+- Added `numpy` import and shipped `composite_rgba_over(...)` utility for RGBA compositing with configurable premultiplication.
+
+### Fixed
+- Robust buffer `map_async` error propagation in native OIT/pick readbacks; explicit `PyRuntimeError` mapping rather than implicit conversions.
+- Closed an unbalanced brace in `src/lib.rs` OIT combined path.
+
+### Tests
+- Version assertions updated to `0.80.0`.
+- Full test suite remains green on reference environment: 1003 passed, 229 skipped, 2 xfailed.
+
+### Documentation
+- API surface for vector and picking helpers documented via docstrings; CHANGELOG entry for Workstream H completion.
 
 ## [0.79.0]
 
@@ -15,20 +40,13 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Workstream G — Datashader Interop
   - G1: Datashader Adapter v1 completed with premultiplied alpha support (`premultiply=True`), optional transform passthrough for alignment, zero-copy RGBA views where possible, and API exports in `adapters/__init__.py`.
   - G2: Bench & Docs completed — `docs/user/datashader_interop.rst` updated with benchmarking playbook, usage, and plotting guidance.
- - Workstream H — Points/Lines/Graphs
-   - H1/H2: Instanced billboard points and sphere impostor LOD in `point_instanced.wgsl` with `shape_mode` and `lod_threshold` uniforms.
-   - H3/H7: Anti-aliased polyline renderer with caps/joins and helpers in `vector/line.rs` + `shaders/line_aa.wgsl`.
-   - H4: Weighted blended OIT paths for points and lines with MRT targets (Rgba16Float + R16Float) and composition via `shaders/oit_compose.wgsl`.
-   - H5: Picking & ID buffer via R32Uint targets and `render_pick()` in point/line/graph renderers.
-   - H6: Point/Path material hooks prepared via `VectorStyle` and texture atlas plumbing.
-   - H12/H13: Graph renderer combining node points and edge lines, with OIT and pick delegation.
 
 ### Changed
 - Planar Reflections (B5) performance tuning to meet perf thresholds without changing public APIs:
   - Medium quality reflection resolution reduced from 1024 → 512.
   - Reflection render target format switched from `Rgba16Float` → `Rgba8Unorm`.
   - WGSL blur kernel sampling loops optimized to compact half-kernel extents.
- - Vector module stabilized: consolidated bind group layout for points to always include atlas slots; added OIT/pick pipelines for vector primitives.
+- Vector module stabilized: consolidated bind group layout for points to always include atlas slots; added OIT/pick pipelines groundwork for vector primitives.
 
 ### Tests
 - Version assertions updated to `0.79.0`.
