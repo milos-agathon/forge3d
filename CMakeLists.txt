@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(forge3d VERSION 0.6.0 LANGUAGES CXX)
+project(forge3d VERSION 0.80.0 LANGUAGES CXX)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
