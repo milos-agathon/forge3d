@@ -50,7 +50,7 @@ python examples/geopandas_demo.py
 
 The example will create a terrain image under `reports/Gore_Range_Albers_1m.png`.
 
-![Gore Range](reports/Gore_Range_Albers_1m.png)
+![Gore Range](assets/Gore_Range_Albers_1m.png)
 
 ## Platform requirements
 
