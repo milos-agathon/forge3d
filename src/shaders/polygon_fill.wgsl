@@ -43,16 +43,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Basic filled polygon rendering
     // UV coordinates can be used for texture mapping in future versions
     
-    var color = uniforms.fill_color;
-    
-    // Apply proper sRGB gamma correction for output
-    // Input colors are assumed to be in linear space
-    color = vec4<f32>(
-        pow(color.r, 1.0 / 2.2),
-        pow(color.g, 1.0 / 2.2), 
-        pow(color.b, 1.0 / 2.2),
-        color.a
-    );
-    
-    return color;
+    // Write linear color; the Rgba8UnormSrgb target handles sRGB encoding.
+    return uniforms.fill_color;
 }

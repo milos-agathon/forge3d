@@ -1,41 +1,13 @@
 #!/usr/bin/env python3
-"""
-examples/stanford_bunny_raytrace.py
-
-Ray trace the Stanford Bunny using Forge3D's Python API only.
-- Loads OBJ from repository asset: assets/bunny.obj (no network)
-- Builds a mesh + BVH with forge3d.mesh
-- Renders via forge3d.path_tracing.render_rgba (GPU if available, CPU fallback otherwise)
-- Saves PNG to out/stanford_bunny_rt.png
-
-Controls:
-- --width/--height: image size
-- --fovy: vertical field of view in degrees (default 34)
-- --theta/--phi: orbital yaw/pitch around the target
-- --radius or --zoom: distance control (zoom scales auto-framed distance)
-- --eye/--target/--up: direct camera overrides
-- --frames/--seed: accumulation frames and RNG seed
-- --cpu: force CPU fallback even if a GPU adapter exists
-
-This example focuses on API usage and may render a procedural image in CPU fallback
-mode while GPU compute matures. It still demonstrates the full Forge3D workflow
-for triangle meshes including BVH creation and camera setup.
-"""
+"""Ray trace the Stanford Bunny via :func:`forge3d.render_raytrace_mesh`."""
 from __future__ import annotations
 
-from pathlib import Path
-import math
 import argparse
-from typing import Tuple, List
-
-import numpy as np
+from pathlib import Path
+from typing import Optional, Sequence, Tuple
 
 import forge3d as f3d
-from forge3d.mesh import make_mesh, build_bvh_cpu, upload_mesh, validate_mesh_arrays
-from forge3d.path_tracing import PathTracer, make_camera, render_aovs, save_aovs
 
-
-# ----------------------------- OBJ Utilities -----------------------------
 
 def ensure_bunny_obj() -> Path:
     """Return the path to the bunny OBJ within this repo (assets/bunny.obj)."""
@@ -48,132 +20,39 @@ def ensure_bunny_obj() -> Path:
     return local_path
 
 
-def load_obj_vertices_indices(path: Path) -> Tuple[np.ndarray, np.ndarray]:
-    """Minimal OBJ loader for 'v' and 'f' lines; returns (V, F).
-
-    - Vertices: (N,3) float32
-    - Faces: (M,3) uint32 (triangulated fan for polygons/quads)
-    """
-    vs: List[Tuple[float, float, float]] = []
-    faces: List[Tuple[int, int, int]] = []
-    with path.open("r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            if not line or line.startswith("#"):
-                continue
-            t = line.strip().split()
-            if not t:
-                continue
-            if t[0] == "v" and len(t) >= 4:
-                vs.append((float(t[1]), float(t[2]), float(t[3])))
-            elif t[0] == "f" and len(t) >= 4:
-                # face entries like: v, v/t, v//n, v/t/n
-                idx = []
-                for w in t[1:]:
-                    s = w.split("/")
-                    try:
-                        i = int(s[0])
-                    except Exception:
-                        continue
-                    # OBJ is 1-based; allow negative indexing but clamp later
-                    idx.append(i)
-                # Triangulate a polygon fan: (0,i,i+1)
-                if len(idx) >= 3:
-                    base = idx[0]
-                    for k in range(1, len(idx) - 1):
-                        faces.append((base, idx[k], idx[k + 1]))
-
-    if not vs or not faces:
-        raise ValueError(f"OBJ parse failed or empty: {path}")
-
-    V = np.array(vs, dtype=np.float32)
-    # Convert indices to 0-based and clamp to valid range
-    F = np.array(faces, dtype=np.int64)
-    F[F > 0] -= 1
-    F[F < 0] += len(V)
-    F = np.clip(F, 0, len(V) - 1).astype(np.uint32)
-    return V, F
+def _parse_vec3(values: Optional[Sequence[float]], default: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    if values is None:
+        return default
+    return tuple(float(v) for v in values)
 
 
-# ----------------------------- Camera helpers ----------------------------
-
-def auto_frame(V: np.ndarray, target: np.ndarray, fovy_deg: float, dir_hint: np.ndarray) -> tuple[np.ndarray, float]:
-    """Compute camera eye position and distance to frame V with margin.
-
-    Returns (eye, distance). znear/zfar are not needed for path tracing camera.
-    """
-    r = float(np.max(np.linalg.norm(V - target[None, :], axis=1)))
-    margin = 1.15
-    d = r * margin / max(1e-6, math.tan(math.radians(fovy_deg) * 0.5))
-    v = np.asarray(dir_hint, dtype=np.float32)
-    v = v / (np.linalg.norm(v) + 1e-8)
-    eye = target + v * d
-    return eye.astype(np.float32), float(d)
+def _parse_optional_vec3(values: Optional[Sequence[float]]) -> Optional[Tuple[float, float, float]]:
+    if values is None:
+        return None
+    return tuple(float(v) for v in values)
 
 
-# ----------------------- CPU preview (points overlay) ----------------------
+def _parse_color(values: Optional[Sequence[str]]) -> Optional[Tuple[float, float, float]]:
+    if values is None:
+        return None
+    tokens = list(values)
+    if len(tokens) == 1:
+        token = tokens[0].strip()
+        if token.startswith("#"):
+            token = token[1:]
+        if len(token) != 6:
+            raise ValueError("Hex color must be RRGGBB")
+        r = int(token[0:2], 16) / 255.0
+        g = int(token[2:4], 16) / 255.0
+        b = int(token[4:6], 16) / 255.0
+        return (r, g, b)
+    if len(tokens) == 3:
+        floats = tuple(float(v) for v in tokens)
+        if max(floats) > 1.0 or min(floats) < 0.0:
+            return tuple(max(0.0, min(1.0, v / 255.0)) for v in floats)
+        return floats
+    raise ValueError("--background-color expects either a single hex value or three components")
 
-def _normalize(v: np.ndarray) -> np.ndarray:
-    n = np.linalg.norm(v, axis=-1, keepdims=True) + 1e-8
-    return v / n
-
-
-def _look_at(eye: np.ndarray, target: np.ndarray, up: np.ndarray) -> np.ndarray:
-    f = _normalize(target - eye)  # forward
-    s = _normalize(np.cross(f, up))
-    u = np.cross(s, f)
-    # Right-handed view matrix (OpenGL-style)
-    M = np.eye(4, dtype=np.float32)
-    M[0, :3] = s
-    M[1, :3] = u
-    M[2, :3] = -f
-    M[0, 3] = -np.dot(s, eye)
-    M[1, 3] = -np.dot(u, eye)
-    M[2, 3] = np.dot(f, eye)
-    return M
-
-
-def _perspective(fovy_deg: float, aspect: float, znear: float = 0.05, zfar: float = 100.0) -> np.ndarray:
-    f = 1.0 / math.tan(math.radians(float(fovy_deg)) * 0.5)
-    a = float(aspect)
-    M = np.zeros((4, 4), dtype=np.float32)
-    M[0, 0] = f / max(a, 1e-8)
-    M[1, 1] = f
-    M[2, 2] = (zfar + znear) / (znear - zfar)
-    M[2, 3] = (2.0 * zfar * znear) / (znear - zfar)
-    M[3, 2] = -1.0
-    return M
-
-
-def _project_points(V: np.ndarray, Mview: np.ndarray, Mproj: np.ndarray, W: int, H: int) -> tuple[np.ndarray, np.ndarray]:
-    Vh = np.concatenate([V.astype(np.float32), np.ones((V.shape[0], 1), dtype=np.float32)], axis=1)
-    clip = (Mproj @ (Mview @ Vh.T)).T
-    w = clip[:, 3:4]
-    valid = np.abs(w[:, 0]) > 1e-6
-    ndc = np.zeros((V.shape[0], 3), dtype=np.float32)
-    if np.any(valid):
-        ndc[valid] = clip[valid, :3] / w[valid]
-    vis = valid & np.all(np.isfinite(ndc), axis=1) & (ndc[:, 2] >= -1.0) & (ndc[:, 2] <= 1.0)
-    xs = np.clip((ndc[:, 0] * 0.5 + 0.5) * (W - 1), 0, W - 1).astype(np.int32)
-    ys = np.clip((1.0 - (ndc[:, 1] * 0.5 + 0.5)) * (H - 1), 0, H - 1).astype(np.int32)
-    return np.stack([xs, ys], axis=1), vis
-
-
-def _draw_points(img: np.ndarray, pts: np.ndarray, vis: np.ndarray, size: int, color: tuple[int, int, int]):
-    h, w = img.shape[:2]
-    r = max(1, int(size))
-    for (x, y), ok in zip(pts, vis):
-        if not ok:
-            continue
-        x0 = max(0, x - r)
-        x1 = min(w - 1, x + r)
-        y0 = max(0, y - r)
-        y1 = min(h - 1, y + r)
-        img[y0:y1 + 1, x0:x1 + 1, 0] = color[0]
-        img[y0:y1 + 1, x0:x1 + 1, 1] = color[1]
-        img[y0:y1 + 1, x0:x1 + 1, 2] = color[2]
-        img[y0:y1 + 1, x0:x1 + 1, 3] = 255
-
-# --------------------------------- Main ----------------------------------
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Ray trace Stanford Bunny with Forge3D")
@@ -192,11 +71,35 @@ def main() -> int:
     # Rendering
     p.add_argument("--frames", type=int, default=8, help="Accumulation frames (>=1)")
     p.add_argument("--seed", type=int, default=7, help="Random seed")
-    p.add_argument("--cpu", action="store_true", help="Force CPU fallback (do not use GPU)")
+    p.add_argument("--no-gpu", action="store_true", help="Force CPU fallback even if native GPU tracer is available")
     # Preview overlay (CPU point cloud) to visualize mesh when GPU is unavailable
     p.add_argument("--preview", action="store_true", help="Draw CPU point-cloud overlay of the bunny onto the output")
     p.add_argument("--preview-size", type=int, default=1, help="Point size (pixels radius)")
     p.add_argument("--preview-color", type=int, nargs=3, metavar=("R","G","B"), default=(255, 160, 40), help="Point color")
+    p.add_argument(
+        "--background-color",
+        type=str,
+        nargs="+",
+        metavar="COLOR",
+        default=None,
+        help="Background color as hex (#RRGGBB) or three numeric components",
+    )
+    # Lighting & palette controls
+    p.add_argument("--palette", type=str, nargs="*", default=None, help="Palette specification (hex stops or colormap key)")
+    p.add_argument("--invert-palette", action="store_true", help="Invert palette direction")
+    p.add_argument("--lighting-type", type=str, default="lambertian", help="Lighting model (lambertian, none, flat)")
+    p.add_argument("--lighting-intensity", type=float, default=1.0, help="Lighting intensity multiplier")
+    p.add_argument("--lighting-azimuth", type=float, default=315.0, help="Lighting azimuth in degrees")
+    p.add_argument("--lighting-elevation", type=float, default=45.0, help="Lighting elevation in degrees")
+    shadow_group = p.add_mutually_exclusive_group()
+    shadow_group.add_argument("--shadows", dest="shadows", action="store_true", help="Enable analytic shadows")
+    shadow_group.add_argument("--no-shadows", dest="shadows", action="store_false", help="Disable analytic shadows")
+    p.set_defaults(shadows=True)
+    p.add_argument("--shadow-intensity", type=float, default=1.0, help="Shadow strength [0..1]")
+    # HDRI environment controls
+    p.add_argument("--hdri", type=str, default=None, help="Path to HDR environment map")
+    p.add_argument("--hdri-rotation", type=float, default=0.0, help="HDRI rotation in degrees")
+    p.add_argument("--hdri-intensity", type=float, default=1.0, help="HDRI blend intensity")
     # Denoiser & firefly controls
     p.add_argument("--denoiser", type=str, choices=["off", "svgf"], default="off", help="Apply denoiser to beauty")
     p.add_argument("--svgf-iters", type=int, default=5, help="Iterations for SVGF denoiser")
@@ -211,131 +114,81 @@ def main() -> int:
     out_path = Path(args.outfile)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 1) Load bunny OBJ
-    obj_path = ensure_bunny_obj()
-    V, F = load_obj_vertices_indices(obj_path)
+    target = _parse_vec3(args.target, (0.0, 0.05, 0.0))
+    up = _parse_vec3(args.up, (0.0, 1.0, 0.0))
+    eye = _parse_optional_vec3(args.eye)
+    preview_color = tuple(int(c) for c in args.preview_color)
+    aov_list = [s.strip() for s in str(args.aovs).split(',') if s.strip()]
 
-    # 2) Normalize geometry to a stable unit scale around origin for predictable camera
-    minv = V.min(axis=0)
-    maxv = V.max(axis=0)
-    center = 0.5 * (minv + maxv)
-    scale = 1.0 / (max(maxv - minv) + 1e-8)
-    Vn = (V - center).astype(np.float32) * (1.6 * float(scale))
+    palette: Optional[Union[str, Sequence[str]]] = None
+    if args.palette:
+        palette = args.palette if len(args.palette) > 1 else args.palette[0]
+    hdri_path = Path(args.hdri) if args.hdri is not None else None
+    background_color = _parse_color(args.background_color)
 
-    # 3) Validate and build mesh/BVH
-    validate_mesh_arrays(np.ascontiguousarray(Vn, dtype=np.float32), np.ascontiguousarray(F.astype(np.uint32)))
-    mesh = make_mesh(np.ascontiguousarray(Vn, dtype=np.float32), np.ascontiguousarray(F.astype(np.uint32)))
-    bvh = build_bvh_cpu(mesh, method="median")
-    handle = upload_mesh(mesh, bvh)
-
-    # 4) Camera setup (auto-framed by default)
-    W, H = int(args.width), int(args.height)
-    aspect = float(W) / float(H)
-    fovy = float(args.fovy)
-
-    target = np.array([0.0, 0.05, 0.0], dtype=np.float32) if args.target is None else np.array(args.target, dtype=np.float32)
-    up = np.array([0.0, 1.0, 0.0], dtype=np.float32) if args.up is None else np.array(args.up, dtype=np.float32)
-
-    # Direction hint from a nice 3/4 view
-    dir_hint_default = np.array([0.8, 0.6, 1.6], dtype=np.float32) - target
-
-    # Spherical orbit direction if provided
-    if (args.theta is not None) or (args.phi is not None):
-        theta = math.radians(args.theta if args.theta is not None else 45.0)
-        phi = math.radians(args.phi if args.phi is not None else 25.0)
-        dirv = np.array([
-            math.cos(phi) * math.sin(theta),
-            math.sin(phi),
-            math.cos(phi) * math.cos(theta),
-        ], dtype=np.float32)
-        dirv = dirv / (np.linalg.norm(dirv) + 1e-8)
-    else:
-        dirv = dir_hint_default / (np.linalg.norm(dir_hint_default) + 1e-8)
-
-    if args.eye is not None:
-        eye = np.array(args.eye, dtype=np.float32)
-    else:
-        if args.radius is not None:
-            d = float(args.radius)
-            eye = target + dirv * d
-        else:
-            eye, d = auto_frame(Vn, target, fovy, dirv)
-            if args.zoom is not None:
-                eye = target + dirv * (float(d) * float(args.zoom))
-
-    cam = make_camera(
-        origin=tuple(map(float, eye.tolist())),
-        look_at=tuple(map(float, target.tolist())),
-        up=tuple(map(float, up.tolist())),
-        fov_y=float(fovy),
-        aspect=float(aspect),
-        exposure=1.0,
-    )
-
-    # 5) Render
-    use_gpu = False if args.cpu else (len(f3d.enumerate_adapters()) > 0)
-    tracer = PathTracer()
-    img = tracer.render_rgba(
-        W, H,
-        scene=[],
-        camera=cam,
-        seed=int(args.seed),
+    _, meta = f3d.render_raytrace_mesh(
+        ensure_bunny_obj(),
+        size=(int(args.width), int(args.height)),
         frames=max(1, int(args.frames)),
-        use_gpu=bool(use_gpu),
-        mesh=handle,
+        seed=int(args.seed),
+        fov_y=float(args.fovy),
+        target=target,
+        up=up,
+        orbit_theta=args.theta,
+        orbit_phi=args.phi,
+        radius=args.radius,
+        zoom=args.zoom,
+        eye=eye,
+        prefer_gpu=not bool(args.no_gpu),
         denoiser=str(args.denoiser),
         svgf_iters=int(args.svgf_iters),
         luminance_clamp=(float(args.lum_clamp) if args.lum_clamp is not None else None),
+        preview=bool(args.preview),
+        preview_size=int(args.preview_size),
+        preview_color=preview_color,
+        background_color=background_color,
+        palette=palette,
+        invert_palette=bool(args.invert_palette),
+        lighting_type=str(args.lighting_type),
+        lighting_intensity=float(args.lighting_intensity),
+        lighting_azimuth=float(args.lighting_azimuth),
+        lighting_elevation=float(args.lighting_elevation),
+        shadows=bool(args.shadows),
+        shadow_intensity=float(args.shadow_intensity),
+        hdri_path=hdri_path,
+        hdri_rotation_deg=float(args.hdri_rotation),
+        hdri_intensity=float(args.hdri_intensity),
+        save_aovs=bool(args.save_aovs),
+        aovs=aov_list,
+        aov_dir=args.aov_dir,
+        basename=args.basename,
+        outfile=out_path,
+        verbose=False,
     )
 
-    # Optional CPU preview overlay of mesh vertices (helps when GPU tracer is unavailable)
-    if args.preview or not use_gpu:
-        Mview = _look_at(eye, target, up)
-        Mproj = _perspective(fovy, aspect)
-        pts, vis = _project_points(Vn, Mview, Mproj, W, H)
-        color = tuple(int(c) for c in args.preview_color)
-        _draw_points(img, pts, vis, size=int(args.preview_size), color=color)
+    gpu_used = bool(meta.get("gpu_used", False))
+    probe_status = meta.get("probe_status", "n/a")
 
-    # 6) Save
-    try:
-        f3d.numpy_to_png(str(out_path), img)
-    except Exception:
-        # PIL fallback
-        try:
-            from PIL import Image  # type: ignore
-            Image.fromarray(img, mode="RGBA").save(str(out_path))
-        except Exception:
-            raw = out_path.with_suffix(".rgba")
-            raw.write_bytes(img.tobytes())
-            print(f"Saved raw RGBA to {raw}")
-            print("Done (CPU fallback render).")
-            return 0
+    if gpu_used:
+        print("[stanford_bunny_raytrace] used_native_gpu_mesh=True")
+    elif args.preview:
+        print("[stanford_bunny_raytrace] GPU render unavailable; preview points overlay applied.")
 
-    print(f"Saved: {out_path} (use_gpu={use_gpu}, tris={handle.triangle_count})")
-    if not use_gpu:
-        print("Note: GPU backend not in use; the beauty image is a procedural fallback. Use --preview to overlay bunny points.")
+    print(
+        f"[stanford_bunny_raytrace] prefer_gpu={not bool(args.no_gpu)} "
+        f"gpu_used={gpu_used} probe={probe_status} tris={meta.get('triangles', 'n/a')}"
+    )
 
-    # 7) Optional AOVs
-    if bool(args.save_aovs):
-        req = [s.strip().lower() for s in str(args.aovs).split(',') if s.strip()]
-        # Some fallback implementations may not accept 'mesh' parameter
-        try:
-            aov_map = render_aovs(
-                W, H, scene=[], camera=cam,
-                aovs=tuple(req), seed=int(args.seed), frames=max(1, int(args.frames)), use_gpu=bool(use_gpu), mesh=handle
-            )
-        except TypeError:
-            aov_map = render_aovs(
-                W, H, scene=[], camera=cam,
-                aovs=tuple(req), seed=int(args.seed), frames=max(1, int(args.frames)), use_gpu=bool(use_gpu)
-            )
-        base = str(args.basename) if args.basename else out_path.stem
-        out_dir = args.aov_dir if args.aov_dir else str(out_path.parent)
-        saved = save_aovs(aov_map, base, output_dir=out_dir)
-        if saved:
-            print("Saved AOVs:")
-            for k, pth in saved.items():
-                print(f"  {k}: {pth}")
+    outfile_record = meta.get("outfile")
+    if outfile_record is not None:
+        print(f"Saved: {outfile_record}")
+
+    aov_outputs = meta.get("aov_outputs")
+    if aov_outputs:
+        print("Saved AOVs:")
+        for name, path in aov_outputs.items():
+            print(f"  {name}: {path}")
+
     return 0
 
 

@@ -260,6 +260,7 @@ import weakref
 from typing import Union, Tuple
 
 from .path_tracing import PathTracer, make_camera
+from .render import render_raster, render_polygons, render_object, render_overlay, render_raytrace_mesh
 from . import _validate as validate
 from .guiding import OnlineGuidingGrid
 from .materials import PbrMaterial
@@ -5903,7 +5904,65 @@ try:  # pragma: no cover - native module availability varies
     invert_matrix = _xf_inv
     compute_normal_matrix = _xf_nmat
 
-    grid_generate = _grid_generate
+    # Preserve the Python API shape expected by tests: default spacing, origin='center',
+    # return 2D XY (N,2) with CCW indices matching the Python fallback.
+    def grid_generate(nx: int, nz: int, spacing=(1.0, 1.0), origin: str = "center"):
+        """Generate a centered 2D grid returning (xy, uv, indices).
+
+        - xy: (nx*nz, 2) float32 positions in the XY plane
+        - uv: (nx*nz, 2) float32 in [0,1]
+        - indices: (num_tris*3,) uint32 CCW triangles
+
+        Notes:
+            Wraps native _grid_generate but normalizes outputs to the Python contract.
+        """
+        nx_i = int(nx); nz_i = int(nz)
+        if nx_i < 2 or nz_i < 2:
+            raise ValueError("nx and nz must be >= 2")
+        try:
+            sx, sy = float(spacing[0]), float(spacing[1])
+        except Exception as e:
+            raise ValueError("spacing components must be finite and > 0") from e
+        import numpy as _np  # local import to avoid circulars during init
+        if not _np.isfinite(sx) or not _np.isfinite(sy) or sx <= 0.0 or sy <= 0.0:
+            raise ValueError("spacing components must be finite and > 0")
+        if str(origin).lower() != "center":
+            # Tests require this exact message
+            raise ValueError("origin must be 'center'")
+
+        # Attempt native call first (provides uv and shape), then normalize
+        try:
+            pos3, uv, _idx_native = _grid_generate(nx_i, nz_i, (sx, sy), "center")
+            # Map 3D (x,y,z) -> 2D (x,z)
+            xy = _np.ascontiguousarray(pos3[:, [0, 2]], dtype=_np.float32)
+            uv = _np.asarray(uv, dtype=_np.float32).reshape(-1, 2)
+        except Exception:
+            # Python fallback path identical to the non-native implementation above
+            xs = (_np.arange(nx_i, dtype=_np.float32) - (nx_i - 1) * 0.5) * sx
+            ys = (_np.arange(nz_i, dtype=_np.float32) - (nz_i - 1) * 0.5) * sy
+            X, Y = _np.meshgrid(xs, ys, indexing='xy')
+            xy = _np.stack([X.ravel(), Y.ravel()], axis=1).astype(_np.float32)
+            U, V = _np.meshgrid(
+                _np.linspace(0.0, 1.0, nx_i, dtype=_np.float32),
+                _np.linspace(0.0, 1.0, nz_i, dtype=_np.float32),
+                indexing='xy'
+            )
+            uv = _np.stack([U.ravel(), V.ravel()], axis=1).astype(_np.float32)
+
+        # Always recompute indices with CCW winding matching tests
+        idx_list: list[int] = []
+        for j in range(nz_i - 1):
+            for i in range(nx_i - 1):
+                v00 = j * nx_i + i
+                v10 = j * nx_i + (i + 1)
+                v01 = (j + 1) * nx_i + i
+                v11 = (j + 1) * nx_i + (i + 1)
+                # First tri: bl->br->tl (CCW in XY)
+                idx_list.extend([v00, v10, v01])
+                # Second tri: br->tr->tl
+                idx_list.extend([v10, v11, v01])
+        indices = _np.asarray(idx_list, dtype=_np.uint32)
+        return xy, uv, indices
 except Exception:
     pass
 

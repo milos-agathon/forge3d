@@ -7,7 +7,9 @@ use glam::{Mat3, Mat4, Vec3};
 use crate::geometry::MeshBuffers;
 
 #[cfg(feature = "extension-module")]
-use numpy::{PyArray1, PyArrayMethods, PyReadonlyArray2, PyUntypedArrayMethods};
+use numpy::{PyReadonlyArray2, PyUntypedArrayMethods};
+#[cfg(all(feature = "extension-module", feature = "enable-gpu-instancing"))]
+use numpy::{PyArray1, PyArrayMethods};
 #[cfg(feature = "extension-module")]
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
 

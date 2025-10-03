@@ -14,7 +14,7 @@ from typing import Optional, Any
 import warnings
 
 
-# Optional matplotlib integration
+# Optional matplotlib integration (colormaps/norms)
 try:
     from .mpl_cmap import (
         matplotlib_to_forge3d_colormap,
@@ -38,6 +38,48 @@ except ImportError:
     get_matplotlib_colormap_names = _matplotlib_unavailable
     is_matplotlib_available = lambda: False
 
+
+# Optional matplotlib image rasterization (M1)
+try:
+    from .mpl_image import (
+        rasterize_figure as mpl_rasterize_figure,
+        rasterize_axes as mpl_rasterize_axes,
+        height_from_luminance as mpl_height_from_luminance,
+        is_matplotlib_available as is_matplotlib_available_image,
+    )
+    _HAS_MATPLOTLIB_IMAGE = True
+except Exception:
+    _HAS_MATPLOTLIB_IMAGE = False
+    def _mpl_image_unavailable(*args, **kwargs):
+        raise ImportError("Matplotlib is required for rasterization adapters. Install with: pip install matplotlib")
+    mpl_rasterize_figure = _mpl_image_unavailable
+    mpl_rasterize_axes = _mpl_image_unavailable
+    mpl_height_from_luminance = _mpl_image_unavailable
+    is_matplotlib_available_image = lambda: False
+
+# Optional matplotlib data adapters (M2)
+try:
+    from .mpl_data import (
+        extract_lines_from_axes,
+        extract_polygons_from_axes,
+        text_to_polygons,
+        extrude_polygons_to_meshes,
+        thicken_lines_to_meshes,
+        line_width_world_from_pixels,
+        is_matplotlib_available as is_matplotlib_available_data,
+    )
+    _HAS_MATPLOTLIB_DATA = True
+except Exception:
+    _HAS_MATPLOTLIB_DATA = False
+    def _mpl_data_unavailable(*args, **kwargs):
+        raise ImportError("Matplotlib is required for data adapters. Install with: pip install matplotlib")
+    extract_lines_from_axes = _mpl_data_unavailable
+    extract_polygons_from_axes = _mpl_data_unavailable
+    text_to_polygons = _mpl_data_unavailable
+    extrude_polygons_to_meshes = _mpl_data_unavailable
+    thicken_lines_to_meshes = _mpl_data_unavailable
+    line_width_world_from_pixels = _mpl_data_unavailable
+    is_matplotlib_available_data = lambda: False
 
 # Optional datashader integration
 try:
@@ -72,6 +114,76 @@ except ImportError:
     get_datashader_info = _datashader_unavailable
     is_datashader_available = lambda: False
 
+# Optional GeoPandas adapter (M3)
+try:
+    from .geopandas_adapter import (
+        is_geopandas_available,
+        reproject_geoseries,
+        geoseries_to_polygons,
+        extrude_geometries_to_meshes,
+    )
+    _HAS_GPD = True
+except Exception:
+    _HAS_GPD = False
+    def _gpd_unavailable(*args, **kwargs):
+        raise ImportError("GeoPandas/Shapely are required. Install with: pip install geopandas shapely pyproj")
+    is_geopandas_available = lambda: False
+    reproject_geoseries = _gpd_unavailable
+    geoseries_to_polygons = _gpd_unavailable
+    extrude_geometries_to_meshes = _gpd_unavailable
+
+# Optional Cartopy integration (M5)
+try:
+    from .cartopy_adapter import (
+        is_cartopy_available,
+        rasterize_geoaxes,
+        get_axes_crs,
+        get_extent_in_crs,
+    )
+    _HAS_CARTOPY = True
+except Exception:
+    _HAS_CARTOPY = False
+    def _cartopy_unavailable(*args, **kwargs):
+        raise ImportError("Cartopy is required. Install with: pip install cartopy")
+    is_cartopy_available = lambda: False
+    rasterize_geoaxes = _cartopy_unavailable
+    get_axes_crs = _cartopy_unavailable
+    get_extent_in_crs = _cartopy_unavailable
+
+# Optional Seaborn/Plotly convenience (M6)
+try:
+    from .charts import (
+        render_chart_to_rgba,
+        is_plotly_available,
+        is_seaborn_available,
+    )
+    _HAS_CHARTS = True
+except Exception:
+    _HAS_CHARTS = False
+    def _charts_unavailable(*args, **kwargs):
+        raise ImportError("Plotly/Seaborn integration requires optional deps. Install with: pip install plotly kaleido seaborn")
+    render_chart_to_rgba = _charts_unavailable
+    is_plotly_available = lambda: False
+    is_seaborn_available = lambda: False
+
+# Optional Rasterio/Xarray adapter (M4)
+try:
+    from .raster_xarray_adapter import (
+        rasterio_to_rgba,
+        dataarray_to_rgba,
+        is_rasterio_available as is_rasterio_available_m4,
+        is_xarray_available as is_xarray_available_m4,
+    )
+    _HAS_RASTER_XARRAY = True
+except Exception:
+    _HAS_RASTER_XARRAY = False
+    def _rxa_unavailable(*args, **kwargs):
+        raise ImportError("Rasterio/Xarray adapters require optional deps. Install with: pip install rasterio xarray rioxarray")
+    rasterio_to_rgba = _rxa_unavailable
+    dataarray_to_rgba = _rxa_unavailable
+    is_rasterio_available_m4 = lambda: False
+    is_xarray_available_m4 = lambda: False
+
 
 __all__ = [
     # Matplotlib integration
@@ -79,6 +191,8 @@ __all__ = [
     'matplotlib_normalize', 
     'get_matplotlib_colormap_names',
     'is_matplotlib_available',
+    'mpl_rasterize_figure', 'mpl_rasterize_axes', 'mpl_height_from_luminance', 'is_matplotlib_available_image',
+    'extract_lines_from_axes', 'extract_polygons_from_axes', 'text_to_polygons', 'extrude_polygons_to_meshes', 'thicken_lines_to_meshes', 'line_width_world_from_pixels', 'is_matplotlib_available_data',
     # Datashader integration
     'DatashaderAdapter',
     'is_datashader_available',
@@ -88,6 +202,15 @@ __all__ = [
     'to_overlay_texture',
     'shade_to_overlay',
     'get_datashader_info'
+    ,
+    # Rasterio/Xarray (M4)
+    'rasterio_to_rgba', 'dataarray_to_rgba', 'is_rasterio_available_m4', 'is_xarray_available_m4',
+    # GeoPandas (M3)
+    'is_geopandas_available', 'reproject_geoseries', 'geoseries_to_polygons', 'extrude_geometries_to_meshes',
+    # Cartopy (M5)
+    'is_cartopy_available', 'rasterize_geoaxes', 'get_axes_crs', 'get_extent_in_crs',
+    # Charts (M6)
+    'render_chart_to_rgba', 'is_plotly_available', 'is_seaborn_available'
 ]
 
 

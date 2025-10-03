@@ -78,7 +78,7 @@ impl AovKind {
             | AovKind::Indirect
             | AovKind::Emission => TextureFormat::Rgba16Float,
             AovKind::Depth => TextureFormat::R32Float,
-            AovKind::Visibility => TextureFormat::R8Unorm,
+            AovKind::Visibility => TextureFormat::Rgba8Unorm,
         }
     }
 
@@ -135,7 +135,7 @@ impl AovKind {
                 pixel_count * 4 // r32float = 1 channel * 4 bytes
             }
             AovKind::Visibility => {
-                pixel_count * 1 // r8unorm = 1 channel * 1 byte
+                pixel_count * 4 // rgba8unorm = 4 channels * 1 byte
             }
         }
     }
@@ -253,6 +253,6 @@ mod tests {
         // 100x100 texture
         assert_eq!(AovKind::Albedo.memory_usage_bytes(100, 100), 80000); // 10k pixels * 8 bytes (rgba16f)
         assert_eq!(AovKind::Depth.memory_usage_bytes(100, 100), 40000); // 10k pixels * 4 bytes (r32f)
-        assert_eq!(AovKind::Visibility.memory_usage_bytes(100, 100), 10000); // 10k pixels * 1 byte (r8unorm)
+        assert_eq!(AovKind::Visibility.memory_usage_bytes(100, 100), 40000); // 10k pixels * 4 bytes (rgba8unorm)
     }
 }

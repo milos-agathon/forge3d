@@ -13,23 +13,48 @@ pub struct GpuContext {
 
 static CTX: OnceCell<GpuContext> = OnceCell::new();
 
+fn backends_from_env() -> wgpu::Backends {
+    use std::env;
+    if let Ok(s) = env::var("WGPU_BACKENDS").or_else(|_| env::var("WGPU_BACKEND")) {
+        let s_l = s.to_lowercase();
+        if s_l.contains("metal") { return wgpu::Backends::METAL; }
+        if s_l.contains("vulkan") { return wgpu::Backends::VULKAN; }
+        if s_l.contains("dx12") { return wgpu::Backends::DX12; }
+        if s_l.contains("gl") { return wgpu::Backends::GL; }
+        if s_l.contains("webgpu") { return wgpu::Backends::BROWSER_WEBGPU; }
+    }
+    #[cfg(target_os = "macos")]
+    { wgpu::Backends::METAL }
+    #[cfg(not(target_os = "macos"))]
+    { wgpu::Backends::all() }
+}
+
 pub fn ctx() -> &'static GpuContext {
     CTX.get_or_init(|| {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            backends: backends_from_env(),
             ..Default::default()
         });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
+            // LowPower tends to resolve faster and avoids eGPU/discrete probing on macOS
+            power_preference: wgpu::PowerPreference::LowPower,
             compatible_surface: None,
             force_fallback_adapter: false,
         }))
         .expect("No suitable GPU adapter");
 
+        let mut limits = adapter.limits();
+        let baseline = wgpu::Limits::downlevel_defaults();
+        limits = limits.using_resolution(baseline);
+        let desired_storage_buffers = 8;
+        limits.max_storage_buffers_per_shader_stage = limits
+            .max_storage_buffers_per_shader_stage
+            .max(desired_storage_buffers);
+
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_defaults(),
+                required_limits: limits,
                 label: Some("forge3d-device"),
             },
             None,
@@ -63,10 +88,18 @@ pub fn create_device_for_test() -> wgpu::Device {
         force_fallback_adapter: false,
     }))
     .expect("No suitable GPU adapter for tests");
+    let mut limits = adapter.limits();
+    let baseline = wgpu::Limits::downlevel_defaults();
+    limits = limits.using_resolution(baseline);
+    let desired_storage_buffers = 8;
+    limits.max_storage_buffers_per_shader_stage = limits
+        .max_storage_buffers_per_shader_stage
+        .max(desired_storage_buffers);
+
     let (device, _queue) = pollster::block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
             required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_defaults(),
+            required_limits: limits,
             label: Some("forge3d-test-device"),
         },
         None,

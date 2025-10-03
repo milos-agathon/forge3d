@@ -57,6 +57,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    integration/matplotlib
    integration/external_images
    user/datashader_interop
+   user/plot_py_adapters
 
 .. toctree::
    :maxdepth: 1

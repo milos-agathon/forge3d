@@ -11,8 +11,47 @@ use wgpu::util::DeviceExt;
 use crate::error::RenderError;
 use crate::gpu::{align_copy_bpr, ctx};
 use crate::path_tracing::aov::{AovFrames, AovKind};
+use std::borrow::Cow;
 use crate::path_tracing::compute::{Sphere, Uniforms};
 use crate::sdf::HybridScene;
+
+/// Load the hybrid kernel WGSL and expand simple `#include "..."` directives.
+///
+/// WGSL has no preprocessor, so we inline our shader snippets. This function
+/// repeatedly expands known includes and removes duplicate include directives to
+/// avoid parser errors and symbol redefinitions.
+fn load_hybrid_kernel_src() -> String {
+    // Deterministic assembly to avoid duplicate definitions
+    // 1) Core SDF primitives (types and basic evaluators)
+    let sdf_primitives = include_str!("../shaders/sdf_primitives.wgsl");
+
+    // 2) CSG operations (strip its own includes)
+    let sdf_operations_raw = include_str!("../shaders/sdf_operations.wgsl");
+    let sdf_operations = sdf_operations_raw
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("#include"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // 3) Hybrid traversal utilities (strip includes)
+    let hybrid_traversal_raw = include_str!("../shaders/hybrid_traversal.wgsl");
+    let hybrid_traversal = hybrid_traversal_raw
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("#include"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // 4) Kernel entry (strip includes)
+    let kernel_raw = include_str!("../shaders/hybrid_kernel.wgsl");
+    let kernel = kernel_raw
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("#include"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Concatenate in dependency order
+    [sdf_primitives, &sdf_operations, &hybrid_traversal, &kernel].join("\n")
+}
 
 /// Additional uniforms for hybrid traversal
 #[repr(C)]
@@ -71,7 +110,7 @@ impl Default for HybridTracerParams {
                 cam_forward: [0.0, 0.0, -1.0],
                 seed_hi: 12345,
                 seed_lo: 67890,
-                _pad_end: [0; 3],
+                _pad_end: [0, 0, 0],
             },
             traversal_mode: TraversalMode::Hybrid,
             early_exit_distance: 0.01,
@@ -99,9 +138,7 @@ struct HybridBindGroupLayouts {
     uniforms: wgpu::BindGroupLayout, // Group 0: camera uniforms
     scene: wgpu::BindGroupLayout,    // Group 1: spheres + legacy mesh buffers
     accum: wgpu::BindGroupLayout,    // Group 2: accumulation buffer
-    output: wgpu::BindGroupLayout,   // Group 3: primary output texture
-    aov: wgpu::BindGroupLayout,      // Group 4: AOV textures
-    hybrid: wgpu::BindGroupLayout,   // Group 5: hybrid scene data
+    output: wgpu::BindGroupLayout,   // Group 3: primary output texture + AOVs
 }
 
 impl HybridPathTracer {
@@ -109,10 +146,11 @@ impl HybridPathTracer {
     pub fn new() -> Result<Self, RenderError> {
         let device = &ctx().device;
 
-        // Load hybrid kernel shader
+        // Load hybrid kernel shader (expand simple includes)
+        let shader_src = load_hybrid_kernel_src();
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("hybrid-pt-kernel"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/hybrid_kernel.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(shader_src.into()),
         });
 
         // Create bind group layouts
@@ -121,8 +159,6 @@ impl HybridPathTracer {
             scene: Self::create_scene_layout(device),
             accum: Self::create_accum_layout(device),
             output: Self::create_output_layout(device),
-            aov: Self::create_aov_layout(device),
-            hybrid: Self::create_hybrid_layout(device),
         };
 
         // Create pipeline layout
@@ -133,8 +169,6 @@ impl HybridPathTracer {
                 &layouts.scene,
                 &layouts.accum,
                 &layouts.output,
-                &layouts.aov,
-                &layouts.hybrid,
             ],
             push_constant_ranges: &[],
         });
@@ -198,28 +232,14 @@ impl HybridPathTracer {
         });
 
         // Scene buffer (spheres)
-        let scene_bytes = bytemuck::cast_slice(spheres);
+        let scene_bytes: Cow<[u8]> = if spheres.is_empty() {
+            Cow::Owned(vec![0u8; std::mem::size_of::<Sphere>()])
+        } else {
+            Cow::Borrowed(bytemuck::cast_slice(spheres))
+        };
         let scene_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("hybrid-pt-scene"),
-            contents: scene_bytes,
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-
-        // Create dummy buffers for legacy mesh bindings (group 1)
-        let dummy_u32: [u32; 1] = [0];
-        let legacy_mesh_vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-legacy-mesh-verts"),
-            contents: bytemuck::cast_slice(&dummy_u32),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let legacy_mesh_indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-legacy-mesh-indices"),
-            contents: bytemuck::cast_slice(&dummy_u32),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let legacy_mesh_bvh = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-legacy-mesh-bvh"),
-            contents: bytemuck::cast_slice(&dummy_u32),
+            contents: scene_bytes.as_ref(),
             usage: wgpu::BufferUsages::STORAGE,
         });
 
@@ -280,27 +300,25 @@ impl HybridPathTracer {
             }],
         });
 
+        // Scene + Hybrid bind group (Group 1)
+        let mut bg1_entries = vec![
+            wgpu::BindGroupEntry { binding: 0, resource: scene_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: hybrid_ubo.as_entire_binding() },
+        ];
+
+        // Add mesh buffer entries at bindings 2..4
+        bg1_entries.extend(
+            hybrid_scene
+                .get_mesh_bind_entries()
+                .into_iter()
+                .enumerate()
+                .map(|(i, mut entry)| { entry.binding = (i + 2) as u32; entry })
+        );
+
         let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hybrid-pt-bg1"),
             layout: &self.layouts.scene,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: scene_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: legacy_mesh_vertices.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: legacy_mesh_indices.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: legacy_mesh_bvh.as_entire_binding(),
-                },
-            ],
+            entries: &bg1_entries,
         });
 
         let bg2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -312,85 +330,19 @@ impl HybridPathTracer {
             }],
         });
 
+        // Output + AOVs bind group (Group 3)
+        let mut bg3_entries = vec![wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&out_view) }];
+        // Map AOVs to bindings 1..7 in the same group
+        for (i, view) in aov_views.iter().enumerate() {
+            bg3_entries.push(wgpu::BindGroupEntry { binding: (i as u32) + 1, resource: wgpu::BindingResource::TextureView(view) });
+        }
         let bg3 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hybrid-pt-bg3"),
             layout: &self.layouts.output,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&out_view),
-            }],
+            entries: &bg3_entries,
         });
 
-        let bg4 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("hybrid-pt-bg4"),
-            layout: &self.layouts.aov,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&aov_views[0]),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&aov_views[1]),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&aov_views[2]),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&aov_views[3]),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(&aov_views[4]),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::TextureView(&aov_views[5]),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::TextureView(&aov_views[6]),
-                },
-            ],
-        });
-
-        // Create hybrid bind group (Group 5)
-        let mut hybrid_entries = vec![wgpu::BindGroupEntry {
-            binding: 0,
-            resource: hybrid_ubo.as_entire_binding(),
-        }];
-
-        // Add SDF buffer entries
-        hybrid_entries.extend(
-            hybrid_scene
-                .get_sdf_bind_entries()
-                .into_iter()
-                .enumerate()
-                .map(|(i, mut entry)| {
-                    entry.binding = (i + 1) as u32; // Bindings 1-2 for SDF
-                    entry
-                }),
-        );
-
-        // Add mesh buffer entries
-        hybrid_entries.extend(
-            hybrid_scene
-                .get_mesh_bind_entries()
-                .into_iter()
-                .enumerate()
-                .map(|(i, mut entry)| {
-                    entry.binding = (i + 3) as u32; // Bindings 3-5 for mesh
-                    entry
-                }),
-        );
-
-        let bg5 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("hybrid-pt-bg5"),
-            layout: &self.layouts.hybrid,
-            entries: &hybrid_entries,
-        });
+        // Removed separate AOV (bg4) and Hybrid (bg5) groups; merged into bg3 and bg1 respectively.
 
         // Dispatch compute shader
         let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -407,8 +359,6 @@ impl HybridPathTracer {
             cpass.set_bind_group(1, &bg1, &[]);
             cpass.set_bind_group(2, &bg2, &[]);
             cpass.set_bind_group(3, &bg3, &[]);
-            cpass.set_bind_group(4, &bg4, &[]);
-            cpass.set_bind_group(5, &bg5, &[]);
 
             let gx = (width + 7) / 8;
             let gy = (height + 7) / 8;
@@ -523,7 +473,7 @@ impl HybridPathTracer {
                     binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -541,6 +491,16 @@ impl HybridPathTracer {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -572,16 +532,90 @@ impl HybridPathTracer {
     fn create_output_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("hybrid-pt-bgl3-out"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::StorageTexture {
-                    access: wgpu::StorageTextureAccess::WriteOnly,
-                    format: wgpu::TextureFormat::Rgba16Float,
-                    view_dimension: wgpu::TextureViewDimension::D2,
+            entries: &[
+                // out_tex at binding 0
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                // AOVs binding 1..7
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::R32Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+            ],
         })
     }
 
@@ -654,7 +688,17 @@ impl HybridPathTracer {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: wgpu::TextureFormat::R8Unorm,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
                         view_dimension: wgpu::TextureViewDimension::D2,
                     },
                     count: None,

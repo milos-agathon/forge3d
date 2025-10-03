@@ -33,20 +33,17 @@ struct Sphere {
 // Bind groups
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(1) @binding(0) var<storage, read> scene_spheres: array<Sphere>;
-@group(1) @binding(1) var<storage, read> legacy_mesh_vertices: array<u32>; // Dummy
-@group(1) @binding(2) var<storage, read> legacy_mesh_indices: array<u32>;  // Dummy
-@group(1) @binding(3) var<storage, read> legacy_mesh_bvh: array<u32>;      // Dummy
 @group(2) @binding(0) var<storage, read_write> accum_hdr: array<vec4<f32>>;
 @group(3) @binding(0) var out_tex: texture_storage_2d<rgba16float, write>;
 
-// AOV Output textures (Group 4)
-@group(4) @binding(0) var aov_albedo: texture_storage_2d<rgba16float, write>;
-@group(4) @binding(1) var aov_normal: texture_storage_2d<rgba16float, write>;
-@group(4) @binding(2) var aov_depth: texture_storage_2d<r32float, write>;
-@group(4) @binding(3) var aov_direct: texture_storage_2d<rgba16float, write>;
-@group(4) @binding(4) var aov_indirect: texture_storage_2d<rgba16float, write>;
-@group(4) @binding(5) var aov_emission: texture_storage_2d<rgba16float, write>;
-@group(4) @binding(6) var aov_visibility: texture_storage_2d<r8unorm, write>;
+// AOV Output textures (moved into Group 3 to stay within max_bind_groups)
+@group(3) @binding(1) var aov_albedo: texture_storage_2d<rgba16float, write>;
+@group(3) @binding(2) var aov_normal: texture_storage_2d<rgba16float, write>;
+@group(3) @binding(3) var aov_depth: texture_storage_2d<r32float, write>;
+@group(3) @binding(4) var aov_direct: texture_storage_2d<rgba16float, write>;
+@group(3) @binding(5) var aov_indirect: texture_storage_2d<rgba16float, write>;
+@group(3) @binding(6) var aov_emission: texture_storage_2d<rgba16float, write>;
+@group(3) @binding(7) var aov_visibility: texture_storage_2d<rgba8unorm, write>;
 
 // AOV flag constants
 const AOV_ALBEDO_BIT: u32 = 0u;
@@ -159,11 +156,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let pixel_coord = vec2<i32>(i32(gid.x), i32(gid.y));
   let is_hit = t_best < 1e20;
 
-  // Sky color for miss cases
-  let sky_color = if (is_hit) { vec3<f32>(0.0) } else {
-    let tsky = 0.5 * (rd.y + 1.0);
-    mix(vec3<f32>(0.6, 0.7, 0.9), vec3<f32>(0.1, 0.2, 0.5), tsky)
-  };
+  // Sky color for miss cases - use magenta marker for easy detection
+  var sky_color = vec3<f32>(0.0);
+  if (!is_hit) {
+    // Magenta (1.0, 0.0, 1.0) - won't occur naturally, easy to detect in Python
+    sky_color = vec3<f32>(1.0, 0.0, 1.0);
+  }
 
   // Lighting
   let light_dir = normalize(vec3<f32>(0.5, 0.8, 0.2));
@@ -188,32 +186,34 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     final_color = hit_albedo * (direct_light + indirect_light);
   }
 
-  // Apply tonemapping
-  final_color = reinhard_tonemap(final_color, uniforms.cam_exposure);
+  // Apply tonemapping (skip for background to preserve colors)
+  if (is_hit) {
+    final_color = reinhard_tonemap(final_color, uniforms.cam_exposure);
+  }
 
   // Write AOVs if enabled
   if (aov_enabled(AOV_ALBEDO_BIT)) {
-    let albedo_val = if (is_hit) { vec4<f32>(hit_albedo, 1.0) } else { vec4<f32>(0.0, 0.0, 0.0, 1.0) };
+    let albedo_val = select(vec4<f32>(0.0, 0.0, 0.0, 1.0), vec4<f32>(hit_albedo, 1.0), is_hit);
     textureStore(aov_albedo, pixel_coord, albedo_val);
   }
 
   if (aov_enabled(AOV_NORMAL_BIT)) {
-    let normal_val = if (is_hit) { vec4<f32>(hit_normal, 1.0) } else { vec4<f32>(0.0, 0.0, 0.0, 1.0) };
+    let normal_val = select(vec4<f32>(0.0, 0.0, 0.0, 1.0), vec4<f32>(hit_normal, 1.0), is_hit);
     textureStore(aov_normal, pixel_coord, normal_val);
   }
 
   if (aov_enabled(AOV_DEPTH_BIT)) {
-    let depth_val = if (is_hit) { t_best } else { 0.0 / 0.0 }; // NaN for miss
+    let depth_val: f32 = select(bitcast<f32>(0x7fc00000u), t_best, is_hit); // qNaN for miss
     textureStore(aov_depth, pixel_coord, vec4<f32>(depth_val, 0.0, 0.0, 0.0));
   }
 
   if (aov_enabled(AOV_DIRECT_BIT)) {
-    let direct_val = if (is_hit) { vec4<f32>(direct_light, 1.0) } else { vec4<f32>(0.0, 0.0, 0.0, 1.0) };
+    let direct_val = select(vec4<f32>(0.0, 0.0, 0.0, 1.0), vec4<f32>(direct_light, 1.0), is_hit);
     textureStore(aov_direct, pixel_coord, direct_val);
   }
 
   if (aov_enabled(AOV_INDIRECT_BIT)) {
-    let indirect_val = if (is_hit) { vec4<f32>(indirect_light, 1.0) } else { vec4<f32>(0.0, 0.0, 0.0, 1.0) };
+    let indirect_val = select(vec4<f32>(0.0, 0.0, 0.0, 1.0), vec4<f32>(indirect_light, 1.0), is_hit);
     textureStore(aov_indirect, pixel_coord, indirect_val);
   }
 
@@ -223,8 +223,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
 
   if (aov_enabled(AOV_VISIBILITY_BIT)) {
-    let visibility_val = if (is_hit) { 1.0 } else { 0.0 };
-    textureStore(aov_visibility, pixel_coord, vec4<f32>(visibility_val, 0.0, 0.0, 0.0));
+    let visibility_val: f32 = select(0.0, 1.0, is_hit);
+    textureStore(aov_visibility, pixel_coord, vec4<f32>(visibility_val, 0.0, 0.0, 1.0));
   }
 
   // Write final output

@@ -35,7 +35,7 @@ struct Uniforms {
 @group(4) @binding(3) var aov_direct: texture_storage_2d<rgba16float, write>;
 @group(4) @binding(4) var aov_indirect: texture_storage_2d<rgba16float, write>;
 @group(4) @binding(5) var aov_emission: texture_storage_2d<rgba16float, write>;
-@group(4) @binding(6) var aov_visibility: texture_storage_2d<r8unorm, write>;
+@group(4) @binding(6) var aov_visibility: texture_storage_2d<rgba8unorm, write>;
 
 fn aov_enabled(bit: u32) -> bool {
   return (ubo.aov_flags & (1u << bit)) != 0u;
@@ -53,6 +53,15 @@ fn env_color(dir: vec3<f32>) -> vec3<f32> {
   let ground = vec3<f32>(0.08, 0.08, 0.08);
   return mix(ground, sky, t);
 }
+
+// Return payload for shading functions (WGSL requires a named struct; anonymous return structs
+// are not accepted by current wgpu's WGSL parser)
+struct ShadeOut {
+  color: vec3<f32>,
+  albedo: vec3<f32>,
+  direct: vec3<f32>,
+  indirect: vec3<f32>,
+};
 
 fn generate_primary_ray(px: u32, py: u32) -> vec3<f32> {
   let sx = (f32(px) + 0.5) / max(1.0, f32(ubo.width));
@@ -155,9 +164,7 @@ fn smith_G_aniso(v: vec3<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f32>, ax: f32
   return 2.0 / (1.0 + sqrt(1.0 + alpha_v * alpha_v));
 }
 
-fn shade_pbr(v: vec3<f32>, n: vec3<f32>, p: vec3<f32>, m: SphereMat) -> struct {
-  color: vec3<f32>, albedo: vec3<f32>, direct: vec3<f32>, indirect: vec3<f32>
-} {
+fn shade_pbr(v: vec3<f32>, n: vec3<f32>, p: vec3<f32>, m: SphereMat) -> ShadeOut {
   let albedo = max(m.albedo, vec3<f32>(0.0));
   let metallic = clamp(m.metallic, 0.0, 1.0);
   let rough = clamp(m.roughness, 0.0, 1.0);
@@ -202,7 +209,7 @@ fn shade_pbr(v: vec3<f32>, n: vec3<f32>, p: vec3<f32>, m: SphereMat) -> struct {
 
   // Add emissive
   let color = direct + indirect + max(m.emissive, vec3<f32>(0.0));
-  return .{ color, albedo, direct, indirect };
+  return ShadeOut(color, albedo, direct, indirect);
 }
 
 struct Hit {
@@ -226,12 +233,7 @@ fn intersect_ground_plane(ro: vec3<f32>, rd: vec3<f32>) -> Hit {
   return Hit(false, 1e30, n, ro);
 }
 
-fn shade_ground(ro: vec3<f32>, rd: vec3<f32>, h: Hit) -> struct {
-  color: vec3<f32>,
-  albedo: vec3<f32>,
-  direct: vec3<f32>,
-  indirect: vec3<f32>,
-} {
+fn shade_ground(ro: vec3<f32>, rd: vec3<f32>, h: Hit) -> ShadeOut {
   // Minimal PBR-ish shading with a single directional light and env reflection.
   let base_color = vec3<f32>(0.6, 0.6, 0.6);
   let metallic = 0.0;
@@ -272,7 +274,7 @@ fn shade_ground(ro: vec3<f32>, rd: vec3<f32>, h: Hit) -> struct {
   let dist = length(p - ro);
   let fog = clamp(dist / 50.0, 0.0, 1.0);
   let color = mix(direct + indirect, env_color(vec3<f32>(0.0, 1.0, 0.0)), fog);
-  return .{ color, base_color, direct, indirect };
+  return ShadeOut(color, base_color, direct, indirect);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -319,12 +321,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   }
 
-  // Tonemap and output RGBA16F
+  // Tonemap and output (RGBA16F target; WGSL uses vec4<f32> for store)
   let tm = tonemap_reinhard(color, ubo.cam_exposure);
-  textureStore(out_rgba, xy, vec4<f16>(vec4<f32>(tm, 1.0)));
+  textureStore(out_rgba, xy, vec4<f32>(tm, 1.0));
 
   // AOV writes (optional)
-  if (aov_enabled(0u)) { textureStore(aov_albedo, xy, vec4<f16>(vec4<f32>(albedo, 1.0))); }
+  if (aov_enabled(0u)) { textureStore(aov_albedo, xy, vec4<f32>(albedo, 1.0)); }
   if (aov_enabled(1u)) {
     var n_out = vec3<f32>(0.0, 1.0, 0.0);
     if (best.hit) {
@@ -333,11 +335,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       let ph = intersect_ground_plane(ro, rd);
       if (ph.hit) { n_out = vec3<f32>(0.0, 1.0, 0.0); }
     }
-    textureStore(aov_normal, xy, vec4<f16>(vec4<f32>(normalize(n_out), 1.0)));
+    textureStore(aov_normal, xy, vec4<f32>(normalize(n_out), 1.0));
   }
   if (aov_enabled(2u)) { textureStore(aov_depth, xy, vec4<f32>(depth, 0.0, 0.0, 0.0)); }
-  if (aov_enabled(3u)) { textureStore(aov_direct, xy, vec4<f16>(vec4<f32>(direct, 1.0))); }
-  if (aov_enabled(4u)) { textureStore(aov_indirect, xy, vec4<f16>(vec4<f32>(indirect, 1.0))); }
-  if (aov_enabled(5u)) { textureStore(aov_emission, xy, vec4<f16>(f16(0.0), f16(0.0), f16(0.0), f16(1.0))); }
-  if (aov_enabled(6u)) { textureStore(aov_visibility, xy, vec4<f32>(vis, 0.0, 0.0, 0.0)); }
+  if (aov_enabled(3u)) { textureStore(aov_direct, xy, vec4<f32>(direct, 1.0)); }
+  if (aov_enabled(4u)) { textureStore(aov_indirect, xy, vec4<f32>(indirect, 1.0)); }
+  if (aov_enabled(5u)) { textureStore(aov_emission, xy, vec4<f32>(0.0, 0.0, 0.0, 1.0)); }
+  if (aov_enabled(6u)) { textureStore(aov_visibility, xy, vec4<f32>(vis, 0.0, 0.0, 1.0)); }
 }

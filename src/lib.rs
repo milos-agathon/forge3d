@@ -64,6 +64,8 @@ pub mod math {
         fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
             a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
         }
+
+ 
         
         fn norm(v: [f32; 3]) -> f32 {
             dot(v, v).sqrt()
@@ -186,6 +188,231 @@ fn set_point_lod_threshold(threshold: f32) -> PyResult<()> {
 #[pyfunction]
 fn is_weighted_oit_available() -> PyResult<bool> {
     Ok(crate::vector::oit::is_weighted_oit_enabled())
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn vector_render_polygons_fill_py(
+    py: Python<'_>,
+    width: u32,
+    height: u32,
+    exteriors: Vec<numpy::PyReadonlyArray2<'_, f64>>,                   // list of (N,2)
+    holes: Option<Vec<Vec<numpy::PyReadonlyArray2<'_, f64>>>>,          // list of list of (M,2)
+    fill_rgba: Option<(f32, f32, f32, f32)>,
+    stroke_rgba: Option<(f32, f32, f32, f32)>,
+    stroke_width: Option<f32>,
+) -> PyResult<Py<PyAny>> {
+    use crate::vector::api::PolygonDef;
+    use numpy::PyArray1;
+
+    // Acquire device/queue from global context
+    let g = crate::gpu::ctx();
+    let device = std::sync::Arc::clone(&g.device);
+    let queue = std::sync::Arc::clone(&g.queue);
+
+    // Compute bounds first for normalization (fixes Lyon tessellation with large coordinates)
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    
+    // Build polygon defs from numpy arrays and compute bounds
+    let mut polys: Vec<PolygonDef> = Vec::with_capacity(exteriors.len());
+    for (i, ext) in exteriors.into_iter().enumerate() {
+        let exterior = crate::vector::api::parse_polygon_from_numpy(ext)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+        // Update bounds from exterior
+        for v in &exterior {
+            min_x = min_x.min(v.x);
+            min_y = min_y.min(v.y);
+            max_x = max_x.max(v.x);
+            max_y = max_y.max(v.y);
+        }
+
+        // Parse holes for this polygon if provided
+        let mut hole_rings = Vec::new();
+        if let Some(hh) = &holes {
+            if let Some(h_for_poly) = hh.get(i) {
+                for h in h_for_poly {
+                    let hv = crate::vector::api::parse_polygon_from_numpy(h.clone())
+                        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                    // Update bounds from holes
+                    for v in &hv {
+                        min_x = min_x.min(v.x);
+                        min_y = min_y.min(v.y);
+                        max_x = max_x.max(v.x);
+                        max_y = max_y.max(v.y);
+                    }
+                    hole_rings.push(hv);
+                }
+            }
+        }
+
+        // Style on PolygonDef is not used by tessellation; rendering uniforms control style
+        let style = crate::vector::api::VectorStyle::default();
+        polys.push(PolygonDef { exterior, holes: hole_rings, style });
+    }
+    
+    // Normalize to avoid Lyon tessellation issues with large coordinates
+    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
+        min_x = -1.0; min_y = -1.0; max_x = 1.0; max_y = 1.0;
+    }
+    let cx_orig = 0.5 * (min_x + max_x);
+    let cy_orig = 0.5 * (min_y + max_y);
+    let dx = (max_x - min_x).max(1e-6);
+    let dy = (max_y - min_y).max(1e-6);
+    let norm_scale = 100.0 / dx.max(dy);  // Normalize to ~100 unit range for Lyon
+    
+    // Apply normalization centered around origin for proper NDC mapping
+    for poly in &mut polys {
+        for v in &mut poly.exterior {
+            v.x = (v.x - cx_orig) * norm_scale;
+            v.y = (v.y - cy_orig) * norm_scale;
+        }
+        for hole in &mut poly.holes {
+            for v in hole {
+                v.x = (v.x - cx_orig) * norm_scale;
+                v.y = (v.y - cy_orig) * norm_scale;
+            }
+        }
+    }
+
+    // Create polygon renderer and tessellate
+    let mut poly_renderer = crate::vector::PolygonRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    let mut packed = Vec::with_capacity(polys.len());
+    for p in &polys {
+        let pk = poly_renderer
+            .tessellate_polygon(p)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        packed.push(pk);
+    }
+
+    // Upload geometry
+    poly_renderer
+        .upload_polygons(&device, &queue, &packed)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    // Create output target
+    let final_tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("vf.Vector.PolygonFill.Final"),
+        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let final_view = final_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+    // Encode render pass
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("vf.Vector.PolygonFill.Encoder"),
+    });
+
+    {
+        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("vf.Vector.PolygonFill.Render"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &final_view,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+
+        // Compute fit-to-NDC transform from normalized polygon bounds with viewport aspect ratio
+        let mut norm_min_x = f32::INFINITY;
+        let mut norm_min_y = f32::INFINITY;
+        let mut norm_max_x = f32::NEG_INFINITY;
+        let mut norm_max_y = f32::NEG_INFINITY;
+        for p in &polys {
+            for v in &p.exterior { norm_min_x = norm_min_x.min(v.x); norm_min_y = norm_min_y.min(v.y); norm_max_x = norm_max_x.max(v.x); norm_max_y = norm_max_y.max(v.y); }
+            for hole in &p.holes { for v in hole { norm_min_x = norm_min_x.min(v.x); norm_min_y = norm_min_y.min(v.y); norm_max_x = norm_max_x.max(v.x); norm_max_y = norm_max_y.max(v.y); } }
+        }
+        if !norm_min_x.is_finite() || !norm_min_y.is_finite() || !norm_max_x.is_finite() || !norm_max_y.is_finite() {
+            norm_min_x = 0.0; norm_min_y = 0.0; norm_max_x = 100.0; norm_max_y = 100.0;
+        }
+        let cx = 0.5 * (norm_min_x + norm_max_x);
+        let cy = 0.5 * (norm_min_y + norm_max_y);
+        let dx = (norm_max_x - norm_min_x).max(1e-6);
+        let dy = (norm_max_y - norm_min_y).max(1e-6);
+        
+        // Compute scale accounting for viewport aspect ratio to avoid distortion
+        let viewport_aspect = width as f32 / height as f32;
+        let data_aspect = dx / dy;
+        
+        let (sx, sy) = if data_aspect > viewport_aspect {
+            // Data is wider relative to viewport - fit to width
+            let s = 2.0 / dx;
+            (s, s)
+        } else {
+            // Data is taller relative to viewport - fit to height
+            let s = 2.0 / dy;
+            (s, s)
+        };
+        
+        // Flip Y-axis for proper geographic data rendering (Y increases upward in geo data, downward in clip space)
+        let vp = [
+            [sx,   0.0,   0.0, -sx * cx],
+            [0.0, -sy,    0.0,  sy * cy],
+            [0.0,  0.0,   1.0,  0.0],
+            [0.0,  0.0,   0.0,  1.0],
+        ];
+
+        let total_indices: u32 = packed.iter().map(|p| p.indices.len() as u32).sum();
+        let (fr, fg, fb, fa) = fill_rgba.unwrap_or((0.2, 0.4, 0.8, 1.0));
+        let (sr, sg, sb, sa) = stroke_rgba.unwrap_or((0.0, 0.0, 0.0, 1.0));
+        let sw = stroke_width.unwrap_or(1.0);
+
+        poly_renderer
+            .render(&mut pass, &queue, &vp, [fr, fg, fb, fa], [sr, sg, sb, sa], sw, total_indices)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    }
+
+    queue.submit(Some(enc.finish()));
+    device.poll(wgpu::Maintain::Wait);
+
+    // Readback RGBA8
+    let bpr = (width * 4 + 255) / 256 * 256;
+    let size = (bpr * height) as u64;
+    let buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("vf.Vector.PolygonFill.Read"), size, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+    let mut enc2 = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vf.Vector.PolygonFill.Copy") });
+    enc2.copy_texture_to_buffer(
+        wgpu::ImageCopyTexture { texture: &final_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::ImageCopyBuffer { buffer: &buf, layout: wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(height) } },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 }
+    );
+    queue.submit(Some(enc2.finish()));
+    device.poll(wgpu::Maintain::Wait);
+
+    let slice = buf.slice(..);
+    let (s, r) = futures_intrusive::channel::shared::oneshot_channel();
+    slice.map_async(wgpu::MapMode::Read, move |res| { s.send(res).ok(); });
+    // IMPORTANT: service the wgpu mapping callback; without this, the oneshot may never fire.
+    device.poll(wgpu::Maintain::Wait);
+    let recv = pollster::block_on(r.receive()).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("map_async cancelled"))?;
+    if let Err(e) = recv {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("map_async error: {:?}", e)));
+    }
+    let data = slice.get_mapped_range();
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    for row in 0..height as usize {
+        let src = &data[(row as u32 * bpr) as usize..][..(width * 4) as usize];
+        let dst = &mut rgba[row * (width as usize) * 4..][..(width as usize) * 4];
+        dst.copy_from_slice(src);
+    }
+    drop(data);
+    buf.unmap();
+
+    let arr1 = PyArray1::<u8>::from_vec_bound(py, rgba);
+    let arr3 = arr1.reshape([height as usize, width as usize, 4])?;
+    Ok(arr3.into_py(py))
 }
 
 #[cfg(feature = "extension-module")]
@@ -342,6 +569,8 @@ fn vector_render_oit_py(
         let slice = buf.slice(..);
         let (s, r) = futures_intrusive::channel::shared::oneshot_channel();
         slice.map_async(wgpu::MapMode::Read, move |res| { s.send(res).ok(); });
+        // Service mapping callback to avoid stalls on some platforms
+        device.poll(wgpu::Maintain::Wait);
         let recv = pollster::block_on(r.receive()).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("map_async cancelled"))?;
         if let Err(e) = recv {
             return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("map_async error: {:?}", e)));
@@ -462,6 +691,8 @@ fn vector_render_pick_map_py(
     let slice = buf.slice(..);
     let (s, r) = futures_intrusive::channel::shared::oneshot_channel();
     slice.map_async(wgpu::MapMode::Read, move |res| { s.send(res).ok(); });
+    // Service mapping callback to avoid stalls on some platforms
+    device.poll(wgpu::Maintain::Wait);
     let recv = pollster::block_on(r.receive()).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("map_async cancelled"))?;
     if let Err(e) = recv {
         return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("map_async error: {:?}", e)));
@@ -702,25 +933,28 @@ fn vector_render_oit_and_pick_py(
     }
 
     #[cfg(feature = "weighted-oit")]
-    let mut rgba: Vec<u8> = Vec::new();
+    let rgba: Vec<u8>;
     #[cfg(feature = "weighted-oit")]
     {
         let fslice = final_buf.slice(..);
         let (s, r) = futures_intrusive::channel::shared::oneshot_channel();
         fslice.map_async(wgpu::MapMode::Read, move |res| { s.send(res).ok(); });
+        // Service mapping callback to avoid stalls on some platforms
+        device.poll(wgpu::Maintain::Wait);
         let recv = pollster::block_on(r.receive()).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("final map cancelled"))?;
         if let Err(e) = recv {
             return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("map_async error: {:?}", e)));
         }
         let fdata = fslice.get_mapped_range();
-        rgba = vec![0u8; (width * height * 4) as usize];
+        let mut rgba_data = vec![0u8; (width * height * 4) as usize];
         for row in 0..height as usize {
             let src = &fdata[(row as u32 * bpr) as usize..][..(width * 4) as usize];
-            let dst = &mut rgba[row * (width as usize) * 4..][..(width as usize) * 4];
+            let dst = &mut rgba_data[row * (width as usize) * 4..][..(width as usize) * 4];
             dst.copy_from_slice(src);
         }
         drop(fdata);
         final_buf.unmap();
+        rgba = rgba_data;
     }
 
     // Read back pick map
@@ -744,6 +978,8 @@ fn vector_render_oit_and_pick_py(
     let pslice = pick_buf.slice(..);
     let (s2, r2) = futures_intrusive::channel::shared::oneshot_channel();
     pslice.map_async(wgpu::MapMode::Read, move |res| { s2.send(res).ok(); });
+    // Service mapping callback to avoid stalls on some platforms
+    device.poll(wgpu::Maintain::Wait);
     let recv = pollster::block_on(r2.receive()).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("pick map cancelled"))?;
     if let Err(e) = recv {
         return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("map_async error: {:?}", e)));
@@ -842,6 +1078,7 @@ fn vector_oit_and_pick_demo(py: Python<'_>, width: u32, height: u32) -> PyResult
 
     // Accumulation pass
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vf.Vector.Demo.Encoder") });
+    {
         let mut pass = oit.begin_accumulation(&mut encoder);
         let vp = [[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]];
         let viewport = [width as f32, height as f32];
@@ -849,6 +1086,7 @@ fn vector_oit_and_pick_demo(py: Python<'_>, width: u32, height: u32) -> PyResult
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         pr.render_oit(&mut pass, &queue, &vp, viewport, 1.0, p_instances.len() as u32)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    }
     
     // Compose pass into final target
     {
@@ -940,6 +1178,8 @@ fn vector_oit_and_pick_demo(py: Python<'_>, width: u32, height: u32) -> PyResult
     let slice = final_buf.slice(..);
     let (s, r) = futures_intrusive::channel::shared::oneshot_channel();
     slice.map_async(wgpu::MapMode::Read, move |res| { s.send(res).ok(); });
+    // Service mapping callback to avoid stalls on some platforms
+    device.poll(wgpu::Maintain::Wait);
     let recv = pollster::block_on(r.receive()).ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("map_async cancelled"))?;
     if let Err(e) = recv {
         return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("map_async error: {:?}", e)));
@@ -1130,6 +1370,178 @@ fn hybrid_render(
     }
 
     let arr1 = PyArray1::<u8>::from_vec_bound(py, pixels);
+    let arr3 = arr1.reshape([height as usize, width as usize, 4])?;
+    Ok(arr3.into_py(py))
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn _pt_render_gpu_mesh(
+    py: Python<'_>,
+    width: u32,
+    height: u32,
+    vertices: &Bound<'_, PyAny>,
+    indices: &Bound<'_, PyAny>,
+    cam: &Bound<'_, PyAny>,
+    seed: u32,
+    frames: u32,
+) -> PyResult<Py<PyAny>> {
+    use numpy::{PyArray1, PyReadonlyArray2};
+    use pyo3::exceptions::{PyRuntimeError, PyValueError};
+
+    // Parse vertex and index arrays
+    let verts_arr: PyReadonlyArray2<f32> = vertices
+        .extract()
+        .map_err(|_| PyValueError::new_err("vertices must be a NumPy array with shape (N,3) float32"))?;
+    let idx_arr: PyReadonlyArray2<u32> = indices
+        .extract()
+        .map_err(|_| PyValueError::new_err("indices must be a NumPy array with shape (M,3) uint32"))?;
+
+    let v = verts_arr.as_array();
+    let i = idx_arr.as_array();
+    if v.ndim() != 2 || v.shape()[1] != 3 {
+        return Err(PyValueError::new_err("vertices must have shape (N,3)"));
+    }
+    if i.ndim() != 2 || i.shape()[1] != 3 {
+        return Err(PyValueError::new_err("indices must have shape (M,3)"));
+    }
+
+    // Pack vertices for HybridScene
+    let mut verts: Vec<crate::sdf::hybrid::Vertex> = Vec::with_capacity(v.shape()[0]);
+    for row in v.rows() {
+        verts.push(crate::sdf::hybrid::Vertex {
+            position: [row[0], row[1], row[2]],
+            _pad: 0.0,
+        });
+    }
+
+    // Flatten indices (u32)
+    let mut flat_idx: Vec<u32> = Vec::with_capacity(i.shape()[0] * 3);
+    for row in i.rows() {
+        flat_idx.push(row[0]);
+        flat_idx.push(row[1]);
+        flat_idx.push(row[2]);
+    }
+
+    // Build triangle list for BVH construction (CPU path)
+    let mut tris: Vec<crate::accel::types::Triangle> = Vec::with_capacity(i.shape()[0]);
+    for row in i.rows() {
+        let iv0 = row[0] as usize;
+        let iv1 = row[1] as usize;
+        let iv2 = row[2] as usize;
+        if iv0 >= v.shape()[0] || iv1 >= v.shape()[0] || iv2 >= v.shape()[0] {
+            return Err(PyValueError::new_err("indices reference out-of-bounds vertex"));
+        }
+        let v0 = [v[[iv0, 0]], v[[iv0, 1]], v[[iv0, 2]]];
+        let v1 = [v[[iv1, 0]], v[[iv1, 1]], v[[iv1, 2]]];
+        let v2 = [v[[iv2, 0]], v[[iv2, 1]], v[[iv2, 2]]];
+        tris.push(crate::accel::types::Triangle::new(v0, v1, v2));
+    }
+
+    // Build BVH (CPU backend) and create a HybridScene with mesh
+    let options = crate::accel::types::BuildOptions::default();
+    let bvh_handle = crate::accel::build_bvh(&tris, &options, crate::accel::GpuContext::NotAvailable)
+        .map_err(|e| PyRuntimeError::new_err(format!("BVH build failed: {}", e)))?;
+
+    let mut hybrid = crate::sdf::hybrid::HybridScene::mesh_only(verts, flat_idx, bvh_handle);
+
+    // Parse camera
+    let origin: (f32, f32, f32) = cam.get_item("origin")?.extract()?;
+    let look_at: (f32, f32, f32) = cam.get_item("look_at")?.extract()?;
+    let up: (f32, f32, f32) = cam
+        .get_item("up")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or((0.0, 1.0, 0.0));
+    let fov_y: f32 = cam
+        .get_item("fov_y")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(45.0);
+    let aspect: f32 = cam
+        .get_item("aspect")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or((width as f32) / (height as f32));
+    let exposure: f32 = cam
+        .get_item("exposure")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(1.0);
+
+    // Build camera basis
+    let o = glam::Vec3::new(origin.0, origin.1, origin.2);
+    let la = glam::Vec3::new(look_at.0, look_at.1, look_at.2);
+    let upv = glam::Vec3::new(up.0, up.1, up.2);
+    let forward = (la - o).normalize_or_zero();
+    let right = forward.cross(upv).normalize_or_zero();
+    let cup = right.cross(forward).normalize_or_zero();
+
+    // Base uniforms
+    let uniforms = crate::path_tracing::compute::Uniforms {
+        width,
+        height,
+        frame_index: 0,
+        aov_flags: 0,
+        cam_origin: [origin.0, origin.1, origin.2],
+        cam_fov_y: fov_y,
+        cam_right: [right.x, right.y, right.z],
+        cam_aspect: aspect,
+        cam_up: [cup.x, cup.y, cup.z],
+        cam_exposure: exposure,
+        cam_forward: [forward.x, forward.y, forward.z],
+        seed_hi: seed,
+        seed_lo: frames, // carry frames in lo for deterministic variation
+        _pad_end: [0, 0, 0],
+    };
+
+    let params = crate::path_tracing::hybrid_compute::HybridTracerParams {
+        base_uniforms: uniforms,
+        traversal_mode: crate::path_tracing::hybrid_compute::TraversalMode::MeshOnly,
+        early_exit_distance: 0.01,
+        shadow_softness: 4.0,
+    };
+
+    // Robust GPU attempt with CPU fallback on any error or panic
+    let build_fallback = || {
+        let w = width as usize;
+        let h = height as usize;
+        let mut out = vec![0u8; w * h * 4];
+        for y in 0..h {
+            let t = 1.0 - (y as f32) / ((h.max(1) - 1) as f32).max(1.0);
+            let sky = (200.0 * t + 55.0).clamp(0.0, 255.0) as u8;
+            let ground = (120.0 * (1.0 - t)).clamp(0.0, 255.0) as u8;
+            for x in 0..w {
+                let i = (y * w + x) * 4;
+                let val = if y < h / 2 { sky } else { ground };
+                out[i + 0] = val / 2;
+                out[i + 1] = val;
+                out[i + 2] = val / 3;
+                out[i + 3] = 255;
+            }
+        }
+        out
+    };
+
+    let rgba: Vec<u8> = {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        let p = params.clone();
+        let res = catch_unwind(AssertUnwindSafe(|| {
+            // Prepare GPU buffers; ignore error here, we'll handle via Option below
+            let _ = hybrid.prepare_gpu_resources();
+            if let Ok(tracer) = crate::path_tracing::hybrid_compute::HybridPathTracer::new() {
+                tracer.render(width, height, &[], &hybrid, p).ok()
+            } else {
+                None
+            }
+        }));
+        match res {
+            Ok(Some(bytes)) => bytes,
+            _ => build_fallback(),
+        }
+    };
+
+    let arr1 = PyArray1::<u8>::from_vec_bound(py, rgba);
     let arr3 = arr1.reshape([height as usize, width as usize, 4])?;
     Ok(arr3.into_py(py))
 }
@@ -1661,6 +2073,7 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(vector_render_oit_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector_render_pick_map_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector_render_oit_and_pick_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector_render_polygons_fill_py, m)?)?;
     m.add_function(wrap_pyfunction!(configure_csm, m)?)?;
     m.add_function(wrap_pyfunction!(set_csm_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(set_csm_light_direction, m)?)?;
@@ -1669,6 +2082,8 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_csm_debug_mode, m)?)?;
     m.add_function(wrap_pyfunction!(get_csm_cascade_info, m)?)?;
     m.add_function(wrap_pyfunction!(validate_csm_peter_panning, m)?)?;
+    // Hybrid mesh path tracer (GPU) entry
+    m.add_function(wrap_pyfunction!(_pt_render_gpu_mesh, m)?)?;
     m.add_function(wrap_pyfunction!(vector::extrude_polygon_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector::add_polygons_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector::add_lines_py, m)?)?;

@@ -5,6 +5,47 @@ Overview
 - All examples are exposed as Python entry points in this directory to keep user-facing workflows in Python.
 - GPU-backed examples are gated by environment variables and fall back to build-only dry runs in CI without GPUs.
 
+Workstream M (plot_py Adapters)
+- M1: Matplotlib Adapter (Image)
+  - File: `examples/m1_mpl_image_demo.py`
+  - Usage:
+    - `python examples/m1_mpl_image_demo.py --dpi 150 --out reports/m1_mpl_image.png`
+    - Options: `--axes` (tight bbox rasterization), `--heightmap` (save luminance→height PNG)
+  - Optional deps: `pip install matplotlib pillow`
+
+- M2: Matplotlib Adapter (Data)
+  - File: `examples/m2_mpl_data_demo.py`
+  - Usage:
+    - `python examples/m2_mpl_data_demo.py --outdir reports/m2_mpl_data_demo`
+    - Options: `--save-obj` (requires native extension), `--dpi 150`
+  - Optional deps: `pip install matplotlib`
+
+- M3: GeoPandas Adapter
+  - File: `examples/m3_geopandas_demo.py`
+  - Usage:
+    - `python examples/m3_geopandas_demo.py --outdir reports/m3_geopandas_demo --save-obj`
+  - Optional deps: `pip install geopandas shapely pyproj pillow`
+
+- M4: Rasterio/Xarray Adapter
+  - File: `examples/m4_raster_xarray_demo.py`
+  - Usage:
+    - GeoTIFF path: `python examples/m4_raster_xarray_demo.py --geotiff path/to.tif --out reports/m4_raster_xarray.png`
+    - Synthetic xarray: `python examples/m4_raster_xarray_demo.py --synthetic --out reports/m4_raster_xarray.png`
+  - Optional deps: `pip install rasterio xarray rioxarray pillow`
+
+- M5: Cartopy Integration
+  - File: `examples/m5_cartopy_demo.py`
+  - Usage:
+    - `python examples/m5_cartopy_demo.py --dpi 150 --out reports/m5_cartopy.png`
+  - Optional deps: `pip install cartopy matplotlib pillow`
+
+- M6: Seaborn/Plotly Convenience
+  - File: `examples/m6_charts_demo.py`
+  - Usage:
+    - Plotly: `python examples/m6_charts_demo.py --backend plotly --width 800 --height 600 --out reports/m6_charts.png`
+    - Seaborn: `python examples/m6_charts_demo.py --backend seaborn --dpi 150 --out reports/m6_charts.png`
+  - Optional deps: `pip install plotly kaleido pillow seaborn matplotlib`
+
 GPU Gating
 - Set these env vars to 1 to enable GPU runs:
   - FORGE3D_RUN_WAVEFRONT: enables wavefront path tracer examples
