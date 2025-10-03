@@ -30,7 +30,7 @@ Rust owns GPU, memory, and determinism. Python is a thin veneer. Follow these ru
   * Allocate/readback with `bytes_per_row = padded`; when copying to CPU, strip the per-row padding.  
 * **Writes (CPU→texture via `Queue::write_texture`)**:
 
-  * When `height > 1`, **`bytes_per_row` must be a multiple of 256**. Build a temporary **padded** upload buffer and copy row-by-row into a 256-byte stride, then pass `bytes_per_row = padded`. *(This corrects the earlier memo that claimed `write_texture` doesn’t require 256B alignment.)*  
+  * When `height > 1`, **`bytes_per_row` must be a multiple of 256**. Build a temporary **padded** upload buffer and copy row-by-row into a 256-byte stride, then pass `bytes_per_row = padded`. *(This corrects the earlier memo that claimed `write_texture` doesn’t require 256B alignment.)* The runtime centralizes this via `padded_bytes_per_row` and `copy_rows_with_padding` helpers so height and color mosaics stay compliant.  
 
 ### Reusable helpers (copy-paste)
 
