@@ -7,6 +7,7 @@ use crate::core::feedback_buffer::FeedbackBuffer;
 #[cfg(feature = "enable-staging-rings")]
 use crate::core::staging_rings::StagingRing;
 use crate::core::tile_cache::{TileCache, TileData, TileId};
+use bytemuck::{Pod, Zeroable};
 use std::collections::HashSet;
 #[cfg(feature = "enable-staging-rings")]
 use std::sync::{Arc, Mutex};
@@ -53,7 +54,7 @@ impl Default for VirtualTextureConfig {
 }
 
 /// Page table entry for virtual texture addressing
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 #[repr(C)]
 pub struct PageTableEntry {
     /// Physical texture coordinates (atlas UV)
@@ -481,23 +482,8 @@ impl VirtualTexture {
 
     /// Update page table texture with current resident tiles
     fn update_page_table(&self, _device: &Device, queue: &Queue) -> Result<(), String> {
-        // Convert page table data to GPU format
-        let gpu_data: Vec<u8> = self
-            .page_table_data
-            .iter()
-            .flat_map(|entry| {
-                // Pack PageTableEntry into RGBA32Float format
-                let bytes: [u8; 16] = unsafe {
-                    std::mem::transmute([
-                        entry.atlas_u,
-                        entry.atlas_v,
-                        entry.is_resident as f32,
-                        entry.mip_bias,
-                    ])
-                };
-                bytes.into_iter()
-            })
-            .collect();
+        // Convert page table data to GPU format without reallocating each frame
+        let gpu_data = bytemuck::cast_slice(&self.page_table_data);
 
         let pages_x = (self.config.width + self.config.tile_size - 1) / self.config.tile_size;
         let pages_y = (self.config.height + self.config.tile_size - 1) / self.config.tile_size;
@@ -510,7 +496,7 @@ impl VirtualTexture {
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            &gpu_data,
+            gpu_data,
             ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(pages_x * 16),
