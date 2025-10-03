@@ -6,18 +6,23 @@ import numpy as np
 
 # Ensure a single native extension instance across both 'forge3d' and 'python.forge3d' import paths.
 # Some tests import modules as 'python.forge3d.*' while conftest imports 'forge3d'.
-# Without this alias, the relative import '. _forge3d' under 'python.forge3d' may attempt to
+# Without this alias, the relative import '._forge3d' under 'python.forge3d' may attempt to
 # initialize the native module a second time under a different qualified name, which PyO3 forbids
 # for abi3 modules built for CPython 3.8+. We pre-import the canonical extension and alias it.
+import importlib as _importlib
+import sys as _sys
+
+_NATIVE_AVAILABLE = False
+_NATIVE_MODULE = None
+
 try:  # pragma: no cover - import path and environment specific
-    import importlib as _importlib
-    import sys as _sys
-    _ext = _importlib.import_module("forge3d._forge3d")
-    _sys.modules[__name__ + "._forge3d"] = _ext
+    _NATIVE_MODULE = _importlib.import_module("forge3d._forge3d")
+    _sys.modules[__name__ + "._forge3d"] = _NATIVE_MODULE
+    _NATIVE_AVAILABLE = True
 except Exception:
     # If the native extension isn't available (CPU-only environment), downstream modules gracefully
     # handle its absence where applicable.
-    pass
+    _NATIVE_MODULE = None
 def list_palettes() -> list[str]:
     return colormap_supported()
 
@@ -32,16 +37,32 @@ def get_current_palette() -> str:
 
 # Conservative GPU capability shims to avoid running GPU-only tests on unsupported envs
 def enumerate_adapters() -> list[dict]:
-    """Return an empty adapter list when GPU support is not guaranteed."""
+    """Return adapter metadata reported by the native module when available."""
+    native = getattr(globals().get("_NATIVE_MODULE"), "enumerate_adapters", None)
+    adapters: list[dict] = []
+    if native is not None:
+        try:
+            maybe = native()
+            if isinstance(maybe, list) and maybe:
+                adapters = maybe
+        except Exception:
+            adapters = []
+    if adapters:
+        return adapters
+    probe = device_probe()
+    if isinstance(probe, dict) and probe.get("status") == "ok":
+        return [probe]
     return []
 
 def device_probe(backend: str | None = None) -> dict:
-    """Report GPU device probe status.
-
-    Conservatively returns unavailable in fallback builds to avoid wgpu validation errors
-    in CI or environments without proper GPU setup.
-    """
-    return {"status": "unavailable"}
+    """Report GPU device probe status via the native module when available."""
+    native = getattr(globals().get("_NATIVE_MODULE"), "device_probe", None)
+    if native is None:
+        return {"status": "unavailable"}
+    try:
+        return native(backend) if backend is not None else native()
+    except Exception:
+        return {"status": "unavailable"}
 
 # -----------------------------------------------------------------------------
 # Vector Picking & OIT helpers (Python shims around native functions if present)
@@ -5273,12 +5294,20 @@ def run_benchmark(operation: str, width: int, height: int,
                       grid=int(grid), colormap=str(colormap), seed=seed_val)
 
 def has_gpu() -> bool:
-    """Check if GPU is available."""
-    # Fallback implementation
-    return False
+    """Check if a native GPU adapter is available."""
+    if not globals().get("_NATIVE_AVAILABLE"):
+        return False
+    return bool(enumerate_adapters())
 
 def get_device():
-    """Get GPU device handle."""
+    """Get GPU device handle from the native module when available."""
+    native = getattr(globals().get("_NATIVE_MODULE"), "get_device", None)
+    if native is not None:
+        try:
+            return native()
+        except Exception:
+            pass
+
     class MockDevice:
         def __init__(self):
             self.name = "Fallback CPU Device"
@@ -5845,14 +5874,6 @@ try:
     ]
 except Exception:
     pass
-
-# Fallback implementation if native module is not available
-_NATIVE_AVAILABLE = False
-def enumerate_adapters() -> list[dict]:
-    return []
-    def device_probe(backend: str | None = None) -> dict:
-        return {"status": "unavailable"}
-
 
 # Prefer native implementations when available (override Python fallbacks)
 try:  # pragma: no cover - native module availability varies
