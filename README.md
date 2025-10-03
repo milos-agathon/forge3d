@@ -37,7 +37,7 @@ New to forge3d? Get a terrain rendering example working in under 10 minutes:
 
 ```bash
 python examples/geopandas_demo.py 
---output-size 4800 3600 
+--output-size 1200 900 
 --lighting-type "blinn-phong" 
 --lighting-intensity 1 
 --lighting-azimuth 315 
@@ -48,6 +48,7 @@ python examples/geopandas_demo.py
 --camera-theta 90
 ```
 
+This should be rendered within 5 seconds! 
 The example will create a terrain image under `reports/Gore_Range_Albers_1m.png`.
 
 ![Gore Range](assets/Gore_Range_Albers_1m.png)
