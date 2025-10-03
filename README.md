@@ -28,7 +28,7 @@ maturin develop --release
 
 ## Quick Start (< 10 minutes)
 
-New to forge3d? Get a terrain rendering example working in under 10 minutes:
+New to forge3d? Get a terrain rendering example working in a few seconds:
 
 1. **Install prerequisites**: Ensure you have Python 3.8 installed
 2. **Install maturin**: `pip install -U maturin`
