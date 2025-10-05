@@ -19,23 +19,39 @@ fn safe_normal_from_tangent(t: Vec3, hint_up: Vec3) -> (Vec3, Vec3) {
     (n, b)
 }
 
-fn join_side_vector(
-    i: usize,
-    path: &[[f32; 3]],
-    up: Vec3,
-    style: &str,
-    miter_limit: f32,
-) -> Vec3 {
+fn join_side_vector(i: usize, path: &[[f32; 3]], up: Vec3, style: &str, miter_limit: f32) -> Vec3 {
     let n = path.len();
     // Compute side vectors for prev and next segments
-    let p_im1 = if i > 0 { Vec3::from(path[i - 1]) } else { Vec3::from(path[i]) };
+    let p_im1 = if i > 0 {
+        Vec3::from(path[i - 1])
+    } else {
+        Vec3::from(path[i])
+    };
     let p_i = Vec3::from(path[i]);
-    let p_ip1 = if i + 1 < n { Vec3::from(path[i + 1]) } else { Vec3::from(path[i]) };
+    let p_ip1 = if i + 1 < n {
+        Vec3::from(path[i + 1])
+    } else {
+        Vec3::from(path[i])
+    };
     let t_prev = (p_i - p_im1).normalize_or_zero();
     let t_next = (p_ip1 - p_i).normalize_or_zero();
     // Side vectors from frames (use in-plane normals to offset ribbon width)
-    let (n_prev, _) = safe_normal_from_tangent(if t_prev.length_squared()>0.0 { t_prev } else { t_next }, up);
-    let (n_next, _) = safe_normal_from_tangent(if t_next.length_squared()>0.0 { t_next } else { t_prev }, up);
+    let (n_prev, _) = safe_normal_from_tangent(
+        if t_prev.length_squared() > 0.0 {
+            t_prev
+        } else {
+            t_next
+        },
+        up,
+    );
+    let (n_next, _) = safe_normal_from_tangent(
+        if t_next.length_squared() > 0.0 {
+            t_next
+        } else {
+            t_prev
+        },
+        up,
+    );
     let s = (n_prev + n_next).normalize_or_zero();
     if s.length_squared() == 0.0 {
         return n_next; // straight or degenerate; fallback
@@ -99,8 +115,12 @@ pub fn generate_ribbon(
                     2 => "round",
                     _ => join_style,
                 }
-            } else { join_style }
-        } else { join_style };
+            } else {
+                join_style
+            }
+        } else {
+            join_style
+        };
         let s = join_side_vector(i, path, up, style_sel, miter_limit); // side vector across ribbon
         let alpha = (i as f32) / ((path.len() - 1) as f32);
         let width = width_start * (1.0 - alpha) + width_end * alpha;

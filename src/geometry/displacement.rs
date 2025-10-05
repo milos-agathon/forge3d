@@ -91,7 +91,9 @@ pub fn displace_heightmap(
     if mesh.normals.len() != mesh.positions.len() {
         recompute_normals(mesh);
     }
-    let Some((min, max)) = compute_bounds(&mesh.positions) else { return; };
+    let Some((min, max)) = compute_bounds(&mesh.positions) else {
+        return;
+    };
     let dx = (max[0] - min[0]).abs().max(1e-8);
     let dy = (max[1] - min[1]).abs().max(1e-8);
     let use_uv = uv_space && mesh.uvs.len() == mesh.positions.len();

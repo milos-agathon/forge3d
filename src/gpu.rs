@@ -17,16 +17,30 @@ fn backends_from_env() -> wgpu::Backends {
     use std::env;
     if let Ok(s) = env::var("WGPU_BACKENDS").or_else(|_| env::var("WGPU_BACKEND")) {
         let s_l = s.to_lowercase();
-        if s_l.contains("metal") { return wgpu::Backends::METAL; }
-        if s_l.contains("vulkan") { return wgpu::Backends::VULKAN; }
-        if s_l.contains("dx12") { return wgpu::Backends::DX12; }
-        if s_l.contains("gl") { return wgpu::Backends::GL; }
-        if s_l.contains("webgpu") { return wgpu::Backends::BROWSER_WEBGPU; }
+        if s_l.contains("metal") {
+            return wgpu::Backends::METAL;
+        }
+        if s_l.contains("vulkan") {
+            return wgpu::Backends::VULKAN;
+        }
+        if s_l.contains("dx12") {
+            return wgpu::Backends::DX12;
+        }
+        if s_l.contains("gl") {
+            return wgpu::Backends::GL;
+        }
+        if s_l.contains("webgpu") {
+            return wgpu::Backends::BROWSER_WEBGPU;
+        }
     }
     #[cfg(target_os = "macos")]
-    { wgpu::Backends::METAL }
+    {
+        wgpu::Backends::METAL
+    }
     #[cfg(not(target_os = "macos"))]
-    { wgpu::Backends::all() }
+    {
+        wgpu::Backends::all()
+    }
 }
 
 pub fn ctx() -> &'static GpuContext {

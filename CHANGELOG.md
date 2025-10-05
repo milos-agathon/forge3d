@@ -6,7 +6,15 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## [Unreleased]
 
 ### Added
-- (placeholder)
+- Python memory helpers now expose real resident and staging telemetry via forge3d.mem and top-level shortcuts.
+- Regression coverage for GPU adapter probes exercises native callbacks and fallback shims.
+
+### Changed
+- Wired staging rings and virtual texture residency updates into the global memory tracker so Python budgets reflect GPU usage.
+- Aligned CMake, Sphinx, and ignore rules with the 0.80.0 metadata to keep generated docs out of the repo.
+
+### Documentation
+- Point auxiliary CLAUDE files at the canonical root guide to avoid drift.
 
 ## [0.80.0]
 

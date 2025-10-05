@@ -31,7 +31,9 @@ fn face_normal(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
 }
 
 fn watertight_edge_check(indices: &[u32]) -> bool {
-    if indices.len() % 3 != 0 { return false; }
+    if indices.len() % 3 != 0 {
+        return false;
+    }
     let mut edges: HashMap<(u32, u32), u32> = HashMap::new();
     for tri in indices.chunks_exact(3) {
         let tri_edges = [
@@ -59,7 +61,8 @@ pub fn export_stl_binary<P: AsRef<Path>>(
     let mut header = [0u8; 80];
     let tag = b"forge3d stl export";
     header[..tag.len()].copy_from_slice(tag);
-    w.write_all(&header).map_err(|e| RenderError::io(format!("{}", e)))?;
+    w.write_all(&header)
+        .map_err(|e| RenderError::io(format!("{}", e)))?;
 
     // Triangle count (u32 LE)
     w.write_all(&(tri_count as u32).to_le_bytes())
@@ -81,22 +84,30 @@ pub fn export_stl_binary<P: AsRef<Path>>(
             .map_err(|e| RenderError::io(format!("{}", e)))?;
     }
 
-    let watertight = if validate_watertight { watertight_edge_check(&mesh.indices) } else { false };
+    let watertight = if validate_watertight {
+        watertight_edge_check(&mesh.indices)
+    } else {
+        false
+    };
     Ok(watertight)
 }
 
 // ---------------- PyO3 bridge -----------------
 
 #[cfg(feature = "extension-module")]
+use crate::geometry::mesh_from_python;
+#[cfg(feature = "extension-module")]
 use pyo3::prelude::*;
 #[cfg(feature = "extension-module")]
 use pyo3::types::PyDict;
-#[cfg(feature = "extension-module")]
-use crate::geometry::mesh_from_python;
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-pub fn io_export_stl_py(path: &str, mesh: &Bound<'_, PyDict>, validate: Option<bool>) -> PyResult<bool> {
+pub fn io_export_stl_py(
+    path: &str,
+    mesh: &Bound<'_, PyDict>,
+    validate: Option<bool>,
+) -> PyResult<bool> {
     let mesh_buf = mesh_from_python(mesh)?;
     export_stl_binary(path, &mesh_buf, validate.unwrap_or(false)).map_err(|e| e.to_py_err())
 }

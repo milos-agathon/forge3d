@@ -4,6 +4,7 @@
 // - Integrates with TerrainSpike by rebinding group(1) height texture/sampler to mosaic
 
 use half::f16;
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 
 use wgpu::{
@@ -12,6 +13,32 @@ use wgpu::{
 };
 
 use crate::terrain::tiling::TileId;
+fn padded_bytes_per_row(unpadded: u32) -> u32 {
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    ((unpadded + align - 1) / align) * align
+}
+
+fn copy_rows_with_padding(
+    src: &[u8],
+    row_bytes: usize,
+    padded_row_bytes: usize,
+    rows: usize,
+) -> Vec<u8> {
+    let mut out = vec![0u8; padded_row_bytes * rows];
+    if row_bytes == padded_row_bytes {
+        out.chunks_exact_mut(row_bytes)
+            .zip(src.chunks_exact(row_bytes))
+            .for_each(|(dst, src)| dst.copy_from_slice(src));
+        return out;
+    }
+    for row in 0..rows {
+        let src_offset = row * row_bytes;
+        let dst_offset = row * padded_row_bytes;
+        out[dst_offset..dst_offset + row_bytes]
+            .copy_from_slice(&src[src_offset..src_offset + row_bytes]);
+    }
+    out
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct MosaicConfig {
@@ -203,43 +230,57 @@ impl HeightMosaic {
             }
         };
 
-        // Upload tile to the texture at (sx, sy)
         let offset_x = sx * self.config.tile_size_px;
         let offset_y = sy * self.config.tile_size_px;
-        // E6: Encode as RG16F when using fallback format, else raw R32F
-        let (bytes_storage, rows_per_image, bytes_per_row): (Option<Vec<u8>>, u32, u32) =
-            if self.format == TextureFormat::Rg16Float {
-                // Two channels per texel: (height, 0.0)
-                #[repr(C)]
-                #[derive(Copy, Clone)]
-                struct Rg16 {
-                    r: f16,
-                    g: f16,
-                }
-                unsafe impl bytemuck::Zeroable for Rg16 {}
-                unsafe impl bytemuck::Pod for Rg16 {}
-                let mut tmp: Vec<Rg16> = Vec::with_capacity(sz);
-                for &h in height_data.iter() {
-                    tmp.push(Rg16 {
-                        r: f16::from_f32(h),
-                        g: f16::from_f32(0.0),
-                    });
-                }
-                let vec_u8: Vec<u8> = bytemuck::cast_slice(&tmp).to_vec();
-                let bpr = 4 * self.config.tile_size_px; // 2 channels * 2 bytes
-                (Some(vec_u8), self.config.tile_size_px, bpr)
-            } else {
-                let bpr = 4 * self.config.tile_size_px; // 4 bytes per f32
-                (None, self.config.tile_size_px, bpr)
-            };
-        let (bytes_ref, rows_per_image, bytes_per_row) = match bytes_storage {
-            Some(ref v) => (v.as_slice(), rows_per_image, bytes_per_row),
-            None => (
-                bytemuck::cast_slice(height_data),
-                rows_per_image,
-                bytes_per_row,
-            ),
+        let rows_per_image = self.config.tile_size_px;
+        let unpadded_bpr = if self.format == TextureFormat::Rg16Float {
+            4 * self.config.tile_size_px // 2 channels * 2 bytes
+        } else {
+            4 * self.config.tile_size_px // 4 bytes per f32
         };
+        let padded_bpr = padded_bytes_per_row(unpadded_bpr);
+
+        let bytes_ref: Cow<[u8]> = if self.format == TextureFormat::Rg16Float {
+            #[repr(C)]
+            #[derive(Copy, Clone)]
+            struct Rg16 {
+                r: f16,
+                g: f16,
+            }
+            unsafe impl bytemuck::Zeroable for Rg16 {}
+            unsafe impl bytemuck::Pod for Rg16 {}
+
+            let mut tmp: Vec<Rg16> = Vec::with_capacity(sz);
+            for &h in height_data.iter() {
+                tmp.push(Rg16 {
+                    r: f16::from_f32(h),
+                    g: f16::from_f32(0.0),
+                });
+            }
+            let mut vec_u8 = bytemuck::cast_slice(&tmp).to_vec();
+            if padded_bpr != unpadded_bpr {
+                vec_u8 = copy_rows_with_padding(
+                    &vec_u8,
+                    unpadded_bpr as usize,
+                    padded_bpr as usize,
+                    rows_per_image as usize,
+                );
+            }
+            Cow::Owned(vec_u8)
+        } else {
+            let src_bytes = bytemuck::cast_slice(height_data);
+            if padded_bpr != unpadded_bpr {
+                Cow::Owned(copy_rows_with_padding(
+                    src_bytes,
+                    unpadded_bpr as usize,
+                    padded_bpr as usize,
+                    rows_per_image as usize,
+                ))
+            } else {
+                Cow::Borrowed(src_bytes)
+            }
+        };
+
         queue.write_texture(
             ImageCopyTexture {
                 texture: &self.texture,
@@ -251,10 +292,10 @@ impl HeightMosaic {
                 },
                 aspect: wgpu::TextureAspect::All,
             },
-            bytes_ref,
+            bytes_ref.as_ref(),
             ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some((bytes_per_row as u32).try_into().unwrap()),
+                bytes_per_row: Some(padded_bpr.try_into().unwrap()),
                 rows_per_image: Some(rows_per_image.try_into().unwrap()),
             },
             Extent3d {
@@ -403,7 +444,18 @@ impl ColorMosaic {
         };
         let offset_x = sx * self.config.tile_size_px;
         let offset_y = sy * self.config.tile_size_px;
-        let bpr = 4 * self.config.tile_size_px; // RGBA8 bytes per row
+        let row_bytes = 4 * self.config.tile_size_px; // RGBA8 bytes per row
+        let padded_bpr = padded_bytes_per_row(row_bytes);
+        let bytes_ref: Cow<[u8]> = if padded_bpr != row_bytes {
+            Cow::Owned(copy_rows_with_padding(
+                rgba_data,
+                row_bytes as usize,
+                padded_bpr as usize,
+                self.config.tile_size_px as usize,
+            ))
+        } else {
+            Cow::Borrowed(rgba_data)
+        };
         queue.write_texture(
             ImageCopyTexture {
                 texture: &self.texture,
@@ -415,10 +467,10 @@ impl ColorMosaic {
                 },
                 aspect: wgpu::TextureAspect::All,
             },
-            rgba_data,
+            bytes_ref.as_ref(),
             ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some((bpr as u32).try_into().unwrap()),
+                bytes_per_row: Some(padded_bpr.try_into().unwrap()),
                 rows_per_image: Some(self.config.tile_size_px.try_into().unwrap()),
             },
             Extent3d {
@@ -438,5 +490,40 @@ impl ColorMosaic {
         // Simple LRU update similar to HeightMosaic
         self.lru.retain(|&t| t != id);
         self.lru.push_back(id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn padded_bytes_per_row_aligns() {
+        let bpr = padded_bytes_per_row(12);
+        assert_eq!(bpr, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        assert_eq!(padded_bytes_per_row(256), 256);
+    }
+
+    #[test]
+    fn copy_rows_with_padding_preserves_data() {
+        let rows = 3usize;
+        let row_bytes = 6usize;
+        let padded = 256usize;
+        let mut src = Vec::with_capacity(row_bytes * rows);
+        for row in 0..rows {
+            for col in 0..row_bytes {
+                src.push((row * row_bytes + col) as u8);
+            }
+        }
+        let padded_bytes = copy_rows_with_padding(&src, row_bytes, padded, rows);
+        assert_eq!(padded_bytes.len(), padded * rows);
+        for row in 0..rows {
+            let src_offset = row * row_bytes;
+            let dst_offset = row * padded;
+            assert_eq!(
+                &padded_bytes[dst_offset..dst_offset + row_bytes],
+                &src[src_offset..src_offset + row_bytes]
+            );
+        }
     }
 }

@@ -6,10 +6,10 @@ use glam::{Mat3, Mat4, Vec3};
 
 use crate::geometry::MeshBuffers;
 
-#[cfg(feature = "extension-module")]
-use numpy::{PyReadonlyArray2, PyUntypedArrayMethods};
 #[cfg(all(feature = "extension-module", feature = "enable-gpu-instancing"))]
 use numpy::{PyArray1, PyArrayMethods};
+#[cfg(feature = "extension-module")]
+use numpy::{PyReadonlyArray2, PyUntypedArrayMethods};
 #[cfg(feature = "extension-module")]
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
 
@@ -38,7 +38,9 @@ pub fn geometry_instance_mesh_py(
     let n = shape[0];
     let cols = shape[1];
     if cols != 16 {
-        return Err(PyValueError::new_err("transforms must have shape (N,16) row-major 4x4"));
+        return Err(PyValueError::new_err(
+            "transforms must have shape (N,16) row-major 4x4",
+        ));
     }
 
     let base = crate::geometry::mesh_from_python(mesh)?;
@@ -52,19 +54,19 @@ pub fn geometry_instance_mesh_py(
     for i in 0..n {
         let r = arr.row(i);
         let m = Mat4::from_cols_array(&[
-            r[0], r[4], r[8], r[12],
-            r[1], r[5], r[9], r[13],
-            r[2], r[6], r[10], r[14],
-            r[3], r[7], r[11], r[15],
+            r[0], r[4], r[8], r[12], r[1], r[5], r[9], r[13], r[2], r[6], r[10], r[14], r[3], r[7],
+            r[11], r[15],
         ]);
         let normal_m = Mat3::from_mat4(m).inverse().transpose();
         let base_index_offset = out.positions.len() as u32;
 
         // Positions / normals / uvs / tangents
         for vi in 0..vcount {
-            out.positions.push(apply_transform_position(&m, base.positions[vi]));
+            out.positions
+                .push(apply_transform_position(&m, base.positions[vi]));
             if base.normals.len() == vcount {
-                out.normals.push(apply_transform_normal(&normal_m, base.normals[vi]));
+                out.normals
+                    .push(apply_transform_normal(&normal_m, base.normals[vi]));
             }
             if base.uvs.len() == vcount {
                 out.uvs.push(base.uvs[vi]);
@@ -170,7 +172,11 @@ pub fn geometry_instance_mesh_gpu_render_py(
     renderer.set_mesh(&g.device, &g.queue, &vertices, &indices);
 
     // Camera
-    let view = glam::Mat4::look_at_rh(glam::Vec3::new(3.0, 2.0, 3.0), glam::Vec3::ZERO, glam::Vec3::Y);
+    let view = glam::Mat4::look_at_rh(
+        glam::Vec3::new(3.0, 2.0, 3.0),
+        glam::Vec3::ZERO,
+        glam::Vec3::Y,
+    );
     let proj = crate::camera::perspective_wgpu(
         45.0f32.to_radians(),
         (width as f32 / height as f32).max(1e-3),
@@ -300,10 +306,9 @@ pub fn geometry_instance_mesh_gpu_render_py(
         let _ = tx.send(res);
     });
     g.device.poll(wgpu::Maintain::Wait);
-    rx.recv().unwrap().map_err(|e| PyValueError::new_err(format!(
-        "Failed to map readback buffer: {:?}",
-        e
-    )))?;
+    rx.recv()
+        .unwrap()
+        .map_err(|e| PyValueError::new_err(format!("Failed to map readback buffer: {:?}", e)))?;
     let data = slice.get_mapped_range();
     let mut rgba = vec![0u8; (width as usize) * (height as usize) * 4];
     let row_bytes_usize = (row_bytes as usize).max(1);

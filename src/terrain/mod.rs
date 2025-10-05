@@ -1676,6 +1676,12 @@ impl TerrainSpike {
         dict.set_item("limit_bytes", metrics.limit_bytes)?;
         dict.set_item("within_budget", metrics.within_budget)?;
         dict.set_item("utilization_ratio", metrics.utilization_ratio)?;
+        dict.set_item("resident_tiles", metrics.resident_tiles)?;
+        dict.set_item("resident_tile_bytes", metrics.resident_tile_bytes)?;
+        dict.set_item("staging_bytes_in_flight", metrics.staging_bytes_in_flight)?;
+        dict.set_item("staging_ring_count", metrics.staging_ring_count)?;
+        dict.set_item("staging_buffer_size", metrics.staging_buffer_size)?;
+        dict.set_item("staging_buffer_stalls", metrics.staging_buffer_stalls)?;
 
         Ok(dict)
     }
@@ -2104,6 +2110,14 @@ impl TerrainSpike {
         }
 
         // Update previous visible set for cancellation
+        let metrics = global_tracker().get_metrics();
+        if !metrics.within_budget {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Host-visible memory budget exceeded: {} / {} bytes",
+                metrics.host_visible_bytes, metrics.limit_bytes
+            )));
+        }
+
         self.prev_visible_height = visible_ids.iter().copied().collect();
         let result: Vec<(u32, u32, u32)> = visible_ids.iter().map(|t| (t.lod, t.x, t.y)).collect();
         Ok(result)

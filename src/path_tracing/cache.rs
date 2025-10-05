@@ -61,10 +61,12 @@ impl SceneCache {
     }
 
     /// Compute content hash for scene
-    pub fn compute_scene_hash(&self,
+    pub fn compute_scene_hash(
+        &self,
         bvh_data: &[u8],
         material_data: &[u8],
-        texture_ids: &[u32]) -> u64 {
+        texture_ids: &[u32],
+    ) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
@@ -82,7 +84,9 @@ impl SceneCache {
 
     /// Cache BVH buffer
     pub fn cache_bvh_buffer(&mut self, content_hash: u64, buffer: Buffer) {
-        let entry = self.entries.entry(content_hash)
+        let entry = self
+            .entries
+            .entry(content_hash)
             .or_insert_with(|| CacheEntry::new(content_hash));
         entry.bvh_buffer = Some(buffer);
         entry.timestamp = std::time::Instant::now();
@@ -91,7 +95,9 @@ impl SceneCache {
 
     /// Cache material buffer
     pub fn cache_material_buffer(&mut self, content_hash: u64, buffer: Buffer) {
-        let entry = self.entries.entry(content_hash)
+        let entry = self
+            .entries
+            .entry(content_hash)
             .or_insert_with(|| CacheEntry::new(content_hash));
         entry.material_buffer = Some(buffer);
         entry.timestamp = std::time::Instant::now();
@@ -100,7 +106,9 @@ impl SceneCache {
 
     /// Cache texture bind group
     pub fn cache_texture_bind_group(&mut self, content_hash: u64, bind_group: BindGroup) {
-        let entry = self.entries.entry(content_hash)
+        let entry = self
+            .entries
+            .entry(content_hash)
             .or_insert_with(|| CacheEntry::new(content_hash));
         entry.texture_bind_group = Some(bind_group);
         entry.timestamp = std::time::Instant::now();
@@ -110,9 +118,9 @@ impl SceneCache {
     /// Check if scene is cached and complete
     pub fn is_scene_cached(&self, content_hash: u64) -> bool {
         if let Some(entry) = self.entries.get(&content_hash) {
-            entry.bvh_buffer.is_some() &&
-            entry.material_buffer.is_some() &&
-            entry.texture_bind_group.is_some()
+            entry.bvh_buffer.is_some()
+                && entry.material_buffer.is_some()
+                && entry.texture_bind_group.is_some()
         } else {
             false
         }
@@ -126,8 +134,14 @@ impl SceneCache {
     /// Get cache statistics
     pub fn get_stats(&self) -> CacheStats {
         let total_entries = self.entries.len();
-        let complete_entries = self.entries.values()
-            .filter(|e| e.bvh_buffer.is_some() && e.material_buffer.is_some() && e.texture_bind_group.is_some())
+        let complete_entries = self
+            .entries
+            .values()
+            .filter(|e| {
+                e.bvh_buffer.is_some()
+                    && e.material_buffer.is_some()
+                    && e.texture_bind_group.is_some()
+            })
             .count();
 
         CacheStats {
@@ -142,7 +156,9 @@ impl SceneCache {
     fn evict_lru(&mut self) {
         while self.entries.len() > self.max_entries {
             // Find oldest entry
-            let oldest_key = self.entries.iter()
+            let oldest_key = self
+                .entries
+                .iter()
                 .min_by_key(|(_, entry)| entry.timestamp)
                 .map(|(key, _)| *key);
 
@@ -171,9 +187,7 @@ pub struct SceneCacheBuilder {
 
 impl Default for SceneCacheBuilder {
     fn default() -> Self {
-        Self {
-            max_entries: 16,
-        }
+        Self { max_entries: 16 }
     }
 }
 
@@ -208,8 +222,7 @@ mod tests {
 
     #[test]
     fn test_hash_computation() {
-        // Mock device for testing
-        let device = std::sync::Arc::new(unsafe { std::mem::zeroed() }); // Placeholder
+        let device = std::sync::Arc::new(crate::gpu::create_device_for_test());
         let cache = SceneCache::new(device);
 
         let bvh_data = vec![1, 2, 3, 4];
@@ -224,8 +237,7 @@ mod tests {
 
     #[test]
     fn test_cache_builder() {
-        let builder = SceneCacheBuilder::new()
-            .max_entries(32);
+        let builder = SceneCacheBuilder::new().max_entries(32);
         assert_eq!(builder.max_entries, 32);
     }
 }

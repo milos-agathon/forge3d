@@ -119,7 +119,8 @@
       "Bash(maturin:*)",
       "Bash(dir:*)",
       "Bash(cargo fmt:*)",
-      "Bash(VF_ENABLE_TERRAIN_TESTS=1 python -m pytest tests/test_b7_cloud_shadows.py -v)"
+      "Bash(VF_ENABLE_TERRAIN_TESTS=1 python -m pytest tests/test_b7_cloud_shadows.py -v)",
+      "Bash(cargo tree:*)"
     ],
     "deny": [],
     "additionalDirectories": [

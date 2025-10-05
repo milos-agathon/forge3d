@@ -4,9 +4,11 @@
 //! GPU feedback buffers for tile visibility, and LRU tile caching.
 
 use crate::core::feedback_buffer::FeedbackBuffer;
+use crate::core::memory_tracker::global_tracker;
 #[cfg(feature = "enable-staging-rings")]
 use crate::core::staging_rings::StagingRing;
 use crate::core::tile_cache::{TileCache, TileData, TileId};
+use bytemuck::{Pod, Zeroable};
 use std::collections::HashSet;
 #[cfg(feature = "enable-staging-rings")]
 use std::sync::{Arc, Mutex};
@@ -53,7 +55,7 @@ impl Default for VirtualTextureConfig {
 }
 
 /// Page table entry for virtual texture addressing
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 #[repr(C)]
 pub struct PageTableEntry {
     /// Physical texture coordinates (atlas UV)
@@ -133,6 +135,10 @@ pub struct VirtualTexture {
 }
 
 impl VirtualTexture {
+    fn publish_resident_metrics(&self) {
+        let tracker = global_tracker();
+        tracker.set_resident_tiles(self.stats.resident_pages, self.resident_tile_memory_bytes());
+    }
     /// Create new virtual texture system
     pub fn new(
         device: &Device,
@@ -199,7 +205,7 @@ impl VirtualTexture {
             ..Default::default()
         };
 
-        Ok(Self {
+        let instance = Self {
             config,
             atlas_texture,
             page_table,
@@ -210,7 +216,9 @@ impl VirtualTexture {
             stats,
             #[cfg(feature = "enable-staging-rings")]
             staging_ring,
-        })
+        };
+        instance.publish_resident_metrics();
+        Ok(instance)
     }
 
     /// Update virtual texture for current camera
@@ -259,6 +267,7 @@ impl VirtualTexture {
 
         // Update statistics
         self.stats.resident_pages = self.tile_cache.resident_count() as u32;
+        self.publish_resident_metrics();
         self.stats.memory_usage = self.calculate_memory_usage();
 
         Ok(())
@@ -481,23 +490,8 @@ impl VirtualTexture {
 
     /// Update page table texture with current resident tiles
     fn update_page_table(&self, _device: &Device, queue: &Queue) -> Result<(), String> {
-        // Convert page table data to GPU format
-        let gpu_data: Vec<u8> = self
-            .page_table_data
-            .iter()
-            .flat_map(|entry| {
-                // Pack PageTableEntry into RGBA32Float format
-                let bytes: [u8; 16] = unsafe {
-                    std::mem::transmute([
-                        entry.atlas_u,
-                        entry.atlas_v,
-                        entry.is_resident as f32,
-                        entry.mip_bias,
-                    ])
-                };
-                bytes.into_iter()
-            })
-            .collect();
+        // Convert page table data to GPU format without reallocating each frame
+        let gpu_data = bytemuck::cast_slice(&self.page_table_data);
 
         let pages_x = (self.config.width + self.config.tile_size - 1) / self.config.tile_size;
         let pages_y = (self.config.height + self.config.tile_size - 1) / self.config.tile_size;
@@ -510,7 +504,7 @@ impl VirtualTexture {
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            &gpu_data,
+            gpu_data,
             ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(pages_x * 16),
@@ -533,6 +527,10 @@ impl VirtualTexture {
     }
 
     /// Calculate current memory usage
+    fn resident_tile_memory_bytes(&self) -> u64 {
+        self.calculate_memory_usage()
+    }
+
     fn calculate_memory_usage(&self) -> u64 {
         let bytes_per_pixel = match self.config.format {
             TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb => 4,
@@ -595,6 +593,12 @@ impl VirtualTexture {
                 },
             ],
         })
+    }
+}
+
+impl Drop for VirtualTexture {
+    fn drop(&mut self) {
+        global_tracker().clear_resident_tiles();
     }
 }
 

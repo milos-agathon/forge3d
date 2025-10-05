@@ -55,7 +55,11 @@ pub struct MeshInstancedRenderer {
 }
 
 impl MeshInstancedRenderer {
-    pub fn new(device: &Device, color_format: TextureFormat, depth_format: Option<TextureFormat>) -> Self {
+    pub fn new(
+        device: &Device,
+        color_format: TextureFormat,
+        depth_format: Option<TextureFormat>,
+    ) -> Self {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("mesh_instanced_shader"),
             source: ShaderSource::Wgsl(include_str!("../shaders/mesh_instanced.wgsl").into()),
@@ -103,10 +107,26 @@ impl MeshInstancedRenderer {
             array_stride: 64, // 4 * vec4<f32>
             step_mode: VertexStepMode::Instance,
             attributes: &[
-                VertexAttribute { offset: 0, shader_location: 2, format: VertexFormat::Float32x4 },
-                VertexAttribute { offset: 16, shader_location: 3, format: VertexFormat::Float32x4 },
-                VertexAttribute { offset: 32, shader_location: 4, format: VertexFormat::Float32x4 },
-                VertexAttribute { offset: 48, shader_location: 5, format: VertexFormat::Float32x4 },
+                VertexAttribute {
+                    offset: 0,
+                    shader_location: 2,
+                    format: VertexFormat::Float32x4,
+                },
+                VertexAttribute {
+                    offset: 16,
+                    shader_location: 3,
+                    format: VertexFormat::Float32x4,
+                },
+                VertexAttribute {
+                    offset: 32,
+                    shader_location: 4,
+                    format: VertexFormat::Float32x4,
+                },
+                VertexAttribute {
+                    offset: 48,
+                    shader_location: 5,
+                    format: VertexFormat::Float32x4,
+                },
             ],
         };
 
@@ -118,7 +138,10 @@ impl MeshInstancedRenderer {
                 entry_point: "vs_main",
                 buffers: &[vertex_layout, instance_layout],
             },
-            primitive: PrimitiveState { topology: PrimitiveTopology::TriangleList, ..Default::default() },
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
             depth_stencil: depth_format.map(|df| wgpu::DepthStencilState {
                 format: df,
                 depth_write_enabled: true,
@@ -130,7 +153,11 @@ impl MeshInstancedRenderer {
             fragment: Some(FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
-                targets: &[Some(ColorTargetState { format: color_format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: ColorWrites::ALL })],
+                targets: &[Some(ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: ColorWrites::ALL,
+                })],
             }),
             multiview: None,
         });
@@ -145,7 +172,10 @@ impl MeshInstancedRenderer {
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("mesh_instanced_bg"),
             layout: &bind_group_layout,
-            entries: &[BindGroupEntry { binding: 0, resource: uniforms_buf.as_entire_binding() }],
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: uniforms_buf.as_entire_binding(),
+            }],
         });
 
         Self {
@@ -166,7 +196,9 @@ impl MeshInstancedRenderer {
         self.uniforms.view = view.to_cols_array_2d();
         self.uniforms.proj = proj.to_cols_array_2d();
     }
-    pub fn set_color(&mut self, color: [f32; 4]) { self.uniforms.color = color; }
+    pub fn set_color(&mut self, color: [f32; 4]) {
+        self.uniforms.color = color;
+    }
     pub fn set_light(&mut self, dir: [f32; 3], intensity: f32) {
         self.uniforms.light_dir_ws = [dir[0], dir[1], dir[2], intensity.max(0.0)];
     }
@@ -174,7 +206,13 @@ impl MeshInstancedRenderer {
         queue.write_buffer(&self.uniforms_buf, 0, bytemuck::bytes_of(&self.uniforms));
     }
 
-    pub fn set_mesh(&mut self, device: &Device, queue: &Queue, vertices: &[VertexPN], indices: &[u32]) {
+    pub fn set_mesh(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        vertices: &[VertexPN],
+        indices: &[u32],
+    ) {
         let vsize = (vertices.len() * std::mem::size_of::<VertexPN>()) as u64;
         let isize = (indices.len() * std::mem::size_of::<u32>()) as u64;
         let vbuf = device.create_buffer(&BufferDescriptor {
@@ -196,7 +234,12 @@ impl MeshInstancedRenderer {
         self.index_count = indices.len() as u32;
     }
 
-    pub fn upload_instances_from_mat4(&mut self, device: &Device, queue: &Queue, transforms: &[Mat4]) {
+    pub fn upload_instances_from_mat4(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        transforms: &[Mat4],
+    ) {
         if transforms.is_empty() {
             return;
         }
@@ -222,7 +265,12 @@ impl MeshInstancedRenderer {
         }
     }
 
-    pub fn upload_instances_from_rowmajor(&mut self, device: &Device, queue: &Queue, row_major_4x4: &[[f32; 16]]) {
+    pub fn upload_instances_from_rowmajor(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        row_major_4x4: &[[f32; 16]],
+    ) {
         if row_major_4x4.is_empty() {
             return;
         }
@@ -242,10 +290,8 @@ impl MeshInstancedRenderer {
         for r in row_major_4x4 {
             // r is row-major; convert to column-major by transposing
             let m = Mat4::from_cols_array(&[
-                r[0], r[4], r[8], r[12],
-                r[1], r[5], r[9], r[13],
-                r[2], r[6], r[10], r[14],
-                r[3], r[7], r[11], r[15],
+                r[0], r[4], r[8], r[12], r[1], r[5], r[9], r[13], r[2], r[6], r[10], r[14], r[3],
+                r[7], r[11], r[15],
             ]);
             packed.extend_from_slice(&m.to_cols_array());
         }
@@ -258,9 +304,15 @@ impl MeshInstancedRenderer {
         if self.index_count == 0 {
             return;
         }
-        let Some(vbuf) = &self.vbuf else { return; };
-        let Some(ibuf) = &self.ibuf else { return; };
-        let Some(inst) = &self.instbuf else { return; };
+        let Some(vbuf) = &self.vbuf else {
+            return;
+        };
+        let Some(ibuf) = &self.ibuf else {
+            return;
+        };
+        let Some(inst) = &self.instbuf else {
+            return;
+        };
         // Update uniforms
         queue.write_buffer(&self.uniforms_buf, 0, bytemuck::bytes_of(&self.uniforms));
 
@@ -296,7 +348,12 @@ impl MeshInstancedRenderer {
         u.view = view.to_cols_array_2d();
         u.proj = proj.to_cols_array_2d();
         u.color = color;
-        u.light_dir_ws = [light_dir[0], light_dir[1], light_dir[2], light_intensity.max(0.0)];
+        u.light_dir_ws = [
+            light_dir[0],
+            light_dir[1],
+            light_dir[2],
+            light_intensity.max(0.0),
+        ];
         queue.write_buffer(&self.uniforms_buf, 0, bytemuck::bytes_of(&u));
 
         pass.set_pipeline(&self.pipeline);
