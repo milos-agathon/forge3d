@@ -36,16 +36,20 @@ New to forge3d? Get a terrain rendering example working in a few seconds:
 4. **Run terrain example**:
 
 ```bash
-python examples/geopandas_demo.py 
---output-size 1200 900 
---lighting-type "blinn-phong" 
---lighting-intensity 1 
---lighting-azimuth 315 
---lighting-elevation 315 
---shadow-intensity 1 
---contrast-pct 0.5 
---gamma 0.05 
+python examples/geopandas_demo.py
+--output-size 1200 900
+--palette-interpolate
+--palette-size 128
+--lighting-type "blinn-phong"
+--lighting-intensity 1
+--lighting-azimuth 315
+--lighting-elevation 315
+--shadow-intensity 1
+--contrast-pct 0.05
+--gamma 0.5
 --camera-theta 90
+--water
+--water-min-area-pct 0.001
 ```
 
 This should be rendered within 5 seconds! 
