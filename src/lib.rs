@@ -128,6 +128,7 @@ pub mod uv; // UV unwrap helpers (planar, spherical)
 pub mod textures {}
 pub mod transforms;
 pub mod vector;
+pub mod viewer; // Interactive windowed viewer (Workstream I1)
 
 // Re-export commonly used types
 pub use core::cloud_shadows::{
@@ -2686,6 +2687,57 @@ fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
     Ok(d.into_py(py))
 }
 
+/// Open an interactive viewer window (Workstream I1)
+///
+/// Opens a windowed viewer with orbit and FPS camera controls.
+///
+/// Args:
+///     width: Window width in pixels (default: 1024)
+///     height: Window height in pixels (default: 768)
+///     title: Window title (default: "forge3d Interactive Viewer")
+///     vsync: Enable VSync (default: True)
+///     fov_deg: Field of view in degrees (default: 45.0)
+///     znear: Near clipping plane (default: 0.1)
+///     zfar: Far clipping plane (default: 1000.0)
+///
+/// Controls:
+///     Tab - Toggle between Orbit and FPS camera modes
+///     Orbit mode: Drag to rotate, Scroll to zoom
+///     FPS mode: WASD to move, Q/E for up/down, Mouse to look, Shift for speed
+///     Esc - Exit viewer
+///
+/// Example:
+///     >>> import forge3d as f3d
+///     >>> f3d.open_viewer(width=1280, height=720, title="My Scene")
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (width=1024, height=768, title="forge3d Interactive Viewer".to_string(), vsync=true, fov_deg=45.0, znear=0.1, zfar=1000.0))]
+fn open_viewer(
+    width: u32,
+    height: u32,
+    title: String,
+    vsync: bool,
+    fov_deg: f32,
+    znear: f32,
+    zfar: f32,
+) -> PyResult<()> {
+    use crate::viewer::{run_viewer, ViewerConfig};
+
+    let config = ViewerConfig {
+        width,
+        height,
+        title,
+        vsync,
+        fov_deg,
+        znear,
+        zfar,
+    };
+
+    run_viewer(config).map_err(|e| {
+        pyo3::exceptions::PyRuntimeError::new_err(format!("Viewer error: {}", e))
+    })
+}
+
 // PyO3 module entry point so Python can `import forge3d._forge3d`
 // This must be named exactly `_forge3d` to match [tool.maturin].module-name in pyproject.toml
 #[cfg(feature = "extension-module")]
@@ -2694,6 +2746,8 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Basic metadata so users can sanity-check the native module is loaded
     m.add("__doc__", "forge3d native module")?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    // Interactive Viewer (I1)
+    m.add_function(wrap_pyfunction!(open_viewer, m)?)?;
     // Vector: point shape/LOD controls
     m.add_function(wrap_pyfunction!(set_point_shape_mode, m)?)?;
     m.add_function(wrap_pyfunction!(set_point_lod_threshold, m)?)?;

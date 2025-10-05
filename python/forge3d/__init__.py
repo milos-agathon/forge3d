@@ -540,6 +540,76 @@ def get_device():
     """Get GPU device handle from the native module when available."""
     return _gpu_get_device()
 
+def open_viewer(
+    width: int = 1024,
+    height: int = 768,
+    title: str = "forge3d Interactive Viewer",
+    vsync: bool = True,
+    fov_deg: float = 45.0,
+    znear: float = 0.1,
+    zfar: float = 1000.0,
+) -> None:
+    """Open an interactive viewer window with orbit and FPS camera controls.
+
+    Opens a windowed viewer for real-time 3D exploration. This is a blocking call
+    that runs until the user closes the window or presses Escape.
+
+    Args:
+        width: Window width in pixels (default: 1024)
+        height: Window height in pixels (default: 768)
+        title: Window title (default: "forge3d Interactive Viewer")
+        vsync: Enable VSync for smoother rendering (default: True)
+        fov_deg: Field of view in degrees (default: 45.0)
+        znear: Near clipping plane distance (default: 0.1)
+        zfar: Far clipping plane distance (default: 1000.0)
+
+    Controls:
+        Tab - Toggle between Orbit and FPS camera modes
+
+        Orbit mode:
+            - Left mouse drag: Rotate camera around target
+            - Mouse scroll: Zoom in/out
+            - Shift + left mouse drag: Pan the target point
+
+        FPS mode:
+            - W/A/S/D: Move forward/left/backward/right
+            - Q/E: Move down/up
+            - Left mouse drag: Look around
+            - Shift: Move faster (2x speed)
+
+        Esc - Exit viewer
+
+    Example:
+        >>> import forge3d as f3d
+        >>> f3d.open_viewer(width=1280, height=720, title="My Scene")
+
+    Note:
+        This function requires a GPU and windowing system. For offscreen rendering,
+        use Scene.render_terrain_rgba() or render_offscreen_rgba() instead.
+    """
+    try:
+        from . import _forge3d as _native  # type: ignore[attr-defined]
+        if hasattr(_native, "open_viewer"):
+            _native.open_viewer(
+                width=int(width),
+                height=int(height),
+                title=str(title),
+                vsync=bool(vsync),
+                fov_deg=float(fov_deg),
+                znear=float(znear),
+                zfar=float(zfar),
+            )
+        else:
+            raise RuntimeError(
+                "Interactive viewer not available. "
+                "This feature requires the native extension to be built with viewer support."
+            )
+    except ImportError as e:
+        raise RuntimeError(
+            f"Native module not available: {e}. "
+            "Install forge3d with: pip install forge3d"
+        ) from e
+
 def make_sampler(address_mode: str = "clamp", mag_filter: str = "linear", mip_filter: str = "linear") -> dict:
     """Create a texture sampler description.
 
