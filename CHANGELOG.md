@@ -6,6 +6,14 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## [Unreleased]
 
 ### Added
+- Workstream I1 — Interactive Viewer
+  - I1: Interactive windowed viewer with winit 0.29 integration providing real-time exploration
+  - Orbit camera mode: rotate around target, zoom, and pan with mouse controls
+  - FPS camera mode: WASD movement with mouse look, Q/E vertical movement, Shift speed boost
+  - Tab to toggle between camera modes, 60+ FPS on simple scenes
+  - DPI-aware rendering with live FPS counter in window title
+  - Rust example: `cargo run --example interactive_viewer`
+  - Documentation: `docs/interactive_viewer.rst`
 - Python memory helpers now expose real resident and staging telemetry via forge3d.mem and top-level shortcuts.
 - Regression coverage for GPU adapter probes exercises native callbacks and fallback shims.
 

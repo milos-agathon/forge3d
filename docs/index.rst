@@ -33,6 +33,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    :maxdepth: 2
    :caption: Advanced Features:
 
+   interactive_viewer
    postfx/index
    pbr_materials
    shadow_mapping
