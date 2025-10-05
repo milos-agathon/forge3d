@@ -11,6 +11,12 @@ pub struct ResourceRegistry {
     buffer_bytes: AtomicU64,
     texture_bytes: AtomicU64,
     host_visible_bytes: AtomicU64,
+    resident_tiles: AtomicU32,
+    resident_tile_bytes: AtomicU64,
+    staging_bytes_in_flight: AtomicU64,
+    staging_ring_count: AtomicU32,
+    staging_buffer_size: AtomicU64,
+    staging_buffer_stalls: AtomicU64,
 
     // Budget limit (512 MiB)
     budget_limit: u64,
@@ -28,6 +34,12 @@ pub struct MemoryMetrics {
     pub limit_bytes: u64,
     pub within_budget: bool,
     pub utilization_ratio: f64,
+    pub resident_tiles: u32,
+    pub resident_tile_bytes: u64,
+    pub staging_bytes_in_flight: u64,
+    pub staging_ring_count: u32,
+    pub staging_buffer_size: u64,
+    pub staging_buffer_stalls: u64,
 }
 
 impl ResourceRegistry {
@@ -39,6 +51,12 @@ impl ResourceRegistry {
             buffer_bytes: AtomicU64::new(0),
             texture_bytes: AtomicU64::new(0),
             host_visible_bytes: AtomicU64::new(0),
+            resident_tiles: AtomicU32::new(0),
+            resident_tile_bytes: AtomicU64::new(0),
+            staging_bytes_in_flight: AtomicU64::new(0),
+            staging_ring_count: AtomicU32::new(0),
+            staging_buffer_size: AtomicU64::new(0),
+            staging_buffer_stalls: AtomicU64::new(0),
             budget_limit: 512 * 1024 * 1024, // 512 MiB
         }
     }
@@ -80,6 +98,40 @@ impl ResourceRegistry {
         self.texture_bytes.fetch_sub(size, Ordering::Relaxed);
     }
 
+    /// Update the number of resident virtual texture tiles tracked globally
+    pub fn set_resident_tiles(&self, count: u32, tile_bytes: u64) {
+        self.resident_tiles.store(count, Ordering::Relaxed);
+        self.resident_tile_bytes
+            .store(tile_bytes, Ordering::Relaxed);
+    }
+
+    /// Clear resident tile telemetry when virtual textures are torn down
+    pub fn clear_resident_tiles(&self) {
+        self.set_resident_tiles(0, 0);
+    }
+
+    /// Update staging ring telemetry aggregated from GPU upload rings
+    pub fn set_staging_stats(
+        &self,
+        bytes_in_flight: u64,
+        ring_count: usize,
+        buffer_size: u64,
+        stalls: u64,
+    ) {
+        self.staging_bytes_in_flight
+            .store(bytes_in_flight, Ordering::Relaxed);
+        self.staging_ring_count
+            .store(ring_count as u32, Ordering::Relaxed);
+        self.staging_buffer_size
+            .store(buffer_size, Ordering::Relaxed);
+        self.staging_buffer_stalls.store(stalls, Ordering::Relaxed);
+    }
+
+    /// Reset staging telemetry when rings are dropped or disabled
+    pub fn clear_staging_stats(&self) {
+        self.set_staging_stats(0, 0, 0, 0);
+    }
+
     /// Get current memory metrics
     pub fn get_metrics(&self) -> MemoryMetrics {
         let buffer_count = self.buffer_count.load(Ordering::Relaxed);
@@ -90,6 +142,12 @@ impl ResourceRegistry {
         let total_bytes = buffer_bytes + texture_bytes;
         let within_budget = host_visible_bytes <= self.budget_limit;
         let utilization_ratio = host_visible_bytes as f64 / self.budget_limit as f64;
+        let resident_tiles = self.resident_tiles.load(Ordering::Relaxed);
+        let resident_tile_bytes = self.resident_tile_bytes.load(Ordering::Relaxed);
+        let staging_bytes_in_flight = self.staging_bytes_in_flight.load(Ordering::Relaxed);
+        let staging_ring_count = self.staging_ring_count.load(Ordering::Relaxed);
+        let staging_buffer_size = self.staging_buffer_size.load(Ordering::Relaxed);
+        let staging_buffer_stalls = self.staging_buffer_stalls.load(Ordering::Relaxed);
 
         MemoryMetrics {
             buffer_count,
@@ -101,6 +159,12 @@ impl ResourceRegistry {
             limit_bytes: self.budget_limit,
             within_budget,
             utilization_ratio,
+            resident_tiles,
+            resident_tile_bytes,
+            staging_bytes_in_flight,
+            staging_ring_count,
+            staging_buffer_size,
+            staging_buffer_stalls,
         }
     }
 

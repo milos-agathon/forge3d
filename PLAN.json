@@ -1,0 +1,195 @@
+[
+  {
+    "id": "R1",
+    "title": "Stop analytic fallback from biasing terrain heights",
+    "files_touched": ["src/shaders/terrain.wgsl"],
+    "severity": "P1",
+    "risk": "medium",
+    "rationale": "Real terrain draws pick up the analytic fallback offset which breaks lighting and tests.",
+    "steps": [
+      "Gate the analytic fallback so it only applies when the sampled texel is a sentinel or the texture is missing.",
+      "Update shader comments and add a regression asserting no bias with valid tiles."
+    ],
+    "validation": [
+      "Re-run terrain fragment tests or demo captures to confirm heights stay unchanged when textures are present."
+    ],
+    "gpu_budget_note": "Shader-only change, no host-visible memory impact."
+  },
+  {
+    "id": "R2",
+    "title": "Restore native adapter probing in Python facade",
+    "files_touched": ["python/forge3d/__init__.py"],
+    "severity": "P1",
+    "risk": "low",
+    "rationale": "GPU capability checks always fall back to empty lists so GPU-specific paths never engage.",
+    "steps": [
+      "Fix the fallback definitions so they live at module scope and only override when _forge3d import fails.",
+      "Set _NATIVE_AVAILABLE when the native module loads and reuse that flag in helpers like has_gpu."
+    ],
+    "validation": [
+      "Import forge3d with a built extension and ensure enumerate_adapters() reports adapters.",
+      "Run GPU-tagged pytest cases to confirm they no longer auto-skip."
+    ],
+    "gpu_budget_note": "Improves detection only; no memory budget change."
+  },
+  {
+    "id": "R3",
+    "title": "Harden feedback buffer parsing",
+    "files_touched": ["src/core/feedback_buffer.rs"],
+    "severity": "P1",
+    "risk": "medium",
+    "rationale": "Parsing uses ptr::read on raw bytes which can fault on alignment and break releases.",
+    "steps": [
+      "Switch to bytemuck::from_bytes or ptr::read_unaligned with explicit layout validation.",
+      "Document expected buffer length and reject trailing garbage to avoid silent corruption."
+    ],
+    "validation": [
+      "Exercise feedback parsing via existing GPU tests or a synthetic buffer to prove alignment safety."
+    ],
+    "gpu_budget_note": "No additional host-visible memory; only parsing logic changes."
+  },
+  {
+    "id": "R4",
+    "title": "Replace zeroed device stub in path tracing cache tests",
+    "files_touched": ["src/path_tracing/cache.rs"],
+    "severity": "P1",
+    "risk": "low",
+    "rationale": "Using std::mem::zeroed() hides legitimate crashes and is undefined behavior.",
+    "steps": [
+      "Use the existing gpu::create_device_for_test() helper to obtain a real wgpu::Device.",
+      "Scope the device to the test or gate the test with cfg when GPU resources are unavailable."
+    ],
+    "validation": [
+      "Run the modified test to ensure it executes without panicking on supported hardware."
+    ],
+    "gpu_budget_note": "Creates a small test device. Host-visible usage stays well under 512 MiB."
+  },
+  {
+    "id": "R5",
+    "title": "Enforce 256-byte alignment for terrain mosaics",
+    "files_touched": ["src/terrain/stream.rs", "src/CLAUDE.md"],
+    "severity": "P2",
+    "risk": "medium",
+    "rationale": "Uploads rely on tile width * bytes-per-pixel and can violate WebGPU alignment when tile sizes change.",
+    "steps": [
+      "Add a padding helper that rounds bytes_per_row up to 256 and copies into a staging buffer when needed.",
+      "Document the rule in the CLAUDE terrain memo and clamp tile sizes accordingly."
+    ],
+    "validation": [
+      "Run mipmap or overlay upload tests with non power-of-two tile sizes to confirm validation passes."
+    ],
+    "gpu_budget_note": "Padding increases temporary host-visible buffers but remains under the 512 MiB ceiling with current tile counts."
+  },
+  {
+    "id": "R6",
+    "title": "Use bytemuck for virtual texture page table uploads",
+    "files_touched": ["src/core/virtual_texture.rs"],
+    "severity": "P2",
+    "risk": "low",
+    "rationale": "std::mem::transmute on floats assumes packed layout and endianness which is brittle.",
+    "steps": [
+      "Derive Pod/Zeroable for PageTableEntry and cast slices to bytes via bytemuck.",
+      "Reuse a staging buffer to avoid per-frame heap churn."
+    ],
+    "validation": [
+      "Exercise page table updates while checking wgpu validation and shader sampling for correctness."
+    ],
+    "gpu_budget_note": "Shared staging buffer keeps host-visible memory stable; no net increase expected."
+  },
+  {
+    "id": "R7",
+    "title": "Fix render bundle support detection",
+    "files_touched": ["python/forge3d/bundles.py"],
+    "severity": "P2",
+    "risk": "low",
+    "rationale": "Import points at a non-existent module so bundle helpers never flip into native mode.",
+    "steps": [
+      "Import _forge3d directly and guard attribute checks accordingly.",
+      "Expose a positive capability probe so callers can skip fallback warnings when native support exists."
+    ],
+    "validation": [
+      "Run bundle-related tests to ensure HAS_BUNDLES_SUPPORT reflects the compiled binary."
+    ],
+    "gpu_budget_note": "Pure Python change; no memory impact."
+  },
+  {
+    "id": "R8",
+    "title": "Refactor Python facade into smaller modules",
+    "files_touched": ["python/forge3d/__init__.py", "python/forge3d/"],
+    "severity": "P2",
+    "risk": "medium",
+    "rationale": "The 6k line monolith mixes fallbacks, adapters, memory tracking, and convenience APIs.",
+    "steps": [
+      "Extract GPU shims, memory tracking, and high-level helpers into dedicated modules and re-export cleanly.",
+      "Add targeted unit tests per module to maintain coverage."
+    ],
+    "validation": [
+      "Smoke test core imports (Renderer, TerrainSpike, VectorScene) and run quick PyTest focus sets."
+    ],
+    "gpu_budget_note": "Refactor only, no change to host-visible memory."
+  },
+  {
+    "id": "R9",
+    "title": "Align version metadata across toolchains",
+    "files_touched": ["CMakeLists.txt", "docs/conf.py", ".gitignore"],
+    "severity": "P3",
+    "risk": "low",
+    "rationale": "Tooling advertises outdated versions and tracks generated docs.",
+    "steps": [
+      "Update CMake and Sphinx version strings to 0.80.0 and add _build/ to .gitignore.",
+      "Document the supported build flow (maturin) so CMake stays optional."
+    ],
+    "validation": [
+      "Run cmake -LAH -N . and sphinx-build to confirm version sync."
+    ],
+    "gpu_budget_note": "No GPU memory effects."
+  },
+  {
+    "id": "R10",
+    "title": "Surface real GPU memory usage to Python",
+    "files_touched": ["src/terrain/mod.rs", "src/core/virtual_texture.rs", "python/forge3d/__init__.py"],
+    "severity": "P2",
+    "risk": "medium",
+    "rationale": "Python tracks a synthetic budget while Rust silently allocates large buffers.",
+    "steps": [
+      "Expose memory telemetry from Rust (e.g., resident tiles, staging buffers) through PyO3.",
+      "Update Python memory helpers to consume the real numbers and enforce the 512 MiB budget."
+    ],
+    "validation": [
+      "Stream a large terrain dataset and verify reported totals stay within the configured limit."
+    ],
+    "gpu_budget_note": "Improves monitoring; may require budgeting adjustments but aims to keep usage <=512 MiB."
+  },
+  {
+    "id": "R11",
+    "title": "Document and test GPU detection paths",
+    "files_touched": ["tests/test_device_probe.py", "python/forge3d/__init__.py"],
+    "severity": "P2",
+    "risk": "low",
+    "rationale": "Lack of regression coverage let adapter probing regress unnoticed.",
+    "steps": [
+      "Add focused tests that monkeypatch _forge3d to assert adapter reporting and probe status.",
+      "Wire tests into CI to guard future refactors."
+    ],
+    "validation": [
+      "Run new tests locally and in CI under environments with and without the native extension."
+    ],
+    "gpu_budget_note": "Test-only change with negligible memory usage."
+  },
+  {
+    "id": "R12",
+    "title": "Prune duplicate contributor guidance",
+    "files_touched": ["CLAUDE.md", "docs/CLAUDE.md", "src/CLAUDE.md", "tests/CLAUDE.md", "python/CLAUDE.md"],
+    "severity": "P3",
+    "risk": "low",
+    "rationale": "Multiple CLAUDE.md copies diverge and confuse contributors.",
+    "steps": [
+      "Consolidate guidance into one canonical document and replace others with short pointers.",
+      "Update references so new contributors land on the maintained version."
+    ],
+    "validation": [
+      "Spot check each location to ensure only the canonical copy remains."
+    ],
+    "gpu_budget_note": "Documentation only; no memory impact."
+  }
+]

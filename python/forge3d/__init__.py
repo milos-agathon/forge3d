@@ -14,20 +14,48 @@ from ._gpu import (
     has_gpu as _gpu_has_gpu,
     get_device as _gpu_get_device,
 )
-from ._memory import (
+from .mem import (
     MEMORY_LIMIT_BYTES as _MEMORY_LIMIT_BYTES,
     aligned_row_size as _aligned_row_size,
     update_memory_usage as _mem_update,
     memory_metrics as _mem_metrics,
+    enforce_memory_budget as _enforce_memory_budget,
+    budget_remaining as _mem_budget_remaining,
+    utilization_ratio as _mem_utilization_ratio,
+    override_memory_limit as _override_memory_limit,
 )
+
+# Colormaps public surface
+from .colormaps import get as get_colormap, available as available_colormaps, load_cpt as load_cpt_colormap, load_json as load_json_colormap
 
 _NATIVE_MODULE = _get_native_module()
 
 if _NATIVE_MODULE is not None:
-    for _name in ("TerrainSpike",):
+    for _name in ("Scene", "TerrainSpike"):
         if hasattr(_NATIVE_MODULE, _name):
             globals()[_name] = getattr(_NATIVE_MODULE, _name)
 
+def _track_memory(**deltas) -> None:
+    """Record fallback memory deltas and enforce the budget."""
+    _mem_update(**deltas)
+    _enforce_memory_budget()
+
+
+
+def memory_metrics() -> dict:
+    return _mem_metrics()
+
+
+def budget_remaining() -> int:
+    return _mem_budget_remaining()
+
+
+def utilization_ratio() -> float:
+    return _mem_utilization_ratio()
+
+
+def override_memory_limit(limit_bytes: int) -> None:
+    _override_memory_limit(limit_bytes)
 
 def list_palettes() -> list[str]:
     return colormap_supported()
@@ -302,6 +330,162 @@ except Exception:
 # Version information
 __version__ = "0.80.0"
 _CURRENT_PALETTE = "viridis"
+_SUPPORTED_MSAA = [1, 2, 4, 8]  # Supported MSAA sample counts
+
+# -----------------------------------------------------------------------------
+# Basic Renderer class for triangle rendering (fallback implementation)
+# -----------------------------------------------------------------------------
+class Renderer:
+    """Basic renderer for triangle rendering and terrain."""
+
+    def __init__(self, width: int, height: int):
+        self.width = width
+        self.height = height
+        self._heightmap = None
+        self._spacing = (1.0, 1.0)
+        self._exaggeration = 1.0
+        self._colormap = "viridis"
+        self._sun_direction = (0.0, 1.0, 0.0)
+        self._exposure = 1.0
+        self._height_range = (0.0, 1.0)
+
+    def info(self) -> str:
+        """Return renderer information."""
+        return f"Renderer({self.width}x{self.height}, fallback=True)"
+
+    def render_triangle_rgba(self) -> np.ndarray:
+        """Render a triangle to RGBA array."""
+        # Create a triangle with color gradients as fallback
+        img = np.zeros((self.height, self.width, 4), dtype=np.uint8)
+
+        # Create a triangle pattern with gradients
+        center_x, center_y = self.width // 2, self.height // 2
+        size = min(self.width, self.height) // 4
+
+        for y in range(self.height):
+            for x in range(self.width):
+                # Triangle check with gradient shading
+                dx, dy = x - center_x, y - center_y
+                distance = abs(dx) + abs(dy)
+
+                if distance < size and y > center_y - size // 2:
+                    # Create gradients based on position
+                    r = min(255, 128 + (x * 127) // self.width)
+                    g = min(255, 64 + (y * 191) // self.height)
+                    b = min(255, 32 + ((x + y) * 223) // (self.width + self.height))
+
+                    # Add some shading based on distance from center
+                    shade_factor = 1.0 - (distance / size * 0.3)
+                    r = int(r * shade_factor)
+                    g = int(g * shade_factor)
+                    b = int(b * shade_factor)
+
+                    img[y, x] = [r, g, b, 255]
+                else:
+                    # Background with subtle gradient
+                    bg_r = (x * 32) // self.width
+                    bg_g = (y * 32) // self.height
+                    img[y, x] = [bg_r, bg_g, 16, 255]
+
+        return img
+
+    def render_triangle_png(self, path: Union[str, Path]) -> None:
+        """Render a triangle to PNG file."""
+        rgba = self.render_triangle_rgba()
+        numpy_to_png(path, rgba)
+
+def render_triangle_rgba(width: int, height: int) -> np.ndarray:
+    """Render a triangle to RGBA array."""
+    renderer = Renderer(width, height)
+    return renderer.render_triangle_rgba()
+
+def render_triangle_png(path: Union[str, Path], width: int, height: int) -> None:
+    """Render a triangle to PNG file."""
+    renderer = Renderer(width, height)
+    renderer.render_triangle_png(path)
+
+def numpy_to_png(path: Union[str, Path], array: np.ndarray) -> None:
+    """Convert numpy array to PNG file."""
+    from PIL import Image
+
+    # Validate file extension
+    path_str = str(path)
+    if not path_str.lower().endswith('.png'):
+        raise ValueError(f"File must have .png extension, got {path_str}")
+
+    # Validate array contiguity
+    if not array.flags['C_CONTIGUOUS']:
+        raise RuntimeError("Array must be C-contiguous")
+
+    # Validate array dimensions
+    if array.ndim not in (2, 3):
+        raise RuntimeError(f"Array must be 2D or 3D, got {array.ndim}D")
+
+    # Validate array dtype
+    if array.dtype != np.uint8:
+        raise RuntimeError("unsupported array; expected uint8 (H,W), (H,W,3) or (H,W,4)")
+
+    # Validate array shape
+    if array.ndim == 3 and array.shape[2] not in (3, 4):
+        raise RuntimeError("expected last dimension to be 3 (RGB) or 4 (RGBA)")
+
+    # Ensure array is 2D or 3D
+    if array.ndim == 2:
+        # Grayscale - convert to RGB
+        img = Image.fromarray(array, mode='L')
+    elif array.ndim == 3:
+        if array.shape[2] == 3:
+            # RGB
+            img = Image.fromarray(array, mode='RGB')
+        elif array.shape[2] == 4:
+            # RGBA
+            img = Image.fromarray(array, mode='RGBA')
+        else:
+            raise ValueError(f"Unsupported array shape: {array.shape}")
+    else:
+        raise ValueError(f"Array must be 2D or 3D, got {array.ndim}D")
+
+    img.save(str(path))
+
+def png_to_numpy(path: Union[str, Path]) -> np.ndarray:
+    """Load PNG file as numpy array."""
+    from PIL import Image
+
+    img = Image.open(str(path))
+    # Convert to RGBA for consistency
+    if img.mode != 'RGBA':
+        img = img.convert('RGBA')
+
+    return np.array(img, dtype=np.uint8)
+
+def dem_stats(heightmap: np.ndarray) -> dict:
+    """Get DEM statistics."""
+    if heightmap.size == 0:
+        return {"min": 0.0, "max": 0.0, "mean": 0.0, "std": 0.0}
+
+    return {
+        "min": float(heightmap.min()),
+        "max": float(heightmap.max()),
+        "mean": float(heightmap.mean()),
+        "std": float(heightmap.std())
+    }
+
+def dem_normalize(heightmap: np.ndarray, target_min: float = 0.0, target_max: float = 1.0) -> np.ndarray:
+    """Normalize DEM to target range."""
+    if heightmap.size == 0:
+        return heightmap.copy()
+
+    current_min = heightmap.min()
+    current_max = heightmap.max()
+
+    if current_max == current_min:
+        return np.full_like(heightmap, target_min)
+
+    # Normalize to 0-1 first
+    normalized = (heightmap - current_min) / (current_max - current_min)
+
+    # Scale to target range
+    return normalized * (target_max - target_min) + target_min
 
 # -----------------------------------------------------------------------------
 # B11: Water surface public types (lightweight placeholders for tests)
@@ -343,29 +527,11 @@ def run_benchmark(operation: str, width: int, height: int,
 
 def has_gpu() -> bool:
     """Check if a native GPU adapter is available."""
-    if not globals().get("_NATIVE_AVAILABLE"):
-        return False
-    return bool(enumerate_adapters())
+    return _gpu_has_gpu()
 
 def get_device():
     """Get GPU device handle from the native module when available."""
-    native = getattr(globals().get("_NATIVE_MODULE"), "get_device", None)
-    if native is not None:
-        try:
-            return native()
-        except Exception:
-            pass
-
-    class MockDevice:
-        def __init__(self):
-            self.name = "Fallback CPU Device"
-            self.backend = "cpu"
-            self.limits = {"max_texture_dimension": 16384}
-
-        def create_virtual_texture(self, *args, **kwargs):
-            return MockVirtualTexture()
-
-    return MockDevice()
+    return _gpu_get_device()
 
 def make_sampler(address_mode: str = "clamp", mag_filter: str = "linear", mip_filter: str = "linear") -> dict:
     """Create a texture sampler description.
@@ -415,30 +581,6 @@ def c10_parent_z90_child_unitx_world() -> tuple[float, float, float]:
     """C10 test shim: parent rotated +90° about Z, child local +X ends up at +Y in world."""
     return (0.0, 1.0, 0.0)
 
-class MockVirtualTexture:
-    """Mock virtual texture for fallback."""
-    def __init__(self):
-        self.width = 1024
-        self.height = 1024
-        self.tile_size = 256
-        self.max_lod = 4
-
-    def upload_tile(self, lod, x, y, data):
-        pass
-
-    def get_tile_status(self, lod, x, y):
-        return "loaded"
-
-    def bind(self, binding):
-        pass
-
-    def upload_tile(self, lod, x, y, data):
-        """Upload tile data."""
-        pass
-
-    def get_tile_status(self, lod, x, y):
-        """Get tile loading status."""
-        return "loaded"
 
 def uniform_lanes_layout() -> dict:
     """Get uniform lanes layout information."""
@@ -1054,6 +1196,10 @@ __all__ = [
     # GPU utilities
     "has_gpu",
     "get_device",
+    "memory_metrics",
+    "budget_remaining",
+    "utilization_ratio",
+    "override_memory_limit",
     "grid_generate",
     # DEM utilities
     "dem_stats",

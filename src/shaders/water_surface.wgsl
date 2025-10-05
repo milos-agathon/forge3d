@@ -156,7 +156,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Apply fresnel reflection effect
     let reflection_factor = 1.0 + reflection_strength * length(fresnel);
-    let final_color = water_color * lighting_factor * reflection_factor;
+    var final_color = water_color * lighting_factor * reflection_factor;
 
     // Distance-based alpha fading (optional)
     let fade_distance = 1000.0;

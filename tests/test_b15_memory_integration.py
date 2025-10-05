@@ -22,7 +22,9 @@ def test_terrain_spike_memory_metrics():
     expected_keys = {
         'buffer_count', 'texture_count', 'buffer_bytes', 'texture_bytes',
         'host_visible_bytes', 'total_bytes', 'limit_bytes', 
-        'within_budget', 'utilization_ratio'
+        'within_budget', 'utilization_ratio',
+        'resident_tiles', 'resident_tile_bytes', 'staging_bytes_in_flight',
+        'staging_ring_count', 'staging_buffer_size', 'staging_buffer_stalls'
     }
     assert set(metrics.keys()) == expected_keys
     

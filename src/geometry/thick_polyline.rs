@@ -40,7 +40,7 @@ pub fn generate_thick_polyline(
 #[cfg(feature = "extension-module")]
 use numpy::{PyReadonlyArray2, PyUntypedArrayMethods};
 #[cfg(feature = "extension-module")]
-use pyo3::{prelude::*, exceptions::PyValueError};
+use pyo3::{exceptions::PyValueError, prelude::*};
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
@@ -58,7 +58,7 @@ pub fn geometry_generate_thick_polyline_py(
     if !width_world.is_finite() || width_world <= 0.0 {
         return Err(PyValueError::new_err("width_world must be positive finite"));
     }
-    let pts: Vec<[f32;3]> = path
+    let pts: Vec<[f32; 3]> = path
         .as_array()
         .outer_iter()
         .map(|row| [row[0], row[1], row[2]])

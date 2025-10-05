@@ -53,7 +53,6 @@ coverage.xml
 # Local outputs and diagnostics
 out/
 diag_out/
-.pytest_cache/
 cover/
 tmp/
 
@@ -75,7 +74,6 @@ instance/
 .scrapy
 
 # Sphinx documentation
-docs/_build/
 
 # PyBuilder
 .pybuilder/
@@ -306,3 +304,7 @@ diag_out/
 # Generated outputs and diagnostics
 out/
 diag_out/
+
+# R9 audit: ensure docs and pytest artifacts ignored
+docs/_build/
+.pytest_cache/

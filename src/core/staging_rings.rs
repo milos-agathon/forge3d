@@ -5,6 +5,7 @@
 //! before completion.
 
 use crate::core::fence_tracker::FenceTracker;
+use crate::core::memory_tracker::global_tracker;
 use std::sync::{Arc, Mutex};
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device, Queue};
 
@@ -93,6 +94,20 @@ pub struct StagingRing {
 }
 
 impl StagingRing {
+    fn publish_stats(&self) {
+        if let Ok(stats) = self.stats.lock() {
+            let snapshot = stats.clone();
+            drop(stats);
+            let tracker = global_tracker();
+            tracker.set_staging_stats(
+                snapshot.bytes_in_flight,
+                snapshot.ring_count,
+                snapshot.buffer_size,
+                snapshot.buffer_stalls,
+            );
+        }
+    }
+
     /// Create a new staging ring system
     ///
     /// # Arguments
@@ -121,14 +136,16 @@ impl StagingRing {
             buffer_size,
         };
 
-        Self {
+        let instance = Self {
             buffers,
             current_index: 0,
             fence_tracker: Arc::new(Mutex::new(FenceTracker::new(device.clone(), queue.clone()))),
             stats: Arc::new(Mutex::new(stats)),
             device,
             queue,
-        }
+        };
+        instance.publish_stats();
+        instance
     }
 
     /// Get the current active staging buffer
@@ -143,7 +160,9 @@ impl StagingRing {
             // Update stats
             if let Ok(mut stats) = self.stats.lock() {
                 stats.bytes_in_flight += size;
+                stats.current_ring_index = self.current_index;
             }
+            self.publish_stats();
             return Some((&self.buffers[self.current_index].buffer, offset));
         }
 
@@ -153,7 +172,9 @@ impl StagingRing {
             if let Some(offset) = self.buffers[self.current_index].allocate(size) {
                 if let Ok(mut stats) = self.stats.lock() {
                     stats.bytes_in_flight += size;
+                    stats.current_ring_index = self.current_index;
                 }
+                self.publish_stats();
                 return Some((&self.buffers[self.current_index].buffer, offset));
             }
         }
@@ -162,6 +183,7 @@ impl StagingRing {
         if let Ok(mut stats) = self.stats.lock() {
             stats.buffer_stalls += 1;
         }
+        self.publish_stats();
         None
     }
 
@@ -198,6 +220,7 @@ impl StagingRing {
                 if let Ok(mut stats) = self.stats.lock() {
                     stats.current_ring_index = next_index;
                 }
+                self.publish_stats();
 
                 return true;
             }
@@ -222,6 +245,7 @@ impl StagingRing {
         if let Ok(mut stats) = self.stats.lock() {
             stats.bytes_in_flight = stats.bytes_in_flight.saturating_sub(completed_bytes);
         }
+        self.publish_stats();
     }
 }
 
@@ -291,5 +315,11 @@ mod tests {
         let stats = ring.stats();
         // Should have attempted to advance (may fail due to fence not being ready)
         assert!(stats.buffer_stalls > 0 || result.is_some());
+    }
+}
+
+impl Drop for StagingRing {
+    fn drop(&mut self) {
+        global_tracker().clear_staging_stats();
     }
 }

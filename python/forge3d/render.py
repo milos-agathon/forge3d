@@ -1187,34 +1187,23 @@ def _designer_grade(
     if lambert is None:
         return out
 
-    highlight = np.clip(lambert[..., None], 0.0, 1.0)
-    warm = np.array([1.02, 1.05, 0.94], dtype=np.float32)
-    cool = np.array([0.85, 0.96, 1.02], dtype=np.float32)
-    grade = cool + (warm - cool) * np.power(highlight, 0.75)
-    out *= grade
-
+    # Ridge/elevation accent (neutral, no color shift)
     elev = np.clip(np.asarray(elev_norm, dtype=np.float32), 0.0, 1.0)
     ridge_accent = 0.82 + 0.35 * np.power(elev[..., None], 1.3)
     out *= ridge_accent
 
+    # Ambient occlusion from slope (neutral, no color shift)
     if normals is not None:
         nz = np.clip(normals[..., 2], 0.0, 1.0)
         slope = np.power(1.0 - nz, 1.4)
         ao = np.clip(1.0 - 0.4 * slope, 0.55, 1.0)
         out *= ao[..., None]
 
-    veg_mask = np.clip(1.0 - np.power(elev, 1.1), 0.0, 1.0)
-    veg_mask *= np.clip(highlight.squeeze(-1) * 0.6 + 0.3, 0.0, 1.0)
-    green_boost = np.array([0.0, 0.16, -0.03], dtype=np.float32)
-    out += veg_mask[..., None] * green_boost
+    # REMOVED: Warm/cool color grading - was shifting colors
+    # REMOVED: Green vegetation boost - was adding unwanted green
+    # REMOVED: Saturation boost - was amplifying color shifts
+
     out = np.clip(out, 0.0, None)
-
-    blend = 0.45
-    out = np.clip(out * (1.0 - blend) + base * blend, 0.0, None)
-    mean = np.mean(out, axis=2, keepdims=True)
-    saturation = out - mean
-    out = np.clip(out + 0.22 * saturation, 0.0, None)
-
     return out
 
 
@@ -1237,36 +1226,24 @@ def _detect_water_mask_via_scene(
     method: str = "flat",
     smooth_iters: int = 1,
 ) -> np.ndarray:
-    f3d = _get_api_module()
-    if not hasattr(f3d, "Scene"):
-        raise RuntimeError("forge3d.Scene is unavailable for water detection")
+    """Detect water mask using simple elevation threshold.
 
-    H, W = int(hm.shape[0]), int(hm.shape[1])
-    scene = f3d.Scene(64, 48, grid=64, colormap="terrain")
-    try:
-        scene.set_height_from_r32f(hm)
-    except Exception:
-        try:
-            scene.set_terrain_dims(W, H, float(max(spacing)))
-            scene.set_terrain_heights(hm)
-        except Exception as exc:
-            raise RuntimeError("Failed to upload height data for water detection") from exc
+    Falls back to Python implementation since detect_water_from_dem is not available.
+    """
+    # Create mask: True where elevation is below water level
+    mask = hm < float(level)
 
-    scene.enable_water_surface()
-    scene.set_water_surface_height(float(level))
-    mask = scene.detect_water_from_dem(method=str(method), smooth_iters=int(max(0, smooth_iters)))
-    mask = np.asarray(mask, dtype=bool)
-    if mask.shape != hm.shape:
+    # Apply smoothing if requested
+    if smooth_iters > 0:
         try:
             from scipy import ndimage  # type: ignore
-
-            zoom_y = H / mask.shape[0]
-            zoom_x = W / mask.shape[1]
-            mask = ndimage.zoom(mask.astype(np.float32), (zoom_y, zoom_x), order=0) >= 0.5
+            # Use binary closing to fill small gaps, then opening to remove small islands
+            for _ in range(smooth_iters):
+                mask = ndimage.binary_closing(mask, structure=np.ones((3, 3)))
+                mask = ndimage.binary_opening(mask, structure=np.ones((3, 3)))
         except Exception:
-            yy = (np.linspace(0, mask.shape[0] - 1, H)).astype(int)
-            xx = (np.linspace(0, mask.shape[1] - 1, W)).astype(int)
-            mask = mask[yy][:, xx]
+            pass  # Skip smoothing if scipy not available
+
     return mask
 
 

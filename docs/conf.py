@@ -1,3 +1,7 @@
+# docs/conf.py
+# Sphinx configuration for forge3d documentation build
+# Exists so docs match current release metadata and extensions
+# RELEVANT FILES:docs/index.rst,pyproject.toml,CMakeLists.txt,CHANGELOG.md
 # Configuration file for the Sphinx documentation builder.
 
 import sys
@@ -160,3 +164,4 @@ epub_copyright = '2025, forge3d contributors'
 # Custom CSS
 def setup(app):
     app.add_css_file('custom.css')
+

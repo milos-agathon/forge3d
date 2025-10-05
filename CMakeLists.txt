@@ -1,3 +1,7 @@
+# ./CMakeLists.txt
+# Configures CMake-based build scaffolding for optional consumers
+# Exists to mirror cargo/maturin targets for native integrators
+# RELEVANT FILES:Cargo.toml,pyproject.toml,docs/conf.py,.github/workflows/build.yml
 cmake_minimum_required(VERSION 3.20)
 project(forge3d VERSION 0.80.0 LANGUAGES CXX)
 
@@ -236,3 +240,4 @@ install(
     DESTINATION share/doc/forge3d/
     OPTIONAL
 )
+

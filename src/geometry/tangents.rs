@@ -69,18 +69,30 @@ pub fn generate_tangents(mesh: &MeshBuffers) -> Vec<[f32; 4]> {
         let n = mesh.normals[i];
         let t = tan1[i];
         // Gram-Schmidt orthogonalize
-        let dot_nt = n[0]*t[0] + n[1]*t[1] + n[2]*t[2];
-        let mut tx = t[0] - n[0]*dot_nt;
-        let mut ty = t[1] - n[1]*dot_nt;
-        let mut tz = t[2] - n[2]*dot_nt;
-        let len = (tx*tx + ty*ty + tz*tz).sqrt();
-        if len > 1e-20 { tx/=len; ty/=len; tz/=len; } else { tx=1.0; ty=0.0; tz=0.0; }
+        let dot_nt = n[0] * t[0] + n[1] * t[1] + n[2] * t[2];
+        let mut tx = t[0] - n[0] * dot_nt;
+        let mut ty = t[1] - n[1] * dot_nt;
+        let mut tz = t[2] - n[2] * dot_nt;
+        let len = (tx * tx + ty * ty + tz * tz).sqrt();
+        if len > 1e-20 {
+            tx /= len;
+            ty /= len;
+            tz /= len;
+        } else {
+            tx = 1.0;
+            ty = 0.0;
+            tz = 0.0;
+        }
         // Handedness
-        let cx = n[1]*tx - n[2]*ty; // cross(n, t).x (partial)
-        let cy = n[2]*tx - n[0]*tz; // not exact but we only need sign of dot with bitangent
-        let cz = n[0]*ty - n[1]*tx;
+        let cx = n[1] * tx - n[2] * ty; // cross(n, t).x (partial)
+        let cy = n[2] * tx - n[0] * tz; // not exact but we only need sign of dot with bitangent
+        let cz = n[0] * ty - n[1] * tx;
         let b = tan2[i];
-        let handed = if (cx*b[0] + cy*b[1] + cz*b[2]) < 0.0 { -1.0 } else { 1.0 };
+        let handed = if (cx * b[0] + cy * b[1] + cz * b[2]) < 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
         out[i] = [tx, ty, tz, handed];
     }
 

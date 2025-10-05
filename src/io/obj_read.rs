@@ -39,8 +39,13 @@ struct VertexKey {
 }
 
 fn parse_vertex_triplet(tok: &str) -> VertexKey {
-    let mut parts = tok.split('/')
-        .map(|s| if s.is_empty() { None } else { s.parse::<i32>().ok() });
+    let mut parts = tok.split('/').map(|s| {
+        if s.is_empty() {
+            None
+        } else {
+            s.parse::<i32>().ok()
+        }
+    });
     let vi = parts.next().flatten().unwrap_or(0);
     let vti = parts.next().flatten().unwrap_or(0);
     let vni = parts.next().flatten().unwrap_or(0);
@@ -48,7 +53,11 @@ fn parse_vertex_triplet(tok: &str) -> VertexKey {
 }
 
 fn index_fix(idx: i32, len: usize) -> usize {
-    if idx > 0 { (idx as usize) - 1 } else { (len as i32 + idx) as usize }
+    if idx > 0 {
+        (idx as usize) - 1
+    } else {
+        (len as i32 + idx) as usize
+    }
 }
 
 fn parse_mtl_file(path: &Path) -> Result<HashMap<String, ObjMaterial>, RenderError> {
@@ -64,7 +73,9 @@ fn parse_mtl_file(path: &Path) -> Result<HashMap<String, ObjMaterial>, RenderErr
     for line in reader.lines() {
         let line = line.map_err(|e| RenderError::io(format!("{}", e)))?;
         let s = line.trim();
-        if s.is_empty() || s.starts_with('#') { continue; }
+        if s.is_empty() || s.starts_with('#') {
+            continue;
+        }
         let mut it = s.split_whitespace();
         let tag = it.next().unwrap_or("");
         match tag {
@@ -73,7 +84,10 @@ fn parse_mtl_file(path: &Path) -> Result<HashMap<String, ObjMaterial>, RenderErr
                     materials.insert(prev.name.clone(), prev);
                 }
                 let name = it.next().unwrap_or("").to_string();
-                current = Some(ObjMaterial { name, ..Default::default() });
+                current = Some(ObjMaterial {
+                    name,
+                    ..Default::default()
+                });
             }
             "Kd" => {
                 if let Some(m) = current.as_mut() {
@@ -223,7 +237,9 @@ pub fn import_obj<P: AsRef<Path>>(path: P) -> Result<ObjImport, RenderError> {
                 for t in 1..(verts.len() - 1) {
                     let tri = [verts[0], verts[t], verts[t + 1]];
                     for vk in tri.iter() {
-                        let idx = if let Some(&i) = map.get(vk) { i } else {
+                        let idx = if let Some(&i) = map.get(vk) {
+                            i
+                        } else {
                             // create new vertex
                             let vi = index_fix(vk.vi, pos.len());
                             if vi >= pos.len() {
@@ -243,7 +259,9 @@ pub fn import_obj<P: AsRef<Path>>(path: P) -> Result<ObjImport, RenderError> {
                                         line_no, vk.vti, tex.len()
                                     )));
                                 }
-                                if mesh.uvs.len() < mesh.positions.len() - 1 { mesh.uvs.resize(mesh.positions.len() - 1, [0.0, 0.0]); }
+                                if mesh.uvs.len() < mesh.positions.len() - 1 {
+                                    mesh.uvs.resize(mesh.positions.len() - 1, [0.0, 0.0]);
+                                }
                                 mesh.uvs.push(tex[vti]);
                             } else if !mesh.uvs.is_empty() {
                                 mesh.uvs.push([0.0, 0.0]);
@@ -257,7 +275,10 @@ pub fn import_obj<P: AsRef<Path>>(path: P) -> Result<ObjImport, RenderError> {
                                         line_no, vk.vni, nor.len()
                                     )));
                                 }
-                                if mesh.normals.len() < mesh.positions.len() - 1 { mesh.normals.resize(mesh.positions.len() - 1, [0.0, 0.0, 0.0]); }
+                                if mesh.normals.len() < mesh.positions.len() - 1 {
+                                    mesh.normals
+                                        .resize(mesh.positions.len() - 1, [0.0, 0.0, 0.0]);
+                                }
                                 mesh.normals.push(nor[vni]);
                             } else if !mesh.normals.is_empty() {
                                 mesh.normals.push([0.0, 0.0, 1.0]);
@@ -291,15 +312,21 @@ pub fn import_obj<P: AsRef<Path>>(path: P) -> Result<ObjImport, RenderError> {
         }
     }
 
-    Ok(ObjImport { mesh, materials, groups, g_groups, o_groups })
+    Ok(ObjImport {
+        mesh,
+        materials,
+        groups,
+        g_groups,
+        o_groups,
+    })
 }
 
 // ---------------- PyO3 bridge -----------------
 
 #[cfg(feature = "extension-module")]
-use pyo3::prelude::*;
-#[cfg(feature = "extension-module")]
 use crate::geometry::mesh_to_python;
+#[cfg(feature = "extension-module")]
+use pyo3::prelude::*;
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
@@ -315,9 +342,22 @@ pub fn io_import_obj_py(py: Python<'_>, path: &str) -> PyResult<PyObject> {
     for m in &result.materials {
         let md = pyo3::types::PyDict::new_bound(py);
         md.set_item("name", m.name.as_str())?;
-        md.set_item("diffuse_color", (m.diffuse_color[0], m.diffuse_color[1], m.diffuse_color[2]))?;
-        md.set_item("ambient_color", (m.ambient_color[0], m.ambient_color[1], m.ambient_color[2]))?;
-        md.set_item("specular_color", (m.specular_color[0], m.specular_color[1], m.specular_color[2]))?;
+        md.set_item(
+            "diffuse_color",
+            (m.diffuse_color[0], m.diffuse_color[1], m.diffuse_color[2]),
+        )?;
+        md.set_item(
+            "ambient_color",
+            (m.ambient_color[0], m.ambient_color[1], m.ambient_color[2]),
+        )?;
+        md.set_item(
+            "specular_color",
+            (
+                m.specular_color[0],
+                m.specular_color[1],
+                m.specular_color[2],
+            ),
+        )?;
         if let Some(tex) = &m.diffuse_texture {
             md.set_item("diffuse_texture", tex.as_str())?;
         } else {

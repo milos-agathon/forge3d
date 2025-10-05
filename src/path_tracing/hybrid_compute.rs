@@ -11,9 +11,9 @@ use wgpu::util::DeviceExt;
 use crate::error::RenderError;
 use crate::gpu::{align_copy_bpr, ctx};
 use crate::path_tracing::aov::{AovFrames, AovKind};
-use std::borrow::Cow;
 use crate::path_tracing::compute::{Sphere, Uniforms};
 use crate::sdf::HybridScene;
+use std::borrow::Cow;
 
 /// Load the hybrid kernel WGSL and expand simple `#include "..."` directives.
 ///
@@ -302,8 +302,14 @@ impl HybridPathTracer {
 
         // Scene + Hybrid bind group (Group 1)
         let mut bg1_entries = vec![
-            wgpu::BindGroupEntry { binding: 0, resource: scene_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: hybrid_ubo.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: scene_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: hybrid_ubo.as_entire_binding(),
+            },
         ];
 
         // Add mesh buffer entries at bindings 2..4
@@ -312,7 +318,10 @@ impl HybridPathTracer {
                 .get_mesh_bind_entries()
                 .into_iter()
                 .enumerate()
-                .map(|(i, mut entry)| { entry.binding = (i + 2) as u32; entry })
+                .map(|(i, mut entry)| {
+                    entry.binding = (i + 2) as u32;
+                    entry
+                }),
         );
 
         let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -331,10 +340,16 @@ impl HybridPathTracer {
         });
 
         // Output + AOVs bind group (Group 3)
-        let mut bg3_entries = vec![wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&out_view) }];
+        let mut bg3_entries = vec![wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::TextureView(&out_view),
+        }];
         // Map AOVs to bindings 1..7 in the same group
         for (i, view) in aov_views.iter().enumerate() {
-            bg3_entries.push(wgpu::BindGroupEntry { binding: (i as u32) + 1, resource: wgpu::BindingResource::TextureView(view) });
+            bg3_entries.push(wgpu::BindGroupEntry {
+                binding: (i as u32) + 1,
+                resource: wgpu::BindingResource::TextureView(view),
+            });
         }
         let bg3 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hybrid-pt-bg3"),

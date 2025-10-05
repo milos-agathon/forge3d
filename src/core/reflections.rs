@@ -131,8 +131,8 @@ pub struct PlanarReflectionUniforms {
     pub debug_mode: u32,
     /// Camera world-space position (xyz, 1 for alignment)
     pub camera_position: [f32; 4],
-    /// Padding for alignment
-    pub _padding: [f32; 3],
+    /// Padding for 16-byte alignment (WGSL struct alignment)
+    pub _padding: [f32; 7],  // 28 bytes to round 292 → 320
 }
 
 impl Default for PlanarReflectionUniforms {
@@ -149,7 +149,7 @@ impl Default for PlanarReflectionUniforms {
             distance_fade_end: 200.0,
             debug_mode: 0,
             camera_position: [0.0, 0.0, 0.0, 1.0],
-            _padding: [0.0; 3],
+            _padding: [0.0; 7],
         }
     }
 }

@@ -5,28 +5,28 @@
 
 //! Core geometry utilities for Workstream F phase 1.
 
+mod curves;
+mod displacement;
 mod extrude;
 mod primitives;
+mod subdivision;
+mod tangents;
+mod thick_polyline;
 mod transform;
 mod validate;
 mod weld;
-mod subdivision;
-mod displacement;
-mod curves;
-mod tangents;
-mod thick_polyline;
 
 pub use extrude::{extrude_polygon, extrude_polygon_with_options, ExtrudeOptions};
 pub use primitives::{
     generate_cone, generate_cylinder, generate_plane, generate_primitive, generate_sphere,
     generate_text3d_stub, generate_torus, generate_unit_box, PrimitiveParams, PrimitiveType,
 };
-pub use transform::{center_to_target, compute_bounds, flip_axis, scale_about_pivot, swap_axes};
-pub use validate::{validate_mesh, MeshStats, MeshValidationIssue, MeshValidationReport};
-pub use weld::{weld_mesh, WeldOptions, WeldResult};
 pub use subdivision::subdivide_triangles;
 #[cfg(feature = "extension-module")]
 pub use thick_polyline::geometry_generate_thick_polyline_py;
+pub use transform::{center_to_target, compute_bounds, flip_axis, scale_about_pivot, swap_axes};
+pub use validate::{validate_mesh, MeshStats, MeshValidationIssue, MeshValidationReport};
+pub use weld::{weld_mesh, WeldOptions, WeldResult};
 
 /// Shared mesh container used by the geometry module family.
 #[derive(Debug, Clone, Default)]
@@ -102,7 +102,7 @@ use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArr
 use pyo3::{
     exceptions::PyValueError,
     prelude::*,
-    types::{PyDict, PyList, PyAnyMethods},
+    types::{PyAnyMethods, PyDict, PyList},
 };
 
 #[cfg(feature = "extension-module")]
@@ -224,7 +224,9 @@ pub(crate) fn mesh_from_python(mesh: &Bound<'_, PyDict>) -> PyResult<MeshBuffers
         Some(value) if !value.is_none() => {
             let array: PyReadonlyArray2<f32> = value.extract()?;
             if array.shape()[1] != 4 {
-                return Err(PyValueError::new_err("tangents array must have shape (N, 4)"));
+                return Err(PyValueError::new_err(
+                    "tangents array must have shape (N, 4)",
+                ));
             }
             read_vec4_array(array)
         }
@@ -556,12 +558,12 @@ pub fn geometry_subdivide_py(
     preserve_boundary: Option<bool>,
 ) -> PyResult<PyObject> {
     let mesh_in = mesh_from_python(mesh)?;
-    let crease_vec: Option<Vec<(u32,u32)>> = match creases {
+    let crease_vec: Option<Vec<(u32, u32)>> = match creases {
         Some(arr) => {
             if arr.shape()[1] != 2 {
                 return Err(PyValueError::new_err("creases must have shape (K, 2)"));
             }
-            let v: Vec<(u32,u32)> = arr
+            let v: Vec<(u32, u32)> = arr
                 .as_array()
                 .outer_iter()
                 .map(|row| (row[0], row[1]))
@@ -625,7 +627,7 @@ pub fn geometry_generate_ribbon_py(
     if path.shape()[1] != 3 {
         return Err(PyValueError::new_err("path must have shape (N, 3)"));
     }
-    let pts: Vec<[f32;3]> = path
+    let pts: Vec<[f32; 3]> = path
         .as_array()
         .outer_iter()
         .map(|row| [row[0], row[1], row[2]])
@@ -633,7 +635,14 @@ pub fn geometry_generate_ribbon_py(
     let style = join_style.unwrap_or("miter");
     let limit = miter_limit.unwrap_or(4.0);
     let join_vec: Option<Vec<u8>> = join_styles.map(|arr| arr.as_slice().unwrap().to_vec());
-    let mesh = curves::generate_ribbon(&pts, width_start, width_end, style, limit, join_vec.as_deref());
+    let mesh = curves::generate_ribbon(
+        &pts,
+        width_start,
+        width_end,
+        style,
+        limit,
+        join_vec.as_deref(),
+    );
     mesh_to_python(py, &mesh)
 }
 
@@ -650,7 +659,7 @@ pub fn geometry_generate_tube_py(
     if path.shape()[1] != 3 {
         return Err(PyValueError::new_err("path must have shape (N, 3)"));
     }
-    let pts: Vec<[f32;3]> = path
+    let pts: Vec<[f32; 3]> = path
         .as_array()
         .outer_iter()
         .map(|row| [row[0], row[1], row[2]])
@@ -661,7 +670,10 @@ pub fn geometry_generate_tube_py(
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-pub fn geometry_generate_tangents_py(py: Python<'_>, mesh: &Bound<'_, PyDict>) -> PyResult<PyObject> {
+pub fn geometry_generate_tangents_py(
+    py: Python<'_>,
+    mesh: &Bound<'_, PyDict>,
+) -> PyResult<PyObject> {
     let mesh_buf = mesh_from_python(mesh)?;
     let tans = tangents::generate_tangents(&mesh_buf);
     let rows: Vec<Vec<f32>> = tans.iter().map(|t| t.to_vec()).collect();
@@ -697,12 +709,12 @@ pub fn geometry_subdivide_adaptive_py(
     preserve_boundary: Option<bool>,
 ) -> PyResult<PyObject> {
     let mesh_in = mesh_from_python(mesh)?;
-    let crease_vec: Option<Vec<(u32,u32)>> = match creases {
+    let crease_vec: Option<Vec<(u32, u32)>> = match creases {
         Some(arr) => {
             if arr.shape()[1] != 2 {
                 return Err(PyValueError::new_err("creases must have shape (K, 2)"));
             }
-            let v: Vec<(u32,u32)> = arr
+            let v: Vec<(u32, u32)> = arr
                 .as_array()
                 .outer_iter()
                 .map(|row| (row[0], row[1]))

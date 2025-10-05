@@ -161,17 +161,13 @@ fn apply_planar_reflection(
   if kernel > 1.0 {
     let texel = reflection_uniforms.max_blur_radius / max(reflection_uniforms.reflection_resolution, 1.0);
     let offset = texel * max(kernel * 0.5, 1.0);
-    let offsets = array<vec2<f32>, 4>(
-      vec2<f32>(offset, 0.0),
-      vec2<f32>(-offset, 0.0),
-      vec2<f32>(0.0, offset),
-      vec2<f32>(0.0, -offset)
-    );
+
+    // Unrolled loop to avoid non-constant array indexing
     var accum = reflection;
-    for (var i: u32 = 0u; i < 4u; i = i + 1u) {
-      let sample_uv = clamp(uv + offsets[i], vec2<f32>(0.0), vec2<f32>(1.0));
-      accum = accum + textureSample(reflection_texture, reflection_sampler, sample_uv);
-    }
+    accum = accum + textureSample(reflection_texture, reflection_sampler, clamp(uv + vec2<f32>(offset, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
+    accum = accum + textureSample(reflection_texture, reflection_sampler, clamp(uv + vec2<f32>(-offset, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
+    accum = accum + textureSample(reflection_texture, reflection_sampler, clamp(uv + vec2<f32>(0.0, offset), vec2<f32>(0.0), vec2<f32>(1.0)));
+    accum = accum + textureSample(reflection_texture, reflection_sampler, clamp(uv + vec2<f32>(0.0, -offset), vec2<f32>(0.0), vec2<f32>(1.0)));
     reflection = accum / 5.0;
   }
 
