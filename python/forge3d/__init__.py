@@ -314,6 +314,7 @@ from .helpers.offscreen import (
     render_offscreen_rgba,
     save_png_deterministic,
     rgba_to_png_bytes,
+    save_png_with_exif,  # Workstream I3: Screenshot with EXIF metadata
 )
 try:  # Optional in non-notebook environments
     from .helpers.ipython_display import (
@@ -326,6 +327,12 @@ except Exception:
         raise ImportError("IPython is required for ipy_display_rgba(); pip install ipython")
     def ipy_display_offscreen(*_args, **_kwargs):  # type: ignore
         raise ImportError("IPython is required for ipy_display_offscreen(); pip install ipython")
+
+# Workstream I3: Frame dumper for recording sequences
+from .helpers.frame_dump import (
+    FrameDumper,
+    dump_frame_sequence,
+)
 
 # Version information
 __version__ = "0.80.0"
@@ -1189,6 +1196,8 @@ __all__ = [
     # Workstream I2: Offscreen + Jupyter helpers
     "render_offscreen_rgba", "save_png_deterministic", "rgba_to_png_bytes",
     "ipy_display_rgba", "ipy_display_offscreen",
+    # Workstream I3: Screenshot/Record Controls
+    "save_png_with_exif", "FrameDumper", "dump_frame_sequence",
     # Scene and terrain
     "Scene",
     "TerrainSpike",
