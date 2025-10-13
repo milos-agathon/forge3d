@@ -115,12 +115,55 @@ def _load_polygons_from_vector(source: Union[str, Path], layer: Optional[str] = 
 
 def _load_dem(src_path: Path) -> tuple[np.ndarray, tuple[float, float]]:
     """Load a DEM from GeoTIFF using rasterio, returning (data, (sx, sy))."""
-    try:
-        import rasterio  # type: ignore
-    except Exception as exc:  # pragma: no cover
-        raise ImportError("rasterio is required to load GeoTIFF DEMs. pip install rasterio") from exc
+    # Try regular import first; some environments may shadow with a stub
+    rio = None
+    try:  # type: ignore[assignment]
+        import rasterio as _rio  # type: ignore
+        rio = _rio if hasattr(_rio, "open") else None
+    except Exception:
+        rio = None
 
-    with rasterio.open(str(src_path)) as ds:  # type: ignore[attr-defined]
+    if rio is None:
+        # Fallback: explicitly locate site-packages rasterio and import as a separate module
+        try:
+            import sys as _sys  # type: ignore
+            import site as _site  # type: ignore
+            from importlib.util import spec_from_file_location as _spec_loc  # type: ignore
+            from importlib.util import module_from_spec as _mod_from_spec  # type: ignore
+            from pathlib import Path as _P  # type: ignore
+
+            candidates: list[str] = []
+            try:
+                candidates.extend(_site.getsitepackages())  # type: ignore
+            except Exception:
+                pass
+            try:
+                candidates.append(_site.getusersitepackages())  # type: ignore
+            except Exception:
+                pass
+            real_init = None
+            real_pkg_path = None
+            for base in candidates:
+                p = _P(base) / "rasterio" / "__init__.py"
+                if p.is_file():
+                    real_init = str(p)
+                    real_pkg_path = str(p.parent)
+                    break
+            if real_init:
+                spec = _spec_loc("rasterio_real", real_init, submodule_search_locations=[real_pkg_path])
+                if spec and spec.loader:
+                    mod = _mod_from_spec(spec)
+                    _sys.modules["rasterio_real"] = mod  # register under alternate name
+                    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+                    if hasattr(mod, "open"):
+                        rio = mod  # type: ignore[assignment]
+        except Exception:
+            rio = None
+
+    if rio is None:
+        raise ImportError("rasterio is required to load GeoTIFF DEMs. pip install rasterio")
+
+    with rio.open(str(src_path)) as ds:  # type: ignore[attr-defined]
         band1 = ds.read(1, masked=True)
         data = np.array(band1.filled(np.nan), dtype=np.float32)
         if np.isnan(data).any():
@@ -135,6 +178,14 @@ def _load_dem(src_path: Path) -> tuple[np.ndarray, tuple[float, float]]:
         sx = abs(sx) or 1.0
         sy = abs(sy) or 1.0
         return data, (sx, sy)
+
+
+def load_dem(src_path: Union[str, Path]) -> tuple[np.ndarray, tuple[float, float]]:
+    """Public helper: load a DEM from GeoTIFF and return (heightmap32, (sx, sy)).
+
+    This wraps the internal ``_load_dem`` to provide a stable import for examples.
+    """
+    return _load_dem(Path(src_path))
 
 
 def _heightmap_to_mesh(hm: np.ndarray, spacing: tuple[float, float], z_scale: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
@@ -161,6 +212,59 @@ def _heightmap_to_mesh(hm: np.ndarray, spacing: tuple[float, float], z_scale: fl
     t1 = np.stack([i00, i11, i01], axis=-1).reshape(-1, 3)
     F = np.concatenate([t0, t1], axis=0).astype(np.uint32)
     return V, F
+
+
+def heightmap_to_mesh(
+    heightmap: np.ndarray,
+    spacing: tuple[float, float],
+    *,
+    vertical_scale: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Public helper: convert a heightmap into triangle mesh vertices/indices.
+
+    Args:
+        heightmap: 2D array (H,W) float32 elevations
+        spacing: (sx, sy) pixel spacing
+        vertical_scale: multiplier applied to elevation values
+    """
+    return _heightmap_to_mesh(heightmap, spacing, z_scale=float(vertical_scale))
+
+
+class RaytraceMeshCache:
+    """Cache for lazily building a mesh suitable for raytracing.
+
+    Useful for interactive viewers where (heightmap, spacing) are known and a mesh is
+    only needed when the user requests a raytrace. Supports optional subsampling and
+    vertical exaggeration.
+    """
+
+    def __init__(
+        self,
+        heightmap: np.ndarray,
+        spacing: tuple[float, float],
+        *,
+        subsample: int = 1,
+        vertical_scale: float = 1.0,
+    ) -> None:
+        self._heightmap = np.asarray(heightmap)
+        self._spacing = (float(spacing[0]), float(spacing[1]))
+        self._subsample = max(1, int(subsample))
+        self._vertical_scale = float(vertical_scale)
+        self._cached: Optional[tuple[np.ndarray, np.ndarray]] = None
+
+    def get_mesh(self) -> tuple[np.ndarray, np.ndarray]:
+        if self._cached is None:
+            hm = self._heightmap[:: self._subsample, :: self._subsample]
+            spacing = (
+                self._spacing[0] * self._subsample,
+                self._spacing[1] * self._subsample,
+            )
+            self._cached = heightmap_to_mesh(
+                hm,
+                spacing,
+                vertical_scale=self._vertical_scale,
+            )
+        return self._cached
 
 
 def _autoframe_camera(V: np.ndarray, size: tuple[int, int], *, fovy: float = 35.0) -> Dict[str, Any]:
@@ -267,6 +371,29 @@ def _resolve_palette(
         table = table[::-1, :]
 
     return table
+
+
+def resolve_palette_argument(
+    colormap: str,
+    *,
+    interpolate: bool = False,
+    size: int = 256,
+    base_colors: Optional[Sequence[str]] = None,
+) -> Union[str, Sequence[str], np.ndarray]:
+    """Resolve palette argument from a name for examples/CLI usage.
+
+    If ``colormap`` is not "custom" (case-insensitive), returns the colormap name unchanged.
+    If it is "custom", returns either the discrete ``base_colors`` sequence (if provided
+    or falls back to a small default) or an interpolated RGBA palette (``np.ndarray(N,4)``)
+    when ``interpolate=True``.
+    """
+    if colormap.lower() != "custom":
+        return colormap
+
+    hex_list = list(base_colors) if base_colors is not None else list(_DEFAULT_HEX_PALETTE)
+    if not interpolate or len(hex_list) < 2:
+        return hex_list
+    return _interpolate_palette_rgba(hex_list, n=int(size))
 
 
 def _write_png(path: Union[str, Path], array: np.ndarray) -> None:
@@ -1585,6 +1712,7 @@ def render_raster(
     water_max_slope_deg: float = 6.0,
     water_min_depth: float = 0.1,
     water_debug: bool = False,
+    show_in_viewer: bool = False,
 ) -> np.ndarray:
     """Render a DEM heightmap as a shaded terrain image.
 
@@ -1655,7 +1783,7 @@ def render_raster(
 
     renderer_mode = str(renderer).lower()
     if renderer_mode in {"hillshade", "raster", "cpu"}:
-        return _render_hillshade_pipeline(
+        rgba = _render_hillshade_pipeline(
             hm,
             spacing_vals,
             (out_w, out_h),
@@ -1690,6 +1818,13 @@ def render_raster(
             water_min_depth=water_min_depth,
             water_debug=water_debug,
         )
+        if show_in_viewer:
+            try:
+                from ._viewer import open_viewer_image as _open_viewer_image
+                _open_viewer_image(rgba, title="forge3d Raster Preview")
+            except Exception:
+                pass
+        return rgba
 
     # Triangulate to mesh for path tracer
     V, F = _heightmap_to_mesh(hm, spacing_vals, z_scale=float(z_scale))
@@ -1707,6 +1842,12 @@ def render_raster(
                     V32 = np.ascontiguousarray(V, dtype=np.float32)
                     F32 = np.ascontiguousarray(F.astype(np.uint32))
                     img = _native._pt_render_gpu_mesh(int(out_w), int(out_h), V32, F32, cam, int(seed), int(max(1, frames)))
+                    if show_in_viewer:
+                        try:
+                            from ._viewer import open_viewer_image as _open_viewer_image
+                            _open_viewer_image(img, title="forge3d Raster Preview")
+                        except Exception:
+                            pass
                     return img
         except Exception:
             pass
@@ -1715,24 +1856,7 @@ def render_raster(
 
     # CPU fallback path tracer
     tracer = PathTracer()
-    gpu_used = False
-    probe_status = "unavailable"
-    saved_aovs = []
-    outfile = None
-    indices = F
-    palette = None
-    invert_palette = False
-    lighting_type = "lambertian"
-    lighting_intensity = 1.0
-    lighting_azimuth = 315.0
-    lighting_elevation = 45.0
-    shadows = True
-    shadow_intensity = 1.0
-    hdri_path = None
-    hdri_rotation_deg = 0.0
-    hdri_intensity = 1.0
-
-    image, meta = tracer.render_rgba(
+    image = tracer.render_rgba(
         out_w,
         out_h,
         scene=None,
@@ -1744,7 +1868,17 @@ def render_raster(
         denoiser=str(denoiser),
         svgf_iters=int(svgf_iters),
         luminance_clamp=(float(luminance_clamp) if luminance_clamp is not None else None),
-    ), meta
+    )
+
+    # Show in interactive viewer when requested
+    if show_in_viewer:
+        try:
+            from ._viewer import open_viewer_image as _open_viewer_image
+            _open_viewer_image(image, title="forge3d Raster Preview")
+        except Exception:
+            pass
+
+    return image
 
 
 def _ensure_closed_ring(coords: np.ndarray) -> np.ndarray:
@@ -1839,6 +1973,7 @@ def render_polygons(
     transform: Optional[Tuple[float, float, float, float]] = None,
     return_pick: bool = False,
     base_pick_id: int = 1,
+    show_in_viewer: bool = False,
 ) -> Union[np.ndarray, tuple[np.ndarray, np.ndarray]]:
     """Render 2D polygons with GPU fill when available, falling back to stroke-only OIT.
 
@@ -1882,6 +2017,15 @@ def render_polygons(
 
     """
     from .vector import VectorScene
+
+    def _maybe_show(img: np.ndarray) -> np.ndarray:
+        if show_in_viewer:
+            try:
+                from ._viewer import open_viewer_image as _open_viewer_image
+                _open_viewer_image(img, title="forge3d Polygons Preview")
+            except Exception:
+                pass
+        return img
 
     def _iter_polys(src: Union[np.ndarray, dict, list, str, Path]):
         # New: accept vector file paths or a dict with {'path','layer'}
@@ -2084,16 +2228,16 @@ def render_polygons(
                     overlay_rgba, pick = scene.render_oit_and_pick(W, H, base_pick_id=int(base_pick_id))
                     composed = _alpha_over(img, overlay_rgba)
                     pbar.update(1); pbar.update(1); pbar.close()
-                    return composed, pick
+                    return _maybe_show(composed), pick
                 else:
                     pbar.write("Compositing overlays...")
                     overlay_rgba = scene.render_oit(W, H)
                     out = _alpha_over(img, overlay_rgba)
                     pbar.update(1); pbar.update(1); pbar.close()
-                    return out
+                    return _maybe_show(out)
             else:
                 pbar.update(2); pbar.close()
-                return img
+                return _maybe_show(img)
         except Exception:
             # Fall through to stroke-only OIT
             pass
@@ -2165,11 +2309,11 @@ def render_polygons(
     if return_pick:
         rgba, pick = scene.render_oit_and_pick(W, H, base_pick_id=int(base_pick_id))
         pbar.update(2); pbar.close()
-        return rgba, pick
+        return _maybe_show(rgba), pick
     else:
         rgba = scene.render_oit(W, H)
         pbar.update(2); pbar.close()
-        return rgba
+        return _maybe_show(rgba)
 
 
 def render_overlay(
@@ -2306,6 +2450,8 @@ def render_object(
     frames: int = 8,
     seed: int = 7,
     camera: Optional[Dict[str, Any]] = None,
+    show_in_viewer: bool = False,
+    viewer_mode: "Literal['image','mesh']" = "image",
 ) -> np.ndarray:
     """Render a 3D triangle mesh object using the GPU mesh path (with CPU fallback).
 
@@ -2321,6 +2467,11 @@ def render_object(
         RNG seed
     camera : dict | None
         Optional camera from make_camera(); if None, auto-framed from bounds
+    show_in_viewer : bool
+        If True, opens an interactive viewer window for preview.
+    viewer_mode : {"image","mesh"}
+        Choose whether to preview the ray-traced image ("image") or open the
+        interactive mesh viewer ("mesh"). Defaults to "image".
     """
     V = np.asarray(vertices)
     F = np.asarray(indices)
@@ -2341,7 +2492,36 @@ def render_object(
         try:
             status = _native.device_probe("metal").get("status", "unavailable")  # type: ignore
             if status == "ok":
-                return _native._pt_render_gpu_mesh(int(W), int(H), V32, F32, cam, int(seed), int(max(1, frames)))
+                img = _native._pt_render_gpu_mesh(int(W), int(H), V32, F32, cam, int(seed), int(max(1, frames)))
+                if show_in_viewer:
+                    if str(viewer_mode).lower() == "mesh":
+                        try:
+                            # Open interactive mesh viewer
+                            _native.open_mesh_viewer(
+                                V32,
+                                F32,
+                                width=int(W),
+                                height=int(H),
+                                title="forge3d Object Viewer",
+                                vsync=True,
+                                fov_deg=45.0,
+                                znear=0.1,
+                                zfar=1000.0,
+                            )
+                        except Exception:
+                            # Fallback to image viewer if mesh viewer not available
+                            try:
+                                from ._viewer import open_viewer_image as _open_viewer_image
+                                _open_viewer_image(img, title="forge3d Object Preview")
+                            except Exception:
+                                pass
+                    else:
+                        try:
+                            from ._viewer import open_viewer_image as _open_viewer_image
+                            _open_viewer_image(img, title="forge3d Object Preview")
+                        except Exception:
+                            pass
+                return img
         except Exception:
             pass
     except Exception:
@@ -2349,7 +2529,7 @@ def render_object(
 
     # CPU fallback
     tracer = PathTracer()
-    return tracer.render_rgba(
+    img = tracer.render_rgba(
         W,
         H,
         scene=None,
@@ -2362,3 +2542,32 @@ def render_object(
         svgf_iters=5,
         luminance_clamp=None,
     )
+    if show_in_viewer:
+        if str(viewer_mode).lower() == "mesh":
+            try:
+                from . import _forge3d as _native  # type: ignore[attr-defined]
+                _native.open_mesh_viewer(
+                    V32,
+                    F32,
+                    width=int(W),
+                    height=int(H),
+                    title="forge3d Object Viewer",
+                    vsync=True,
+                    fov_deg=45.0,
+                    znear=0.1,
+                    zfar=1000.0,
+                )
+            except Exception:
+                # Fallback to image viewer
+                try:
+                    from ._viewer import open_viewer_image as _open_viewer_image
+                    _open_viewer_image(img, title="forge3d Object Preview")
+                except Exception:
+                    pass
+        else:
+            try:
+                from ._viewer import open_viewer_image as _open_viewer_image
+                _open_viewer_image(img, title="forge3d Object Preview")
+            except Exception:
+                pass
+    return img

@@ -224,6 +224,51 @@ impl CameraController {
             CameraMode::Fps => self.fps.position + self.fps.forward(),
         }
     }
+
+    pub fn set_position(&mut self, eye: Vec3, target: Vec3) {
+        // Set orbit camera position
+        self.orbit.target = target;
+        self.orbit.distance = eye.distance(target);
+        
+        // Calculate yaw and pitch from camera direction
+        // Orbit camera formula: eye = target + [distance * cos(pitch) * sin(yaw), distance * sin(pitch), distance * cos(pitch) * cos(yaw)]
+        // So: offset = eye - target
+        let offset = eye - target;
+        let horizontal_dist = (offset.x * offset.x + offset.z * offset.z).sqrt();
+        
+        self.orbit.pitch = offset.y.atan2(horizontal_dist);
+        self.orbit.yaw = offset.x.atan2(offset.z);
+        
+        // Set FPS camera position to look at target
+        self.fps.position = eye;
+        let forward = (target - eye).normalize();
+        self.fps.pitch = forward.y.asin();
+        self.fps.yaw = forward.z.atan2(forward.x);
+    }
+
+    pub fn set_orbit_distance(&mut self, distance: f32) {
+        self.orbit.distance = distance;
+    }
+
+    pub fn set_orbit_yaw(&mut self, yaw_radians: f32) {
+        self.orbit.yaw = yaw_radians;
+    }
+
+    pub fn set_orbit_pitch(&mut self, pitch_radians: f32) {
+        self.orbit.pitch = pitch_radians;
+    }
+
+    pub fn orbit_distance(&self) -> f32 {
+        self.orbit.distance
+    }
+
+    pub fn orbit_yaw(&self) -> f32 {
+        self.orbit.yaw
+    }
+
+    pub fn orbit_pitch(&self) -> f32 {
+        self.orbit.pitch
+    }
 }
 
 impl Default for CameraController {

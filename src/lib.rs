@@ -14,7 +14,7 @@ use shadows::state::{CpuCsmConfig, CpuCsmState};
 #[cfg(feature = "extension-module")]
 use glam::Vec3;
 #[cfg(feature = "extension-module")]
-use numpy::{PyArray1, PyArrayMethods};
+use numpy::{PyArray1, PyArrayMethods, PyUntypedArrayMethods, PyReadonlyArrayDyn};
 #[cfg(feature = "extension-module")]
 use pyo3::types::PyDict;
 #[cfg(feature = "extension-module")]
@@ -1978,6 +1978,8 @@ fn hybrid_render(
     Ok(arr3.into_py(py))
 }
 
+ 
+
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 fn _pt_render_gpu_mesh(
@@ -2738,6 +2740,224 @@ fn open_viewer(
     })
 }
 
+/// Open an interactive viewer window initialized with a provided RGBA8 image.
+///
+/// The viewer will present the image fullscreen. Press F12 to export a PNG screenshot.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (rgba, width=None, height=None, title="forge3d Image Preview".to_string(), vsync=true, fov_deg=45.0, znear=0.1, zfar=1000.0))]
+fn open_viewer_image(
+    _py: Python<'_>,
+    rgba: numpy::PyReadonlyArray3<'_, u8>, // (H, W, 4)
+    width: Option<u32>,
+    height: Option<u32>,
+    title: String,
+    vsync: bool,
+    fov_deg: f32,
+    znear: f32,
+    zfar: f32,
+) -> PyResult<()> {
+    use crate::viewer::{run_image_viewer, ViewerConfig};
+
+    let shape = rgba.shape();
+    if shape.len() != 3 || shape[2] != 4 {
+        return Err(PyValueError::new_err("rgba must have shape (H, W, 4)"));
+    }
+    let h = shape[0] as u32;
+    let w = shape[1] as u32;
+    let view_w = width.unwrap_or(w);
+    let view_h = height.unwrap_or(h);
+
+    // Copy to Vec<u8>
+    let data: Vec<u8> = rgba.as_slice()?.to_vec();
+
+    let config = ViewerConfig {
+        width: view_w,
+        height: view_h,
+        title,
+        vsync,
+        fov_deg,
+        znear,
+        zfar,
+    };
+
+    run_image_viewer(config, data, w, h).map_err(|e| {
+        pyo3::exceptions::PyRuntimeError::new_err(format!("Viewer error: {}", e))
+    })
+}
+
+/// Open an interactive mesh viewer window initialized with vertex/index buffers.
+///
+/// vertices: numpy array (N,3) float32 of positions
+/// indices: numpy array (M,3) uint32, or (K,) flat uint32
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (vertices, indices, uvs=None, texture_rgba=None, texture_width=0, texture_height=0, camera_eye=None, camera_target=None, width=1024, height=768, title="forge3d Mesh Viewer".to_string(), vsync=true, fov_deg=45.0, znear=0.1, zfar=1000.0))]
+fn open_mesh_viewer(
+    py: Python<'_>,
+    vertices: numpy::PyReadonlyArray2<'_, f32>,
+    indices: PyReadonlyArrayDyn<'_, u32>,
+    uvs: Option<numpy::PyReadonlyArray2<'_, f32>>,
+    texture_rgba: Option<numpy::PyReadonlyArray3<'_, u8>>,
+    texture_width: u32,
+    texture_height: u32,
+    camera_eye: Option<numpy::PyReadonlyArray1<'_, f32>>,
+    camera_target: Option<numpy::PyReadonlyArray1<'_, f32>>,
+    width: u32,
+    height: u32,
+    title: String,
+    vsync: bool,
+    fov_deg: f32,
+    znear: f32,
+    zfar: f32,
+) -> PyResult<()> {
+    use crate::viewer::{run_mesh_viewer_with_camera, run_mesh_viewer_with_texture, ViewerConfig};
+
+    // Flatten vertices (N,3) -> Vec<f32>
+    let vshape = vertices.shape();
+    if vshape.len() != 2 || vshape[1] != 3 {
+        return Err(PyValueError::new_err("vertices must have shape (N, 3) float32"));
+    }
+    let verts: Vec<f32> = vertices.as_slice()?.to_vec();
+
+    // Flatten indices: accept (M,3) or (K,)
+    let ishape = indices.shape();
+    let idx: Vec<u32> = match ishape.len() {
+        1 => indices.as_slice()?.to_vec(),
+        2 => indices.as_slice()?
+                .to_vec(),
+        _ => return Err(PyValueError::new_err("indices must be (M,3) or (K,) uint32")),
+    };
+    
+    // Parse UVs if provided
+    let uvs_opt = uvs.and_then(|uv_arr| {
+        let uv_shape = uv_arr.shape();
+        if uv_shape.len() == 2 && uv_shape[1] == 2 {
+            uv_arr.as_slice().ok().map(|s| s.to_vec())
+        } else {
+            None
+        }
+    });
+    
+    // Parse texture if provided
+    let texture_opt = texture_rgba.and_then(|tex_arr| {
+        let tex_shape = tex_arr.shape();
+        if tex_shape.len() == 3 && tex_shape[2] == 4 {
+            tex_arr.as_slice().ok().map(|s| s.to_vec())
+        } else {
+            None
+        }
+    });
+
+    // Parse camera parameters
+    let camera_eye_opt = camera_eye.and_then(|arr| {
+        let slice = arr.as_slice().ok()?;
+        if slice.len() == 3 {
+            Some([slice[0], slice[1], slice[2]])
+        } else {
+            None
+        }
+    });
+    
+    let camera_target_opt = camera_target.and_then(|arr| {
+        let slice = arr.as_slice().ok()?;
+        if slice.len() == 3 {
+            Some([slice[0], slice[1], slice[2]])
+        } else {
+            None
+        }
+    });
+
+    let config = ViewerConfig {
+        width,
+        height,
+        title,
+        vsync,
+        fov_deg,
+        znear,
+        zfar,
+    };
+
+    // If texture is provided, use textured viewer. Release the Python GIL while the
+    // blocking winit event loop runs so Python threads (CLI) remain responsive.
+    // The closure must return a type that is safe to cross the GIL boundary; use Option<String>.
+    let err_msg: Option<String> = py.allow_threads(|| {
+        let res = if let (Some(uvs_data), Some(tex_data)) = (uvs_opt, texture_opt) {
+            run_mesh_viewer_with_texture(
+                config,
+                verts,
+                idx,
+                uvs_data,
+                tex_data,
+                texture_width,
+                texture_height,
+                camera_eye_opt,
+                camera_target_opt,
+            )
+        } else {
+            run_mesh_viewer_with_camera(config, verts, idx, camera_eye_opt, camera_target_opt)
+        };
+        match res {
+            Ok(()) => None,
+            Err(e) => Some(e.to_string()),
+        }
+    });
+
+    if let Some(msg) = err_msg {
+        Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Viewer error: {}", msg)))
+    } else {
+        Ok(())
+    }
+}
+
+/// Send a non-blocking export command to the active viewer (save offscreen PNG to path).
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn viewer_export(path: String) -> PyResult<()> {
+    use crate::viewer::{viewer_send_command, ViewerCommand};
+    viewer_send_command(ViewerCommand::Export(path))
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
+}
+
+/// Set camera parameters in the active 3D viewer
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (distance=None, theta=None, phi=None))]
+fn viewer_set_camera(distance: Option<f32>, theta: Option<f32>, phi: Option<f32>) -> PyResult<()> {
+    use crate::viewer::{viewer_send_command, ViewerCommand};
+    viewer_send_command(ViewerCommand::SetCamera { distance, theta, phi })
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
+}
+
+/// Capture a snapshot from the active 3D viewer
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (path, width=None, height=None))]
+fn viewer_snapshot(path: String, width: Option<u32>, height: Option<u32>) -> PyResult<()> {
+    use crate::viewer::{viewer_send_command, ViewerCommand};
+    viewer_send_command(ViewerCommand::Snapshot { path, width, height })
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
+}
+
+/// Get current camera state from the active 3D viewer
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn viewer_get_camera(py: Python<'_>) -> PyResult<(Py<numpy::PyArray1<f32>>, Py<numpy::PyArray1<f32>>, f32, f32, f32, f32)> {
+    use crate::viewer::{viewer_send_command, ViewerCommand};
+    use std::sync::mpsc::channel;
+    
+    let (tx, rx) = channel();
+    viewer_send_command(ViewerCommand::GetCamera { response_tx: tx })
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+    
+    let state = rx.recv_timeout(std::time::Duration::from_secs(5))
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Timeout waiting for camera state: {}", e)))?;
+    
+    let eye = numpy::PyArray1::from_slice_bound(py, &state.eye).unbind();
+    let target = numpy::PyArray1::from_slice_bound(py, &state.target).unbind();
+    Ok((eye, target, state.distance, state.theta, state.phi, state.fov))
+}
+
 // PyO3 module entry point so Python can `import forge3d._forge3d`
 // This must be named exactly `_forge3d` to match [tool.maturin].module-name in pyproject.toml
 #[cfg(feature = "extension-module")]
@@ -2748,6 +2968,12 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     // Interactive Viewer (I1)
     m.add_function(wrap_pyfunction!(open_viewer, m)?)?;
+    m.add_function(wrap_pyfunction!(open_viewer_image, m)?)?;
+    m.add_function(wrap_pyfunction!(open_mesh_viewer, m)?)?;
+    m.add_function(wrap_pyfunction!(viewer_export, m)?)?;
+    m.add_function(wrap_pyfunction!(viewer_set_camera, m)?)?;
+    m.add_function(wrap_pyfunction!(viewer_snapshot, m)?)?;
+    m.add_function(wrap_pyfunction!(viewer_get_camera, m)?)?;
     // Vector: point shape/LOD controls
     m.add_function(wrap_pyfunction!(set_point_shape_mode, m)?)?;
     m.add_function(wrap_pyfunction!(set_point_lod_threshold, m)?)?;

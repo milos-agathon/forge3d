@@ -1,113 +1,73 @@
-# examples/m3_geopandas_demo.py
+# examples/geopandas_demo.py
 # Updated: Load a GeoTIFF DEM (Gore_Range_Albers_1m.tif) and render with a custom palette.
 # - Reads elevation from assets/Gore_Range_Albers_1m.tif
 # - Uses an interpolated 128-color palette built from provided hex stops
-# - Saves an RGBA preview PNG
+# - Saves an RGBA preview PNG or opens interactive 3D viewer
+#
+# CAMERA CONTROL & SNAPSHOT FEATURES:
+# 1. Single-terminal interactive mode (recommended):
+#    python examples/geopandas_demo.py --viewer-3d --water
+#    
+#    In the same terminal, use the built-in prompt to control the viewer:
+#      forge3d> help
+#      forge3d> camera distance=2000 theta=45 phi=30
+#      forge3d> snapshot my_view.png 1920 1080
+#      forge3d> get_camera
+#
+#    You can still use the Python API from a second terminal if preferred:
+#      python
+#      >>> import forge3d as f3d
+#      >>> f3d.set_camera(distance=2000, theta=45, phi=30)
+#      >>> f3d.snapshot('my_view.png', width=1920, height=1080)
+#      >>> print(f3d.get_camera())
+#
+# 2. Automatic snapshot demo (single terminal - captures 10 views):
+#    python examples/geopandas_demo.py --viewer-3d --water --demo-snapshots
+#
+# Available Python API:
+#  - f3d.set_camera(distance=None, theta=None, phi=None): Control camera position
+#  - f3d.snapshot(path, width=None, height=None): Save PNG at custom resolution
+#  - f3d.get_camera(): Get current camera state for raytracing
 
 from __future__ import annotations
 
 import argparse
+import multiprocessing as mp
+import threading
+import time
 from pathlib import Path
-from typing import Sequence, Union
+from typing import Optional, Sequence
 
-import numpy as np
+ 
 
 try:
     import forge3d as f3d
 except Exception as exc:  # pragma: no cover
     raise ImportError("forge3d Python API is required. Ensure package is installed or built.") from exc
 
-
-CUSTOM_HEX_COLORS: Sequence[str] = (
-"#e7d8a2", "#c5a06e", "#995f57", "#4a3c37"
+# Import lean helpers from the package to avoid duplicating logic in the example
+from forge3d.render import (
+    load_dem as _pkg_load_dem,
+    resolve_palette_argument,
+    RaytraceMeshCache,
+)
+from forge3d.helpers.interactive_cli import (
+    _command_reader,
+    interactive_control_loop,
+    demo_snapshots,
 )
 
 
-def load_dem(src_path: Path) -> tuple[np.ndarray, tuple[float, float]]:
-    """Load a DEM from GeoTIFF and return (heightmap32, pixel_spacing_xy)."""
-
-    try:
-        import rasterio
-    except Exception as exc:  # pragma: no cover
-        raise ImportError("rasterio is required. Install with: pip install rasterio") from exc
-
-    with rasterio.open(str(src_path)) as ds:
-        band1 = ds.read(1, masked=True)
-        data = np.array(band1.filled(np.nan), dtype=np.float32)
-        if np.isnan(data).any():
-            finite = data[np.isfinite(data)]
-            fill_val = float(np.min(finite)) if finite.size else 0.0
-            data = np.nan_to_num(data, nan=fill_val)
-        try:
-            sx = float(ds.transform.a)
-            sy = float(-ds.transform.e)
-        except Exception:
-            sx, sy = 1.0, 1.0
-        sx = abs(sx) or 1.0
-        sy = abs(sy) or 1.0
-        return data, (sx, sy)
-
-
-def _resolve_palette_argument(colormap: str, interpolate: bool = False, size: int = 256) -> Union[str, Sequence[str]]:
-    """Resolve palette argument from colormap name.
-
-    Args:
-        colormap: Name of colormap ("custom" or built-in name)
-        interpolate: If True, interpolate custom palette to create smooth gradients
-        size: Number of colors when interpolating
-
-    Returns:
-        Either colormap name (str) or list of hex colors
-    """
-    if colormap.lower() != "custom":
-        return colormap
-
-    # Use custom palette
-    base_colors = CUSTOM_HEX_COLORS
-
-    if not interpolate or len(base_colors) < 2:
-        # Return discrete colors as-is
-        return base_colors
-
-    # Interpolate colors to create smooth gradients
-    try:
-        # Convert hex to RGB
-        rgb_colors = []
-        for hex_color in base_colors:
-            hex_color = hex_color.lstrip('#')
-            r, g, b = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
-            rgb_colors.append((r, g, b))
-
-        # Interpolate in RGB space
-        num_steps = int(size)
-        indices = np.linspace(0, len(rgb_colors) - 1, num_steps)
-
-        interpolated = []
-        for idx in indices:
-            i0 = int(np.floor(idx))
-            i1 = min(i0 + 1, len(rgb_colors) - 1)
-            t = idx - i0
-
-            # Linear interpolation
-            r = rgb_colors[i0][0] * (1 - t) + rgb_colors[i1][0] * t
-            g = rgb_colors[i0][1] * (1 - t) + rgb_colors[i1][1] * t
-            b = rgb_colors[i0][2] * (1 - t) + rgb_colors[i1][2] * t
-
-            # Convert back to hex
-            hex_val = f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
-            interpolated.append(hex_val)
-
-        return interpolated
-    except Exception:
-        # Fallback to discrete colors
-        return base_colors
-
+CUSTOM_HEX_COLORS: Sequence[str] = (
+    "#e7d8a2", "#c5a06e", "#995f57", "#4a3c37"
+)
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="M3 DEM → Terrain render demo (Gore Range 1m)")
     parser.add_argument("--src", type=Path, default=Path("assets/Gore_Range_Albers_1m.tif"), help="Input GeoTIFF DEM")
     parser.add_argument("--out", type=Path, default=Path("reports/Gore_Range_Albers_1m.png"), help="Output PNG path")
     parser.add_argument("--output-size", type=int, nargs=2, default=(800, 600), metavar=("W", "H"), help="Output size (pixels)")
+    parser.add_argument("--quiet", action="store_true", help="Suppress non-error output")
 
     # Color/palette parameters
     parser.add_argument("--colormap", type=str, default="custom", help="Colormap name or preset")
@@ -165,13 +125,30 @@ def main() -> int:
     parser.add_argument("--water-min-depth", type=float, default=0.1, help="Min water depth")
     parser.add_argument("--water-debug", action="store_true", help="Water detection debug info")
     
+    # Viewer parameters
+    parser.add_argument("--viewer", action="store_true", help="Open interactive 2D image viewer instead of saving to file")
+    parser.add_argument("--viewer-3d", action="store_true", help="Open interactive 3D terrain viewer with camera controls")
+    parser.add_argument("--viewer-subsample", type=int, default=4, help="Subsample factor for 3D mesh (1=full, 2=half, 4=quarter)")
+    parser.add_argument("--viewer-vscale", type=float, default=1.0, help="Vertical exaggeration for 3D viewer")
+    parser.add_argument("--demo-snapshots", action="store_true", help="Demo: Automatically capture snapshots from multiple camera angles")
+    parser.add_argument("--demo-snapshot-dir", type=Path, default=Path("snapshots"), help="Directory for demo snapshots")
+    parser.add_argument(
+        "--cli-mode",
+        type=str,
+        default="process",
+        choices=["process", "thread"],
+        help="Interactive prompt mode: 'process' (default, robust if viewer holds GIL) or 'thread' (shares same stdin)"
+    )
+    
     args = parser.parse_args()
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
+    verbose = not bool(args.quiet)
+
     # Load DEM
     try:
-        hm, spacing = load_dem(args.src)
+        hm, spacing = _pkg_load_dem(args.src)
     except Exception as exc:
         print(f"Failed to load DEM '{args.src}': {exc}")
         return 0
@@ -192,11 +169,106 @@ def main() -> int:
         water_shallow = None
         water_deep = None
 
-    # Resolve palette with interpolation settings
-    palette = _resolve_palette_argument(
+    # If 3D viewer is requested, prepare CLI and raytrace helper early so the
+    # user sees the prompt immediately (before heavy rendering occurs).
+    cli_started = False
+    stop_event = threading.Event()
+    control_thread: Optional[threading.Thread] = None
+    # Reader/control resources (filled per --cli-mode)
+    command_queue = None  # type: ignore[assignment]
+    response_queue = None  # type: ignore[assignment]
+    command_proc: Optional[mp.Process] = None
+    command_reader_thread: Optional[threading.Thread] = None
+    command_stop = None  # type: ignore[assignment]
+
+    raytrace_helper: Optional[RaytraceMeshCache] = None
+    if args.viewer_3d:
+        try:
+            raytrace_helper = RaytraceMeshCache(
+                hm,
+                spacing,
+                subsample=max(1, int(args.viewer_subsample)),
+                vertical_scale=float(args.viewer_vscale),
+            )
+        except Exception as exc:
+            if verbose:
+                print(f"[WARN] Raytrace mesh unavailable: {exc}")
+            raytrace_helper = None
+
+        if not args.demo_snapshots and verbose:
+            # Start CLI before heavy rendering (concise notice)
+            cli_mode_desc = "thread" if args.cli_mode == "thread" else "process"
+            print(f"Interactive CLI ({cli_mode_desc}) started. Type 'help' for commands; 'quit' to exit.", flush=True)
+
+            if args.cli_mode == "thread":
+                import queue as threading_queue
+                command_queue = threading_queue.Queue()
+                response_queue = threading_queue.Queue()
+                command_stop = threading.Event()
+
+                # Reader thread to handle stdin and echo responses
+                command_reader_thread = threading.Thread(
+                    target=_command_reader,
+                    args=(command_queue, response_queue, command_stop),
+                    daemon=True,
+                )
+                command_reader_thread.start()
+
+                # Control loop thread to process commands and call f3d.* APIs
+                control_thread = threading.Thread(
+                    target=interactive_control_loop,
+                    kwargs=dict(
+                        dem_path=args.src,
+                        dem_data=hm,
+                        spacing=spacing,
+                        raytrace_helper=raytrace_helper,
+                        default_size=tuple(args.output_size),
+                        stop_event=stop_event,
+                        command_queue=command_queue,
+                        response_queue=response_queue,
+                        command_stop=command_stop,
+                    ),
+                    daemon=True,
+                )
+                control_thread.start()
+            else:
+                # Use a dedicated process to read stdin and a thread to run the control loop
+                command_queue = mp.Queue()
+                response_queue = mp.Queue()
+                command_stop = mp.Event()
+
+                command_proc = mp.Process(
+                    target=_command_reader,
+                    args=(command_queue, response_queue, command_stop),
+                    daemon=True,
+                )
+                command_proc.start()
+
+                control_thread = threading.Thread(
+                    target=interactive_control_loop,
+                    kwargs=dict(
+                        dem_path=args.src,
+                        dem_data=hm,
+                        spacing=spacing,
+                        raytrace_helper=raytrace_helper,
+                        default_size=tuple(args.output_size),
+                        stop_event=stop_event,
+                        command_queue=command_queue,
+                        response_queue=response_queue,
+                        command_stop=command_stop,
+                    ),
+                    daemon=True,
+                )
+                control_thread.start()
+
+            cli_started = True
+
+    # Resolve palette with interpolation settings (may be used for 2D or 3D)
+    palette = resolve_palette_argument(
         args.colormap,
         interpolate=args.palette_interpolate,
-        size=args.palette_size
+        size=args.palette_size,
+        base_colors=CUSTOM_HEX_COLORS,
     )
 
     # Call render_raster with all parameters
@@ -237,17 +309,95 @@ def main() -> int:
         water_debug=args.water_debug if water_enabled else False,
     )
 
-    # Save output
-    try:
-        f3d.numpy_to_png(str(args.out), rgba)
-        print(f"Wrote {args.out}")
-    except Exception:
+    # Display in viewer or save to file
+    if args.viewer_3d:
+        # If CLI hasn't started yet, show brief notice
+        if not cli_started and verbose:
+            print("Initializing viewer and computing terrain texture (first run may take longer)...", flush=True)
+
+        if args.demo_snapshots and verbose:
+            print(f"[DEMO] Capturing snapshots to {args.demo_snapshot_dir}...", flush=True)
+
+            def run_demo_after_delay():
+                time.sleep(3)  # Give viewer time to initialize
+                try:
+                    demo_snapshots(
+                        args.demo_snapshot_dir,
+                        width=args.output_size[0],
+                        height=args.output_size[1]
+                    )
+                except Exception as e:
+                    print(f"[DEMO] Error: {e}")
+
+            control_thread = threading.Thread(target=run_demo_after_delay, daemon=True)
+            control_thread.start()
+        # When not in demo-snapshots mode, the CLI has already started above.
+
         try:
-            from PIL import Image
-            Image.fromarray(rgba, mode='RGBA').save(str(args.out))
-            print(f"Wrote {args.out}")
+            f3d.open_terrain_viewer_3d(
+                hm,
+                texture_rgba=rgba,
+                spacing=spacing,
+                vertical_scale=args.viewer_vscale,
+                subsample=args.viewer_subsample,
+                width=args.output_size[0],
+                height=args.output_size[1],
+                title=f"3D Terrain - {args.src.name}",
+            )
         except Exception as exc:
-            print(f"Render/save failed: {exc}")
+            print(f"Failed to open 3D viewer: {exc}")
+            return 1
+        finally:
+            stop_event.set()
+            if control_thread is not None:
+                control_thread.join(timeout=1.0)
+            if command_stop is not None:
+                try:
+                    command_stop.set()
+                except Exception:
+                    pass
+            if command_queue is not None:
+                try:
+                    command_queue.put(None, timeout=0.1)
+                except Exception:
+                    pass
+            if response_queue is not None:
+                try:
+                    response_queue.put(None)
+                except Exception:
+                    pass
+            if command_proc is not None:
+                command_proc.join(timeout=1.0)
+            if command_reader_thread is not None:
+                command_reader_thread.join(timeout=1.0)
+    elif args.viewer:
+        if verbose:
+            print("Opening 2D image viewer (ESC to close)...")
+        try:
+            f3d.open_viewer_image(
+                rgba,
+                width=args.output_size[0],
+                height=args.output_size[1],
+                title=f"Terrain Render - {args.src.name}",
+                vsync=True,
+            )
+        except Exception as exc:
+            print(f"Failed to open viewer: {exc}")
+            return 1
+    else:
+        # Save output
+        try:
+            f3d.numpy_to_png(str(args.out), rgba)
+            if verbose:
+                print(f"Wrote {args.out}")
+        except Exception:
+            try:
+                from PIL import Image
+                Image.fromarray(rgba, mode='RGBA').save(str(args.out))
+                if verbose:
+                    print(f"Wrote {args.out}")
+            except Exception as exc:
+                print(f"Render/save failed: {exc}")
 
     return 0
 

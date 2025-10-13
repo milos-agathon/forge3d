@@ -28,6 +28,10 @@ from .mem import (
 # Colormaps public surface
 from .colormaps import get as get_colormap, available as available_colormaps, load_cpt as load_cpt_colormap, load_json as load_json_colormap
 
+# 3D Terrain Viewer
+from .terrain_viewer import open_terrain_viewer_3d
+from .viewer_control import set_camera, snapshot, export, get_camera
+
 _NATIVE_MODULE = _get_native_module()
 
 if _NATIVE_MODULE is not None:
@@ -603,6 +607,124 @@ def open_viewer(
             raise RuntimeError(
                 "Interactive viewer not available. "
                 "This feature requires the native extension to be built with viewer support."
+            )
+    except ImportError as e:
+        raise RuntimeError(
+            f"Native module not available: {e}. "
+            "Install forge3d with: pip install forge3d"
+        ) from e
+
+def open_mesh_viewer(
+    vertices: np.ndarray,
+    indices: np.ndarray,
+    *,
+    width: int = 1024,
+    height: int = 768,
+    title: str = "forge3d Mesh Viewer",
+    vsync: bool = True,
+    fov_deg: float = 45.0,
+    znear: float = 0.1,
+    zfar: float = 1000.0,
+) -> None:
+    """Open the interactive mesh viewer initialized with vertices and indices.
+
+    vertices: (N,3) float32 positions; indices: (M,3) or (K,) uint32
+    """
+    v = np.asarray(vertices)
+    i = np.asarray(indices)
+    if v.ndim != 2 or v.shape[1] != 3:
+        raise ValueError("vertices must have shape (N,3)")
+    if v.dtype != np.float32:
+        v = v.astype(np.float32, copy=True)
+    if i.dtype != np.uint32:
+        i = i.astype(np.uint32, copy=True)
+    try:
+        from . import _forge3d as _native  # type: ignore[attr-defined]
+        if hasattr(_native, "open_mesh_viewer"):
+            _native.open_mesh_viewer(
+                v,
+                i,
+                width=int(width),
+                height=int(height),
+                title=str(title),
+                vsync=bool(vsync),
+                fov_deg=float(fov_deg),
+                znear=float(znear),
+                zfar=float(zfar),
+            )
+        else:
+            raise RuntimeError(
+                "Interactive mesh viewer not available. "
+                "This feature requires the native extension built with viewer support."
+            )
+    except ImportError as e:
+        raise RuntimeError(
+            f"Native module not available: {e}. "
+            "Install forge3d with: pip install forge3d"
+        ) from e
+
+def viewer_export(path: str) -> None:
+    """Request an asynchronous export (offscreen PNG) from the active viewer."""
+    if not isinstance(path, str) or not path:
+        raise ValueError("path must be a non-empty string")
+    try:
+        from . import _forge3d as _native  # type: ignore[attr-defined]
+        if hasattr(_native, "viewer_export"):
+            _native.viewer_export(str(path))
+        else:
+            raise RuntimeError("viewer_export is unavailable in this build")
+    except ImportError as e:
+        raise RuntimeError(
+            f"Native module not available: {e}. "
+            "Install forge3d with: pip install forge3d"
+        ) from e
+
+def open_viewer_image(
+    rgba: np.ndarray,
+    *,
+    width: int | None = None,
+    height: int | None = None,
+    title: str = "forge3d Image Preview",
+    vsync: bool = True,
+    fov_deg: float = 45.0,
+    znear: float = 0.1,
+    zfar: float = 1000.0,
+) -> None:
+    """Open the interactive viewer initialized with an RGBA image.
+
+    This presents the image fullscreen inside the interactive window. The call blocks
+    until the window is closed. Press F12 inside the viewer to export a PNG screenshot.
+
+    Args:
+        rgba: NumPy array (H, W, 4) uint8. If not C-contiguous/uint8, a copy is made.
+        width, height: Optional window size; defaults to the image dimensions.
+        title, vsync, fov_deg, znear, zfar: Viewer configuration.
+    """
+    arr = np.asarray(rgba)
+    if arr.ndim != 3 or arr.shape[2] != 4:
+        raise ValueError("rgba must have shape (H, W, 4)")
+    if arr.dtype != np.uint8:
+        arr = arr.astype(np.uint8, copy=True)
+    if not arr.flags['C_CONTIGUOUS']:
+        arr = np.ascontiguousarray(arr)
+
+    try:
+        from . import _forge3d as _native  # type: ignore[attr-defined]
+        if hasattr(_native, "open_viewer_image"):
+            _native.open_viewer_image(
+                arr,  # (H,W,4)
+                width=None if width is None else int(width),
+                height=None if height is None else int(height),
+                title=str(title),
+                vsync=bool(vsync),
+                fov_deg=float(fov_deg),
+                znear=float(znear),
+                zfar=float(zfar),
+            )
+        else:
+            raise RuntimeError(
+                "Interactive image viewer not available. "
+                "This feature requires the native extension built with viewer support."
             )
     except ImportError as e:
         raise RuntimeError(

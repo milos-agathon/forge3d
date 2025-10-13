@@ -19,6 +19,7 @@ if __name__ == "__main__":
     parser.add_argument("--polygons", type=str, default=None, help="Path to a vector file (.shp, .geojson, .gpkg, .gdb)")
     parser.add_argument("--layer", type=str, default=None, help="Optional layer name for layered datasets (.gdb, .gpkg)")
     parser.add_argument("--output", type=str, default="reports/render_polygon.png", help="Output PNG path")
+    parser.add_argument("--viewer", action="store_true", help="Open interactive viewer (press F12 to export screenshot)")
     parser.add_argument("path", nargs="?", help="Optional positional vector path (.shp, .geojson, .gpkg, .gdb); same as --polygons")
     args = parser.parse_args()
 
@@ -58,14 +59,16 @@ if __name__ == "__main__":
         fill_rgba=(0.20, 0.50, 0.90, 1.0),
         stroke_rgba=(0.00, 0.00, 0.00, 1.0),
         stroke_width=1.5,
+        show_in_viewer=bool(args.viewer),
     )
 
-    # Save PNG (if Pillow is available)
-    try:
-        from PIL import Image
-        out_path = args.output
-        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-        Image.fromarray(img).save(out_path)
-        print(f"Saved {out_path}")
-    except Exception as e:
-        print("(Optional) Pillow not available; skipping PNG save:", e)
+    # Save PNG only when not using viewer mode
+    if not args.viewer:
+        try:
+            from PIL import Image
+            out_path = args.output
+            os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+            Image.fromarray(img).save(out_path)
+            print(f"Saved {out_path}")
+        except Exception as e:
+            print("(Optional) Pillow not available; skipping PNG save:", e)
