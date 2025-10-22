@@ -1,4 +1,0 @@
-- Which adapters and backends should the restored GPU probes report for validation? Command: `python -c "import forge3d; print(forge3d.enumerate_adapters())"`
-- What tile sizes and atlas dimensions do real workloads use when calling `enable_overlay_mosaic` so alignment helpers can be sized correctly? Command: `rg -n "enable_overlay_mosaic" -g "*.py" tests python`
-- Are the committed docs in `docs/_build` known-good snapshots or can we drop them and rebuild in CI? Command: `git log -- docs/_build`
-- Do downstream users rely on the CMake workflow, or can we simplify it around maturin only? Command: `cmake -LAH -N .`
