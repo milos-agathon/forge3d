@@ -188,29 +188,68 @@ def load_dem(src_path: Union[str, Path]) -> tuple[np.ndarray, tuple[float, float
     return _load_dem(Path(src_path))
 
 
+def _compute_vertex_colors(
+    hm: np.ndarray,
+    palette: Union[str, Sequence[str], np.ndarray, None] = None,
+    invert_palette: bool = False,
+    contrast_pct: float = 1.0,
+    gamma: float = 1.1,
+    equalize: bool = True,
+) -> np.ndarray:
+    """Compute per-vertex RGB colors from heightmap using palette mapping.
+    
+    Returns: (H*W, 3) float32 array of RGB colors in range [0, 1]
+    """
+    H, W = hm.shape
+    
+    # Normalize heightmap to [0, 1]
+    norm01 = _normalize_robust(hm, pct=float(contrast_pct))
+    
+    # Apply gamma correction
+    gval = float(gamma)
+    if np.isfinite(gval) and abs(gval - 1.0) > 1e-3:
+        norm01 = np.clip(norm01, 0.0, 1.0) ** (1.0 / gval)
+    
+    # Apply histogram equalization
+    if bool(equalize):
+        norm01 = _equalize01(norm01)
+    
+    # Map to palette
+    palette_table = _resolve_palette(palette, invert=invert_palette, entries=256)
+    idx = np.clip((norm01 * (palette_table.shape[0] - 1)).astype(np.int32), 0, palette_table.shape[0] - 1)
+    rgb = palette_table[idx, :3].astype(np.float32) / 255.0
+    
+    # Flatten to per-vertex colors
+    colors = rgb.reshape(-1, 3)
+    return colors
+
+
 def _heightmap_to_mesh(hm: np.ndarray, spacing: tuple[float, float], z_scale: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
     """Triangulate a heightmap grid to positions (N,3) and indices (M,3).
 
-    The grid is laid out so that X increases with column index and Y increases with row index,
-    using the provided pixel spacing. Z is elevation * z_scale. We output positions as [X, Z, Y]
-    so Z is the 'up' axis consistently with examples.
+    The grid is laid out so that X increases with column index and Z increases with row index,
+    using the provided pixel spacing. Y is elevation * z_scale. We output positions as [X, Y, Z]
+    where Y is the 'up' axis (standard coordinate system for 3D graphics).
     """
     H, W = hm.shape
     sx, sy = float(spacing[0]), float(spacing[1])
     xs = np.arange(W, dtype=np.float32) * sx
-    ys = np.arange(H, dtype=np.float32) * sy
-    X, Y = np.meshgrid(xs, ys)
-    Z = hm.astype(np.float32) * float(z_scale)
-    V = np.stack([X, Z, Y], axis=-1).reshape(-1, 3).astype(np.float32)
+    zs = np.arange(H, dtype=np.float32) * sy
+    X, Z = np.meshgrid(xs, zs)
+    Y = hm.astype(np.float32) * float(z_scale)
+    V = np.stack([X, Y, Z], axis=-1).reshape(-1, 3).astype(np.float32)
 
     i = np.arange(H * W, dtype=np.uint32).reshape(H, W)
-    i00 = i[:-1, :-1]
-    i10 = i[1:, :-1]
-    i01 = i[:-1, 1:]
-    i11 = i[1:, 1:]
-    t0 = np.stack([i00, i10, i11], axis=-1).reshape(-1, 3)
-    t1 = np.stack([i00, i11, i01], axis=-1).reshape(-1, 3)
-    F = np.concatenate([t0, t1], axis=0).astype(np.uint32)
+    i00 = i[:-1, :-1]  # top-left of quad
+    i10 = i[1:, :-1]   # bottom-left (Z increases down)
+    i01 = i[:-1, 1:]   # top-right (X increases right)
+    i11 = i[1:, 1:]    # bottom-right
+    # Counter-clockwise winding for Y-up coordinate system when viewed from above
+    # Triangle 1: i00 → i01 → i11 (top-left → top-right → bottom-right)
+    # Triangle 2: i00 → i11 → i10 (top-left → bottom-right → bottom-left)
+    t0 = np.stack([i00, i01, i11], axis=-1).reshape(-1, 3)
+    t1 = np.stack([i00, i11, i10], axis=-1).reshape(-1, 3)
+    F = np.ascontiguousarray(np.concatenate([t0, t1], axis=0).astype(np.uint32))
     return V, F
 
 
@@ -428,7 +467,22 @@ def _auto_frame_mesh(
     verts = _np.asarray(vertices, dtype=_np.float32)
     minv = verts.min(axis=0)
     maxv = verts.max(axis=0)
-    center = (minv + maxv) * 0.5 if target is None else _np.asarray(target, dtype=_np.float32)
+    
+    # For terrain: use representative surface elevation instead of geometric center
+    bbox_size = maxv - minv
+    x_range = float(max(bbox_size[0], 1e-6))
+    y_range = float(max(bbox_size[1], 1e-6))
+    z_range = float(max(bbox_size[2], 1e-6))
+    horizontal_extent = math.sqrt(x_range * x_range + z_range * z_range)
+    vertical_extent = y_range
+    # Terrain detection: horizontal extent >> vertical (wide flat mesh)
+    is_terrain_shape = horizontal_extent > 1e-3 and horizontal_extent > 2.0 * vertical_extent
+    if target is None and is_terrain_shape:
+        # Terrain case: use horizontal center but median elevation
+        center = (minv + maxv) * 0.5
+        center[1] = float(_np.median(verts[:, 1]))  # Use median Y instead of center Y
+    else:
+        center = (minv + maxv) * 0.5 if target is None else _np.asarray(target, dtype=_np.float32)
     dir_hint_default = _np.array([0.8, 0.6, 1.6], dtype=_np.float32)
     dir_hint = dir_hint_default
     if orbit_theta is not None or orbit_phi is not None:
@@ -452,12 +506,38 @@ def _auto_frame_mesh(
             distance = 1.0
         dir_hint = to_eye / distance
     else:
-        extent = max(float(_np.linalg.norm(maxv - minv)), 1e-6)
-        distance = extent * 1.15 / max(1e-6, math.tan(math.radians(fov_y) * 0.5))
+        horizontal_extent = math.sqrt(x_range * x_range + z_range * z_range)
+        # Terrain: horizontal extent >> vertical (wide flat mesh, even with exaggeration)
+        is_terrain = horizontal_extent > 1e-3 and horizontal_extent > 2.0 * vertical_extent
+
+        fov_y_rad = math.radians(fov_y)
+        fov_x_rad = 2.0 * math.atan(math.tan(fov_y_rad * 0.5) * max(aspect, 1e-6))
+        half_horiz = 0.5 * horizontal_extent
+        half_vert = 0.5 * vertical_extent
+
+        # Camera distance calculation
+        dist_x = half_horiz / max(math.tan(fov_x_rad * 0.5), 1e-6)
+        dist_y = half_vert / max(math.tan(fov_y_rad * 0.5), 1e-6)
+        
+        if is_terrain:
+            # For terrain: use HORIZONTAL extent only to maximize viewport coverage
+            # Ignore vertical extent (exaggeration) - camera should frame horizontal extent
+            distance = dist_x
+        else:
+            # Normal mesh: use both extents equally
+            distance = max(dist_x, dist_y)
+        
+        # Add margin to ensure camera is outside mesh bounds
+        # Use 1.35x margin for terrain (tested working value)
+        margin_factor = 1.35 if is_terrain else 1.25
+        distance = max(distance, 1.0) * margin_factor
+
         if radius is not None:
             distance = float(radius)
         if zoom is not None:
             distance *= float(zoom)
+        elif is_terrain:
+            distance *= 1.0  # terrain: keep full distance, don't bring closer
         eye = center + dir_hint * distance
 
     up_vec = _np.asarray(up, dtype=_np.float32)
@@ -475,11 +555,13 @@ def _auto_frame_mesh(
 
 
 def render_raytrace_mesh(
-    mesh: Union[str, Path, Tuple[np.ndarray, np.ndarray], Dict[str, Any]],
+    mesh: Union[str, Path, tuple[np.ndarray, np.ndarray], dict],
     *,
     size: tuple[int, int] = (512, 512),
     frames: int = 8,
     seed: int = 7,
+    sampling_mode: str = "sobol",
+    debug_mode: int = 0,
     fov_y: float = 34.0,
     target: Optional[Sequence[float]] = None,
     up: Sequence[float] = (0.0, 1.0, 0.0),
@@ -509,6 +591,7 @@ def render_raytrace_mesh(
     hdri_path: Optional[Union[str, Path]] = None,
     hdri_rotation_deg: float = 0.0,
     hdri_intensity: float = 1.0,
+    hdri_exposure: float = 1.0,
     background_color: Optional[Sequence[float]] = None,
     save_aovs: bool = False,
     aovs: Sequence[str] = ("albedo", "normal", "depth", "visibility"),
@@ -544,7 +627,7 @@ def render_raytrace_mesh(
         mesh_name = Path(mesh).name
     elif isinstance(mesh, tuple) and len(mesh) == 2:
         vertices = _np.asarray(mesh[0], dtype=_np.float32)
-        indices = _np.asarray(mesh[1], dtype=_np.uint32)
+        indices = _np.ascontiguousarray(mesh[1], dtype=_np.uint32)
         mesh_name = "mesh"
     elif isinstance(mesh, dict) and "vertices" in mesh and "indices" in mesh:
         vertices = _np.asarray(mesh["vertices"], dtype=_np.float32)
@@ -553,24 +636,31 @@ def render_raytrace_mesh(
     else:
         raise TypeError("mesh must be an OBJ path, (vertices, indices) tuple, or mesh dict")
 
-    if vertices.ndim != 2 or vertices.shape[1] != 3:
-        raise ValueError("vertices must have shape (N,3)")
+    if vertices.ndim != 2 or (vertices.shape[1] != 3 and vertices.shape[1] != 8):
+        raise ValueError("vertices must have shape (N,3) or (N,8) for colored vertices")
     if indices.ndim != 2 or indices.shape[1] != 3:
         raise ValueError("indices must have shape (M,3)")
 
     from .mesh import make_mesh, build_bvh_cpu, upload_mesh, validate_mesh_arrays
 
-    validate_mesh_arrays(vertices, indices)
+    # Extract positions for validation and normalization
+    has_colors = vertices.shape[1] == 8
+    positions = _np.ascontiguousarray(vertices[:, :3]) if has_colors else vertices
+    
+    validate_mesh_arrays(positions, indices)
 
-    verts_proc = vertices
+    verts_proc = vertices.copy()
     if normalize:
-        minv = verts_proc.min(axis=0)
-        maxv = verts_proc.max(axis=0)
+        # Normalize only the position columns (0:3)
+        minv = positions.min(axis=0)
+        maxv = positions.max(axis=0)
         center = (minv + maxv) * 0.5
         scale = 1.0 / (max(maxv - minv) + 1e-8)
-        verts_proc = (verts_proc - center) * float(normalize_scale * scale)
+        verts_proc[:, :3] = (positions - center) * float(normalize_scale * scale)
 
-    mesh_dict = make_mesh(_np.ascontiguousarray(verts_proc, dtype=_np.float32), _np.ascontiguousarray(indices, dtype=_np.uint32))
+    # For BVH construction, use only positions (N,3)
+    positions_proc = _np.ascontiguousarray(verts_proc[:, :3] if has_colors else verts_proc, dtype=_np.float32)
+    mesh_dict = make_mesh(positions_proc, _np.ascontiguousarray(indices, dtype=_np.uint32))
     bvh = build_bvh_cpu(mesh_dict, method="median")
     handle = upload_mesh(mesh_dict, bvh)
 
@@ -585,8 +675,10 @@ def render_raytrace_mesh(
         up_vec = _np.asarray(cam.get("up", up), dtype=_np.float32)
     else:
         aspect = float(width) / float(max(1, height))
+        # Use only positions for camera framing
+        verts_for_camera = verts_proc[:, :3] if has_colors else verts_proc
         eye_vec, target_vec, up_vec, cam = _auto_frame_mesh(
-            verts_proc,
+            verts_for_camera,
             target=target,
             up=up,
             fov_y=fov_y,
@@ -597,6 +689,56 @@ def render_raytrace_mesh(
             zoom=zoom,
             eye_override=eye,
         )
+    
+    # Add lighting parameters to camera dict for GPU path
+    cam["lighting_type"] = str(lighting_type)
+    cam["lighting_intensity"] = float(lighting_intensity)
+    cam["lighting_azimuth"] = float(lighting_azimuth)
+    cam["lighting_elevation"] = float(lighting_elevation)
+    cam["shadow_intensity"] = float(shadow_intensity) if shadows else 0.0
+
+    # Pass HDRI parameters to GPU tracer via camera dict (expected by native _pt_render_gpu_mesh)
+    if hdri_path is not None:
+        try:
+            cam["hdri_path"] = str(Path(hdri_path))
+        except Exception:
+            cam["hdri_path"] = str(hdri_path)
+    cam["hdri_rotation_deg"] = float(hdri_rotation_deg)
+    cam["hdri_intensity"] = float(hdri_intensity)
+    cam["hdri_exposure"] = float(hdri_exposure)
+    cam["hdri_enabled"] = 1.0 if (hdri_path is not None and float(hdri_intensity) > 0.0) else 0.0
+
+    # Propagate OIDN mode preference to native layer (Final/Tiled/Off)
+    # If Python-side denoiser is "off", request GPU OIDN=Off
+    try:
+        cam["oidn_mode"] = "off" if str(denoiser).lower() in ("off", "none") else "final"
+    except Exception:
+        cam["oidn_mode"] = "final"
+
+    # ------------------------------------------------------------------
+    # AOV request preprocessing (shared by GPU and CPU paths)
+    # ------------------------------------------------------------------
+    saved_aovs: Optional[Dict[str, Path]] = None
+    background_mask: Optional[np.ndarray] = None
+    aov_list = [str(a).strip().lower() for a in aovs if str(a).strip()]
+    requested_aovs: list[str] = []
+    if save_aovs:
+        requested_aovs.extend(aov_list)
+    if background_rgb is not None and "visibility" not in requested_aovs:
+        requested_aovs.append("visibility")
+
+    aov_name_to_bit: Dict[str, int] = {
+        "albedo": 1 << 0,
+        "normal": 1 << 1,
+        "depth": 1 << 2,
+        "direct": 1 << 3,
+        "indirect": 1 << 4,
+        "emission": 1 << 5,
+        "visibility": 1 << 6,
+    }
+    aov_mask = 0
+    for name in requested_aovs:
+        aov_mask |= aov_name_to_bit.get(name, 0)
 
     gpu_used = False
     probe_status = "skipped"
@@ -621,23 +763,21 @@ def render_raytrace_mesh(
                 try:
                     V32 = _np.ascontiguousarray(verts_proc, dtype=_np.float32)
                     F32 = _np.ascontiguousarray(indices.astype(_np.uint32))
-                    image = _native._pt_render_gpu_mesh(width, height, V32, F32, cam, int(seed), int(max(1, frames)))
-                    
-                    # Detect and replace magenta marker background IMMEDIATELY on raw GPU output
-                    if image is not None and background_rgb is not None:
-                        img_f = image.astype(_np.float32) / 255.0 if image.max() > 1.0 else image.astype(_np.float32)
-                        r, g, b = img_f[..., 0], img_f[..., 1], img_f[..., 2]
-                        
-                        # Detect magenta marker: r=1, g=0, b=1 (tonemapping skipped for background)
-                        is_magenta = (r > 0.95) & (g < 0.05) & (b > 0.95)
-                        
-                        if _np.any(is_magenta):
-                            if verbose:
-                                n_magenta = _np.sum(is_magenta)
-                                total_px = is_magenta.size
-                                print(f"[DEBUG] Detected {n_magenta}/{total_px} magenta pixels ({100*n_magenta/total_px:.1f}%)")
-                            img_f[is_magenta, :3] = background_rgb[None, :]
-                            image = (img_f * 255.0).astype(_np.uint8)
+                    # Map sampling mode: rng=0, sobol=1, cmj=2
+                    sampling_mode_map = {"rng": 0, "sobol": 1, "cmj": 2}
+                    sampling_mode_int = sampling_mode_map.get(sampling_mode.lower(), 0)
+                    image = _native._pt_render_gpu_mesh(
+                        int(width),
+                        int(height),
+                        V32,
+                        F32,
+                        cam,
+                        int(seed),
+                        int(max(1, frames)),
+                        sampling_mode_int,
+                        int(max(0, debug_mode)),
+                        aov_mask=int(aov_mask),
+                    )
                 except Exception as exc:  # pragma: no cover
                     if verbose:
                         print(f"[render_raytrace_mesh] GPU render failed ({exc!r}); falling back to CPU")
@@ -734,15 +874,6 @@ def render_raytrace_mesh(
     # ------------------------------------------------------------------
     # Optional AOVs & visibility mask
     # ------------------------------------------------------------------
-    saved_aovs: Optional[Dict[str, Path]] = None
-    background_mask: Optional[np.ndarray] = None
-    aov_list = [str(a).strip().lower() for a in aovs if str(a).strip()]
-    requested_aovs: list[str] = []
-    if save_aovs:
-        requested_aovs.extend(aov_list)
-    if background_rgb is not None and "visibility" not in requested_aovs:
-        requested_aovs.append("visibility")
-
     if requested_aovs:
         unique_aovs = tuple(dict.fromkeys(requested_aovs))
         try:
@@ -912,6 +1043,8 @@ def render_raytrace_mesh(
             "hdri_path": str(hdri_path) if hdri_path is not None else None,
             "hdri_rotation_deg": float(hdri_rotation_deg),
             "hdri_intensity": float(hdri_intensity),
+            "hdri_exposure": float(hdri_exposure),
+            "hdri_enabled": float(1.0 if (hdri_path is not None and hdri_intensity > 0.0) else 0.0),
             "background_color": background_rgb.tolist() if background_rgb is not None else None,
             "background_mask_available": bool(background_mask is not None),
         },
@@ -1827,7 +1960,25 @@ def render_raster(
         return rgba
 
     # Triangulate to mesh for path tracer
+    print(f"[PT-DEBUG] Mesh generation: reduced from {hm.shape} using spacing={spacing_vals}, z_scale={z_scale}")
     V, F = _heightmap_to_mesh(hm, spacing_vals, z_scale=float(z_scale))
+    if verbose:
+        print(f"[PT-DEBUG] Mesh ready: {V.shape[0]} verts, {F.shape[0]} tris")
+    # Compute vertex colors from palette (matching hillshade quality)
+    vertex_colors = _compute_vertex_colors(
+        hm,
+        palette=palette,
+        invert_palette=invert_palette,
+        contrast_pct=contrast_pct,
+        gamma=gamma,
+        equalize=equalize,
+    )
+    
+    # Package vertices with colors: [x, y, z, pad, r, g, b, pad2]
+    num_verts = V.shape[0]
+    V_colored = np.zeros((num_verts, 8), dtype=np.float32)
+    V_colored[:, 0:3] = V  # positions
+    V_colored[:, 4:7] = vertex_colors  # colors
 
     # Auto camera if not provided
     cam = camera if camera is not None else _autoframe_camera(V, (out_w, out_h))
@@ -1839,9 +1990,19 @@ def render_raster(
             if hasattr(_native, "device_probe"):
                 status = _native.device_probe("metal").get("status", "unavailable")  # type: ignore
                 if status == "ok":
-                    V32 = np.ascontiguousarray(V, dtype=np.float32)
+                    V_colored32 = np.ascontiguousarray(V_colored, dtype=np.float32)
                     F32 = np.ascontiguousarray(F.astype(np.uint32))
-                    img = _native._pt_render_gpu_mesh(int(out_w), int(out_h), V32, F32, cam, int(seed), int(max(1, frames)))
+                    img = _native._pt_render_gpu_mesh(
+                        int(out_w),
+                        int(out_h),
+                        V_colored32,
+                        F32,
+                        cam,
+                        int(seed),
+                        int(max(1, frames)),
+                        None,
+                        int(max(0, debug_mode)),
+                    )
                     if show_in_viewer:
                         try:
                             from ._viewer import open_viewer_image as _open_viewer_image
@@ -2442,6 +2603,88 @@ def render_overlay(
     return _alpha_over(base, overlay)
 
 
+def _render_raytrace_mesh_simple(
+    mesh: tuple[_np.ndarray, _np.ndarray],
+    width: int,
+    height: int,
+    camera: dict,
+    frames: int = 50,
+    seed: int = 42,
+    prefer_gpu: bool = True,
+    denoiser: str | None = None,
+    denoise_strength: float = 0.8,
+    background_rgb: _np.ndarray | None = None,
+    sampling_mode: str = "rng",
+    verbose: bool = True,
+) -> tuple[_np.ndarray, dict]:
+    """Simplified render function for internal use (GPU mesh path with CPU fallback).
+
+    Parameters
+    ----------
+    vertices : np.ndarray (N,3) float32/float64
+    indices : np.ndarray (M,3) int/uint
+    """
+    V = np.asarray(mesh[0])
+    F = np.asarray(mesh[1])
+    if V.ndim != 2 or V.shape[1] != 3:
+        raise ValueError("vertices must have shape (N,3)")
+    if F.ndim != 2 or F.shape[1] != 3:
+        raise ValueError("indices must have shape (M,3)")
+
+    V32 = np.ascontiguousarray(V.astype(np.float32))
+    F32 = np.ascontiguousarray(F.astype(np.uint32))
+
+    W, H = int(width), int(height)
+    cam = camera
+
+    # Try native GPU mesh tracer
+    try:
+        from . import _forge3d as _native  # type: ignore[attr-defined]
+        try:
+            status = _native.device_probe("metal").get("status", "unavailable")  # type: ignore
+            if status == "ok":
+                # Map sampling mode string to int: rng=0, sobol=1, cmj=2
+                sampling_mode_map = {"rng": 0, "sobol": 1, "cmj": 2}
+                sampling_mode_int = sampling_mode_map.get(sampling_mode.lower(), 0)
+                img = _native._pt_render_gpu_mesh(
+                    int(W),
+                    int(H),
+                    V32,
+                    F32,
+                    cam,
+                    int(seed),
+                    int(max(1, frames)),
+                    sampling_mode_int,
+                    int(max(0, debug_mode)),
+                )
+                if verbose:
+                    print("Rendered with GPU")
+                return img, {}
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # CPU fallback
+    tracer = PathTracer()
+    img = tracer.render_rgba(
+        W,
+        H,
+        scene=None,
+        camera=cam,
+        seed=int(seed),
+        frames=max(1, int(frames)),
+        use_gpu=False,
+        mesh=None,
+        denoiser="off",
+        svgf_iters=5,
+        luminance_clamp=None,
+    )
+    if verbose:
+        print("Rendered with CPU")
+    return img, {}
+
+
 def render_object(
     vertices: np.ndarray,
     indices: np.ndarray,
@@ -2492,7 +2735,17 @@ def render_object(
         try:
             status = _native.device_probe("metal").get("status", "unavailable")  # type: ignore
             if status == "ok":
-                img = _native._pt_render_gpu_mesh(int(W), int(H), V32, F32, cam, int(seed), int(max(1, frames)))
+                img = _native._pt_render_gpu_mesh(
+                    int(W),
+                    int(H),
+                    V32,
+                    F32,
+                    cam,
+                    int(seed),
+                    int(max(1, frames)),
+                    None,
+                    int(max(0, debug_mode)),
+                )
                 if show_in_viewer:
                     if str(viewer_mode).lower() == "mesh":
                         try:

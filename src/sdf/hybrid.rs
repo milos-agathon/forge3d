@@ -8,17 +8,20 @@
 // RELEVANT FILES:src/path_tracing/hybrid_compute.rs,src/gpu/mod.rs,src/accel/mod.rs
 
 use once_cell::sync::OnceCell;
+use std::sync::Arc;
 use wgpu::Buffer;
 
 use crate::accel::BvhHandle;
 use crate::error::RenderError;
 use crate::gpu::ctx;
-// Note: Vertex type simplified for core functionality
+// Vertex with position and color for heightmap rendering
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct Vertex {
     pub position: [f32; 3],
     pub _pad: f32,
+    pub color: [f32; 3],    // RGB color from palette
+    pub _pad2: f32,
 }
 use crate::sdf::SdfScene;
 
@@ -51,9 +54,9 @@ pub struct SdfBuffers {
 /// GPU buffers for mesh data
 #[derive(Debug)]
 pub struct MeshBuffers {
-    pub vertices_buffer: Buffer,
-    pub indices_buffer: Buffer,
-    pub bvh_buffer: Buffer,
+    pub vertices_buffer: Arc<Buffer>,
+    pub indices_buffer: Arc<Buffer>,
+    pub bvh_buffer: Arc<Buffer>,
     pub vertex_count: u32,
     pub index_count: u32,
     pub bvh_node_count: u32,
@@ -67,7 +70,7 @@ fn dummy_storage_buffer() -> &'static wgpu::Buffer {
     DUMMY.get_or_init(|| {
         ctx().device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("hybrid-dummy-storage"),
-            size: 4,
+            size: 64,  // Increased to satisfy all shader binding requirements
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         })
@@ -332,29 +335,84 @@ impl HybridScene {
     /// Upload mesh data to GPU buffers
     pub fn upload_mesh_to_gpu(&mut self) -> Result<(), RenderError> {
         if !self.has_mesh() {
+            eprintln!("[HYBRID] upload_mesh_to_gpu: no mesh data (has_mesh=false)");
             return Ok(());
         }
+
+        eprintln!("[HYBRID] upload_mesh_to_gpu: starting upload for {} vertices, {} indices",
+            self.vertices.len(), self.indices.len());
 
         let device = &ctx().device;
 
         // Convert vertices to bytes
         let vertices_data = bytemuck::cast_slice(&self.vertices);
-        let indices_data = bytemuck::cast_slice(&self.indices);
+        eprintln!("[HYBRID] Vertices byte size: {} bytes", vertices_data.len());
 
-        // Get BVH data
-        let (bvh_data, bvh_node_count) = match &self.bvh {
-            Some(bvh) => {
-                match &bvh.backend {
-                    crate::accel::BvhBackend::Gpu(_gpu_data) => {
-                        // For GPU BVH, we already have the buffer
-                        return Ok(()); // GPU BVH manages its own buffers
-                    }
-                    crate::accel::BvhBackend::Cpu(cpu_data) => {
-                        let bvh_bytes = bytemuck::cast_slice(&cpu_data.nodes);
-                        (bvh_bytes, cpu_data.nodes.len())
-                    }
+        // Get BVH data and build an index buffer whose triangle order matches the BVH leaf ranges
+        let (indices_flat, bvh_data, bvh_node_count) = match &self.bvh {
+            Some(bvh) => match &bvh.backend {
+                crate::accel::BvhBackend::Gpu(gpu_data) => {
+                    // For GPU BVH, buffers are already on GPU - use original triangle order
+                    eprintln!("[HYBRID] GPU BVH backend: {} nodes, {} primitives",
+                        gpu_data.node_count, gpu_data.primitive_count);
+                    
+                    // Create vertex buffer
+                    let vertices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("hybrid-mesh-vertices"),
+                        size: vertices_data.len().max(4) as u64,
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    ctx().queue.write_buffer(&vertices_buffer, 0, vertices_data);
+                    
+                    // Create indices buffer (original order)
+                    let indices_bytes = bytemuck::cast_slice(&self.indices);
+                    let indices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("hybrid-mesh-indices"),
+                        size: indices_bytes.len().max(4) as u64,
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    ctx().queue.write_buffer(&indices_buffer, 0, indices_bytes);
+                    
+                    // Store mesh buffers with references to GPU BVH buffers
+                    self.mesh_buffers = Some(MeshBuffers {
+                        vertices_buffer: Arc::new(vertices_buffer),
+                        indices_buffer: Arc::new(indices_buffer),
+                        bvh_buffer: Arc::clone(&gpu_data.nodes_buffer),
+                        vertex_count: self.vertices.len() as u32,
+                        index_count: self.indices.len() as u32,
+                        bvh_node_count: gpu_data.node_count,
+                    });
+                    
+                    eprintln!("[HYBRID] Uploaded mesh to GPU with GPU BVH: {} verts, {} indices ({} tris), {} BVH nodes",
+                        self.vertices.len(), self.indices.len(), self.indices.len() / 3, gpu_data.node_count);
+                    return Ok(());
                 }
-            }
+                crate::accel::BvhBackend::Cpu(cpu_data) => {
+                    // cpu_data.indices is the reordered triangle index stream (by triangle id)
+                    // Our self.indices is a flattened (tri_count*3) index array in original triangle order.
+                    // Reorder the flattened index buffer to match cpu_data.indices so that leaf
+                    // ranges (first,count) address triangles directly as tri_start..tri_start+count.
+                    let tri_count = self.indices.len() / 3;
+                    eprintln!("[HYBRID] BVH CPU backend: {} triangles, {} reordered indices, {} BVH nodes",
+                        tri_count, cpu_data.indices.len(), cpu_data.nodes.len());
+                    let mut flat = Vec::with_capacity(self.indices.len());
+                    for &tri_id in &cpu_data.indices {
+                        let t = tri_id as usize;
+                        if t < tri_count {
+                            let base = t * 3;
+                            flat.push(self.indices[base + 0]);
+                            flat.push(self.indices[base + 1]);
+                            flat.push(self.indices[base + 2]);
+                        }
+                    }
+                    eprintln!("[HYBRID] Reordered {} triangles ({} indices)", flat.len() / 3, flat.len());
+                    let bvh_bytes = bytemuck::cast_slice(&cpu_data.nodes);
+                    eprintln!("[HYBRID] BVH byte size: {} bytes ({} nodes)", bvh_bytes.len(), cpu_data.nodes.len());
+                    (flat, bvh_bytes, cpu_data.nodes.len())
+                }
+            },
             None => return Err(RenderError::Upload("No BVH available".into())),
         };
 
@@ -366,9 +424,16 @@ impl HybridScene {
             mapped_at_creation: false,
         });
 
+        // Choose reordered indices if available; otherwise fall back to original
+        let indices_bytes: &[u8] = if indices_flat.is_empty() {
+            bytemuck::cast_slice(&self.indices)
+        } else {
+            bytemuck::cast_slice(&indices_flat)
+        };
+
         let indices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("hybrid-mesh-indices"),
-            size: indices_data.len().max(4) as u64,
+            size: indices_bytes.len().max(4) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -382,17 +447,20 @@ impl HybridScene {
 
         // Upload data
         ctx().queue.write_buffer(&vertices_buffer, 0, vertices_data);
-        ctx().queue.write_buffer(&indices_buffer, 0, indices_data);
+        ctx().queue.write_buffer(&indices_buffer, 0, indices_bytes);
         ctx().queue.write_buffer(&bvh_buffer, 0, bvh_data);
 
         self.mesh_buffers = Some(MeshBuffers {
-            vertices_buffer,
-            indices_buffer,
-            bvh_buffer,
+            vertices_buffer: Arc::new(vertices_buffer),
+            indices_buffer: Arc::new(indices_buffer),
+            bvh_buffer: Arc::new(bvh_buffer),
             vertex_count: self.vertices.len() as u32,
-            index_count: self.indices.len() as u32,
+            index_count: if indices_flat.is_empty() { self.indices.len() as u32 } else { indices_flat.len() as u32 },
             bvh_node_count: bvh_node_count as u32,
         });
+        let idx_len = if indices_flat.is_empty() { self.indices.len() } else { indices_flat.len() };
+        eprintln!("[HYBRID] Uploaded mesh to GPU: {} verts, {} indices ({} tris), {} BVH nodes",
+            self.vertices.len(), idx_len, idx_len / 3, bvh_node_count);
 
         Ok(())
     }
@@ -435,6 +503,8 @@ impl HybridScene {
     /// Get bind group entries for mesh buffers
     pub fn get_mesh_bind_entries(&self) -> Vec<wgpu::BindGroupEntry> {
         if let Some(mesh_buffers) = &self.mesh_buffers {
+            eprintln!("[HYBRID] get_mesh_bind_entries: returning real buffers (vcount={}, icount={}, bvh={})",
+                mesh_buffers.vertex_count, mesh_buffers.index_count, mesh_buffers.bvh_node_count);
             vec![
                 wgpu::BindGroupEntry {
                     binding: 0, // Mesh vertices
@@ -450,6 +520,7 @@ impl HybridScene {
                 },
             ]
         } else {
+            eprintln!("[HYBRID] WARNING: mesh_buffers is None - using dummy buffers!");
             let dummy = dummy_storage_buffer();
             vec![
                 wgpu::BindGroupEntry {

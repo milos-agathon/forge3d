@@ -3,6 +3,9 @@ use crate::terrain_stats;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
+/// High-level rendering utilities and compositors
+pub mod terrain_drape;
+
 // Terrain metadata structure to hold height range
 pub struct TerrainMeta {
     pub h_min: f32,

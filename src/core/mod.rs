@@ -63,6 +63,9 @@ pub mod sampler_modes;
 // L6: Texture upload helpers for HDR formats
 pub mod texture_upload;
 
+// Terrain draping: UV transformation utilities
+pub mod uv_transform;
+
 // N5: Environment mapping and IBL
 pub mod envmap;
 

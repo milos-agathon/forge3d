@@ -57,9 +57,9 @@ pub fn ctx() -> &'static GpuContext {
         }))
         .expect("No suitable GPU adapter");
 
+        // Respect adapter-native limits (do NOT downgrade to downlevel defaults).
+        // Using the adapter's reported limits is sufficient to lift the 2048 cap.
         let mut limits = adapter.limits();
-        let baseline = wgpu::Limits::downlevel_defaults();
-        limits = limits.using_resolution(baseline);
         let desired_storage_buffers = 8;
         limits.max_storage_buffers_per_shader_stage = limits
             .max_storage_buffers_per_shader_stage
@@ -68,12 +68,26 @@ pub fn ctx() -> &'static GpuContext {
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 required_features: wgpu::Features::empty(),
-                required_limits: limits,
+                required_limits: limits.clone(),
                 label: Some("forge3d-device"),
             },
             None,
         ))
         .expect("request_device failed");
+
+        // Log Metal/GPU limits for debugging resolution caps
+        #[cfg(target_os = "macos")]
+        {
+            eprintln!("[GPU-LIMITS] Metal device limits:");
+            eprintln!("  max_texture_dimension_2d: {}", limits.max_texture_dimension_2d);
+            eprintln!("  max_compute_workgroup_size_x: {}", limits.max_compute_workgroup_size_x);
+            eprintln!("  max_compute_workgroup_size_y: {}", limits.max_compute_workgroup_size_y);
+            eprintln!("  max_compute_workgroups_per_dimension: {}", limits.max_compute_workgroups_per_dimension);
+            eprintln!("  max_storage_buffer_binding_size: {}", limits.max_storage_buffer_binding_size);
+            eprintln!("  max_storage_buffers_per_shader_stage: {}", limits.max_storage_buffers_per_shader_stage);
+            eprintln!("  max_storage_textures_per_shader_stage: {}", limits.max_storage_textures_per_shader_stage);
+            eprintln!("  COPY_BYTES_PER_ROW_ALIGNMENT: {}", wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        }
 
         GpuContext {
             device: Arc::new(device),

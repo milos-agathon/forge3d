@@ -6,3 +6,4 @@ pub mod gltf_read;
 pub mod obj_read;
 pub mod obj_write;
 pub mod stl_write;
+pub mod tex_upload;

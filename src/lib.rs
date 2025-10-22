@@ -7,6 +7,8 @@
 use once_cell::sync::Lazy;
 #[cfg(feature = "extension-module")]
 use std::sync::Mutex;
+#[cfg(feature = "extension-module")]
+use std::path::PathBuf;
 
 #[cfg(feature = "extension-module")]
 use shadows::state::{CpuCsmConfig, CpuCsmState};
@@ -117,6 +119,7 @@ pub mod loaders;
 pub mod mesh;
 pub mod path_tracing;
 pub mod pipeline;
+pub mod post; // Post-processing: denoising, AO, etc.
 pub mod render; // Rendering utilities (instancing)
 pub mod renderer;
 pub mod scene;
@@ -1982,6 +1985,18 @@ fn hybrid_render(
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
+#[pyo3(signature = (
+    width,
+    height,
+    vertices,
+    indices,
+    cam,
+    seed,
+    frames,
+    sampling_mode=None,
+    debug_mode=None,
+    aov_mask=None
+))]
 fn _pt_render_gpu_mesh(
     py: Python<'_>,
     width: u32,
@@ -1991,13 +2006,17 @@ fn _pt_render_gpu_mesh(
     cam: &Bound<'_, PyAny>,
     seed: u32,
     frames: u32,
+    sampling_mode: Option<u32>,
+    debug_mode: Option<u32>,
+    aov_mask: Option<u32>,
 ) -> PyResult<Py<PyAny>> {
     use numpy::{PyArray1, PyReadonlyArray2};
     use pyo3::exceptions::{PyRuntimeError, PyValueError};
 
     // Parse vertex and index arrays
+    // Vertices can be (N,3) or (N,8) where 8 = [x,y,z,pad,r,g,b,pad2]
     let verts_arr: PyReadonlyArray2<f32> = vertices.extract().map_err(|_| {
-        PyValueError::new_err("vertices must be a NumPy array with shape (N,3) float32")
+        PyValueError::new_err("vertices must be a NumPy array with shape (N,3) or (N,8) float32")
     })?;
     let idx_arr: PyReadonlyArray2<u32> = indices.extract().map_err(|_| {
         PyValueError::new_err("indices must be a NumPy array with shape (M,3) uint32")
@@ -2005,19 +2024,27 @@ fn _pt_render_gpu_mesh(
 
     let v = verts_arr.as_array();
     let i = idx_arr.as_array();
-    if v.ndim() != 2 || v.shape()[1] != 3 {
-        return Err(PyValueError::new_err("vertices must have shape (N,3)"));
+    if v.ndim() != 2 || (v.shape()[1] != 3 && v.shape()[1] != 8) {
+        return Err(PyValueError::new_err("vertices must have shape (N,3) or (N,8)"));
     }
     if i.ndim() != 2 || i.shape()[1] != 3 {
         return Err(PyValueError::new_err("indices must have shape (M,3)"));
     }
 
-    // Pack vertices for HybridScene
+    // Pack vertices for HybridScene with colors
     let mut verts: Vec<crate::sdf::hybrid::Vertex> = Vec::with_capacity(v.shape()[0]);
+    let has_colors = v.shape()[1] == 8;
     for row in v.rows() {
+        let color = if has_colors {
+            [row[4], row[5], row[6]]
+        } else {
+            [0.7, 0.7, 0.8]  // default gray-blue
+        };
         verts.push(crate::sdf::hybrid::Vertex {
             position: [row[0], row[1], row[2]],
             _pad: 0.0,
+            color,
+            _pad2: 0.0,
         });
     }
 
@@ -2029,8 +2056,11 @@ fn _pt_render_gpu_mesh(
         flat_idx.push(row[2]);
     }
 
-    // Build triangle list for BVH construction (CPU path)
+    // Build triangle list for BVH construction (CPU path) with degenerate filtering
+    let t_start = std::time::Instant::now();
     let mut tris: Vec<crate::accel::types::Triangle> = Vec::with_capacity(i.shape()[0]);
+    let mut degenerate_count = 0usize;
+    
     for row in i.rows() {
         let iv0 = row[0] as usize;
         let iv1 = row[1] as usize;
@@ -2043,20 +2073,112 @@ fn _pt_render_gpu_mesh(
         let v0 = [v[[iv0, 0]], v[[iv0, 1]], v[[iv0, 2]]];
         let v1 = [v[[iv1, 0]], v[[iv1, 1]], v[[iv1, 2]]];
         let v2 = [v[[iv2, 0]], v[[iv2, 1]], v[[iv2, 2]]];
+        
+        // Compute triangle normal to filter degenerates
+        let e1 = [
+            v1[0] - v0[0],
+            v1[1] - v0[1],
+            v1[2] - v0[2],
+        ];
+        let e2 = [
+            v2[0] - v0[0],
+            v2[1] - v0[1],
+            v2[2] - v0[2],
+        ];
+        let normal = [
+            e1[1] * e2[2] - e1[2] * e2[1],
+            e1[2] * e2[0] - e1[0] * e2[2],
+            e1[0] * e2[1] - e1[1] * e2[0],
+        ];
+        let normal_len_sq = normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2];
+        
+        // Filter degenerate triangles (near-zero area)
+        if normal_len_sq < 1e-24 {
+            degenerate_count += 1;
+            continue;
+        }
+        
         tris.push(crate::accel::types::Triangle::new(v0, v1, v2));
     }
+    let tri_prep_ms = t_start.elapsed().as_millis();
+    eprintln!("[PT-RUST] Triangle prep: {}ms ({} valid, {} degenerate filtered)", 
+              tri_prep_ms, tris.len(), degenerate_count);
+    
+    // Debug: Check first triangle winding
+    if !tris.is_empty() {
+        let t0 = &tris[0];
+        let e1 = [
+            t0.v1[0] - t0.v0[0],
+            t0.v1[1] - t0.v0[1],
+            t0.v1[2] - t0.v0[2],
+        ];
+        let e2 = [
+            t0.v2[0] - t0.v0[0],
+            t0.v2[1] - t0.v0[1],
+            t0.v2[2] - t0.v0[2],
+        ];
+        let normal = [
+            e1[1] * e2[2] - e1[2] * e2[1],
+            e1[2] * e2[0] - e1[0] * e2[2],
+            e1[0] * e2[1] - e1[1] * e2[0],
+        ];
+        let up_dot = normal[1]; // Y component (up is +Y)
+        eprintln!("[PT-RUST] First triangle: v0=({:.3}, {:.3}, {:.3}), v1=({:.3}, {:.3}, {:.3}), v2=({:.3}, {:.3}, {:.3})",
+            t0.v0[0], t0.v0[1], t0.v0[2],
+            t0.v1[0], t0.v1[1], t0.v1[2],
+            t0.v2[0], t0.v2[1], t0.v2[2]);
+        eprintln!("[PT-RUST] First triangle normal: ({:.3}, {:.3}, {:.3}), dot(up)={:.3} (should be positive)",
+            normal[0], normal[1], normal[2], up_dot);
+    }
 
-    // Build BVH (CPU backend) and create a HybridScene with mesh
+    // Build BVH - try GPU LBVH first (fast), fallback to CPU SAH
+    eprintln!("[PT-RUST] Starting BVH construction for {} triangles...", tris.len());
+    let t_bvh = std::time::Instant::now();
     let options = crate::accel::types::BuildOptions::default();
-    let bvh_handle =
-        crate::accel::build_bvh(&tris, &options, crate::accel::GpuContext::NotAvailable)
-            .map_err(|e| PyRuntimeError::new_err(format!("BVH build failed: {}", e)))?;
+    
+    // Try GPU LBVH first for speed
+    let gpu_ctx = crate::gpu::ctx();
+    let gpu_context = crate::accel::GpuContext::Available {
+        device: gpu_ctx.device.clone(),
+        queue: gpu_ctx.queue.clone(),
+    };
+    
+    let bvh_handle = crate::accel::build_bvh(&tris, &options, gpu_context.clone())
+        .or_else(|e| {
+            eprintln!("[PT-RUST] GPU LBVH failed ({}), falling back to CPU SAH...", e);
+            crate::accel::build_bvh(&tris, &options, crate::accel::GpuContext::NotAvailable)
+        })
+        .map_err(|e| PyRuntimeError::new_err(format!("BVH build failed: {}", e)))?;
+    
+    let bvh_ms = t_bvh.elapsed().as_millis();
+    let backend_name = match &bvh_handle.backend {
+        crate::accel::BvhBackend::Gpu(_) => "GPU LBVH",
+        crate::accel::BvhBackend::Cpu(_) => "CPU SAH",
+    };
+    eprintln!("[PT-RUST] BVH construction complete ({}): {}ms ({:.2} M tris/sec)", 
+              backend_name, bvh_ms, (tris.len() as f64 / 1e6) / (bvh_ms as f64 / 1000.0));
 
+    let vertex_count = verts.len();
     let mut hybrid = crate::sdf::hybrid::HybridScene::mesh_only(verts, flat_idx, bvh_handle);
+
+    // Debug: print mesh bounds
+    if let Some(bvh) = &hybrid.bvh {
+        match &bvh.backend {
+            crate::accel::BvhBackend::Cpu(cpu_data) => {
+                let aabb = &cpu_data.world_aabb;
+                eprintln!("[PT-DEBUG] Mesh AABB: min=({:.3}, {:.3}, {:.3}), max=({:.3}, {:.3}, {:.3})",
+                    aabb.min[0], aabb.min[1], aabb.min[2],
+                    aabb.max[0], aabb.max[1], aabb.max[2]);
+            }
+            _ => {}
+        }
+    }
 
     // Parse camera
     let origin: (f32, f32, f32) = cam.get_item("origin")?.extract()?;
     let look_at: (f32, f32, f32) = cam.get_item("look_at")?.extract()?;
+    eprintln!("[PT-DEBUG] Camera: origin=({:.3}, {:.3}, {:.3}), look_at=({:.3}, {:.3}, {:.3})",
+        origin.0, origin.1, origin.2, look_at.0, look_at.1, look_at.2);
     let up: (f32, f32, f32) = cam
         .get_item("up")
         .ok()
@@ -2078,38 +2200,185 @@ fn _pt_render_gpu_mesh(
         .and_then(|v| v.extract().ok())
         .unwrap_or(1.0);
 
-    // Build camera basis
+    // Build a robust camera basis (avoid zero/degenerate vectors -> NaNs in shader)
     let o = glam::Vec3::new(origin.0, origin.1, origin.2);
     let la = glam::Vec3::new(look_at.0, look_at.1, look_at.2);
-    let upv = glam::Vec3::new(up.0, up.1, up.2);
-    let forward = (la - o).normalize_or_zero();
-    let right = forward.cross(upv).normalize_or_zero();
+    let mut upv = glam::Vec3::new(up.0, up.1, up.2);
+    let mut forward = la - o;
+    let eps = 1e-8_f32;
+    if forward.length_squared() < eps {
+        eprintln!("[PT-RUST] WARNING: Camera forward vector is zero; using default -Z");
+        forward = glam::Vec3::new(0.0, 0.0, -1.0);
+    } else {
+        forward = forward.normalize();
+    }
+    if upv.length_squared() < eps {
+        eprintln!("[PT-RUST] WARNING: Camera up vector is zero; using default +Y");
+        upv = glam::Vec3::Y;
+    }
+    // If forward and up are nearly parallel, pick a safe alternative up vector
+    if forward.cross(upv).length_squared() < eps {
+        upv = if forward.y.abs() > 0.9 { glam::Vec3::Z } else { glam::Vec3::Y };
+    }
+    let mut right = forward.cross(upv);
+    if right.length_squared() < eps {
+        // choose alternative axis to build right
+        right = if forward.y.abs() < 0.99 { forward.cross(glam::Vec3::Y) } else { forward.cross(glam::Vec3::Z) };
+    }
+    let right = right.normalize_or_zero();
     let cup = right.cross(forward).normalize_or_zero();
+
+    // Convert FOV from degrees to radians for shader
+    let fov_y_rad = fov_y.to_radians();
+
+    // Extract lighting parameters from camera dict (with defaults)
+    let lighting_type_str: String = cam
+        .get_item("lighting_type")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or_else(|| "lambertian".to_string());
+    let lighting_type_u32 = if lighting_type_str == "blinn-phong" { 1u32 } else { 0u32 };
+    
+    let lighting_intensity: f32 = cam
+        .get_item("lighting_intensity")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(1.0);
+    
+    let lighting_azimuth_deg: f32 = cam
+        .get_item("lighting_azimuth")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(315.0);
+    let lighting_azimuth_rad = lighting_azimuth_deg.to_radians();
+    
+    let lighting_elevation_deg: f32 = cam
+        .get_item("lighting_elevation")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(45.0);
+    let lighting_elevation_rad = lighting_elevation_deg.to_radians();
+    
+    let shadow_intensity: f32 = cam
+        .get_item("shadow_intensity")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(1.0);
+
+    let hdri_intensity: f32 = cam
+        .get_item("hdri_intensity")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(0.0);
+
+    let hdri_rotation_deg: f32 = cam
+        .get_item("hdri_rotation_deg")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(0.0);
+    let hdri_rotation_rad = hdri_rotation_deg.to_radians();
+
+    let hdri_exposure: f32 = cam
+        .get_item("hdri_exposure")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(1.0);
+
+    let hdri_enabled: f32 = cam
+        .get_item("hdri_enabled")
+        .ok()
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(if hdri_intensity > 0.0 { 1.0 } else { 0.0 });
+
+    let hdri_path_opt: Option<PathBuf> = cam
+        .get_item("hdri_path")
+        .ok()
+        .and_then(|value| value.extract::<Option<String>>().ok())
+        .and_then(|maybe_str| maybe_str.map(|s| PathBuf::from(s)));
+
+    if hdri_path_opt.is_none() && hdri_enabled > 0.5 {
+        eprintln!("[_pt_render_gpu_mesh] Warning: hdri_enabled set but no hdri_path provided. Disabling HDRI.");
+    }
+
+    let hdri_enabled = if hdri_path_opt.is_some() {
+        hdri_enabled
+    } else {
+        0.0
+    };
 
     // Base uniforms
     let uniforms = crate::path_tracing::compute::Uniforms {
         width,
         height,
-        frame_index: 0,
-        aov_flags: 0,
-        cam_origin: [origin.0, origin.1, origin.2],
-        cam_fov_y: fov_y,
+        frame_index: frames,
+        aov_flags: aov_mask.unwrap_or(0),
+        cam_origin: [o.x, o.y, o.z],
+        cam_fov_y: fov_y_rad,
         cam_right: [right.x, right.y, right.z],
         cam_aspect: aspect,
         cam_up: [cup.x, cup.y, cup.z],
         cam_exposure: exposure,
         cam_forward: [forward.x, forward.y, forward.z],
         seed_hi: seed,
-        seed_lo: frames, // carry frames in lo for deterministic variation
+        seed_lo: frames,
+        sampling_mode: sampling_mode.unwrap_or(0),
+        lighting_type: lighting_type_u32,
+        lighting_intensity,
+        lighting_azimuth: lighting_azimuth_rad,
+        lighting_elevation: lighting_elevation_rad,
+        shadow_intensity,
+        hdri_intensity,
+        hdri_rotation: hdri_rotation_rad,
+        hdri_exposure,
+        hdri_enabled,
         _pad_end: [0, 0, 0],
     };
+
+    let debug_mode_val = debug_mode.unwrap_or(0);
+
+    // Determine OIDN mode from camera dict if provided
+    let mut oidn_mode = crate::path_tracing::oidn_runner::OidnMode::Final;
+    if let Ok(val_obj) = cam.get_item("oidn_mode") {
+        if let Ok(mode_str) = val_obj.extract::<String>() {
+            match mode_str.as_str() {
+                "off" | "OFF" | "Off" => {
+                    oidn_mode = crate::path_tracing::oidn_runner::OidnMode::Off;
+                }
+                "tiled" | "TILED" | "Tiled" => {
+                    oidn_mode = crate::path_tracing::oidn_runner::OidnMode::Tiled;
+                }
+                _ => {
+                    oidn_mode = crate::path_tracing::oidn_runner::OidnMode::Final;
+                }
+            }
+        }
+    }
 
     let params = crate::path_tracing::hybrid_compute::HybridTracerParams {
         base_uniforms: uniforms,
         traversal_mode: crate::path_tracing::hybrid_compute::TraversalMode::MeshOnly,
         early_exit_distance: 0.01,
         shadow_softness: 4.0,
+        rt_true_res: true,  // Default: enforce true resolution
+        rt_allow_upscale: false,  // Default: no upscaling fallback
+        tile_size: (512, 512),  // Default tile size
+        memory_budget: None,  // No memory governor by default
+        oidn_mode,
+        total_triangles: vertex_count / 3,  // Estimate from vertex count
+        show_progress: true,  // Enable progress reporting
+        rt_spp: frames,  // Use actual SPP from Python API
+        rt_batch_spp: (frames / 4).max(1).min(32),  // Adaptive: fewer batches for low SPP
+        debug_mode: debug_mode_val,
+        hdri_path: hdri_path_opt.clone(),
     };
+    
+    eprintln!(
+        "[_pt_render_gpu_mesh] frames={} -> rt_spp={} rt_batch_spp={} debug_mode={}",
+        frames,
+        params.rt_spp,
+        params.rt_batch_spp,
+        params.debug_mode,
+    );
 
     // Robust GPU attempt with CPU fallback on any error or panic
     let build_fallback = || {
@@ -2136,17 +2405,45 @@ fn _pt_render_gpu_mesh(
         use std::panic::{catch_unwind, AssertUnwindSafe};
         let p = params.clone();
         let res = catch_unwind(AssertUnwindSafe(|| {
-            // Prepare GPU buffers; ignore error here, we'll handle via Option below
-            let _ = hybrid.prepare_gpu_resources();
+            // Prepare GPU buffers - MUST succeed or fail fast
+            eprintln!("[PT-RUST] Uploading {} vertices and BVH to GPU...", vertex_count);
+            let t_upload = std::time::Instant::now();
+            match hybrid.prepare_gpu_resources() {
+                Ok(_) => {
+                    let upload_ms = t_upload.elapsed().as_millis();
+                    let mb = (vertex_count * std::mem::size_of::<crate::sdf::hybrid::Vertex>()) as f64 / 1e6;
+                    eprintln!("[PT-RUST] GPU buffer upload complete: {}ms ({:.1} MB)", upload_ms, mb);
+                },
+                Err(e) => {
+                    eprintln!("[PT-RUST] ERROR: GPU buffer upload failed: {}", e);
+                    return None;
+                }
+            }
+            
+            eprintln!("[PT-RUST] Launching GPU path tracer ({}x{}, {} frames)...", width, height, frames);
+            let t_render = std::time::Instant::now();
             if let Ok(tracer) = crate::path_tracing::hybrid_compute::HybridPathTracer::new() {
-                tracer.render(width, height, &[], &hybrid, p).ok()
+                let result = tracer.render(width, height, &[], &hybrid, p).ok();
+                let render_ms = t_render.elapsed().as_millis();
+                let mpix = (width as f64 * height as f64 * frames as f64) / 1e6;
+                eprintln!("[PT-RUST] GPU render complete: {}ms ({:.1} Mpx @ {:.2} Mpx/s)", 
+                         render_ms, mpix, mpix / (render_ms as f64 / 1000.0));
+                result
             } else {
+                eprintln!("[PT-RUST] ERROR: Failed to create HybridPathTracer");
                 None
             }
         }));
         match res {
             Ok(Some(bytes)) => bytes,
-            _ => build_fallback(),
+            Ok(None) => {
+                eprintln!("[PT-RUST] GPU path failed, using fallback gradient");
+                build_fallback()
+            },
+            Err(e) => {
+                eprintln!("[PT-RUST] GPU path panicked: {:?}, using fallback gradient", e);
+                build_fallback()
+            }
         }
     };
 
@@ -2258,12 +2555,32 @@ fn _pt_render_gpu(
         .and_then(|v| v.extract().ok())
         .unwrap_or(1.0);
 
-    // Build camera basis
+    // Build a robust camera basis (avoid zero/degenerate vectors -> NaNs in shader)
     let o = Vec3::new(origin.0, origin.1, origin.2);
     let la = Vec3::new(look_at.0, look_at.1, look_at.2);
-    let upv = Vec3::new(up.0, up.1, up.2);
-    let forward = (la - o).normalize_or_zero();
-    let right = forward.cross(upv).normalize_or_zero();
+    let mut upv = Vec3::new(up.0, up.1, up.2);
+    let mut forward = la - o;
+    let eps = 1e-8_f32;
+    if forward.length_squared() < eps {
+        eprintln!("[PT-RUST] WARNING: Camera forward vector is zero; using default -Z");
+        forward = Vec3::new(0.0, 0.0, -1.0);
+    } else {
+        forward = forward.normalize();
+    }
+    if upv.length_squared() < eps {
+        eprintln!("[PT-RUST] WARNING: Camera up vector is zero; using default +Y");
+        upv = Vec3::Y;
+    }
+    // If forward and up are nearly parallel, pick a safe alternative up vector
+    if forward.cross(upv).length_squared() < eps {
+        upv = if forward.y.abs() > 0.9 { Vec3::Z } else { Vec3::Y };
+    }
+    let mut right = forward.cross(upv);
+    if right.length_squared() < eps {
+        // choose alternative axis to build right
+        right = if forward.y.abs() < 0.99 { forward.cross(Vec3::Y) } else { forward.cross(Vec3::Z) };
+    }
+    let right = right.normalize_or_zero();
     let cup = right.cross(forward).normalize_or_zero();
 
     let uniforms = PtUniforms {
@@ -2280,6 +2597,16 @@ fn _pt_render_gpu(
         cam_forward: [forward.x, forward.y, forward.z],
         seed_hi: seed,
         seed_lo: 0,
+        sampling_mode: 0,
+        lighting_type: 0,
+        lighting_intensity: 1.0,
+        lighting_azimuth: 5.497787,
+        lighting_elevation: 0.785398,
+        shadow_intensity: 1.0,
+        hdri_intensity: 0.0,
+        hdri_rotation: 0.0,
+        hdri_exposure: 1.0,
+        hdri_enabled: 0.0,
         _pad_end: [0, 0, 0],
     };
 
@@ -2958,6 +3285,225 @@ fn viewer_get_camera(py: Python<'_>) -> PyResult<(Py<numpy::PyArray1<f32>>, Py<n
     Ok((eye, target, state.distance, state.theta, state.phi, state.fov))
 }
 
+/// Render terrain with DEM displacement and categorical land-cover texture draping
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (
+    heightmap,
+    landcover,
+    width=1280,
+    height=720,
+    z_dir=1.0,
+    zscale=1.0,
+    camera_distance=None,
+    camera_theta=45.0,
+    camera_phi=25.0,
+    camera_gamma=0.0,
+    camera_fov=35.0,
+    light_type=1,
+    light_elevation=45.0,
+    light_azimuth=315.0,
+    light_intensity=1.0,
+    ambient=0.25,
+    shadow_intensity=0.5,
+    lighting_model=2,
+    shininess=32.0,
+    specular_strength=0.3,
+    shadow_softness=2.0,
+    background_r=1.0,
+    background_g=1.0,
+    background_b=1.0,
+    background_a=1.0,
+    shadow_map_res=2048,
+    shadow_bias=0.0015,
+    enable_shadows=true,
+    hdri_path=None,
+    hdri_intensity=1.0,
+    hdri_rotation_deg=0.0,
+    y_flip=false,
+    denoiser="oidn",
+    denoise_strength=0.8
+))]
+fn terrain_drape_render(
+    py: Python<'_>,
+    heightmap: PyReadonlyArrayDyn<'_, f32>,
+    landcover: PyReadonlyArrayDyn<'_, u8>,
+    width: u32,
+    height: u32,
+    z_dir: f32,
+    zscale: f32,
+    camera_distance: Option<f32>,
+    camera_theta: f32,
+    camera_phi: f32,
+    camera_gamma: f32,
+    camera_fov: f32,
+    light_type: u32,
+    light_elevation: f32,
+    light_azimuth: f32,
+    light_intensity: f32,
+    ambient: f32,
+    shadow_intensity: f32,
+    lighting_model: u32,
+    shininess: f32,
+    specular_strength: f32,
+    shadow_softness: f32,
+    background_r: f32,
+    background_g: f32,
+    background_b: f32,
+    background_a: f32,
+    shadow_map_res: u32,
+    shadow_bias: f32,
+    enable_shadows: bool,
+    hdri_path: Option<String>,
+    hdri_intensity: f32,
+    hdri_rotation_deg: f32,
+    y_flip: bool,
+    denoiser: &str,
+    denoise_strength: f32,
+) -> PyResult<Py<PyArray1<u8>>> {
+    use crate::renderer::terrain_drape::{TerrainDrapeRenderer, TerrainDrapeConfig};
+    use crate::core::uv_transform::UVTransform;
+    
+    // Validate heightmap shape (H, W)
+    let hm_shape = heightmap.shape();
+    if hm_shape.len() != 2 {
+        return Err(PyValueError::new_err(format!(
+            "Heightmap must be 2D (H, W), got shape {:?}",
+            hm_shape
+        )));
+    }
+    let hm_h = hm_shape[0] as u32;
+    let hm_w = hm_shape[1] as u32;
+    
+    // Validate landcover shape (H, W, 4)
+    let lc_shape = landcover.shape();
+    if lc_shape.len() != 3 || lc_shape[2] != 4 {
+        return Err(PyValueError::new_err(format!(
+            "Land-cover must be 3D (H, W, 4) RGBA, got shape {:?}",
+            lc_shape
+        )));
+    }
+    let lc_h = lc_shape[0] as u32;
+    let lc_w = lc_shape[1] as u32;
+    
+    // Ensure matching dimensions
+    if hm_h != lc_h || hm_w != lc_w {
+        return Err(PyValueError::new_err(format!(
+            "Heightmap and land-cover must have same dimensions: heightmap={}x{}, landcover={}x{}",
+            hm_w, hm_h, lc_w, lc_h
+        )));
+    }
+    
+    // Copy data from numpy arrays
+    let heightmap_data: Vec<f32> = heightmap.as_slice()?.to_vec();
+    let landcover_data: Vec<u8> = landcover.as_slice()?.to_vec();
+    
+    // Compute camera parameters
+    let terrain_size_x = hm_w as f32;
+    let terrain_size_z = hm_h as f32;
+    let terrain_extent = (terrain_size_x.powi(2) + terrain_size_z.powi(2)).sqrt();
+    
+    // Auto-calculate distance with margin (1.5x for good framing)
+    let distance = camera_distance.unwrap_or(terrain_extent * 1.5);
+    let theta_rad = camera_theta.to_radians();
+    let phi_rad = camera_phi.to_radians();
+    
+    // Camera position (spherical coordinates around terrain center)
+    let camera_pos = glam::Vec3::new(
+        distance * phi_rad.cos() * theta_rad.sin(),
+        distance * phi_rad.sin(),
+        distance * phi_rad.cos() * theta_rad.cos(),
+    );
+    let camera_target = glam::Vec3::ZERO;
+    
+    // View and projection matrices with camera roll (gamma)
+    let view_dir = (camera_target - camera_pos).normalize();
+    let right = view_dir.cross(glam::Vec3::Y).normalize();
+    let up_base = right.cross(view_dir).normalize();
+    
+    // Apply camera roll (gamma) by rotating the up vector around the view direction
+    let gamma_rad = camera_gamma.to_radians();
+    let up = if gamma_rad.abs() > 0.001 {
+        // Rotate up vector around view direction
+        let cos_gamma = gamma_rad.cos();
+        let sin_gamma = gamma_rad.sin();
+        up_base * cos_gamma + right * sin_gamma
+    } else {
+        up_base
+    };
+    
+    let view = glam::Mat4::look_at_rh(camera_pos, camera_target, up);
+    let aspect = width as f32 / height as f32;
+    let proj = glam::Mat4::perspective_rh(camera_fov.to_radians(), aspect, 0.1, distance * 10.0);
+    
+    // UV transform
+    let uv_xform = if y_flip {
+        UVTransform::with_y_flip()
+    } else {
+        UVTransform::identity()
+    };
+    
+    // Create renderer config
+    let config = TerrainDrapeConfig {
+        width,
+        height,
+        sample_count: 1,
+        z_dir,
+        zscale,
+        light_type,
+        light_elevation,
+        light_azimuth,
+        light_intensity,
+        ambient,
+        shadow_intensity,
+        lighting_model,
+        shininess,
+        specular_strength,
+        shadow_softness,
+        gamma: camera_gamma,
+        fov: camera_fov,
+        background_color: [background_r, background_g, background_b, background_a],
+        tonemap_mode: 1,  // aces
+        gamma_correction: 2.2,
+        hdri_intensity,
+        shadow_map_res,
+        shadow_bias,
+        enable_shadows,
+        hdri_path,
+        hdri_rotation_deg,
+        denoiser: denoiser.to_string(),
+        denoise_strength,
+    };
+    
+    // Render (release GIL for async operations)
+    let result_data = py.allow_threads(|| {
+        let runtime = tokio::runtime::Runtime::new()
+            .map_err(|e| format!("Failed to create async runtime: {}", e))?;
+        
+        runtime.block_on(async {
+            let renderer = TerrainDrapeRenderer::new(config).await
+                .map_err(|e| format!("Failed to create renderer: {}", e))?;
+            
+            renderer.render(
+                &heightmap_data,
+                hm_w,
+                hm_h,
+                &landcover_data,
+                lc_w,
+                lc_h,
+                &uv_xform,
+                &view,
+                &proj,
+                &camera_pos,
+            )
+        })
+    }).map_err(|e: String| PyValueError::new_err(e))?;
+    
+    // Convert to numpy array
+    let result_array = PyArray1::from_vec_bound(py, result_data).unbind();
+    Ok(result_array)
+}
+
 // PyO3 module entry point so Python can `import forge3d._forge3d`
 // This must be named exactly `_forge3d` to match [tool.maturin].module-name in pyproject.toml
 #[cfg(feature = "extension-module")]
@@ -2974,6 +3520,9 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(viewer_set_camera, m)?)?;
     m.add_function(wrap_pyfunction!(viewer_snapshot, m)?)?;
     m.add_function(wrap_pyfunction!(viewer_get_camera, m)?)?;
+    
+    // Terrain draping renderer
+    m.add_function(wrap_pyfunction!(terrain_drape_render, m)?)?;
     // Vector: point shape/LOD controls
     m.add_function(wrap_pyfunction!(set_point_shape_mode, m)?)?;
     m.add_function(wrap_pyfunction!(set_point_lod_threshold, m)?)?;

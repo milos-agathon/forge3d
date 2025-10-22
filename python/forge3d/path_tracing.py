@@ -590,23 +590,56 @@ def save_aovs(
                 numpy_to_png(str(path), arr)
             out_paths[k] = str(path)
         else:
-            # HDR paths: prefer EXR, but skip if toolchain not present.
-            # We still record the intended path for clarity.
-            filename = f"{basename}_aov-{k}.exr"
-            path = out_dir / filename
-            # Optional: attempt OpenEXR via imageio if present.
+            # HDR paths: prefer EXR, but if EXR toolchain is unavailable, fallback to PNG thumbs.
+            filename_exr = f"{basename}_aov-{k}.exr"
+            path_exr = out_dir / filename_exr
             try:
                 import imageio.v3 as iio  # type: ignore
 
                 data = arr.astype(np.float32)
-                # Some writers expect 3-channel for EXR, convert depth to 1-channel compatible
                 if data.ndim == 2:
                     data = data[..., None]
-                iio.imwrite(str(path), data, plugin="EXR")
-                out_paths[k] = str(path)
-            except Exception:
-                # Skip silently if EXR pipeline is unavailable.
+                iio.imwrite(str(path_exr), data, plugin="EXR")
+                out_paths[k] = str(path_exr)
                 continue
+            except Exception:
+                # Fallback to 8-bit PNG thumbnail with simple normalization
+                filename_png = f"{basename}_aov-{k}.png"
+                path_png = out_dir / filename_png
+                try:
+                    from PIL import Image  # type: ignore
+                    data = arr
+                    if isinstance(data, np.ndarray):
+                        data = data.astype(np.float32)
+                        if k == "normal" and data.ndim == 3 and data.shape[2] >= 3:
+                            # Map [-1,1] -> [0,1]
+                            data = (np.clip(data[..., :3], -1.0, 1.0) + 1.0) * 0.5
+                        else:
+                            # Generic min-max normalization per-channel
+                            if data.ndim == 2:
+                                mn = float(np.nanmin(data))
+                                mx = float(np.nanmax(data))
+                                rng = max(1e-8, mx - mn)
+                                data = np.clip((data - mn) / rng, 0.0, 1.0)[..., None]
+                            elif data.ndim == 3:
+                                mn = np.nanmin(data, axis=(0,1), keepdims=True)
+                                mx = np.nanmax(data, axis=(0,1), keepdims=True)
+                                rng = np.maximum(1e-8, mx - mn)
+                                data = np.clip((data - mn) / rng, 0.0, 1.0)
+                            else:
+                                # Unsupported shape, skip
+                                continue
+                        # Ensure 3 channels for PNG
+                        if data.ndim == 3 and data.shape[2] == 1:
+                            data = np.repeat(data, 3, axis=2)
+                        if data.ndim == 2:
+                            data = np.stack([data, data, data], axis=-1)
+                        im = Image.fromarray((data * 255.0 + 0.5).astype(np.uint8), mode="RGB")
+                        im.save(str(path_png))
+                        out_paths[k] = str(path_png)
+                except Exception:
+                    # Could not save fallback; skip
+                    continue
 
     return out_paths
 

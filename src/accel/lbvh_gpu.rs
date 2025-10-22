@@ -61,7 +61,6 @@ pub struct GpuBvhBuilder {
     sort_scan_pipeline: ComputePipeline,
     sort_scatter_pipeline: ComputePipeline,
     sort_clear_pipeline: ComputePipeline,
-    sort_bitonic_pipeline: ComputePipeline,
     link_nodes_pipeline: ComputePipeline,
     init_leaves_pipeline: ComputePipeline,
     refit_leaves_pipeline: ComputePipeline,
@@ -79,10 +78,89 @@ impl GpuBvhBuilder {
         });
 
         let sort_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Radix Sort"),
+            label: Some("Radix Sort Optimized"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("../shaders/radix_sort_pairs.wgsl").into(),
+                include_str!("../shaders/radix_sort_optimized.wgsl").into(),
             ),
+        });
+        
+        // Create explicit bind group layout for radix sort
+        let sort_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Radix Sort Layout"),
+            entries: &[
+                // @binding(0) src_keys
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // @binding(1) src_vals
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // @binding(2) dst_keys
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // @binding(3) dst_vals
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // @binding(4) histogram
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // @binding(5) uniforms
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        
+        let sort_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Radix Sort Pipeline Layout"),
+            bind_group_layouts: &[&sort_bind_group_layout],
+            push_constant_ranges: &[],
         });
 
         let link_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -103,43 +181,35 @@ impl GpuBvhBuilder {
             entry_point: "main",
         });
 
+        let sort_clear_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Radix Sort Clear Pipeline"),
+                layout: Some(&sort_pipeline_layout),
+                module: &sort_shader,
+                entry_point: "clear_histogram",
+            });
+            
         let sort_count_pipeline =
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Radix Sort Count Pipeline"),
-                layout: None,
+                label: Some("Radix Sort Histogram Pipeline"),
+                layout: Some(&sort_pipeline_layout),
                 module: &sort_shader,
-                entry_point: "count_pass",
+                entry_point: "build_histogram",
             });
 
         let sort_scan_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Radix Sort Scan Pipeline"),
-            layout: None,
+            layout: Some(&sort_pipeline_layout),
             module: &sort_shader,
-            entry_point: "scan_pass",
+            entry_point: "scan_histogram",
         });
 
         let sort_scatter_pipeline =
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("Radix Sort Scatter Pipeline"),
-                layout: None,
+                layout: Some(&sort_pipeline_layout),
                 module: &sort_shader,
-                entry_point: "scatter_pass",
-            });
-
-        let sort_clear_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Radix Sort Clear Pipeline"),
-                layout: None,
-                module: &sort_shader,
-                entry_point: "clear_hist",
-            });
-
-        let sort_bitonic_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Bitonic Sort Pipeline"),
-                layout: None,
-                module: &sort_shader,
-                entry_point: "bitonic_sort",
+                entry_point: "scatter_keys",
             });
 
         let link_nodes_pipeline =
@@ -190,7 +260,6 @@ impl GpuBvhBuilder {
             sort_scan_pipeline,
             sort_scatter_pipeline,
             sort_clear_pipeline,
-            sort_bitonic_pipeline,
             link_nodes_pipeline,
             init_leaves_pipeline,
             refit_leaves_pipeline,
@@ -257,8 +326,8 @@ impl GpuBvhBuilder {
         stats.internal_count = prim_count - 1;
 
         let gpu_data = GpuBvhData {
-            nodes_buffer: buffers.nodes_buffer,
-            indices_buffer: buffers.sorted_indices_buffer,
+            nodes_buffer: std::sync::Arc::new(buffers.nodes_buffer),
+            indices_buffer: std::sync::Arc::new(buffers.sorted_indices_buffer),
             node_count,
             primitive_count: prim_count,
             world_aabb,
@@ -553,150 +622,108 @@ impl GpuBvhBuilder {
         if prim_count == 0 {
             return Ok(());
         }
+        
+        eprintln!("[GPU-LBVH] Starting optimized radix sort for {} keys...", prim_count);
+        let sort_start = Instant::now();
         let size_bytes = (prim_count * 4) as u64;
 
-        // For very small arrays, use GPU bitonic sorter (single workgroup)
+        // For very small arrays, use CPU fallback
         if prim_count <= 256 {
-            let u = SortUniforms {
-                prim_count,
-                pass_shift: 0,
-                _pad0: 0,
-                _pad1: 0,
-            };
-            let ubuf = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("bitonic-sort-uniforms"),
-                    contents: cast_slice(&[u]),
-                    usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-                });
-
-            let bgl0 = self.sort_bitonic_pipeline.get_bind_group_layout(0);
-            let bgl1 = self.sort_bitonic_pipeline.get_bind_group_layout(1);
-            let bgl2 = self.sort_bitonic_pipeline.get_bind_group_layout(2);
-
-            let bg0 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("bitonic-bg0"),
-                layout: &bgl0,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: ubuf.as_entire_binding(),
-                }],
-            });
-            let bg1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("bitonic-bg1"),
-                layout: &bgl1,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: buffers.morton_codes_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: buffers.sorted_indices_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-            let bg2 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("bitonic-bg2"),
-                layout: &bgl2,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: buffers.sort_temp_keys.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: buffers.sort_temp_values.as_entire_binding(),
-                    },
-                ],
-            });
-
-            let mut enc = self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("bitonic-enc"),
-                });
-            {
-                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("bitonic-pass"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.sort_bitonic_pipeline);
-                pass.set_bind_group(0, &bg0, &[]);
-                pass.set_bind_group(1, &bg1, &[]);
-                pass.set_bind_group(2, &bg2, &[]);
-                pass.dispatch_workgroups(1, 1, 1);
-            }
-            // Copy sorted temp buffers back to primary buffers
-            enc.copy_buffer_to_buffer(
-                &buffers.sort_temp_keys,
-                0,
-                &buffers.morton_codes_buffer,
-                0,
-                size_bytes,
-            );
-            enc.copy_buffer_to_buffer(
-                &buffers.sort_temp_values,
-                0,
-                &buffers.sorted_indices_buffer,
-                0,
-                size_bytes,
-            );
-            self.queue.submit(Some(enc.finish()));
-            return Ok(());
+            // Use CPU fallback for small arrays (not worth GPU overhead)
+            eprintln!("[GPU-LBVH] Array too small ({}), using CPU fallback", prim_count);
+            anyhow::bail!("Array size {} too small for GPU radix sort, use CPU fallback", prim_count);
         }
 
-        // GPU radix sort multi-pass (4-bit digits)
+        // GPU radix sort: 8-bit digits, 4 passes (bits 0-7, 8-15, 16-23, 24-31)
+        let num_workgroups = ((prim_count + 255) / 256).max(1);
+        let histogram_size = (num_workgroups * 256 * 4) as u64; // 256 bins per workgroup, u32 each
+        
+        // Create histogram buffer (larger than before)
+        let histogram_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Radix Sort Histogram"),
+            size: histogram_size,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
         let mut keys_in = &buffers.morton_codes_buffer;
         let mut vals_in = &buffers.sorted_indices_buffer;
         let mut keys_out = &buffers.sort_temp_keys;
         let mut vals_out = &buffers.sort_temp_values;
 
-        // Bind group layouts per entry
-        let bgl0_count = self.sort_count_pipeline.get_bind_group_layout(0);
-        let bgl1_count = self.sort_count_pipeline.get_bind_group_layout(1);
-        let bgl3_count = self.sort_count_pipeline.get_bind_group_layout(3);
-        let bgl3_scan = self.sort_scan_pipeline.get_bind_group_layout(3);
-        let bgl0_scat = self.sort_scatter_pipeline.get_bind_group_layout(0);
-        let bgl1_scat = self.sort_scatter_pipeline.get_bind_group_layout(1);
-        let bgl2_scat = self.sort_scatter_pipeline.get_bind_group_layout(2);
-        let bgl3_scat = self.sort_scatter_pipeline.get_bind_group_layout(3);
-        let bgl3_clear = self.sort_clear_pipeline.get_bind_group_layout(3);
+        // Get bind group layout (single layout for all passes)
+        let bgl = self.sort_clear_pipeline.get_bind_group_layout(0);
 
-        let mut enc = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("lbvh-radix-enc"),
-            });
+        // 4 passes for 8-bit digits: bits 0-7, 8-15, 16-23, 24-31
+        for pass in 0..4 {
+            let pass_start = Instant::now();
+            let shift = pass * 8;
+            eprintln!("[GPU-LBVH] Radix pass {}/4 (shift={})...", pass + 1, shift);
+            
+            let mut enc = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("lbvh-radix-enc"),
+                });
 
-        for shift in (0..32).step_by(4) {
-            let u = SortUniforms {
+            // Create uniforms for this pass
+            #[repr(C)]
+            #[derive(Clone, Copy, Pod, Zeroable)]
+            struct RadixUniforms {
+                prim_count: u32,
+                pass_shift: u32,
+                num_workgroups: u32,
+                _pad: u32,
+            }
+            
+            let uniforms = RadixUniforms {
                 prim_count,
-                pass_shift: shift as u32,
-                _pad0: 0,
-                _pad1: 0,
+                pass_shift: shift,
+                num_workgroups,
+                _pad: 0,
             };
-            let ubuf = self
+            let uniforms_buf = self
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("radix-uniforms"),
-                    contents: cast_slice(&[u]),
-                    usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                    contents: cast_slice(&[uniforms]),
+                    usage: BufferUsages::UNIFORM,
                 });
 
-            // Clear histogram
-            let bg3c = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("radix-bg3-clear"),
-                layout: &bgl3_clear,
+            // Create single bind group for all kernels this pass
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("radix-sort-bg"),
+                layout: &bgl,
                 entries: &[
+                    // @binding(0) src_keys
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: buffers.sort_histogram.as_entire_binding(),
+                        resource: keys_in.as_entire_binding(),
                     },
+                    // @binding(1) src_vals
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: buffers.sort_prefix_sums.as_entire_binding(),
+                        resource: vals_in.as_entire_binding(),
+                    },
+                    // @binding(2) dst_keys
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: keys_out.as_entire_binding(),
+                    },
+                    // @binding(3) dst_vals
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: vals_out.as_entire_binding(),
+                    },
+                    // @binding(4) histogram
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: histogram_buffer.as_entire_binding(),
+                    },
+                    // @binding(5) uniforms
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: uniforms_buf.as_entire_binding(),
                     },
                 ],
             });
@@ -706,162 +733,65 @@ impl GpuBvhBuilder {
                     timestamp_writes: None,
                 });
                 pass.set_pipeline(&self.sort_clear_pipeline);
-                pass.set_bind_group(3, &bg3c, &[]);
-                pass.dispatch_workgroups(1, 1, 1);
+                pass.set_bind_group(0, &bind_group, &[]);
+                let clear_wg = ((num_workgroups * 256 + 255) / 256).max(1);
+                pass.dispatch_workgroups(clear_wg, 1, 1);
             }
+            
+            // Step 2: Build histogram
 
-            // Count
-            let bg0 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("radix-bg0-count"),
-                layout: &bgl0_count,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: ubuf.as_entire_binding(),
-                }],
-            });
-            let bg1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("radix-bg1-count"),
-                layout: &bgl1_count,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: keys_in.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: vals_in.as_entire_binding(),
-                    },
-                ],
-            });
-            let bg3 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("radix-bg3-count"),
-                layout: &bgl3_count,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: buffers.sort_histogram.as_entire_binding(),
-                }],
-            });
             {
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("radix-count"),
+                    label: Some("radix-histogram"),
                     timestamp_writes: None,
                 });
                 pass.set_pipeline(&self.sort_count_pipeline);
-                pass.set_bind_group(0, &bg0, &[]);
-                pass.set_bind_group(1, &bg1, &[]);
-                pass.set_bind_group(3, &bg3, &[]);
-                let wg = ((prim_count + 255) / 256) as u32;
-                pass.dispatch_workgroups(wg, 1, 1);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(num_workgroups, 1, 1);
             }
+            
+            // Step 3: Scan histogram
 
-            // Scan
-            let bg3s = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("radix-bg3-scan"),
-                layout: &bgl3_scan,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: buffers.sort_histogram.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: buffers.sort_prefix_sums.as_entire_binding(),
-                    },
-                ],
-            });
             {
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("radix-scan"),
                     timestamp_writes: None,
                 });
                 pass.set_pipeline(&self.sort_scan_pipeline);
-                pass.set_bind_group(3, &bg3s, &[]);
+                pass.set_bind_group(0, &bind_group, &[]);
                 pass.dispatch_workgroups(1, 1, 1);
             }
+            
+            // Step 4: Scatter keys to sorted positions
 
-            // Clear histogram again to reuse as per-bucket offsets
-            {
-                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("radix-clear2"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.sort_clear_pipeline);
-                pass.set_bind_group(3, &bg3c, &[]);
-                pass.dispatch_workgroups(1, 1, 1);
-            }
-
-            // Scatter
-            let bg0_s = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("radix-bg0-scatter"),
-                layout: &bgl0_scat,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: ubuf.as_entire_binding(),
-                }],
-            });
-            let bg1_s = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("radix-bg1-scatter"),
-                layout: &bgl1_scat,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: keys_in.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: vals_in.as_entire_binding(),
-                    },
-                ],
-            });
-            let bg2_s = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("radix-bg2-scatter"),
-                layout: &bgl2_scat,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: keys_out.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: vals_out.as_entire_binding(),
-                    },
-                ],
-            });
-            let bg3_s = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("radix-bg3-scatter"),
-                layout: &bgl3_scat,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: buffers.sort_histogram.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: buffers.sort_prefix_sums.as_entire_binding(),
-                    },
-                ],
-            });
             {
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("radix-scatter"),
                     timestamp_writes: None,
                 });
                 pass.set_pipeline(&self.sort_scatter_pipeline);
-                pass.set_bind_group(0, &bg0_s, &[]);
-                pass.set_bind_group(1, &bg1_s, &[]);
-                pass.set_bind_group(2, &bg2_s, &[]);
-                pass.set_bind_group(3, &bg3_s, &[]);
-                let wg = ((prim_count + 255) / 256) as u32;
-                pass.dispatch_workgroups(wg, 1, 1);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(num_workgroups, 1, 1);
             }
-
-            // Ping-pong
+            
+            self.queue.submit(Some(enc.finish()));
+            
+            eprintln!("[GPU-LBVH] Pass {} complete: {}ms", pass + 1, pass_start.elapsed().as_millis());
+            
+            // Swap buffers for next pass
             std::mem::swap(&mut keys_in, &mut keys_out);
             std::mem::swap(&mut vals_in, &mut vals_out);
         }
-
-        // After 8 passes, data are back in primary buffers; no copy needed.
-        self.queue.submit(Some(enc.finish()));
+        
+        // After 4 passes with swaps, data is already in primary buffers:
+        // Start: keys_in=primary, keys_out=temp
+        // After swap 1: keys_in=temp, keys_out=primary
+        // After swap 2: keys_in=primary, keys_out=temp
+        // After swap 3: keys_in=temp, keys_out=primary
+        // After swap 4: keys_in=primary, keys_out=temp
+        // So keys_in already points to morton_codes_buffer - no copy needed!
+        
+        eprintln!("[GPU-LBVH] Radix sort complete: {}ms total", sort_start.elapsed().as_millis());
         Ok(())
     }
 
@@ -872,10 +802,6 @@ impl GpuBvhBuilder {
         prim_count: u32,
         node_count: u32,
     ) -> Result<()> {
-        if prim_count == 0 {
-            return Ok(());
-        }
-        // Uniforms
         let uniforms = LinkUniforms {
             prim_count,
             node_count,

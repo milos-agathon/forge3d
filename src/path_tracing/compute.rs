@@ -30,8 +30,36 @@ pub struct Uniforms {
     pub cam_forward: [f32; 3],
     pub seed_hi: u32,
     pub seed_lo: u32,
-    pub _pad_end: [u32; 3],
+    pub sampling_mode: u32,  // 0=rng, 1=sobol, 2=cmj
+    pub lighting_type: u32,
+    pub lighting_intensity: f32,
+    pub lighting_azimuth: f32,
+    pub lighting_elevation: f32,
+    pub shadow_intensity: f32,
+    pub hdri_intensity: f32,
+    pub hdri_rotation: f32,
+    pub hdri_exposure: f32,
+    pub hdri_enabled: f32,
+    pub _pad_end: [u32; 3],  // Reserved for future parameters / alignment
 }
+
+/// TileParams for true-resolution tiled rendering
+/// Uses vec4-aligned fields to avoid WGSL alignment issues
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Debug)]
+pub struct TileParams {
+    /// (tile_x_px, tile_y_px, tile_w, tile_h)
+    pub tile_origin_size: [u32; 4],
+    /// (img_w, img_h, spp_batch, spp_done)
+    pub img_spp_counts: [u32; 4],
+    /// (seed, reserved0, reserved1, reserved2)
+    pub seeds_misc: [u32; 4],
+    /// Padding to reach 256-byte alignment for Metal (split to avoid bytemuck limits)
+    pub _pad0: [u32; 32],
+    pub _pad1: [u32; 20],  // Total: 48 + 128 + 80 = 256 bytes
+}
+
+const _: () = assert!(std::mem::size_of::<TileParams>() == 256, "TileParams must be 256 bytes for Metal alignment");
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]

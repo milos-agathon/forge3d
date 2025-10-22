@@ -524,7 +524,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -622,6 +622,7 @@ dependencies = [
  "lyon_tessellation",
  "ndarray",
  "numpy",
+ "oidn",
  "once_cell",
  "pollster",
  "pyo3",
@@ -1380,6 +1381,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oidn"
+version = "2.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12331c17ab2164afb05093c59e3eaf315466fe8551b7024327d579874b4ffb8f"
+dependencies = [
+ "num_enum",
+ "pkg-config",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1723,7 +1734,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]

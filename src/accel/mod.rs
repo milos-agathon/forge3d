@@ -105,8 +105,8 @@ pub enum BvhBackend {
 /// GPU BVH data (buffers and metadata)
 #[derive(Debug)]
 pub struct GpuBvhData {
-    pub nodes_buffer: wgpu::Buffer,
-    pub indices_buffer: wgpu::Buffer,
+    pub nodes_buffer: std::sync::Arc<wgpu::Buffer>,
+    pub indices_buffer: std::sync::Arc<wgpu::Buffer>,
     pub node_count: u32,
     pub primitive_count: u32,
     pub world_aabb: Aabb,

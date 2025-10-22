@@ -6,13 +6,17 @@
 pub mod accel;
 pub mod alias_table;
 pub mod aov;
+pub mod buffer_pool;
 pub mod compute;
 pub mod guiding;
 pub mod hybrid_compute;
 pub mod io;
 pub mod lighting;
+pub mod memory_governor;
 pub mod mesh;
+pub mod oidn_runner;
 pub mod restir;
+pub mod tile_dispatch;
 pub mod wavefront;
 
 // Note: SVGF integration stubs live under src/denoise/svgf for future wiring.

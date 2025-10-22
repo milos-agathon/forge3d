@@ -104,6 +104,15 @@ def main() -> int:
     p.add_argument("--denoiser", type=str, choices=["off", "svgf"], default="off", help="Apply denoiser to beauty")
     p.add_argument("--svgf-iters", type=int, default=5, help="Iterations for SVGF denoiser")
     p.add_argument("--luminance-clamp", dest="lum_clamp", type=float, default=None, help="Optional luminance clamp to suppress fireflies")
+    # Ray tracing controls
+    p.add_argument("--render-mode", default="raster", choices=["raster", "raytrace"], 
+                        help="Rendering mode: raster (fast GPU rasterization) or raytrace (high quality path tracing)")
+    p.add_argument("--rt-spp", type=int, default=64, help="Ray tracing samples per pixel (raytrace mode only)")
+    p.add_argument("--rt-seed", type=int, default=0, help="Random seed for ray tracing (raytrace mode only)")
+    p.add_argument("--rt-batch-spp", type=int, default=8, help="Ray tracing batch size for progressive rendering (raytrace mode only)")
+    p.add_argument("--rt-sampling-mode", default="sobol", choices=["rng", "sobol", "cmj"], 
+                        help="Sampling mode: rng (fast), sobol (best quality, recommended), cmj (alternative)")
+    p.add_argument("--max-rt-triangles", type=int, default=2000000, help="Max triangles for ray tracing mesh (will decimate if needed)")
     # AOV export
     p.add_argument("--save-aovs", action="store_true", help="Render and save AOVs (EXR where available, PNG for visibility)")
     p.add_argument("--aovs", type=str, default="albedo,normal,depth,visibility", help="Comma-separated AOV list to render")
