@@ -9,9 +9,12 @@ import argparse
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from _import_shim import ensure_repo_import
+import os
 
-ensure_repo_import()
+# Only use import shim if explicitly requested (to avoid breaking rasterio imports)
+if os.environ.get("USE_IMPORT_SHIM", "").lower() in ("1", "true", "yes"):
+    from _import_shim import ensure_repo_import
+    ensure_repo_import()
 
 try:
     import forge3d as f3d
@@ -27,10 +30,12 @@ DEFAULT_OUTPUT = Path("examples/out/terrain_demo.png")
 DEFAULT_SIZE = (2560, 1440)
 DEFAULT_DOMAIN = (200.0, 2200.0)
 DEFAULT_COLORMAP_STOPS: Sequence[tuple[float, str]] = (
-    (200.0, "#e7d8a2"),
-    (800.0, "#c5a06e"),
-    (1500.0, "#995f57"),
-    (2200.0, "#4a3c37"),
+    (200.0, "#00aa00"),   # Low elevation: Vibrant green (valleys)
+    (800.0, "#80ff00"),   # Mid-low: Bright lime (foothills)
+    (1200.0, "#ffff00"),  # Mid: Pure yellow (slopes)
+    (1600.0, "#ff8000"),  # Mid-high: Vivid orange (rocky terrain)
+    (2000.0, "#ff0000"),  # High: Pure red (peaks)
+    (2200.0, "#800000"),  # Highest: Dark red (summits)
 )
 
 
@@ -58,11 +63,14 @@ def _load_dem(path: Path):
             "that exposes the DEM loader."
         )
 
-    return load_dem_fn(
+    # Load DEM without fill_nodata to avoid import issues with _import_shim
+    # The _import_shim adds python/ to sys.path which breaks rasterio.fill import
+    dem = load_dem_fn(
         str(path),
-        fill_nodata=True,
-        to_local_metric=True,
+        fill_nodata_values=False,
     )
+
+    return dem
 
 
 def _infer_domain(dem, fallback: tuple[float, float]) -> tuple[float, float]:
@@ -121,26 +129,108 @@ def _infer_domain(dem, fallback: tuple[float, float]) -> tuple[float, float]:
     return fallback
 
 
-def _build_colormap(domain: tuple[float, float]):
+def _build_colormap(domain: tuple[float, float], colormap_name: str = "viridis"):
+    """
+    Build colormap for the DEM domain.
+
+    Args:
+        domain: (min_elevation, max_elevation) tuple
+        colormap_name: Name of colormap to use ("viridis", "magma", "terrain")
+                      OR comma-separated hex colors (e.g., "#ff0000,#00ff00,#0000ff")
+    """
+    # Check if colormap_name is a custom hex color palette (contains commas)
+    if colormap_name and "," in colormap_name:
+        # Parse comma-separated hex colors
+        hex_colors = [c.strip() for c in colormap_name.split(",")]
+
+        # Validate hex color format
+        import re
+        hex_pattern = re.compile(r'^#[0-9A-Fa-f]{6}$')
+        invalid_colors = [c for c in hex_colors if not hex_pattern.match(c)]
+
+        if invalid_colors:
+            print(f"Warning: Invalid hex color format: {invalid_colors}")
+            print("Expected format: #RRGGBB (e.g., #ff0000)")
+            print("Falling back to viridis colormap")
+            colormap_name = "viridis"
+        else:
+            # Create evenly-spaced stops across the domain
+            domain_min, domain_max = domain
+            domain_range = domain_max - domain_min
+            n_colors = len(hex_colors)
+
+            stops = []
+            for i, hex_color in enumerate(hex_colors):
+                t = i / (n_colors - 1) if n_colors > 1 else 0.0
+                elevation = domain_min + t * domain_range
+                stops.append((elevation, hex_color))
+
+            print(f"Custom colormap created with {n_colors} colors")
+            return f3d.Colormap1D.from_stops(stops=stops, domain=domain)
+
+    if colormap_name and colormap_name != "terrain":
+        # Use built-in colormaps (viridis, magma, etc.)
+        # These have better color vibrancy than the earth-tone defaults
+        try:
+            import numpy as np
+
+            cmap = f3d.get_colormap(f"forge3d:{colormap_name}")
+
+            # Convert colormap RGBA array to stops
+            # Sample ~16 evenly spaced colors from the 256-color palette
+            rgba_array = cmap.rgba  # Shape: (256, 4), dtype: float32, range: [0, 1]
+            n_samples = 16
+            indices = np.linspace(0, len(rgba_array) - 1, n_samples, dtype=int)
+
+            # Create elevation stops evenly spaced across the domain
+            domain_min, domain_max = domain
+            domain_range = domain_max - domain_min
+
+            stops = []
+            for i, idx in enumerate(indices):
+                # Calculate elevation for this stop
+                t = i / (n_samples - 1)  # Normalized position [0, 1]
+                elevation = domain_min + t * domain_range
+
+                # Get RGBA color and convert to hex
+                rgba = rgba_array[idx]
+                r, g, b = int(rgba[0] * 255), int(rgba[1] * 255), int(rgba[2] * 255)
+                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+
+                stops.append((elevation, hex_color))
+
+            return f3d.Colormap1D.from_stops(stops=stops, domain=domain)
+
+        except Exception as e:
+            print(f"Warning: Failed to load colormap '{colormap_name}': {e}")
+            print("Falling back to terrain colormap (earth tones)")
+            colormap_name = "terrain"
+
+    # Fall back to terrain colormap (earth tones)
+
+    # Original domain from the default stops
+    original_min = DEFAULT_COLORMAP_STOPS[0][0]
+    original_max = DEFAULT_COLORMAP_STOPS[-1][0]
+    original_range = original_max - original_min
+
+    # New domain from actual DEM
+    new_min = domain[0]
+    new_max = domain[1]
+    new_range = new_max - new_min
+
+    # Remap all stops proportionally to new domain
     stops = []
     for value, color in DEFAULT_COLORMAP_STOPS:
-        mapped_value = float(value)
+        # Calculate position in original range [0.0, 1.0]
+        t = (value - original_min) / original_range
+        # Map to new range
+        mapped_value = new_min + t * new_range
         stops.append((mapped_value, color))
-
-    stops[0] = (domain[0], stops[0][1])
-    stops[-1] = (domain[1], stops[-1][1])
 
     return f3d.Colormap1D.from_stops(
         stops=stops,
         domain=domain,
     )
-
-
-def _get_height_texture(dem):
-    for attr in ("texture_view", "texture", "height_texture"):
-        if hasattr(dem, attr):
-            return getattr(dem, attr)
-    raise SystemExit("DEM handle does not expose a GPU texture view.")
 
 
 def _build_params(
@@ -151,8 +241,10 @@ def _build_params(
     exposure: float,
     domain: tuple[float, float],
     colormap,
+    albedo_mode: str = "mix",
+    colormap_strength: float = 0.5,
 ):
-    return f3d.TerrainRenderParams(
+    config = f3d.TerrainRenderParamsConfig(
         size_px=size,
         render_scale=render_scale,
         msaa_samples=msaa,
@@ -189,7 +281,7 @@ def _build_params(
             normal_bias=0.5,
             min_variance=1e-4,
             light_bleed_reduction=0.5,
-            evsm_exponent=0.0,
+            evsm_exponent=40.0,
             fade_start=1.0,
         ),
         triplanar=f3d.TriplanarSettings(
@@ -235,9 +327,12 @@ def _build_params(
         ],
         exposure=exposure,
         gamma=2.2,
-        albedo_mode="mix",
-        colormap_strength=0.5,
+        albedo_mode=albedo_mode,
+        colormap_strength=colormap_strength,
     )
+
+    # Wrap the config in the native TerrainRenderParams
+    return f3d.TerrainRenderParams(config)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -297,6 +392,13 @@ def _parse_args() -> argparse.Namespace:
         help="Override the colormap elevation domain.",
     )
     parser.add_argument(
+        "--colormap",
+        type=str,
+        default="viridis",
+        help="Colormap: 'viridis' (default, blue-green-yellow), 'magma' (purple-red-yellow), 'terrain' (green-yellow-orange-red), "
+             "or custom hex colors as comma-separated values (e.g., '#ff0000,#00ff00,#0000ff' for red-green-blue gradient).",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=DEFAULT_OUTPUT,
@@ -317,11 +419,30 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Allow replacing an existing output file.",
     )
+    parser.add_argument(
+        "--albedo-mode",
+        type=str,
+        choices=["material", "colormap", "mix"],
+        default="mix",
+        help="Albedo source: 'material' (triplanar only), 'colormap' (LUT only), or 'mix' (blend both). Default: mix",
+    )
+    parser.add_argument(
+        "--colormap-strength",
+        type=float,
+        default=0.5,
+        help="Colormap blend strength [0.0-1.0]. Only used with --albedo-mode=mix. Default: 0.5",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
+
+    # Validate colormap_strength range
+    if not 0.0 <= args.colormap_strength <= 1.0:
+        raise SystemExit(
+            f"Error: --colormap-strength must be in range [0.0, 1.0], got {args.colormap_strength}"
+        )
 
     _require_attributes(
         (
@@ -353,7 +474,9 @@ def main() -> int:
     sess = f3d.Session(window=bool(args.window))
 
     dem = _load_dem(args.dem)
-    height_texture = _get_height_texture(dem)
+    # FIX: Pass the numpy array (dem.data) instead of texture_view dict
+    # The renderer expects a numpy array to upload to GPU, not a pre-uploaded texture
+    heightmap_array = dem.data
 
     domain = (
         tuple(args.colormap_domain)  # type: ignore[arg-type]
@@ -362,7 +485,7 @@ def main() -> int:
     )
     domain = (float(domain[0]), float(domain[1]))
 
-    colormap = _build_colormap(domain)
+    colormap = _build_colormap(domain, colormap_name=args.colormap)
 
     materials = f3d.MaterialSet.terrain_default(
         triplanar_scale=6.0,
@@ -384,16 +507,18 @@ def main() -> int:
         exposure=float(args.exposure),
         domain=domain,
         colormap=colormap,
+        albedo_mode=args.albedo_mode,
+        colormap_strength=float(args.colormap_strength),
     )
 
-    renderer = f3d.TerrainRenderer(sess.device)
+    renderer = f3d.TerrainRenderer(sess)
 
     frame = renderer.render_terrain_pbr_pom(
-        target=None,
-        heightmap=height_texture,
         material_set=materials,
         env_maps=ibl,
         params=params,
+        heightmap=heightmap_array,
+        target=None,
     )
 
     frame.save(str(args.output))
@@ -404,7 +529,7 @@ def main() -> int:
         if viewer_cls is None:
             print("forge3d.Viewer is not available in this build. Skipping interactive viewer.")
         else:
-            with viewer_cls(sess, renderer, height_texture, materials, ibl, params) as view:
+            with viewer_cls(sess, renderer, heightmap_array, materials, ibl, params) as view:
                 view.run()
 
     return 0

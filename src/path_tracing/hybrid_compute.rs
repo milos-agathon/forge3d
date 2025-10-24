@@ -1370,6 +1370,7 @@ impl HybridPathTracer {
         })
     }
 
+    #[allow(dead_code)]
     fn create_aov_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("hybrid-pt-bgl4-aovs"),
@@ -1458,6 +1459,7 @@ impl HybridPathTracer {
         })
     }
 
+    #[allow(dead_code)]
     fn create_hybrid_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("hybrid-pt-bgl5-hybrid"),

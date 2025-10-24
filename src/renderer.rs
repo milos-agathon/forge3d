@@ -1,4 +1,10 @@
+// src/renderer.rs
+// Renderer module utilities exposed to Python bindings
+// Exists to host shared rendering helpers available to extension callers
+// RELEVANT FILES: src/renderer/readback.rs, src/terrain_renderer.rs, src/lib.rs, python/forge3d/__init__.py
 // T02-BEGIN:dem-stats
+pub mod readback;
+
 use crate::terrain_stats;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
