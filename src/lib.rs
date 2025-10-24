@@ -16,11 +16,15 @@ use shadows::state::{CpuCsmConfig, CpuCsmState};
 #[cfg(feature = "extension-module")]
 use glam::Vec3;
 #[cfg(feature = "extension-module")]
-use numpy::{PyArray1, PyArrayMethods, PyUntypedArrayMethods, PyReadonlyArrayDyn};
+use numpy::{IntoPyArray, PyArray1, PyArray3, PyArrayMethods};
 #[cfg(feature = "extension-module")]
 use pyo3::types::PyDict;
 #[cfg(feature = "extension-module")]
-use pyo3::{exceptions::PyValueError, prelude::*, wrap_pyfunction};
+use pyo3::{
+    exceptions::{PyRuntimeError, PyValueError},
+    prelude::*,
+    wrap_pyfunction,
+};
 
 // C1/C3/C5/C6/C7: Additional imports for PyO3 functions
 #[cfg(feature = "extension-module")]
@@ -42,9 +46,15 @@ use crate::core::multi_thread::{
 #[cfg(feature = "extension-module")]
 use crate::device_caps::DeviceCaps;
 #[cfg(feature = "extension-module")]
+use crate::renderer::readback::read_texture_tight;
+#[cfg(feature = "extension-module")]
 use crate::sdf::hybrid::Ray as HybridRay;
 #[cfg(feature = "extension-module")]
 use crate::sdf::py::PySdfScene;
+#[cfg(feature = "extension-module")]
+use crate::util::image_write;
+#[cfg(feature = "extension-module")]
+use std::path::Path;
 #[cfg(feature = "extension-module")]
 use std::sync::Arc;
 #[cfg(feature = "extension-module")]
@@ -57,6 +67,146 @@ use wgpu::{
 static GLOBAL_CSM_STATE: Lazy<Mutex<CpuCsmState>> =
     Lazy::new(|| Mutex::new(CpuCsmState::default()));
 
+#[cfg(feature = "extension-module")]
+#[pyclass(module = "forge3d._forge3d", name = "Frame")]
+pub struct Frame {
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
+    texture: wgpu::Texture,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+}
+
+#[cfg(feature = "extension-module")]
+impl Frame {
+    pub(crate) fn new(
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        texture: wgpu::Texture,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        Self {
+            device,
+            queue,
+            texture,
+            width,
+            height,
+            format,
+        }
+    }
+
+    fn read_tight_bytes(&self) -> anyhow::Result<Vec<u8>> {
+        read_texture_tight(
+            &self.device,
+            &self.queue,
+            &self.texture,
+            (self.width, self.height),
+            self.format,
+        )
+    }
+}
+
+#[cfg(feature = "extension-module")]
+#[pymethods]
+impl Frame {
+    #[new]
+    fn py_new() -> PyResult<Self> {
+        Err(PyRuntimeError::new_err(
+            "Frame objects are constructed internally by forge3d",
+        ))
+    }
+
+    #[getter]
+    fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    fn format(&self) -> String {
+        format!("{:?}", self.format)
+    }
+
+    fn save(&self, path: &str) -> PyResult<()> {
+        let data = self
+            .read_tight_bytes()
+            .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
+
+        match self.format {
+            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
+                image_write::write_png_rgba8(Path::new(path), &data, self.width, self.height)
+                    .map_err(|err| {
+                        PyRuntimeError::new_err(format!("failed to write PNG: {err:#}"))
+                    })?;
+                Ok(())
+            }
+            wgpu::TextureFormat::Rgba16Float => Err(PyRuntimeError::new_err(
+                "saving RGBA16F frames is not implemented yet",
+            )),
+            other => Err(PyValueError::new_err(format!(
+                "unsupported texture format for save: {:?}",
+                other
+            ))),
+        }
+    }
+
+    fn to_numpy<'py>(&self, py: Python<'py>) -> PyResult<&'py PyArray3<u8>> {
+        match self.format {
+            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
+                let data = self
+                    .read_tight_bytes()
+                    .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
+                let arr = ndarray::Array3::from_shape_vec(
+                    (self.height as usize, self.width as usize, 4),
+                    data,
+                )
+                .map_err(|_| {
+                    PyRuntimeError::new_err("failed to reshape RGBA buffer into numpy array")
+                })?;
+                Ok(arr.into_pyarray_bound(py).into_gil_ref())
+            }
+            wgpu::TextureFormat::Rgba16Float => Err(PyRuntimeError::new_err(
+                "to_numpy for RGBA16F frames is not implemented yet",
+            )),
+            other => Err(PyValueError::new_err(format!(
+                "unsupported texture format for numpy conversion: {:?}",
+                other
+            ))),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Frame(width={}, height={}, format={:?})",
+            self.width, self.height, self.format
+        )
+    }
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn render_debug_pattern_frame(py: Python<'_>, width: u32, height: u32) -> PyResult<Py<Frame>> {
+    let ctx = crate::gpu::ctx();
+    let texture = crate::util::debug_pattern::render_debug_pattern(
+        ctx.device.as_ref(),
+        ctx.queue.as_ref(),
+        width,
+        height,
+    )
+    .map_err(|err| PyRuntimeError::new_err(format!("failed to render debug pattern: {err:#}")))?;
+
+    let frame = Frame::new(
+        ctx.device.clone(),
+        ctx.queue.clone(),
+        texture,
+        width,
+        height,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+    );
+
+    Py::new(py, frame)
+}
 // Core modules
 pub mod math {
     /// Orthonormalize a tangent `t` against normal `n` and return (tangent, bitangent).
@@ -103,6 +253,7 @@ pub mod math {
 pub mod accel;
 pub mod camera;
 pub mod colormap;
+mod colormap1d;
 pub mod context;
 pub mod converters; // Geometry converters (e.g., MultipolygonZ -> OBJ)
 pub mod core;
@@ -113,10 +264,13 @@ pub mod formats;
 pub mod geometry;
 pub mod gpu;
 pub mod grid;
+mod ibl_wrapper;
 pub mod import; // Importers: OSM buildings, etc.
 pub mod io; // IO: OBJ/PLY/glTF readers/writers
 pub mod loaders;
+mod material_set;
 pub mod mesh;
+mod overlay_layer;
 pub mod path_tracing;
 pub mod pipeline;
 pub mod post; // Post-processing: denoising, AO, etc.
@@ -124,12 +278,17 @@ pub mod render; // Rendering utilities (instancing)
 pub mod renderer;
 pub mod scene;
 pub mod sdf; // New SDF module
+mod session;
 pub mod shadows; // Shadow mapping implementations
 pub mod terrain;
+mod terrain_camera;
+mod terrain_render_params;
+mod terrain_renderer;
 pub mod terrain_stats;
 pub mod uv; // UV unwrap helpers (planar, spherical)
 pub mod textures {}
 pub mod transforms;
+pub mod util;
 pub mod vector;
 pub mod viewer; // Interactive windowed viewer (Workstream I1)
 
@@ -3062,446 +3221,8 @@ fn open_viewer(
         zfar,
     };
 
-    run_viewer(config).map_err(|e| {
-        pyo3::exceptions::PyRuntimeError::new_err(format!("Viewer error: {}", e))
-    })
-}
-
-/// Open an interactive viewer window initialized with a provided RGBA8 image.
-///
-/// The viewer will present the image fullscreen. Press F12 to export a PNG screenshot.
-#[cfg(feature = "extension-module")]
-#[pyfunction]
-#[pyo3(signature = (rgba, width=None, height=None, title="forge3d Image Preview".to_string(), vsync=true, fov_deg=45.0, znear=0.1, zfar=1000.0))]
-fn open_viewer_image(
-    _py: Python<'_>,
-    rgba: numpy::PyReadonlyArray3<'_, u8>, // (H, W, 4)
-    width: Option<u32>,
-    height: Option<u32>,
-    title: String,
-    vsync: bool,
-    fov_deg: f32,
-    znear: f32,
-    zfar: f32,
-) -> PyResult<()> {
-    use crate::viewer::{run_image_viewer, ViewerConfig};
-
-    let shape = rgba.shape();
-    if shape.len() != 3 || shape[2] != 4 {
-        return Err(PyValueError::new_err("rgba must have shape (H, W, 4)"));
-    }
-    let h = shape[0] as u32;
-    let w = shape[1] as u32;
-    let view_w = width.unwrap_or(w);
-    let view_h = height.unwrap_or(h);
-
-    // Copy to Vec<u8>
-    let data: Vec<u8> = rgba.as_slice()?.to_vec();
-
-    let config = ViewerConfig {
-        width: view_w,
-        height: view_h,
-        title,
-        vsync,
-        fov_deg,
-        znear,
-        zfar,
-    };
-
-    run_image_viewer(config, data, w, h).map_err(|e| {
-        pyo3::exceptions::PyRuntimeError::new_err(format!("Viewer error: {}", e))
-    })
-}
-
-/// Open an interactive mesh viewer window initialized with vertex/index buffers.
-///
-/// vertices: numpy array (N,3) float32 of positions
-/// indices: numpy array (M,3) uint32, or (K,) flat uint32
-#[cfg(feature = "extension-module")]
-#[pyfunction]
-#[pyo3(signature = (vertices, indices, uvs=None, texture_rgba=None, texture_width=0, texture_height=0, camera_eye=None, camera_target=None, width=1024, height=768, title="forge3d Mesh Viewer".to_string(), vsync=true, fov_deg=45.0, znear=0.1, zfar=1000.0))]
-fn open_mesh_viewer(
-    py: Python<'_>,
-    vertices: numpy::PyReadonlyArray2<'_, f32>,
-    indices: PyReadonlyArrayDyn<'_, u32>,
-    uvs: Option<numpy::PyReadonlyArray2<'_, f32>>,
-    texture_rgba: Option<numpy::PyReadonlyArray3<'_, u8>>,
-    texture_width: u32,
-    texture_height: u32,
-    camera_eye: Option<numpy::PyReadonlyArray1<'_, f32>>,
-    camera_target: Option<numpy::PyReadonlyArray1<'_, f32>>,
-    width: u32,
-    height: u32,
-    title: String,
-    vsync: bool,
-    fov_deg: f32,
-    znear: f32,
-    zfar: f32,
-) -> PyResult<()> {
-    use crate::viewer::{run_mesh_viewer_with_camera, run_mesh_viewer_with_texture, ViewerConfig};
-
-    // Flatten vertices (N,3) -> Vec<f32>
-    let vshape = vertices.shape();
-    if vshape.len() != 2 || vshape[1] != 3 {
-        return Err(PyValueError::new_err("vertices must have shape (N, 3) float32"));
-    }
-    let verts: Vec<f32> = vertices.as_slice()?.to_vec();
-
-    // Flatten indices: accept (M,3) or (K,)
-    let ishape = indices.shape();
-    let idx: Vec<u32> = match ishape.len() {
-        1 => indices.as_slice()?.to_vec(),
-        2 => indices.as_slice()?
-                .to_vec(),
-        _ => return Err(PyValueError::new_err("indices must be (M,3) or (K,) uint32")),
-    };
-    
-    // Parse UVs if provided
-    let uvs_opt = uvs.and_then(|uv_arr| {
-        let uv_shape = uv_arr.shape();
-        if uv_shape.len() == 2 && uv_shape[1] == 2 {
-            uv_arr.as_slice().ok().map(|s| s.to_vec())
-        } else {
-            None
-        }
-    });
-    
-    // Parse texture if provided
-    let texture_opt = texture_rgba.and_then(|tex_arr| {
-        let tex_shape = tex_arr.shape();
-        if tex_shape.len() == 3 && tex_shape[2] == 4 {
-            tex_arr.as_slice().ok().map(|s| s.to_vec())
-        } else {
-            None
-        }
-    });
-
-    // Parse camera parameters
-    let camera_eye_opt = camera_eye.and_then(|arr| {
-        let slice = arr.as_slice().ok()?;
-        if slice.len() == 3 {
-            Some([slice[0], slice[1], slice[2]])
-        } else {
-            None
-        }
-    });
-    
-    let camera_target_opt = camera_target.and_then(|arr| {
-        let slice = arr.as_slice().ok()?;
-        if slice.len() == 3 {
-            Some([slice[0], slice[1], slice[2]])
-        } else {
-            None
-        }
-    });
-
-    let config = ViewerConfig {
-        width,
-        height,
-        title,
-        vsync,
-        fov_deg,
-        znear,
-        zfar,
-    };
-
-    // If texture is provided, use textured viewer. Release the Python GIL while the
-    // blocking winit event loop runs so Python threads (CLI) remain responsive.
-    // The closure must return a type that is safe to cross the GIL boundary; use Option<String>.
-    let err_msg: Option<String> = py.allow_threads(|| {
-        let res = if let (Some(uvs_data), Some(tex_data)) = (uvs_opt, texture_opt) {
-            run_mesh_viewer_with_texture(
-                config,
-                verts,
-                idx,
-                uvs_data,
-                tex_data,
-                texture_width,
-                texture_height,
-                camera_eye_opt,
-                camera_target_opt,
-            )
-        } else {
-            run_mesh_viewer_with_camera(config, verts, idx, camera_eye_opt, camera_target_opt)
-        };
-        match res {
-            Ok(()) => None,
-            Err(e) => Some(e.to_string()),
-        }
-    });
-
-    if let Some(msg) = err_msg {
-        Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Viewer error: {}", msg)))
-    } else {
-        Ok(())
-    }
-}
-
-/// Send a non-blocking export command to the active viewer (save offscreen PNG to path).
-#[cfg(feature = "extension-module")]
-#[pyfunction]
-fn viewer_export(path: String) -> PyResult<()> {
-    use crate::viewer::{viewer_send_command, ViewerCommand};
-    viewer_send_command(ViewerCommand::Export(path))
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
-}
-
-/// Set camera parameters in the active 3D viewer
-#[cfg(feature = "extension-module")]
-#[pyfunction]
-#[pyo3(signature = (distance=None, theta=None, phi=None))]
-fn viewer_set_camera(distance: Option<f32>, theta: Option<f32>, phi: Option<f32>) -> PyResult<()> {
-    use crate::viewer::{viewer_send_command, ViewerCommand};
-    viewer_send_command(ViewerCommand::SetCamera { distance, theta, phi })
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
-}
-
-/// Capture a snapshot from the active 3D viewer
-#[cfg(feature = "extension-module")]
-#[pyfunction]
-#[pyo3(signature = (path, width=None, height=None))]
-fn viewer_snapshot(path: String, width: Option<u32>, height: Option<u32>) -> PyResult<()> {
-    use crate::viewer::{viewer_send_command, ViewerCommand};
-    viewer_send_command(ViewerCommand::Snapshot { path, width, height })
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
-}
-
-/// Get current camera state from the active 3D viewer
-#[cfg(feature = "extension-module")]
-#[pyfunction]
-fn viewer_get_camera(py: Python<'_>) -> PyResult<(Py<numpy::PyArray1<f32>>, Py<numpy::PyArray1<f32>>, f32, f32, f32, f32)> {
-    use crate::viewer::{viewer_send_command, ViewerCommand};
-    use std::sync::mpsc::channel;
-    
-    let (tx, rx) = channel();
-    viewer_send_command(ViewerCommand::GetCamera { response_tx: tx })
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
-    
-    let state = rx.recv_timeout(std::time::Duration::from_secs(5))
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Timeout waiting for camera state: {}", e)))?;
-    
-    let eye = numpy::PyArray1::from_slice_bound(py, &state.eye).unbind();
-    let target = numpy::PyArray1::from_slice_bound(py, &state.target).unbind();
-    Ok((eye, target, state.distance, state.theta, state.phi, state.fov))
-}
-
-/// Render terrain with DEM displacement and categorical land-cover texture draping
-#[cfg(feature = "extension-module")]
-#[pyfunction]
-#[pyo3(signature = (
-    heightmap,
-    landcover,
-    width=1280,
-    height=720,
-    z_dir=1.0,
-    zscale=1.0,
-    camera_distance=None,
-    camera_theta=45.0,
-    camera_phi=25.0,
-    camera_gamma=0.0,
-    camera_fov=35.0,
-    light_type=1,
-    light_elevation=45.0,
-    light_azimuth=315.0,
-    light_intensity=1.0,
-    ambient=0.25,
-    shadow_intensity=0.5,
-    lighting_model=2,
-    shininess=32.0,
-    specular_strength=0.3,
-    shadow_softness=2.0,
-    background_r=1.0,
-    background_g=1.0,
-    background_b=1.0,
-    background_a=1.0,
-    shadow_map_res=2048,
-    shadow_bias=0.0015,
-    enable_shadows=true,
-    hdri_path=None,
-    hdri_intensity=1.0,
-    hdri_rotation_deg=0.0,
-    y_flip=false,
-    denoiser="oidn",
-    denoise_strength=0.8
-))]
-fn terrain_drape_render(
-    py: Python<'_>,
-    heightmap: PyReadonlyArrayDyn<'_, f32>,
-    landcover: PyReadonlyArrayDyn<'_, u8>,
-    width: u32,
-    height: u32,
-    z_dir: f32,
-    zscale: f32,
-    camera_distance: Option<f32>,
-    camera_theta: f32,
-    camera_phi: f32,
-    camera_gamma: f32,
-    camera_fov: f32,
-    light_type: u32,
-    light_elevation: f32,
-    light_azimuth: f32,
-    light_intensity: f32,
-    ambient: f32,
-    shadow_intensity: f32,
-    lighting_model: u32,
-    shininess: f32,
-    specular_strength: f32,
-    shadow_softness: f32,
-    background_r: f32,
-    background_g: f32,
-    background_b: f32,
-    background_a: f32,
-    shadow_map_res: u32,
-    shadow_bias: f32,
-    enable_shadows: bool,
-    hdri_path: Option<String>,
-    hdri_intensity: f32,
-    hdri_rotation_deg: f32,
-    y_flip: bool,
-    denoiser: &str,
-    denoise_strength: f32,
-) -> PyResult<Py<PyArray1<u8>>> {
-    use crate::renderer::terrain_drape::{TerrainDrapeRenderer, TerrainDrapeConfig};
-    use crate::core::uv_transform::UVTransform;
-    
-    // Validate heightmap shape (H, W)
-    let hm_shape = heightmap.shape();
-    if hm_shape.len() != 2 {
-        return Err(PyValueError::new_err(format!(
-            "Heightmap must be 2D (H, W), got shape {:?}",
-            hm_shape
-        )));
-    }
-    let hm_h = hm_shape[0] as u32;
-    let hm_w = hm_shape[1] as u32;
-    
-    // Validate landcover shape (H, W, 4)
-    let lc_shape = landcover.shape();
-    if lc_shape.len() != 3 || lc_shape[2] != 4 {
-        return Err(PyValueError::new_err(format!(
-            "Land-cover must be 3D (H, W, 4) RGBA, got shape {:?}",
-            lc_shape
-        )));
-    }
-    let lc_h = lc_shape[0] as u32;
-    let lc_w = lc_shape[1] as u32;
-    
-    // Ensure matching dimensions
-    if hm_h != lc_h || hm_w != lc_w {
-        return Err(PyValueError::new_err(format!(
-            "Heightmap and land-cover must have same dimensions: heightmap={}x{}, landcover={}x{}",
-            hm_w, hm_h, lc_w, lc_h
-        )));
-    }
-    
-    // Copy data from numpy arrays
-    let heightmap_data: Vec<f32> = heightmap.as_slice()?.to_vec();
-    let landcover_data: Vec<u8> = landcover.as_slice()?.to_vec();
-    
-    // Compute camera parameters
-    let terrain_size_x = hm_w as f32;
-    let terrain_size_z = hm_h as f32;
-    let terrain_extent = (terrain_size_x.powi(2) + terrain_size_z.powi(2)).sqrt();
-    
-    // Auto-calculate distance with margin (1.5x for good framing)
-    let distance = camera_distance.unwrap_or(terrain_extent * 1.5);
-    let theta_rad = camera_theta.to_radians();
-    let phi_rad = camera_phi.to_radians();
-    
-    // Camera position (spherical coordinates around terrain center)
-    let camera_pos = glam::Vec3::new(
-        distance * phi_rad.cos() * theta_rad.sin(),
-        distance * phi_rad.sin(),
-        distance * phi_rad.cos() * theta_rad.cos(),
-    );
-    let camera_target = glam::Vec3::ZERO;
-    
-    // View and projection matrices with camera roll (gamma)
-    let view_dir = (camera_target - camera_pos).normalize();
-    let right = view_dir.cross(glam::Vec3::Y).normalize();
-    let up_base = right.cross(view_dir).normalize();
-    
-    // Apply camera roll (gamma) by rotating the up vector around the view direction
-    let gamma_rad = camera_gamma.to_radians();
-    let up = if gamma_rad.abs() > 0.001 {
-        // Rotate up vector around view direction
-        let cos_gamma = gamma_rad.cos();
-        let sin_gamma = gamma_rad.sin();
-        up_base * cos_gamma + right * sin_gamma
-    } else {
-        up_base
-    };
-    
-    let view = glam::Mat4::look_at_rh(camera_pos, camera_target, up);
-    let aspect = width as f32 / height as f32;
-    let proj = glam::Mat4::perspective_rh(camera_fov.to_radians(), aspect, 0.1, distance * 10.0);
-    
-    // UV transform
-    let uv_xform = if y_flip {
-        UVTransform::with_y_flip()
-    } else {
-        UVTransform::identity()
-    };
-    
-    // Create renderer config
-    let config = TerrainDrapeConfig {
-        width,
-        height,
-        sample_count: 1,
-        z_dir,
-        zscale,
-        light_type,
-        light_elevation,
-        light_azimuth,
-        light_intensity,
-        ambient,
-        shadow_intensity,
-        lighting_model,
-        shininess,
-        specular_strength,
-        shadow_softness,
-        gamma: camera_gamma,
-        fov: camera_fov,
-        background_color: [background_r, background_g, background_b, background_a],
-        tonemap_mode: 1,  // aces
-        gamma_correction: 2.2,
-        hdri_intensity,
-        shadow_map_res,
-        shadow_bias,
-        enable_shadows,
-        hdri_path,
-        hdri_rotation_deg,
-        denoiser: denoiser.to_string(),
-        denoise_strength,
-    };
-    
-    // Render (release GIL for async operations)
-    let result_data = py.allow_threads(|| {
-        let runtime = tokio::runtime::Runtime::new()
-            .map_err(|e| format!("Failed to create async runtime: {}", e))?;
-        
-        runtime.block_on(async {
-            let renderer = TerrainDrapeRenderer::new(config).await
-                .map_err(|e| format!("Failed to create renderer: {}", e))?;
-            
-            renderer.render(
-                &heightmap_data,
-                hm_w,
-                hm_h,
-                &landcover_data,
-                lc_w,
-                lc_h,
-                &uv_xform,
-                &view,
-                &proj,
-                &camera_pos,
-            )
-        })
-    }).map_err(|e: String| PyValueError::new_err(e))?;
-    
-    // Convert to numpy array
-    let result_array = PyArray1::from_vec_bound(py, result_data).unbind();
-    Ok(result_array)
+    run_viewer(config)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Viewer error: {}", e)))
 }
 
 // PyO3 module entry point so Python can `import forge3d._forge3d`
@@ -3667,6 +3388,7 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
     m.add_function(wrap_pyfunction!(global_memory_metrics, m)?)?;
+    m.add_function(wrap_pyfunction!(render_debug_pattern_frame, m)?)?;
 
     // Workstream C: Core Engine & Target interfaces
     m.add_function(wrap_pyfunction!(engine_info, m)?)?;
@@ -3735,6 +3457,13 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
 
     // Add main classes
+    m.add_class::<crate::session::Session>()?;
+    m.add_class::<crate::colormap1d::Colormap1D>()?;
+    m.add_class::<crate::overlay_layer::OverlayLayer>()?;
+    m.add_class::<crate::terrain_render_params::TerrainRenderParams>()?;
+    m.add_class::<crate::terrain_renderer::TerrainRenderer>()?;
+    m.add_class::<crate::material_set::MaterialSet>()?;
+    m.add_class::<crate::ibl_wrapper::IBL>()?;
     m.add_class::<crate::scene::Scene>()?;
     // Expose TerrainSpike (E2/E3) to Python
     m.add_class::<crate::terrain::TerrainSpike>()?;

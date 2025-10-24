@@ -10,51 +10,16 @@ mod image_viewer_stub;
 mod textured_mesh;
 
 use camera_controller::{CameraController, CameraMode};
-pub use image_viewer_stub::run_image_viewer;
-pub use textured_mesh::run_mesh_viewer_with_texture;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use wgpu::{Device, Instance, Queue, Surface, SurfaceConfiguration};
 use winit::{
+    dpi::PhysicalSize,
     event::*,
     event_loop::EventLoop,
-    window::{Window, WindowBuilder},
-    dpi::PhysicalSize,
     keyboard::{KeyCode, PhysicalKey},
+    window::{Window, WindowBuilder},
 };
-use wgpu::{Instance, Surface, Device, Queue, SurfaceConfiguration, Buffer, RenderPipeline, BindGroupLayout, BindGroup, TextureView, Texture};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use wgpu::util::DeviceExt;
-use glam::Mat4;
-use std::sync::mpsc::Sender;
-
-#[derive(Debug, Clone)]
-pub struct CameraState {
-    pub eye: [f32; 3],
-    pub target: [f32; 3],
-    pub distance: f32,
-    pub theta: f32,  // degrees
-    pub phi: f32,    // degrees
-    pub fov: f32,    // degrees
-}
-
-#[derive(Debug, Clone)]
-pub enum ViewerCommand {
-    Export(String),
-    SetCamera { distance: Option<f32>, theta: Option<f32>, phi: Option<f32> },
-    Snapshot { path: String, width: Option<u32>, height: Option<u32> },
-    GetCamera { response_tx: std::sync::mpsc::Sender<CameraState> },
-}
-
-static VIEWER_SENDER: Mutex<Option<Sender<ViewerCommand>>> = Mutex::new(None);
-
-pub fn viewer_send_command(cmd: ViewerCommand) -> Result<(), String> {
-    let guard = VIEWER_SENDER.lock().map_err(|e| format!("Lock error: {}", e))?;
-    if let Some(tx) = &*guard {
-        tx.send(cmd).map_err(|e| format!("Send error: {}", e))?;
-        Ok(())
-    } else {
-        Err("Viewer not running".to_string())
-    }
-}
 
 #[derive(Clone)]
 pub struct ViewerConfig {
@@ -163,7 +128,6 @@ pub struct Viewer {
     config: SurfaceConfiguration,
     camera: CameraController,
     view_config: ViewerConfig,
-    last_frame: Instant,
     frame_count: u64,
     fps_counter: FpsCounter,
     // Input state
@@ -215,7 +179,10 @@ impl FpsCounter {
 }
 
 impl Viewer {
-    pub async fn new(window: Arc<Window>, config: ViewerConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(
+        window: Arc<Window>,
+        config: ViewerConfig,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let size = window.inner_size();
 
         // Create wgpu instance
@@ -283,7 +250,6 @@ impl Viewer {
             config: surface_config,
             camera: CameraController::new(),
             view_config: config,
-            last_frame: Instant::now(),
             frame_count: 0,
             fps_counter: FpsCounter::new(),
             keys_pressed: std::collections::HashSet::new(),
@@ -484,8 +450,7 @@ impl Viewer {
     pub fn handle_input(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput {
-                event: key_event,
-                ..
+                event: key_event, ..
             } => {
                 if let PhysicalKey::Code(keycode) = key_event.physical_key {
                     let pressed = key_event.state == ElementState::Pressed;
@@ -523,7 +488,8 @@ impl Viewer {
                 true
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.camera.handle_mouse_move(position.x as f32, position.y as f32);
+                self.camera
+                    .handle_mouse_move(position.x as f32, position.y as f32);
                 true
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -695,7 +661,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
         WindowBuilder::new()
             .with_title(&config.title)
             .with_inner_size(PhysicalSize::new(config.width, config.height))
-            .build(&event_loop)?
+            .build(&event_loop)?,
     );
 
     println!("forge3d Interactive Viewer");
@@ -744,11 +710,12 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                                 elwt.exit();
                             }
                             WindowEvent::KeyboardInput {
-                                event: key_event,
-                                ..
+                                event: key_event, ..
                             } => {
                                 if key_event.state == ElementState::Pressed {
-                                    if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key {
+                                    if let PhysicalKey::Code(KeyCode::Escape) =
+                                        key_event.physical_key
+                                    {
                                         elwt.exit();
                                     }
                                 }

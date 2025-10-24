@@ -105,7 +105,7 @@ pub struct Scene {
     cloud_shadow_renderer: Option<crate::core::cloud_shadows::CloudShadowRenderer>,
     cloud_shadows_enabled: bool,
     bg3_cloud_shadows: Option<wgpu::BindGroup>,
-    bg4_dummy_cloud_shadows: wgpu::BindGroup,  // Dummy bind group for devices with >=6 bind groups
+    bg4_dummy_cloud_shadows: wgpu::BindGroup, // Dummy bind group for devices with >=6 bind groups
 
     // B8: Realtime Clouds
     cloud_renderer: Option<crate::core::clouds::CloudRenderer>,
@@ -904,12 +904,14 @@ impl Scene {
             usage: wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-        let dummy_cloud_view = dummy_cloud_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let dummy_cloud_view =
+            dummy_cloud_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let dummy_cloud_sampler = g.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("scene.dummy_cloud_sampler"),
             ..Default::default()
         });
-        let bg4_dummy_cloud_shadows = tp.make_bg_cloud_shadows(&g.device, &dummy_cloud_view, &dummy_cloud_sampler);
+        let bg4_dummy_cloud_shadows =
+            tp.make_bg_cloud_shadows(&g.device, &dummy_cloud_view, &dummy_cloud_sampler);
 
         // B5: Create a default planar reflection renderer (disabled by default)
         let mut reflection_renderer = crate::core::reflections::PlanarReflectionRenderer::new(
@@ -1409,7 +1411,10 @@ impl Scene {
                 // B7: Cloud shadows at group 4 when available and supported
                 if max_groups >= 6 {
                     // Use actual cloud shadow bind group if available, otherwise use dummy
-                    let cloud_bg = self.bg3_cloud_shadows.as_ref().unwrap_or(&self.bg4_dummy_cloud_shadows);
+                    let cloud_bg = self
+                        .bg3_cloud_shadows
+                        .as_ref()
+                        .unwrap_or(&self.bg4_dummy_cloud_shadows);
                     rp.set_bind_group(4, cloud_bg, &[]);
                 }
                 // B5: Planar reflections at group 5 when available and supported
@@ -1878,7 +1883,10 @@ impl Scene {
                 // B7: Cloud shadows at group 4 when available and supported
                 if max_groups >= 6 {
                     // Use actual cloud shadow bind group if available, otherwise use dummy
-                    let cloud_bg = self.bg3_cloud_shadows.as_ref().unwrap_or(&self.bg4_dummy_cloud_shadows);
+                    let cloud_bg = self
+                        .bg3_cloud_shadows
+                        .as_ref()
+                        .unwrap_or(&self.bg4_dummy_cloud_shadows);
                     rp.set_bind_group(4, cloud_bg, &[]);
                 }
                 // B5: Planar reflections at group 5 when available and supported
@@ -5716,7 +5724,10 @@ impl Scene {
             let max_groups = crate::gpu::ctx().device.limits().max_bind_groups;
             if max_groups >= 6 {
                 // Use actual cloud shadow bind group if available, otherwise use dummy
-                let cloud_bg = self.bg3_cloud_shadows.as_ref().unwrap_or(&self.bg4_dummy_cloud_shadows);
+                let cloud_bg = self
+                    .bg3_cloud_shadows
+                    .as_ref()
+                    .unwrap_or(&self.bg4_dummy_cloud_shadows);
                 rp.set_bind_group(4, cloud_bg, &[]);
                 if let Some(reflection_bg) = renderer.bind_group() {
                     rp.set_bind_group(5, reflection_bg, &[]);

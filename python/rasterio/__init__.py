@@ -10,29 +10,46 @@ even if this stub appears earlier on sys.path (e.g., PYTHONPATH=python).
 """
 
 import sys as _sys
-from pathlib import Path as _Path
-import importlib as _importlib
-import importlib.util as _util
 import os as _os
-import site as _site
 
-# Try to import the real rasterio by temporarily removing this repo's python/
-# directory from sys.path so the resolver can see site-packages first.
+# Store the directory containing this stub module
+_stub_dir = _os.path.dirname(__file__)
+
+# Try to find and import the real rasterio by temporarily removing stub from path
 _real_rasterio = None
+_original_path = _sys.path.copy()
 try:
-    # First, try a straightforward import by deprioritizing the stub path
-    _stub_root = _Path(__file__).resolve().parents[1]  # .../forge3d/python
-    _orig_path = list(_sys.path)
-    _sys.path = [p for p in _orig_path if _Path(p).resolve() != _stub_root]
-    # Remove this stub from sys.modules to allow a fresh import
-    _sys.modules.pop('rasterio', None)
-    try:
-        _real_rasterio = _importlib.import_module('rasterio')
-    finally:
-        _sys.path = _orig_path
-except Exception:
-    _real_rasterio = None
+    # Remove any path entries that contain this stub (the parent of the rasterio dir)
+    _stub_parent = _os.path.dirname(_stub_dir)
+    _filtered_path = [p for p in _sys.path if p != _stub_parent]
+    _sys.path = _filtered_path
 
+    # Now try to import the real rasterio
+    try:
+        import importlib as _importlib
+        import importlib.util as _util
+
+        # Force reimport by removing from cache if present
+        if 'rasterio' in _sys.modules and hasattr(_sys.modules['rasterio'], '__file__'):
+            if _sys.modules['rasterio'].__file__ and _stub_dir in _sys.modules['rasterio'].__file__:
+                # This is the stub, remove it
+                del _sys.modules['rasterio']
+
+        _spec = _util.find_spec('rasterio')
+        if _spec and _spec.origin:
+            _real_rasterio = _importlib.import_module('rasterio')
+            # Import key functions from real rasterio
+            if hasattr(_real_rasterio, 'open'):
+                open = _real_rasterio.open
+            if hasattr(_real_rasterio, '__version__'):
+                __version__ = _real_rasterio.__version__
+    except ImportError:
+        pass
+finally:
+    # Restore original sys.path
+    _sys.path = _original_path
+
+# If real rasterio not found, provide a helpful error message
 if _real_rasterio is None:
     # Try to locate site-packages rasterio manually and load it in-place
     _candidates = []

@@ -75,6 +75,7 @@ oidn = { version = "2.1", optional = true }
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"] }
 env_logger = "0.10"
+sha2 = "0.10"
 
 [[bin]]
 name = "policies"
