@@ -27,11 +27,33 @@ from .mem import (
 
 # Colormaps public surface
 from .colormaps import get as get_colormap, available as available_colormaps, load_cpt as load_cpt_colormap, load_json as load_json_colormap
+from .terrain_params import (
+    ClampSettings,
+    IblSettings,
+    LightSettings,
+    LodSettings,
+    PomSettings,
+    SamplingSettings,
+    ShadowSettings,
+    TerrainRenderParams as TerrainRenderParamsConfig,
+    TriplanarSettings,
+)
 
 _NATIVE_MODULE = _get_native_module()
 
 if _NATIVE_MODULE is not None:
-    for _name in ("Scene", "TerrainSpike"):
+    for _name in (
+        "Scene",
+        "TerrainSpike",
+        "Session",
+        "Colormap1D",
+        "MaterialSet",
+        "IBL",
+        "OverlayLayer",
+        "TerrainRenderParams",
+        "TerrainRenderer",
+        "render_debug_pattern_frame",
+    ):
         if hasattr(_NATIVE_MODULE, _name):
             globals()[_name] = getattr(_NATIVE_MODULE, _name)
 
@@ -303,6 +325,7 @@ from .materials import PbrMaterial
 from .textures import load_texture, build_pbr_textures
 from . import geometry
 from .vector import VectorScene
+from . import io  # Import io module for DEM loading (Milestone 5 - Task 5.1)
 from .sdf import (
     SdfPrimitive, SdfScene, SdfSceneBuilder, HybridRenderer,
     SdfPrimitiveType, CsgOperation, TraversalMode,
@@ -435,6 +458,21 @@ def numpy_to_png(path: Union[str, Path], array: np.ndarray) -> None:
     # Validate array shape
     if array.ndim == 3 and array.shape[2] not in (3, 4):
         raise RuntimeError("expected last dimension to be 3 (RGB) or 4 (RGBA)")
+
+    # Validate buffer size (must be tight, not padded)
+    if array.ndim == 2:
+        expected_size = array.shape[0] * array.shape[1]
+    elif array.ndim == 3:
+        expected_size = array.shape[0] * array.shape[1] * array.shape[2]
+    else:
+        expected_size = 0
+
+    actual_size = array.size
+    if actual_size != expected_size:
+        raise RuntimeError(
+            f"Array buffer size mismatch: got {actual_size}, expected {expected_size}. "
+            f"This may indicate a padded buffer was passed instead of a tight buffer."
+        )
 
     # Ensure array is 2D or 3D
     if array.ndim == 2:
@@ -1269,6 +1307,22 @@ __all__ = [
     # Workstream I3: Screenshot/Record Controls
     "save_png_with_exif", "FrameDumper", "dump_frame_sequence",
     # Scene and terrain
+    "LightSettings",
+    "IblSettings",
+    "ShadowSettings",
+    "TriplanarSettings",
+    "PomSettings",
+    "LodSettings",
+    "SamplingSettings",
+    "ClampSettings",
+    "TerrainRenderParamsConfig",
+    "Colormap1D",
+    "OverlayLayer",
+    "TerrainRenderParams",
+    "TerrainRenderer",
+    "MaterialSet",
+    "IBL",
+    "Session",
     "Scene",
     "TerrainSpike",
     "make_terrain",
@@ -1309,6 +1363,7 @@ __all__ = [
     # Path guiding (A13)
     "OnlineGuidingGrid",
     # GPU adapter utilities
+    "render_debug_pattern_frame",
     "enumerate_adapters",
     "device_probe",
     # Transform functions

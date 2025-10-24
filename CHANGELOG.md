@@ -20,6 +20,12 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ### Changed
 - Wired staging rings and virtual texture residency updates into the global memory tracker so Python budgets reflect GPU usage.
 - Aligned CMake, Sphinx, and ignore rules with the 0.80.0 metadata to keep generated docs out of the repo.
+- Terrain PBR shader clamps POM steps, applies ACES tonemapping with explicit gamma, and honors global colormap strength while the renderer now outputs `Rgba8Unorm` to avoid double sRGB conversion.
+- Terrain asset pipelines now auto-select material and IBL quality tiers to respect the 512 MiB budget, emitting memory usage logs and downscaling textures when devices report iGPU-class limits.
+- Terrain renderer now queries adapter sample-count support, downgrades unsupported MSAA requests, and logs the effective sample count to avoid WebGPU validation errors.
+
+### Fixed
+- Terrain renderer honors TerrainRenderParams toggles for MSAA and parallax occlusion flags so user settings directly drive the GPU pipeline.
 
 ### Documentation
 - Point auxiliary CLAUDE files at the canonical root guide to avoid drift.

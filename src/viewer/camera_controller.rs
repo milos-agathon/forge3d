@@ -3,7 +3,7 @@
 // - Orbit camera: rotate around target with mouse
 // - FPS camera: WASD movement with mouse look
 
-use glam::{Vec3, Mat4, Quat};
+use glam::{Mat4, Vec3};
 use std::f32::consts::PI;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -157,7 +157,8 @@ impl CameraController {
                     self.fps.yaw = forward.z.atan2(forward.x);
                 }
                 CameraMode::Orbit => {
-                    self.orbit.target = self.fps.position + self.fps.forward() * self.orbit.distance;
+                    self.orbit.target =
+                        self.fps.position + self.fps.forward() * self.orbit.distance;
                     self.orbit.yaw = self.fps.yaw;
                     self.orbit.pitch = self.fps.pitch;
                 }

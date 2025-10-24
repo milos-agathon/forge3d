@@ -14,11 +14,15 @@ use shadows::state::{CpuCsmConfig, CpuCsmState};
 #[cfg(feature = "extension-module")]
 use glam::Vec3;
 #[cfg(feature = "extension-module")]
-use numpy::{PyArray1, PyArrayMethods};
+use numpy::{IntoPyArray, PyArray1, PyArray3, PyArrayMethods};
 #[cfg(feature = "extension-module")]
 use pyo3::types::PyDict;
 #[cfg(feature = "extension-module")]
-use pyo3::{exceptions::PyValueError, prelude::*, wrap_pyfunction};
+use pyo3::{
+    exceptions::{PyRuntimeError, PyValueError},
+    prelude::*,
+    wrap_pyfunction,
+};
 
 // C1/C3/C5/C6/C7: Additional imports for PyO3 functions
 #[cfg(feature = "extension-module")]
@@ -40,9 +44,15 @@ use crate::core::multi_thread::{
 #[cfg(feature = "extension-module")]
 use crate::device_caps::DeviceCaps;
 #[cfg(feature = "extension-module")]
+use crate::renderer::readback::read_texture_tight;
+#[cfg(feature = "extension-module")]
 use crate::sdf::hybrid::Ray as HybridRay;
 #[cfg(feature = "extension-module")]
 use crate::sdf::py::PySdfScene;
+#[cfg(feature = "extension-module")]
+use crate::util::image_write;
+#[cfg(feature = "extension-module")]
+use std::path::Path;
 #[cfg(feature = "extension-module")]
 use std::sync::Arc;
 #[cfg(feature = "extension-module")]
@@ -55,6 +65,146 @@ use wgpu::{
 static GLOBAL_CSM_STATE: Lazy<Mutex<CpuCsmState>> =
     Lazy::new(|| Mutex::new(CpuCsmState::default()));
 
+#[cfg(feature = "extension-module")]
+#[pyclass(module = "forge3d._forge3d", name = "Frame")]
+pub struct Frame {
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
+    texture: wgpu::Texture,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+}
+
+#[cfg(feature = "extension-module")]
+impl Frame {
+    pub(crate) fn new(
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        texture: wgpu::Texture,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        Self {
+            device,
+            queue,
+            texture,
+            width,
+            height,
+            format,
+        }
+    }
+
+    fn read_tight_bytes(&self) -> anyhow::Result<Vec<u8>> {
+        read_texture_tight(
+            &self.device,
+            &self.queue,
+            &self.texture,
+            (self.width, self.height),
+            self.format,
+        )
+    }
+}
+
+#[cfg(feature = "extension-module")]
+#[pymethods]
+impl Frame {
+    #[new]
+    fn py_new() -> PyResult<Self> {
+        Err(PyRuntimeError::new_err(
+            "Frame objects are constructed internally by forge3d",
+        ))
+    }
+
+    #[getter]
+    fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    fn format(&self) -> String {
+        format!("{:?}", self.format)
+    }
+
+    fn save(&self, path: &str) -> PyResult<()> {
+        let data = self
+            .read_tight_bytes()
+            .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
+
+        match self.format {
+            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
+                image_write::write_png_rgba8(Path::new(path), &data, self.width, self.height)
+                    .map_err(|err| {
+                        PyRuntimeError::new_err(format!("failed to write PNG: {err:#}"))
+                    })?;
+                Ok(())
+            }
+            wgpu::TextureFormat::Rgba16Float => Err(PyRuntimeError::new_err(
+                "saving RGBA16F frames is not implemented yet",
+            )),
+            other => Err(PyValueError::new_err(format!(
+                "unsupported texture format for save: {:?}",
+                other
+            ))),
+        }
+    }
+
+    fn to_numpy<'py>(&self, py: Python<'py>) -> PyResult<&'py PyArray3<u8>> {
+        match self.format {
+            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
+                let data = self
+                    .read_tight_bytes()
+                    .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
+                let arr = ndarray::Array3::from_shape_vec(
+                    (self.height as usize, self.width as usize, 4),
+                    data,
+                )
+                .map_err(|_| {
+                    PyRuntimeError::new_err("failed to reshape RGBA buffer into numpy array")
+                })?;
+                Ok(arr.into_pyarray_bound(py).into_gil_ref())
+            }
+            wgpu::TextureFormat::Rgba16Float => Err(PyRuntimeError::new_err(
+                "to_numpy for RGBA16F frames is not implemented yet",
+            )),
+            other => Err(PyValueError::new_err(format!(
+                "unsupported texture format for numpy conversion: {:?}",
+                other
+            ))),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Frame(width={}, height={}, format={:?})",
+            self.width, self.height, self.format
+        )
+    }
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+fn render_debug_pattern_frame(py: Python<'_>, width: u32, height: u32) -> PyResult<Py<Frame>> {
+    let ctx = crate::gpu::ctx();
+    let texture = crate::util::debug_pattern::render_debug_pattern(
+        ctx.device.as_ref(),
+        ctx.queue.as_ref(),
+        width,
+        height,
+    )
+    .map_err(|err| PyRuntimeError::new_err(format!("failed to render debug pattern: {err:#}")))?;
+
+    let frame = Frame::new(
+        ctx.device.clone(),
+        ctx.queue.clone(),
+        texture,
+        width,
+        height,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+    );
+
+    Py::new(py, frame)
+}
 // Core modules
 pub mod math {
     /// Orthonormalize a tangent `t` against normal `n` and return (tangent, bitangent).
@@ -101,6 +251,7 @@ pub mod math {
 pub mod accel;
 pub mod camera;
 pub mod colormap;
+mod colormap1d;
 pub mod context;
 pub mod converters; // Geometry converters (e.g., MultipolygonZ -> OBJ)
 pub mod core;
@@ -111,22 +262,30 @@ pub mod formats;
 pub mod geometry;
 pub mod gpu;
 pub mod grid;
+mod ibl_wrapper;
 pub mod import; // Importers: OSM buildings, etc.
 pub mod io; // IO: OBJ/PLY/glTF readers/writers
 pub mod loaders;
+mod material_set;
 pub mod mesh;
+mod overlay_layer;
 pub mod path_tracing;
 pub mod pipeline;
 pub mod render; // Rendering utilities (instancing)
 pub mod renderer;
 pub mod scene;
 pub mod sdf; // New SDF module
+mod session;
 pub mod shadows; // Shadow mapping implementations
 pub mod terrain;
+mod terrain_camera;
+mod terrain_render_params;
+mod terrain_renderer;
 pub mod terrain_stats;
 pub mod uv; // UV unwrap helpers (planar, spherical)
 pub mod textures {}
 pub mod transforms;
+pub mod util;
 pub mod vector;
 pub mod viewer; // Interactive windowed viewer (Workstream I1)
 
@@ -2733,9 +2892,8 @@ fn open_viewer(
         zfar,
     };
 
-    run_viewer(config).map_err(|e| {
-        pyo3::exceptions::PyRuntimeError::new_err(format!("Viewer error: {}", e))
-    })
+    run_viewer(config)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Viewer error: {}", e)))
 }
 
 // PyO3 module entry point so Python can `import forge3d._forge3d`
@@ -2892,6 +3050,7 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
     m.add_function(wrap_pyfunction!(global_memory_metrics, m)?)?;
+    m.add_function(wrap_pyfunction!(render_debug_pattern_frame, m)?)?;
 
     // Workstream C: Core Engine & Target interfaces
     m.add_function(wrap_pyfunction!(engine_info, m)?)?;
@@ -2960,6 +3119,13 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
 
     // Add main classes
+    m.add_class::<crate::session::Session>()?;
+    m.add_class::<crate::colormap1d::Colormap1D>()?;
+    m.add_class::<crate::overlay_layer::OverlayLayer>()?;
+    m.add_class::<crate::terrain_render_params::TerrainRenderParams>()?;
+    m.add_class::<crate::terrain_renderer::TerrainRenderer>()?;
+    m.add_class::<crate::material_set::MaterialSet>()?;
+    m.add_class::<crate::ibl_wrapper::IBL>()?;
     m.add_class::<crate::scene::Scene>()?;
     // Expose TerrainSpike (E2/E3) to Python
     m.add_class::<crate::terrain::TerrainSpike>()?;

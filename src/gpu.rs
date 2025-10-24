@@ -6,6 +6,7 @@ use once_cell::sync::OnceCell;
 use std::sync::Arc;
 
 pub struct GpuContext {
+    pub instance: Arc<wgpu::Instance>,
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
     pub adapter: Arc<wgpu::Adapter>,
@@ -45,10 +46,10 @@ fn backends_from_env() -> wgpu::Backends {
 
 pub fn ctx() -> &'static GpuContext {
     CTX.get_or_init(|| {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = Arc::new(wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: backends_from_env(),
             ..Default::default()
-        });
+        }));
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             // LowPower tends to resolve faster and avoids eGPU/discrete probing on macOS
             power_preference: wgpu::PowerPreference::LowPower,
@@ -76,6 +77,7 @@ pub fn ctx() -> &'static GpuContext {
         .expect("request_device failed");
 
         GpuContext {
+            instance,
             device: Arc::new(device),
             queue: Arc::new(queue),
             adapter: Arc::new(adapter),
