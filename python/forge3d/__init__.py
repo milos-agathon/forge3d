@@ -53,6 +53,12 @@ if _NATIVE_MODULE is not None:
         "TerrainRenderParams",
         "TerrainRenderer",
         "render_debug_pattern_frame",
+        # P0 Lighting classes
+        "Light",
+        "MaterialShading",
+        "ShadowSettings",
+        "GiSettings",
+        "Atmosphere",
     ):
         if hasattr(_NATIVE_MODULE, _name):
             globals()[_name] = getattr(_NATIVE_MODULE, _name)

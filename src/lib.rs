@@ -3130,6 +3130,12 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::scene::Scene>()?;
     // Expose TerrainSpike (E2/E3) to Python
     m.add_class::<crate::terrain::TerrainSpike>()?;
+    // P0 Lighting classes
+    m.add_class::<crate::lighting::PyLight>()?;
+    m.add_class::<crate::lighting::PyMaterialShading>()?;
+    m.add_class::<crate::lighting::PyShadowSettings>()?;
+    m.add_class::<crate::lighting::PyGiSettings>()?;
+    m.add_class::<crate::lighting::PyAtmosphere>()?;
 
     Ok(())
 }

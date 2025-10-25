@@ -6,12 +6,20 @@
 pub mod types;
 pub mod ibl_cache;
 
+#[cfg(feature = "extension-module")]
+pub mod py_bindings;
+
 // Re-export main types
 pub use types::{
     LightType, BrdfModel, ShadowTechnique, GiTechnique,
     Light, MaterialShading, ShadowSettings, GiSettings, Atmosphere,
 };
 pub use ibl_cache::IblResourceCache;
+
+#[cfg(feature = "extension-module")]
+pub use py_bindings::{
+    PyLight, PyMaterialShading, PyShadowSettings, PyGiSettings, PyAtmosphere,
+};
 
 #[cfg(test)]
 mod tests;
