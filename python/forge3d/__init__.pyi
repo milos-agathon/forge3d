@@ -3,6 +3,17 @@ from typing import Iterable, Tuple, Optional, Sequence, Any, overload, Union, Di
 import os
 import numpy as np
 from . import geometry
+from .terrain_params import (
+    LightSettings,
+    IblSettings,
+    ShadowSettings,
+    TriplanarSettings,
+    PomSettings,
+    LodSettings,
+    SamplingSettings,
+    ClampSettings,
+    TerrainRenderParams as TerrainRenderParamsConfig,
+)
 
 PathLikeStr = os.PathLike[str] | str
 
@@ -76,6 +87,99 @@ class Scene:
     def get_cloud_params(self) -> Tuple[float, float, float, float]: ...
     def debug_lut_format(self) -> str: ...
 
+class Session:
+    window: bool
+    def __init__(self, window: bool = ..., backend: Optional[str] = ...) -> None: ...
+    def info(self) -> str: ...
+    @property
+    def adapter_name(self) -> str: ...
+    @property
+    def backend(self) -> str: ...
+    @property
+    def device_type(self) -> str: ...
+
+class Colormap1D:
+    domain: Tuple[float, float]
+    @staticmethod
+    def from_stops(
+        stops: Sequence[Tuple[float, str]],
+        domain: Tuple[float, float],
+    ) -> Colormap1D: ...
+
+class OverlayLayer:
+    strength: float
+    offset: float
+    blend_mode: str
+    domain: Tuple[float, float]
+    @staticmethod
+    def from_colormap1d(
+        colormap: Colormap1D,
+        strength: float = ...,
+        offset: float = ...,
+        blend_mode: str = ...,
+        domain: Tuple[float, float] = ...,
+    ) -> OverlayLayer: ...
+    @property
+    def colormap(self) -> Optional[Colormap1D]: ...
+    @property
+    def kind(self) -> str: ...
+
+class TerrainRenderParams:
+    size_px: Tuple[int, int]
+    render_scale: float
+    msaa_samples: int
+    z_scale: float
+    cam_target: Tuple[float, float, float]
+    cam_radius: float
+    cam_phi_deg: float
+    cam_theta_deg: float
+    cam_gamma_deg: float
+    fov_y_deg: float
+    clip: Tuple[float, float]
+    exposure: float
+    gamma: float
+    albedo_mode: str
+    colormap_strength: float
+    overlays: Sequence[OverlayLayer]
+    def __init__(self, params: Any) -> None: ...
+    @property
+    def light(self) -> Any: ...
+    @property
+    def ibl(self) -> Any: ...
+    @property
+    def shadows(self) -> Any: ...
+    @property
+    def triplanar(self) -> Any: ...
+    @property
+    def pom(self) -> Any: ...
+    @property
+    def lod(self) -> Any: ...
+    @property
+    def sampling(self) -> Any: ...
+    @property
+    def clamp(self) -> Any: ...
+    @property
+    def python_object(self) -> Any: ...
+
+class Frame:
+    width: int
+    height: int
+    format: str
+    def save(self, path: PathLikeStr) -> None: ...
+    def to_numpy(self) -> np.ndarray: ...
+    def size(self) -> Tuple[int, int]: ...
+
+class TerrainRenderer:
+    def __init__(self, session: "Session") -> None: ...
+    def render_terrain_pbr_pom(
+        self,
+        material_set: "MaterialSet",
+        env_maps: "IBL",
+        params: TerrainRenderParams,
+        heightmap: np.ndarray,
+        target: Optional[Any] = ...,
+    ) -> Frame: ...
+
 # Vector Picking & OIT helpers
 def set_point_shape_mode(mode: int) -> None: ...
 def set_point_lod_threshold(threshold: float) -> None: ...
@@ -132,8 +236,15 @@ def render_triangle_png(path: PathLikeStr, width: int, height: int) -> None: ...
 def dem_stats(heightmap: np.ndarray) -> Tuple[float, float, float, float]: ...
 def dem_normalize(heightmap: np.ndarray, *, mode: str = ..., out_range: Tuple[float, float] = ..., eps: float = ..., return_stats: bool = ...) -> np.ndarray | Tuple[np.ndarray, Tuple[float, float, float, float]]: ...
 
+def render_debug_pattern_frame(width: int, height: int) -> Any: ...
+
 def enumerate_adapters() -> list[dict[str, Any]]: ...
 def device_probe(backend: Optional[str] = ...) -> dict[str, Any]: ...
+
+def memory_metrics() -> Dict[str, Any]: ...
+def budget_remaining() -> int: ...
+def utilization_ratio() -> float: ...
+def override_memory_limit(limit_bytes: int) -> None: ...
 
 # Add the timing API stub at top-level
 from typing import Dict, TypedDict

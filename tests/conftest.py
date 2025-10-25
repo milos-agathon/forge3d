@@ -39,6 +39,15 @@ def _needs_build_from_exc(exc: BaseException) -> bool:
         isinstance(exc, ImportError) and ("_forge3d" in msg or "forge3d._forge3d" in msg)
     )
 
+def pytest_configure(config):
+    """Register custom markers for Workstream I tasks."""
+    config.addinivalue_line(
+        "markers", "viewer: tests for interactive viewer functionality (Workstream I1)"
+    )
+    config.addinivalue_line(
+        "markers", "offscreen: tests for offscreen rendering and Jupyter integration (Workstream I2)"
+    )
+
 def pytest_sessionstart(session):
     if os.environ.get("FORGE3D_NO_BOOTSTRAP") == "1":
         return

@@ -16,13 +16,19 @@ fn face_normal(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
     let ny = uz * vx - ux * vz;
     let nz = ux * vy - uy * vx;
     let len = (nx * nx + ny * ny + nz * nz).sqrt();
-    if len > 0.0 { [nx / len, ny / len, nz / len] } else { [0.0, 0.0, 0.0] }
+    if len > 0.0 {
+        [nx / len, ny / len, nz / len]
+    } else {
+        [0.0, 0.0, 0.0]
+    }
 }
 
 pub fn multipolygonz_to_mesh(polygons: &[Vec<[f32; 3]>]) -> MeshBuffers {
     let mut mesh = MeshBuffers::new();
     for ring in polygons.iter() {
-        if ring.len() < 3 { continue; }
+        if ring.len() < 3 {
+            continue;
+        }
         // Append ring vertices to mesh
         let base = mesh.positions.len() as u32;
         for p in ring.iter() {
@@ -30,7 +36,8 @@ pub fn multipolygonz_to_mesh(polygons: &[Vec<[f32; 3]>]) -> MeshBuffers {
         }
         // Triangulate fan
         for i in 1..(ring.len() - 1) {
-            mesh.indices.extend_from_slice(&[base, base + i as u32, base + (i as u32 + 1)]);
+            mesh.indices
+                .extend_from_slice(&[base, base + i as u32, base + (i as u32 + 1)]);
         }
     }
     // Compute flat-shaded normals per triangle and assign per vertex (duplicate per-vertex per triangle for simplicity)
@@ -46,38 +53,57 @@ pub fn multipolygonz_to_mesh(polygons: &[Vec<[f32; 3]>]) -> MeshBuffers {
         let n = face_normal(a, b, c);
         for &vid in tri {
             let e = &mut accum[vid as usize];
-            e[0] += n[0]; e[1] += n[1]; e[2] += n[2];
+            e[0] += n[0];
+            e[1] += n[1];
+            e[2] += n[2];
             counts[vid as usize] += 1;
         }
     }
     for (i, e) in accum.iter().enumerate() {
         let count = counts[i].max(1) as f32;
-        let nx = e[0] / count; let ny = e[1] / count; let nz = e[2] / count;
-        let len = (nx*nx + ny*ny + nz*nz).sqrt();
-        mesh.normals[i] = if len > 0.0 { [nx/len, ny/len, nz/len] } else { [0.0, 0.0, 1.0] };
+        let nx = e[0] / count;
+        let ny = e[1] / count;
+        let nz = e[2] / count;
+        let len = (nx * nx + ny * ny + nz * nz).sqrt();
+        mesh.normals[i] = if len > 0.0 {
+            [nx / len, ny / len, nz / len]
+        } else {
+            [0.0, 0.0, 1.0]
+        };
     }
     mesh
 }
 
 // ---------------- PyO3 bridge -----------------
 #[cfg(feature = "extension-module")]
-use pyo3::prelude::*;
-#[cfg(feature = "extension-module")]
-use pyo3::types::PyList;
+use crate::geometry::mesh_to_python;
 #[cfg(feature = "extension-module")]
 use numpy::{PyReadonlyArray2, PyUntypedArrayMethods};
 #[cfg(feature = "extension-module")]
-use crate::geometry::mesh_to_python;
+use pyo3::prelude::*;
+#[cfg(feature = "extension-module")]
+use pyo3::types::PyList;
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-pub fn converters_multipolygonz_to_obj_py(py: Python<'_>, polys: &Bound<'_, PyList>) -> PyResult<PyObject> {
+pub fn converters_multipolygonz_to_obj_py(
+    py: Python<'_>,
+    polys: &Bound<'_, PyList>,
+) -> PyResult<PyObject> {
     // polys: list of (N,3) float32 arrays
-    let mut rings: Vec<Vec<[f32;3]>> = Vec::with_capacity(polys.len());
+    let mut rings: Vec<Vec<[f32; 3]>> = Vec::with_capacity(polys.len());
     for item in polys.iter() {
         let arr: PyReadonlyArray2<f32> = item.extract()?;
-        if arr.shape()[1] != 3 { return Err(pyo3::exceptions::PyValueError::new_err("polygon must have shape (N,3)")); }
-        let ring: Vec<[f32;3]> = arr.as_array().outer_iter().map(|row| [row[0], row[1], row[2]]).collect();
+        if arr.shape()[1] != 3 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "polygon must have shape (N,3)",
+            ));
+        }
+        let ring: Vec<[f32; 3]> = arr
+            .as_array()
+            .outer_iter()
+            .map(|row| [row[0], row[1], row[2]])
+            .collect();
         rings.push(ring);
     }
     let mesh = multipolygonz_to_mesh(&rings);

@@ -2,8 +2,8 @@
 // Minimal glTF 2.0 importer: loads first mesh primitive as MeshBuffers.
 // Supports embedded (data URI) and external buffers via gltf::import.
 
-use crate::geometry::MeshBuffers;
 use crate::error::RenderError;
+use crate::geometry::MeshBuffers;
 
 pub fn import_gltf_to_mesh(path: &str) -> Result<MeshBuffers, RenderError> {
     let (doc, buffers, _images) = gltf::import(path).map_err(|e| RenderError::io(e.to_string()))?;
@@ -35,7 +35,9 @@ pub fn import_gltf_to_mesh(path: &str) -> Result<MeshBuffers, RenderError> {
             } else {
                 // No indices: build a trivial triangle list if length divisible by 3
                 let n = out.positions.len();
-                if n % 3 == 0 { out.indices = (0u32..(n as u32)).collect(); }
+                if n % 3 == 0 {
+                    out.indices = (0u32..(n as u32)).collect();
+                }
             }
 
             break 'outer;
@@ -43,7 +45,9 @@ pub fn import_gltf_to_mesh(path: &str) -> Result<MeshBuffers, RenderError> {
     }
 
     if out.positions.is_empty() || out.indices.is_empty() {
-        return Err(RenderError::Render("glTF contains no mesh primitives".into()));
+        return Err(RenderError::Render(
+            "glTF contains no mesh primitives".into(),
+        ));
     }
     Ok(out)
 }

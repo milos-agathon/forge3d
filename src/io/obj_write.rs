@@ -24,9 +24,12 @@ fn export_mtl_to_path(path: &Path, materials: &[ObjMaterial]) -> Result<(), Rend
         let kd = m.diffuse_color;
         let ka = m.ambient_color;
         let ks = m.specular_color;
-        writeln!(w, "Kd {} {} {}", kd[0], kd[1], kd[2]).map_err(|e| RenderError::io(format!("{}", e)))?;
-        writeln!(w, "Ka {} {} {}", ka[0], ka[1], ka[2]).map_err(|e| RenderError::io(format!("{}", e)))?;
-        writeln!(w, "Ks {} {} {}", ks[0], ks[1], ks[2]).map_err(|e| RenderError::io(format!("{}", e)))?;
+        writeln!(w, "Kd {} {} {}", kd[0], kd[1], kd[2])
+            .map_err(|e| RenderError::io(format!("{}", e)))?;
+        writeln!(w, "Ka {} {} {}", ka[0], ka[1], ka[2])
+            .map_err(|e| RenderError::io(format!("{}", e)))?;
+        writeln!(w, "Ks {} {} {}", ks[0], ks[1], ks[2])
+            .map_err(|e| RenderError::io(format!("{}", e)))?;
         if let Some(tex) = &m.diffuse_texture {
             writeln!(w, "map_Kd {}", tex).map_err(|e| RenderError::io(format!("{}", e)))?;
         }
@@ -65,7 +68,8 @@ pub fn export_obj_with_metadata<P: AsRef<Path>>(
                 .unwrap_or_else(|| Path::new("."))
                 .join(&mtl_filename);
             export_mtl_to_path(&mtl_path, mats)?;
-            writeln!(w, "mtllib {}", mtl_filename).map_err(|e| RenderError::io(format!("{}", e)))?;
+            writeln!(w, "mtllib {}", mtl_filename)
+                .map_err(|e| RenderError::io(format!("{}", e)))?;
             wrote_mtllib = true;
         }
     }
@@ -79,8 +83,7 @@ pub fn export_obj_with_metadata<P: AsRef<Path>>(
     // Write texture coordinates (optional)
     if !mesh.uvs.is_empty() {
         for t in &mesh.uvs {
-            writeln!(w, "vt {} {}", t[0], t[1])
-                .map_err(|e| RenderError::io(format!("{}", e)))?;
+            writeln!(w, "vt {} {}", t[0], t[1]).map_err(|e| RenderError::io(format!("{}", e)))?;
         }
     }
 
@@ -185,7 +188,10 @@ pub fn export_obj_with_metadata<P: AsRef<Path>>(
         let v2 = to_one(tri[2]);
 
         let face = if has_uv && has_n {
-            format!("f {}/{}/{} {}/{}/{} {}/{}/{}", v0, v0, v0, v1, v1, v1, v2, v2, v2)
+            format!(
+                "f {}/{}/{} {}/{}/{} {}/{}/{}",
+                v0, v0, v0, v1, v1, v1, v2, v2, v2
+            )
         } else if has_uv {
             format!("f {}/{} {}/{} {}/{}", v0, v0, v1, v1, v2, v2)
         } else if has_n {
@@ -205,7 +211,10 @@ pub fn export_obj_with_metadata<P: AsRef<Path>>(
 #[cfg(feature = "extension-module")]
 use numpy::PyReadonlyArray1;
 #[cfg(feature = "extension-module")]
-use pyo3::{prelude::*, types::{PyDict, PyList}};
+use pyo3::{
+    prelude::*,
+    types::{PyDict, PyList},
+};
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
@@ -224,11 +233,31 @@ pub fn io_export_obj_py(
         let mut out = Vec::with_capacity(list.len());
         for item in list.iter() {
             let d = item.downcast::<PyDict>()?;
-            let name: String = if let Some(v) = d.get_item("name")? { v.extract()? } else { String::new() };
-            let kd: (f32, f32, f32) = if let Some(v) = d.get_item("diffuse_color")? { v.extract()? } else { (0.8,0.8,0.8) };
-            let ka: (f32, f32, f32) = if let Some(v) = d.get_item("ambient_color")? { v.extract()? } else { (0.0,0.0,0.0) };
-            let ks: (f32, f32, f32) = if let Some(v) = d.get_item("specular_color")? { v.extract()? } else { (0.0,0.0,0.0) };
-            let dt: Option<String> = if let Some(v) = d.get_item("diffuse_texture")? { v.extract::<Option<String>>()? } else { None };
+            let name: String = if let Some(v) = d.get_item("name")? {
+                v.extract()?
+            } else {
+                String::new()
+            };
+            let kd: (f32, f32, f32) = if let Some(v) = d.get_item("diffuse_color")? {
+                v.extract()?
+            } else {
+                (0.8, 0.8, 0.8)
+            };
+            let ka: (f32, f32, f32) = if let Some(v) = d.get_item("ambient_color")? {
+                v.extract()?
+            } else {
+                (0.0, 0.0, 0.0)
+            };
+            let ks: (f32, f32, f32) = if let Some(v) = d.get_item("specular_color")? {
+                v.extract()?
+            } else {
+                (0.0, 0.0, 0.0)
+            };
+            let dt: Option<String> = if let Some(v) = d.get_item("diffuse_texture")? {
+                v.extract::<Option<String>>()?
+            } else {
+                None
+            };
             out.push(ObjMaterial {
                 name,
                 diffuse_color: [kd.0, kd.1, kd.2],
@@ -238,10 +267,15 @@ pub fn io_export_obj_py(
             });
         }
         Some(out)
-    } else { None };
+    } else {
+        None
+    };
 
     // Helper to parse dict[str] -> Vec<u32>
-    fn parse_groups_dict<'py>(_py: Python<'py>, d: &Bound<'py, PyDict>) -> PyResult<HashMap<String, Vec<u32>>> {
+    fn parse_groups_dict<'py>(
+        _py: Python<'py>,
+        d: &Bound<'py, PyDict>,
+    ) -> PyResult<HashMap<String, Vec<u32>>> {
         let mut map: HashMap<String, Vec<u32>> = HashMap::new();
         for (k, v) in d.iter() {
             let name: String = k.extract()?;
@@ -251,9 +285,21 @@ pub fn io_export_obj_py(
         Ok(map)
     }
 
-    let mg_rust = if let Some(d) = material_groups { Some(parse_groups_dict(d.py(), d)?) } else { None };
-    let gg_rust = if let Some(d) = g_groups { Some(parse_groups_dict(d.py(), d)?) } else { None };
-    let og_rust = if let Some(d) = o_groups { Some(parse_groups_dict(d.py(), d)?) } else { None };
+    let mg_rust = if let Some(d) = material_groups {
+        Some(parse_groups_dict(d.py(), d)?)
+    } else {
+        None
+    };
+    let gg_rust = if let Some(d) = g_groups {
+        Some(parse_groups_dict(d.py(), d)?)
+    } else {
+        None
+    };
+    let og_rust = if let Some(d) = o_groups {
+        Some(parse_groups_dict(d.py(), d)?)
+    } else {
+        None
+    };
 
     export_obj_with_metadata(
         path,
@@ -262,5 +308,6 @@ pub fn io_export_obj_py(
         mg_rust.as_ref(),
         gg_rust.as_ref(),
         og_rust.as_ref(),
-    ).map_err(|e| e.to_py_err())
+    )
+    .map_err(|e| e.to_py_err())
 }

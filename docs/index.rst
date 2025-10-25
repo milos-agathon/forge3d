@@ -33,6 +33,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    :maxdepth: 2
    :caption: Advanced Features:
 
+   interactive_viewer
    postfx/index
    pbr_materials
    shadow_mapping
@@ -67,6 +68,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    examples/f2_city_demo
    examples/f16_instancing
    examples/f18_gltf_import
+   examples/terrain_demo_quickstart
 
 .. toctree::
    :maxdepth: 1

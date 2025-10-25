@@ -4,6 +4,7 @@
 //! allowing the virtual texture system to know which tiles are actually being used.
 
 use crate::core::tile_cache::TileId;
+use bytemuck::{Pod, Zeroable};
 use std::collections::HashSet;
 use wgpu::{
     BindGroup, BindGroupEntry, Buffer, BufferDescriptor, BufferUsages, CommandEncoder,
@@ -26,7 +27,7 @@ pub struct FeedbackBuffer {
 }
 
 /// Feedback entry structure (matches GPU layout)
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 #[repr(C)]
 pub struct FeedbackEntry {
     /// Tile X coordinate
@@ -244,21 +245,28 @@ impl FeedbackBuffer {
         let entry_size = std::mem::size_of::<FeedbackEntry>();
         let mut tile_ids = HashSet::new();
 
-        for chunk in data.chunks_exact(entry_size) {
-            if chunk.len() == entry_size {
-                // Safety: We know the chunk is exactly the size of FeedbackEntry
-                let entry: FeedbackEntry =
-                    unsafe { std::ptr::read(chunk.as_ptr() as *const FeedbackEntry) };
+        let mut chunks = data.chunks_exact(entry_size);
+        for chunk in &mut chunks {
+            let entry_bytes = match bytemuck::try_from_bytes::<FeedbackEntry>(chunk) {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+            let entry = *entry_bytes;
 
-                // Filter out invalid/empty entries
-                if entry.frame_number > 0 && entry.tile_x != u32::MAX && entry.tile_y != u32::MAX {
-                    tile_ids.insert(TileId {
-                        x: entry.tile_x,
-                        y: entry.tile_y,
-                        mip_level: entry.mip_level,
-                    });
-                }
+            if entry.frame_number > 0 && entry.tile_x != u32::MAX && entry.tile_y != u32::MAX {
+                tile_ids.insert(TileId {
+                    x: entry.tile_x,
+                    y: entry.tile_y,
+                    mip_level: entry.mip_level,
+                });
             }
+        }
+
+        if !chunks.remainder().is_empty() {
+            log::warn!(
+                "feedback_buffer: discarded {} trailing bytes from GPU feedback stream",
+                chunks.remainder().len()
+            );
         }
 
         tile_ids.into_iter().collect()
@@ -377,8 +385,7 @@ mod tests {
 
     #[test]
     fn test_feedback_entry_size() {
-        // Ensure FeedbackEntry has expected size for GPU compatibility
-        assert_eq!(std::mem::size_of::<FeedbackEntry>(), 16); // 4 u32s = 16 bytes
+        assert_eq!(std::mem::size_of::<FeedbackEntry>(), 16);
     }
 
     #[test]
@@ -389,7 +396,6 @@ mod tests {
             mip_level: 2,
             frame_number: 100,
         };
-
         assert_eq!(entry.tile_x, 10);
         assert_eq!(entry.tile_y, 20);
         assert_eq!(entry.mip_level, 2);
@@ -399,7 +405,6 @@ mod tests {
     #[test]
     fn test_feedback_stats_default() {
         let stats = FeedbackStats::default();
-
         assert_eq!(stats.entries_processed, 0);
         assert_eq!(stats.unique_tiles, 0);
         assert_eq!(stats.process_time_ms, 0.0);
@@ -408,7 +413,6 @@ mod tests {
 
     #[test]
     fn test_parse_empty_feedback_data() {
-        // Create a minimal feedback buffer for testing parsing logic
         let device = pollster::block_on(async {
             let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
             let adapter = instance
@@ -424,14 +428,44 @@ mod tests {
 
         let buffer = FeedbackBuffer::new(&device, 10).unwrap();
 
-        // Test with empty data
         let empty_data = vec![0u8; 0];
         let tiles = buffer.parse_feedback_data(&empty_data);
         assert!(tiles.is_empty());
 
-        // Test with invalid data (all zeros)
         let zero_data = vec![0u8; std::mem::size_of::<FeedbackEntry>()];
         let tiles = buffer.parse_feedback_data(&zero_data);
-        assert!(tiles.is_empty()); // Should filter out invalid entries
+        assert!(tiles.is_empty());
+    }
+
+    #[test]
+    fn test_parse_feedback_trailing_bytes() {
+        let device = pollster::block_on(async {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions::default())
+                .await
+                .unwrap();
+            let (device, _) = adapter
+                .request_device(&wgpu::DeviceDescriptor::default(), None)
+                .await
+                .unwrap();
+            device
+        });
+
+        let buffer = FeedbackBuffer::new(&device, 4).unwrap();
+        let entry = FeedbackEntry {
+            tile_x: 3,
+            tile_y: 9,
+            mip_level: 1,
+            frame_number: 77,
+        };
+        let mut bytes = bytemuck::bytes_of(&entry).to_vec();
+        bytes.extend_from_slice(&[0xAA, 0xBB]);
+
+        let tiles = buffer.parse_feedback_data(&bytes);
+        assert_eq!(tiles.len(), 1);
+        assert!(tiles
+            .iter()
+            .any(|id| id.x == 3 && id.y == 9 && id.mip_level == 1));
     }
 }

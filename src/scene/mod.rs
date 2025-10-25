@@ -105,6 +105,7 @@ pub struct Scene {
     cloud_shadow_renderer: Option<crate::core::cloud_shadows::CloudShadowRenderer>,
     cloud_shadows_enabled: bool,
     bg3_cloud_shadows: Option<wgpu::BindGroup>,
+    bg4_dummy_cloud_shadows: wgpu::BindGroup, // Dummy bind group for devices with >=6 bind groups
 
     // B8: Realtime Clouds
     cloud_renderer: Option<crate::core::clouds::CloudRenderer>,
@@ -368,11 +369,10 @@ impl SsaoResources {
         });
 
         // Create empty layout for group 0 (and reuse for lower groups when shader expects higher indices)
-        let empty_bgl =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("empty_bind_group_layout"),
-                entries: &[],
-            });
+        let empty_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("empty_bind_group_layout"),
+            entries: &[],
+        });
 
         let blur_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("ssao-blur-pipeline"),
@@ -888,6 +888,31 @@ impl Scene {
             &mosaic_params_ubo,
         );
 
+        // B7: Create dummy cloud shadow texture and bind group for devices with >=6 bind groups
+        // This ensures the pipeline always has valid bind groups even when cloud shadows are disabled
+        let dummy_cloud_texture = g.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("scene.dummy_cloud_shadow"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let dummy_cloud_view =
+            dummy_cloud_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let dummy_cloud_sampler = g.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("scene.dummy_cloud_sampler"),
+            ..Default::default()
+        });
+        let bg4_dummy_cloud_shadows =
+            tp.make_bg_cloud_shadows(&g.device, &dummy_cloud_view, &dummy_cloud_sampler);
+
         // B5: Create a default planar reflection renderer (disabled by default)
         let mut reflection_renderer = crate::core::reflections::PlanarReflectionRenderer::new(
             &g.device,
@@ -960,7 +985,7 @@ impl Scene {
             terrain_enabled: true,
 
             // B5: Planar reflections - initially disabled
-            reflection_renderer: None,
+            reflection_renderer: Some(reflection_renderer),
             reflections_enabled: false,
 
             // B6: Depth of Field - initially disabled
@@ -972,6 +997,7 @@ impl Scene {
             cloud_shadow_renderer: None,
             cloud_shadows_enabled: false,
             bg3_cloud_shadows: None,
+            bg4_dummy_cloud_shadows,
 
             // B8: Realtime Clouds - initially disabled
             cloud_renderer: None,
@@ -1022,11 +1048,13 @@ impl Scene {
 
             // F16: GPU instancing state
             #[cfg(feature = "enable-gpu-instancing")]
-            mesh_instanced_renderer: Some(crate::render::mesh_instanced::MeshInstancedRenderer::new(
-                &g.device,
-                TEXTURE_FORMAT,
-                depth_format,
-            )),
+            mesh_instanced_renderer: Some(
+                crate::render::mesh_instanced::MeshInstancedRenderer::new(
+                    &g.device,
+                    TEXTURE_FORMAT,
+                    depth_format,
+                ),
+            ),
             #[cfg(feature = "enable-gpu-instancing")]
             instanced_batches: Vec::new(),
         })
@@ -1327,20 +1355,23 @@ impl Scene {
                     let view = self.scene.view;
                     let proj = self.scene.proj;
                     for b in &self.instanced_batches {
-                        self.mesh_instanced_renderer.as_ref().unwrap().draw_batch_params(
-                            &mut rp,
-                            &g.queue,
-                            view,
-                            proj,
-                            b.color,
-                            b.light_dir,
-                            b.light_intensity,
-                            &b.vbuf,
-                            &b.ibuf,
-                            &b.instbuf,
-                            b.index_count,
-                            b.instance_count,
-                        );
+                        self.mesh_instanced_renderer
+                            .as_ref()
+                            .unwrap()
+                            .draw_batch_params(
+                                &mut rp,
+                                &g.queue,
+                                view,
+                                proj,
+                                b.color,
+                                b.light_dir,
+                                b.light_intensity,
+                                &b.vbuf,
+                                &b.ibuf,
+                                &b.instbuf,
+                                b.index_count,
+                                b.instance_count,
+                            );
                     }
                 }
             }
@@ -1378,10 +1409,13 @@ impl Scene {
 
                 let max_groups = crate::gpu::ctx().device.limits().max_bind_groups;
                 // B7: Cloud shadows at group 4 when available and supported
-                if max_groups >= 5 {
-                    if let Some(ref cloud_bg) = self.bg3_cloud_shadows {
-                        rp.set_bind_group(4, cloud_bg, &[]);
-                    }
+                if max_groups >= 6 {
+                    // Use actual cloud shadow bind group if available, otherwise use dummy
+                    let cloud_bg = self
+                        .bg3_cloud_shadows
+                        .as_ref()
+                        .unwrap_or(&self.bg4_dummy_cloud_shadows);
+                    rp.set_bind_group(4, cloud_bg, &[]);
                 }
                 // B5: Planar reflections at group 5 when available and supported
                 if max_groups >= 6 {
@@ -1577,16 +1611,17 @@ impl Scene {
                 (&self.normal_view, None)
             };
 
-            let depth_attachment = self.depth_view.as_ref().map(|view| {
-                wgpu::RenderPassDepthStencilAttachment {
-                    view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Discard,
-                    }),
-                    stencil_ops: None,
-                }
-            });
+            let depth_attachment =
+                self.depth_view
+                    .as_ref()
+                    .map(|view| wgpu::RenderPassDepthStencilAttachment {
+                        view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Discard,
+                        }),
+                        stencil_ops: None,
+                    });
 
             // Begin and end a pass that only clears targets to keep textures valid
             {
@@ -1656,7 +1691,9 @@ impl Scene {
                     layout: wgpu::ImageDataLayout {
                         offset: 0,
                         bytes_per_row: Some(std::num::NonZeroU32::new(padded).unwrap().into()),
-                        rows_per_image: Some(std::num::NonZeroU32::new(self.height).unwrap().into()),
+                        rows_per_image: Some(
+                            std::num::NonZeroU32::new(self.height).unwrap().into(),
+                        ),
                     },
                 },
                 wgpu::Extent3d {
@@ -1844,10 +1881,13 @@ impl Scene {
                 rp.set_bind_group(3, &self.bg3_tile, &[]);
                 let max_groups = crate::gpu::ctx().device.limits().max_bind_groups;
                 // B7: Cloud shadows at group 4 when available and supported
-                if max_groups >= 5 {
-                    if let Some(ref cloud_bg) = self.bg3_cloud_shadows {
-                        rp.set_bind_group(4, cloud_bg, &[]);
-                    }
+                if max_groups >= 6 {
+                    // Use actual cloud shadow bind group if available, otherwise use dummy
+                    let cloud_bg = self
+                        .bg3_cloud_shadows
+                        .as_ref()
+                        .unwrap_or(&self.bg4_dummy_cloud_shadows);
+                    rp.set_bind_group(4, cloud_bg, &[]);
                 }
                 // B5: Planar reflections at group 5 when available and supported
                 if max_groups >= 6 {
@@ -5444,12 +5484,14 @@ impl Scene {
     // F16: GPU Instanced Meshes API
     // -----------------------------
     #[cfg(feature = "enable-gpu-instancing")]
-    #[pyo3(text_signature = "($self, positions, indices, transforms, normals=None, color=(0.85,0.85,0.9,1.0), light_dir=(0.3,0.7,0.2), light_intensity=1.2)")]
+    #[pyo3(
+        text_signature = "($self, positions, indices, transforms, normals=None, color=(0.85,0.85,0.9,1.0), light_dir=(0.3,0.7,0.2), light_intensity=1.2)"
+    )]
     pub fn add_instanced_mesh(
         &mut self,
-        positions: PyReadonlyArray2<'_, f32>,   // (Nv,3)
-        indices: PyReadonlyArray2<'_, u32>,     // (Nt,3)
-        transforms: PyReadonlyArray2<'_, f32>,  // (Ni,16) row-major
+        positions: PyReadonlyArray2<'_, f32>,       // (Nv,3)
+        indices: PyReadonlyArray2<'_, u32>,         // (Nt,3)
+        transforms: PyReadonlyArray2<'_, f32>,      // (Ni,16) row-major
         normals: Option<PyReadonlyArray2<'_, f32>>, // (Nv,3) optional
         color: Option<(f32, f32, f32, f32)>,
         light_dir: Option<(f32, f32, f32)>,
@@ -5493,7 +5535,10 @@ impl Scene {
             } else {
                 [0.0, 0.0, 1.0]
             };
-            verts.push(Vpn { position: p, normal: n });
+            verts.push(Vpn {
+                position: p,
+                normal: n,
+            });
         }
 
         // Upload vertex/index buffers
@@ -5527,10 +5572,8 @@ impl Scene {
         for i in 0..ni {
             let r = trs.row(i);
             let cm = [
-                r[0], r[4], r[8], r[12],
-                r[1], r[5], r[9], r[13],
-                r[2], r[6], r[10], r[14],
-                r[3], r[7], r[11], r[15],
+                r[0], r[4], r[8], r[12], r[1], r[5], r[9], r[13], r[2], r[6], r[10], r[14], r[3],
+                r[7], r[11], r[15],
             ];
             packed.extend_from_slice(&cm);
         }
@@ -5540,7 +5583,8 @@ impl Scene {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        g.queue.write_buffer(&instbuf, 0, bytemuck::cast_slice(&packed));
+        g.queue
+            .write_buffer(&instbuf, 0, bytemuck::cast_slice(&packed));
 
         // Ensure renderer exists (defensive)
         if self.mesh_instanced_renderer.is_none() {
@@ -5549,13 +5593,12 @@ impl Scene {
             } else {
                 None
             };
-            self.mesh_instanced_renderer = Some(
-                crate::render::mesh_instanced::MeshInstancedRenderer::new(
+            self.mesh_instanced_renderer =
+                Some(crate::render::mesh_instanced::MeshInstancedRenderer::new(
                     &g.device,
                     TEXTURE_FORMAT,
                     depth_format,
-                ),
-            );
+                ));
         }
 
         let batch = InstancedBatch {
@@ -5567,7 +5610,9 @@ impl Scene {
             color: color
                 .map(|c| [c.0, c.1, c.2, c.3])
                 .unwrap_or([0.85, 0.85, 0.9, 1.0]),
-            light_dir: light_dir.map(|d| [d.0, d.1, d.2]).unwrap_or([0.3, 0.7, 0.2]),
+            light_dir: light_dir
+                .map(|d| [d.0, d.1, d.2])
+                .unwrap_or([0.3, 0.7, 0.2]),
             light_intensity: light_intensity.unwrap_or(1.2).max(0.0),
         };
         self.instanced_batches.push(batch);
@@ -5605,10 +5650,8 @@ impl Scene {
         for i in 0..ni {
             let r = trs.row(i);
             packed.extend_from_slice(&[
-                r[0], r[4], r[8], r[12],
-                r[1], r[5], r[9], r[13],
-                r[2], r[6], r[10], r[14],
-                r[3], r[7], r[11], r[15],
+                r[0], r[4], r[8], r[12], r[1], r[5], r[9], r[13], r[2], r[6], r[10], r[14], r[3],
+                r[7], r[11], r[15],
             ]);
         }
         let b = &mut self.instanced_batches[batch_index];
@@ -5619,7 +5662,8 @@ impl Scene {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        g.queue.write_buffer(&b.instbuf, 0, bytemuck::cast_slice(&packed));
+        g.queue
+            .write_buffer(&b.instbuf, 0, bytemuck::cast_slice(&packed));
         b.instance_count = ni as u32;
         Ok(())
     }
@@ -5676,11 +5720,18 @@ impl Scene {
             rp.set_bind_group(0, &self.bg0_globals, &[]);
             rp.set_bind_group(1, &self.bg1_height, &[]);
             rp.set_bind_group(2, &self.bg2_lut, &[]);
-            if let Some(ref cloud_bg) = self.bg3_cloud_shadows {
-                rp.set_bind_group(3, cloud_bg, &[]);
-            }
-            if let Some(reflection_bg) = renderer.bind_group() {
-                rp.set_bind_group(4, reflection_bg, &[]);
+            rp.set_bind_group(3, &self.bg3_tile, &[]);
+            let max_groups = crate::gpu::ctx().device.limits().max_bind_groups;
+            if max_groups >= 6 {
+                // Use actual cloud shadow bind group if available, otherwise use dummy
+                let cloud_bg = self
+                    .bg3_cloud_shadows
+                    .as_ref()
+                    .unwrap_or(&self.bg4_dummy_cloud_shadows);
+                rp.set_bind_group(4, cloud_bg, &[]);
+                if let Some(reflection_bg) = renderer.bind_group() {
+                    rp.set_bind_group(5, reflection_bg, &[]);
+                }
             }
             rp.set_vertex_buffer(0, self.vbuf.slice(..));
             rp.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint32);

@@ -1,6 +1,6 @@
 // T3.3 Terrain shader — compatible with Rust pipeline bind group layouts.
 // Layout: 0=Globals UBO, 1=height R32Float + NonFiltering sampler, 2=LUT RGBA8 + Filtering sampler.
-// This version adds a deterministic analytic height fallback to avoid uniform output with a 1×1 dummy height.
+// This version adds a deterministic analytic height fallback to avoid uniform output with a 1x1 dummy height.
 
 // ---------- Globals UBO (176 bytes total, must match Rust) ----------
 // std140-compatible layout: 176 bytes total
@@ -105,10 +105,15 @@ fn sample_height_with_fallback(
   uv: vec2<f32>,
   uv_offset: vec2<f32>,
   xz: vec2<f32>,
-  spacing: f32
+  spacing: f32,
+  use_fallback: bool
 ) -> f32 {
   let sample_uv = clamp(uv + uv_offset, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
   let h_tex = textureSampleLevel(height_tex, height_samp, sample_uv, 0.0).r;
+  if (!use_fallback) {
+    return h_tex;
+  }
+  // Synthesize variation only when the height texture is a sentinel tile.
   let offset_xz = vec2<f32>(xz.x + uv_offset.x * spacing, xz.y + uv_offset.y * spacing);
   let h_ana = analytic_height(offset_xz.x, offset_xz.y);
   return h_tex + h_ana;
@@ -156,17 +161,13 @@ fn apply_planar_reflection(
   if kernel > 1.0 {
     let texel = reflection_uniforms.max_blur_radius / max(reflection_uniforms.reflection_resolution, 1.0);
     let offset = texel * max(kernel * 0.5, 1.0);
-    let offsets = array<vec2<f32>, 4>(
-      vec2<f32>(offset, 0.0),
-      vec2<f32>(-offset, 0.0),
-      vec2<f32>(0.0, offset),
-      vec2<f32>(0.0, -offset)
-    );
+
+    // Unrolled loop to avoid non-constant array indexing
     var accum = reflection;
-    for (var i: u32 = 0u; i < 4u; i = i + 1u) {
-      let sample_uv = clamp(uv + offsets[i], vec2<f32>(0.0), vec2<f32>(1.0));
-      accum = accum + textureSample(reflection_texture, reflection_sampler, sample_uv);
-    }
+    accum = accum + textureSample(reflection_texture, reflection_sampler, clamp(uv + vec2<f32>(offset, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
+    accum = accum + textureSample(reflection_texture, reflection_sampler, clamp(uv + vec2<f32>(-offset, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
+    accum = accum + textureSample(reflection_texture, reflection_sampler, clamp(uv + vec2<f32>(0.0, offset), vec2<f32>(0.0), vec2<f32>(1.0)));
+    accum = accum + textureSample(reflection_texture, reflection_sampler, clamp(uv + vec2<f32>(0.0, -offset), vec2<f32>(0.0), vec2<f32>(1.0)));
     reflection = accum / 5.0;
   }
 
@@ -213,16 +214,19 @@ fn vs_main(in: VsIn) -> VsOut {
   let sy = f32(TileSlotU.slot / tiles_x);
   let base = vec2<f32>(sx, sy) * inv;
   let uv_tile = clamp(in.uv * inv + base, vec2<f32>(0.0), vec2<f32>(1.0));
+
+  let tex_dims_u32 = textureDimensions(height_tex, 0);
+  let use_fallback = tex_dims_u32.x <= 1u && tex_dims_u32.y <= 1u;
   // Sample height with a NonFiltering sampler; level 0 to avoid filtering.
   var h_tex = textureSampleLevel(height_tex, height_samp, uv_tile, 0.0).r;
 
-  // E2: Geomorphing — blend between a coarse (quantized) sample and fine sample
+  // E2: Geomorphing – blend between a coarse (quantized) sample and fine sample
   let morph = clamp(globals._pad_tail.x, 0.0, 1.0);
   let coarse_factor = max(globals._pad_tail.y, 1.0);
   if (morph < 1.0) {
     // Quantize UVs to emulate a coarser grid without mips
-    let tex_dims = vec2<f32>(textureDimensions(height_tex, 0));
-    let step = vec2<f32>(coarse_factor) / max(tex_dims, vec2<f32>(1.0));
+    let tex_dims = vec2<f32>(max(f32(tex_dims_u32.x), 1.0), max(f32(tex_dims_u32.y), 1.0));
+    let step = vec2<f32>(coarse_factor) / tex_dims;
     // Guard against zero step by clamping denominator above
     let uv_q = (floor(uv_tile / step) + 0.5) * step;
     let uv_qc = clamp(uv_q, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
@@ -230,10 +234,12 @@ fn vs_main(in: VsIn) -> VsOut {
     h_tex = mix(h_coarse, h_tex, morph);
   }
 
-  // Deterministic analytic fallback guarantees variation even if height_tex is 1x1.
-  let h_ana = analytic_height(in.pos_xy.x, in.pos_xy.y);
+  var h_base = h_tex;
+  if (use_fallback) {
+    // Height atlas is a 1x1 sentinel; add deterministic variation to avoid flat shading.
+    h_base = h_base + analytic_height(in.pos_xy.x, in.pos_xy.y);
+  }
 
-  let h_base = h_tex + h_ana;
 
   // E2: Skirts — apply only to the skirt ring (uv outside [0,1]) and honor per-edge mask
   let skirt_depth = max(globals._pad_tail.z, 0.0);
@@ -276,13 +282,15 @@ fn fs_main(in: VsOut) -> FsOut {
   let sy = f32(TileSlotU.slot / tiles_x);
   let base = vec2<f32>(sx, sy) * inv;
   let uv_tile = clamp(uv * inv + base, vec2<f32>(0.0), vec2<f32>(1.0));
-  let tex_dims = vec2<f32>(textureDimensions(height_tex, 0));
+  let tex_dims_u32 = textureDimensions(height_tex, 0);
+  let use_fallback = tex_dims_u32.x <= 1u && tex_dims_u32.y <= 1u;
+  let tex_dims = vec2<f32>(max(f32(tex_dims_u32.x), 1.0), max(f32(tex_dims_u32.y), 1.0));
   let texel = vec2<f32>(1.0) / tex_dims;
 
-  let h_left = sample_height_with_fallback(uv_tile, vec2<f32>(-texel.x, 0.0), in.xz, spacing);
-  let h_right = sample_height_with_fallback(uv_tile, vec2<f32>(texel.x, 0.0), in.xz, spacing);
-  let h_down = sample_height_with_fallback(uv_tile, vec2<f32>(0.0, -texel.y), in.xz, spacing);
-  let h_up = sample_height_with_fallback(uv_tile, vec2<f32>(0.0, texel.y), in.xz, spacing);
+  let h_left = sample_height_with_fallback(uv_tile, vec2<f32>(-texel.x, 0.0), in.xz, spacing, use_fallback);
+  let h_right = sample_height_with_fallback(uv_tile, vec2<f32>(texel.x, 0.0), in.xz, spacing, use_fallback);
+  let h_down = sample_height_with_fallback(uv_tile, vec2<f32>(0.0, -texel.y), in.xz, spacing, use_fallback);
+  let h_up = sample_height_with_fallback(uv_tile, vec2<f32>(0.0, texel.y), in.xz, spacing, use_fallback);
 
   let spacing_step = max(spacing, 1e-5);
   let grad_x = ((h_right - h_left) * exaggeration) / (2.0 * spacing_step);

@@ -6,6 +6,7 @@ use once_cell::sync::OnceCell;
 use std::sync::Arc;
 
 pub struct GpuContext {
+    pub instance: Arc<wgpu::Instance>,
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
     pub adapter: Arc<wgpu::Adapter>,
@@ -17,24 +18,38 @@ fn backends_from_env() -> wgpu::Backends {
     use std::env;
     if let Ok(s) = env::var("WGPU_BACKENDS").or_else(|_| env::var("WGPU_BACKEND")) {
         let s_l = s.to_lowercase();
-        if s_l.contains("metal") { return wgpu::Backends::METAL; }
-        if s_l.contains("vulkan") { return wgpu::Backends::VULKAN; }
-        if s_l.contains("dx12") { return wgpu::Backends::DX12; }
-        if s_l.contains("gl") { return wgpu::Backends::GL; }
-        if s_l.contains("webgpu") { return wgpu::Backends::BROWSER_WEBGPU; }
+        if s_l.contains("metal") {
+            return wgpu::Backends::METAL;
+        }
+        if s_l.contains("vulkan") {
+            return wgpu::Backends::VULKAN;
+        }
+        if s_l.contains("dx12") {
+            return wgpu::Backends::DX12;
+        }
+        if s_l.contains("gl") {
+            return wgpu::Backends::GL;
+        }
+        if s_l.contains("webgpu") {
+            return wgpu::Backends::BROWSER_WEBGPU;
+        }
     }
     #[cfg(target_os = "macos")]
-    { wgpu::Backends::METAL }
+    {
+        wgpu::Backends::METAL
+    }
     #[cfg(not(target_os = "macos"))]
-    { wgpu::Backends::all() }
+    {
+        wgpu::Backends::all()
+    }
 }
 
 pub fn ctx() -> &'static GpuContext {
     CTX.get_or_init(|| {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = Arc::new(wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: backends_from_env(),
             ..Default::default()
-        });
+        }));
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             // LowPower tends to resolve faster and avoids eGPU/discrete probing on macOS
             power_preference: wgpu::PowerPreference::LowPower,
@@ -62,6 +77,7 @@ pub fn ctx() -> &'static GpuContext {
         .expect("request_device failed");
 
         GpuContext {
+            instance,
             device: Arc::new(device),
             queue: Arc::new(queue),
             adapter: Arc::new(adapter),

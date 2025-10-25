@@ -19,12 +19,7 @@ except Exception as exc:  # pragma: no cover
 
 
 CUSTOM_HEX_COLORS: Sequence[str] = (
-    "#AABD8A",
-    "#E6CE99",
-    "#D4B388",
-    "#C0A181",
-    "#AC8D75",
-    "#9B7B62",
+"#e7d8a2", "#c5a06e", "#995f57", "#4a3c37"
 )
 
 
@@ -53,8 +48,59 @@ def load_dem(src_path: Path) -> tuple[np.ndarray, tuple[float, float]]:
         return data, (sx, sy)
 
 
-def _resolve_palette_argument(colormap: str) -> Union[str, Sequence[str]]:
-    return CUSTOM_HEX_COLORS if colormap.lower() == "custom" else colormap
+def _resolve_palette_argument(colormap: str, interpolate: bool = False, size: int = 256) -> Union[str, Sequence[str]]:
+    """Resolve palette argument from colormap name.
+
+    Args:
+        colormap: Name of colormap ("custom" or built-in name)
+        interpolate: If True, interpolate custom palette to create smooth gradients
+        size: Number of colors when interpolating
+
+    Returns:
+        Either colormap name (str) or list of hex colors
+    """
+    if colormap.lower() != "custom":
+        return colormap
+
+    # Use custom palette
+    base_colors = CUSTOM_HEX_COLORS
+
+    if not interpolate or len(base_colors) < 2:
+        # Return discrete colors as-is
+        return base_colors
+
+    # Interpolate colors to create smooth gradients
+    try:
+        # Convert hex to RGB
+        rgb_colors = []
+        for hex_color in base_colors:
+            hex_color = hex_color.lstrip('#')
+            r, g, b = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+            rgb_colors.append((r, g, b))
+
+        # Interpolate in RGB space
+        num_steps = int(size)
+        indices = np.linspace(0, len(rgb_colors) - 1, num_steps)
+
+        interpolated = []
+        for idx in indices:
+            i0 = int(np.floor(idx))
+            i1 = min(i0 + 1, len(rgb_colors) - 1)
+            t = idx - i0
+
+            # Linear interpolation
+            r = rgb_colors[i0][0] * (1 - t) + rgb_colors[i1][0] * t
+            g = rgb_colors[i0][1] * (1 - t) + rgb_colors[i1][1] * t
+            b = rgb_colors[i0][2] * (1 - t) + rgb_colors[i1][2] * t
+
+            # Convert back to hex
+            hex_val = f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+            interpolated.append(hex_val)
+
+        return interpolated
+    except Exception:
+        # Fallback to discrete colors
+        return base_colors
 
 
 def main() -> int:
@@ -66,6 +112,10 @@ def main() -> int:
     # Color/palette parameters
     parser.add_argument("--colormap", type=str, default="custom", help="Colormap name or preset")
     parser.add_argument("--invert-palette", action="store_true", help="Invert palette direction")
+    parser.add_argument("--palette-interpolate", action="store_true", help="Interpolate palette colors (smooth gradients)")
+    parser.add_argument("--no-palette-interpolate", dest="palette_interpolate", action="store_false", help="Use discrete palette colors (no interpolation)")
+    parser.set_defaults(palette_interpolate=False)
+    parser.add_argument("--palette-size", type=int, default=256, help="Number of colors when interpolating palette")
     parser.add_argument("--contrast-pct", type=float, default=1.0, help="Percentile clip for normalization")
     parser.add_argument("--gamma", type=float, default=1.1, help="Gamma correction")
     parser.add_argument("--equalize", action="store_true", default=True, help="Histogram equalization")
@@ -95,7 +145,11 @@ def main() -> int:
     parser.add_argument("--camera-theta", type=float, default=90.0, help="Camera polar angle (degrees, 90=overhead)")
     
     # Water parameters
-    parser.add_argument("--water-level", type=float, default=None, help="Water elevation")
+    water_group = parser.add_mutually_exclusive_group()
+    water_group.add_argument("--water", dest="water_enabled", action="store_true", help="Enable water detection")
+    water_group.add_argument("--no-water", dest="water_enabled", action="store_false", help="Disable water detection")
+    parser.set_defaults(water_enabled=True)
+    parser.add_argument("--water-level", type=float, default=None, help="Water elevation (None = use percentile)")
     parser.add_argument("--water-level-percentile", type=float, default=30.0, help="Water level percentile")
     parser.add_argument("--water-method", type=str, default="flat", help="Water detection method")
     parser.add_argument("--water-smooth", type=int, default=1, help="Water smoothing iterations")
@@ -125,12 +179,25 @@ def main() -> int:
     # Determine shadow toggle
     shadow_enabled = bool(args.shadow_enabled)
 
-    # Convert water color tuples if provided
-    water_color = tuple(args.water_color) if args.water_color else None
-    water_shallow = tuple(args.water_shallow) if args.water_shallow else None
-    water_deep = tuple(args.water_deep) if args.water_deep else None
+    # Determine water toggle and prepare water parameters
+    water_enabled = bool(args.water_enabled)
 
-    palette = _resolve_palette_argument(args.colormap)
+    # Set default water colors if enabled and not explicitly provided
+    if water_enabled:
+        water_color = tuple(args.water_color) if args.water_color else None
+        water_shallow = tuple(args.water_shallow) if args.water_shallow else (0.4, 0.7, 0.9)  # Light blue
+        water_deep = tuple(args.water_deep) if args.water_deep else (0.1, 0.3, 0.6)  # Deep blue
+    else:
+        water_color = None
+        water_shallow = None
+        water_deep = None
+
+    # Resolve palette with interpolation settings
+    palette = _resolve_palette_argument(
+        args.colormap,
+        interpolate=args.palette_interpolate,
+        size=args.palette_size
+    )
 
     # Call render_raster with all parameters
     rgba = f3d.render_raster(
@@ -153,21 +220,21 @@ def main() -> int:
         camera_distance=args.camera_distance,
         camera_phi=args.camera_phi,
         camera_theta=args.camera_theta,
-        water_level=args.water_level,
-        water_level_percentile=args.water_level_percentile,
-        water_method=args.water_method,
-        water_smooth=args.water_smooth,
-        water_color=water_color,
-        water_shallow=water_shallow,
-        water_deep=water_deep,
-        water_depth_gamma=args.water_depth_gamma,
-        water_depth_max=args.water_depth_max,
-        water_keep_components=args.water_keep_components,
-        water_min_area_pct=args.water_min_area_pct,
-        water_morph_iter=args.water_morph_iter,
-        water_max_slope_deg=args.water_max_slope_deg,
-        water_min_depth=args.water_min_depth,
-        water_debug=args.water_debug,
+        water_level=args.water_level if water_enabled else None,
+        water_level_percentile=args.water_level_percentile if water_enabled else None,
+        water_method=args.water_method if water_enabled else None,
+        water_smooth=args.water_smooth if water_enabled else 0,
+        water_color=water_color if water_enabled else None,
+        water_shallow=water_shallow if water_enabled else None,
+        water_deep=water_deep if water_enabled else None,
+        water_depth_gamma=args.water_depth_gamma if water_enabled else 1.0,
+        water_depth_max=args.water_depth_max if water_enabled else None,
+        water_keep_components=args.water_keep_components if water_enabled else 0,
+        water_min_area_pct=args.water_min_area_pct if water_enabled else 0.0,
+        water_morph_iter=args.water_morph_iter if water_enabled else 0,
+        water_max_slope_deg=args.water_max_slope_deg if water_enabled else 90.0,
+        water_min_depth=args.water_min_depth if water_enabled else 0.0,
+        water_debug=args.water_debug if water_enabled else False,
     )
 
     # Save output

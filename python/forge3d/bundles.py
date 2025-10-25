@@ -10,12 +10,32 @@ from typing import Optional, List, Dict, Tuple, Any, Union
 from enum import Enum
 import warnings
 
-try:
-    import forge3d._core as _core
-    HAS_BUNDLES_SUPPORT = True
-except (ImportError, AttributeError):
-    HAS_BUNDLES_SUPPORT = False
+from ._native import refresh_native_module
 
+try:
+    from . import _forge3d as _native  # type: ignore[attr-defined]
+except (ImportError, AttributeError):
+    _native = None
+
+_REQUIRED_NATIVE_SYMBOLS = ("render_bundle_compile", "render_bundle_execute")
+
+
+def _detect_native_bundle_support(module: object | None) -> bool:
+    if module is None:
+        return False
+    return any(hasattr(module, symbol) for symbol in _REQUIRED_NATIVE_SYMBOLS)
+
+HAS_BUNDLES_SUPPORT = _detect_native_bundle_support(_native)
+
+
+def refresh_bundles_support(module: object | None = None) -> bool:
+    """Recompute bundle support flag (used for tests and dynamic reloads)."""
+    global HAS_BUNDLES_SUPPORT, _native
+    if module is None:
+        module = refresh_native_module()
+    _native = module
+    HAS_BUNDLES_SUPPORT = _detect_native_bundle_support(_native)
+    return HAS_BUNDLES_SUPPORT
 
 def has_bundles_support() -> bool:
     """Check if render bundle functionality is available."""
