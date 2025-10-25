@@ -15,11 +15,13 @@ from pathlib import Path as _Path
 import importlib as _importlib
 import importlib.util as _util
 import os as _os
-import site as _site
 
-# Try to import the real rasterio by temporarily removing this repo's python/
-# directory from sys.path so the resolver can see site-packages first.
+# Store the directory containing this stub module
+_stub_dir = _os.path.dirname(__file__)
+
+# Try to find and import the real rasterio by temporarily removing stub from path
 _real_rasterio = None
+_original_path = _sys.path.copy()
 try:
     # First, try a straightforward import by deprioritizing the stub path
     _stub_root = _Path(__file__).resolve().parents[1]  # .../forge3d/python
@@ -74,6 +76,7 @@ finally:
     _sys.path = _original_path
 >>>>>>> 136f57c (PBR + IBL terrain with Triplanar + POM pipeline production-ready)
 
+# If real rasterio not found, provide a helpful error message
 if _real_rasterio is None:
     # Try to locate site-packages rasterio manually and load it in-place
     _candidates = []

@@ -14,10 +14,9 @@ use camera_controller::{CameraController, CameraMode};
 pub use image_viewer_stub::run_image_viewer;
 pub use textured_mesh::run_mesh_viewer_with_texture;
 use winit::{
+    dpi::PhysicalSize,
     event::*,
     event_loop::EventLoop,
-    window::{Window, WindowBuilder},
-    dpi::PhysicalSize,
     keyboard::{KeyCode, PhysicalKey},
 };
 use wgpu::{Instance, Surface, Device, Queue, SurfaceConfiguration, Buffer, RenderPipeline, BindGroupLayout, BindGroup, TextureView, Texture};
@@ -227,6 +226,10 @@ impl FpsCounter {
 }
 
 impl Viewer {
+    pub async fn new(
+        window: Arc<Window>,
+        config: ViewerConfig,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
     pub async fn new(
         window: Arc<Window>,
         config: ViewerConfig,
@@ -499,6 +502,7 @@ impl Viewer {
         match event {
             WindowEvent::KeyboardInput {
                 event: key_event, ..
+                event: key_event, ..
             } => {
                 if let PhysicalKey::Code(keycode) = key_event.physical_key {
                     let pressed = key_event.state == ElementState::Pressed;
@@ -536,6 +540,8 @@ impl Viewer {
                 true
             }
             WindowEvent::CursorMoved { position, .. } => {
+                self.camera
+                    .handle_mouse_move(position.x as f32, position.y as f32);
                 self.camera
                     .handle_mouse_move(position.x as f32, position.y as f32);
                 true
@@ -710,6 +716,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
             .with_title(&config.title)
             .with_inner_size(PhysicalSize::new(config.width, config.height))
             .build(&event_loop)?,
+            .build(&event_loop)?,
     );
 
     println!("forge3d Interactive Viewer");
@@ -759,8 +766,12 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                             }
                             WindowEvent::KeyboardInput {
                                 event: key_event, ..
+                                event: key_event, ..
                             } => {
                                 if key_event.state == ElementState::Pressed {
+                                    if let PhysicalKey::Code(KeyCode::Escape) =
+                                        key_event.physical_key
+                                    {
                                     if let PhysicalKey::Code(KeyCode::Escape) =
                                         key_event.physical_key
                                     {

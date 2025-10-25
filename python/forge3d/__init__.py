@@ -38,6 +38,17 @@ from .terrain_params import (
     TerrainRenderParams as TerrainRenderParamsConfig,
     TriplanarSettings,
 )
+from .terrain_params import (
+    ClampSettings,
+    IblSettings,
+    LightSettings,
+    LodSettings,
+    PomSettings,
+    SamplingSettings,
+    ShadowSettings,
+    TerrainRenderParams as TerrainRenderParamsConfig,
+    TriplanarSettings,
+)
 
 # 3D Terrain Viewer
 from .terrain_viewer import open_terrain_viewer_3d
