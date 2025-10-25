@@ -263,6 +263,7 @@ pub mod geometry;
 pub mod gpu;
 pub mod grid;
 mod ibl_wrapper;
+pub mod lighting; // P0: Production-ready lighting stack (lights, BRDFs, shadows, IBL)
 pub mod import; // Importers: OSM buildings, etc.
 pub mod io; // IO: OBJ/PLY/glTF readers/writers
 pub mod loaders;
