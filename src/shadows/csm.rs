@@ -1,7 +1,8 @@
 // src/shadows/csm.rs
 // Cascaded Shadow Maps implementation with 3-4 cascades and PCF/EVSM filtering
-// RELEVANT FILES: shaders/csm.wgsl, python/forge3d/lighting.py, tests/test_b4_csm.py
+// RELEVANT FILES: shaders/shadows.wgsl, python/forge3d/lighting.py, tests/test_b4_csm.py
 
+use crate::lighting::types::ShadowTechnique;
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3, Vec4};
 use wgpu::{
@@ -77,8 +78,14 @@ pub struct CsmUniforms {
     pub enable_unclipped_depth: u32,
     /// Depth clipping distance factor for cascade adjustment
     pub depth_clip_factor: f32,
-    /// Padding for alignment
-    pub _padding: f32,
+    /// Active shadow technique identifier
+    pub technique: u32,
+    /// Technique feature flags (bitmask)
+    pub technique_flags: u32,
+    /// Primary technique parameters (pcss radius/filter, moment bias, light size)
+    pub technique_params: [f32; 4],
+    /// Reserved for future expansions (e.g., MSM tuning)
+    pub technique_reserved: [f32; 4],
 }
 
 impl Default for CsmUniforms {
@@ -104,7 +111,10 @@ impl Default for CsmUniforms {
             peter_panning_offset: 0.001,
             enable_unclipped_depth: 0, // Disabled by default, enabled when supported
             depth_clip_factor: 1.0,    // Default factor for depth clipping
-            _padding: 0.0,
+            technique: ShadowTechnique::PCF.as_u32(),
+            technique_flags: 0,
+            technique_params: [0.03, 0.06, 0.0005, 0.25],
+            technique_reserved: [0.0; 4],
         }
     }
 }
@@ -437,9 +447,49 @@ impl CsmRenderer {
         })
     }
 
+    /// Get optional view into the EVSM/VSM moment texture array
+    pub fn moment_texture_view(&self) -> Option<TextureView> {
+        self.evsm_maps.as_ref().map(|texture| {
+            texture.create_view(&TextureViewDescriptor {
+                label: Some("csm_moment_texture_view"),
+                format: Some(TextureFormat::Rgba32Float),
+                dimension: Some(TextureViewDimension::D2Array),
+                aspect: wgpu::TextureAspect::All,
+                base_mip_level: 0,
+                mip_level_count: Some(1),
+                base_array_layer: 0,
+                array_layer_count: Some(self.config.cascade_count),
+            })
+        })
+    }
+
+    /// Calculate total GPU memory used by the shadow resources
+    pub fn total_memory_bytes(&self) -> u64 {
+        let depth_bytes = (self.config.shadow_map_size as u64)
+            * (self.config.shadow_map_size as u64)
+            * (self.config.cascade_count as u64)
+            * 4;
+
+        let moment_bytes = if self.evsm_maps.is_some() {
+            (self.config.shadow_map_size as u64)
+                * (self.config.shadow_map_size as u64)
+                * (self.config.cascade_count as u64)
+                * 16
+        } else {
+            0
+        };
+
+        depth_bytes + moment_bytes
+    }
+
+    /// Helper to expose current shadow map resolution
+    pub fn shadow_map_resolution(&self) -> u32 {
+        self.config.shadow_map_size
+    }
+
     /// Get WGSL shader source for CSM
     pub fn shader_source() -> &'static str {
-        include_str!("../../shaders/csm.wgsl")
+        include_str!("../../shaders/shadows.wgsl")
     }
 
     /// Enable/disable debug visualization

@@ -41,6 +41,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    user/vector_picking_oit
    vector_graphics
    terrain_rendering
+   rendering_options
    async_operations
    misc_topics
 
@@ -75,6 +76,12 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    :caption: CI & Testing:
 
    ci/notebook_integration
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Troubleshooting:
+
+   troubleshooting_visuals
 
 Overview
 --------

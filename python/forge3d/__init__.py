@@ -321,7 +321,13 @@ from pathlib import Path
 import types as _types
 import sys
 import weakref
-from typing import Union, Tuple
+from typing import Any, Mapping, Optional, Sequence, Union, Tuple
+
+from .config import (
+    RendererConfig,
+    load_renderer_config as _load_renderer_config,
+    split_renderer_overrides as _split_renderer_overrides,
+)
 
 from .path_tracing import PathTracer, make_camera
 from .render import render_raster, render_polygons, render_object, render_overlay, render_raytrace_mesh
@@ -374,20 +380,54 @@ _SUPPORTED_MSAA = [1, 2, 4, 8]  # Supported MSAA sample counts
 class Renderer:
     """Basic renderer for triangle rendering and terrain."""
 
-    def __init__(self, width: int, height: int):
-        self.width = width
-        self.height = height
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        *,
+        config: RendererConfig | Mapping[str, Any] | str | Path | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self.width = int(width)
+        self.height = int(height)
+        overrides, remaining = _split_renderer_overrides(dict(kwargs))
+        if remaining:
+            unknown = ", ".join(sorted(str(k) for k in remaining))
+            raise TypeError(f"Unexpected renderer keyword arguments: {unknown}")
+        self._config = _load_renderer_config(config, overrides)
         self._heightmap = None
         self._spacing = (1.0, 1.0)
         self._exaggeration = 1.0
         self._colormap = "viridis"
         self._sun_direction = (0.0, 1.0, 0.0)
+        self._lights: list[dict[str, Any]] = []
         self._exposure = 1.0
         self._height_range = (0.0, 1.0)
+        self._shading: dict[str, Any] = {}
+        self._brdf_override: str | None = None
+        self._apply_config()
 
     def info(self) -> str:
         """Return renderer information."""
         return f"Renderer({self.width}x{self.height}, fallback=True)"
+
+    def get_config(self) -> dict:
+        """Return a deep copy of the active renderer configuration."""
+        return self._config.copy().to_dict()
+
+    def set_lights(self, lights: Sequence[Mapping[str, Any]] | Mapping[str, Any]) -> None:
+        """Override the active light list."""
+        payload = [lights] if isinstance(lights, Mapping) else list(lights)
+        normalized: list[Mapping[str, Any]] = []
+        for item in payload:
+            if hasattr(item, "to_dict"):
+                normalized.append(item.to_dict())  # type: ignore[arg-type]
+            elif isinstance(item, Mapping):
+                normalized.append(item)
+            else:
+                raise TypeError("set_lights expects mapping objects or LightConfig instances")
+        self._config = _load_renderer_config(self._config, {"lights": normalized})
+        self._apply_config()
 
     def render_triangle_rgba(self) -> np.ndarray:
         """Render a triangle to RGBA array."""
@@ -424,6 +464,24 @@ class Renderer:
                     img[y, x] = [bg_r, bg_g, 16, 255]
 
         return img
+
+    def _apply_config(self) -> None:
+        """Synchronize cached lighting state from the current renderer config."""
+        self._exposure = float(self._config.lighting.exposure)
+        self._lights = [light.to_dict() for light in self._config.lighting.lights]
+        primary = None
+        for light in self._config.lighting.lights:
+            if light.type == "directional" and light.direction is not None:
+                primary = light
+                break
+        if primary is None and self._config.lighting.lights:
+            candidate = self._config.lighting.lights[0]
+            if candidate.direction is not None:
+                primary = candidate
+        if primary is not None and primary.direction is not None:
+            self._sun_direction = tuple(float(c) for c in primary.direction)
+        self._shading = self._config.shading.to_dict()
+        self._brdf_override = self._config.brdf_override
 
     def render_triangle_png(self, path: Union[str, Path]) -> None:
         """Render a triangle to PNG file."""
@@ -1302,6 +1360,7 @@ except Exception:
 __all__ = [
     # Basic rendering
     "Renderer",
+    "RendererConfig",
     "render_triangle_rgba",
     "render_triangle_png",
     "numpy_to_png",

@@ -1,5 +1,9 @@
+# python/forge3d/__init__.pyi
+# Type stubs for forge3d public Python API and fallbacks
+# Exists to mirror runtime signatures for IDEs and keep tooling aligned
+# RELEVANT FILES: python/forge3d/__init__.py, python/forge3d/config.py, src/render/params.rs, examples/terrain_demo.py
 from __future__ import annotations
-from typing import Iterable, Tuple, Optional, Sequence, Any, overload, Union, Dict, Literal
+from typing import Iterable, Tuple, Optional, Sequence, Any, overload, Union, Dict, Literal, Mapping
 import os
 import numpy as np
 from . import geometry
@@ -19,11 +23,41 @@ PathLikeStr = os.PathLike[str] | str
 
 __version__: str
 
+class RendererConfig:
+    lighting: Dict[str, Any]
+    shading: Dict[str, Any]
+    shadows: Dict[str, Any]
+    gi: Dict[str, Any]
+    atmosphere: Dict[str, Any]
+    brdf_override: Optional[str]
+    def __init__(
+        self,
+        *,
+        lighting: Dict[str, Any] | None = ...,
+        shading: Dict[str, Any] | None = ...,
+        shadows: Dict[str, Any] | None = ...,
+        gi: Dict[str, Any] | None = ...,
+        atmosphere: Dict[str, Any] | None = ...,
+        brdf_override: Optional[str] = ...,
+    ) -> None: ...
+    def to_dict(self) -> Dict[str, Any]: ...
+    def copy(self) -> RendererConfig: ...
+    def validate(self) -> None: ...
+
 class Renderer:
-    def __init__(self, width: int, height: int) -> None: ...
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        *,
+        config: RendererConfig | Mapping[str, Any] | PathLikeStr | None = ...,
+        **kwargs: Any,
+    ) -> None: ...
     def info(self) -> str: ...
     def render_triangle_rgba(self) -> np.ndarray: ...  # (H,W,4) uint8, C-contiguous
     def render_triangle_png(self, path: PathLikeStr) -> None: ...
+    def get_config(self) -> Dict[str, Any]: ...
+    def set_lights(self, lights: Sequence[Mapping[str, Any]] | Mapping[str, Any]) -> None: ...
     def set_msaa_samples(self, samples: int) -> int: ...
     # Terrain helpers (subset)
     def add_terrain(self, heightmap: np.ndarray, spacing: Tuple[float, float], exaggeration: float, colormap: str) -> None: ...
@@ -97,6 +131,26 @@ class Session:
     def backend(self) -> str: ...
     @property
     def device_type(self) -> str: ...
+
+class IBL:
+    intensity: float
+    rotation_deg: float
+    @staticmethod
+    def from_hdr(
+        path: PathLikeStr,
+        intensity: float = ...,
+        rotate_deg: float = ...,
+        quality: str = ...,
+    ) -> "IBL": ...
+    def set_intensity(self, value: float) -> None: ...
+    def set_rotation_deg(self, value: float) -> None: ...
+    def quality(self) -> str: ...
+    def dimensions(self) -> Optional[Tuple[int, int]]: ...
+    def path(self) -> str: ...
+    def base_resolution(self) -> int: ...
+    def set_base_resolution(self, resolution: int) -> None: ...
+    def set_cache_dir(self, path: PathLikeStr | None = ...) -> None: ...
+    def cache_dir(self) -> Optional[str]: ...
 
 class Colormap1D:
     domain: Tuple[float, float]
@@ -300,6 +354,132 @@ class VectorScene:
     def render_pick_map(self, width: int, height: int, base_pick_id: int = ...) -> np.ndarray: ...  # (H,W) uint32
     def render_oit_and_pick(self, width: int, height: int, base_pick_id: int = ...) -> Tuple[np.ndarray, np.ndarray]: ...  # (H,W,4) uint8, (H,W) uint32
 
+# P5: Screen-space effects classes
+class SSAOSettings:
+    radius: float
+    intensity: float
+    bias: float
+    sample_count: int
+    spiral_turns: float
+    technique: str  # "SSAO" or "GTAO"
+    blur_radius: int
+    temporal_alpha: float
+    def __init__(
+        self,
+        radius: float = ...,
+        intensity: float = ...,
+        bias: float = ...,
+        sample_count: int = ...,
+        spiral_turns: float = ...,
+        technique: str = ...,
+        blur_radius: int = ...,
+        temporal_alpha: float = ...
+    ) -> None: ...
+    @staticmethod
+    def ssao(radius: float, intensity: float) -> SSAOSettings: ...
+    @staticmethod
+    def gtao(radius: float, intensity: float) -> SSAOSettings: ...
+
+class SSGISettings:
+    ray_steps: int
+    ray_radius: float
+    ray_thickness: float
+    intensity: float
+    temporal_alpha: float
+    use_half_res: bool
+    ibl_fallback: float
+    def __init__(
+        self,
+        ray_steps: int = ...,
+        ray_radius: float = ...,
+        ray_thickness: float = ...,
+        intensity: float = ...,
+        temporal_alpha: float = ...,
+        use_half_res: bool = ...,
+        ibl_fallback: float = ...
+    ) -> None: ...
+
+class SSRSettings:
+    max_steps: int
+    max_distance: float
+    thickness: float
+    stride: float
+    intensity: float
+    roughness_fade: float
+    edge_fade: float
+    temporal_alpha: float
+    def __init__(
+        self,
+        max_steps: int = ...,
+        max_distance: float = ...,
+        thickness: float = ...,
+        stride: float = ...,
+        intensity: float = ...,
+        roughness_fade: float = ...,
+        edge_fade: float = ...,
+        temporal_alpha: float = ...
+    ) -> None: ...
+
+# P6: Atmospherics & sky classes
+class SkySettings:
+    sun_direction: Tuple[float, float, float]
+    turbidity: float
+    ground_albedo: float
+    model: str  # "off", "preetham", or "hosek-wilkie"
+    sun_intensity: float
+    exposure: float
+    def __init__(
+        self,
+        sun_direction: Tuple[float, float, float] = ...,
+        turbidity: float = ...,
+        ground_albedo: float = ...,
+        model: str = ...,
+        sun_intensity: float = ...,
+        exposure: float = ...
+    ) -> None: ...
+    @staticmethod
+    def preetham(turbidity: float, ground_albedo: float) -> SkySettings: ...
+    @staticmethod
+    def hosek_wilkie(turbidity: float, ground_albedo: float) -> SkySettings: ...
+    def with_sun_angles(self, azimuth_deg: float, elevation_deg: float) -> None: ...
+
+class VolumetricSettings:
+    density: float
+    height_falloff: float
+    phase_g: float
+    max_steps: int
+    start_distance: float
+    max_distance: float
+    absorption: float
+    sun_intensity: float
+    scattering_color: Tuple[float, float, float]
+    temporal_alpha: float
+    ambient_color: Tuple[float, float, float]
+    use_shadows: bool
+    jitter_strength: float
+    phase_function: str  # "isotropic" or "hg"
+    def __init__(
+        self,
+        density: float = ...,
+        height_falloff: float = ...,
+        phase_g: float = ...,
+        max_steps: int = ...,
+        start_distance: float = ...,
+        max_distance: float = ...,
+        absorption: float = ...,
+        sun_intensity: float = ...,
+        scattering_color: Tuple[float, float, float] = ...,
+        temporal_alpha: float = ...,
+        ambient_color: Tuple[float, float, float] = ...,
+        use_shadows: bool = ...,
+        jitter_strength: float = ...,
+        phase_function: str = ...
+    ) -> None: ...
+    @staticmethod
+    def with_god_rays(density: float, phase_g: float) -> VolumetricSettings: ...
+    @staticmethod
+    def uniform_fog(density: float) -> VolumetricSettings: ...
+
 # A13: Path guiding (Python utility)
 class OnlineGuidingGrid:
     width: int
@@ -309,3 +489,4 @@ class OnlineGuidingGrid:
     def update(self, x: int, y: int, bin_index: int, weight: float = ...) -> None: ...
     def pdf(self, x: int, y: int) -> np.ndarray: ...  # (B,) float32, sum=1
     def dims(self) -> Tuple[int, int, int]: ...
+

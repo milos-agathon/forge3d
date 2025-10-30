@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 import os
 
@@ -22,6 +22,8 @@ except ImportError as exc:  # pragma: no cover
     raise SystemExit(
         "forge3d import failed. Build the PyO3 extension with `maturin develop --release`."
     ) from exc
+
+from forge3d.config import load_renderer_config
 
 
 DEFAULT_DEM = Path("assets/Gore_Range_Albers_1m.tif")
@@ -127,6 +129,102 @@ def _infer_domain(dem, fallback: tuple[float, float]) -> tuple[float, float]:
                 return (lo_f, hi_f)
 
     return fallback
+
+
+def _split_key_value_string(spec: str) -> dict[str, str]:
+    tokens = spec.split(",")
+    result: dict[str, str] = {}
+    current_key: str | None = None
+    for raw in tokens:
+        segment = raw.strip()
+        if not segment:
+            continue
+        if "=" in segment:
+            key, value = segment.split("=", 1)
+            current_key = key.strip().lower()
+            result[current_key] = value.strip()
+        elif current_key is not None:
+            result[current_key] = f"{result[current_key]},{segment}"
+        else:
+            raise ValueError(f"Invalid segment '{segment}' in specification '{spec}'")
+    return result
+
+
+def _parse_float_list(value: str, length: int, label: str) -> tuple[float, ...]:
+    parts = [float(part.strip()) for part in value.split(",") if part.strip()]
+    if len(parts) != length:
+        raise ValueError(f"{label} requires exactly {length} comma-separated floats")
+    return tuple(parts)
+
+
+def _parse_light_spec(spec: str) -> dict[str, Any]:
+    mapping = _split_key_value_string(spec)
+    out: dict[str, Any] = {}
+    for key, val in mapping.items():
+        if key in {"type", "light"}:
+            out["type"] = val
+        elif key in {"dir", "direction"}:
+            out["direction"] = _parse_float_list(val, 3, "direction")
+        elif key in {"pos", "position"}:
+            out["position"] = _parse_float_list(val, 3, "position")
+        elif key in {"intensity", "power"}:
+            out["intensity"] = float(val)
+        elif key in {"color", "rgb"}:
+            out["color"] = _parse_float_list(val, 3, "color")
+        elif key in {"cone", "cone_angle", "angle"}:
+            out["cone_angle"] = float(val)
+        elif key in {"area", "extent", "area_extent"}:
+            out["area_extent"] = _parse_float_list(val, 2, "area extent")
+        elif key in {"hdr", "hdr_path"}:
+            out["hdr_path"] = val
+    return out
+
+
+def _parse_volumetric_spec(spec: str) -> dict[str, Any]:
+    mapping = _split_key_value_string(spec)
+    out: dict[str, Any] = {}
+    if "density" in mapping:
+        out["density"] = float(mapping["density"])
+    if "phase" in mapping:
+        out["phase"] = mapping["phase"]
+    if "g" in mapping:
+        out["g"] = float(mapping["g"])
+    if "anisotropy" in mapping:
+        out["anisotropy"] = float(mapping["anisotropy"])
+    return out
+
+
+def _build_renderer_config(args: argparse.Namespace):
+    overrides: dict[str, Any] = {}
+    if args.light:
+        overrides["lights"] = [_parse_light_spec(spec) for spec in args.light]
+    overrides["exposure"] = args.exposure
+    if args.brdf:
+        overrides["brdf"] = args.brdf
+    if args.shadows:
+        overrides["shadows"] = args.shadows
+    if args.shadow_map_res is not None:
+        overrides["shadow_map_res"] = args.shadow_map_res
+    if args.cascades is not None:
+        overrides["cascades"] = args.cascades
+    if args.pcss_blocker_radius is not None:
+        overrides["pcss_blocker_radius"] = args.pcss_blocker_radius
+    if args.pcss_filter_radius is not None:
+        overrides["pcss_filter_radius"] = args.pcss_filter_radius
+    if args.shadow_light_size is not None:
+        overrides["light_size"] = args.shadow_light_size
+    if args.shadow_moment_bias is not None:
+        overrides["moment_bias"] = args.shadow_moment_bias
+    if args.gi:
+        modes = [item.strip() for item in args.gi.split(",") if item.strip()]
+        overrides["gi"] = modes
+    if args.sky:
+        overrides["sky"] = args.sky
+    if args.hdr:
+        overrides["hdr"] = args.hdr
+    if args.volumetric:
+        overrides["volumetric"] = _parse_volumetric_spec(args.volumetric)
+    return load_renderer_config(None, overrides)
 
 
 def _build_colormap(domain: tuple[float, float], colormap_name: str = "viridis"):
@@ -352,6 +450,17 @@ def _parse_args() -> argparse.Namespace:
         help="Path to an environment HDR image.",
     )
     parser.add_argument(
+        "--ibl-res",
+        type=int,
+        default=256,
+        help="Resolution of the environment cubemap used for IBL precomputation.",
+    )
+    parser.add_argument(
+        "--ibl-cache",
+        type=Path,
+        help="Directory used to persist precomputed IBL results (.iblcache files).",
+    )
+    parser.add_argument(
         "--size",
         type=int,
         nargs=2,
@@ -432,6 +541,74 @@ def _parse_args() -> argparse.Namespace:
         default=0.5,
         help="Colormap blend strength [0.0-1.0]. Only used with --albedo-mode=mix. Default: 0.5",
     )
+    parser.add_argument(
+        "--light",
+        dest="light",
+        action="append",
+        default=[],
+        metavar="SPEC",
+        help="Lighting override in key=value form (repeatable). Example: type=directional,dir=0.2,0.8,-0.55,intensity=8,color=1,0.96,0.9",
+    )
+    parser.add_argument(
+        "--brdf",
+        type=str,
+        help="Shading BRDF model (e.g., cooktorrance-ggx, lambert, disney-principled).",
+    )
+    parser.add_argument(
+        "--shadows",
+        type=str,
+        help="Shadow technique (hard, pcf, pcss, vsm, evsm, msm, csm).",
+    )
+    parser.add_argument(
+        "--shadow-map-res",
+        dest="shadow_map_res",
+        type=int,
+        help="Shadow map resolution (power of two).",
+    )
+    parser.add_argument(
+        "--cascades",
+        type=int,
+        help="Cascade count for cascaded shadow maps.",
+    )
+    parser.add_argument(
+        "--pcss-blocker-radius",
+        dest="pcss_blocker_radius",
+        type=float,
+        help="PCSS blocker search radius in world units.",
+    )
+    parser.add_argument(
+        "--pcss-filter-radius",
+        dest="pcss_filter_radius",
+        type=float,
+        help="PCSS filter radius in world units.",
+    )
+    parser.add_argument(
+        "--shadow-light-size",
+        dest="shadow_light_size",
+        type=float,
+        help="Effective light size for PCSS penumbra estimation.",
+    )
+    parser.add_argument(
+        "--shadow-moment-bias",
+        dest="shadow_moment_bias",
+        type=float,
+        help="Moment bias for VSM/EVSM/MSM (use small positive values).",
+    )
+    parser.add_argument(
+        "--gi",
+        type=str,
+        help="Comma-separated list of GI modes (e.g., ibl,ssao,ssgi).",
+    )
+    parser.add_argument(
+        "--sky",
+        type=str,
+        help="Sky model override (hosek-wilkie, preetham, hdri).",
+    )
+    parser.add_argument(
+        "--volumetric",
+        type=str,
+        help="Volumetric fog settings (e.g., 'density=0.02,phase=hg,g=0.7').",
+    )
     return parser.parse_args()
 
 
@@ -464,6 +641,8 @@ def main() -> int:
         )
     )
 
+    renderer_config = _build_renderer_config(args)
+
     if args.output.exists() and not args.overwrite:
         raise SystemExit(
             f"Output file already exists: {args.output}. Use --overwrite to replace it."
@@ -493,18 +672,38 @@ def main() -> int:
         blend_sharpness=4.0,
     )
 
+    hdr_path_value: Path | str = args.hdr
+    if renderer_config.atmosphere.hdr_path is not None:
+        hdr_path_value = Path(renderer_config.atmosphere.hdr_path)
+    else:
+        env_hdr = next(
+            (
+                light.hdr_path
+                for light in renderer_config.lighting.lights
+                if light.type == "environment" and light.hdr_path is not None
+            ),
+            None,
+        )
+        if env_hdr is not None:
+            hdr_path_value = Path(env_hdr)
+
     ibl = f3d.IBL.from_hdr(
-        str(args.hdr),
+        str(hdr_path_value),
         intensity=1.0,
         rotate_deg=0.0,
     )
+    if args.ibl_res <= 0:
+        raise SystemExit("Error: --ibl-res must be greater than zero.")
+    ibl.set_base_resolution(int(args.ibl_res))
+    if args.ibl_cache is not None:
+        ibl.set_cache_dir(str(args.ibl_cache))
 
     params = _build_params(
         size=(int(args.size[0]), int(args.size[1])),
         render_scale=float(args.render_scale),
         msaa=int(args.msaa),
         z_scale=float(args.z_scale),
-        exposure=float(args.exposure),
+        exposure=float(renderer_config.lighting.exposure),
         domain=domain,
         colormap=colormap,
         albedo_mode=args.albedo_mode,

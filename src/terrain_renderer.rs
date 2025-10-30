@@ -32,10 +32,12 @@ pub struct TerrainRenderer {
     adapter: Arc<wgpu::Adapter>,
     pipeline: Mutex<PipelineCache>,
     bind_group_layout: wgpu::BindGroupLayout,
+    placeholder_bind_group_layout: wgpu::BindGroupLayout,
     ibl_bind_group_layout: wgpu::BindGroupLayout,
     blit_bind_group_layout: wgpu::BindGroupLayout,
     blit_pipeline: wgpu::RenderPipeline,
     sampler_linear: wgpu::Sampler,
+    empty_bind_group: wgpu::BindGroup,
     color_format: wgpu::TextureFormat,
 }
 
@@ -499,6 +501,12 @@ impl TerrainRenderer {
             ],
         });
 
+        let placeholder_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("terrain_pbr_pom.placeholder.bind_group_layout"),
+                entries: &[],
+            });
+
         let ibl_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("terrain_pbr_pom.ibl_bind_group_layout"),
@@ -516,12 +524,6 @@ impl TerrainRenderer {
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
                             view_dimension: wgpu::TextureViewDimension::Cube,
@@ -530,13 +532,13 @@ impl TerrainRenderer {
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
-                        binding: 3,
+                        binding: 2,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
-                        binding: 4,
+                        binding: 3,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -546,13 +548,7 @@ impl TerrainRenderer {
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 6,
+                        binding: 4,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
@@ -563,6 +559,12 @@ impl TerrainRenderer {
                     },
                 ],
             });
+
+        let empty_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain_pbr_pom.placeholder.bind_group"),
+            layout: &placeholder_bind_group_layout,
+            entries: &[],
+        });
 
         // Create samplers
         // Use Nearest filtering for R32Float heightmap (non-filterable on some hardware)
@@ -604,6 +606,7 @@ impl TerrainRenderer {
         let pipeline = Self::create_render_pipeline(
             device.as_ref(),
             &bind_group_layout,
+            &placeholder_bind_group_layout,
             &ibl_bind_group_layout,
             color_format,
             1,
@@ -622,10 +625,12 @@ impl TerrainRenderer {
             adapter,
             pipeline: Mutex::new(pipeline_cache),
             bind_group_layout,
+            placeholder_bind_group_layout,
             ibl_bind_group_layout,
             blit_bind_group_layout,
             blit_pipeline,
             sampler_linear,
+            empty_bind_group,
             color_format,
         })
     }
@@ -633,6 +638,7 @@ impl TerrainRenderer {
     fn create_render_pipeline(
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
+        placeholder_bind_group_layout: &wgpu::BindGroupLayout,
         ibl_bind_group_layout: &wgpu::BindGroupLayout,
         color_format: wgpu::TextureFormat,
         sample_count: u32,
@@ -644,7 +650,11 @@ impl TerrainRenderer {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("terrain_pbr_pom.pipeline_layout"),
-            bind_group_layouts: &[bind_group_layout, ibl_bind_group_layout],
+            bind_group_layouts: &[
+                bind_group_layout,
+                placeholder_bind_group_layout,
+                ibl_bind_group_layout,
+            ],
             push_constant_ranges: &[],
         });
 
@@ -837,37 +847,27 @@ impl TerrainRenderer {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(
-                        ibl_resources.irradiance_view.as_ref(),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(
-                        ibl_resources.irradiance_sampler.as_ref(),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(
                         ibl_resources.specular_view.as_ref(),
                     ),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(
-                        ibl_resources.specular_sampler.as_ref(),
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(
+                        ibl_resources.irradiance_view.as_ref(),
                     ),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 4,
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(
+                        ibl_resources.sampler.as_ref(),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
                     resource: wgpu::BindingResource::TextureView(ibl_resources.brdf_view.as_ref()),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::Sampler(ibl_resources.brdf_sampler.as_ref()),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
+                    binding: 4,
                     resource: ibl_uniform_buffer.as_entire_binding(),
                 },
             ],
@@ -942,6 +942,7 @@ impl TerrainRenderer {
             pipeline_cache.pipeline = Self::create_render_pipeline(
                 self.device.as_ref(),
                 &self.bind_group_layout,
+                &self.placeholder_bind_group_layout,
                 &self.ibl_bind_group_layout,
                 self.color_format,
                 effective_msaa,
@@ -1071,7 +1072,8 @@ impl TerrainRenderer {
 
             pass.set_pipeline(&pipeline_cache.pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
-            pass.set_bind_group(1, &ibl_bind_group, &[]);
+            pass.set_bind_group(1, &self.empty_bind_group, &[]);
+            pass.set_bind_group(2, &ibl_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
         drop(pipeline_cache);
