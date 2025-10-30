@@ -26,11 +26,11 @@ struct PbrMaterial {
 
 struct PbrLighting {
     light_direction: vec3<f32>,
-    // padding: f32,
+    _padding1: f32,
     light_color: vec3<f32>,
     light_intensity: f32,
     camera_position: vec3<f32>,
-    // padding: f32,
+    _padding2: f32,
     ibl_intensity: f32,
     ibl_rotation: f32,
     exposure: f32,
@@ -201,6 +201,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     
     // Sample normal map and get world normal
     let world_normal = sample_normal_map(input.uv, TBN);
+    let view_position = uniforms.view_matrix * vec4<f32>(input.world_position, 1.0);
+    let view_depth = -view_position.z;
     
     // Sample material textures
     var base_color = material.base_color;
@@ -272,6 +274,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         direct_lighting = (diffuse + specular) * radiance * n_dot_l;
     }
     
+    // Apply dynamic shadows
+    let shadow_factor = evaluate_shadow_factor(input.world_position, view_depth, world_normal);
+    direct_lighting = direct_lighting * shadow_factor;
+    
     // INDIRECT LIGHTING (IBL)
     var indirect_lighting = vec3<f32>(0.0);
     
@@ -303,6 +309,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     
     // Combine direct and indirect lighting
     var color = direct_lighting + indirect_lighting + emissive;
+    color = evaluate_shadow_color(color, input.world_position, view_depth, world_normal);
     
     // Tone mapping and gamma correction
     color = color * lighting.exposure;

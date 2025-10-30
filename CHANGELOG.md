@@ -6,6 +6,196 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## [Unreleased]
 
 ### Added
+
+- **P4 - IBL pipeline refresh**
+  - Compute-driven equirectangular -> cubemap conversion plus irradiance/specular prefiltering and BRDF LUT generation (WGSL: `ibl_equirect.wgsl`, `ibl_prefilter.wgsl`, `ibl_brdf.wgsl`)
+  - On-disk `.iblcache` reuse keyed by HDR + resolution with new CLI flags `--ibl-res` and `--ibl-cache`
+  - Runtime split-sum shader path now sources bind group @group(2) with shared sampler and BRDF uniform controls
+
+- **P9 — QA: Golden Images, Unit Tests, CI Matrix**
+  - Implemented comprehensive QA infrastructure for cross-platform correctness and visual regression testing
+  - **Shader parameter packing tests** (`tests/test_shader_params_p5_p8.rs`):
+    - GPU alignment validation for all P5-P8 types (SSAOSettings, SSGISettings, SSRSettings, SkySettings, VolumetricSettings)
+    - WGSL uniform buffer layout verification (16-byte alignment, size validation)
+    - Bytemuck Pod/Zeroable trait tests for safe GPU transmission
+    - Parameter range validation (roughness [0.04, 1.0], turbidity [1.0, 10.0], etc.)
+    - 12 comprehensive test cases covering layout, alignment, defaults, and edge cases
+  - **Golden image regression testing** (`tests/golden_images.rs`):
+    - 12 reference images at 1280×920 resolution covering BRDF × shadow × GI combinations
+    - SSIM (Structural Similarity Index) comparison with epsilon ≥ 0.98 threshold
+    - Configurations: Lambert, Phong, GGX, Disney, Oren-Nayar, Toon, Ashikhmin, Ward, Blinn-Phong
+    - Shadow techniques: Hard, PCF, PCSS, VSM, EVSM, MSM, CSM
+    - GI modes: None, IBL, SSAO, GTAO, SSGI, SSR
+    - Diff image generation and artifact storage on failure
+    - Golden image generator script (`scripts/generate_golden_images.py`)
+  - **CI/CD matrix** (`.github/workflows/ci.yml`):
+    - Cross-platform testing: Windows (win_amd64), Linux (linux_x86_64), macOS (macos_universal2)
+    - Rust test suite with cargo check, cargo test, cargo clippy
+    - Python wheel builds with maturin for all platforms (abi3 support)
+    - Python tests across 3 versions (3.9, 3.11, 3.12)
+    - Example sanity tests: Render 640×360 frames within 90s timeout
+    - Golden image validation with artifact upload on failure
+    - Shader parameter packing validation on all platforms
+    - Documentation build (Rust docs + Sphinx)
+    - Artifact preservation (wheels, docs, golden image diffs)
+  - **Troubleshooting documentation** (`docs/troubleshooting_visuals.rst`):
+    - Comprehensive visual debugging guide organized by subsystem
+    - Checklists for: Lighting & Shadows, BRDF & Materials, Global Illumination, Atmospherics & Sky, Screen-Space Effects
+    - Performance & memory debugging (OOM, slow rendering)
+    - Platform-specific issues (Windows/MSVC, Linux/GNU, macOS/Clang)
+    - Shader compilation errors (WGSL validation, SPIR-V translation)
+    - Golden image test failures and CI debugging
+    - Quick reference with code examples for common fixes
+  - **CI job structure**:
+    - `test-rust`: Cargo tests on all platforms
+    - `build-wheels`: Maturin wheel builds for win/linux/macos
+    - `test-python`: Pytest across Python versions
+    - `test-golden-images`: Visual regression with SSIM validation
+    - `test-examples`: Sanity checks for all example scripts
+    - `test-shader-params`: GPU alignment validation
+    - `build-docs`: Rust + Sphinx documentation builds
+    - `ci-success`: Final gating job for PR merges
+  - Test coverage: 12 golden images, 12 shader param tests, 10+ example sanity tests
+  - Acceptance: CI green on all platforms, golden image diffs stored as artifacts on failure
+- **P8 — Performance & Memory Budget Enforcement (≤512 MiB host-visible)**
+  - Implemented GPU memory budget tracking and auto-downscaling to enforce 512 MiB host-visible memory constraint
+  - **Memory budget infrastructure** (`src/render/memory_budget.rs`):
+    - `GpuMemoryBudget`: Thread-safe atomic tracking of GPU allocations by category
+    - Categories: VertexBuffers, IndexBuffers, UniformBuffers, Textures (RGBA8, RGBA16F, R32F, Depth), ShadowMaps, IBL Cubemaps, BRDF LUT, Froxel Grid, Screen-space Effects
+    - Budget enforcement: Warn at 90% utilization, track peak allocation, provide detailed breakdown
+    - Auto-downscaling functions for resource quality when budget exceeded
+  - **Auto-downscaling strategies**:
+    - `auto_downscale_shadow_map()`: Progressive resolution halving (4096→2048→1024→512 minimum)
+    - `auto_downscale_ibl_cubemap()`: Cubemap resolution downscale with mip chain accounting (512→256→128→32 minimum)
+    - `auto_downscale_froxel_grid()`: Froxel dimension reduction prioritizing Z-axis (depth) first
+    - Log warnings when downscaling occurs with original→final resolution
+  - **Rendering statistics API** (`Scene.get_stats()`):
+    - Returns Python dict with GPU memory usage (current, peak, budget, utilization %)
+    - Lists enabled rendering passes (terrain, ssao, reflections, dof, clouds, IBL, etc.)
+    - Frame time tracking (placeholder: 0.0 ms, ready for future timing integration)
+    - Memory estimations based on texture dimensions and buffer sizes
+  - **RenderStats struct**: Structured statistics with memory breakdown by category
+  - **Thread-safe atomic counters**: All memory tracking uses `Arc<AtomicUsize>` for concurrent safety
+  - **Validation via unit tests**: Budget overflow, auto-downscaling, utilization calculation tests
+  - CLI-ready: `--gpu-budget-mib 512` parameter support (default: 512 MiB)
+  - Console logging: Budget decisions logged at INFO level, warnings at WARN level
+  - Acceptance criteria: Renderer respects ≤512 MiB, stats accessible via `scene.get_stats()`, auto-downscaling prevents OOM
+- **P7 — Python UX Polish: High-level Presets & Validation + Examples**
+  - Implemented high-level rendering presets for common scenarios while preserving low-level control
+  - **forge3d.presets module** with production-ready configurations:
+    - `studio_pbr()`: Indoor studio lighting (directional + IBL + PCF shadows + Disney Principled BRDF)
+    - `outdoor_sun()`: Outdoor scenes (Hosek-Wilkie sky + sun + CSM shadows + Cook-Torrance GGX)
+    - `toon_viz()`: Stylized NPR rendering (Toon BRDF + hard shadows + no GI)
+    - `minimal()`: Fast previews (Lambert + single light + no shadows)
+    - `high_quality()`: Final renders (PCSS soft shadows + GTAO + SSR + IBL)
+  - **Preset features**:
+    - Configuration dictionaries ready for `Renderer(**config)`
+    - Sensible defaults with parameter overrides support
+    - Factory pattern with keyword arguments
+    - Programmatic access via `get_preset(name, **kwargs)`
+  - **Example gallery scripts** for visual comparison:
+    - `examples/lighting_gallery.py`: Grid render comparing 12 BRDF models (Lambert, Phong, Oren-Nayar, GGX, Disney, Ashikhmin, Ward, Toon, Minnaert)
+    - `examples/shadow_gallery.py`: Side-by-side comparison of 7 shadow techniques (Hard, PCF, PCSS, VSM, EVSM, MSM, CSM) with quality/performance table
+    - `examples/ibl_gallery.py`: HDR environment rotation sweep, roughness sweep (0-1), metallic vs. dielectric comparison
+  - **CLI integration ready**: Examples demonstrate command-line usage patterns
+  - All galleries support configurable output resolution, grid layout, and tile sizes
+  - Comprehensive docstrings with usage examples and parameter documentation
+  - Acceptance: Users can reproduce figures with single command: `python examples/terrain_demo.py --preset outdoor_sun --brdf cooktorrance-ggx --shadows csm`
+- **P6 — Atmospherics & Sky (Hosek-Wilkie/Preetham, Volumetric Fog/God-rays)**
+  - Implemented physical sky models and volumetric fog with single-scattering for realistic atmospheric rendering
+  - Physical sky models: Hosek-Wilkie (2012) and Preetham (1999) analytic atmospheric scattering
+    - Hosek-Wilkie: More accurate sky model based on measured atmospheric data with turbidity-based coefficients
+    - Preetham: Classic Perez function-based sky with turbidity parameter
+    - Turbidity range [1.0-10.0]: 2.0=clear sky, 6.0=hazy, 10.0=very hazy
+    - Ground albedo [0-1] for realistic ground bounce lighting influence
+    - Sun disk rendering with limb darkening and corona/glow
+    - Sunrise/sunset color shifts with proper solar elevation angle calculation
+    - Exposure control and simple tonemapping (Reinhard)
+  - Volumetric fog with Henyey-Greenstein phase function for single-scattering
+    - Exponential height fog: Denser near ground with configurable falloff
+    - Henyey-Greenstein phase: Configurable asymmetry parameter g [-1 to 1] for forward/backward scattering
+    - View-ray marching with jittered sampling (16-128 steps, configurable)
+    - Beer-Lambert extinction law for physically-based transmittance
+    - Temporal reprojection with configurable alpha [0-0.9] for stable, noise-free results
+  - God-rays (volumetric shadows) from shadow maps
+    - Shadow map sampling during ray march for volumetric occlusion
+    - PCF shadow filtering for smooth god-ray beams
+    - Directional in-scattering from sun with phase function
+    - Ambient sky contribution for omnidirectional scatter
+    - Beams visible when sun occluded by terrain/geometry
+  - Alternative froxelized volumetric approach (16×8×64 grid) for performance
+    - Precomputed froxel grid with scattering and extinction
+    - Fast lookup during final render pass
+    - Memory budget: ~64 KiB for froxel grid (well under 512 MiB)
+  - WGSL shaders: `sky.wgsl` (compute + fragment variants), `volumetric.wgsl` (view-ray + froxel approaches)
+  - Rust types: `SkySettings` (48 bytes), `VolumetricSettings` (80 bytes), `AtmosphericsSettings` (all GPU-aligned)
+  - Enums: `SkyModel` (Off, Preetham, HosekWilkie), `VolumetricPhase` (Isotropic, HenyeyGreenstein)
+  - Python bindings: `SkySettings`, `VolumetricSettings` classes with factory methods and validation
+  - Factory methods: `SkySettings.hosek_wilkie()`, `SkySettings.preetham()`, `VolumetricSettings.with_god_rays()`, `VolumetricSettings.uniform_fog()`
+  - Sun direction synced from directional light tagged as "sun"
+  - CLI-ready: `--sky hosek-wilkie --turbidity 2.5 --ground-albedo 0.2`, `--volumetric 'density=0.015,phase=hg,g=0.7,max_steps=48'`
+  - Acceptance criteria: Sunrise/sunset color shift visible, god-ray beams when sun occluded, temporally stable fog
+- **P5 — Screen-space Effects (SSAO/GTAO, SSGI, SSR)**
+  - Implemented comprehensive screen-space rendering effects as optional toggleable passes
+  - GBuffer pass: Depth, view-space normals, material properties (albedo, roughness, metallic) for screen-space techniques
+  - SSAO/GTAO: Two ambient occlusion techniques with bilateral blur and optional temporal filtering
+    - SSAO: Hemisphere sampling with spiral pattern (16-64 samples/pixel)
+    - GTAO: Horizon-based ground-truth AO for higher accuracy
+    - Bilateral blur: Edge-preserving denoising using depth and normal weights
+    - Configurable radius, intensity, bias, and temporal accumulation (0-0.95 alpha)
+  - SSGI: Screen-space global illumination with half-res ray marching and IBL fallback
+    - Ray marching in depth buffer for indirect diffuse lighting (16-32 steps/ray)
+    - Cosine-weighted hemisphere sampling with low-discrepancy noise
+    - IBL fallback for ray misses with configurable contribution (0-1)
+    - Half-resolution mode with bilateral upsampling for performance
+    - Temporal accumulation for noise reduction (0-0.9 alpha)
+  - SSR: Screen-space reflections with hierarchical ray marching and environment fallback
+    - Adaptive hierarchical ray marching with binary search refinement (32-64 steps)
+    - Thickness-based hit detection with configurable tolerance
+    - Roughness-based fade and screen edge fade for artifact reduction
+    - Environment map fallback for off-screen/missed rays with mip-based roughness
+    - Fresnel-based reflection intensity with metallic/dielectric support
+    - Temporal accumulation for stable reflections (0-0.85 alpha)
+  - WGSL shaders: `gbuffer.wgsl`, `ssao_gtao.wgsl`, `ssgi.wgsl`, `ssr.wgsl`
+  - Depth reconstruction utilities: Fast view-space position reconstruction from linear depth
+  - Rust types: `SSAOSettings`, `SSGISettings`, `SSRSettings`, `ScreenSpaceSettings` (all 32-byte GPU-aligned)
+  - Python bindings: `SSAOSettings`, `SSGISettings`, `SSRSettings` classes with validation
+  - Factory methods: `SSAOSettings.ssao()`, `SSAOSettings.gtao()` for quick configuration
+  - CLI-ready: Designed for `--gi ssao`, `--gi ssgi`, `--gi ssr` command-line options
+  - Acceptance criteria: AO visibly darkens creases, SSGI adds diffuse bounce on walls, SSR reflects sky & bright objects
+- **P4 — IBL Pipeline (Diffuse Irradiance + Specular Prefilter + BRDF LUT)**
+  - Implemented complete Image-Based Lighting pipeline for high-quality environment lighting
+  - Compute shaders for offline/first-frame precomputation: irradiance convolution, GGX specular prefilter, BRDF 2D LUT
+  - Irradiance convolution: Lambertian diffuse sampling with hemisphere integration (512-2048 samples/pixel)
+  - Specular prefilter: GGX importance sampling with Hammersley low-discrepancy sequence (1024 samples/pixel)
+  - BRDF LUT: Split-sum approximation integration (NdotV × roughness) with geometry term
+  - Split-sum evaluation shader: `eval_ibl()` combining prefiltered specular, diffuse irradiance, and BRDF LUT
+  - Energy-conserving IBL with proper Fresnel and metallic/dielectric blending
+  - Disk cache support (`.iblcache`) keyed by HDR path, resolution, and GGX settings
+  - `IblResourceCache` manages BRDF LUT (512×512 RG16F), irradiance cube (32×32 RGBA16F), specular cube (128×128 RGBA16F, 6 mips)
+  - Memory budget: ~3 MiB total (well under 64 MiB P0 budget)
+  - WGSL modules: `ibl/irradiance_convolution.wgsl`, `ibl/specular_prefilter.wgsl`, `ibl/brdf_lut.wgsl`, `ibl/eval_ibl.wgsl`
+  - Hammersley sequence and radical inverse for low-discrepancy sampling
+  - Tonemapping helpers: Reinhard and ACES filmic
+- **P3 — Shadow System (Hard, PCF, PCSS, VSM/EVSM/MSM, CSM)**
+  - Implemented comprehensive pluggable shadow system with 7 techniques
+  - Shadow techniques: Hard (single sample), PCF (Poisson disk), PCSS (soft shadows with blocker search), VSM (variance), EVSM (exponential variance), MSM (4-moment), CSM (cascaded)
+  - Complete WGSL implementation: `shadows_p3.wgsl` with all techniques and unified dispatcher
+  - Extended `ShadowTechnique` enum with P3 variants and helper methods (`name()`, `from_name()`, `requires_moments()`, `channels()`)
+  - PCSS: Blocker search + penumbra estimation + adaptive PCF filtering
+  - VSM/EVSM/MSM: Moment-based shadow maps with light leak reduction and Chebyshev's inequality
+  - CSM: Cascade selection with smooth transitions and per-cascade stabilization support
+  - Python bindings: `ShadowSettings` supports all 7 techniques via string names
+  - GPU-aligned `ShadowParamsGPU` struct (64 bytes) with all technique parameters
+  - Poisson disk sampling (16 and 32-sample sets) for high-quality PCF/PCSS
+- **P2 — BRDF Library + Material Routing**
+  - Implemented comprehensive BRDF library with 10 switchable shading models
+  - BRDF models: Lambert, Phong, Oren-Nayar, Cook-Torrance (GGX & Beckmann), Disney Principled, Ashikhmin-Shirley, Ward, Toon, Minnaert
+  - WGSL shader modules: `brdf/common.wgsl` (geometry terms, NDFs, Fresnel), individual model shaders, and `brdf/dispatch.wgsl` (model switcher)
+  - Extended `MaterialShading` struct with new parameters: sheen, clearcoat, subsurface, anisotropy (total 32 bytes, GPU-aligned)
+  - Python bindings: `MaterialShading` class with factory methods (`lambert()`, `phong()`, `disney()`, `anisotropic()`)
+  - Validation example: `examples/brdf_comparison.py` demonstrating all BRDF models
+  - Cross-platform shader compilation verified (win_amd64, linux_x86_64, macos_universal2 compatible)
 - Workstream I1 — Interactive Viewer
   - I1: Interactive windowed viewer with winit 0.29 integration providing real-time exploration
   - Orbit camera mode: rotate around target, zoom, and pan with mouse controls
@@ -14,6 +204,9 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
   - DPI-aware rendering with live FPS counter in window title
   - Rust example: `cargo run --example interactive_viewer`
   - Documentation: `docs/interactive_viewer.rst`
+- Renderer configuration plumbing with typed enums and validation exposed via `Renderer(config=..., **kwargs)` and `Renderer.get_config()`, including CLI overrides for lighting, BRDF, shadows, GI, and atmosphere in `examples/terrain_demo.py`.
+- Light buffer SSBO with R2 sampling seeds, WGSL sampling stubs, and Python `Renderer.set_lights()` for multi-light uploads.
+- WGSL BRDF library and dispatch covering Lambert, Phong, Blinn-Phong, Oren-Nayar, Cook-Torrance (GGX/Beckmann), Disney Principled, Ashikhmin-Shirley, Ward, Toon, and Minnaert, exposed via `RendererConfig.brdf_override`.
 - Python memory helpers now expose real resident and staging telemetry via forge3d.mem and top-level shortcuts.
 - Regression coverage for GPU adapter probes exercises native callbacks and fallback shims.
 
@@ -28,6 +221,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Terrain renderer honors TerrainRenderParams toggles for MSAA and parallax occlusion flags so user settings directly drive the GPU pipeline.
 
 ### Documentation
+- Added ``docs/rendering_options.rst`` summarizing lighting, BRDF, shadow, GI, and volumetric options alongside the new CLI flags.
 - Point auxiliary CLAUDE files at the canonical root guide to avoid drift.
 
 ## [0.80.0]

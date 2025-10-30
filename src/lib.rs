@@ -263,6 +263,7 @@ pub mod geometry;
 pub mod gpu;
 pub mod grid;
 mod ibl_wrapper;
+pub mod lighting; // P0: Production-ready lighting stack (lights, BRDFs, shadows, IBL)
 pub mod import; // Importers: OSM buildings, etc.
 pub mod io; // IO: OBJ/PLY/glTF readers/writers
 pub mod loaders;
@@ -318,6 +319,23 @@ pub use core::soft_light_radius::{
 pub use core::water_surface::{
     WaterSurfaceMode, WaterSurfaceParams, WaterSurfaceRenderer, WaterSurfaceUniforms,
 };
+pub use lighting::LightBuffer;
+pub use render::params::{
+    AtmosphereParams as RendererAtmosphereParams,
+    BrdfModel as RendererBrdfModel,
+    ConfigError as RendererConfigError,
+    GiMode as RendererGiMode,
+    GiParams as RendererGiParams,
+    LightConfig as RendererLightConfig,
+    LightingParams as RendererLightingParams,
+    RendererConfig,
+    ShadowParams as RendererShadowParams,
+    ShadowTechnique as RendererShadowTechnique,
+    SkyModel as RendererSkyModel,
+    VolumetricParams as RendererVolumetricParams,
+    VolumetricPhase as RendererVolumetricPhase,
+    LightType as RendererLightType,
+};
 pub use error::RenderError;
 pub use path_tracing::{TracerEngine, TracerParams};
 pub use sdf::{
@@ -326,6 +344,7 @@ pub use sdf::{
 };
 pub use shadows::{
     detect_peter_panning, CascadeStatistics, CascadedShadowMaps, CsmConfig, CsmRenderer,
+    ShadowManager, ShadowManagerConfig,
 };
 
 #[cfg(feature = "extension-module")]
@@ -3129,6 +3148,19 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::scene::Scene>()?;
     // Expose TerrainSpike (E2/E3) to Python
     m.add_class::<crate::terrain::TerrainSpike>()?;
+    // P0 Lighting classes
+    m.add_class::<crate::lighting::PyLight>()?;
+    m.add_class::<crate::lighting::PyMaterialShading>()?;
+    m.add_class::<crate::lighting::PyShadowSettings>()?;
+    m.add_class::<crate::lighting::PyGiSettings>()?;
+    m.add_class::<crate::lighting::PyAtmosphere>()?;
+    // P5 Screen-space effects classes
+    m.add_class::<crate::lighting::PySSAOSettings>()?;
+    m.add_class::<crate::lighting::PySSGISettings>()?;
+    m.add_class::<crate::lighting::PySSRSettings>()?;
+    // P6 Atmospherics classes
+    m.add_class::<crate::lighting::PySkySettings>()?;
+    m.add_class::<crate::lighting::PyVolumetricSettings>()?;
 
     Ok(())
 }

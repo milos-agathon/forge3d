@@ -1,0 +1,354 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ============================================================================
+  # Rust Tests (cargo test)
+  # ============================================================================
+  test-rust:
+    name: Test Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev
+
+      - name: Run cargo check
+        run: cargo check --workspace --all-features
+
+      - name: Run cargo test
+        run: cargo test --workspace --all-features -- --test-threads=1
+        env:
+          # Run tests serially to avoid GPU contention
+          RUST_TEST_THREADS: 1
+
+      - name: Run cargo clippy
+        run: cargo clippy --workspace --all-features -- -D warnings
+        continue-on-error: true
+
+  # ============================================================================
+  # Python Wheel Build (maturin)
+  # ============================================================================
+  build-wheels:
+    name: Build Wheel (${{ matrix.platform.os }})
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os: windows
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: linux
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos
+            runner: macos-latest
+            target: universal2-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies (Linux)
+        if: matrix.platform.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev cmake
+
+      - name: Install system dependencies (macOS)
+        if: matrix.platform.os == 'macos'
+        run: |
+          brew install cmake
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Build wheel
+        run: maturin build --release --target ${{ matrix.platform.target }}
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheels-${{ matrix.platform.os }}
+          path: target/wheels/*.whl
+
+  # ============================================================================
+  # Python Tests (pytest)
+  # ============================================================================
+  test-python:
+    name: Test Python (${{ matrix.os }})
+    needs: build-wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python-version: ['3.9', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: wheels-${{ runner.os == 'Windows' && 'windows' || runner.os == 'Linux' && 'linux' || 'macos' }}
+          path: dist/
+
+      - name: Install wheel and test dependencies
+        run: |
+          pip install dist/*.whl
+          pip install pytest numpy
+
+      - name: Run pytest
+        run: pytest tests/ -v --tb=short
+        continue-on-error: true
+
+  # ============================================================================
+  # Golden Image Tests
+  # ============================================================================
+  test-golden-images:
+    name: Golden Images (${{ matrix.os }})
+    needs: build-wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]  # Skip macOS for golden images (no GPU in CI)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: wheels-${{ runner.os == 'Windows' && 'windows' || 'linux' }}
+          path: dist/
+
+      - name: Install wheel
+        run: pip install dist/*.whl
+
+      - name: Generate golden images
+        run: python scripts/generate_golden_images.py --output-dir tests/golden
+        continue-on-error: true
+
+      - name: Run golden image tests
+        run: cargo test --test golden_images -- --ignored --test-threads=1
+        continue-on-error: true
+
+      - name: Upload golden image artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: golden-image-diffs-${{ matrix.os }}
+          path: tests/golden/diff/
+
+  # ============================================================================
+  # Example Sanity Tests (640×360 renders within 90s)
+  # ============================================================================
+  test-examples:
+    name: Example Sanity (${{ matrix.os }})
+    needs: build-wheels
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        example:
+          - name: "Triangle"
+            script: "examples/triangle_png.py"
+            args: "--width 640 --height 360"
+          - name: "Terrain Single Tile"
+            script: "examples/terrain_single_tile.py"
+            args: ""
+          - name: "PNG NumPy Roundtrip"
+            script: "examples/png_numpy_roundtrip.py"
+            args: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: wheels-${{ runner.os == 'Windows' && 'windows' || 'linux' }}
+          path: dist/
+
+      - name: Install wheel and dependencies
+        run: |
+          pip install dist/*.whl
+          pip install numpy
+
+      - name: Run example: ${{ matrix.example.name }}
+        run: python ${{ matrix.example.script }} ${{ matrix.example.args }}
+        timeout-minutes: 2
+
+      - name: Verify output exists
+        shell: bash
+        run: |
+          # Check that at least one PNG was created
+          if ls *.png 1> /dev/null 2>&1; then
+            echo "✓ PNG output found"
+          else
+            echo "✗ No PNG output found"
+            exit 1
+          fi
+
+  # ============================================================================
+  # Shader Parameter Packing Tests (P9)
+  # ============================================================================
+  test-shader-params:
+    name: Shader Params (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-shader-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run shader parameter packing tests
+        run: cargo test --test test_shader_params_p5_p8 -- --test-threads=1
+
+  # ============================================================================
+  # Documentation Build
+  # ============================================================================
+  build-docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust docs
+        run: cargo doc --workspace --all-features --no-deps
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Sphinx dependencies
+        run: |
+          pip install sphinx sphinx-rtd-theme
+
+      - name: Build Sphinx docs
+        run: |
+          cd docs
+          make html || true
+        continue-on-error: true
+
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: documentation
+          path: |
+            target/doc/
+            docs/_build/html/
+
+  # ============================================================================
+  # Final Status
+  # ============================================================================
+  ci-success:
+    name: CI Success
+    needs: [test-rust, build-wheels, test-python, test-shader-params]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check all jobs succeeded
+        run: |
+          if [ "${{ needs.test-rust.result }}" != "success" ] || \
+             [ "${{ needs.build-wheels.result }}" != "success" ] || \
+             [ "${{ needs.test-python.result }}" != "success" ] || \
+             [ "${{ needs.test-shader-params.result }}" != "success" ]; then
+            echo "❌ CI failed"
+            exit 1
+          else
+            echo "✅ CI passed"
+          fi

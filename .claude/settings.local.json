@@ -137,7 +137,8 @@
       "Bash(VF_COLOR_DEBUG_MODE=0 RUST_LOG=color.debug=info python:*)",
       "Bash(RUST_LOG=info VF_COLOR_DEBUG_MODE=0 python:*)",
       "Bash(VF_COLOR_DEBUG_MODE=2 python:*)",
-      "Bash(VF_COLOR_DEBUG_MODE=3 python:*)"
+      "Bash(VF_COLOR_DEBUG_MODE=3 python:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "additionalDirectories": [

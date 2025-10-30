@@ -1,4 +1,17 @@
 // src/shaders/terrain_pbr_pom.wgsl
+}
+@group(2) @binding(0)
+var ibl_specular_tex : texture_cube<f32>;
+
+@group(2) @binding(1)
+var ibl_irradiance_tex : texture_cube<f32>;
+
+@group(2) @binding(2)
+
+@group(2) @binding(3)
+var ibl_brdf_lut_tex : texture_2d<f32>;
+
+@group(2) @binding(4)
 // Terrain PBR + POM shader implementing normal, triplanar, and BRDF logic
 // Exists to light the terrain renderer milestone with placeholder resources until assets land
 // RELEVANT FILES: src/terrain_renderer.rs, src/terrain_render_params.rs, src/overlay_layer.rs, terrain_demo_task_breakdown.md
@@ -66,26 +79,21 @@ var colormap_samp : sampler;
 @group(0) @binding(8)
 var<uniform> u_overlay : OverlayUniforms;
 
-@group(1) @binding(0)
-var ibl_irradiance_tex : texture_cube<f32>;
-
-@group(1) @binding(1)
-var ibl_irradiance_samp : sampler;
-
-@group(1) @binding(2)
+@group(2) @binding(0)
 var ibl_specular_tex : texture_cube<f32>;
 
-@group(1) @binding(3)
-var ibl_specular_samp : sampler;
+@group(2) @binding(1)
+var ibl_irradiance_tex : texture_cube<f32>;
 
-@group(1) @binding(4)
+@group(2) @binding(2)
+var ibl_env_sampler : sampler;
+
+@group(2) @binding(3)
 var ibl_brdf_lut_tex : texture_2d<f32>;
 
-@group(1) @binding(5)
-var ibl_brdf_lut_samp : sampler;
-
-@group(1) @binding(6)
+@group(2) @binding(4)
 var<uniform> u_ibl : IblUniforms;
+
 
 struct VertexInput {
     @location(0) position : vec3<f32>,
@@ -532,13 +540,13 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
 
     let rotated_normal = rotate_y(blended_normal, u_ibl.sin_theta, u_ibl.cos_theta);
     let rotated_view = rotate_y(view_dir, u_ibl.sin_theta, u_ibl.cos_theta);
-    let irradiance = textureSample(ibl_irradiance_tex, ibl_irradiance_samp, rotated_normal).rgb;
+    let irradiance = textureSample(ibl_irradiance_tex, ibl_env_sampler, rotated_normal).rgb;
     let reflection_dir = reflect(-rotated_view, rotated_normal);
     let max_mips = max(u_ibl.specular_mip_count - 1.0, 0.0);
     let lod = clamp(roughness * max_mips, 0.0, max_mips);
-    let prefiltered = textureSampleLevel(ibl_specular_tex, ibl_specular_samp, reflection_dir, lod).rgb;
+    let prefiltered = textureSampleLevel(ibl_specular_tex, ibl_env_sampler, reflection_dir, lod).rgb;
     let n_dot_v_ibl = max(dot(rotated_normal, rotated_view), 0.0);
-    let brdf_sample = textureSample(ibl_brdf_lut_tex, ibl_brdf_lut_samp, vec2<f32>(n_dot_v_ibl, roughness)).rg;
+    let brdf_sample = textureSample(ibl_brdf_lut_tex, ibl_env_sampler, vec2<f32>(n_dot_v_ibl, roughness)).rg;
     let fresnel_ibl = fresnel_schlick(n_dot_v_ibl, f0);
     let k_s = fresnel_ibl;
     let k_d = (vec3<f32>(1.0, 1.0, 1.0) - k_s) * (1.0 - metallic);
@@ -582,3 +590,4 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     out.color = vec4<f32>(gamma_corrected, 1.0);
     return out;
 }
+

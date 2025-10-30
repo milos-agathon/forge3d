@@ -32,7 +32,7 @@ mod colormap_path_tests {
 
         // Define 4-stop LUT with distinct colors
         let stops = vec![
-            (0.0, "#ff0000"), // Red
+            (0.0, "#ff0000"),  // Red
             (0.33, "#00ff00"), // Green
             (0.66, "#0000ff"), // Blue
             (1.0, "#ffff00"),  // Yellow
@@ -134,18 +134,14 @@ mod colormap_path_tests {
         }
 
         // Define colormap
-        let stops = vec![
-            (0.0, "#e7d8a2"),
-            (0.5, "#c5a06e"),
-            (1.0, "#995f57"),
-        ];
+        let stops = vec![(0.0, "#e7d8a2"), (0.5, "#c5a06e"), (1.0, "#995f57")];
         let domain = (0.0, 1.0);
 
         // Render with albedo_mode="mix", colormap_strength=0.5
         std::env::set_var("VF_COLOR_DEBUG_MODE", "0"); // Normal mode
-        // TODO: Create params with albedo_mode="mix", colormap_strength=0.5
-        // let frame_mix = render_terrain(&session, params_mix, &heightmap, width, height);
-        // let rgba_mix = frame_mix.to_rgba8();
+                                                       // TODO: Create params with albedo_mode="mix", colormap_strength=0.5
+                                                       // let frame_mix = render_terrain(&session, params_mix, &heightmap, width, height);
+                                                       // let rgba_mix = frame_mix.to_rgba8();
 
         // Render with albedo_mode="colormap" (LUT only)
         // TODO: Create params with albedo_mode="colormap"
@@ -223,8 +219,7 @@ mod colormap_path_tests {
 
         // Verify: Monotonic brightness increase
         assert!(
-            mean_brightness[0] < mean_brightness[1]
-                && mean_brightness[1] < mean_brightness[2],
+            mean_brightness[0] < mean_brightness[1] && mean_brightness[1] < mean_brightness[2],
             "Brightness should increase with colormap_strength. Got: {:?}",
             mean_brightness
         );

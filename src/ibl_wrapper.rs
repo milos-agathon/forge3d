@@ -6,6 +6,7 @@
 use anyhow::{anyhow, Result};
 use log::warn;
 use pyo3::prelude::*;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use wgpu::{SamplerDescriptor, TextureAspect, TextureViewDescriptor, TextureViewDimension};
 
@@ -16,9 +17,7 @@ pub(crate) struct IblGpuResources {
     pub irradiance_view: Arc<wgpu::TextureView>,
     pub specular_view: Arc<wgpu::TextureView>,
     pub brdf_view: Arc<wgpu::TextureView>,
-    pub irradiance_sampler: Arc<wgpu::Sampler>,
-    pub specular_sampler: Arc<wgpu::Sampler>,
-    pub brdf_sampler: Arc<wgpu::Sampler>,
+    pub sampler: Arc<wgpu::Sampler>,
     pub specular_mip_count: u32,
 }
 
@@ -39,6 +38,8 @@ pub struct IBL {
     pub(crate) quality: crate::core::ibl::IBLQuality,
     pub(crate) use_auto_quality: bool,
     pub(crate) gpu_state: Arc<Mutex<Option<IblGpuState>>>,
+    pub(crate) base_resolution: u32,
+    pub(crate) cache_dir: Option<PathBuf>,
 }
 
 #[pymethods]
@@ -116,6 +117,8 @@ impl IBL {
             quality: quality_level,
             use_auto_quality,
             gpu_state: Arc::new(Mutex::new(None)),
+            base_resolution: quality_level.base_environment_size(),
+            cache_dir: None,
         })
     }
 
@@ -200,6 +203,38 @@ impl IBL {
         self.rotation_deg.to_radians()
     }
 
+    #[pyo3(text_signature = "($self, resolution)")]
+    pub fn set_base_resolution(&mut self, resolution: u32) -> PyResult<()> {
+        let clamped = resolution.max(16);
+        self.base_resolution = clamped;
+        if let Ok(mut guard) = self.gpu_state.lock() {
+            *guard = None;
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn base_resolution(&self) -> u32 {
+        self.base_resolution
+    }
+
+    #[pyo3(signature = (path=None))]
+    #[pyo3(text_signature = "($self, path=None)")]
+    pub fn set_cache_dir(&mut self, path: Option<&str>) -> PyResult<()> {
+        self.cache_dir = path.map(PathBuf::from);
+        if let Ok(mut guard) = self.gpu_state.lock() {
+            *guard = None;
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
+    pub fn cache_dir(&self) -> Option<String> {
+        self.cache_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+    }
+
     pub(crate) fn ensure_gpu_resources(
         &self,
         device: &Arc<wgpu::Device>,
@@ -275,6 +310,12 @@ impl IBL {
         }
 
         let mut renderer = crate::core::ibl::IBLRenderer::new(device.as_ref(), quality_to_use);
+        renderer.set_base_resolution(self.base_resolution);
+        if let Some(cache_dir) = self.cache_dir.as_ref() {
+            renderer
+                .configure_cache(cache_dir, Path::new(&self.environment_path))
+                .map_err(|e| anyhow!("Failed to configure IBL cache: {}", e))?;
+        }
 
         renderer
             .load_environment_map(
@@ -322,8 +363,8 @@ impl IBL {
             ..TextureViewDescriptor::default()
         }));
 
-        let sampler_descriptor = |label: &'static str| SamplerDescriptor {
-            label: Some(label),
+        let sampler = Arc::new(device.create_sampler(&SamplerDescriptor {
+            label: Some("ibl.env.sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -331,22 +372,13 @@ impl IBL {
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
-        };
-
-        let irradiance_sampler =
-            Arc::new(device.create_sampler(&sampler_descriptor("ibl.irradiance.sampler")));
-        let specular_sampler =
-            Arc::new(device.create_sampler(&sampler_descriptor("ibl.specular.sampler")));
-        let brdf_sampler =
-            Arc::new(device.create_sampler(&sampler_descriptor("ibl.brdf_lut.sampler")));
+        }));
 
         let shared = Arc::new(IblGpuResources {
             irradiance_view,
             specular_view,
             brdf_view,
-            irradiance_sampler,
-            specular_sampler,
-            brdf_sampler,
+            sampler,
             specular_mip_count: quality_to_use.specular_mip_levels(),
         });
 

@@ -5667,6 +5667,130 @@ impl Scene {
         b.instance_count = ni as u32;
         Ok(())
     }
+
+    /// Get rendering statistics (P8)
+    ///
+    /// Returns
+    /// -------
+    /// dict
+    ///     Dictionary containing:
+    ///     - gpu_memory_mb: float - Current GPU memory usage in MiB (estimated)
+    ///     - gpu_memory_peak_mb: float - Peak GPU memory usage in MiB (estimated)
+    ///     - gpu_memory_budget_mb: float - GPU memory budget in MiB
+    ///     - gpu_utilization: float - Memory utilization (0.0 to 1.0+)
+    ///     - frame_time_ms: float - Last frame time in milliseconds (placeholder: 0.0)
+    ///     - passes_enabled: list[str] - List of enabled rendering passes
+    ///
+    /// Notes
+    /// -----
+    /// GPU memory tracking is currently estimated based on texture dimensions and
+    /// known buffer sizes. Actual GPU memory usage may vary.
+    #[pyo3(text_signature = "($self)")]
+    pub fn get_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
+        use pyo3::types::PyDict;
+
+        let dict = PyDict::new(py);
+
+        // Estimate GPU memory usage based on textures
+        let bytes_per_pixel_color = 4; // RGBA8
+        let bytes_per_pixel_normal = 8; // RGBA16F
+        let bytes_per_pixel_depth = 4; // Depth32Float
+
+        let color_bytes = (self.width * self.height * bytes_per_pixel_color) as usize;
+        let normal_bytes = (self.width * self.height * bytes_per_pixel_normal) as usize;
+        let depth_bytes = if self.depth.is_some() {
+            (self.width * self.height * self.sample_count * bytes_per_pixel_depth) as usize
+        } else {
+            0
+        };
+
+        let msaa_color_bytes = if self.sample_count > 1 {
+            (self.width * self.height * self.sample_count * bytes_per_pixel_color) as usize
+        } else {
+            0
+        };
+        let msaa_normal_bytes = if self.sample_count > 1 {
+            (self.width * self.height * self.sample_count * bytes_per_pixel_normal) as usize
+        } else {
+            0
+        };
+
+        // SSAO textures
+        let ssao_bytes = (self.ssao.width * self.ssao.height * 4) as usize * 2; // AO + blur
+
+        // Vertex/Index buffers (estimated)
+        let grid_verts = (self.grid * self.grid * 4 * 4) as usize; // 4 floats per vert, 4 bytes per float
+        let grid_indices = ((self.grid - 1) * (self.grid - 1) * 6 * 4) as usize; // 6 indices per quad, 4 bytes per index
+
+        let total_bytes = color_bytes + normal_bytes + depth_bytes +
+                         msaa_color_bytes + msaa_normal_bytes +
+                         ssao_bytes + grid_verts + grid_indices;
+
+        let total_mb = total_bytes as f64 / (1024.0 * 1024.0);
+        let budget_mb = 512.0; // Default budget from P8
+
+        dict.set_item("gpu_memory_mb", total_mb)?;
+        dict.set_item("gpu_memory_peak_mb", total_mb)?; // No tracking yet, use current
+        dict.set_item("gpu_memory_budget_mb", budget_mb)?;
+        dict.set_item("gpu_utilization", total_mb / budget_mb)?;
+        dict.set_item("frame_time_ms", 0.0)?; // Placeholder, no timing yet
+
+        // Collect enabled passes
+        let mut passes: Vec<&str> = Vec::new();
+
+        if self.terrain_enabled {
+            passes.push("terrain");
+        }
+        if self.ssao_enabled {
+            passes.push("ssao");
+        }
+        if self.reflections_enabled {
+            passes.push("reflections");
+        }
+        if self.dof_enabled {
+            passes.push("dof");
+        }
+        if self.cloud_shadows_enabled {
+            passes.push("cloud_shadows");
+        }
+        if self.clouds_enabled {
+            passes.push("clouds");
+        }
+        if self.ground_plane_enabled {
+            passes.push("ground_plane");
+        }
+        if self.water_surface_enabled {
+            passes.push("water_surface");
+        }
+        if self.soft_light_radius_enabled {
+            passes.push("soft_light_radius");
+        }
+        if self.point_spot_lights_enabled {
+            passes.push("point_spot_lights");
+        }
+        if self.ltc_area_lights_enabled {
+            passes.push("ltc_area_lights");
+        }
+        if self.ibl_enabled {
+            passes.push("ibl");
+        }
+        if self.dual_source_oit_enabled {
+            passes.push("dual_source_oit");
+        }
+        if self.overlay_enabled {
+            passes.push("overlay");
+        }
+        if self.text_overlay_enabled {
+            passes.push("text_overlay");
+        }
+        if self.text3d_enabled {
+            passes.push("text3d");
+        }
+
+        dict.set_item("passes_enabled", passes)?;
+
+        Ok(dict.into())
+    }
 }
 impl Scene {
     // B5: Render reflections to reflection texture with clip plane

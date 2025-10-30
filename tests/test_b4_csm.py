@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # tests/test_b4_csm.py
 # Test suite for Cascaded Shadow Maps (B4) implementation
-# RELEVANT FILES:shaders/csm.wgsl,python/forge3d/lighting.py,examples/csm_demo.py,src/shadows/csm.rs
+# RELEVANT FILES:shaders/shadows.wgsl,python/forge3d/lighting.py,examples/csm_demo.py,src/shadows/csm.rs
 
 """
 Test suite for Cascaded Shadow Maps implementation.
