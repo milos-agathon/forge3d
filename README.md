@@ -46,7 +46,7 @@ python examples/geopandas_demo.py
 --lighting-elevation 315 
 --shadow-intensity 1 
 --contrast-pct 0.5 
---gamma 0.05 
+--gamma 0.5 
 --camera-theta 90
 ```
 
