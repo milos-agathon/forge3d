@@ -70,5 +70,10 @@ fn cs_equirect_to_cubemap(@builtin(global_invocation_id) gid: vec3<u32>) {
     let uv = direction_to_equirect(world_dir);
 
     let color = textureSampleLevel(equirect_map, env_sampler, uv, 0.0);
-    textureStore(target_cube, vec3<i32>(i32(gid.x), i32(gid.y), i32(face)), color);
+    textureStore(
+        target_cube,
+        vec2<i32>(i32(gid.x), i32(gid.y)),
+        i32(face),
+        color,
+    );
 }

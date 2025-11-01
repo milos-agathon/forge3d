@@ -37,9 +37,10 @@ pub fn read_texture_tight(
 
     let bytes_per_pixel = match format {
         wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => 4,
+        wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => 4,
         wgpu::TextureFormat::Rgba16Float => 8,
         _ => bail!(
-            "read_texture_tight only supports RGBA8/RGBA16F formats, got {:?}",
+            "read_texture_tight only supports RGBA8/BGRA8/RGBA16F formats, got {:?}",
             format
         ),
     };

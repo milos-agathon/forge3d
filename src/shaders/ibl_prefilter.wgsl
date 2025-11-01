@@ -125,7 +125,8 @@ fn cs_irradiance_convolution(@builtin(global_invocation_id) gid: vec3<u32>) {
     irradiance = PI * irradiance / f32(sample_count);
     textureStore(
         target_cube,
-        vec3<i32>(i32(gid.x), i32(gid.y), i32(face)),
+        vec2<i32>(i32(gid.x), i32(gid.y)),
+        i32(face),
         vec4<f32>(irradiance, 1.0),
     );
 }
@@ -177,7 +178,8 @@ fn cs_specular_prefilter(@builtin(global_invocation_id) gid: vec3<u32>) {
     prefiltered = prefiltered / max(total_weight, 1e-3);
     textureStore(
         target_cube,
-        vec3<i32>(i32(gid.x), i32(gid.y), i32(face)),
+        vec2<i32>(i32(gid.x), i32(gid.y)),
+        i32(face),
         vec4<f32>(prefiltered, 1.0),
     );
 }

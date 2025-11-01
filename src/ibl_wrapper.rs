@@ -185,23 +185,6 @@ impl IBL {
             self.quality()
         )
     }
-}
-
-impl IBL {
-    /// Get reference to HDR image
-    pub fn hdr_image(&self) -> Option<&Arc<crate::formats::hdr::HdrImage>> {
-        self.hdr_image.as_ref()
-    }
-
-    /// Get IBL quality level
-    pub fn quality_level(&self) -> crate::core::ibl::IBLQuality {
-        self.quality
-    }
-
-    /// Get rotation in radians
-    pub fn rotation_rad(&self) -> f32 {
-        self.rotation_deg.to_radians()
-    }
 
     #[pyo3(text_signature = "($self, resolution)")]
     pub fn set_base_resolution(&mut self, resolution: u32) -> PyResult<()> {
@@ -233,6 +216,23 @@ impl IBL {
         self.cache_dir
             .as_ref()
             .map(|p| p.display().to_string())
+    }
+}
+
+impl IBL {
+    /// Get reference to HDR image
+    pub fn hdr_image(&self) -> Option<&Arc<crate::formats::hdr::HdrImage>> {
+        self.hdr_image.as_ref()
+    }
+
+    /// Get IBL quality level
+    pub fn quality_level(&self) -> crate::core::ibl::IBLQuality {
+        self.quality
+    }
+
+    /// Get rotation in radians
+    pub fn rotation_rad(&self) -> f32 {
+        self.rotation_deg.to_radians()
     }
 
     pub(crate) fn ensure_gpu_resources(

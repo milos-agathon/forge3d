@@ -5,23 +5,27 @@ Generate golden reference images for P9 regression testing
 Creates 12 golden images with different BRDF × shadow × GI combinations
 at 1280×920 resolution for SSIM validation (epsilon ≥ 0.98).
 
+This script launches the interactive viewer example headlessly, issues
+commands over stdin to configure GI and scene, captures a snapshot PNG,
+and quits.
+
 Usage:
-    python scripts/generate_golden_images.py [--output-dir tests/golden]
+    python scripts/generate_golden_images.py \
+        [--output-dir tests/golden] [--overwrite] \
+        [--filter SUBSTR] [--ibl path.hdr] [--obj path.obj]
 """
 
 import argparse
 import os
 import sys
+import time
+import subprocess
 from pathlib import Path
 
 # Add parent directory to path for forge3d import
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-try:
-    import forge3d
-except ImportError:
-    print("Error: forge3d not found. Run 'maturin develop --release' first.")
-    sys.exit(1)
+# Python module is not required; we drive the Rust viewer example.
 
 
 GOLDEN_CONFIGS = [
@@ -149,6 +153,182 @@ GOLDEN_CONFIGS = [
 ]
 
 
+def _camera_for_config(name: str):
+    """Return (fov_deg, eye(x,y,z), target(x,y,z), up(x,y,z)) for a config name.
+
+    Defaults chosen to frame assets/cornell_box.obj nicely.
+    """
+    # Default camera
+    fov = 45.0
+    eye = [0.0, 1.0, -3.0]
+    target = [0.0, 1.0, 0.0]
+    up = [0.0, 1.0, 0.0]
+
+    # Slightly wider for SSR to catch reflections
+    if name.endswith("_ssr"):
+        fov = 55.0
+
+    return fov, eye, target, up
+
+
+def _viewer_args_for_config(name, width: int, height: int, gi_modes, ibl_enabled, ibl_path: Path|None, obj_path: Path|None, snapshot: Path):
+    args: list[str] = []
+    # Ensure window size matches golden target
+    args += ["--size", f"{int(width)}x{int(height)}"]
+    # Load mesh if available
+    if obj_path and obj_path.exists():
+        args += ["--obj", str(obj_path)]
+    # IBL setup
+    if ibl_enabled and ibl_path and ibl_path.exists():
+        args += ["--ibl", str(ibl_path)]
+    # Enable GI modes
+    for mode in gi_modes:
+        if mode in ("ssao", "ssgi", "ssr"):
+            args += ["--gi", f"{mode}:on"]
+        elif mode == "gtao":
+            args += ["--ssao-technique", "gtao", "--gi", "ssao:on"]
+        elif mode == "ibl":
+            pass
+    # Choose visualization:
+    # - SSGI/SSR: GI debug view
+    # - IBL-only: Lit viz (simple shading using albedo+normal with IBL)
+    # - Otherwise: Material; if AO/GTAO present, composite AO for visibility
+    has_ssgi_or_ssr = any(m in ("ssgi", "ssr") for m in gi_modes)
+    has_ao = any(m in ("ssao", "gtao") for m in gi_modes)
+    has_ibl = any(m == "ibl" for m in gi_modes)
+    has_ibl_only = has_ibl and not has_ssgi_or_ssr and not has_ao
+    if has_ssgi_or_ssr:
+        args += ["--viz", "gi"]
+    elif has_ibl_only:
+        args += ["--viz", "lit", "--lit-sun", "1.0", "--lit-ibl", "0.6"]
+    else:
+        args += ["--viz", "material"]
+        if has_ao:
+            # Enable AO composite and set a default multiplier
+            args += ["--ssao-composite", "on", "--ssao-mul", "0.8"]
+    # Camera & FOV for consistent framing
+    fov, eye, target, up = _camera_for_config(name)
+    args += ["--fov", f"{fov}"]
+    args += ["--cam-lookat", f"{eye[0]},{eye[1]},{eye[2]},{target[0]},{target[1]},{target[2]},{up[0]},{up[1]},{up[2]}"]
+    # Take snapshot
+    args += ["--snapshot", str(snapshot)]
+    return args
+
+
+def _run_viewer_and_snapshot(example_args: list[str], cwd: Path, snapshot_path: Path, timeout_sec: float = 45.0) -> None:
+    env = os.environ.copy()
+    env["FORGE3D_AUTO_SNAPSHOT_PATH"] = str(snapshot_path)
+    proc = subprocess.Popen(
+        ["cargo", "run", "--quiet", "--release", "--example", "interactive_viewer", "--", *example_args],
+        cwd=str(cwd),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+
+    # Asynchronously drain stdout to avoid deadlocks and detect readiness/snapshot
+    saved_snapshot = {"done": False}
+    ready = {"seen": False}
+
+    def _reader():
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                s = line.rstrip()
+                print(f"[viewer] {s}")
+                if "Interactive Viewer" in s or s.startswith("Controls:"):
+                    ready["seen"] = True
+                if s.startswith("Saved snapshot to "):
+                    # Matches viewer log in render()
+                    saved_snapshot["done"] = True
+        except Exception:
+            pass
+
+    import threading, sys
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+
+    # If running interactively, forward our terminal stdin to the viewer's stdin
+    forwarder_stop = {"stop": False}
+    def _forward_stdin():
+        try:
+            if not sys.stdin.isatty():
+                return
+            assert proc.stdin is not None
+            for line in sys.stdin:
+                if forwarder_stop["stop"]:
+                    break
+                try:
+                    proc.stdin.write(line)
+                    proc.stdin.flush()
+                    try:
+                        sys.stdout.write(f"[forward] {line}")
+                        sys.stdout.flush()
+                    except Exception:
+                        pass
+                except Exception:
+                    break
+        except Exception:
+            pass
+
+    tf = threading.Thread(target=_forward_stdin, daemon=True)
+    tf.start()
+    try:
+        # Wait up to a few seconds for startup banner to ensure input thread alive
+        t0 = time.time()
+        while not ready["seen"] and (time.time() - t0) < 5.0:
+            time.sleep(0.1)
+        # Extra settle time for first frame
+        time.sleep(0.5)
+        # Proactively request snapshot via stdin as a fallback
+        try:
+            assert proc.stdin is not None
+            proc.stdin.write(f"snapshot {snapshot_path}\n")
+            proc.stdin.flush()
+        except Exception:
+            pass
+        # After initial-commands snapshot, wait for file or log
+        t0 = time.time()
+        while not (snapshot_path.exists() or saved_snapshot["done"]):
+            if time.time() - t0 > 120.0:
+                raise RuntimeError(f"Snapshot not created within timeout: {snapshot_path}")
+            time.sleep(0.2)
+        # Request quit and wait
+        try:
+            assert proc.stdin is not None
+            proc.stdin.write(":quit\n")
+            proc.stdin.flush()
+        except Exception:
+            pass
+        try:
+            forwarder_stop["stop"] = True
+        except Exception:
+            pass
+        proc.wait(timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        # If we have our snapshot already, force-kill and continue. Otherwise, fail.
+        try:
+            if snapshot_path.exists() or saved_snapshot["done"]:
+                print("  [generator] Viewer did not exit in time; killing after snapshot...")
+                proc.kill()
+            else:
+                proc.kill()
+                raise RuntimeError("Viewer did not exit in time")
+        except Exception:
+            # Best-effort cleanup; propagate failure only if no snapshot
+            if not snapshot_path.exists():
+                raise RuntimeError("Viewer did not exit in time")
+    finally:
+        try:
+            if proc.poll() is None:
+                proc.kill()
+        except Exception:
+            pass
+
+
 def generate_golden_image(
     name: str,
     width: int,
@@ -159,8 +339,11 @@ def generate_golden_image(
     ibl_enabled: bool,
     description: str,
     output_dir: Path,
+    *,
+    ibl_path: Path|None,
+    obj_path: Path|None,
 ) -> None:
-    """Generate a single golden reference image"""
+    """Generate a single golden reference image using the interactive viewer."""
 
     print(f"\nGenerating: {name}")
     print(f"  Resolution: {width}×{height}")
@@ -169,43 +352,23 @@ def generate_golden_image(
     print(f"  GI: {gi_modes if gi_modes else 'none'}")
     print(f"  Description: {description}")
 
-    # TODO: This is a placeholder implementation
-    # In a real implementation, you would:
-    # 1. Create a Scene with specified width/height
-    # 2. Set up camera looking at interesting terrain
-    # 3. Configure lighting (directional sun + optional IBL)
-    # 4. Set BRDF model
-    # 5. Configure shadow technique
-    # 6. Enable GI modes (SSAO, GTAO, SSGI, SSR, IBL)
-    # 7. Render to PNG
-
-    # For now, just create a placeholder file
     output_path = output_dir / f"{name}.png"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write a tiny valid PNG (1×1 white pixel) as placeholder
-    # PNG header + IHDR + IDAT + IEND
-    png_data = bytes([
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,  # PNG signature
-        0x00, 0x00, 0x00, 0x0D,  # IHDR length
-        0x49, 0x48, 0x44, 0x52,  # IHDR
-        0x00, 0x00, 0x00, 0x01,  # width=1
-        0x00, 0x00, 0x00, 0x01,  # height=1
-        0x08, 0x02, 0x00, 0x00, 0x00,  # bit depth=8, color type=2 (RGB)
-        0x90, 0x77, 0x53, 0xDE,  # CRC
-        0x00, 0x00, 0x00, 0x0C,  # IDAT length
-        0x49, 0x44, 0x41, 0x54,  # IDAT
-        0x08, 0xD7, 0x63, 0xF8, 0xFF, 0xFF, 0x3F, 0x00, 0x05, 0xFE, 0x02, 0xFE,  # compressed data
-        0xDC, 0xCC, 0x59, 0xE7,  # CRC
-        0x00, 0x00, 0x00, 0x00,  # IEND length
-        0x49, 0x45, 0x4E, 0x44,  # IEND
-        0xAE, 0x42, 0x60, 0x82,  # CRC
-    ])
+    # Build commands for viewer
+    project_root = Path(__file__).parent.parent
+    args_list = _viewer_args_for_config(name, width, height, gi_modes, ibl_enabled, ibl_path, obj_path, output_path)
 
-    with open(output_path, 'wb') as f:
-        f.write(png_data)
+    # Launch viewer and send commands
+    _run_viewer_and_snapshot(args_list, project_root, output_path)
 
-    print(f"  ✓ Placeholder written: {output_path}")
+    # Ensure file exists
+    t0 = time.time()
+    while not output_path.exists():
+        if time.time() - t0 > 10.0:
+            raise RuntimeError(f"Snapshot not created: {output_path}")
+        time.sleep(0.1)
+    print(f"  ✓ Snapshot written: {output_path}")
 
 
 def main():
@@ -223,6 +386,24 @@ def main():
         action="store_true",
         help="Overwrite existing golden images",
     )
+    parser.add_argument(
+        "--filter",
+        type=str,
+        default=None,
+        help="Substring filter to select a subset of configs by name",
+    )
+    parser.add_argument(
+        "--ibl",
+        type=Path,
+        default=None,
+        help="Path to environment HDR/EXR to use for IBL scenes",
+    )
+    parser.add_argument(
+        "--obj",
+        type=Path,
+        default=Path("assets/bunny.obj"),
+        help="Path to OBJ mesh to load (default: assets/bunny.obj)",
+    )
 
     args = parser.parse_args()
 
@@ -230,7 +411,9 @@ def main():
     print("Golden Image Generator (P9)")
     print("=" * 70)
     print(f"Output directory: {args.output_dir}")
-    print(f"Number of images: {len(GOLDEN_CONFIGS)}")
+    # Filter configs if requested
+    selected = [c for c in GOLDEN_CONFIGS if (args.filter is None or args.filter in c[0])]
+    print("Number of images: {}".format(len(selected)))
     print(f"Resolution: 1280×920 (all images)")
     print("=" * 70)
 
@@ -239,7 +422,7 @@ def main():
 
     # Generate each golden image
     success_count = 0
-    for config in GOLDEN_CONFIGS:
+    for config in selected:
         name, width, height, brdf, shadows, gi_modes, ibl_enabled, description = config
 
         output_path = args.output_dir / f"{name}.png"
@@ -260,6 +443,8 @@ def main():
                 ibl_enabled,
                 description,
                 args.output_dir,
+                ibl_path=args.ibl,
+                obj_path=args.obj if args.obj is not None else None,
             )
             success_count += 1
         except Exception as e:
@@ -268,11 +453,11 @@ def main():
             traceback.print_exc()
 
     print("\n" + "=" * 70)
-    print(f"Generated {success_count}/{len(GOLDEN_CONFIGS)} golden images")
+    print(f"Generated {success_count}/{len(selected)} golden images")
     print(f"Output: {args.output_dir}")
     print("=" * 70)
 
-    if success_count < len(GOLDEN_CONFIGS):
+    if success_count < len(selected):
         print("\n⚠️  Some images failed to generate")
         sys.exit(1)
 

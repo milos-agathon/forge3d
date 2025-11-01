@@ -1,0 +1,29 @@
+# Simple Cornell-like box (unit cube room) without top
+# Coordinates: box centered, open front for camera
+mtllib none
+
+o Box
+v -1.0  0.0 -1.0
+v  1.0  0.0 -1.0
+v  1.0  0.0  1.0
+v -1.0  0.0  1.0
+v -1.0  2.0 -1.0
+v  1.0  2.0 -1.0
+v  1.0  2.0  1.0
+v -1.0  2.0  1.0
+
+# Floor (y=0)
+f 1 2 3
+f 1 3 4
+# Back wall (z=1)
+f 4 3 7
+f 4 7 8
+# Left wall (x=-1)
+f 1 4 8
+f 1 8 5
+# Right wall (x=1)
+f 2 6 7
+f 2 7 3
+# Ceiling (y=2)
+f 5 8 7
+f 5 7 6

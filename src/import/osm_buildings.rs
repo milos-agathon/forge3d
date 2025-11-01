@@ -3,7 +3,9 @@
 // Each feature: {"coords": np.ndarray (N,2) float32 in XY, "height": float}
 // Returns a merged MeshBuffers extruded with given or default height.
 
+#[cfg(feature = "extension-module")]
 use crate::geometry::{extrude_polygon_with_options, ExtrudeOptions, MeshBuffers};
+#[cfg(feature = "extension-module")]
 use serde_json::Value as JsonValue;
 
 #[cfg(feature = "extension-module")]
@@ -11,6 +13,7 @@ use numpy::{PyReadonlyArray2, PyUntypedArrayMethods};
 #[cfg(feature = "extension-module")]
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
 
+#[cfg(feature = "extension-module")]
 fn merge_meshes(meshes: &[MeshBuffers]) -> MeshBuffers {
     let mut out = MeshBuffers::new();
     let mut base: u32 = 0;

@@ -23,7 +23,7 @@ struct PrefilterUniforms {
 var<uniform> params: PrefilterUniforms;
 
 @group(0) @binding(1)
-var brdf_target: texture_storage_2d<rg16float, write>;
+var brdf_target: texture_storage_2d<rgba16float, write>;
 
 fn hammersley(i: u32, n: u32) -> vec2<f32> {
     var bits = i;

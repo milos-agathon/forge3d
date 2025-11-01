@@ -14,7 +14,9 @@
 
 # forge3d
 
-Headless GPU rendering + PNGâ†”NumPy utilities (Rust + PyO3 + wgpu).
+Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
+
+Current release: 0.86.0 — cumulative P0–P5 work (config/CLI, lights, BRDFs, shadows, IBL, and screen‑space effects).
 
 ## Installation
 

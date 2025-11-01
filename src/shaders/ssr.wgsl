@@ -323,6 +323,44 @@ fn cs_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     textureStore(output_ssr, pixel, vec4<f32>(reflection_color, reflection_alpha));
 }
 
+// ======================================================================================
+// Minimal pipeline entrypoints to match Rust SsrRenderer layouts
+// ======================================================================================
+
+// Group(0) layout used by SsrRenderer::ssr_bind_group_layout
+@group(0) @binding(0) var ssr_depth_tex: texture_2d<f32>;
+@group(0) @binding(1) var ssr_normal_tex: texture_2d<f32>;
+@group(0) @binding(2) var ssr_albedo_tex: texture_2d<f32>;
+@group(0) @binding(3) var ssr_out_rgba: texture_storage_2d<rgba16float, write>;
+// bindings(4) and (5) are uniforms in Rust; not used here to keep shader simple
+@group(0) @binding(6) var ssr_env_cube: texture_cube<f32>;
+@group(0) @binding(7) var ssr_env_sam: sampler;
+
+// Simple SSR that writes albedo color as a placeholder (ensures pipeline compatibility)
+@compute @workgroup_size(8, 8, 1)
+fn cs_ssr(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let pixel = global_id.xy;
+    let dims = textureDimensions(ssr_albedo_tex);
+    if (pixel.x >= dims.x || pixel.y >= dims.y) { return; }
+    let albedo = textureLoad(ssr_albedo_tex, pixel, 0).rgb;
+    textureStore(ssr_out_rgba, pixel, vec4<f32>(albedo, 1.0));
+}
+
+// Group(0) layout used by SsrRenderer::temporal_bind_group_layout
+@group(0) @binding(0) var ssr_current: texture_2d<f32>;
+@group(0) @binding(1) var ssr_history: texture_2d<f32>;
+@group(0) @binding(2) var ssr_filtered_out: texture_storage_2d<rgba16float, write>;
+
+// Temporal filter: simple copy of current into filtered (placeholder)
+@compute @workgroup_size(8, 8, 1)
+fn cs_ssr_temporal(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let pixel = global_id.xy;
+    let dims = textureDimensions(ssr_current);
+    if (pixel.x >= dims.x || pixel.y >= dims.y) { return; }
+    let cur = textureLoad(ssr_current, pixel, 0);
+    textureStore(ssr_filtered_out, pixel, cur);
+}
+
 // ============================================================================
 // Hierarchical depth buffer generation (optional preprocessing)
 // ============================================================================

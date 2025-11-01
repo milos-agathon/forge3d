@@ -4,6 +4,7 @@
 
 use glam::{Mat3, Mat4, Vec3};
 
+#[cfg(feature = "extension-module")]
 use crate::geometry::MeshBuffers;
 
 #[cfg(all(feature = "extension-module", feature = "enable-gpu-instancing"))]

@@ -332,7 +332,7 @@ impl IBLRenderer {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: wgpu::TextureFormat::Rg16Float,
+                        format: wgpu::TextureFormat::Rgba16Float,
                         view_dimension: wgpu::TextureViewDimension::D2,
                     },
                     count: None,
@@ -529,7 +529,7 @@ impl IBLRenderer {
         let pixel_count = (width as usize) * (height as usize);
         if hdr_data.len() != pixel_count * 3 && hdr_data.len() != pixel_count * 4 {
             return Err(format!(
-                "HDR data length {} does not match width*height*{3|4}",
+                "HDR data length {} does not match width*height*{{3|4}}",
                 hdr_data.len()
             ));
         }
@@ -951,7 +951,7 @@ impl IBLRenderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rg16Float,
+            format: wgpu::TextureFormat::Rgba16Float,
             usage: wgpu::TextureUsages::STORAGE_BINDING
                 | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_SRC,
@@ -1206,33 +1206,33 @@ impl IBLRenderer {
         let specular_bytes = read_blob(&mut reader)?;
         let brdf_bytes = read_blob(&mut reader)?;
 
-        self.upload_cubemap(
+        let (irr_tex, irr_view) = Self::upload_cubemap(
             device,
             queue,
             metadata.irradiance_size,
             1,
             &irradiance_bytes,
-            &mut self.irradiance_map,
-            &mut self.irradiance_view,
         )?;
-        self.upload_cubemap(
+        self.irradiance_map = Some(irr_tex);
+        self.irradiance_view = Some(irr_view);
+        let (spec_tex, spec_view) = Self::upload_cubemap(
             device,
             queue,
             metadata.specular_size,
             metadata.specular_mips,
             &specular_bytes,
-            &mut self.specular_map,
-            &mut self.specular_view,
         )?;
-        self.upload_2d(
+        self.specular_map = Some(spec_tex);
+        self.specular_view = Some(spec_view);
+        let (brdf_tex, brdf_view) = Self::upload_2d(
             device,
             queue,
             metadata.brdf_size,
             metadata.brdf_size,
             &brdf_bytes,
-            &mut self.brdf_lut,
-            &mut self.brdf_view,
         )?;
+        self.brdf_lut = Some(brdf_tex);
+        self.brdf_view = Some(brdf_view);
 
         info!(
             "Loaded IBL cache '{}' ({:.2} MiB)",
@@ -1337,15 +1337,12 @@ impl IBLRenderer {
         Ok(())
     }
     fn upload_cubemap(
-        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         base_size: u32,
         mip_levels: u32,
         bytes: &[u8],
-        out_texture: &mut Option<wgpu::Texture>,
-        out_view: &mut Option<wgpu::TextureView>,
-    ) -> Result<(), String> {
+    ) -> Result<(wgpu::Texture, wgpu::TextureView), String> {
         let expected_len = cubemap_data_len(base_size, mip_levels, 8);
         if bytes.len() != expected_len {
             return Err("IBL cache cubemap payload size mismatch".into());
@@ -1411,21 +1408,16 @@ impl IBLRenderer {
             array_layer_count: Some(CUBE_FACE_COUNT),
         });
 
-        *out_texture = Some(texture);
-        *out_view = Some(view);
-        Ok(())
+        Ok((texture, view))
     }
     fn upload_2d(
-        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         width: u32,
         height: u32,
         bytes: &[u8],
-        out_texture: &mut Option<wgpu::Texture>,
-        out_view: &mut Option<wgpu::TextureView>,
-    ) -> Result<(), String> {
-        let expected = (width * height * 4) as usize;
+    ) -> Result<(wgpu::Texture, wgpu::TextureView), String> {
+        let expected = (width * height * 8) as usize;
         if bytes.len() != expected {
             return Err("IBL cache BRDF payload size mismatch".into());
         }
@@ -1440,12 +1432,12 @@ impl IBLRenderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rg16Float,
+            format: wgpu::TextureFormat::Rgba16Float,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
 
-        let (padded, bpr) = pad_image_rows(bytes, width, height, 4);
+        let (padded, bpr) = pad_image_rows(bytes, width, height, 8);
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &texture,
@@ -1466,12 +1458,11 @@ impl IBLRenderer {
             },
         );
 
-        *out_view = Some(texture.create_view(&wgpu::TextureViewDescriptor {
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("ibl.cache.brdf.view"),
             ..Default::default()
-        }));
-        *out_texture = Some(texture);
-        Ok(())
+        });
+        Ok((texture, view))
     }
     fn download_cubemap(
         &self,
@@ -1538,10 +1529,7 @@ impl IBLRenderer {
         queue.submit(Some(encoder.finish()));
 
         for (buffer, _, _) in buffer_slices.iter() {
-            buffer
-                .slice(..)
-                .map_async(wgpu::MapMode::Read, |_| ())
-                .map_err(|e| format!("Failed to map cubemap buffer: {e:?}"))?;
+            buffer.slice(..).map_async(wgpu::MapMode::Read, |_| ());
         }
         device.poll(wgpu::Maintain::Wait);
 
@@ -1567,7 +1555,7 @@ impl IBLRenderer {
         width: u32,
         height: u32,
     ) -> Result<Vec<u8>, String> {
-        let bytes_per_pixel = 4usize;
+        let bytes_per_pixel = 8usize;
         let padded_row = align_to(bytes_per_pixel * width as usize, COPY_ALIGNMENT);
         let padded_total = padded_row * height as usize;
 
@@ -1605,10 +1593,7 @@ impl IBLRenderer {
         );
 
         queue.submit(Some(encoder.finish()));
-        buffer
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, |_| ())
-            .map_err(|e| format!("Failed to map BRDF buffer: {e:?}"))?;
+        buffer.slice(..).map_async(wgpu::MapMode::Read, |_| ());
         device.poll(wgpu::Maintain::Wait);
 
         let data = buffer.slice(..).get_mapped_range();

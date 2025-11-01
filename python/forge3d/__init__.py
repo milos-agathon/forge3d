@@ -336,7 +336,16 @@ from .guiding import OnlineGuidingGrid
 from .materials import PbrMaterial
 from .textures import load_texture, build_pbr_textures
 from . import geometry
-from .vector import VectorScene
+# VectorScene requires the native extension; guard import so CPU-only usage works
+try:
+    from .vector import VectorScene
+except Exception:
+    class VectorScene:  # type: ignore
+        def __init__(self, *_, **__):
+            raise RuntimeError(
+                "VectorScene unavailable: native extension not present. "
+                "Install/build the forge3d native module to use VectorScene."
+            )
 from . import io  # Import io module for DEM loading (Milestone 5 - Task 5.1)
 from .sdf import (
     SdfPrimitive, SdfScene, SdfSceneBuilder, HybridRenderer,
@@ -370,7 +379,7 @@ from .helpers.frame_dump import (
 )
 
 # Version information
-__version__ = "0.80.0"
+__version__ = "0.86.0"
 _CURRENT_PALETTE = "viridis"
 _SUPPORTED_MSAA = [1, 2, 4, 8]  # Supported MSAA sample counts
 
@@ -1076,7 +1085,7 @@ def validate_copy_alignment(offset: int, alignment: int = 4):
         raise ValueError(f"Offset {offset} must be {alignment}-byte aligned")
 
 # Convenience terrain factory expected by tests
-def make_terrain(width: int, height: int, grid: int) -> TerrainSpike:
+def make_terrain(width: int, height: int, grid: int):
     if int(grid) < 2:
         raise ValueError("grid must be >= 2")
     return TerrainSpike(width, height, grid)

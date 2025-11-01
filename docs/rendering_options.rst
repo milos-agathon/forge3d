@@ -121,3 +121,47 @@ To load from disk, write a JSON document that matches the ``RendererConfig`` str
     renderer = f3d.Renderer(256, 256, config="render_config.json")
 
 Both Python and Rust validators ensure directional lights provide ``direction``, positional lights include ``position``, filtered shadows retain practical resolutions, and shadow atlases stay within the 256 MiB budget with power-of-two sizes.
+
+Viewer GI Commands Quick Reference
+----------------------------------
+
+The interactive viewer exposes a compact, single-terminal command interface for GI and debugging. See the project root ``p5.md`` for a full guide.
+
+Basic toggles:
+
+* ``:gi ssao on|off``
+* ``:gi ssgi on|off``
+* ``:gi ssr on|off``
+* ``:viz material|normal|depth|gi``
+* ``:viz-depth-max <float>``
+
+SSAO/GTAO:
+
+* ``:ssao-technique ssao|gtao``
+* ``:ssao-radius <float>``
+* ``:ssao-intensity <float>``
+* ``:ssao-composite on|off``
+* ``:ssao-mul <0..1>``
+
+SSGI:
+
+* ``:ssgi-steps <u32>``  ``:ssgi-radius <float>``  ``:ssgi-half on|off``
+* ``:ssgi-temporal-alpha <0..1>``
+* ``:ssgi-edges on|off``  ``:ssgi-upsigma <float>``  ``:ssgi-normexp <float>``
+
+SSR:
+
+* ``:ssr-max-steps <u32>``  ``:ssr-thickness <float>``
+
+Environment & capture:
+
+* ``:ibl <path.hdr|path.exr>``
+* ``:snapshot [path]``
+
+Camera & framing (useful for golden images):
+
+* ``:fov <degrees>``
+* ``:cam-lookat ex ey ez tx ty tz [ux uy uz]``
+* ``:size <width> <height>``
+
+See also: the acceptance workflow in ``p5.md`` and the generator ``scripts/generate_golden_images.py``.

@@ -133,3 +133,7 @@ pub mod staging_rings;
 // Available when enable-memory-pools feature is enabled
 
 // O3: Compressed texture pipeline (already declared above)
+
+// P5: Screen-space effects (SSAO/GTAO, SSGI, SSR)
+pub mod gbuffer;
+pub mod screen_space_effects;

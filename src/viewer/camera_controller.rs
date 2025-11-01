@@ -225,6 +225,39 @@ impl CameraController {
             CameraMode::Fps => self.fps.position + self.fps.forward(),
         }
     }
+
+    /// Force orbit camera to a specific pose (target, distance, yaw, pitch)
+    pub fn set_orbit_pose_target(&mut self, target: Vec3, distance: f32, yaw: f32, pitch: f32) {
+        self.mode = CameraMode::Orbit;
+        self.orbit.target = target;
+        self.orbit.distance = distance.max(0.01);
+        // Clamp pitch to avoid gimbal lock
+        let p = pitch.clamp(-std::f32::consts::FRAC_PI_2 + 0.01, std::f32::consts::FRAC_PI_2 - 0.01);
+        self.orbit.pitch = p;
+        self.orbit.yaw = yaw;
+    }
+
+    /// Set camera from eye/target/up; updates both orbit and FPS states and switches to Orbit mode
+    pub fn set_look_at(&mut self, eye: Vec3, target: Vec3, up: Vec3) {
+        let forward = (target - eye).normalize();
+        let pitch = forward.y.asin();
+        let yaw = forward.z.atan2(forward.x);
+        let distance = (target - eye).length().max(0.01);
+
+        // Update orbit
+        self.mode = CameraMode::Orbit;
+        self.orbit.target = target;
+        self.orbit.distance = distance;
+        self.orbit.yaw = yaw;
+        self.orbit.pitch = pitch;
+        self.orbit.up = if up.length_squared() > 0.0 { up.normalize() } else { Vec3::Y };
+
+        // Keep FPS roughly in sync too
+        self.fps.position = eye;
+        self.fps.yaw = yaw;
+        self.fps.pitch = pitch;
+        self.fps.up = self.orbit.up;
+    }
 }
 
 impl Default for CameraController {

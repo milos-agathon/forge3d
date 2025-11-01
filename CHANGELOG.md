@@ -1,4 +1,42 @@
 # Changelog
+## [0.86.0] - P5 Screen-space Effects
+
+### Added
+- SSAO/GTAO, SSGI, and SSR passes integrated and toggleable from the viewer and Python API.
+- Bilateral blur, temporal accumulation controls, and GI debug viz.
+- Golden image generator updated and made resilient to slow-exiting viewers; automatic snapshot plumbing stabilized.
+
+## [0.85.0] - P4 Image-Based Lighting
+
+### Added
+- End-to-end IBL pipeline: HDR import, irradiance convolution, specular prefilter, BRDF LUT.
+- Cache-aware resource init with conservative memory budget selection and auto-downgrade heuristics.
+- Viewer Lit viz path with `--lit-sun`/`--lit-ibl` parameters.
+
+## [0.84.0] - P3 Shadows
+
+### Added
+- Pluggable shadow techniques: Hard, PCF, PCSS, VSM, EVSM, MSM, and CSM.
+- Shadow manager, atlas allocation, and quality controls; PCSS blocker search and PCF filtering.
+
+## [0.83.0] - P2 BRDF Library
+
+### Added
+- BRDF library and dispatcher covering Lambert, Phong, Blinn-Phong, Oren–Nayar, Cook–Torrance (GGX/Beckmann), Disney Principled, Ashikhmin–Shirley, Ward, Toon, Minnaert.
+- Material uniform extensions and global override plumbed via `RendererConfig.brdf_override`.
+
+## [0.82.0] - P1 Light System
+
+### Added
+- Typed light buffer (std430) with multiple light types and per-frame sampling seeds.
+- Python `Renderer.set_lights(...)` and viewer light controls.
+
+## [0.81.0] - P0 Config & CLI Plumbing
+
+### Added
+- Typed `RendererConfig` with enums for lights, BRDF, shadows, GI, sky/volumetrics; serde + validation.
+- CLI/Viewer flag plumbing for selecting viz/gi modes; Python wrappers and docs.
+
 All notable changes to this project will be documented in this file.
 
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
@@ -212,7 +250,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ### Changed
 - Wired staging rings and virtual texture residency updates into the global memory tracker so Python budgets reflect GPU usage.
-- Aligned CMake, Sphinx, and ignore rules with the 0.80.0 metadata to keep generated docs out of the repo.
+- Aligned CMake, Sphinx, and ignore rules with the release metadata to keep generated docs out of the repo.
 - Terrain PBR shader clamps POM steps, applies ACES tonemapping with explicit gamma, and honors global colormap strength while the renderer now outputs `Rgba8Unorm` to avoid double sRGB conversion.
 - Terrain asset pipelines now auto-select material and IBL quality tiers to respect the 512 MiB budget, emitting memory usage logs and downscaling textures when devices report iGPU-class limits.
 - Terrain renderer now queries adapter sample-count support, downgrades unsupported MSAA requests, and logs the effective sample count to avoid WebGPU validation errors.
@@ -244,7 +282,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Closed an unbalanced brace in `src/lib.rs` OIT combined path.
 
 ### Tests
-- Version assertions updated to `0.80.0`.
+- Version assertions updated to this release.
 - Full test suite remains green on reference environment: 1003 passed, 229 skipped, 2 xfailed.
 
 ### Documentation
