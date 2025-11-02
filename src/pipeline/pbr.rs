@@ -18,6 +18,35 @@ use wgpu::{
 };
 use wgpu::util::DeviceExt;
 
+/// GPU BRDF/shading selection parameters (matches shaders' ShadingParamsGPU layout)
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct ShadingParamsGpu {
+    pub brdf: u32,       // 0=Lambert,1=Phong,4=GGX,6=Disney
+    pub metallic: f32,
+    pub roughness: f32,
+    pub sheen: f32,
+    pub clearcoat: f32,
+    pub subsurface: f32,
+    pub anisotropy: f32,
+    pub _pad: f32,
+}
+
+impl Default for ShadingParamsGpu {
+    fn default() -> Self {
+        Self {
+            brdf: 4,            // GGX by default
+            metallic: 0.0,
+            roughness: 0.5,
+            sheen: 0.0,
+            clearcoat: 0.0,
+            subsurface: 0.0,
+            anisotropy: 0.0,
+            _pad: 0.0,
+        }
+    }
+}
+
 /// Tone mapping operators available to the PBR pipeline
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToneMappingMode {
@@ -706,6 +735,10 @@ pub struct PbrPipelineWithShadows {
     pub lighting_uniforms: PbrLighting,
     /// GPU buffer storing lighting parameters
    pub lighting_uniform_buffer: Buffer,
+    /// CPU copy of shading parameters (BRDF routing)
+    pub shading_uniforms: ShadingParamsGpu,
+    /// GPU buffer storing shading parameters
+    pub shading_uniform_buffer: Buffer,
     /// Cached bind group for global uniforms
     pub globals_bind_group: Option<BindGroup>,
     /// IBL resources (fallback or user-provided)
@@ -756,6 +789,14 @@ impl PbrPipelineWithShadows {
                 contents: bytemuck::bytes_of(&lighting_uniforms),
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             });
+
+        // M2: Shading (BRDF selection) uniforms
+        let shading_uniforms = ShadingParamsGpu::default();
+        let shading_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("pbr_shading_uniforms_buffer"),
+            contents: bytemuck::bytes_of(&shading_uniforms),
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
 
         let mut shadow_config = ShadowManagerConfig::default();
         shadow_config.technique = ShadowTechnique::PCF;
@@ -833,6 +874,8 @@ impl PbrPipelineWithShadows {
             scene_uniform_buffer,
             lighting_uniforms,
             lighting_uniform_buffer,
+            shading_uniforms,
+            shading_uniform_buffer,
             globals_bind_group: Some(globals_bind_group),
             ibl_resources,
             ibl_bind_group: Some(ibl_bind_group),
@@ -1283,6 +1326,17 @@ impl PbrPipelineWithShadows {
                     },
                     count: None,
                 },
+                // M2: ShadingParamsGPU (BRDF selection)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         })
     }
@@ -1301,6 +1355,10 @@ impl PbrPipelineWithShadows {
                         binding: 1,
                         resource: self.lighting_uniform_buffer.as_entire_binding(),
                     },
+                    BindGroupEntry {
+                        binding: 2,
+                        resource: self.shading_uniform_buffer.as_entire_binding(),
+                    },
                 ],
             });
             self.globals_bind_group = Some(bind_group);
@@ -1308,6 +1366,16 @@ impl PbrPipelineWithShadows {
         self.globals_bind_group
             .as_ref()
             .expect("global bind group should exist")
+    }
+
+    /// Update BRDF model by index (matches WGSL constants)
+    pub fn set_brdf_index(&mut self, queue: &Queue, brdf_index: u32) {
+        self.shading_uniforms.brdf = brdf_index;
+        queue.write_buffer(
+            &self.shading_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&self.shading_uniforms),
+        );
     }
 
     fn ensure_ibl_bind_group(&mut self, device: &Device) -> &BindGroup {

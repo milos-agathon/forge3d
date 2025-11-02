@@ -16,6 +16,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //   --gltf <path>
     //   --ibl <path.hdr|path.exr>
     //   --viz <material|normal|depth|gi|lit>
+    //   --brdf <lambert|phong|ggx|disney>
+    //   --sky <off|on|preetham|hosek-wilkie>
+    //   --sky-turbidity <float>
+    //   --sky-ground <float>
+    //   --sky-exposure <float>
+    //   --sky-sun <float>
+    //   --fog <on|off>
+    //   --fog-density <float>
+    //   --fog-g <float>
+    //   --fog-steps <u32>
+    //   --fog-shadow <on|off>
+    //   --fog-temporal <float 0..0.9>
     //   --ssao-radius <float>
     //   --ssao-intensity <float>
     //   --ssao-composite <on|off>
@@ -94,6 +106,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--viz" => {
                 if let Some(mode) = args.next() { cmds.push(format!(":viz {}", mode.to_lowercase())); }
             }
+            "--brdf" => {
+                if let Some(model) = args.next() {
+                    let m = model.to_lowercase();
+                    if ["lambert","lam","phong","ggx","disney","disney-principled","principled"].contains(&m.as_str()) {
+                        cmds.push(format!(":brdf {}", m));
+                    }
+                }
+            }
             "--lit-sun" => {
                 if let Some(val) = args.next() { cmds.push(format!(":lit-sun {}", val)); }
             }
@@ -103,6 +123,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--ibl" => {
                 if let Some(path) = args.next() { cmds.push(format!(":ibl {}", path)); }
             }
+            "--sky" => {
+                if let Some(mode) = args.next() {
+                    let m = mode.to_lowercase();
+                    cmds.push(format!(":sky {}", m));
+                }
+            }
+            "--sky-turbidity" => { if let Some(v) = args.next() { cmds.push(format!(":sky-turbidity {}", v)); } }
+            "--sky-ground" => { if let Some(v) = args.next() { cmds.push(format!(":sky-ground {}", v)); } }
+            "--sky-exposure" => { if let Some(v) = args.next() { cmds.push(format!(":sky-exposure {}", v)); } }
+            "--sky-sun" => { if let Some(v) = args.next() { cmds.push(format!(":sky-sun {}", v)); } }
+            "--fog" => {
+                if let Some(arg) = args.next() {
+                    let on = matches!(arg.as_str(), "on"|"1"|"true");
+                    cmds.push(format!(":fog {}", if on {"on"} else {"off"}));
+                }
+            }
+            "--fog-density" => { if let Some(v) = args.next() { cmds.push(format!(":fog-density {}", v)); } }
+            "--fog-g" => { if let Some(v) = args.next() { cmds.push(format!(":fog-g {}", v)); } }
+            "--fog-steps" => { if let Some(v) = args.next() { cmds.push(format!(":fog-steps {}", v)); } }
+            "--fog-shadow" => {
+                if let Some(arg) = args.next() {
+                    let on = matches!(arg.as_str(), "on"|"1"|"true");
+                    cmds.push(format!(":fog-shadow {}", if on {"on"} else {"off"}));
+                }
+            }
+            "--fog-temporal" => { if let Some(v) = args.next() { cmds.push(format!(":fog-temporal {}", v)); } }
             "--ssao-radius" => {
                 if let Some(val) = args.next() { cmds.push(format!(":ssao-radius {}", val)); }
             }

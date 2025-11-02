@@ -3,7 +3,7 @@
 // Exposes Rust lighting types to Python
 
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::PyList;
 use pyo3::exceptions::PyValueError;
 
 use super::types::*;

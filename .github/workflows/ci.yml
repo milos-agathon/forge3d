@@ -71,6 +71,44 @@ jobs:
         continue-on-error: true
 
   # ============================================================================
+  # Interactive Viewer E2E (macOS only; optional)
+  # ============================================================================
+  test-interactive-viewer-macos:
+    name: Interactive Viewer (macOS)
+    needs: build-wheels
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download macOS wheel artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: wheels-macos
+          path: dist/
+
+      - name: Install wheel and pytest
+        run: |
+          pip install dist/*.whl
+          pip install pytest numpy
+
+      - name: Run interactive viewer tests
+        env:
+          RUN_INTERACTIVE_VIEWER_CI: '1'
+        run: |
+          pytest tests/ -m interactive_viewer -v --tb=short
+        continue-on-error: true
+
+  # ============================================================================
   # Python Wheel Build (maturin)
   # ============================================================================
   build-wheels:

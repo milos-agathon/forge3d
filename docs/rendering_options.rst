@@ -76,6 +76,20 @@ The terrain demo exposes configuration toggles that map directly into ``Renderer
      - ``--volumetric density=0.02,phase=hg,g=0.7``
      - Supplies volumetric fog parameters.
 
+Additional Viewer Fog Controls (P6‑10)
+--------------------------------------
+
+The interactive viewer exposes performance and quality toggles for the volumetric fog pass:
+
+* ``:fog-half on|off`` — compute fog at half resolution and upsample to full-res for composition.
+* ``:fog-edges on|off`` — enable depth-aware bilateral upsample to preserve edges (on by default).
+* ``:fog-upsigma <float>`` — set bilateral depth sigma (default ``0.02``). Lower = sharper edges; higher = smoother.
+
+Notes:
+
+* In half-res mode, the renderer reduces internal ``max_steps`` heuristically to maintain quality at lower cost.
+* Upsample is guided by the full-resolution depth buffer. When ``:fog-edges off``, a fast bilinear upsample is used instead.
+
 Python Usage
 ------------
 

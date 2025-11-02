@@ -56,6 +56,47 @@ Keyboard Controls
 - **Tab** - Toggle between Orbit and FPS camera modes
 - **Esc** - Exit the viewer
 
+Interactive Terminal Commands
+-----------------------------
+
+In addition to keyboard and mouse controls, the viewer supports a single-terminal interactive workflow.
+With the viewer running, type commands directly into the same terminal:
+
+See the on-screen indicators for these commands in the :ref:`hud-overlay` section.
+
+- Snapshot
+  - ``:snapshot [path]`` — Save the current frame to a PNG (default: ``snapshot.png``)
+
+- Sky Controls
+  - ``:sky <off|on|preetham|hosek-wilkie>`` — Toggle and select sky model
+  - ``:sky-turbidity <float 1..10>`` — Turbidity (1=clear, 10=hazy)
+  - ``:sky-ground <float 0..1>`` — Ground albedo
+  - ``:sky-exposure <float>`` — Exposure multiplier
+  - ``:sky-sun <float>`` — Sun intensity multiplier
+
+- Fog Controls
+  - ``:fog <on|off>`` — Toggle volumetric fog
+  - ``:fog-density <float>`` — Fog density
+  - ``:fog-g <float -0.999..0.999>`` — Phase asymmetry (Henyey–Greenstein g)
+  - ``:fog-steps <u32>`` — Raymarch step count
+  - ``:fog-shadow <on|off>`` — Use shadows in fog
+  - ``:fog-temporal <float 0..0.9>`` — Temporal reprojection alpha
+  - ``:fog-mode <raymarch|froxels>`` — Fog rendering mode
+  - ``:fog-preset <low|med|high>`` — Quick preset for density/steps/temporal
+
+Examples
+~~~~~~~~
+
+::
+
+  :sky preetham
+  :sky-turbidity 4.0
+  :fog on
+  :fog-density 0.04
+  :fog-mode froxels
+  :snapshot out.png
+  :quit
+
 Usage (Python)
 --------------
 
@@ -156,6 +197,23 @@ The viewer is designed to run at 60 FPS or higher on simple scenes. Performance 
 - **VSync disabled** - Runs at maximum GPU frame rate
 - **FPS counter** - Displayed in window title, updated every second
 - **DPI aware** - Handles high-resolution displays correctly
+
+.. _hud-overlay:
+
+HUD Overlay
+------------
+
+A minimal HUD overlay is rendered on top of the final frame to visualize current sky and fog controls.
+It draws compact bars with short labels on the top-left of the window:
+
+- ``SKY`` — Sky enabled state. A green bar indicates sky is active. A numeric model id (0/1) is shown to the right: 0=Preetham, 1=Hosek-Wilkie.
+- ``TURB`` — Sky turbidity. A bar and numeric readout show the current value (1..10).
+- ``FOG`` — Fog enabled state. A blue bar indicates fog is active (1) or off (0) with a numeric flag.
+- ``DENS`` — Fog density. A bar and numeric readout (three decimals) show the current density.
+- ``TEMP`` — Fog temporal alpha. A bar and numeric readout indicate the temporal accumulation setting (0..0.9).
+
+These indicators update in real time as you issue terminal commands. The overlay is implemented via
+``core::text_overlay::TextOverlayRenderer`` using lightweight quads (no font atlas required).
 
 Acceptance Criteria (I1)
 -------------------------

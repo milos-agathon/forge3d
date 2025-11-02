@@ -19,7 +19,8 @@ struct VolumetricParams {
 
     use_shadows: u32,              // 1=sample shadow map for god-rays
     jitter_strength: f32,          // Ray march jitter [0-1]
-    _pad: vec2<f32>,
+    frame_index: u32,              // Frame index for temporal jitter sequencing
+    _pad0: u32,
 }
 
 struct CameraUniforms {
@@ -257,7 +258,7 @@ fn cs_volumetric(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     // Jitter for temporal stability
-    let jitter = interleaved_gradient_noise(pixel, 0u);
+    let jitter = interleaved_gradient_noise(pixel, params.frame_index);
 
     // Ray march
     let fog_result = ray_march_fog(camera.eye_position, view_dir_ws, max_march_dist, jitter);
@@ -359,7 +360,7 @@ fn cs_apply_froxels(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var accumulated_fog = vec3<f32>(0.0);
     var accumulated_transmittance = 1.0;
 
-    let froxel_march_steps = 32u;
+    let froxel_march_steps = params.max_steps;
     let step_size = scene_distance / f32(froxel_march_steps);
 
     for (var i = 0u; i < froxel_march_steps; i = i + 1u) {

@@ -16,7 +16,7 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 0.86.0 — cumulative P0–P5 work (config/CLI, lights, BRDFs, shadows, IBL, and screen‑space effects).
+Current release: 0.87.0 — P6 perf & polish: half‑resolution volumetric fog with bilateral depth‑aware upsampling, step heuristics, viewer toggles, and docs update.
 
 ## Installation
 

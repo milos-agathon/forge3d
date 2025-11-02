@@ -7,6 +7,7 @@
 
 use crate::core::material::{PbrLighting, PbrMaterial};
 use crate::pipeline::pbr::{create_pbr_sampler, PbrPipelineWithShadows, PbrSceneUniforms};
+use crate::render::params::{RendererConfig, BrdfModel as CfgBrdfModel};
 use wgpu::{Device, Queue, RenderPass, Sampler, TextureFormat};
 
 /// Helper that owns a PBR pipeline and records bind groups for render passes.
@@ -89,5 +90,35 @@ impl PbrRenderPass {
             .expect("prepare must be called before begin");
         self.pipeline
             .begin_render(device, surface_format, pass);
+    }
+
+    /// Apply renderer configuration to the PBR pipeline (M2-03)
+    ///
+    /// Selects the BRDF model from either `brdf_override` (if present) or
+    /// from `shading.brdf` in the provided `RendererConfig` and uploads it
+    /// to the GPU via `ShadingParamsGpu`.
+    pub fn apply_renderer_config(&mut self, queue: &Queue, cfg: &RendererConfig) {
+        let model = cfg.brdf_override.unwrap_or(cfg.shading.brdf);
+        self.set_brdf_model(queue, model);
+    }
+
+    /// Set BRDF model using config enum and upload to GPU (M2-03)
+    pub fn set_brdf_model(&mut self, queue: &Queue, model: CfgBrdfModel) {
+        let idx = match model {
+            CfgBrdfModel::Lambert => 0u32,
+            CfgBrdfModel::Phong => 1u32,
+            CfgBrdfModel::BlinnPhong => 1u32, // treat as Phong for now
+            CfgBrdfModel::OrenNayar => 0u32,  // map to Lambert until O-N lands
+            CfgBrdfModel::CookTorranceGGX => 4u32,
+            CfgBrdfModel::CookTorranceBeckmann => 4u32, // map to GGX for now
+            CfgBrdfModel::DisneyPrincipled => 6u32,
+            CfgBrdfModel::AshikhminShirley => 6u32, // temporary: use Disney fallback
+            CfgBrdfModel::Ward => 6u32,             // temporary: use Disney fallback
+            CfgBrdfModel::Toon => 0u32,             // simple: map to Lambert-like
+            CfgBrdfModel::Minnaert => 0u32,
+            CfgBrdfModel::Subsurface => 6u32,       // treat as Disney umbrella
+            CfgBrdfModel::Hair => 6u32,             // treat as Disney umbrella
+        };
+        self.pipeline.set_brdf_index(queue, idx);
     }
 }

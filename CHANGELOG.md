@@ -1,4 +1,21 @@
 # Changelog
+## [0.87.0] - P6 Performance & Polish
+
+### Added
+- Half-resolution volumetric fog path with bilateral, depth-aware upsampling to full resolution.
+- New viewer commands for fog performance/quality tuning:
+  - `:fog-half on|off` to enable/disable half-resolution fog rendering.
+  - `:fog-edges on|off` to enable/disable depth-aware bilateral upsample.
+  - `:fog-upsigma <float>` to tune bilateral depth sigma.
+- Step-count heuristic in half-res mode to maintain quality at lower cost.
+
+### Changed
+- Integrated the half-res compute + upsample pass into the viewer render graph, preserving the single-terminal workflow and automatic snapshot path.
+- Minor cleanup and uniform consistency checks around camera/fog parameters.
+
+### Documentation
+- Updated `docs/rendering_options.rst` with the new fog controls, usage, and tuning notes.
+
 ## [0.86.0] - P5 Screen-space Effects
 
 ### Added

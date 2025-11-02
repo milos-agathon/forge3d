@@ -49,6 +49,26 @@ struct PbrLighting {
     gamma: f32,
 }
 
+// M2: Shading parameters for BRDF dispatch (matches Rust uniform layout)
+// Minimal set: brdf index + common knobs. Metallic/roughness are primarily sourced
+// from material, but remain here for future models.
+struct ShadingParamsGPU {
+    brdf: u32,        // 0=Lambert, 1=Phong, 4=GGX, 6=Disney...
+    metallic: f32,
+    roughness: f32,
+    sheen: f32,
+    clearcoat: f32,
+    subsurface: f32,
+    anisotropy: f32,
+    _pad: f32,
+}
+
+// BRDF model indices (aligned with lighting.wgsl definitions)
+const BRDF_LAMBERT: u32 = 0u;
+const BRDF_PHONG: u32 = 1u;
+const BRDF_COOK_TORRANCE_GGX: u32 = 4u;
+const BRDF_DISNEY_PRINCIPLED: u32 = 6u;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
@@ -69,6 +89,7 @@ struct VertexOutput {
 // Uniforms and textures
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var<uniform> lighting: PbrLighting;
+@group(0) @binding(2) var<uniform> shading: ShadingParamsGPU;
 
 @group(1) @binding(0) var<uniform> material: PbrMaterial;
 @group(1) @binding(1) var base_color_texture: texture_2d<f32>;
@@ -262,26 +283,44 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let dielectric_f0 = vec3<f32>(0.04);
     let f0 = mix(dielectric_f0, base_color.rgb, metallic);
     
-    // DIRECT LIGHTING
+    // DIRECT LIGHTING (M2: BRDF dispatch)
     var direct_lighting = vec3<f32>(0.0);
-    
     if n_dot_l > 0.0 {
-        // Calculate BRDF terms
-        let D = distribution_ggx(n_dot_h, roughness);
-        let G = geometry_smith(n_dot_v, n_dot_l, roughness);
-        let F = fresnel_schlick(v_dot_h, f0);
-        
-        // Cook-Torrance specular BRDF
-        let specular = (D * G * F) / max(4.0 * n_dot_v * n_dot_l, 1e-6);
-        
-        // Diffuse BRDF (Lambertian)
-        let kS = F;
-        let kD = (vec3<f32>(1.0) - kS) * (1.0 - metallic);
-        let diffuse = kD * base_color.rgb / 3.14159265359;
-        
-        // Add direct lighting contribution
+        // Default: Cook-Torrance GGX
+        var brdf_color = vec3<f32>(0.0);
+        if (shading.brdf == BRDF_LAMBERT) {
+            // Pure Lambert diffuse
+            brdf_color = base_color.rgb / 3.14159265359;
+        } else if (shading.brdf == BRDF_PHONG) {
+            // Simple Blinn-Phong approx using roughness→shininess mapping
+            let shininess = max(1.0, pow(1.0 - roughness, 5.0) * 256.0);
+            let kD = (1.0 - metallic);
+            let diffuse = base_color.rgb * (kD / 3.14159265359);
+            let spec = pow(n_dot_h, shininess);
+            let specular = mix(vec3<f32>(0.04), base_color.rgb, metallic) * spec;
+            brdf_color = diffuse + specular;
+        } else if (shading.brdf == BRDF_DISNEY_PRINCIPLED) {
+            // Map to GGX for now (placeholder until full Disney is wired)
+            let D = distribution_ggx(n_dot_h, roughness);
+            let G = geometry_smith(n_dot_v, n_dot_l, roughness);
+            let F = fresnel_schlick(v_dot_h, f0);
+            let specular = (D * G * F) / max(4.0 * n_dot_v * n_dot_l, 1e-6);
+            let kS = F;
+            let kD = (vec3<f32>(1.0) - kS) * (1.0 - metallic);
+            let diffuse = kD * base_color.rgb / 3.14159265359;
+            brdf_color = diffuse + specular;
+        } else { // BRDF_COOK_TORRANCE_GGX and others → GGX
+            let D = distribution_ggx(n_dot_h, roughness);
+            let G = geometry_smith(n_dot_v, n_dot_l, roughness);
+            let F = fresnel_schlick(v_dot_h, f0);
+            let specular = (D * G * F) / max(4.0 * n_dot_v * n_dot_l, 1e-6);
+            let kS = F;
+            let kD = (vec3<f32>(1.0) - kS) * (1.0 - metallic);
+            let diffuse = kD * base_color.rgb / 3.14159265359;
+            brdf_color = diffuse + specular;
+        }
         let radiance = lighting.light_color * lighting.light_intensity;
-        direct_lighting = (diffuse + specular) * radiance * n_dot_l;
+        direct_lighting = brdf_color * radiance * n_dot_l;
     }
     
     // INDIRECT LIGHTING (IBL)

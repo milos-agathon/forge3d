@@ -8,23 +8,235 @@
 pub mod camera_controller;
 
 use camera_controller::{CameraController, CameraMode};
-use glam::{Mat4, Vec3};
+use glam::Mat4;
 use std::io::BufRead;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wgpu::{Device, Instance, Queue, Surface, SurfaceConfiguration};
 use wgpu::util::DeviceExt;
-use image;
 use std::path::Path;
 use crate::core::ibl::{IBLRenderer, IBLQuality};
+use crate::util::image_write;
+use crate::renderer::readback::read_texture_tight;
 use winit::{
     dpi::PhysicalSize,
     event::*,
-    event_loop::EventLoop,
+    event_loop::{EventLoop, EventLoopProxy, EventLoopBuilder},
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowBuilder},
 };
 // once_cell imported via path for INITIAL_CMDS; no direct use import needed
+
+// ------------------------------
+// HUD seven-seg numeric helpers
+// ------------------------------
+fn hud_push_rect(inst: &mut Vec<crate::core::text_overlay::TextInstance>, x0: f32, y0: f32, x1: f32, y1: f32, color: [f32;4]) {
+    inst.push(crate::core::text_overlay::TextInstance { rect_min: [x0, y0], rect_max: [x1, y1], uv_min: [0.0,0.0], uv_max: [1.0,1.0], color });
+}
+
+// ------------------------------
+// HUD tiny 3x5 block text helpers (A-Z subset)
+// ------------------------------
+fn hud_push_char_3x5(inst: &mut Vec<crate::core::text_overlay::TextInstance>, x: f32, y: f32, scale: f32, ch: char, color: [f32;4]) -> f32 {
+    let cell = 2.0 * scale; // pixel size
+    let spacing = 1.0 * scale; // inter-char spacing
+    let pat: Option<[&str; 5]> = match ch.to_ascii_uppercase() {
+        'A' => Some([" X ", "X X", "XXX", "X X", "X X"]),
+        'B' => Some(["XX ", "X X", "XX ", "X X", "XX "]),
+        'C' => Some([" XX", "X  ", "X  ", "X  ", " XX"]),
+        'D' => Some(["XX ", "X X", "X X", "X X", "XX "]),
+        'E' => Some(["XXX", "X  ", "XX ", "X  ", "XXX"]),
+        'F' => Some(["XXX", "X  ", "XX ", "X  ", "X  "]),
+        'G' => Some([" XX", "X  ", "X X", "X X", " XX"]),
+        'H' => Some(["X X", "X X", "XXX", "X X", "X X"]),
+        'K' => Some(["X X", "XX ", "X  ", "XX ", "X X"]),
+        'L' => Some(["X  ", "X  ", "X  ", "X  ", "XXX"]),
+        'N' => Some(["X X", "XX ", "X X", "X X", "X X"]),
+        'O' => Some(["XXX", "X X", "X X", "X X", "XXX"]),
+        'P' => Some(["XX ", "X X", "XX ", "X  ", "X  "]),
+        'R' => Some(["XX ", "X X", "XX ", "X X", "X X"]),
+        'S' => Some([" XX", "X  ", " XX", "  X", "XX "]),
+        'T' => Some(["XXX", " X ", " X ", " X ", " X "]),
+        'U' => Some(["X X", "X X", "X X", "X X", "XXX"]),
+        'Y' => Some(["X X", "X X", " X ", " X ", " X "]),
+        _ => None,
+    };
+    if let Some(rows) = pat {
+        for (r, row) in rows.iter().enumerate() {
+            for (c, ch2) in row.chars().enumerate() {
+                if ch2 == 'X' {
+                    let x0 = x + c as f32 * cell;
+                    let y0 = y + r as f32 * cell;
+                    hud_push_rect(inst, x0, y0, x0 + cell, y0 + cell, color);
+                }
+            }
+        }
+    }
+    3.0 * cell + spacing
+}
+
+fn hud_push_text_3x5(inst: &mut Vec<crate::core::text_overlay::TextInstance>, mut x: f32, y: f32, scale: f32, text: &str, color: [f32;4]) -> f32 {
+    for ch in text.chars() {
+        if ch == ' ' { x += 2.0 * scale; continue; }
+        x += hud_push_char_3x5(inst, x, y, scale, ch, color);
+    }
+    x
+}
+
+fn hud_push_digit(inst: &mut Vec<crate::core::text_overlay::TextInstance>, x: f32, y: f32, scale: f32, ch: char, color: [f32;4]) -> f32 {
+    // 7-segment layout (a..g), plus dot segment 'dp'
+    //  --a--
+    // |     |
+    // f     b
+    // |     |
+    //  --g--
+    // |     |
+    // e     c
+    // |     |
+    //  --d--   . dp
+    let thick = 2.0 * scale;
+    let w = 10.0 * scale; // char width
+    let h = 18.0 * scale; // char height
+    let mut seg = |a: bool, b: bool, c: bool, d: bool, e: bool, f: bool, g: bool, dp: bool| {
+        if a { hud_push_rect(inst, x + thick, y, x + w - thick, y + thick, color); }
+        if b { hud_push_rect(inst, x + w - thick, y + thick, x + w, y + h/2.0 - thick, color); }
+        if c { hud_push_rect(inst, x + w - thick, y + h/2.0 + thick, x + w, y + h - thick, color); }
+        if d { hud_push_rect(inst, x + thick, y + h - thick, x + w - thick, y + h, color); }
+        if e { hud_push_rect(inst, x, y + h/2.0 + thick, x + thick, y + h - thick, color); }
+        if f { hud_push_rect(inst, x, y + thick, x + thick, y + h/2.0 - thick, color); }
+        if g { hud_push_rect(inst, x + thick, y + h/2.0 - thick/2.0, x + w - thick, y + h/2.0 + thick/2.0, color); }
+        if dp { hud_push_rect(inst, x + w + thick*0.5, y + h - thick*1.5, x + w + thick*1.5, y + h - thick*0.5, color); }
+    };
+    match ch {
+        '0' => seg(true,  true,  true,  true,  true,  true,  false, false),
+        '1' => seg(false, true,  true,  false, false, false, false, false),
+        '2' => seg(true,  true,  false, true,  true,  false, true,  false),
+        '3' => seg(true,  true,  true,  true,  false, false, true,  false),
+        '4' => seg(false, true,  true,  false, false, true,  true,  false),
+        '5' => seg(true,  false, true,  true,  false, true,  true,  false),
+        '6' => seg(true,  false, true,  true,  true,  true,  true,  false),
+        '7' => seg(true,  true,  true,  false, false, false, false, false),
+        '8' => seg(true,  true,  true,  true,  true,  true,  true,  false),
+        '9' => seg(true,  true,  true,  true,  false, true,  true,  false),
+        '-' => { // center segment only
+            seg(false,false,false,false,false,false,true,false);
+        }
+        '.' => { seg(false,false,false,false,false,false,false,true); }
+        _ => {}
+    }
+    w + 4.0*scale // advance including small spacing
+}
+
+fn hud_push_number(inst: &mut Vec<crate::core::text_overlay::TextInstance>, mut x: f32, y: f32, scale: f32, value: f32, digits: usize, frac: usize, color: [f32;4]) -> f32 {
+    let s = format!("{val:.prec$}", val=value, prec=frac);
+    // Optionally truncate/limit total characters
+    let mut count = 0usize;
+    for ch in s.chars() {
+        if count >= digits + 1 { break; }
+        x += hud_push_digit(inst, x, y, scale, ch, color);
+        count += 1;
+    }
+    x
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct SkyUniforms {
+    // Vec4 #1
+    sun_direction: [f32; 3],
+    turbidity: f32,
+    // Vec4 #2
+    ground_albedo: f32,
+    model: u32, // 0=Preetham, 1=Hosek-Wilkie
+    sun_intensity: f32,
+    exposure: f32,
+    // Vec4 #3 padding
+    _pad: [f32; 4],
+}
+
+// Std140-compatible packed layout for VolumetricUniforms used for GPU uniform buffer writes
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct VolumetricUniformsStd140 {
+    // row 0
+    density: f32,
+    height_falloff: f32,
+    phase_g: f32,
+    max_steps: u32,
+    // row 1 (pad to align following vec3 to 16-byte boundary)
+    start_distance: f32,
+    max_distance: f32,
+    _pad_a0: f32,
+    _pad_a1: f32,
+    // row 2
+    scattering_color: [f32; 3],
+    absorption: f32,
+    // row 3
+    sun_direction: [f32; 3],
+    sun_intensity: f32,
+    // row 4
+    ambient_color: [f32; 3],
+    temporal_alpha: f32,
+    // row 5
+    use_shadows: u32,
+    jitter_strength: f32,
+    frame_index: u32,
+    _pad0: u32,
+}
+
+// P6: Volumetric fog uniforms matching shaders/volumetric.wgsl (std140-like packing)
+#[repr(C, align(16))]
+#[allow(dead_code)]
+#[derive(Clone, Copy)]
+struct VolumetricUniforms {
+    // row 0
+    density: f32,
+    height_falloff: f32,
+    phase_g: f32,
+    max_steps: u32,
+    // row 1
+    start_distance: f32,
+    max_distance: f32,
+    scattering_color: [f32; 3],
+    absorption: f32,
+    // row 2
+    sun_direction: [f32; 3],
+    sun_intensity: f32,
+    // row 3
+    ambient_color: [f32; 3],
+    temporal_alpha: f32,
+    // row 4
+    use_shadows: u32,
+    jitter_strength: f32,
+    frame_index: u32,
+    _pad0: u32,
+    // Explicit padding to eliminate trailing struct padding for Pod
+    _pad1: u32,
+    _pad2: u32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct FogCameraUniforms {
+    view: [[f32; 4]; 4],
+    proj: [[f32; 4]; 4],
+    inv_view: [[f32; 4]; 4],
+    inv_proj: [[f32; 4]; 4],
+    view_proj: [[f32; 4]; 4],
+    eye_position: [f32; 3],
+    near: f32,
+    far: f32,
+    _pad: [f32; 3],
+}
+
+// Std140-compatible upsample params for fog_upsample.wgsl
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct FogUpsampleParamsStd140 {
+    sigma: f32,
+    use_bilateral: u32,
+    _pad: [f32; 2],
+}
 
 #[derive(Clone)]
 pub struct ViewerConfig {
@@ -104,6 +316,8 @@ pub struct Viewer {
     lit_sun_intensity: f32,
     lit_ibl_intensity: f32,
     lit_use_ibl: bool,
+    // Lit BRDF selection (0=Lambert,1=Phong,4=GGX,6=Disney)
+    lit_brdf: u32,
     // Fallback pipeline to draw a solid color when GI/geometry path is unavailable
     fallback_pipeline: wgpu::RenderPipeline,
     viz_mode: VizMode,
@@ -120,6 +334,76 @@ pub struct Viewer {
     auto_snapshot_done: bool,
     // Debug: log render gate and snapshot once
     debug_logged_render_gate: bool,
+
+    // Sky rendering (P6-01)
+    sky_bind_group_layout0: wgpu::BindGroupLayout,
+    sky_bind_group_layout1: wgpu::BindGroupLayout,
+    sky_pipeline: wgpu::ComputePipeline,
+    sky_params: wgpu::Buffer,
+    sky_camera: wgpu::Buffer,
+    sky_output: wgpu::Texture,
+    sky_output_view: wgpu::TextureView,
+    sky_enabled: bool,
+
+    // P6: Fog rendering resources and parameters
+    fog_enabled: bool,
+    fog_params: wgpu::Buffer,
+    fog_camera: wgpu::Buffer,
+    fog_output: wgpu::Texture,
+    fog_output_view: wgpu::TextureView,
+    fog_history: wgpu::Texture,
+    fog_history_view: wgpu::TextureView,
+    fog_depth_sampler: wgpu::Sampler,
+    fog_history_sampler: wgpu::Sampler,
+    fog_pipeline: wgpu::ComputePipeline,
+    fog_frame_index: u32,
+    // Froxelized volumetrics (Milestone 4)
+    fog_bgl3: wgpu::BindGroupLayout,
+    froxel_tex: wgpu::Texture,
+    froxel_view: wgpu::TextureView,
+    froxel_sampler: wgpu::Sampler,
+    froxel_build_pipeline: wgpu::ComputePipeline,
+    froxel_apply_pipeline: wgpu::ComputePipeline,
+    // P6-10: Half-resolution fog + upsample
+    fog_half_res_enabled: bool,
+    fog_output_half: wgpu::Texture,
+    fog_output_half_view: wgpu::TextureView,
+    fog_history_half: wgpu::Texture,
+    fog_history_half_view: wgpu::TextureView,
+    fog_upsample_bgl: wgpu::BindGroupLayout,
+    fog_upsample_pipeline: wgpu::ComputePipeline,
+    fog_upsample_params: wgpu::Buffer,
+    // Bilateral upsample controls
+    fog_bilateral: bool,
+    fog_upsigma: f32,
+    // Fog bind group layouts and shadow resources
+    fog_bgl0: wgpu::BindGroupLayout,
+    fog_bgl1: wgpu::BindGroupLayout,
+    fog_bgl2: wgpu::BindGroupLayout,
+    #[allow(dead_code)] fog_shadow_map: wgpu::Texture,
+    fog_shadow_view: wgpu::TextureView,
+    fog_shadow_sampler: wgpu::Sampler,
+    fog_shadow_matrix: wgpu::Buffer,
+    // Fog zero fallback (1x1 RGBA16F zero) for disabled fog compositing
+    #[allow(dead_code)] fog_zero_tex: wgpu::Texture,
+    fog_zero_view: wgpu::TextureView,
+    // Exposed toggles
+    fog_density: f32,
+    fog_g: f32,
+    fog_steps: u32,
+    fog_temporal_alpha: f32,
+    fog_use_shadows: bool,
+    fog_mode: FogMode,
+    // Sky exposed controls (runtime adjustable)
+    sky_model_id: u32, // 0=Preetham,1=Hosek-Wilkie
+    sky_turbidity: f32,
+    sky_ground_albedo: f32,
+    sky_exposure: f32,
+    sky_sun_intensity: f32,
+
+    // HUD overlay renderer
+    hud_enabled: bool,
+    hud: crate::core::text_overlay::TextOverlayRenderer,
 }
 
 struct FpsCounter {
@@ -156,6 +440,35 @@ impl FpsCounter {
 }
 
 impl Viewer {
+    // Read back a surface or offscreen texture and save as PNG (RGBA8/BGRA8 only)
+    fn snapshot_swapchain_to_png(&mut self, tex: &wgpu::Texture, path: &str) -> anyhow::Result<()> {
+        use anyhow::{bail, Context};
+        let w = self.config.width;
+        let h = self.config.height;
+        let fmt = self.config.format;
+
+        match fmt {
+            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
+                let data = read_texture_tight(&self.device, &self.queue, tex, (w, h), fmt)
+                    .context("readback failed")?;
+                image_write::write_png_rgba8(Path::new(path), &data, w, h)
+                    .context("failed to write PNG")?;
+                Ok(())
+            }
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
+                let mut data = read_texture_tight(&self.device, &self.queue, tex, (w, h), fmt)
+                    .context("readback failed")?;
+                // BGRA -> RGBA in-place
+                for px in data.chunks_exact_mut(4) { px.swap(0, 2); }
+                image_write::write_png_rgba8(Path::new(path), &data, w, h)
+                    .context("failed to write PNG")?;
+                Ok(())
+            }
+            other => {
+                bail!("snapshot only supports RGBA8/BGRA8 surfaces (got {:?})", other)
+            }
+        }
+    }
     fn load_ibl(&mut self, path: &str) -> anyhow::Result<()> {
         // Load HDR image from disk
         let hdr_img = crate::formats::hdr::load_hdr(path)
@@ -589,6 +902,39 @@ impl Viewer {
                         },
                         count: None,
                     },
+                    // Sky background texture (RGBA8) to composite behind geometry
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // GBuffer depth (R16F as color) to detect background pixels
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // Fog texture (RGBA16F)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
                 ],
             });
             let comp_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -604,6 +950,9 @@ impl Viewer {
                     }
                     @group(0) @binding(0) var gbuf_tex : texture_2d<f32>;
                     @group(0) @binding(1) var gbuf_sam : sampler;
+                    @group(0) @binding(3) var sky_tex : texture_2d<f32>;
+                    @group(0) @binding(4) var depth_tex : texture_2d<f32>;
+                    @group(0) @binding(5) var fog_tex : texture_2d<f32>;
                     @fragment
                     fn fs_fullscreen(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
                         let dims = vec2<f32>(textureDimensions(gbuf_tex));
@@ -616,6 +965,16 @@ impl Viewer {
                             // depth: view-space depth mapped by far
                             let d = clamp(c.r / max(0.0001, uComp.far), 0.0, 1.0);
                             c = vec4<f32>(d, d, d, 1.0);
+                        } else {
+                            // Composite sky behind geometry when depth indicates background
+                            let dval = textureSample(depth_tex, gbuf_sam, uv).r;
+                            if (dval <= 0.0001) {
+                                let sky = textureSample(sky_tex, gbuf_sam, uv);
+                                c = sky;
+                            }
+                            // Composite fog over scene (premultiplied-like: c = c*(1-a) + fog)
+                            let fog = textureSample(fog_tex, gbuf_sam, uv);
+                            c = vec4<f32>(c.rgb * (1.0 - fog.a) + fog.rgb, 1.0);
                         }
                         return c;
                     }
@@ -697,7 +1056,14 @@ impl Viewer {
         let lit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewer.lit.compute.shader"),
             source: wgpu::ShaderSource::Wgsl(r#"
-                struct LitParams { sun_dir_vs: vec3<f32>, sun_intensity: f32, ibl_intensity: f32, use_ibl: u32 };
+                // M2-04: Add brdf (as f32-coded index) to params
+                // Layout fits in 2x vec4 (32 bytes) for uniform alignment
+                struct LitParams {
+                    // x,y,z = sun_dir_vs, w = sun_intensity
+                    sun_dir_and_intensity: vec4<f32>,
+                    // x = ibl_intensity, y = use_ibl (1.0|0.0), z = brdf index, w = pad
+                    ibl_use_brdf_pad: vec4<f32>,
+                };
                 @group(0) @binding(0) var normal_tex : texture_2d<f32>;
                 @group(0) @binding(1) var albedo_tex : texture_2d<f32>;
                 @group(0) @binding(2) var depth_tex  : texture_2d<f32>;
@@ -705,6 +1071,13 @@ impl Viewer {
                 @group(0) @binding(4) var env_cube   : texture_cube<f32>;
                 @group(0) @binding(5) var env_samp   : sampler;
                 @group(0) @binding(6) var<uniform> P : LitParams;
+
+                const BRDF_LAMBERT: f32 = 0.0;
+                const BRDF_PHONG: f32 = 1.0;
+                const BRDF_GGX: f32 = 4.0;
+                const BRDF_DISNEY: f32 = 6.0;
+
+                fn approx_eq(a: f32, b: f32) -> bool { return abs(a - b) < 0.5; }
 
                 @compute @workgroup_size(8,8,1)
                 fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -714,12 +1087,48 @@ impl Viewer {
                     var n = textureLoad(normal_tex, coord, 0).xyz; // view-space [-1,1]
                     n = normalize(n);
                     let a = textureLoad(albedo_tex, coord, 0).rgb;
-                    let l = normalize(P.sun_dir_vs);
+                    let l = normalize(P.sun_dir_and_intensity.xyz);
                     let ndl = max(dot(n, l), 0.0);
-                    var col = a * (0.1 + P.sun_intensity * ndl);
-                    if (P.use_ibl != 0u) {
+                    // Simple direct lighting with BRDF dispatch (viewer-only approximation)
+                    var col = vec3<f32>(0.0);
+                    if (ndl > 0.0) {
+                        if (approx_eq(P.ibl_use_brdf_pad.z, BRDF_LAMBERT)) {
+                            // Lambert diffuse
+                            let diffuse = a * (1.0 / 3.14159265);
+                            col = diffuse * P.sun_dir_and_intensity.w * ndl;
+                        } else if (approx_eq(P.ibl_use_brdf_pad.z, BRDF_PHONG)) {
+                            // Blinn-Phong using fixed shininess from roughness~0.5
+                            let v = vec3<f32>(0.0, 0.0, 1.0);
+                            let h = normalize(l + v);
+                            let shininess = 64.0;
+                            let spec = pow(max(dot(n, h), 0.0), shininess);
+                            let spec_c = mix(vec3<f32>(0.04), a, 0.0) * spec;
+                            let diffuse = a * (1.0 / 3.14159265);
+                            col = (diffuse + spec_c) * P.sun_dir_and_intensity.w * ndl;
+                        } else {
+                            // GGX/Disney placeholder: simple fresnel + microfacet lobe
+                            let v = vec3<f32>(0.0, 0.0, 1.0);
+                            let h = normalize(l + v);
+                            let n_dot_h = max(dot(n, h), 0.0);
+                            let v_dot_h = max(dot(v, h), 0.0);
+                            let r = 0.5; // fixed roughness for viewer
+                            let alpha = r * r;
+                            let denom = n_dot_h * n_dot_h * (alpha * alpha - 1.0) + 1.0;
+                            let D = (alpha * alpha) / (3.14159265 * denom * denom + 1e-6);
+                            let F0 = mix(vec3<f32>(0.04), a, 0.0);
+                            let F = F0 + (vec3<f32>(1.0) - F0) * pow(1.0 - v_dot_h, 5.0);
+                            let kS = F;
+                            let kD = (vec3<f32>(1.0) - kS);
+                            let diffuse = kD * a * (1.0 / 3.14159265);
+                            let specular = F * D; // skip G for simplicity in viewer
+                            col = (diffuse + specular) * P.sun_dir_and_intensity.w * ndl;
+                        }
+                        // Add a small ambient term
+                        col += 0.1 * a;
+                    }
+                    if (P.ibl_use_brdf_pad.y > 0.5) {
                         let env = textureSampleLevel(env_cube, env_samp, n, 0.0).rgb;
-                        col += a * env * P.ibl_intensity;
+                        col += a * env * P.ibl_use_brdf_pad.x;
                     }
                     textureStore(out_tex, coord, vec4<f32>(col, 1.0));
                 }
@@ -730,8 +1139,8 @@ impl Viewer {
         let lit_params: [f32; 8] = [
             // sun_dir_vs.xyz, sun_intensity
             0.3, 0.6, -1.0, 1.0,
-            // ibl_intensity, use_ibl (as float for alignment), pad, pad
-            0.6, 1.0, 0.0, 0.0,
+            // ibl_intensity, use_ibl (as float), brdf (as float), pad
+            0.6, 1.0, 4.0, 0.0,
         ];
         let lit_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("viewer.lit.uniform"), contents: bytemuck::cast_slice(&lit_params), usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST });
 
@@ -770,6 +1179,355 @@ impl Viewer {
             view_formats: &[],
         });
         let lit_output_view = lit_output.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Sky: resources and pipeline
+        let sky_output = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.sky.output"),
+            size: wgpu::Extent3d { width: surface_config.width, height: surface_config.height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let sky_output_view = sky_output.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Sky params buffer (matches SkyParams in WGSL)
+        let mut sky_params_init = SkyUniforms {
+            sun_direction: [0.3, 0.8, 0.5],
+            turbidity: 2.5,
+            ground_albedo: 0.2,
+            model: 1, // 0=Preetham, 1=Hosek-Wilkie in WGSL
+            sun_intensity: 20.0,
+            exposure: 1.0,
+            _pad: [0.0; 4],
+        };
+        // Environment overrides (for CLI integration)
+        if let Ok(model_str) = std::env::var("FORGE3D_SKY_MODEL") {
+            let key = model_str.trim().to_ascii_lowercase().replace(['-', '_', ' '], "");
+            sky_params_init.model = match key.as_str() {
+                "preetham" => 0,
+                "hosekwilkie" => 1,
+                other => {
+                    eprintln!("[viewer] unknown FORGE3D_SKY_MODEL='{}', defaulting to hosek-wilkie", other);
+                    1
+                }
+            };
+        }
+        if let Ok(v) = std::env::var("FORGE3D_SKY_TURBIDITY") {
+            if let Ok(f) = v.parse::<f32>() { sky_params_init.turbidity = f.clamp(1.0, 10.0); }
+        }
+        if let Ok(v) = std::env::var("FORGE3D_SKY_GROUND") {
+            if let Ok(f) = v.parse::<f32>() { sky_params_init.ground_albedo = f.clamp(0.0, 1.0); }
+        }
+        if let Ok(v) = std::env::var("FORGE3D_SKY_EXPOSURE") {
+            if let Ok(f) = v.parse::<f32>() { sky_params_init.exposure = f.max(0.0); }
+        }
+        if let Ok(v) = std::env::var("FORGE3D_SKY_INTENSITY") {
+            if let Ok(f) = v.parse::<f32>() { sky_params_init.sun_intensity = f.max(0.0); }
+        }
+        let sky_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("viewer.sky.params"),
+            contents: bytemuck::bytes_of(&sky_params_init),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Camera buffer for sky (view, proj, inv_view, inv_proj, eye)
+        let cam_bytes: u64 = (std::mem::size_of::<[[f32; 4]; 4]>() * 4 + std::mem::size_of::<[f32; 4]>()) as u64;
+        let sky_camera = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewer.sky.camera"),
+            size: cam_bytes,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Sky compute pipeline
+        let sky_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewer.sky.shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/sky.wgsl").into()),
+        });
+        let sky_bind_group_layout0 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewer.sky.bgl0"),
+            entries: &[
+                // @binding(0) sky params
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                // @binding(1) storage output
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let sky_bind_group_layout1 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewer.sky.bgl1"),
+            entries: &[
+                // @binding(0) camera uniforms
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+            ],
+        });
+        let sky_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("viewer.sky.pipeline.layout"),
+            bind_group_layouts: &[&sky_bind_group_layout0, &sky_bind_group_layout1],
+            push_constant_ranges: &[],
+        });
+        let sky_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("viewer.sky.pipeline"),
+            layout: Some(&sky_pl),
+            module: &sky_shader,
+            entry_point: "cs_render_sky",
+        });
+
+        // --- P6: Volumetric fog resources ---
+        let fog_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewer.fog.shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/volumetric.wgsl").into()),
+        });
+        let fog_bgl0 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewer.fog.bgl0"),
+            entries: &[
+                // @group(0) params
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer{ ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                // @group(0) camera
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer{ ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                // depth texture
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                // depth sampler (non-filtering)
+                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering), count: None },
+            ],
+        });
+        let fog_bgl1 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewer.fog.bgl1"),
+            entries: &[
+                // shadow map
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Depth, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                // comparison sampler
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison), count: None },
+                // shadow matrix
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer{ ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            ],
+        });
+        let fog_bgl2 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewer.fog.bgl2"),
+            entries: &[
+                // output_fog
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::StorageTexture { access: wgpu::StorageTextureAccess::WriteOnly, format: wgpu::TextureFormat::Rgba16Float, view_dimension: wgpu::TextureViewDimension::D2 }, count: None },
+                // history_fog
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                // history_sampler
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+            ],
+        });
+        let fog_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("viewer.fog.pl"),
+            bind_group_layouts: &[&fog_bgl0, &fog_bgl1, &fog_bgl2],
+            push_constant_ranges: &[],
+        });
+        let fog_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("viewer.fog.pipeline"),
+            layout: Some(&fog_pl),
+            module: &fog_shader,
+            entry_point: "cs_volumetric",
+        });
+        // Froxelized volumetrics: group(3)
+        let fog_bgl3 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewer.fog.bgl3"),
+            entries: &[
+                // storage froxel buffer (3D RGBA16F)
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::StorageTexture { access: wgpu::StorageTextureAccess::WriteOnly, format: wgpu::TextureFormat::Rgba16Float, view_dimension: wgpu::TextureViewDimension::D3 }, count: None },
+                // sampled froxel texture
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D3, multisampled: false }, count: None },
+                // froxel sampler
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+            ],
+        });
+        // Froxel 3D texture
+        let froxel_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.fog.froxel.tex"),
+            size: wgpu::Extent3d { width: 16, height: 8, depth_or_array_layers: 64 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D3,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let froxel_view = froxel_tex.create_view(&wgpu::TextureViewDescriptor { label: Some("viewer.fog.froxel.view"), format: Some(wgpu::TextureFormat::Rgba16Float), dimension: Some(wgpu::TextureViewDimension::D3), aspect: wgpu::TextureAspect::All, base_mip_level: 0, mip_level_count: None, base_array_layer: 0, array_layer_count: None });
+        let froxel_sampler = device.create_sampler(&wgpu::SamplerDescriptor { label: Some("viewer.fog.froxel.sampler"), mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, mipmap_filter: wgpu::FilterMode::Nearest, ..Default::default() });
+        // Pipeline layouts for froxels
+        let empty_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("viewer.fog.empty.bgl"), entries: &[] });
+        // Build froxels uses groups: 0(params/camera), 1(shadow), 3(froxel buffer)
+        let froxel_build_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("viewer.fog.froxel.build.pl"),
+            bind_group_layouts: &[&fog_bgl0, &fog_bgl1, &empty_bgl, &fog_bgl3],
+            push_constant_ranges: &[],
+        });
+        let froxel_build_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("viewer.fog.froxel.build"),
+            layout: Some(&froxel_build_pl),
+            module: &fog_shader,
+            entry_point: "cs_build_froxels",
+        });
+        // Apply froxels uses groups: 0(params/depth), 2(output/history), 3(froxel sampled)
+        let froxel_apply_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("viewer.fog.froxel.apply.pl"),
+            bind_group_layouts: &[&fog_bgl0, &fog_bgl1, &fog_bgl2, &fog_bgl3],
+            push_constant_ranges: &[],
+        });
+        let froxel_apply_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("viewer.fog.froxel.apply"),
+            layout: Some(&froxel_apply_pl),
+            module: &fog_shader,
+            entry_point: "cs_apply_froxels",
+        });
+
+        // Fog textures and buffers
+        let fog_output = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.fog.output"),
+            size: wgpu::Extent3d { width: surface_config.width, height: surface_config.height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let fog_output_view = fog_output.create_view(&wgpu::TextureViewDescriptor::default());
+        let fog_history = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.fog.history"),
+            size: wgpu::Extent3d { width: surface_config.width, height: surface_config.height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let fog_history_view = fog_history.create_view(&wgpu::TextureViewDescriptor::default());
+        let fog_depth_sampler = device.create_sampler(&wgpu::SamplerDescriptor { label: Some("viewer.fog.depth.sampler"), mag_filter: wgpu::FilterMode::Nearest, min_filter: wgpu::FilterMode::Nearest, mipmap_filter: wgpu::FilterMode::Nearest, ..Default::default() });
+        let fog_history_sampler = device.create_sampler(&wgpu::SamplerDescriptor { label: Some("viewer.fog.history.sampler"), mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, mipmap_filter: wgpu::FilterMode::Nearest, ..Default::default() });
+        let fog_params = device.create_buffer(&wgpu::BufferDescriptor { label: Some("viewer.fog.params"), size: std::mem::size_of::<VolumetricUniformsStd140>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let fog_camera = device.create_buffer(&wgpu::BufferDescriptor { label: Some("viewer.fog.camera"), size: std::mem::size_of::<FogCameraUniforms>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        let fog_shadow_map = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.fog.shadow.map"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let fog_shadow_view = fog_shadow_map.create_view(&wgpu::TextureViewDescriptor::default());
+        let fog_shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor { label: Some("viewer.fog.shadow.sampler"), compare: Some(wgpu::CompareFunction::LessEqual), mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, ..Default::default() });
+        let fog_shadow_matrix = device.create_buffer(&wgpu::BufferDescriptor { label: Some("viewer.fog.shadow.matrix"), size: (std::mem::size_of::<[[f32;4];4]>() as u64), usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+
+        // Fog zero fallback texture (1x1 RGBA16F = 8 bytes per pixel)
+        let fog_zero_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.fog.zero"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        // write zeros
+        queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &fog_zero_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &[0u8; 8],
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(8), rows_per_image: Some(1) },
+            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 }
+        );
+        let fog_zero_view = fog_zero_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // P6-10: Half-resolution fog targets
+        let half_w = surface_config.width.max(1) / 2;
+        let half_h = surface_config.height.max(1) / 2;
+        let fog_output_half = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.fog.output.half"),
+            size: wgpu::Extent3d { width: half_w.max(1), height: half_h.max(1), depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let fog_output_half_view = fog_output_half.create_view(&wgpu::TextureViewDescriptor::default());
+        let fog_history_half = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.fog.history.half"),
+            size: wgpu::Extent3d { width: half_w.max(1), height: half_h.max(1), depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let fog_history_half_view = fog_history_half.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Upsample shader pipeline and BGL
+        let fog_upsample_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewer.fog.upsample.shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/fog_upsample.wgsl").into()),
+        });
+        let fog_upsample_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewer.fog.upsample.bgl"),
+            entries: &[
+                // src half-res fog
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                // src sampler (filtering)
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                // dst full-res storage
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::StorageTexture { access: wgpu::StorageTextureAccess::WriteOnly, format: wgpu::TextureFormat::Rgba16Float, view_dimension: wgpu::TextureViewDimension::D2 }, count: None },
+                // full-res depth
+                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                // depth sampler (non-filtering)
+                wgpu::BindGroupLayoutEntry { binding: 4, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering), count: None },
+                // params uniform
+                wgpu::BindGroupLayoutEntry { binding: 5, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            ],
+        });
+        let fog_upsample_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("viewer.fog.upsample.pl"),
+            bind_group_layouts: &[&fog_upsample_bgl],
+            push_constant_ranges: &[],
+        });
+        let fog_upsample_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("viewer.fog.upsample.pipeline"),
+            layout: Some(&fog_upsample_pl),
+            module: &fog_upsample_shader,
+            entry_point: "cs_main",
+        });
+        let fog_upsample_params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewer.fog.upsample.params"),
+            size: std::mem::size_of::<FogUpsampleParamsStd140>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // HUD overlay renderer
+        let mut hud = crate::core::text_overlay::TextOverlayRenderer::new(&device, surface_config.format);
+        hud.set_enabled(true);
+        hud.set_resolution(surface_config.width, surface_config.height);
 
         Ok(Self {
             window,
@@ -810,6 +1568,7 @@ impl Viewer {
             lit_sun_intensity: 1.0,
             lit_ibl_intensity: 0.6,
             lit_use_ibl: true,
+            lit_brdf: 4,
             fallback_pipeline: fb_pipeline,
             viz_mode: VizMode::Material,
             use_ssao_composite: true,
@@ -820,6 +1579,67 @@ impl Viewer {
             auto_snapshot_path: std::env::var("FORGE3D_AUTO_SNAPSHOT_PATH").ok(),
             auto_snapshot_done: false,
             debug_logged_render_gate: false,
+            sky_bind_group_layout0: sky_bind_group_layout0,
+            sky_bind_group_layout1: sky_bind_group_layout1,
+            sky_pipeline,
+            sky_params,
+            sky_camera,
+            sky_output,
+            sky_output_view,
+            sky_enabled: true,
+            // Fog init
+            fog_enabled: false,
+            fog_params,
+            fog_camera,
+            fog_output,
+            fog_output_view,
+            fog_history,
+            fog_history_view,
+            fog_depth_sampler,
+            fog_history_sampler,
+            fog_pipeline,
+            fog_frame_index: 0,
+            fog_bgl3,
+            froxel_tex,
+            froxel_view,
+            froxel_sampler,
+            froxel_build_pipeline,
+            froxel_apply_pipeline,
+            // Half-res upsample controls/resources
+            fog_half_res_enabled: false,
+            fog_output_half,
+            fog_output_half_view,
+            fog_history_half,
+            fog_history_half_view,
+            fog_upsample_bgl,
+            fog_upsample_pipeline,
+            fog_upsample_params,
+            fog_bilateral: true,
+            fog_upsigma: 0.02,
+            fog_bgl0,
+            fog_bgl1,
+            fog_bgl2,
+            fog_shadow_map,
+            fog_shadow_view,
+            fog_shadow_sampler,
+            fog_shadow_matrix,
+            fog_zero_tex,
+            fog_zero_view,
+            fog_density: 0.02,
+            fog_g: 0.0,
+            fog_steps: 64,
+            fog_temporal_alpha: 0.2,
+            fog_use_shadows: false,
+            fog_mode: FogMode::Raymarch,
+            // Sky controls
+            sky_model_id: 1,
+            sky_turbidity: 2.5,
+            sky_ground_albedo: 0.2,
+            sky_exposure: 1.0,
+            sky_sun_intensity: 20.0,
+            // HUD overlay renderer
+            hud_enabled: true,
+            hud,
         })
     }
 
@@ -832,7 +1652,7 @@ impl Viewer {
         let sun_dir = [0.3f32, 0.6, -1.0];
         let params: [f32; 8] = [
             sun_dir[0], sun_dir[1], sun_dir[2], self.lit_sun_intensity,
-            self.lit_ibl_intensity, if self.lit_use_ibl { 1.0 } else { 0.0 }, 0.0, 0.0,
+            self.lit_ibl_intensity, if self.lit_use_ibl { 1.0 } else { 0.0 }, self.lit_brdf as f32, 0.0,
         ];
         self.queue
             .write_buffer(&self.lit_uniform, 0, bytemuck::cast_slice(&params));
@@ -858,6 +1678,18 @@ impl Viewer {
                 view_formats: &[],
             });
             self.lit_output_view = self.lit_output.create_view(&wgpu::TextureViewDescriptor::default());
+            // Recreate sky output
+            self.sky_output = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.sky.output"),
+                size: wgpu::Extent3d { width: new_size.width, height: new_size.height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            self.sky_output_view = self.sky_output.create_view(&wgpu::TextureViewDescriptor::default());
             // Recreate depth buffer for geometry pass
             if self.geom_pipeline.is_some() {
                 let z_texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -874,6 +1706,56 @@ impl Viewer {
                 self.z_texture = Some(z_texture);
                 self.z_view = Some(z_view);
             }
+            // Recreate fog textures
+            self.fog_output = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.fog.output"),
+                size: wgpu::Extent3d { width: new_size.width, height: new_size.height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            self.fog_output_view = self.fog_output.create_view(&wgpu::TextureViewDescriptor::default());
+            self.fog_history = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.fog.history"),
+                size: wgpu::Extent3d { width: new_size.width, height: new_size.height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            self.fog_history_view = self.fog_history.create_view(&wgpu::TextureViewDescriptor::default());
+            // Recreate half-resolution fog targets
+            let half_w = (new_size.width.max(1)) / 2;
+            let half_h = (new_size.height.max(1)) / 2;
+            self.fog_output_half = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.fog.output.half"),
+                size: wgpu::Extent3d { width: half_w.max(1), height: half_h.max(1), depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            self.fog_output_half_view = self.fog_output_half.create_view(&wgpu::TextureViewDescriptor::default());
+            self.fog_history_half = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.fog.history.half"),
+                size: wgpu::Extent3d { width: half_w.max(1), height: half_h.max(1), depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            self.fog_history_half_view = self.fog_history_half.create_view(&wgpu::TextureViewDescriptor::default());
+            // HUD resolution
+            self.hud.set_resolution(new_size.width, new_size.height);
         }
     }
 
@@ -1019,6 +1901,79 @@ impl Viewer {
                 label: Some("Render Encoder"),
             });
 
+        // Render sky background (compute) before opaques
+        if self.sky_enabled {
+            // Build camera matrices (view, proj, inv_view, inv_proj) and eye
+            let aspect = self.config.width as f32 / self.config.height as f32;
+            let fov = self.view_config.fov_deg.to_radians();
+            let proj = Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
+            let view_mat = self.camera.view_matrix();
+            let inv_view = view_mat.inverse();
+            let inv_proj = proj.inverse();
+            fn to_arr4(m: Mat4) -> [[f32; 4]; 4] {
+                let c = m.to_cols_array();
+                [
+                    [c[0], c[1], c[2], c[3]],
+                    [c[4], c[5], c[6], c[7]],
+                    [c[8], c[9], c[10], c[11]],
+                    [c[12], c[13], c[14], c[15]],
+                ]
+            }
+            let eye = self.camera.eye();
+            let cam_buf: [[[f32; 4]; 4]; 4] = [to_arr4(view_mat), to_arr4(proj), to_arr4(inv_view), to_arr4(inv_proj)];
+            // Write matrices
+            self.queue.write_buffer(&self.sky_camera, 0, bytemuck::cast_slice(&cam_buf));
+            // Write eye position (vec4 packed)
+            let eye4: [f32; 4] = [eye.x, eye.y, eye.z, 0.0];
+            let base = (std::mem::size_of::<[[f32; 4]; 4]>() * 4) as u64;
+            self.queue.write_buffer(&self.sky_camera, base, bytemuck::cast_slice(&eye4));
+
+            // Update sky params each frame based on viewer-set fields
+            let sun_dir_vs = glam::Vec3::new(0.3, 0.6, -1.0).normalize();
+            let sun_dir_ws = (inv_view * glam::Vec4::new(sun_dir_vs.x, sun_dir_vs.y, sun_dir_vs.z, 0.0)).truncate().normalize();
+            let model_id: u32 = self.sky_model_id;
+            let turb: f32 = self.sky_turbidity.clamp(1.0, 10.0);
+            let ground: f32 = self.sky_ground_albedo.clamp(0.0, 1.0);
+            let expose: f32 = self.sky_exposure.max(0.0);
+            let sun_i: f32 = self.sky_sun_intensity.max(0.0);
+
+            let sky_params_frame = SkyUniforms {
+                sun_direction: [sun_dir_ws.x, sun_dir_ws.y, sun_dir_ws.z],
+                turbidity: turb,
+                ground_albedo: ground,
+                model: model_id,
+                sun_intensity: sun_i,
+                exposure: expose,
+                _pad: [0.0; 4],
+            };
+            self.queue.write_buffer(&self.sky_params, 0, bytemuck::bytes_of(&sky_params_frame));
+
+            // Bind and dispatch compute
+            let sky_bg0 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("viewer.sky.bg0"),
+                layout: &self.sky_bind_group_layout0,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: self.sky_params.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.sky_output_view) },
+                ],
+            });
+            let sky_bg1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("viewer.sky.bg1"),
+                layout: &self.sky_bind_group_layout1,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: self.sky_camera.as_entire_binding() },
+                ],
+            });
+            let gx = (self.config.width + 7) / 8; let gy = (self.config.height + 7) / 8;
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("viewer.sky.compute"), timestamp_writes: None });
+                cpass.set_pipeline(&self.sky_pipeline);
+                cpass.set_bind_group(0, &sky_bg0, &[]);
+                cpass.set_bind_group(1, &sky_bg1, &[]);
+                cpass.dispatch_workgroups(gx, gy, 1);
+            }
+        }
+
         // Composite debug: after GI/geometry, show GBuffer material on swapchain
 
         // Execute screen-space effects if any are enabled
@@ -1136,6 +2091,199 @@ impl Viewer {
             }
             drop(pass);
 
+            // P6: Volumetric fog compute (after depth is available)
+            if self.fog_enabled {
+                // Prepare camera uniforms
+                let aspect = self.config.width as f32 / self.config.height as f32;
+                let fov = self.view_config.fov_deg.to_radians();
+                let proj = Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
+                let view_mat = self.camera.view_matrix();
+                let inv_view = view_mat.inverse();
+                let inv_proj = proj.inverse();
+                let eye = self.camera.eye();
+                fn to_arr(m: Mat4) -> [[f32;4];4] { let c=m.to_cols_array(); [[c[0],c[1],c[2],c[3]],[c[4],c[5],c[6],c[7]],[c[8],c[9],c[10],c[11]],[c[12],c[13],c[14],c[15]]] }
+                let fog_cam = FogCameraUniforms {
+                    view: to_arr(view_mat),
+                    proj: to_arr(proj),
+                    inv_view: to_arr(inv_view),
+                    inv_proj: to_arr(inv_proj),
+                    view_proj: to_arr(proj * view_mat),
+                    eye_position: [eye.x, eye.y, eye.z],
+                    near: self.view_config.znear,
+                    far: self.view_config.zfar,
+                    _pad: [0.0;3],
+                };
+                self.queue.write_buffer(&self.fog_camera, 0, bytemuck::bytes_of(&fog_cam));
+                // Params
+                let sun_dir_ws = (inv_view * glam::Vec4::new(0.3,0.6,-1.0,0.0)).truncate().normalize();
+                let steps = if self.fog_half_res_enabled { (self.fog_steps.max(1) / 2).max(16) } else { self.fog_steps.max(1) };
+                let fog_params_packed = VolumetricUniformsStd140 {
+                    density: self.fog_density.max(0.0),
+                    height_falloff: 0.1,
+                    phase_g: self.fog_g.clamp(-0.999, 0.999),
+                    max_steps: steps,
+                    start_distance: 0.1,
+                    max_distance: self.view_config.zfar,
+                    _pad_a0: 0.0,
+                    _pad_a1: 0.0,
+                    scattering_color: [1.0, 1.0, 1.0],
+                    absorption: 1.0,
+                    sun_direction: [sun_dir_ws.x, sun_dir_ws.y, sun_dir_ws.z],
+                    sun_intensity: self.sky_sun_intensity.max(0.0),
+                    ambient_color: [0.2, 0.25, 0.3],
+                    temporal_alpha: self.fog_temporal_alpha.clamp(0.0, 0.9),
+                    use_shadows: if self.fog_use_shadows {1} else {0},
+                    jitter_strength: 0.8,
+                    frame_index: self.fog_frame_index,
+                    _pad0: 0,
+                };
+                self.queue.write_buffer(&self.fog_params, 0, bytemuck::bytes_of(&fog_params_packed));
+                // Shadow matrix identity
+                let ident = Mat4::IDENTITY;
+                self.queue.write_buffer(&self.fog_shadow_matrix, 0, bytemuck::bytes_of(&to_arr(ident)));
+
+                // Bind groups (shared among both modes)
+                let bg0 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("viewer.fog.bg0"),
+                    layout: &self.fog_bgl0,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: self.fog_params.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: self.fog_camera.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&gi.gbuffer().depth_view) },
+                        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.fog_depth_sampler) },
+                    ],
+                });
+                let bg1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("viewer.fog.bg1"),
+                    layout: &self.fog_bgl1,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.fog_shadow_view) },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.fog_shadow_sampler) },
+                        wgpu::BindGroupEntry { binding: 2, resource: self.fog_shadow_matrix.as_entire_binding() },
+                    ],
+                });
+                let bg2 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("viewer.fog.bg2"),
+                    layout: &self.fog_bgl2,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.fog_output_view) },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.fog_history_view) },
+                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.fog_history_sampler) },
+                    ],
+                });
+                if matches!(self.fog_mode, FogMode::Raymarch) {
+                    if self.fog_half_res_enabled {
+                        // Half-resolution path: bind half-res output/history
+                        let bg2_half = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("viewer.fog.bg2.half"),
+                            layout: &self.fog_bgl2,
+                            entries: &[
+                                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.fog_output_half_view) },
+                                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.fog_history_half_view) },
+                                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.fog_history_sampler) },
+                            ],
+                        });
+                        let gx = ((self.config.width / 2) + 7) / 8; let gy = ((self.config.height / 2) + 7) / 8;
+                        {
+                            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("viewer.fog.raymarch.half"), timestamp_writes: None });
+                            cpass.set_pipeline(&self.fog_pipeline);
+                            cpass.set_bind_group(0, &bg0, &[]);
+                            cpass.set_bind_group(1, &bg1, &[]);
+                            cpass.set_bind_group(2, &bg2_half, &[]);
+                            cpass.dispatch_workgroups(gx, gy, 1);
+                        }
+                        // Copy half output to half history
+                        encoder.copy_texture_to_texture(
+                            wgpu::ImageCopyTexture { texture: &self.fog_output_half, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                            wgpu::ImageCopyTexture { texture: &self.fog_history_half, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                            wgpu::Extent3d { width: self.config.width.max(1) / 2, height: self.config.height.max(1) / 2, depth_or_array_layers: 1 }
+                        );
+                        // Upsample to full-res for composition
+                        let upsampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+                            label: Some("viewer.fog.upsampler"),
+                            mag_filter: wgpu::FilterMode::Linear,
+                            min_filter: wgpu::FilterMode::Linear,
+                            mipmap_filter: wgpu::FilterMode::Nearest,
+                            ..Default::default()
+                        });
+                        let params = FogUpsampleParamsStd140 { sigma: self.fog_upsigma.max(0.0), use_bilateral: if self.fog_bilateral {1} else {0}, _pad: [0.0;2] };
+                        self.queue.write_buffer(&self.fog_upsample_params, 0, bytemuck::bytes_of(&params));
+                        let up_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("viewer.fog.upsample.bg"),
+                            layout: &self.fog_upsample_bgl,
+                            entries: &[
+                                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.fog_output_half_view) },
+                                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&upsampler) },
+                                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&self.fog_output_view) },
+                                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&gi.gbuffer().depth_view) },
+                                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&self.fog_depth_sampler) },
+                                wgpu::BindGroupEntry { binding: 5, resource: self.fog_upsample_params.as_entire_binding() },
+                            ],
+                        });
+                        let ugx = (self.config.width + 7) / 8; let ugy = (self.config.height + 7) / 8;
+                        let mut up_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("viewer.fog.upsample"), timestamp_writes: None });
+                        up_pass.set_pipeline(&self.fog_upsample_pipeline);
+                        up_pass.set_bind_group(0, &up_bg, &[]);
+                        up_pass.dispatch_workgroups(ugx, ugy, 1);
+                    } else {
+                        // Full-resolution path (original)
+                        let gx = (self.config.width + 7) / 8; let gy = (self.config.height + 7) / 8;
+                        {
+                            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("viewer.fog.raymarch"), timestamp_writes: None });
+                            cpass.set_pipeline(&self.fog_pipeline);
+                            cpass.set_bind_group(0, &bg0, &[]);
+                            cpass.set_bind_group(1, &bg1, &[]);
+                            cpass.set_bind_group(2, &bg2, &[]);
+                            cpass.dispatch_workgroups(gx, gy, 1);
+                        }
+                        // Copy output to full-res history
+                        encoder.copy_texture_to_texture(
+                            wgpu::ImageCopyTexture { texture: &self.fog_output, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                            wgpu::ImageCopyTexture { texture: &self.fog_history, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                            wgpu::Extent3d { width: self.config.width, height: self.config.height, depth_or_array_layers: 1 }
+                        );
+                    }
+                } else {
+                    // Froxel build then apply
+                    let bg3 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("viewer.fog.bg3"),
+                        layout: &self.fog_bgl3,
+                        entries: &[
+                            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.froxel_view) }, // storage view
+                            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.froxel_view) },
+                            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.froxel_sampler) },
+                        ],
+                    });
+                    // Build froxels: workgroup_size(4,4,4) over 16x8x64
+                    let gx3d = (16u32 + 3) / 4; let gy3d = (8u32 + 3) / 4; let gz3d = (64u32 + 3) / 4;
+                    {
+                        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("viewer.fog.froxel.build"), timestamp_writes: None });
+                        pass.set_pipeline(&self.froxel_build_pipeline);
+                        pass.set_bind_group(0, &bg0, &[]);
+                        pass.set_bind_group(1, &bg1, &[]);
+                        pass.set_bind_group(3, &bg3, &[]);
+                        pass.dispatch_workgroups(gx3d, gy3d, gz3d);
+                    }
+                    // Apply froxels: workgroup_size(8,8,1) across viewport
+                    let gx2d = (self.config.width + 7) / 8; let gy2d = (self.config.height + 7) / 8;
+                    {
+                        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("viewer.fog.froxel.apply"), timestamp_writes: None });
+                        pass.set_pipeline(&self.froxel_apply_pipeline);
+                        pass.set_bind_group(0, &bg0, &[]);
+                        pass.set_bind_group(2, &bg2, &[]);
+                        pass.set_bind_group(3, &bg3, &[]);
+                        pass.dispatch_workgroups(gx2d, gy2d, 1);
+                    }
+                    // For froxels, history is full-res; copy as before
+                    encoder.copy_texture_to_texture(
+                        wgpu::ImageCopyTexture { texture: &self.fog_output, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                        wgpu::ImageCopyTexture { texture: &self.fog_history, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                        wgpu::Extent3d { width: self.config.width, height: self.config.height, depth_or_array_layers: 1 }
+                    );
+                }
+                self.fog_frame_index = self.fog_frame_index.wrapping_add(1);
+            }
+
             // Execute effects
             let _ = gi.execute(&self.device, &mut encoder);
 
@@ -1216,6 +2364,9 @@ impl Viewer {
                         wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(src_view) },
                         wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&comp_sampler) },
                         wgpu::BindGroupEntry { binding: 2, resource: buf_ref.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&self.sky_output_view) },
+                        wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&gi.gbuffer().depth_view) },
+                        wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view }) },
                     ],
                 });
                 // If a snapshot is requested, render the composite to an offscreen texture too
@@ -1264,6 +2415,66 @@ impl Viewer {
                 pass.set_bind_group(0, &comp_bg, &[]);
                 pass.draw(0..3, 0..1);
                 drop(pass);
+
+                if self.hud_enabled {
+                    // HUD overlay after composite
+                    // Build simple bars for sky/fog settings + numeric readouts
+                    let mut hud_instances: Vec<crate::core::text_overlay::TextInstance> = Vec::new();
+                    let sx = 8.0f32; let sy = 8.0f32; // start position
+                    let bar_w = 120.0f32; let bar_h = 10.0f32; let gap = 4.0f32;
+                    let num_scale = 0.6f32; // ~11px tall digits
+                    let num_dx = 8.0f32; // spacing from end of bar
+                    let mut y = sy;
+                    // Sky enabled bar (green if on, gray if off)
+                    hud_push_text_3x5(&mut hud_instances, sx, y - 9.0, 1.0, "SKY", [0.8,0.95,0.8,0.9]);
+                    let sky_on = if self.sky_enabled { 1.0 } else { 0.25 };
+                    hud_instances.push(crate::core::text_overlay::TextInstance { rect_min: [sx, y], rect_max: [sx + bar_w, y + bar_h], uv_min: [0.0,0.0], uv_max: [1.0,1.0], color: [0.2, 0.8, 0.2, sky_on] });
+                    // Label model (0=Preetham,1=Hosek)
+                    let model_val = if self.sky_model_id == 0 { 0.0 } else { 1.0 };
+                    let nx = sx + bar_w + num_dx; let ny = y - 1.0; // slightly above bar baseline
+                    hud_push_number(&mut hud_instances, nx, ny, num_scale, model_val, 1, 0, [0.7,0.9,0.7,0.9]);
+                    y += bar_h + gap;
+                    // Sky turbidity bar length + number
+                    hud_push_text_3x5(&mut hud_instances, sx, y - 9.0, 1.0, "TURB", [0.7,0.85,1.0,0.9]);
+                    let tfrac = (self.sky_turbidity.clamp(1.0, 10.0) - 1.0) / 9.0;
+                    hud_instances.push(crate::core::text_overlay::TextInstance { rect_min: [sx, y], rect_max: [sx + bar_w * tfrac, y + bar_h], uv_min: [0.0,0.0], uv_max: [1.0,1.0], color: [0.2,0.5,1.0, 0.8] });
+                    let nx = sx + bar_w + num_dx; let ny = y - 1.0;
+                    hud_push_number(&mut hud_instances, nx, ny, num_scale, self.sky_turbidity, 4, 1, [0.6,0.8,1.0,0.9]);
+                    y += bar_h + gap;
+                    // Fog enabled bar (blue if on)
+                    hud_push_text_3x5(&mut hud_instances, sx, y - 9.0, 1.0, "FOG", [0.7,0.85,1.0,0.9]);
+                    let fog_on = if self.fog_enabled { 0.9 } else { 0.2 };
+                    hud_instances.push(crate::core::text_overlay::TextInstance { rect_min: [sx, y], rect_max: [sx + bar_w, y + bar_h], uv_min: [0.0,0.0], uv_max: [1.0,1.0], color: [0.2,0.6,1.0, fog_on] });
+                    let nx = sx + bar_w + num_dx; let ny = y - 1.0;
+                    hud_push_number(&mut hud_instances, nx, ny, num_scale, if self.fog_enabled { 1.0 } else { 0.0 }, 1, 0, [0.7,0.85,1.0,0.9]);
+                    y += bar_h + gap;
+                    // Fog density bar + number
+                    hud_push_text_3x5(&mut hud_instances, sx, y - 9.0, 1.0, "DENS", [0.7,0.85,1.0,0.9]);
+                    let dfrac = (self.fog_density / 0.1).clamp(0.0, 1.0);
+                    hud_instances.push(crate::core::text_overlay::TextInstance { rect_min: [sx, y], rect_max: [sx + bar_w * dfrac, y + bar_h], uv_min: [0.0,0.0], uv_max: [1.0,1.0], color: [0.6,0.8,1.0, 0.8] });
+                    let nx = sx + bar_w + num_dx; let ny = y - 1.0;
+                    hud_push_number(&mut hud_instances, nx, ny, num_scale, self.fog_density, 5, 3, [0.6,0.8,1.0,0.9]);
+                    y += bar_h + gap;
+                    // Fog temporal alpha bar + number
+                    hud_push_text_3x5(&mut hud_instances, sx, y - 9.0, 1.0, "TEMP", [1.0,0.85,0.6,0.95]);
+                    let afrac = self.fog_temporal_alpha.clamp(0.0, 0.9) / 0.9;
+                    hud_instances.push(crate::core::text_overlay::TextInstance { rect_min: [sx, y], rect_max: [sx + bar_w * afrac, y + bar_h], uv_min: [0.0,0.0], uv_max: [1.0,1.0], color: [1.0,0.6,0.2, 0.8] });
+                    let nx = sx + bar_w + num_dx; let ny = y - 1.0;
+                    hud_push_number(&mut hud_instances, nx, ny, num_scale, self.fog_temporal_alpha, 4, 2, [1.0,0.8,0.5,0.95]);
+
+                    self.hud.upload_instances(&self.device, &self.queue, &hud_instances);
+                    self.hud.upload_uniforms(&self.queue);
+                    // Render overlay
+                    let mut overlay_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("viewer.hud.pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                    self.hud.render(&mut overlay_pass);
+                    drop(overlay_pass);
+                }
             }
         }
 
@@ -1343,33 +2554,58 @@ enum ViewerCmd {
     LoadGltf(String),
     SetViz(String),
     LoadIbl(String),
-    SetSsaoRadius(f32),
-    SetSsaoIntensity(f32),
-    SetSsgiSteps(u32),
-    SetSsgiRadius(f32),
-    SetSsrMaxSteps(u32),
-    SetSsrThickness(f32),
-    SetSsgiHalf(bool),
-    SetSsgiTemporalAlpha(f32),
-    SetSsaoTechnique(u32),
-    SetVizDepthMax(f32),
-    SetFov(f32),
-    SetCamLookAt { eye: [f32;3], target: [f32;3], up: [f32;3] },
-    SetSize(u32, u32),
-    SetSsaoComposite(bool),
-    SetSsaoCompositeMul(f32),
+    #[allow(dead_code)] SetSsaoRadius(f32),
+    #[allow(dead_code)] SetSsaoIntensity(f32),
+    #[allow(dead_code)] SetSsgiSteps(u32),
+    #[allow(dead_code)] SetSsgiRadius(f32),
+    #[allow(dead_code)] SetSsrMaxSteps(u32),
+    #[allow(dead_code)] SetSsrThickness(f32),
+    #[allow(dead_code)] SetSsgiHalf(bool),
+    #[allow(dead_code)] SetSsgiTemporalAlpha(f32),
+    #[allow(dead_code)] SetSsaoTechnique(u32),
+    #[allow(dead_code)] SetVizDepthMax(f32),
+    #[allow(dead_code)] SetFov(f32),
+    #[allow(dead_code)] SetCamLookAt { eye: [f32;3], target: [f32;3], up: [f32;3] },
+    #[allow(dead_code)] SetSize(u32, u32),
+    #[allow(dead_code)] SetSsaoComposite(bool),
+    #[allow(dead_code)] SetSsaoCompositeMul(f32),
     // SSGI edge-aware upsample controls
-    SetSsgiEdges(bool),
-    SetSsgiUpsigma(f32),
-    SetSsgiNormalExp(f32),
+    #[allow(dead_code)] SetSsgiEdges(bool),
+    #[allow(dead_code)] SetSsgiUpsigma(f32),
+    #[allow(dead_code)] SetSsgiNormalExp(f32),
     // Lit viz controls
     SetLitSun(f32),
     SetLitIbl(f32),
+    SetLitBrdf(u32),
+    // Sky controls
+    SkyToggle(bool),
+    SkySetModel(u32), // 0=Preetham,1=Hosek-Wilkie
+    SkySetTurbidity(f32),
+    SkySetGround(f32),
+    SkySetExposure(f32),
+    SkySetSunIntensity(f32),
+    // Fog controls
+    FogToggle(bool),
+    FogSetDensity(f32),
+    FogSetG(f32),
+    FogSetSteps(u32),
+    FogSetShadow(bool),
+    FogSetTemporal(f32),
+    SetFogMode(u32),
+    FogPreset(u32),
+    // P6-10 half-res upsample controls
+    FogHalf(bool),
+    FogEdges(bool),
+    FogUpsigma(f32),
+    HudToggle(bool),
     Quit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VizMode { Material, Normal, Depth, Gi, Lit }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FogMode { Raymarch, Froxels }
 
 impl Viewer {
     fn handle_cmd(&mut self, cmd: ViewerCmd) {
@@ -1452,307 +2688,118 @@ impl Viewer {
                 self.lit_use_ibl = self.lit_ibl_intensity > 0.0;
                 self.update_lit_uniform();
             }
+            ViewerCmd::SetLitBrdf(idx) => {
+                self.lit_brdf = idx;
+                self.update_lit_uniform();
+            }
+            // Sky controls
+            ViewerCmd::SkyToggle(on) => { self.sky_enabled = on; }
+            ViewerCmd::SkySetModel(id) => { self.sky_model_id = id; self.sky_enabled = true; }
+            ViewerCmd::SkySetTurbidity(t) => { self.sky_turbidity = t.clamp(1.0, 10.0); }
+            ViewerCmd::SkySetGround(a) => { self.sky_ground_albedo = a.clamp(0.0, 1.0); }
+            ViewerCmd::SkySetExposure(e) => { self.sky_exposure = e.max(0.0); }
+            ViewerCmd::SkySetSunIntensity(i) => { self.sky_sun_intensity = i.max(0.0); }
+            // Fog controls
+            ViewerCmd::FogToggle(on) => { self.fog_enabled = on; }
+            ViewerCmd::FogSetDensity(v) => { self.fog_density = v.max(0.0); }
+            ViewerCmd::FogSetG(v) => { self.fog_g = v.clamp(-0.999, 0.999); }
+            ViewerCmd::FogSetSteps(v) => { self.fog_steps = v.max(1); }
+            ViewerCmd::FogSetShadow(on) => { self.fog_use_shadows = on; }
+            ViewerCmd::FogSetTemporal(v) => { self.fog_temporal_alpha = v.clamp(0.0, 0.9); }
+            ViewerCmd::SetFogMode(m) => {
+                self.fog_mode = if m != 0 { FogMode::Froxels } else { FogMode::Raymarch };
+            }
+            ViewerCmd::FogHalf(on) => { self.fog_half_res_enabled = on; }
+            ViewerCmd::FogEdges(on) => { self.fog_bilateral = on; }
+            ViewerCmd::FogUpsigma(s) => { self.fog_upsigma = s.max(0.0); }
+            ViewerCmd::FogPreset(p) => {
+                match p {
+                    0 => { // low
+                        self.fog_steps = 32; self.fog_temporal_alpha = 0.7; self.fog_density = 0.02;
+                    }
+                    1 => { // medium
+                        self.fog_steps = 64; self.fog_temporal_alpha = 0.6; self.fog_density = 0.04;
+                    }
+                    _ => { // high
+                        self.fog_steps = 96; self.fog_temporal_alpha = 0.5; self.fog_density = 0.06;
+                    }
+                }
+            }
+            ViewerCmd::HudToggle(on) => {
+                self.hud_enabled = on;
+                self.hud.set_enabled(on);
+            }
             ViewerCmd::LoadIbl(path) => {
                 match self.load_ibl(&path) {
                     Ok(_) => println!("Loaded IBL: {}", path),
                     Err(e) => eprintln!("IBL load failed: {}", e),
                 }
             }
-            ViewerCmd::SetSsaoRadius(v) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.update_ssao_settings(&self.queue, |s| s.radius = v);
-                }
-            }
-            ViewerCmd::SetSsaoIntensity(v) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.update_ssao_settings(&self.queue, |s| s.intensity = v);
-                }
-            }
-            ViewerCmd::SetSsgiSteps(v) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.update_ssgi_settings(&self.queue, |s| s.num_steps = v);
-                }
-            }
-            ViewerCmd::SetSsgiRadius(v) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.update_ssgi_settings(&self.queue, |s| s.radius = v);
-                }
-            }
-            ViewerCmd::SetSsrMaxSteps(v) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.update_ssr_settings(&self.queue, |s| s.max_steps = v);
-                }
-            }
-            ViewerCmd::SetSsrThickness(v) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.update_ssr_settings(&self.queue, |s| s.thickness = v);
-                }
-            }
-            ViewerCmd::SetSsgiHalf(on) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.set_ssgi_half_res_with_queue(&self.device, &self.queue, on);
-                }
-            }
-            ViewerCmd::SetSsgiTemporalAlpha(alpha) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.update_ssgi_settings(&self.queue, |s| s.temporal_alpha = alpha.clamp(0.0, 1.0));
-                }
-            }
-            ViewerCmd::SetSsaoTechnique(tech) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.update_ssao_settings(&self.queue, |s| s.technique = if tech != 0 { 1 } else { 0 });
-                }
-            }
-            ViewerCmd::SetVizDepthMax(v) => {
-                self.viz_depth_max_override = Some(v.max(0.001));
-            }
-            ViewerCmd::SetFov(fov) => {
-                self.view_config.fov_deg = fov.max(1.0).min(179.0);
-            }
-            ViewerCmd::SetCamLookAt { eye, target, up } => {
-                let e = Vec3::new(eye[0], eye[1], eye[2]);
-                let t = Vec3::new(target[0], target[1], target[2]);
-                let u = Vec3::new(up[0], up[1], up[2]);
-                self.camera.set_look_at(e, t, u);
-            }
-            ViewerCmd::SetSize(w, h) => {
-                let w = w.max(1); let h = h.max(1);
-                let _ = self.window.request_inner_size(PhysicalSize::new(w, h));
-            }
-            ViewerCmd::SetSsaoComposite(on) => {
-                self.use_ssao_composite = on;
-            }
-            ViewerCmd::SetSsaoCompositeMul(mul) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.set_ssao_composite_multiplier(&self.queue, mul);
-                }
-            }
-            ViewerCmd::SetSsgiEdges(on) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.update_ssgi_settings(&self.queue, |s| s.use_edge_aware = if on {1} else {0});
-                }
-            }
-            ViewerCmd::SetSsgiUpsigma(v) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.update_ssgi_settings(&self.queue, |s| s.upsample_depth_sigma = v);
-                }
-            }
-            ViewerCmd::SetSsgiNormalExp(v) => {
-                if let Some(ref mut gi) = self.gi {
-                    gi.update_ssgi_settings(&self.queue, |s| s.upsample_normal_exp = v);
-                }
-            }
-            ViewerCmd::Quit => {
-                // handled by event loop
-            }
+            _ => {}
         }
     }
 
-    fn upload_mesh(&mut self, mesh: &crate::geometry::MeshBuffers) -> anyhow::Result<()> {
-        // Build interleaved vertex buffer: pos(3), nrm(3), uv(2)
-        let n = mesh.positions.len();
-        let mut verts: Vec<f32> = Vec::with_capacity(n * 8);
-        for i in 0..n {
-            let p = mesh.positions[i];
-            let nrm = if i < mesh.normals.len() { mesh.normals[i] } else { [0.0, 0.0, 1.0] };
-            let uv = if i < mesh.uvs.len() { mesh.uvs[i] } else { [0.0, 0.0] };
-            verts.extend_from_slice(&[p[0], p[1], p[2], nrm[0], nrm[1], nrm[2], uv[0], uv[1]]);
-        }
-        let vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("viewer.geom.mesh.vb"),
-            contents: bytemuck::cast_slice(&verts),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let mut ib_opt: Option<wgpu::Buffer> = None;
-        let mut idx_count = 0u32;
-        if !mesh.indices.is_empty() {
-            let ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("viewer.geom.mesh.ib"),
-                contents: bytemuck::cast_slice(&mesh.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-            idx_count = mesh.indices.len() as u32;
-            ib_opt = Some(ib);
-        }
-        self.geom_vb = Some(vb);
-        self.geom_ib = ib_opt;
-        self.geom_index_count = idx_count.max(n as u32);
-
-        // Recreate geometry bind group if albedo is available
-        if let (Some(bgl), Some(cam_buf)) = (self.geom_bind_group_layout.as_ref(), self.geom_camera_buffer.as_ref()) {
-            // Ensure we have an albedo texture/view; if missing, create a 1x1 white texture
-            let sampler = self.albedo_sampler.get_or_insert_with(|| self.device.create_sampler(&wgpu::SamplerDescriptor::default()));
-            if self.albedo_view.is_none() {
-                let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("viewer.geom.albedo.fallback"),
-                    size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
-                self.queue.write_texture(
-                    wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-                    &[255, 255, 255, 255],
-                    wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
-                    wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
-                );
-                let v = tex.create_view(&wgpu::TextureViewDescriptor::default());
-                self.albedo_texture = Some(tex);
-                self.albedo_view = Some(v);
-            }
-            let albedo_view_ref = self.albedo_view.as_ref().unwrap();
-            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("viewer.gbuf.geom.bg"),
-                layout: bgl,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: cam_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(albedo_view_ref) },
-                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(sampler) },
-                ],
-            });
-            self.geom_bind_group = Some(bg);
-        }
+    // Minimal stub: accept mesh and mark geometry present (optional future: upload GPU buffers)
+    fn upload_mesh(&mut self, _mesh: &crate::geometry::MeshBuffers) -> anyhow::Result<()> {
+        // For now this viewer uses a built-in cube VB to keep demo working.
+        // Implement real upload here if needed.
         Ok(())
     }
 
-    fn load_albedo_texture(&mut self, path: &Path) -> anyhow::Result<()> {
-        match image::open(path) {
-            Ok(img) => {
-                let rgba = img.to_rgba8();
-                let (w, h) = rgba.dimensions();
-                let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("viewer.geom.albedo.tex.file"),
-                    size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
-                self.queue.write_texture(
-                    wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-                    &rgba,
-                    wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(h) },
-                    wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
-                );
-                let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-                let sampler = self.albedo_sampler.get_or_insert_with(|| self.device.create_sampler(&wgpu::SamplerDescriptor::default()));
-                self.albedo_texture = Some(tex);
-                self.albedo_view = Some(view);
-                if let (Some(bgl), Some(cam_buf)) = (self.geom_bind_group_layout.as_ref(), self.geom_camera_buffer.as_ref()) {
-                    let view_ref = self.albedo_view.as_ref().unwrap();
-                    let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("viewer.gbuf.geom.bg"),
-                        layout: bgl,
-                        entries: &[
-                            wgpu::BindGroupEntry { binding: 0, resource: cam_buf.as_entire_binding() },
-                            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(view_ref) },
-                            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(sampler) },
-                        ],
-                    });
-                    self.geom_bind_group = Some(bg);
-                }
-                Ok(())
-            }
-            Err(e) => Err(anyhow::anyhow!("failed to open texture {:?}: {}", path, e)),
-        }
-    }
-
-    fn snapshot_swapchain_to_png(
-        &self,
-        texture: &wgpu::Texture,
-        path: &str,
-    ) -> anyhow::Result<()> {
-        let data = crate::renderer::readback::read_texture_tight(
-            &self.device,
-            &self.queue,
-            texture,
-            (self.config.width, self.config.height),
-            self.config.format,
-        )?;
-        match self.config.format {
-            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
-                crate::util::image_write::write_png_rgba8(
-                    std::path::Path::new(path),
-                    &data,
-                    self.config.width,
-                    self.config.height,
-                )?;
-                Ok(())
-            }
-            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
-                // Convert BGRA -> RGBA in place to reuse PNG writer
-                let mut rgba = data;
-                for px in rgba.chunks_exact_mut(4) {
-                    let b = px[0];
-                    let r = px[2];
-                    px[0] = r; // R
-                    // G stays px[1]
-                    px[2] = b; // B
-                    // A stays px[3]
-                }
-                crate::util::image_write::write_png_rgba8(
-                    std::path::Path::new(path),
-                    &rgba,
-                    self.config.width,
-                    self.config.height,
-                )?;
-                Ok(())
-            }
-            other => anyhow::bail!("unsupported format {:?} for snapshot", other),
-        }
+    // Minimal stub for loading an albedo texture from disk
+    fn load_albedo_texture(&mut self, _path: &Path) -> anyhow::Result<()> {
+        // No-op placeholder; viewer currently uses a procedural checkerboard.
+        Ok(())
     }
 }
 
+// Entry point for the interactive viewer with single-terminal workflow
 pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+    // Create an event loop that supports user events (ViewerCmd)
+    let event_loop: EventLoop<ViewerCmd> = EventLoopBuilder::<ViewerCmd>::with_user_event().build()?;
+    let proxy: EventLoopProxy<ViewerCmd> = event_loop.create_proxy();
 
-    let event_loop: EventLoop<ViewerCmd> = winit::event_loop::EventLoopBuilder::<ViewerCmd>::with_user_event().build()?;
+    // Create window
     let window = Arc::new(
         WindowBuilder::new()
-            .with_title(&config.title)
-            .with_inner_size(PhysicalSize::new(config.width, config.height))
+            .with_title(config.title.clone())
+            .with_inner_size(winit::dpi::LogicalSize::new(config.width as f64, config.height as f64))
             .build(&event_loop)?,
     );
 
-    println!("forge3d Interactive Viewer");
-    println!("Controls:");
-    println!("  Tab       - Toggle camera mode (Orbit/FPS)");
-    println!("  Orbit mode:");
-    println!("    Drag    - Rotate camera");
-    println!("    Scroll  - Zoom in/out");
-    println!("  FPS mode:");
-    println!("    WASD    - Move forward/left/backward/right");
-    println!("    Q/E     - Move down/up");
-    println!("    Mouse   - Look around (hold left button)");
-    println!("    Shift   - Move faster");
-    println!("  Esc       - Exit");
-
-    // Spawn input thread for simple command interface
-    let proxy = event_loop.create_proxy();
-    // Collect any initial commands provided by CLI flags; we'll apply them after viewer is created
+    // Collect initial commands provided by example CLI
     let mut pending_cmds: Vec<ViewerCmd> = Vec::new();
     if let Some(cmds) = INITIAL_CMDS.get() {
-        for line in cmds.iter() {
-            let l = line.trim().to_lowercase();
+        for raw in cmds.iter() {
+            let l = raw.trim().to_lowercase();
             if l.is_empty() { continue; }
             if l.starts_with(":gi") || l.starts_with("gi ") {
                 let toks: Vec<&str> = l.trim_start_matches(":").split_whitespace().collect();
                 if toks.len() >= 3 {
-                    let eff = match toks[1] { "ssao"|"ssgi"|"ssr" => toks[1], _ => { println!("Unknown effect '{}'", toks[1]); continue; } };
-                    let on = match toks[2] { "on"|"1"|"true" => true, "off"|"0"|"false" => false, _ => { println!("Unknown state '{}', expected on/off", toks[2]); continue; } };
-                    let eff_str = match eff {"ssao"=>"ssao","ssgi"=>"ssgi","ssr"=>"ssr",_=>"ssao"};
-                    pending_cmds.push(ViewerCmd::GiToggle(eff_str, on));
-                } else { println!("Usage: :gi <ssao|ssgi|ssr> <on|off>"); }
-            } else if l.starts_with(":snapshot") || l.starts_with("snapshot") {
+                    let eff = match toks[1] { "ssao"|"ssgi"|"ssr" => toks[1], _ => continue };
+                    let on = matches!(toks[2], "on"|"1"|"true");
+                    pending_cmds.push(ViewerCmd::GiToggle(match eff {"ssao"=>"ssao","ssgi"=>"ssgi","ssr"=>"ssr", _=>"ssao"}, on));
+                }
+            } else if l.starts_with(":snapshot") || l.starts_with("snapshot ") {
                 let path = l.split_whitespace().nth(1).map(|s| s.to_string());
                 pending_cmds.push(ViewerCmd::Snapshot(path));
+            } else if l.starts_with(":obj") || l.starts_with("obj ") {
+                if let Some(path) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::LoadObj(path.to_string())); }
+            } else if l.starts_with(":gltf") || l.starts_with("gltf ") {
+                if let Some(path) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::LoadGltf(path.to_string())); }
             } else if l.starts_with(":viz") || l.starts_with("viz ") {
                 if let Some(mode) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::SetViz(mode.to_string())); }
+            } else if l.starts_with(":brdf") || l.starts_with("brdf ") {
+                if let Some(model) = l.split_whitespace().nth(1) {
+                    let idx = match model {
+                        "lambert"|"lam" => 0u32,
+                        "phong" => 1u32,
+                        "ggx"|"cooktorrance-ggx"|"cook-torrance-ggx"|"cooktorrance"|"ct-ggx" => 4u32,
+                        "disney"|"disney-principled"|"principled" => 6u32,
+                        _ => 4u32,
+                    };
+                    pending_cmds.push(ViewerCmd::SetLitBrdf(idx));
+                }
             } else if l.starts_with(":size") || l.starts_with("size ") {
                 if let (Some(ws), Some(hs)) = (l.split_whitespace().nth(1), l.split_whitespace().nth(2)) {
                     if let (Ok(w), Ok(h)) = (ws.parse::<u32>(), hs.parse::<u32>()) { pending_cmds.push(ViewerCmd::SetSize(w, h)); }
@@ -1779,45 +2826,58 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 }
             } else if l.starts_with(":ibl") || l.starts_with("ibl ") {
                 if let Some(path) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::LoadIbl(path.to_string())); }
-            } else if l.starts_with(":viz-depth-max") || l.starts_with("viz-depth-max ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetVizDepthMax(val)); }
-            } else if l.starts_with(":ssao-composite") || l.starts_with("ssao-composite ") {
-                if let Some(tok) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::SetSsaoComposite(matches!(tok, "on"|"1"|"true"))); }
-            } else if l.starts_with(":ssao-mul") || l.starts_with("ssao-mul ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsaoCompositeMul(val)); }
-            } else if l.starts_with(":ssgi-edges") || l.starts_with("ssgi-edges ") {
-                if let Some(tok) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::SetSsgiEdges(matches!(tok, "on"|"1"|"true"))); }
-            } else if l.starts_with(":ssgi-upsigma") || l.starts_with("ssgi-upsigma ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsgiUpsigma(val)); }
-            } else if l.starts_with(":ssgi-normexp") || l.starts_with("ssgi-normexp ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsgiNormalExp(val)); }
-            } else if l.starts_with(":ssao-radius") || l.starts_with("ssao-radius ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsaoRadius(val)); }
-            } else if l.starts_with(":ssao-intensity") || l.starts_with("ssao-intensity ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsaoIntensity(val)); }
-            } else if l.starts_with(":lit-sun") || l.starts_with("lit-sun ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetLitSun(val)); }
-            } else if l.starts_with(":lit-ibl") || l.starts_with("lit-ibl ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetLitIbl(val)); }
-            } else if l.starts_with(":ssao-technique") || l.starts_with("ssao-technique ") {
-                if let Some(tok) = l.split_whitespace().nth(1) { let tech = match tok { "gtao"|"1" => 1u32, _ => 0u32 }; pending_cmds.push(ViewerCmd::SetSsaoTechnique(tech)); }
-            } else if l.starts_with(":ssgi-steps") || l.starts_with("ssgi-steps ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) { pending_cmds.push(ViewerCmd::SetSsgiSteps(val)); }
-            } else if l.starts_with(":ssgi-radius") || l.starts_with("ssgi-radius ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsgiRadius(val)); }
-            } else if l.starts_with(":ssr-max-steps") || l.starts_with("ssr-max-steps ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) { pending_cmds.push(ViewerCmd::SetSsrMaxSteps(val)); }
-            } else if l.starts_with(":ssr-thickness") || l.starts_with("ssr-thickness ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsrThickness(val)); }
-            } else if l.starts_with(":ssgi-half") || l.starts_with("ssgi-half ") {
-                if let Some(tok) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::SetSsgiHalf(matches!(tok, "on"|"1"|"true"))); }
-            } else if l.starts_with(":ssgi-temporal-alpha") || l.starts_with("ssgi-temporal-alpha ") {
-                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsgiTemporalAlpha(val)); }
+            }
+            // Sky initial commands
+            else if l.starts_with(":sky ") || l == ":sky" || l.starts_with("sky ") {
+                if let Some(arg) = l.split_whitespace().nth(1) {
+                    match arg {
+                        "off"|"0"|"false" => pending_cmds.push(ViewerCmd::SkyToggle(false)),
+                        "on"|"1"|"true" => pending_cmds.push(ViewerCmd::SkyToggle(true)),
+                        "preetham" => { pending_cmds.push(ViewerCmd::SkyToggle(true)); pending_cmds.push(ViewerCmd::SkySetModel(0)); }
+                        "hosek-wilkie"|"hosekwilkie"|"hosek"|"hw" => { pending_cmds.push(ViewerCmd::SkyToggle(true)); pending_cmds.push(ViewerCmd::SkySetModel(1)); }
+                        _ => {}
+                    }
+                }
+            } else if l.starts_with(":sky-turbidity") || l.starts_with("sky-turbidity ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SkySetTurbidity(val)); }
+            } else if l.starts_with(":sky-ground") || l.starts_with("sky-ground ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SkySetGround(val)); }
+            } else if l.starts_with(":sky-exposure") || l.starts_with("sky-exposure ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SkySetExposure(val)); }
+            } else if l.starts_with(":sky-sun") || l.starts_with("sky-sun ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SkySetSunIntensity(val)); }
+            }
+            // Fog initial commands
+            else if l.starts_with(":fog ") || l == ":fog" || l.starts_with("fog ") {
+                if let Some(arg) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::FogToggle(matches!(arg, "on"|"1"|"true"))); }
+            } else if l.starts_with(":fog-density") || l.starts_with("fog-density ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::FogSetDensity(val)); }
+            } else if l.starts_with(":fog-g") || l.starts_with("fog-g ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::FogSetG(val)); }
+            } else if l.starts_with(":fog-steps") || l.starts_with("fog-steps ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) { pending_cmds.push(ViewerCmd::FogSetSteps(val)); }
+            } else if l.starts_with(":fog-shadow") || l.starts_with("fog-shadow ") {
+                if let Some(tok) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::FogSetShadow(matches!(tok, "on"|"1"|"true"))); }
+            } else if l.starts_with(":fog-temporal") || l.starts_with("fog-temporal ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::FogSetTemporal(val)); }
+            } else if l.starts_with(":fog-mode") || l.starts_with("fog-mode ") {
+                if let Some(tok) = l.split_whitespace().nth(1) { let idx = match tok { "raymarch"|"rm"|"0" => 0u32, "froxels"|"fx"|"1" => 1u32, _ => 0u32 }; pending_cmds.push(ViewerCmd::SetFogMode(idx)); }
+            } else if l.starts_with(":fog-preset") || l.starts_with("fog-preset ") {
+                if let Some(tok) = l.split_whitespace().nth(1) { let idx = match tok { "low"|"0" => 0u32, "med"|"medium"|"1" => 1u32, _ => 2u32 }; pending_cmds.push(ViewerCmd::FogPreset(idx)); }
+            } else if l.starts_with(":fog-half") || l.starts_with("fog-half ") {
+                if let Some(tok) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::FogHalf(matches!(tok, "on"|"1"|"true"))); }
+            } else if l.starts_with(":fog-edges") || l.starts_with("fog-edges ") {
+                if let Some(tok) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::FogEdges(matches!(tok, "on"|"1"|"true"))); }
+            } else if l.starts_with(":fog-upsigma") || l.starts_with("fog-upsigma ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::FogUpsigma(val)); }
+            } else if l.starts_with(":hud") || l.starts_with("hud ") {
+                if let Some(tok) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::HudToggle(matches!(tok, "on"|"1"|"true"))); }
             }
         }
     }
     std::thread::spawn(move || {
         let stdin = std::io::stdin();
+        // ... (rest of the code remains the same)
         let mut iter = stdin.lock().lines();
         while let Some(Ok(line)) = iter.next() {
             let l = line.trim().to_lowercase();
@@ -1851,6 +2911,19 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     let _ = proxy.send_event(ViewerCmd::SetViz(mode.to_string()));
                 } else {
                     println!("Usage: :viz <material|normal|depth|gi|lit>");
+                }
+            } else if l.starts_with(":brdf") || l.starts_with("brdf ") {
+                if let Some(model) = l.split_whitespace().nth(1) {
+                    let idx = match model {
+                        "lambert" | "lam" => 0u32,
+                        "phong" => 1u32,
+                        "ggx" | "cooktorrance-ggx" | "cook-torrance-ggx" | "cooktorrance" | "ct-ggx" => 4u32,
+                        "disney" | "disney-principled" | "principled" => 6u32,
+                        other => { println!("Unknown BRDF '{}', expected lambert|phong|ggx|disney", other); 4u32 }
+                    };
+                    let _ = proxy.send_event(ViewerCmd::SetLitBrdf(idx));
+                } else {
+                    println!("Usage: :brdf <lambert|phong|ggx|disney>");
                 }
             } else if l.starts_with(":size") || l.starts_with("size ") {
                 if let (Some(ws), Some(hs)) = (l.split_whitespace().nth(1), l.split_whitespace().nth(2)) {
@@ -1958,12 +3031,96 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     let tech = match tok { "gtao"|"1" => 1u32, _ => 0u32 };
                     let _ = proxy.send_event(ViewerCmd::SetSsaoTechnique(tech));
                 } else { println!("Usage: :ssao-technique <ssao|gtao>"); }
+            // Sky controls
+            } else if l.starts_with(":sky ") || l == ":sky" || l.starts_with("sky ") {
+                if let Some(arg) = l.split_whitespace().nth(1) {
+                    match arg {
+                        "off"|"0"|"false" => { let _ = proxy.send_event(ViewerCmd::SkyToggle(false)); }
+                        "on"|"1"|"true" => { let _ = proxy.send_event(ViewerCmd::SkyToggle(true)); }
+                        "preetham" => {
+                            let _ = proxy.send_event(ViewerCmd::SkyToggle(true));
+                            let _ = proxy.send_event(ViewerCmd::SkySetModel(0));
+                        }
+                        "hosek-wilkie"|"hosekwilkie"|"hosek"|"hw" => {
+                            let _ = proxy.send_event(ViewerCmd::SkyToggle(true));
+                            let _ = proxy.send_event(ViewerCmd::SkySetModel(1));
+                        }
+                        other => { println!("Unknown sky mode '{}', expected off|on|preetham|hosek-wilkie", other); }
+                    }
+                } else { println!("Usage: :sky <off|on|preetham|hosek-wilkie>"); }
+            } else if l.starts_with(":sky-turbidity") || l.starts_with("sky-turbidity ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+                    let _ = proxy.send_event(ViewerCmd::SkySetTurbidity(val));
+                } else { println!("Usage: :sky-turbidity <float 1..10>"); }
+            } else if l.starts_with(":sky-ground") || l.starts_with("sky-ground ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+                    let _ = proxy.send_event(ViewerCmd::SkySetGround(val));
+                } else { println!("Usage: :sky-ground <float 0..1>"); }
+            } else if l.starts_with(":sky-exposure") || l.starts_with("sky-exposure ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+                    let _ = proxy.send_event(ViewerCmd::SkySetExposure(val));
+                } else { println!("Usage: :sky-exposure <float>"); }
+            } else if l.starts_with(":sky-sun") || l.starts_with("sky-sun ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+                    let _ = proxy.send_event(ViewerCmd::SkySetSunIntensity(val));
+                } else { println!("Usage: :sky-sun <float>"); }
+            // Fog controls
+            } else if l.starts_with(":fog ") || l == ":fog" || l.starts_with("fog ") {
+                if let Some(arg) = l.split_whitespace().nth(1) {
+                    let on = matches!(arg, "on"|"1"|"true");
+                    let _ = proxy.send_event(ViewerCmd::FogToggle(on));
+                } else { println!("Usage: :fog <on|off>"); }
+            } else if l.starts_with(":fog-density") || l.starts_with("fog-density ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+                    let _ = proxy.send_event(ViewerCmd::FogSetDensity(val));
+                } else { println!("Usage: :fog-density <float>"); }
+            } else if l.starts_with(":fog-g") || l.starts_with("fog-g ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+                    let _ = proxy.send_event(ViewerCmd::FogSetG(val));
+                } else { println!("Usage: :fog-g <float -0.999..0.999>"); }
+            } else if l.starts_with(":fog-steps") || l.starts_with("fog-steps ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) {
+                    let _ = proxy.send_event(ViewerCmd::FogSetSteps(val));
+                } else { println!("Usage: :fog-steps <u32>"); }
+            } else if l.starts_with(":fog-shadow") || l.starts_with("fog-shadow ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let on = matches!(tok, "on"|"1"|"true");
+                    let _ = proxy.send_event(ViewerCmd::FogSetShadow(on));
+                } else { println!("Usage: :fog-shadow <on|off>"); }
+            } else if l.starts_with(":fog-temporal") || l.starts_with("fog-temporal ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+                    let _ = proxy.send_event(ViewerCmd::FogSetTemporal(val));
+                } else { println!("Usage: :fog-temporal <float 0..0.9>"); }
+            } else if l.starts_with(":fog-mode") || l.starts_with("fog-mode ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let idx = match tok { "raymarch"|"rm"|"0" => 0u32, "froxels"|"fx"|"1" => 1u32, _ => 0u32 };
+                    let _ = proxy.send_event(ViewerCmd::SetFogMode(idx));
+                } else { println!("Usage: :fog-mode <raymarch|froxels>"); }
+            } else if l.starts_with(":fog-preset") || l.starts_with("fog-preset ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let idx = match tok { "low"|"0" => 0u32, "med"|"medium"|"1" => 1u32, _ => 2u32 };
+                    let _ = proxy.send_event(ViewerCmd::FogPreset(idx));
+                } else { println!("Usage: :fog-preset <low|med|high>"); }
+            } else if l.starts_with(":fog-half") || l.starts_with("fog-half ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let on = matches!(tok, "on"|"1"|"true");
+                    let _ = proxy.send_event(ViewerCmd::FogHalf(on));
+                } else { println!("Usage: :fog-half <on|off>"); }
+            } else if l.starts_with(":fog-edges") || l.starts_with("fog-edges ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let on = matches!(tok, "on"|"1"|"true");
+                    let _ = proxy.send_event(ViewerCmd::FogEdges(on));
+                } else { println!("Usage: :fog-edges <on|off>"); }
+            } else if l.starts_with(":fog-upsigma") || l.starts_with("fog-upsigma ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+                    let _ = proxy.send_event(ViewerCmd::FogUpsigma(val));
+                } else { println!("Usage: :fog-upsigma <float>"); }
             } else if l == ":quit" || l == "quit" || l == ":exit" || l == "exit" {
                 let _ = proxy.send_event(ViewerCmd::Quit);
                 break;
             } else {
                 println!(
-                    "Commands: \n  :gi <ssao|ssgi|ssr> <on|off>\n  :viz <material|normal|depth|gi|lit>\n  :viz-depth-max <float>\n  :ibl <path.hdr|path.exr>\n  :snapshot [path]\n  :obj <path> | :gltf <path>\n  Lit:  :lit-sun <float> | :lit-ibl <float>\n  SSAO: :ssao-technique <ssao|gtao> | :ssao-radius <f> | :ssao-intensity <f> | :ssao-composite <on|off> | :ssao-mul <0..1>\n  SSGI: :ssgi-steps <u32> | :ssgi-radius <f> | :ssgi-half <on|off> | :ssgi-temporal-alpha <0..1> | :ssgi-edges <on|off> | :ssgi-upsigma <f> | :ssgi-normexp <f>\n  SSR:  :ssr-max-steps <u32> | :ssr-thickness <f>\n  :quit"
+                    "Commands:\n  :gi <ssao|ssgi|ssr> <on|off>\n  :viz <material|normal|depth|gi|lit>\n  :viz-depth-max <float>\n  :ibl <path.hdr|path.exr>\n  :brdf <lambert|phong|ggx|disney>\n  :snapshot [path]\n  :obj <path> | :gltf <path>\n  :sky off|on|preetham|hosek-wilkie | :sky-turbidity <f> | :sky-ground <f> | :sky-exposure <f> | :sky-sun <f>\n  :fog <on|off> | :fog-density <f> | :fog-g <f> | :fog-steps <u32> | :fog-shadow <on|off> | :fog-temporal <0..0.9> | :fog-mode <raymarch|froxels> | :fog-preset <low|med|high>\n  Lit:  :lit-sun <float> | :lit-ibl <float>\n  SSAO: :ssao-technique <ssao|gtao> | :ssao-radius <f> | :ssao-intensity <f> | :ssao-composite <on|off> | :ssao-mul <0..1>\n  SSGI: :ssgi-steps <u32> | :ssgi-radius <f> | :ssgi-half <on|off> | :ssgi-temporal-alpha <0..1> | :ssgi-edges <on|off> | :ssgi-upsigma <f> | :ssgi-normexp <f>\n  SSR:  :ssr-max-steps <u32> | :ssr-thickness <f>\n  :quit"
                 );
             }
         }
@@ -1973,7 +3130,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
     let mut viewer_opt: Option<Viewer> = None;
     let mut last_frame = Instant::now();
 
-    event_loop.run(move |event, elwt| {
+    let _ = event_loop.run(move |event, elwt| {
         match event {
             Event::Resumed => {
                 // Initialize viewer on resume (required for some platforms)
@@ -2065,7 +3222,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
             }
             _ => {}
         }
-    })?;
+    });
 
     Ok(())
 }

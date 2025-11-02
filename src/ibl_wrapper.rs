@@ -13,6 +13,8 @@ use wgpu::{SamplerDescriptor, TextureAspect, TextureViewDescriptor, TextureViewD
 use crate::util::memory_budget;
 
 /// Shared GPU handles consumed by the terrain renderer
+/// Shared IBL GPU resources. Some fields are not yet read by all code paths; keep them for future integration.
+#[allow(dead_code)]
 pub(crate) struct IblGpuResources {
     pub irradiance_view: Arc<wgpu::TextureView>,
     pub specular_view: Arc<wgpu::TextureView>,
@@ -21,6 +23,8 @@ pub(crate) struct IblGpuResources {
     pub specular_mip_count: u32,
 }
 
+/// Cached GPU state for IBL. Fields may be unused in some builds while plumbing lands.
+#[allow(dead_code)]
 pub(crate) struct IblGpuState {
     device: Arc<wgpu::Device>,
     quality: crate::core::ibl::IBLQuality,
@@ -36,6 +40,8 @@ pub struct IBL {
     pub(crate) rotation_deg: f32,
     pub(crate) hdr_image: Option<Arc<crate::formats::hdr::HdrImage>>,
     pub(crate) quality: crate::core::ibl::IBLQuality,
+    /// Auto-select IBL quality by adapter; unused in some code paths until quality negotiation is wired globally.
+    #[allow(dead_code)]
     pub(crate) use_auto_quality: bool,
     pub(crate) gpu_state: Arc<Mutex<Option<IblGpuState>>>,
     pub(crate) base_resolution: u32,

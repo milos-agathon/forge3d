@@ -8,6 +8,9 @@ use wgpu::*;
 /// IBL resource cache (P0)
 /// Manages BRDF LUT, irradiance cubemap, and prefiltered specular cubemap
 /// Total budget: <=64 MiB
+/// IBL resource cache for BRDF/irradiance/specular maps.
+/// Some fields are not accessed in all builds; silence until the full IBL path is wired.
+#[allow(dead_code)]
 pub struct IblResourceCache {
     device: Arc<Device>,
     queue: Arc<Queue>,

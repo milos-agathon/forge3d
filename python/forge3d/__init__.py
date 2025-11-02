@@ -379,7 +379,7 @@ from .helpers.frame_dump import (
 )
 
 # Version information
-__version__ = "0.86.0"
+__version__ = "0.87.0"
 _CURRENT_PALETTE = "viridis"
 _SUPPORTED_MSAA = [1, 2, 4, 8]  # Supported MSAA sample counts
 

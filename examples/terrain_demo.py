@@ -728,6 +728,10 @@ def main() -> int:
         if viewer_cls is None:
             print("forge3d.Viewer is not available in this build. Skipping interactive viewer.")
         else:
+            # Propagate sky selection to the native viewer via environment variable
+            # Accepted values: "preetham", "hosek-wilkie"
+            if args.sky:
+                os.environ["FORGE3D_SKY_MODEL"] = str(args.sky)
             with viewer_cls(sess, renderer, heightmap_array, materials, ibl, params) as view:
                 view.run()
 

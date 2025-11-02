@@ -27,6 +27,26 @@ pub enum LightType {
     Environment,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VolumetricMode {
+    Raymarch,
+    Froxels,
+}
+
+impl FromStr for VolumetricMode {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let key = normalize_key(value);
+        Ok(match key.as_str() {
+            "raymarch" | "rm" | "0" => Self::Raymarch,
+            "froxels" | "fx" | "1" => Self::Froxels,
+            _ => return Err("unknown volumetric mode"),
+        })
+    }
+}
+
 impl LightType {
     fn canonical(self) -> &'static str {
         match self {
@@ -496,24 +516,20 @@ impl Default for ShadowParams {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GiParams {
-    #[serde(default)]
+    #[serde(default = "GiParams::default_modes")]
     pub modes: Vec<GiMode>,
     #[serde(default = "GiParams::default_ao_strength")]
     pub ambient_occlusion_strength: f32,
 }
 
 impl GiParams {
-    const fn default_ao_strength() -> f32 {
-        1.0
-    }
+    fn default_modes() -> Vec<GiMode> { vec![GiMode::None] }
+    const fn default_ao_strength() -> f32 { 1.0 }
 }
 
 impl Default for GiParams {
     fn default() -> Self {
-        Self {
-            modes: vec![GiMode::None],
-            ambient_occlusion_strength: Self::default_ao_strength(),
-        }
+        Self { modes: Self::default_modes(), ambient_occlusion_strength: Self::default_ao_strength() }
     }
 }
 
@@ -525,6 +541,28 @@ pub struct VolumetricParams {
     pub phase: VolumetricPhase,
     #[serde(default = "VolumetricParams::default_anisotropy")]
     pub anisotropy: f32,
+    #[serde(default = "VolumetricParams::default_mode")]
+    pub mode: VolumetricMode,
+    #[serde(default = "VolumetricParams::default_height_falloff")]
+    pub height_falloff: f32,
+    #[serde(default = "VolumetricParams::default_max_steps")]
+    pub max_steps: u32,
+    #[serde(default = "VolumetricParams::default_start_distance")]
+    pub start_distance: f32,
+    #[serde(default = "VolumetricParams::default_max_distance")]
+    pub max_distance: f32,
+    #[serde(default = "VolumetricParams::default_absorption")]
+    pub absorption: f32,
+    #[serde(default = "VolumetricParams::default_scattering_color")]
+    pub scattering_color: [f32; 3],
+    #[serde(default = "VolumetricParams::default_ambient_color")]
+    pub ambient_color: [f32; 3],
+    #[serde(default = "VolumetricParams::default_temporal_alpha")]
+    pub temporal_alpha: f32,
+    #[serde(default = "VolumetricParams::default_use_shadows")]
+    pub use_shadows: bool,
+    #[serde(default = "VolumetricParams::default_jitter_strength")]
+    pub jitter_strength: f32,
 }
 
 impl VolumetricParams {
@@ -539,6 +577,19 @@ impl VolumetricParams {
     const fn default_anisotropy() -> f32 {
         0.0
     }
+
+    fn default_mode() -> VolumetricMode { VolumetricMode::Raymarch }
+
+    const fn default_height_falloff() -> f32 { 0.0 }
+    const fn default_max_steps() -> u32 { 64 }
+    const fn default_start_distance() -> f32 { 0.0 }
+    const fn default_max_distance() -> f32 { 1000.0 }
+    const fn default_absorption() -> f32 { 0.0 }
+    const fn default_scattering_color() -> [f32; 3] { [1.0, 1.0, 1.0] }
+    const fn default_ambient_color() -> [f32; 3] { [0.0, 0.0, 0.0] }
+    const fn default_temporal_alpha() -> f32 { 0.2 }
+    const fn default_use_shadows() -> bool { false }
+    const fn default_jitter_strength() -> f32 { 0.25 }
 }
 
 impl Default for VolumetricParams {
@@ -547,6 +598,17 @@ impl Default for VolumetricParams {
             density: Self::default_density(),
             phase: Self::default_phase(),
             anisotropy: Self::default_anisotropy(),
+            mode: Self::default_mode(),
+            height_falloff: Self::default_height_falloff(),
+            max_steps: Self::default_max_steps(),
+            start_distance: Self::default_start_distance(),
+            max_distance: Self::default_max_distance(),
+            absorption: Self::default_absorption(),
+            scattering_color: Self::default_scattering_color(),
+            ambient_color: Self::default_ambient_color(),
+            temporal_alpha: Self::default_temporal_alpha(),
+            use_shadows: Self::default_use_shadows(),
+            jitter_strength: Self::default_jitter_strength(),
         }
     }
 }

@@ -405,7 +405,7 @@ impl HybridScene {
     }
 
     /// Get bind group entries for SDF buffers
-    pub fn get_sdf_bind_entries(&self) -> Vec<wgpu::BindGroupEntry> {
+    pub fn get_sdf_bind_entries(&self) -> Vec<wgpu::BindGroupEntry<'_>> {
         if let Some(sdf_buffers) = &self.sdf_buffers {
             vec![
                 wgpu::BindGroupEntry {
@@ -433,7 +433,7 @@ impl HybridScene {
     }
 
     /// Get bind group entries for mesh buffers
-    pub fn get_mesh_bind_entries(&self) -> Vec<wgpu::BindGroupEntry> {
+    pub fn get_mesh_bind_entries(&self) -> Vec<wgpu::BindGroupEntry<'_>> {
         if let Some(mesh_buffers) = &self.mesh_buffers {
             vec![
                 wgpu::BindGroupEntry {
