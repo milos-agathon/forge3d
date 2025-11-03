@@ -102,22 +102,23 @@ impl PbrRenderPass {
         self.set_brdf_model(queue, model);
     }
 
-    /// Set BRDF model using config enum and upload to GPU (M2-03)
+    /// Set BRDF model using config enum and upload to GPU (M2-03, P2-04)
     pub fn set_brdf_model(&mut self, queue: &Queue, model: CfgBrdfModel) {
+        // Map to shader indices matching src/shaders/lighting.wgsl constants
         let idx = match model {
-            CfgBrdfModel::Lambert => 0u32,
-            CfgBrdfModel::Phong => 1u32,
-            CfgBrdfModel::BlinnPhong => 1u32, // treat as Phong for now
-            CfgBrdfModel::OrenNayar => 0u32,  // map to Lambert until O-N lands
-            CfgBrdfModel::CookTorranceGGX => 4u32,
-            CfgBrdfModel::CookTorranceBeckmann => 4u32, // map to GGX for now
-            CfgBrdfModel::DisneyPrincipled => 6u32,
-            CfgBrdfModel::AshikhminShirley => 6u32, // temporary: use Disney fallback
-            CfgBrdfModel::Ward => 6u32,             // temporary: use Disney fallback
-            CfgBrdfModel::Toon => 0u32,             // simple: map to Lambert-like
-            CfgBrdfModel::Minnaert => 0u32,
-            CfgBrdfModel::Subsurface => 6u32,       // treat as Disney umbrella
-            CfgBrdfModel::Hair => 6u32,             // treat as Disney umbrella
+            CfgBrdfModel::Lambert => 0u32,              // BRDF_LAMBERT
+            CfgBrdfModel::Phong => 1u32,                // BRDF_PHONG
+            CfgBrdfModel::BlinnPhong => 2u32,           // BRDF_BLINN_PHONG
+            CfgBrdfModel::OrenNayar => 3u32,            // BRDF_OREN_NAYAR (P2-04)
+            CfgBrdfModel::CookTorranceGGX => 4u32,      // BRDF_COOK_TORRANCE_GGX
+            CfgBrdfModel::CookTorranceBeckmann => 5u32, // BRDF_COOK_TORRANCE_BECKMANN
+            CfgBrdfModel::DisneyPrincipled => 6u32,     // BRDF_DISNEY_PRINCIPLED
+            CfgBrdfModel::AshikhminShirley => 7u32,     // BRDF_ASHIKHMIN_SHIRLEY (P2-04)
+            CfgBrdfModel::Ward => 8u32,                 // BRDF_WARD (P2-04)
+            CfgBrdfModel::Toon => 9u32,                 // BRDF_TOON (P2-04)
+            CfgBrdfModel::Minnaert => 10u32,            // BRDF_MINNAERT (P2-04)
+            CfgBrdfModel::Subsurface => 11u32,          // BRDF_SUBSURFACE
+            CfgBrdfModel::Hair => 12u32,                // BRDF_HAIR
         };
         self.pipeline.set_brdf_index(queue, idx);
     }

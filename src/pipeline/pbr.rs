@@ -5,7 +5,7 @@
 
 use crate::core::material::{texture_flags, PbrLighting, PbrMaterial};
 use crate::mesh::vertex::TbnVertex;
-use crate::lighting::types::ShadowTechnique;
+use crate::lighting::types::{ShadowTechnique, MaterialShading};
 use crate::lighting::LightBuffer;
 use crate::shadows::{ShadowManager, ShadowManagerConfig};
 use bytemuck::{Pod, Zeroable};
@@ -19,34 +19,8 @@ use wgpu::{
 };
 use wgpu::util::DeviceExt;
 
-/// GPU BRDF/shading selection parameters (matches shaders' ShadingParamsGPU layout)
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-pub struct ShadingParamsGpu {
-    pub brdf: u32,       // 0=Lambert,1=Phong,4=GGX,6=Disney
-    pub metallic: f32,
-    pub roughness: f32,
-    pub sheen: f32,
-    pub clearcoat: f32,
-    pub subsurface: f32,
-    pub anisotropy: f32,
-    pub _pad: f32,
-}
-
-impl Default for ShadingParamsGpu {
-    fn default() -> Self {
-        Self {
-            brdf: 4,            // GGX by default
-            metallic: 0.0,
-            roughness: 0.5,
-            sheen: 0.0,
-            clearcoat: 0.0,
-            subsurface: 0.0,
-            anisotropy: 0.0,
-            _pad: 0.0,
-        }
-    }
-}
+// P2-06: Use centralized MaterialShading from lighting::types instead of duplicate definition
+// MaterialShading is GPU-aligned and matches WGSL ShadingParamsGPU exactly
 
 /// Tone mapping operators available to the PBR pipeline
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -736,8 +710,8 @@ pub struct PbrPipelineWithShadows {
     pub lighting_uniforms: PbrLighting,
     /// GPU buffer storing lighting parameters
    pub lighting_uniform_buffer: Buffer,
-    /// CPU copy of shading parameters (BRDF routing)
-    pub shading_uniforms: ShadingParamsGpu,
+    /// CPU copy of shading parameters (BRDF routing) - P2-06
+    pub shading_uniforms: MaterialShading,
     /// GPU buffer storing shading parameters
     pub shading_uniform_buffer: Buffer,
     /// Cached bind group for global uniforms
@@ -793,8 +767,8 @@ impl PbrPipelineWithShadows {
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             });
 
-        // M2: Shading (BRDF selection) uniforms
-        let shading_uniforms = ShadingParamsGpu::default();
+        // P2-06: Shading (BRDF selection) uniforms using MaterialShading
+        let shading_uniforms = MaterialShading::default();
         let shading_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("pbr_shading_uniforms_buffer"),
             contents: bytemuck::bytes_of(&shading_uniforms),
@@ -1472,6 +1446,33 @@ impl PbrPipelineWithShadows {
     /// Update BRDF model by index (matches WGSL constants)
     pub fn set_brdf_index(&mut self, queue: &Queue, brdf_index: u32) {
         self.shading_uniforms.brdf = brdf_index;
+        queue.write_buffer(
+            &self.shading_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&self.shading_uniforms),
+        );
+    }
+
+    /// P2-06: Update full MaterialShading parameters from CPU to GPU
+    /// 
+    /// This uploads all BRDF dispatch parameters to the GPU uniform buffer,
+    /// allowing dynamic control over shading model, metallic, roughness,
+    /// and extended parameters (sheen, clearcoat, subsurface, anisotropy).
+    /// 
+    /// # Example
+    /// ```ignore
+    /// use forge3d::lighting::types::{MaterialShading, BrdfModel};
+    /// 
+    /// let mut shading = MaterialShading::default();
+    /// shading.brdf = BrdfModel::DisneyPrincipled.as_u32();
+    /// shading.metallic = 1.0;
+    /// shading.roughness = 0.3;
+    /// shading.sheen = 0.2;
+    /// 
+    /// pbr_state.update_shading_uniforms(&queue, &shading);
+    /// ```
+    pub fn update_shading_uniforms(&mut self, queue: &Queue, shading: &MaterialShading) {
+        self.shading_uniforms = *shading;
         queue.write_buffer(
             &self.shading_uniform_buffer,
             0,

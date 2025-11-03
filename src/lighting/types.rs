@@ -433,7 +433,33 @@ impl Light {
 
 /// Material shading parameters (P0/P2)
 /// GPU-aligned struct for uniform buffer upload
-/// Size: 32 bytes (2 vec4s)
+/// Material shading parameters for BRDF dispatch (P2-06)
+/// 
+/// This struct is GPU-aligned and matches WGSL `ShadingParamsGPU` exactly.
+/// Can be uploaded directly to GPU via uniform buffer at @group(0) @binding(2).
+/// 
+/// **Layout Parity**: Must match `ShadingParamsGPU` in `src/shaders/lighting.wgsl`
+/// 
+/// **Size**: 32 bytes (2 vec4s)  
+/// **Alignment**: 16 bytes (vec4 boundary)  
+/// **Traits**: `Pod` + `Zeroable` (bytemuck) for safe GPU upload
+/// 
+/// ## Memory Layout
+/// 
+/// ```text
+/// Offset | Field       | Type | Size | Notes
+/// -------|-------------|------|------|------------------
+///   0-15 | Vec4 #1     |      |  16  |
+///      0 |   brdf      | u32  |   4  | BrdfModel enum value
+///      4 |   metallic  | f32  |   4  | [0, 1]
+///      8 |   roughness | f32  |   4  | [0, 1]
+///     12 |   sheen     | f32  |   4  | [0, 1]
+///  16-31 | Vec4 #2     |      |  16  |
+///     16 |   clearcoat | f32  |   4  | [0, 1]
+///     20 |   subsurface| f32  |   4  | [0, 1]
+///     24 |   anisotropy| f32  |   4  | [-1, 1]
+///     28 |   _pad      | f32  |   4  | Padding
+/// ```
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct MaterialShading {
@@ -472,6 +498,29 @@ impl Default for MaterialShading {
         }
     }
 }
+
+/// Type alias clarifying that MaterialShading is the CPU-side representation
+/// of WGSL `ShadingParamsGPU` (P2-06)
+/// 
+/// **Usage**: Create `MaterialShading` on CPU, upload to GPU uniform buffer
+/// at @group(0) @binding(2), where it becomes `ShadingParamsGPU` in shaders.
+/// 
+/// **Example**:
+/// ```rust
+/// use forge3d::lighting::MaterialShading;
+/// 
+/// let shading = MaterialShading {
+///     brdf: BrdfModel::DisneyPrincipled.as_u32(),
+///     metallic: 1.0,
+///     roughness: 0.3,
+///     sheen: 0.1,
+///     ..Default::default()
+/// };
+/// 
+/// // Upload to GPU (in pipeline code):
+/// queue.write_buffer(&shading_uniform, 0, bytemuck::bytes_of(&shading));
+/// ```
+pub type ShadingParamsGPU = MaterialShading;
 
 impl MaterialShading {
     /// Validate material parameters

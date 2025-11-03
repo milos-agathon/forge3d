@@ -374,6 +374,21 @@ impl LightBuffer {
         self.frame_counter
     }
 
+    /// Get the current frame's light buffer for bind group creation
+    pub fn current_light_buffer(&self) -> &Buffer {
+        &self.buffers[self.frame_index]
+    }
+
+    /// Get the current frame's count buffer for bind group creation
+    pub fn current_count_buffer(&self) -> &Buffer {
+        &self.count_buffers[self.frame_index]
+    }
+
+    /// Get the environment buffer (stub for P1-05, full IBL in P4)
+    pub fn environment_buffer(&self) -> &Buffer {
+        &self.environment_stub
+    }
+
     // P1-07: Debug inspection API
 
     /// Get reference to last uploaded lights (P1-07)

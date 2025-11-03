@@ -1,6 +1,22 @@
 // src/shaders/lighting.wgsl
 // P0 Lighting System: Lights, BRDFs, Shadows, and IBL
 // Matches Rust types in src/lighting/types.rs
+//
+// Bind Groups and Layouts (when used by unified lighting pipelines):
+// - @group(0): Included from lights.wgsl
+//   - @binding(3): storage<array<LightGPU>> - Light array (from lights.wgsl)
+//   - @binding(4): uniform<LightMetadata> - Light count and frame metadata (from lights.wgsl)
+//   - @binding(5): uniform<vec4<f32>> - Environment lighting parameters (from lights.wgsl)
+// - @group(2): IBL environment textures (unified lighting)
+//   - @binding(0): texture_cube<f32> - IBL specular environment
+//   - @binding(1): texture_cube<f32> - IBL irradiance cube
+//   - @binding(2): sampler - IBL environment sampler
+//   - @binding(3): texture_2d<f32> - IBL BRDF LUT
+//
+// Note: This module defines ShadingParamsGPU and BRDF constants, then includes brdf/dispatch.wgsl.
+// Individual pipelines (mesh PBR, terrain) use different group layouts and bind ShadingParamsGPU at their own locations.
+// Mesh PBR: @group(0) @binding(2) for ShadingParamsGPU
+// Terrain: @group(0) @binding(5) for TerrainShadingUniforms (terrain-specific, P2-05 will bridge to ShadingParamsGPU)
 
 #include "lights.wgsl"
 

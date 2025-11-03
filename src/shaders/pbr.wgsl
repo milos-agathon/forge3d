@@ -2,19 +2,31 @@
 //! Bind Groups and Layouts:
 //! - @group(0): Per-draw uniforms
 //!   - @binding(0): uniform buffer `Uniforms`
-//!   - @binding(1): storage/uniform buffer `PbrMaterial`
+//!   - @binding(1): uniform buffer `PbrLighting`
+//!   - @binding(2): uniform buffer `ShadingParamsGPU` (BRDF dispatch, defined in lighting.wgsl)
 //! - @group(1): Material textures/samplers (if used)
-//!   - @binding(0): sampled texture (base color)
-//!   - @binding(1): sampled texture (metallic-roughness)
-//!   - @binding(2): sampled texture (normal)
-//!   - @binding(3): sampled texture (occlusion)
-//!   - @binding(4): sampled texture (emissive)
-//!   - @binding(5): sampler (filtering)
+//!   - @binding(0): uniform buffer `PbrMaterial`
+//!   - @binding(1): sampled texture (base color)
+//!   - @binding(2): sampled texture (metallic-roughness)
+//!   - @binding(3): sampled texture (normal)
+//!   - @binding(4): sampled texture (occlusion)
+//!   - @binding(5): sampled texture (emissive)
+//!   - @binding(6): sampler (filtering)
+//! - @group(2): IBL textures (optional)
+//!   - @binding(0): irradiance texture
+//!   - @binding(1): irradiance sampler
+//!   - @binding(2): prefilter texture
+//!   - @binding(3): prefilter sampler
+//!   - @binding(4): BRDF LUT texture
+//!   - @binding(5): BRDF LUT sampler
 //! Render Target Formats:
 //! - Color: RGBA8UnormSrgb (matches CPU expectations)
 //! Address Space: `uniform`, `fragment`, `vertex`
 //!
-//! Implements metallic-roughness workflow with GGX + Lambertian BRDF.
+//! Implements metallic-roughness workflow with BRDF dispatch to lighting.wgsl module.
+
+// Import centralized lighting and BRDF definitions
+#include "lighting.wgsl"
 
 struct Uniforms {
     model_matrix: mat4x4<f32>,
@@ -49,25 +61,7 @@ struct PbrLighting {
     gamma: f32,
 }
 
-// M2: Shading parameters for BRDF dispatch (matches Rust uniform layout)
-// Minimal set: brdf index + common knobs. Metallic/roughness are primarily sourced
-// from material, but remain here for future models.
-struct ShadingParamsGPU {
-    brdf: u32,        // 0=Lambert, 1=Phong, 4=GGX, 6=Disney...
-    metallic: f32,
-    roughness: f32,
-    sheen: f32,
-    clearcoat: f32,
-    subsurface: f32,
-    anisotropy: f32,
-    _pad: f32,
-}
-
-// BRDF model indices (aligned with lighting.wgsl definitions)
-const BRDF_LAMBERT: u32 = 0u;
-const BRDF_PHONG: u32 = 1u;
-const BRDF_COOK_TORRANCE_GGX: u32 = 4u;
-const BRDF_DISNEY_PRINCIPLED: u32 = 6u;
+// Note: ShadingParamsGPU and BRDF constants are defined in lighting.wgsl
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -162,32 +156,7 @@ fn sample_normal_map(uv: vec2<f32>, tbn: mat3x3<f32>) -> vec3<f32> {
     }
 }
 
-// Distribution function (GGX/Trowbridge-Reitz)
-fn distribution_ggx(n_dot_h: f32, roughness: f32) -> f32 {
-    let alpha = roughness * roughness;
-    let alpha2 = alpha * alpha;
-    let n_dot_h2 = n_dot_h * n_dot_h;
-    
-    let num = alpha2;
-    let denom = 3.14159265359 * pow(n_dot_h2 * (alpha2 - 1.0) + 1.0, 2.0);
-    
-    return num / max(denom, 1e-6);
-}
-
-// Geometry function (Smith model)
-fn geometry_smith(n_dot_v: f32, n_dot_l: f32, roughness: f32) -> f32 {
-    let k = pow(roughness + 1.0, 2.0) / 8.0;
-    
-    let ggx1 = n_dot_v / (n_dot_v * (1.0 - k) + k);
-    let ggx2 = n_dot_l / (n_dot_l * (1.0 - k) + k);
-    
-    return ggx1 * ggx2;
-}
-
-// Fresnel-Schlick approximation
-fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
-    return f0 + (vec3<f32>(1.0) - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
-}
+// Note: Common BRDF math (distribution_ggx, geometry_smith, fresnel_schlick) now imported from brdf/common.wgsl via lighting.wgsl
 
 // Fresnel-Schlick with roughness for IBL
 fn fresnel_schlick_roughness(cos_theta: f32, f0: vec3<f32>, roughness: f32) -> vec3<f32> {
@@ -283,42 +252,22 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let dielectric_f0 = vec3<f32>(0.04);
     let f0 = mix(dielectric_f0, base_color.rgb, metallic);
     
-    // DIRECT LIGHTING (M2: BRDF dispatch)
+    // DIRECT LIGHTING (P2-03: BRDF dispatch via eval_brdf)
     var direct_lighting = vec3<f32>(0.0);
     if n_dot_l > 0.0 {
-        // Default: Cook-Torrance GGX
-        var brdf_color = vec3<f32>(0.0);
-        if (shading.brdf == BRDF_LAMBERT) {
-            // Pure Lambert diffuse
-            brdf_color = base_color.rgb / 3.14159265359;
-        } else if (shading.brdf == BRDF_PHONG) {
-            // Simple Blinn-Phong approx using roughness→shininess mapping
-            let shininess = max(1.0, pow(1.0 - roughness, 5.0) * 256.0);
-            let kD = (1.0 - metallic);
-            let diffuse = base_color.rgb * (kD / 3.14159265359);
-            let spec = pow(n_dot_h, shininess);
-            let specular = mix(vec3<f32>(0.04), base_color.rgb, metallic) * spec;
-            brdf_color = diffuse + specular;
-        } else if (shading.brdf == BRDF_DISNEY_PRINCIPLED) {
-            // Map to GGX for now (placeholder until full Disney is wired)
-            let D = distribution_ggx(n_dot_h, roughness);
-            let G = geometry_smith(n_dot_v, n_dot_l, roughness);
-            let F = fresnel_schlick(v_dot_h, f0);
-            let specular = (D * G * F) / max(4.0 * n_dot_v * n_dot_l, 1e-6);
-            let kS = F;
-            let kD = (vec3<f32>(1.0) - kS) * (1.0 - metallic);
-            let diffuse = kD * base_color.rgb / 3.14159265359;
-            brdf_color = diffuse + specular;
-        } else { // BRDF_COOK_TORRANCE_GGX and others → GGX
-            let D = distribution_ggx(n_dot_h, roughness);
-            let G = geometry_smith(n_dot_v, n_dot_l, roughness);
-            let F = fresnel_schlick(v_dot_h, f0);
-            let specular = (D * G * F) / max(4.0 * n_dot_v * n_dot_l, 1e-6);
-            let kS = F;
-            let kD = (vec3<f32>(1.0) - kS) * (1.0 - metallic);
-            let diffuse = kD * base_color.rgb / 3.14159265359;
-            brdf_color = diffuse + specular;
-        }
+        // Construct ShadingParamsGPU from material properties and shading uniform
+        // Use shading.brdf for model selection, and material metallic/roughness for surface properties
+        var shading_params: ShadingParamsGPU;
+        shading_params.brdf = shading.brdf;
+        shading_params.metallic = metallic;
+        shading_params.roughness = roughness;
+        shading_params.sheen = shading.sheen;
+        shading_params.clearcoat = shading.clearcoat;
+        shading_params.subsurface = shading.subsurface;
+        shading_params.anisotropy = shading.anisotropy;
+        
+        // Call unified BRDF dispatch
+        let brdf_color = eval_brdf(world_normal, view_dir, light_dir, base_color.rgb, shading_params);
         let radiance = lighting.light_color * lighting.light_intensity;
         direct_lighting = brdf_color * radiance * n_dot_l;
     }
@@ -417,22 +366,23 @@ fn fs_pbr_simple(input: VertexOutput) -> @location(0) vec4<f32> {
     // Calculate F0
     let f0 = mix(vec3<f32>(0.04), base_color.rgb, metallic);
     
-    // BRDF calculation
+    // BRDF calculation (P2-03: using eval_brdf)
     var color = vec3<f32>(0.0);
     
     if n_dot_l > 0.0 {
-        let D = distribution_ggx(n_dot_h, roughness);
-        let G = geometry_smith(n_dot_v, n_dot_l, roughness);
-        let F = fresnel_schlick(v_dot_h, f0);
+        // Construct shading params using current shading uniform
+        var shading_params: ShadingParamsGPU;
+        shading_params.brdf = shading.brdf;
+        shading_params.metallic = metallic;
+        shading_params.roughness = roughness;
+        shading_params.sheen = shading.sheen;
+        shading_params.clearcoat = shading.clearcoat;
+        shading_params.subsurface = shading.subsurface;
+        shading_params.anisotropy = shading.anisotropy;
         
-        let specular = (D * G * F) / max(4.0 * n_dot_v * n_dot_l, 1e-6);
-        
-        let kS = F;
-        let kD = (vec3<f32>(1.0) - kS) * (1.0 - metallic);
-        let diffuse = kD * base_color.rgb / 3.14159265359;
-        
+        let brdf_color = eval_brdf(world_normal, view_dir, light_dir, base_color.rgb, shading_params);
         let radiance = lighting.light_color * lighting.light_intensity;
-        color = (diffuse + specular) * radiance * n_dot_l;
+        color = brdf_color * radiance * n_dot_l;
     }
     
     // Simple ambient

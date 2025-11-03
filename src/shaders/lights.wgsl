@@ -2,6 +2,16 @@
 // Light GPU buffer layout and sampling helpers
 // Exists to expose multi-light data/sampling to shared lighting shaders
 // RELEVANT FILES: src/lighting/types.rs, src/lighting/light_buffer.rs, src/shaders/lighting.wgsl, python/forge3d/config.py
+//
+// Bind Groups and Layouts (when included by pipelines):
+// - @group(0): Light buffer and metadata (used by lighting.wgsl)
+//   - @binding(3): storage<array<LightGPU>> - Light array (dynamic, up to MAX_LIGHTS)
+//   - @binding(4): uniform<LightMetadata> - Light count, frame index, R2 sequence seeds
+//   - @binding(5): uniform<vec4<f32>> - Environment lighting parameters (stub for P4 IBL)
+//
+// Note: These bindings are defined at @group(0) when lighting.wgsl is used.
+// Mesh PBR pipeline uses @group(0) @binding(2) for ShadingParamsGPU (no collision).
+// Terrain pipeline uses @group(1) for lights (@binding(3-5), no collision with @group(0)).
 
 const PI: f32 = 3.14159265359;
 

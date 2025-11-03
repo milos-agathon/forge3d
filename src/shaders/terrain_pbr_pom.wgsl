@@ -2,8 +2,43 @@
 // Terrain PBR + POM shader implementing normal, triplanar, and BRDF logic
 // Exists to light the terrain renderer milestone with placeholder resources until assets land
 // RELEVANT FILES: src/terrain_renderer.rs, src/terrain_render_params.rs, src/overlay_layer.rs, terrain_demo_task_breakdown.md
+//
+// Bind Groups and Layouts:
+// - @group(0): Terrain uniforms and textures
+//   - @binding(0): uniform<TerrainUniforms> - View/proj matrices, sun exposure, spacing, height exaggeration
+//   - @binding(1): texture_2d<f32> - Height texture
+//   - @binding(2): sampler - Height sampler
+//   - @binding(3): texture_2d_array<f32> - Material albedo texture array
+//   - @binding(4): sampler - Material sampler
+//   - @binding(5): uniform<TerrainShadingUniforms> - Triplanar, POM, layer heights/roughness/metallic, light params, clamps
+//   - @binding(6): texture_2d<f32> - Colormap texture
+//   - @binding(7): sampler - Colormap sampler
+//   - @binding(8): uniform<OverlayUniforms> - Overlay domain, blend mode, albedo mode, colormap strength, gamma
+// - @group(1): Light buffer (P1-06)
+//   - @binding(3): storage<array<Light>> - Light array
+//   - @binding(4): uniform<LightMetadata> - Light count, frame index, sequence seed
+//   - @binding(5): uniform<EnvironmentParams> - Ambient color
+// - @group(2): IBL textures
+//   - @binding(0): texture_cube<f32> - IBL specular cube map
+//   - @binding(1): texture_cube<f32> - IBL irradiance cube map
+//   - @binding(2): sampler - IBL environment sampler
+//   - @binding(3): texture_2d<f32> - IBL BRDF LUT
+//   - @binding(4): uniform<IblUniforms> - IBL intensity, rotation (sin/cos theta), specular mip count
+//
+// Note: TerrainShadingUniforms (@group(0) @binding(5)) contains terrain-specific shading knobs.
+// P2-05: Optional BRDF dispatch hook (disabled by default, preserves current terrain look)
+// No binding collisions with mesh PBR pipeline (which uses different group layouts).
+
+// P2-05: Include lighting.wgsl for optional eval_brdf dispatch
+// Note: This adds BRDF constants and eval_brdf function, but terrain uses calculate_pbr_brdf by default
+#include "lighting.wgsl"
 
 const PI : f32 = 3.14159265;
+
+// P2-05: Optional BRDF dispatch flag (default: false = use calculate_pbr_brdf for current look)
+// Set to true to enable eval_brdf dispatch, allowing BRDF model switching on terrain
+const TERRAIN_USE_BRDF_DISPATCH: bool = false;
+const TERRAIN_BRDF_MODEL: u32 = BRDF_COOK_TORRANCE_GGX;  // Used when TERRAIN_USE_BRDF_DISPATCH = true
 
 struct TerrainUniforms {
     view : mat4x4<f32>,
@@ -349,6 +384,24 @@ fn calculate_pbr_brdf(
     return (diffuse + specular) * n_dot_l;
 }
 
+// P2-05: Bridge function to map terrain parameters to ShadingParamsGPU for optional eval_brdf
+// Maps a subset of TerrainShadingUniforms to ShadingParamsGPU, ignoring unsupported terrain knobs
+fn terrain_to_shading_params(
+    roughness: f32,
+    metallic: f32,
+    brdf_model: u32,  // Runtime flag: which BRDF model to use (default BRDF_COOK_TORRANCE_GGX)
+) -> ShadingParamsGPU {
+    var params: ShadingParamsGPU;
+    params.brdf = brdf_model;
+    params.metallic = metallic;
+    params.roughness = roughness;
+    params.sheen = 0.0;        // Terrain doesn't use sheen
+    params.clearcoat = 0.0;    // Terrain doesn't use clearcoat
+    params.subsurface = 0.0;   // Terrain doesn't use subsurface
+    params.anisotropy = 0.0;   // Terrain doesn't use anisotropy
+    return params;
+}
+
 fn gamma_correct(color : vec3<f32>, gamma : f32) -> vec3<f32> {
     return pow(color, vec3<f32>(1.0 / gamma));
 }
@@ -546,15 +599,27 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     metallic = clamp(metallic, 0.0, 1.0);
     let f0 = mix(vec3<f32>(0.04, 0.04, 0.04), albedo, metallic);
     let light_dir = normalize(u_terrain.sun_exposure.xyz);
-    var lighting = calculate_pbr_brdf(
-        blended_normal,
-        view_dir,
-        light_dir,
-        albedo,
-        roughness,
-        metallic,
-        f0,
-    ) * u_terrain.sun_exposure.w;
+    
+    // P2-05: Optional BRDF dispatch (flag-controlled)
+    var lighting: vec3<f32>;
+    if (TERRAIN_USE_BRDF_DISPATCH) {
+        // Use unified BRDF dispatch (allows model switching)
+        let shading_params = terrain_to_shading_params(roughness, metallic, TERRAIN_BRDF_MODEL);
+        let n_dot_l = max(dot(blended_normal, light_dir), 0.0);
+        lighting = eval_brdf(blended_normal, view_dir, light_dir, albedo, shading_params) * n_dot_l;
+    } else {
+        // Use original terrain-specific calculate_pbr_brdf (default, preserves current look)
+        lighting = calculate_pbr_brdf(
+            blended_normal,
+            view_dir,
+            light_dir,
+            albedo,
+            roughness,
+            metallic,
+            f0,
+        );
+    }
+    lighting = lighting * u_terrain.sun_exposure.w;
     lighting = lighting * u_shading.light_params.rgb;
     if (shadow_enabled && pom_enabled) {
         let shadow_factor = clamp(mix(0.4, 1.0, occlusion), u_shading.clamp1.z, u_shading.clamp1.w);
