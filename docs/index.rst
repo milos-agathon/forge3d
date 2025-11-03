@@ -36,6 +36,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    interactive_viewer
    postfx/index
    pbr_materials
+   user/presets_overview
    shadow_mapping
    user/path_tracing
    user/vector_picking_oit
@@ -70,6 +71,9 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    examples/f16_instancing
    examples/f18_gltf_import
    examples/terrain_demo_quickstart
+   examples/lighting_gallery
+   examples/shadow_gallery
+   examples/ibl_gallery
 
 .. toctree::
    :maxdepth: 1

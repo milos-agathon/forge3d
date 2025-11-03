@@ -16,7 +16,7 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 0.87.0 — P6 perf & polish: half‑resolution volumetric fog with bilateral depth‑aware upsampling, step heuristics, viewer toggles, and docs update.
+Current release: 0.88.0 — high-level rendering presets (studio_pbr, outdoor_sun, toon_viz), Renderer.apply_preset() API, CLI --preset flag, and example galleries for lighting/shadows/IBL comparisons.
 
 ## Installation
 

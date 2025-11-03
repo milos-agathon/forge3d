@@ -251,6 +251,35 @@ class ShadingParams:
     roughness: float = 0.5
     sheen: float = 0.0
     clearcoat: float = 0.0
+    
+    def to_dict(self) -> dict:
+        return {
+            "brdf": self.brdf,
+            "normal_maps": self.normal_maps,
+            "metallic": self.metallic,
+            "roughness": self.roughness,
+            "sheen": self.sheen,
+            "clearcoat": self.clearcoat,
+        }
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any], default: Optional["ShadingParams"] = None) -> "ShadingParams":
+        base = copy.deepcopy(default) if default is not None else cls()
+        if "brdf" in data:
+            base.brdf = _normalize_choice(data["brdf"], _BRDF_MODELS, "BRDF model")
+        if "normal_maps" in data:
+            base.normal_maps = bool(data["normal_maps"])
+        if "metallic" in data:
+            base.metallic = float(data["metallic"])
+        if "roughness" in data:
+            base.roughness = float(data["roughness"])
+        if "sheen" in data:
+            base.sheen = float(data["sheen"])
+        if "clearcoat" in data:
+            base.clearcoat = float(data["clearcoat"])
+        return base
+
+@dataclass
 class VolumetricParams:
     density: float = 0.02
     phase: str = "isotropic"
@@ -284,6 +313,10 @@ class VolumetricParams:
                 base.mode = "raymarch"
             elif m in {"froxels", "fx", "1"}:
                 base.mode = "froxels"
+        return base
+
+@dataclass
+class AtmosphereParams:
     enabled: bool = True
     sky: str = "hosek-wilkie"
     hdr_path: Optional[str] = None
@@ -315,6 +348,92 @@ class VolumetricParams:
                 base.volumetric = VolumetricParams.from_mapping(data["volumetric"])
             else:
                 raise TypeError("atmosphere.volumetric must be a mapping or None")
+        return base
+
+
+@dataclass
+class ShadowParams:
+    enabled: bool = True
+    technique: str = "pcf"
+    map_size: int = 2048
+    cascades: int = 1
+    contact_hardening: bool = False
+    pcss_blocker_radius: float = 6.0
+    pcss_filter_radius: float = 4.0
+    light_size: float = 1.0
+    moment_bias: float = 5e-4
+
+    def to_dict(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "technique": self.technique,
+            "map_size": self.map_size,
+            "cascades": self.cascades,
+            "contact_hardening": self.contact_hardening,
+            "pcss_blocker_radius": self.pcss_blocker_radius,
+            "pcss_filter_radius": self.pcss_filter_radius,
+            "light_size": self.light_size,
+            "moment_bias": self.moment_bias,
+        }
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any], default: Optional["ShadowParams"] = None) -> "ShadowParams":
+        base = copy.deepcopy(default) if default is not None else cls()
+        if "enabled" in data:
+            base.enabled = bool(data["enabled"])
+        if "technique" in data:
+            base.technique = _normalize_choice(data["technique"], _SHADOW_TECHNIQUES, "shadow technique")
+        if "map_size" in data:
+            base.map_size = int(data["map_size"])
+        if "cascades" in data:
+            base.cascades = int(data["cascades"])
+        if "contact_hardening" in data:
+            base.contact_hardening = bool(data["contact_hardening"])
+        if "pcss_blocker_radius" in data:
+            base.pcss_blocker_radius = float(data["pcss_blocker_radius"])
+        if "pcss_filter_radius" in data:
+            base.pcss_filter_radius = float(data["pcss_filter_radius"])
+        if "light_size" in data:
+            base.light_size = float(data["light_size"])
+        if "moment_bias" in data:
+            base.moment_bias = float(data["moment_bias"])
+        return base
+
+    def requires_moments(self) -> bool:
+        return self.technique in {"vsm", "evsm", "msm"}
+
+    def atlas_memory_bytes(self) -> int:
+        bpp = 8 if self.requires_moments() else 4
+        return int(self.map_size) * int(self.map_size) * bpp * max(1, int(self.cascades))
+
+
+@dataclass
+class GiParams:
+    modes: List[str] = field(default_factory=list)
+    ambient_occlusion_strength: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "modes": list(self.modes),
+            "ambient_occlusion_strength": self.ambient_occlusion_strength,
+        }
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any], default: Optional["GiParams"] = None) -> "GiParams":
+        base = copy.deepcopy(default) if default is not None else cls()
+        if "modes" in data:
+            raw = data["modes"]
+            items = raw if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)) else [raw]
+            out: List[str] = []
+            for item in items:
+                if item is None:
+                    continue
+                m = _normalize_choice(item, _GI_MODES, "gi mode")
+                if m != "none" and m not in out:
+                    out.append(m)
+            base.modes = out
+        if "ambient_occlusion_strength" in data:
+            base.ambient_occlusion_strength = float(data["ambient_occlusion_strength"])
         return base
 
 

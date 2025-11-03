@@ -1,4 +1,3 @@
-
 // src/core/ibl.rs
 // Image-based lighting precompute pipeline and runtime bindings
 // Provides compute-based irradiance/specular integration with disk caching
@@ -205,6 +204,7 @@ pub struct IBLRenderer {
     brdf_view: Option<wgpu::TextureView>,
 
     env_sampler: wgpu::Sampler,
+    equirect_sampler: wgpu::Sampler,
     cache: Option<IblCacheConfig>,
     pbr_bind_group: Option<wgpu::BindGroup>,
     is_initialized: bool,
@@ -458,6 +458,34 @@ impl IBLRenderer {
             ..Default::default()
         });
 
+        // Separate sampler for equirectangular sampling: Repeat on U to avoid horizontal seam
+        let equirect_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("ibl.precompute.equirect.sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 16.0,
+            ..Default::default()
+        });
+
+        // Separate sampler for equirectangular sampling: Repeat on U to avoid horizontal seam
+        let equirect_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("ibl.precompute.equirect.sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 16.0,
+            ..Default::default()
+        });
+
         Self {
             quality,
             base_resolution,
@@ -481,6 +509,7 @@ impl IBLRenderer {
             brdf_lut: None,
             brdf_view: None,
             env_sampler,
+            equirect_sampler,
             cache: None,
             pbr_bind_group: None,
             is_initialized: false,
@@ -659,7 +688,7 @@ impl IBLRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.env_sampler),
+                    resource: wgpu::BindingResource::Sampler(&self.equirect_sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,

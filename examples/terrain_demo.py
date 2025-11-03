@@ -224,6 +224,14 @@ def _build_renderer_config(args: argparse.Namespace):
         overrides["hdr"] = args.hdr
     if args.volumetric:
         overrides["volumetric"] = _parse_volumetric_spec(args.volumetric)
+    # If a high-level preset is provided, use it as a base and then apply CLI overrides.
+    if getattr(args, "preset", None):
+        try:
+            from forge3d import presets as _presets  # lazy import to avoid heavy top-level deps
+            preset_map = _presets.get(str(args.preset))
+        except Exception as exc:
+            raise SystemExit(f"Unknown or unavailable preset '{args.preset}': {exc}")
+        return load_renderer_config(preset_map, overrides)
     return load_renderer_config(None, overrides)
 
 
@@ -553,6 +561,11 @@ def _parse_args() -> argparse.Namespace:
         "--brdf",
         type=str,
         help="Shading BRDF model (e.g., cooktorrance-ggx, lambert, disney-principled).",
+    )
+    parser.add_argument(
+        "--preset",
+        type=str,
+        help="High-level preset to initialize config (studio_pbr, outdoor_sun, toon_viz).",
     )
     parser.add_argument(
         "--shadows",

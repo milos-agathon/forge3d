@@ -1,521 +1,199 @@
 """
-High-level rendering presets for forge3d (P7)
+python/forge3d/presets.py
+High-level rendering presets for Python UX polish (P7-01).
 
-This module provides convenient preset configurations that combine multiple
-rendering features into cohesive, production-ready setups. Each preset returns
-a configuration dictionary that can be merged into a Renderer's config or
-passed directly during initialization.
+Each preset returns a plain dict compatible with
+python/forge3d/config.py::RendererConfig.from_mapping(), covering
+lighting/shading/shadows/gi/atmosphere keys. Values are chosen to be
+validation-friendly (e.g., GI modes empty by default to avoid HDRI
+requirements; shadow map sizes are powers of two; CSM cascades 2..4).
 
-Example usage:
-    import forge3d
-    from forge3d.presets import studio_pbr, outdoor_sun
-
-    # Use preset directly
-    renderer = forge3d.Renderer(800, 600, **studio_pbr())
-
-    # Or merge preset with custom overrides
-    config = outdoor_sun(turbidity=3.5, ground_albedo=0.3)
-    renderer = forge3d.Renderer(800, 600, **config)
-
-Available presets:
-- studio_pbr(): Indoor studio lighting with IBL and soft shadows
-- outdoor_sun(): Outdoor scene with physical sky and cascaded shadow maps
-- toon_viz(): Stylized toon rendering with hard shadows
-- minimal(): Minimal setup for fast previews
-- high_quality(): Maximum quality settings for final renders
+Example
+-------
+>>> from forge3d import Renderer
+>>> from forge3d import presets
+>>> r = Renderer(1280, 720)
+>>> cfg = presets.get("outdoor_sun")
+>>> # Optionally add overrides (e.g., enable GI IBL once HDR is provided)
+>>> cfg["gi"] = {"modes": ["ibl"]}
+>>> cfg["atmosphere"]["hdr_path"] = "assets/sky.hdr"
 """
+from __future__ import annotations
 
-from typing import Dict, Any, Optional
+from typing import Any, Callable, Dict, List
 
 
-def studio_pbr(
-    ibl_intensity: float = 1.0,
-    light_intensity: float = 3.0,
-    shadow_map_res: int = 2048,
-    roughness: float = 0.5,
-    metallic: float = 0.0,
-    **overrides
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+
+def _dir_light(
+    *,
+    direction: tuple[float, float, float],
+    intensity: float = 5.0,
+    color: tuple[float, float, float] = (1.0, 0.97, 0.94),
 ) -> Dict[str, Any]:
+    """Build a directional light mapping compatible with LightConfig.from_mapping()."""
+    return {
+        "type": "directional",
+        "direction": [float(direction[0]), float(direction[1]), float(direction[2])],
+        "intensity": float(intensity),
+        "color": [float(color[0]), float(color[1]), float(color[2])],
+    }
+
+
+def _normalize_name(name: str) -> str:
+    return "".join(c for c in str(name).strip().lower() if c not in {"-", "_", " ", "."})
+
+
+# -----------------------------------------------------------------------------
+# Preset definitions (schema-aligned with python/forge3d/config.py)
+# -----------------------------------------------------------------------------
+
+def studio_pbr() -> Dict[str, Any]:
+    """Studio preset: directional key, Disney BRDF, PCF shadows.
+
+    Notes
+    -----
+    - GI modes are left empty to avoid HDR asset requirements by default.
+    - Atmosphere is disabled; users may enable HDR sky via overrides later.
     """
-    Studio PBR lighting preset (P7)
-
-    Indoor studio setup with:
-    - Directional light (key light)
-    - IBL for ambient and specular reflections
-    - PCF shadows for soft shadow edges
-    - Disney Principled BRDF for physically-based materials
-
-    Perfect for: Product visualization, character rendering, studio setups
-
-    Args:
-        ibl_intensity: IBL contribution multiplier [0-2], default 1.0
-        light_intensity: Main light intensity [0-10], default 3.0
-        shadow_map_res: Shadow map resolution [512-4096], default 2048
-        roughness: Default surface roughness [0-1], default 0.5
-        metallic: Default metallic factor [0-1], default 0.0
-        **overrides: Additional config overrides
-
-    Returns:
-        Configuration dictionary ready for Renderer(**config)
-
-    Example:
-        >>> from forge3d.presets import studio_pbr
-        >>> renderer = forge3d.Renderer(800, 600, **studio_pbr())
-        >>> # Or with overrides:
-        >>> config = studio_pbr(ibl_intensity=1.5, roughness=0.3)
-    """
-    config = {
-        # Lighting
-        'lighting': {
-            'lights': [
-                {
-                    'type': 'directional',
-                    'direction': [0.5, -0.8, 0.3],  # 45° from top-right
-                    'color': [1.0, 1.0, 1.0],
-                    'intensity': light_intensity,
-                }
+    return {
+        "lighting": {
+            "exposure": 1.0,
+            "lights": [
+                _dir_light(direction=(-0.30, -0.95, -0.20), intensity=6.0, color=(1.0, 0.98, 0.95)),
             ],
         },
-
-        # Material shading
-        'shading': {
-            'brdf': 'disney-principled',
-            'roughness': roughness,
-            'metallic': metallic,
-            'clearcoat': 0.0,
-            'sheen': 0.0,
+        "shading": {
+            "brdf": "disney-principled",
+            "roughness": 0.35,
+            "metallic": 0.0,
+            "normal_maps": True,
         },
-
-        # Shadows
-        'shadows': {
-            'enabled': True,
-            'technique': 'PCF',
-            'map_res': shadow_map_res,
-            'bias': 0.001,
-            'pcf_radius': 2.0,
+        "shadows": {
+            "enabled": True,
+            "technique": "pcf",
+            "map_size": 2048,
+            "cascades": 1,
         },
-
-        # Global Illumination
-        'gi': {
-            'technique': 'IBL',
-            'ibl_intensity': ibl_intensity,
-            'ibl_rotation': 0.0,
+        "gi": {
+            "modes": [],
         },
-
-        # Atmosphere (minimal)
-        'atmosphere': {
-            'fog_density': 0.0,
-            'exposure': 1.0,
-            'sky_model': 'Off',
+        "atmosphere": {
+            "enabled": False,
         },
     }
 
-    # Merge overrides
-    config.update(overrides)
-    return config
 
-
-def outdoor_sun(
-    turbidity: float = 2.5,
-    ground_albedo: float = 0.2,
-    sun_elevation: float = 45.0,
-    sun_azimuth: float = 135.0,
-    cascades: int = 4,
-    fog_density: float = 0.0,
-    **overrides
-) -> Dict[str, Any]:
-    """
-    Outdoor sun lighting preset (P7)
-
-    Outdoor scene with:
-    - Hosek-Wilkie physical sky model
-    - Sun as directional light (synced with sky)
-    - CSM (Cascaded Shadow Maps) for large scenes
-    - Cook-Torrance GGX BRDF for realistic materials
-    - Optional volumetric fog
-
-    Perfect for: Terrain rendering, outdoor scenes, architectural visualization
-
-    Args:
-        turbidity: Atmospheric turbidity [1-10], default 2.5 (clear)
-            1.0 = very clear, 2.5 = clear, 6.0 = hazy, 10.0 = very hazy
-        ground_albedo: Ground reflectance [0-1], default 0.2
-        sun_elevation: Sun elevation angle in degrees [0-90], default 45
-        sun_azimuth: Sun azimuth angle in degrees [0-360], default 135
-        cascades: Number of CSM cascades [1-4], default 4
-        fog_density: Volumetric fog density [0-1], default 0.0 (no fog)
-        **overrides: Additional config overrides
-
-    Returns:
-        Configuration dictionary ready for Renderer(**config)
-
-    Example:
-        >>> from forge3d.presets import outdoor_sun
-        >>> # Sunrise scene
-        >>> config = outdoor_sun(sun_elevation=10, turbidity=3.5)
-        >>> renderer = forge3d.Renderer(1920, 1080, **config)
-    """
-    import math
-
-    # Calculate sun direction from angles
-    el_rad = math.radians(sun_elevation)
-    az_rad = math.radians(sun_azimuth)
-    sun_dir = [
-        math.cos(el_rad) * math.sin(az_rad),
-        math.sin(el_rad),
-        math.cos(el_rad) * math.cos(az_rad),
-    ]
-
-    config = {
-        # Lighting
-        'lighting': {
-            'lights': [
-                {
-                    'type': 'directional',
-                    'direction': sun_dir,
-                    'color': [1.0, 0.95, 0.9],  # Slightly warm sun
-                    'intensity': 5.0,
-                }
+def outdoor_sun() -> Dict[str, Any]:
+    """Outdoor preset: Hosek–Wilkie sky, sun as directional light, CSM, GGX."""
+    return {
+        "lighting": {
+            "exposure": 1.0,
+            "lights": [
+                _dir_light(direction=(-0.35, -1.00, -0.25), intensity=5.0, color=(1.0, 0.97, 0.92)),
             ],
         },
-
-        # Material shading
-        'shading': {
-            'brdf': 'cooktorrance-ggx',
-            'roughness': 0.6,
-            'metallic': 0.0,
+        "shading": {
+            "brdf": "cooktorrance-ggx",
+            "roughness": 0.5,
+            "metallic": 0.0,
+            "normal_maps": True,
         },
-
-        # Shadows
-        'shadows': {
-            'enabled': True,
-            'technique': 'CSM',
-            'map_res': 2048,
-            'cascades': cascades,
-            'bias': 0.002,
-            'normal_bias': 0.01,
+        "shadows": {
+            "enabled": True,
+            "technique": "csm",
+            "map_size": 2048,
+            "cascades": 3,  # Valid range [2,4] for CSM; pick 3 for balance
         },
-
-        # Global Illumination
-        'gi': {
-            'technique': 'None',  # Sky provides ambient
+        "gi": {
+            "modes": [],  # Users can enable ["ibl"] if they provide an HDR path
         },
-
-        # Atmosphere
-        'atmosphere': {
-            'fog_density': fog_density,
-            'exposure': 1.2,
-            'sky_model': 'HosekWilkie',
-        },
-
-        # Sky settings (if available)
-        'sky': {
-            'model': 'hosek-wilkie',
-            'turbidity': turbidity,
-            'ground_albedo': ground_albedo,
-            'sun_intensity': 20.0,
-            'exposure': 1.0,
-        },
-
-        # Volumetric (if fog enabled)
-        'volumetric': {
-            'density': fog_density,
-            'height_falloff': 0.1,
-            'phase_g': 0.7,
-            'use_shadows': True if fog_density > 0 else False,
-        } if fog_density > 0 else None,
-    }
-
-    # Merge overrides
-    config.update(overrides)
-    return config
-
-
-def toon_viz(
-    outline_width: float = 2.0,
-    shade_steps: int = 3,
-    light_intensity: float = 2.0,
-    **overrides
-) -> Dict[str, Any]:
-    """
-    Toon/cel-shaded visualization preset (P7)
-
-    Stylized non-photorealistic rendering with:
-    - Toon BRDF for stepped shading
-    - Hard shadows for crisp edges
-    - No global illumination (pure local shading)
-    - High contrast lighting
-
-    Perfect for: Stylized graphics, technical illustrations, NPR rendering
-
-    Args:
-        outline_width: Edge outline width [0-5], default 2.0
-        shade_steps: Number of discrete shade levels [2-5], default 3
-        light_intensity: Main light intensity [0-10], default 2.0
-        **overrides: Additional config overrides
-
-    Returns:
-        Configuration dictionary ready for Renderer(**config)
-
-    Example:
-        >>> from forge3d.presets import toon_viz
-        >>> renderer = forge3d.Renderer(800, 600, **toon_viz(shade_steps=4))
-    """
-    config = {
-        # Lighting
-        'lighting': {
-            'lights': [
-                {
-                    'type': 'directional',
-                    'direction': [0.3, -0.6, 0.5],
-                    'color': [1.0, 1.0, 1.0],
-                    'intensity': light_intensity,
-                }
-            ],
-        },
-
-        # Material shading
-        'shading': {
-            'brdf': 'toon',
-            'roughness': 0.5,  # Controls shade step positions
-            'metallic': 0.0,
-        },
-
-        # Shadows
-        'shadows': {
-            'enabled': True,
-            'technique': 'Hard',
-            'map_res': 1024,
-            'bias': 0.001,
-        },
-
-        # Global Illumination
-        'gi': {
-            'technique': 'None',
-        },
-
-        # Atmosphere
-        'atmosphere': {
-            'fog_density': 0.0,
-            'exposure': 1.0,
-            'sky_model': 'Off',
+        "atmosphere": {
+            "enabled": True,
+            "sky": "hosek-wilkie",
+            # "hdr_path": None  # provide via overrides if using GI IBL
         },
     }
 
-    # Merge overrides
-    config.update(overrides)
-    return config
 
-
-def minimal(
-    **overrides
-) -> Dict[str, Any]:
-    """
-    Minimal lighting preset for fast previews (P7)
-
-    Bare-bones setup with:
-    - Single directional light
-    - Lambert BRDF (fastest)
-    - No shadows
-    - No GI
-
-    Perfect for: Quick previews, performance testing, debugging
-
-    Args:
-        **overrides: Additional config overrides
-
-    Returns:
-        Configuration dictionary ready for Renderer(**config)
-
-    Example:
-        >>> from forge3d.presets import minimal
-        >>> renderer = forge3d.Renderer(640, 480, **minimal())
-    """
-    config = {
-        'lighting': {
-            'lights': [
-                {
-                    'type': 'directional',
-                    'direction': [0.0, -1.0, 0.0],
-                    'color': [1.0, 1.0, 1.0],
-                    'intensity': 2.0,
-                }
+def toon_viz() -> Dict[str, Any]:
+    """Toon visualization: toon BRDF, hard shadows, no GI, flat background."""
+    return {
+        "lighting": {
+            "exposure": 1.0,
+            "lights": [
+                _dir_light(direction=(-0.40, -0.90, -0.10), intensity=4.0, color=(1.0, 1.0, 1.0)),
             ],
         },
-        'shading': {
-            'brdf': 'lambert',
-            'roughness': 1.0,
-            'metallic': 0.0,
+        "shading": {
+            "brdf": "toon",
+            "normal_maps": False,
         },
-        'shadows': {
-            'enabled': False,
+        "shadows": {
+            "enabled": True,
+            "technique": "hard",
+            "map_size": 1024,
+            "cascades": 1,
         },
-        'gi': {
-            'technique': 'None',
+        "gi": {
+            "modes": [],
         },
-        'atmosphere': {
-            'fog_density': 0.0,
-            'exposure': 1.0,
-            'sky_model': 'Off',
+        "atmosphere": {
+            "enabled": False,
         },
     }
 
-    config.update(overrides)
-    return config
 
+# -----------------------------------------------------------------------------
+# Registry and lookup helpers
+# -----------------------------------------------------------------------------
 
-def high_quality(
-    ibl_path: Optional[str] = None,
-    shadow_map_res: int = 4096,
-    **overrides
-) -> Dict[str, Any]:
-    """
-    High-quality rendering preset for final renders (P7)
+_PRESETS: Dict[str, Callable[[], Dict[str, Any]]] = {
+    "studio_pbr": studio_pbr,
+    "outdoor_sun": outdoor_sun,
+    "toon_viz": toon_viz,
+}
 
-    Maximum quality settings with:
-    - IBL with high-resolution environment maps
-    - Disney Principled BRDF
-    - PCSS soft shadows (high sample count)
-    - SSAO for ambient occlusion detail
-    - Optional SSR for reflections
-
-    Perfect for: Final renders, marketing materials, hero shots
-
-    Args:
-        ibl_path: Path to HDR environment map, optional
-        shadow_map_res: Shadow map resolution [2048-8192], default 4096
-        **overrides: Additional config overrides
-
-    Returns:
-        Configuration dictionary ready for Renderer(**config)
-
-    Example:
-        >>> from forge3d.presets import high_quality
-        >>> config = high_quality(ibl_path='assets/studio.hdr')
-        >>> renderer = forge3d.Renderer(2048, 2048, **config)
-    """
-    config = {
-        'lighting': {
-            'lights': [
-                {
-                    'type': 'directional',
-                    'direction': [0.5, -0.8, 0.3],
-                    'color': [1.0, 1.0, 1.0],
-                    'intensity': 3.0,
-                }
-            ],
-        },
-        'shading': {
-            'brdf': 'disney-principled',
-            'roughness': 0.4,
-            'metallic': 0.0,
-            'clearcoat': 0.1,
-            'sheen': 0.0,
-        },
-        'shadows': {
-            'enabled': True,
-            'technique': 'PCSS',
-            'map_res': shadow_map_res,
-            'pcss_blocker_radius': 8.0,
-            'pcss_filter_radius': 12.0,
-            'light_size': 0.5,
-            'moment_bias': 0.0005,
-        },
-        'gi': {
-            'technique': 'IBL',
-            'ibl_intensity': 1.2,
-            'ibl_rotation': 0.0,
-        },
-        'atmosphere': {
-            'fog_density': 0.0,
-            'exposure': 1.0,
-            'sky_model': 'Off',
-        },
-        # Screen-space effects
-        'ssao': {
-            'enabled': True,
-            'radius': 0.5,
-            'intensity': 1.0,
-            'technique': 'GTAO',
-            'sample_count': 32,
-        },
-    }
-
-    if ibl_path:
-        config['gi']['ibl_path'] = ibl_path
-
-    config.update(overrides)
-    return config
-
-
-# Preset registry for programmatic access
-PRESETS = {
-    'studio_pbr': studio_pbr,
-    'outdoor_sun': outdoor_sun,
-    'toon_viz': toon_viz,
-    'minimal': minimal,
-    'high_quality': high_quality,
+_ALIASES: Dict[str, str] = {
+    "studio": "studio_pbr",
+    "pbr": "studio_pbr",
+    "sun": "outdoor_sun",
+    "outdoor": "outdoor_sun",
+    "toon": "toon_viz",
+    "toonviz": "toon_viz",
 }
 
 
-def list_presets() -> list:
+def available() -> List[str]:
+    """List available preset names."""
+    return sorted(_PRESETS.keys())
+
+
+def get(name: str) -> Dict[str, Any]:
+    """Resolve a preset by name (case-insensitive; supports common aliases).
+
+    Raises
+    ------
+    ValueError
+        If the preset name is unknown.
     """
-    List all available preset names
-
-    Returns:
-        List of preset name strings
-
-    Example:
-        >>> from forge3d.presets import list_presets
-        >>> print(list_presets())
-        ['studio_pbr', 'outdoor_sun', 'toon_viz', 'minimal', 'high_quality']
-    """
-    return list(PRESETS.keys())
+    key = _normalize_name(name)
+    if key in _ALIASES:
+        key = _ALIASES[key]
+    if key not in _PRESETS:
+        raise ValueError(f"Unknown preset: {name!r}. Available: {', '.join(available())}")
+    # Return a shallow copy to avoid accidental mutation of registry entries
+    out = _PRESETS[key]()
+    assert isinstance(out, dict)
+    return dict(out)
 
 
-def get_preset(name: str, **kwargs) -> Dict[str, Any]:
-    """
-    Get a preset configuration by name
-
-    Args:
-        name: Preset name (see list_presets())
-        **kwargs: Preset-specific arguments and overrides
-
-    Returns:
-        Configuration dictionary
-
-    Raises:
-        ValueError: If preset name is unknown
-
-    Example:
-        >>> from forge3d.presets import get_preset
-        >>> config = get_preset('outdoor_sun', turbidity=3.5)
-        >>> renderer = forge3d.Renderer(800, 600, **config)
-    """
-    if name not in PRESETS:
-        available = ', '.join(list_presets())
-        raise ValueError(f"Unknown preset '{name}'. Available: {available}")
-
-    return PRESETS[name](**kwargs)
-
-
-def describe_preset(name: str) -> str:
-    """
-    Get human-readable description of a preset
-
-    Args:
-        name: Preset name
-
-    Returns:
-        Multiline description string
-
-    Example:
-        >>> from forge3d.presets import describe_preset
-        >>> print(describe_preset('studio_pbr'))
-    """
-    if name not in PRESETS:
-        available = ', '.join(list_presets())
-        raise ValueError(f"Unknown preset '{name}'. Available: {available}")
-
-    func = PRESETS[name]
-    return func.__doc__ or f"No description available for preset '{name}'"
+__all__ = [
+    "studio_pbr",
+    "outdoor_sun",
+    "toon_viz",
+    "available",
+    "get",
+]

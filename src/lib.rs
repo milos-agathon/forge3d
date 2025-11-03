@@ -2264,6 +2264,12 @@ fn _pt_render_gpu_mesh(
     cam: &Bound<'_, PyAny>,
     seed: u32,
     frames: u32,
+    lighting_type: &str,
+    lighting_intensity: f32,
+    lighting_azimuth: f32,
+    lighting_elevation: f32,
+    shadows: bool,
+    shadow_intensity: f32,
 ) -> PyResult<Py<PyAny>> {
     use numpy::{PyArray1, PyReadonlyArray2};
     use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -2377,8 +2383,49 @@ fn _pt_render_gpu_mesh(
         _pad_end: [0, 0, 0],
     };
 
+    // Parse lighting type string to enum
+    let lighting_type_id = match lighting_type.to_lowercase().as_str() {
+        "flat" => 0u32,
+        "lambertian" | "lambert" => 1u32,
+        "phong" => 2u32,
+        "blinn-phong" | "blinn_phong" | "blinnphong" => 3u32,
+        _ => 1u32, // default to lambertian
+    };
+
+    // Convert azimuth/elevation to light direction vector
+    let azimuth_rad = lighting_azimuth.to_radians();
+    let elevation_rad = lighting_elevation.to_radians();
+    let light_dir = [
+        azimuth_rad.cos() * elevation_rad.cos(),
+        elevation_rad.sin(),
+        azimuth_rad.sin() * elevation_rad.cos(),
+    ];
+
+    // Normalize light direction
+    let len = (light_dir[0] * light_dir[0] + light_dir[1] * light_dir[1] + light_dir[2] * light_dir[2]).sqrt();
+    let light_dir_normalized = if len > 1e-6 {
+        [light_dir[0] / len, light_dir[1] / len, light_dir[2] / len]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
+
+    // Create lighting uniforms
+    let lighting_uniforms = crate::path_tracing::hybrid_compute::LightingUniforms {
+        light_dir: light_dir_normalized,
+        lighting_type: lighting_type_id,
+        light_color: [lighting_intensity, lighting_intensity * 0.95, lighting_intensity * 0.8], // Warm white
+        shadows_enabled: if shadows { 1 } else { 0 },
+        ambient_color: [0.1, 0.12, 0.15], // Cool ambient
+        shadow_intensity,
+        hdri_intensity: 0.0,
+        hdri_rotation: 0.0,
+        specular_power: 32.0,
+        _pad: [0, 0, 0, 0, 0],
+    };
+
     let params = crate::path_tracing::hybrid_compute::HybridTracerParams {
         base_uniforms: uniforms,
+        lighting_uniforms,
         traversal_mode: crate::path_tracing::hybrid_compute::TraversalMode::MeshOnly,
         early_exit_distance: 0.01,
         shadow_softness: 4.0,

@@ -22,6 +22,20 @@ struct Uniforms {
   _pad: u32,
 }
 
+// Lighting uniforms (Group 4)
+struct LightingUniforms {
+  light_dir: vec3<f32>,           // Directional light direction
+  lighting_type: u32,             // 0=flat, 1=lambertian, 2=phong, 3=blinn-phong
+  light_color: vec3<f32>,         // Light color * intensity
+  shadows_enabled: u32,           // 0 or 1
+  ambient_color: vec3<f32>,       // Ambient/indirect light
+  shadow_intensity: f32,          // Shadow darkness [0,1]
+  hdri_intensity: f32,            // HDR environment intensity
+  hdri_rotation: f32,             // HDR rotation in radians
+  specular_power: f32,            // Phong/Blinn specular exponent
+  _pad: vec3<u32>,
+}
+
 // Sphere primitive for legacy support
 struct Sphere {
     center: vec3<f32>,
@@ -35,6 +49,7 @@ struct Sphere {
 @group(1) @binding(0) var<storage, read> scene_spheres: array<Sphere>;
 @group(2) @binding(0) var<storage, read_write> accum_hdr: array<vec4<f32>>;
 @group(3) @binding(0) var out_tex: texture_storage_2d<rgba16float, write>;
+@group(4) @binding(0) var<uniform> lighting: LightingUniforms;
 
 // AOV Output textures (moved into Group 3 to stay within max_bind_groups)
 @group(3) @binding(1) var aov_albedo: texture_storage_2d<rgba16float, write>;
@@ -164,26 +179,60 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
 
   // Lighting
-  let light_dir = normalize(vec3<f32>(0.5, 0.8, 0.2));
-  let light_color = vec3<f32>(1.0, 0.95, 0.8);
-
-  var direct_light = vec3<f32>(0.0);
-  var indirect_light = vec3<f32>(0.0);
+  var diffuse_light = vec3<f32>(0.0);
+  var specular_light = vec3<f32>(0.0);
+  var indirect_light = lighting.ambient_color;
   var final_color = sky_color;
 
   if (is_hit) {
-    // Direct lighting with shadow testing
-    let ndotl = max(0.0, dot(hit_normal, light_dir));
-    let shadow_ray = Ray(hit_point + hit_normal * 0.001, 0.001, light_dir, 1000.0);
+    let view_dir = normalize(ro - hit_point);
+    
+    // Calculate shadow factor
+    var shadow_factor = 1.0;
+    if (lighting.shadows_enabled != 0u) {
+      let shadow_ray = Ray(hit_point + hit_normal * 0.001, 0.001, lighting.light_dir, 1000.0);
+      let raw_shadow = soft_shadow_factor(shadow_ray, 1000.0, 4.0);
+      // Apply shadow_intensity: 0.0=full shadow, 1.0=no shadow
+      shadow_factor = mix(raw_shadow, 1.0, 1.0 - lighting.shadow_intensity);
+    }
 
-    // Use soft shadows if SDF geometry is present
-    let shadow_factor = soft_shadow_factor(shadow_ray, 1000.0, 4.0);
-    direct_light = light_color * ndotl * shadow_factor;
-
-    // Indirect/ambient lighting
-    indirect_light = vec3<f32>(0.1, 0.12, 0.15);
-
-    final_color = hit_albedo * (direct_light + indirect_light);
+    // Compute lighting based on lighting_type
+    // 0=flat, 1=lambertian, 2=phong, 3=blinn-phong
+    
+    if (lighting.lighting_type == 0u) {
+      // Flat shading - uniform lighting, no direction
+      diffuse_light = lighting.light_color * shadow_factor;
+      specular_light = vec3<f32>(0.0);
+    } else if (lighting.lighting_type == 1u) {
+      // Lambertian (diffuse only, no specular)
+      let ndotl = max(0.0, dot(hit_normal, lighting.light_dir));
+      diffuse_light = lighting.light_color * ndotl * shadow_factor;
+      specular_light = vec3<f32>(0.0);
+    } else if (lighting.lighting_type == 2u) {
+      // Phong (diffuse + sharp specular highlight)
+      let ndotl = max(0.0, dot(hit_normal, lighting.light_dir));
+      diffuse_light = lighting.light_color * ndotl * shadow_factor;
+      
+      let reflect_dir = reflect(-lighting.light_dir, hit_normal);
+      let spec_intensity = pow(max(0.0, dot(view_dir, reflect_dir)), lighting.specular_power);
+      // Specular is NOT shadowed and NOT multiplied by albedo (it's direct reflection)
+      specular_light = lighting.light_color * spec_intensity * 0.2;
+    } else if (lighting.lighting_type == 3u) {
+      // Blinn-Phong (diffuse + softer specular with halfway vector)
+      let ndotl = max(0.0, dot(hit_normal, lighting.light_dir));
+      diffuse_light = lighting.light_color * ndotl * shadow_factor;
+      
+      let halfway = normalize(lighting.light_dir + view_dir);
+      // Blinn-Phong needs much higher exponent and drastically lower weight than Phong
+      // because halfway vector activates over a much broader surface area
+      let blinn_exponent = lighting.specular_power * 6.0;
+      let spec_intensity = pow(max(0.0, dot(hit_normal, halfway)), blinn_exponent);
+      // Very low weight (0.03 vs 0.2 for Phong) to match overall brightness contribution
+      specular_light = lighting.light_color * spec_intensity * 0.03;
+    }
+    
+    // Properly combine: albedo affects diffuse/ambient, specular is separate (direct reflection)
+    final_color = hit_albedo * (diffuse_light + indirect_light) + specular_light;
   }
 
   // Apply tonemapping (skip for background to preserve colors)
@@ -208,7 +257,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
 
   if (aov_enabled(AOV_DIRECT_BIT)) {
-    let direct_val = select(vec4<f32>(0.0, 0.0, 0.0, 1.0), vec4<f32>(direct_light, 1.0), is_hit);
+    // Direct lighting is diffuse + specular combined
+    let total_direct = diffuse_light + specular_light;
+    let direct_val = select(vec4<f32>(0.0, 0.0, 0.0, 1.0), vec4<f32>(total_direct, 1.0), is_hit);
     textureStore(aov_direct, pixel_coord, direct_val);
   }
 

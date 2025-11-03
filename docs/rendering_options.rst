@@ -60,6 +60,9 @@ The terrain demo exposes configuration toggles that map directly into ``Renderer
    * - ``--brdf``
      - ``--brdf disney-principled``
      - Overrides ``shading.brdf``.
+   * - ``--preset``
+     - ``--preset outdoor_sun --brdf cooktorrance-ggx --shadows csm --cascades 4 --hdr assets/sky.hdr``
+     - Initialize from a high-level preset, then apply CLI overrides. Preset merge precedes overrides; overrides always take precedence.
    * - ``--shadows`` / ``--shadow-map-res`` / ``--cascades``
      - ``--shadows pcf --shadow-map-res 2048 --cascades 4``
      - Select technique and atlas parameters.
@@ -75,6 +78,16 @@ The terrain demo exposes configuration toggles that map directly into ``Renderer
    * - ``--volumetric``
      - ``--volumetric density=0.02,phase=hg,g=0.7``
      - Supplies volumetric fog parameters.
+
+Preset Examples
+---------------
+
+One-command acceptance (P7) using the terrain demo:
+
+.. code-block:: bash
+
+   python examples/terrain_demo.py --preset outdoor_sun \
+       --brdf cooktorrance-ggx --shadows csm --cascades 4 --hdr assets/sky.hdr
 
 Additional Viewer Fog Controls (P6‑10)
 --------------------------------------

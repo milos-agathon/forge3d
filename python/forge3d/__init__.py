@@ -39,6 +39,9 @@ from .terrain_params import (
     TriplanarSettings,
 )
 
+# P7-11: Expose presets at top-level for discoverability (pure-Python, no native deps)
+from . import presets as presets
+
 _NATIVE_MODULE = _get_native_module()
 
 if _NATIVE_MODULE is not None:
@@ -379,7 +382,9 @@ from .helpers.frame_dump import (
 )
 
 # Version information
-__version__ = "0.87.0"
+__version__ = "0.88.0"
+# Alias for convenience: allow `forge3d.version` in addition to `forge3d.__version__`
+version = __version__
 _CURRENT_PALETTE = "viridis"
 _SUPPORTED_MSAA = [1, 2, 4, 8]  # Supported MSAA sample counts
 
@@ -436,6 +441,48 @@ class Renderer:
             else:
                 raise TypeError("set_lights expects mapping objects or LightConfig instances")
         self._config = _load_renderer_config(self._config, {"lights": normalized})
+        self._apply_config()
+
+    def apply_preset(self, name: str, **overrides: Any) -> None:
+        """Apply a high-level preset to the current renderer configuration.
+
+        The merge order is: current-config -> preset(name) -> overrides.
+        Overrides can be provided in two forms:
+        - Nested schema mappings (lighting/shading/shadows/gi/atmosphere/brdf_override)
+        - Flat override keys recognized by load_renderer_config() (e.g., brdf, shadows,
+          shadow_map_res, cascades, sky, hdr, volumetric, etc.)
+
+        After merging, the resulting configuration is validated and applied to the
+        renderer's cached state.
+        """
+        # Import lazily to keep CPU-only usage light and avoid hard deps at import time
+        try:
+            from . import presets as _presets  # type: ignore
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError(f"forge3d.presets unavailable: {e}")
+
+        # 1) Resolve preset mapping and merge into the current config
+        preset_map = _presets.get(name)
+        cfg = RendererConfig.from_mapping(preset_map, self._config)
+
+        # 2) Split overrides into nested schema vs flat normalized keys
+        nested_keys = {"lighting", "shading", "shadows", "gi", "atmosphere", "brdf_override"}
+        nested: dict[str, Any] = {}
+        flat: dict[str, Any] = {}
+        for k, v in list(overrides.items()):
+            if k in nested_keys:
+                nested[k] = v
+            else:
+                flat[k] = v
+
+        if nested:
+            cfg = RendererConfig.from_mapping(nested, cfg)
+
+        # 3) Apply flat overrides using existing normalization + validate the result
+        cfg = _load_renderer_config(cfg, flat if flat else None)
+
+        # 4) Commit and refresh cached state
+        self._config = cfg
         self._apply_config()
 
     def render_triangle_rgba(self) -> np.ndarray:

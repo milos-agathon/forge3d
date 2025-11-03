@@ -1,4 +1,36 @@
 # Changelog
+## [0.88.0] - P7 Python UX Polish
+
+### Added
+- **P7 — Python UX Polish: High-level Presets & Validation + Examples**
+  - **Presets API** (`python/forge3d/presets.py`):
+    - `studio_pbr()`: Indoor studio lighting with directional key + IBL, PCF shadows, Disney Principled BRDF, HDRI sky
+    - `outdoor_sun()`: Outdoor scenes with Hosek-Wilkie sky, sun directional light, CSM shadows, Cook-Torrance GGX BRDF
+    - `toon_viz()`: Stylized NPR rendering with Toon BRDF, hard shadows, no GI
+    - `get(name)` and `available()` helpers for case-insensitive preset resolution
+    - All presets return mappings compatible with `RendererConfig.from_mapping()` for clean merging
+  - **Renderer.apply_preset(name, **overrides)** method:
+    - Merges preset into current `RendererConfig` instance
+    - Applies user overrides after preset application
+    - Raises `ValueError` for invalid preset names with helpful error messages
+  - **CLI integration** in `examples/terrain_demo.py`:
+    - `--preset <name>` flag to apply preset as base configuration
+    - CLI overrides (--brdf, --shadows, --hdr, etc.) take precedence over preset defaults
+    - Acceptance one-liner: `python examples/terrain_demo.py --preset outdoor_sun --brdf cooktorrance-ggx --shadows csm --cascades 4 --hdr assets/sky.hdr`
+  - **Example galleries**:
+    - `examples/lighting_gallery.py`: Grid render comparing BRDF models (Lambert, Phong, Oren-Nayar, GGX, Disney, Ashikhmin, Ward, Toon, Minnaert) with configurable output
+    - `examples/shadow_gallery.py`: Side-by-side comparison of shadow techniques (Hard, PCF, PCSS, VSM, EVSM, MSM, CSM) with quality/performance notes
+    - `examples/ibl_gallery.py`: HDR environment rotation sweep, roughness sweep (0-1), metallic vs. dielectric comparisons
+  - **Unit tests** (`tests/test_presets.py`, `tests/test_renderer_apply_preset.py`):
+    - Validates all presets return valid mappings accepted by `RendererConfig.from_mapping()`
+    - Verifies expected fields for each preset (sky model, shadow technique, BRDF)
+    - Tests preset application and override precedence
+
+### Documentation
+- Added Sphinx how-to pages for presets (`docs/user/presets_overview.rst`, per-preset pages)
+- Example gallery documentation with CLI usage and reproducibility tips
+- Import-safe design ensures presets work in CPU-only environments without native dependencies
+
 ## [0.87.0] - P6 Performance & Polish
 
 ### Added

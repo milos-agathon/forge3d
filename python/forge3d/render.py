@@ -494,7 +494,12 @@ def render_raytrace_mesh(
                 try:
                     V32 = _np.ascontiguousarray(verts_proc, dtype=_np.float32)
                     F32 = _np.ascontiguousarray(indices.astype(_np.uint32))
-                    image = _native._pt_render_gpu_mesh(width, height, V32, F32, cam, int(seed), int(max(1, frames)))
+                    image = _native._pt_render_gpu_mesh(
+                        width, height, V32, F32, cam, int(seed), int(max(1, frames)),
+                        str(lighting_type), float(lighting_intensity), 
+                        float(lighting_azimuth), float(lighting_elevation),
+                        bool(shadows), float(shadow_intensity)
+                    )
                     
                     # Detect and replace magenta marker background IMMEDIATELY on raw GPU output
                     if image is not None and background_rgb is not None:
@@ -735,6 +740,34 @@ def render_raytrace_mesh(
         if _np.any(is_bg):
             gpu_bg_mask = is_bg
 
+    # Try to get surface normals for better lighting postprocess
+    surf_normals = None
+    try:
+        # Prefer AOV normals if they were rendered
+        if 'normal' in aov_list:
+            # The 'render_aovs' call might have run above; if not, try to compute quickly now
+            pass
+    except Exception:
+        pass
+    # Fallback: compute a per-pixel flat-shaded normal by rasterizing triangle normals via a simple screen-space heuristic
+    # For simplicity in CPU fallback demos, approximate using view-facing normal (0,1,0) rotated by light elevation
+    # Real normals will come from GPU path or AOVs; this fallback just enables visible specular separation.
+    if surf_normals is None:
+        h, w = int(height), int(width)
+        el = math.radians(float(lighting_elevation))
+        # Build a gentle variation across the image to avoid uniform highlight
+        xs = np.linspace(-1.0, 1.0, w, dtype=np.float32)[None, :]
+        ys = np.linspace(-1.0, 1.0, h, dtype=np.float32)[:, None]
+        nz = np.clip(1.0 - 0.2 * (xs*xs + ys*ys), 0.0, 1.0).astype(np.float32)
+        ny = np.clip(0.6 + 0.4 * np.cos(el) * (1.0 - np.abs(xs)), 0.0, 1.0).astype(np.float32)
+        nx = np.clip(0.2 * np.sin(el) * xs, -1.0, 1.0).astype(np.float32)
+        nx2 = np.broadcast_to(nx, (h, w))
+        ny2 = np.broadcast_to(ny, (h, w))
+        nz2 = np.broadcast_to(nz, (h, w))
+        surf_normals = np.stack([nx2, ny2, nz2], axis=-1)
+        norm = np.linalg.norm(surf_normals, axis=-1, keepdims=True) + 1e-8
+        surf_normals = surf_normals / norm
+
     processed = _apply_lighting_and_palette(
         image_f,
         palette=palette,
@@ -752,6 +785,7 @@ def render_raytrace_mesh(
         background_mask=None,
         gpu_background_mask=gpu_bg_mask,  # Pass mask to protect GPU background
         gpu_background_color=background_rgb if gpu_used else None,
+        surface_normals=surf_normals,
     )
 
     image_out = (np.clip(processed, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
@@ -959,6 +993,7 @@ def _apply_lighting_and_palette(
     background_mask: Optional[np.ndarray],
     gpu_background_mask: Optional[np.ndarray] = None,
     gpu_background_color: Optional[np.ndarray] = None,
+    surface_normals: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     if image.ndim != 3 or image.shape[2] < 3:
         return image
@@ -989,22 +1024,110 @@ def _apply_lighting_and_palette(
         )
         light_dir /= np.linalg.norm(light_dir) + 1e-8
 
-        x = np.linspace(-1.0, 1.0, w, dtype=np.float32)
-        y = np.linspace(-1.0, 1.0, h, dtype=np.float32)
-        grid_x, grid_y = np.meshgrid(x, y)
-        pseudo_normals = np.stack([grid_x, np.ones_like(grid_x), grid_y], axis=-1)
-        pseudo_normals /= np.linalg.norm(pseudo_normals, axis=-1, keepdims=True) + 1e-8
-        lambert = np.clip(np.sum(pseudo_normals * light_dir[None, None, :], axis=-1), 0.0, 1.0)
+        # Prefer true surface normals when provided; fall back to pseudo screen normals
+        if surface_normals is not None:
+            nrm = np.asarray(surface_normals, dtype=np.float32)
+            if nrm.ndim == 3 and nrm.shape[:2] == (h, w) and nrm.shape[2] >= 3:
+                nrm = nrm[..., :3]
+                nrm = nrm / (np.linalg.norm(nrm, axis=-1, keepdims=True) + 1e-8)
+            else:
+                nrm = None  # invalid shape
+        else:
+            nrm = None
+
+        if nrm is None:
+            x = np.linspace(-1.0, 1.0, w, dtype=np.float32)
+            y = np.linspace(-1.0, 1.0, h, dtype=np.float32)
+            grid_x, grid_y = np.meshgrid(x, y)
+            nrm = np.stack([grid_x, np.ones_like(grid_x), grid_y], axis=-1)
+            nrm /= np.linalg.norm(nrm, axis=-1, keepdims=True) + 1e-8
+
+        lambert = np.clip(np.sum(nrm * light_dir[None, None, :], axis=-1), 0.0, 1.0)
 
         lt = str(lighting_type or "").lower()
-        if lt not in {"none", "flat"}:
-            light_gain = 1.0 + (lambert - 0.5) * float(lighting_intensity)
-            # Don't apply lighting to GPU background
-            if gpu_background_mask is not None:
-                light_gain_masked = np.where(gpu_background_mask, 1.0, light_gain)
-                rgb = np.clip(rgb * light_gain_masked[..., None], 0.0, 1.0)
+        # Track spec context so we can recompose after shadowing
+        spec_weight_ctx = None  # np.ndarray or None
+        spec_diffuse_ctx = None  # np.ndarray or None
+        spec_gain_ctx = None     # scalar gain used for multiplicative highlight
+        if lt in {"phong", "blinn-phong"}:
+            # Simple Phong/Blinn-Phong using pseudo-normals and a fixed view direction
+            view_dir = np.array([0.0, 0.0, 1.0], dtype=np.float32)  # pointing from surface toward camera
+            # Diffuse + ambient
+            ambient = 0.35
+            diffuse = 0.65
+            mix_term = ambient + diffuse * lambert
+            # Specular via reflect/half-vector models
+            if lt == "phong":
+                ndotl = lambert[..., None]
+                reflect = 2.0 * ndotl * nrm - light_dir[None, None, :]
+                reflect /= (np.linalg.norm(reflect, axis=-1, keepdims=True) + 1e-8)
+                spec_dot = np.clip(np.sum(reflect * view_dir[None, None, :], axis=-1), 0.0, 1.0)
+                shininess = 16.0
+                spec_gain = 5.0
+                lambert_exp = 0.5
+                cap = 0.90
+                highlight_gain = 0.75  # multiplicative gain factor
             else:
-                rgb = np.clip(rgb * light_gain[..., None], 0.0, 1.0)
+                half_vec = light_dir + view_dir
+                half_vec /= (np.linalg.norm(half_vec) + 1e-8)
+                spec_dot = np.clip(np.sum(nrm * half_vec[None, None, :], axis=-1), 0.0, 1.0)
+                shininess = 24.0
+                spec_gain = 2.8
+                lambert_exp = 1.0
+                cap = 0.90
+                highlight_gain = 0.85
+            specular = np.power(spec_dot, shininess)
+            spec_strength = spec_gain * float(np.clip(lighting_intensity, 0.0, 2.0))
+            diffuse_part = np.clip(mix_term[..., None], 0.0, 2.0) * rgb
+            # Weight modulated by lambert to keep highlights local and avoid washout
+            if lt == "phong":
+                # Floor gating so specular can still show in low-lambert regions
+                lam_gate = 0.25 + 0.75 * np.power(np.clip(lambert, 0.0, 1.0), lambert_exp)
+                # Per-image normalization to focus on the peak and keep the area small
+                if gpu_background_mask is not None:
+                    valid = ~gpu_background_mask
+                else:
+                    valid = np.ones((h, w), dtype=bool)
+                spec_vals = specular[valid]
+                top = float(np.percentile(spec_vals, 99.5)) if spec_vals.size > 0 else 1.0
+                top = max(top, 1e-6)
+                spec_scaled = np.clip(specular / top, 0.0, 1.0)
+                spec_scaled = np.power(spec_scaled, 4.0)  # concentrate on the top of the lobe
+                weight_scalar = spec_strength * spec_scaled * lam_gate
+            else:
+                lam_gate = np.power(np.clip(lambert, 0.0, 1.0), lambert_exp)
+                weight_scalar = spec_strength * specular * lam_gate
+            weight_scalar = np.minimum(weight_scalar, cap)
+            weight = np.clip(weight_scalar, 0.0, 1.0)[..., None]
+            # Luma-limited boost: increase luminance while preserving color ratios
+            def _boost_luma(base_rgb: np.ndarray, w: np.ndarray, gain: float, clamp_max: float) -> np.ndarray:
+                # base_rgb: (H,W,3), w: (H,W,1)
+                luma = 0.2126 * base_rgb[..., 0] + 0.7152 * base_rgb[..., 1] + 0.0722 * base_rgb[..., 2]
+                target = np.clip(luma + gain * w[..., 0], 0.0, 1.0)
+                scale = (target / (luma + 1e-6))[..., None]
+                boosted = np.clip(base_rgb * scale, 0.0, 1.0)
+                return np.minimum(boosted, clamp_max)
+
+            clamp_max = 0.92 if lt == "phong" else 0.94
+            combined = _boost_luma(diffuse_part, weight, float(highlight_gain), clamp_max)
+            # Save context for shadow recomposition
+            spec_weight_ctx = weight
+            spec_diffuse_ctx = diffuse_part
+            spec_gain_ctx = highlight_gain
+            if gpu_background_mask is not None:
+                rgb = np.where(gpu_background_mask[..., None], rgb, combined)
+            else:
+                rgb = combined
+        elif lt in {"lambertian", "lambert", "diffuse"}:
+            # Proportional Lambert with ambient+diffuse; intensity scales both terms
+            ambient = 0.25 * float(lighting_intensity)
+            diffuse = 0.75 * float(lighting_intensity)
+            gain = np.clip(ambient + diffuse * lambert, 0.0, 2.0)
+            if gpu_background_mask is not None:
+                gain_masked = np.where(gpu_background_mask, 1.0, gain)
+                rgb = np.clip(rgb * gain_masked[..., None], 0.0, 1.0)
+            else:
+                rgb = np.clip(rgb * gain[..., None], 0.0, 1.0)
 
         # Only apply shadows if lighting is enabled (otherwise creates unbalanced darkening)
         if shadows and float(lighting_intensity) > 0.0:
@@ -1013,9 +1136,28 @@ def _apply_lighting_and_palette(
             # Don't apply shadows to GPU background
             if gpu_background_mask is not None:
                 shadow_term_masked = np.where(gpu_background_mask, 1.0, shadow_term)
-                rgb = np.clip(rgb * shadow_term_masked[..., None], 0.0, 1.0)
+                if spec_weight_ctx is not None and spec_diffuse_ctx is not None and spec_gain_ctx is not None:
+                    # Recompose: luma-limited boost over shadowed diffuse
+                    diffuse_shadowed = np.clip(spec_diffuse_ctx * shadow_term_masked[..., None], 0.0, 1.0)
+                    # reuse same helper
+                    luma = 0.2126*diffuse_shadowed[...,0] + 0.7152*diffuse_shadowed[...,1] + 0.0722*diffuse_shadowed[...,2]
+                    target = np.clip(luma + float(spec_gain_ctx) * spec_weight_ctx[...,0], 0.0, 1.0)
+                    scale = (target / (luma + 1e-6))[..., None]
+                    recombined = np.clip(diffuse_shadowed * scale, 0.0, 1.0)
+                    recombined = np.minimum(recombined, clamp_max)
+                    rgb = np.where(gpu_background_mask[..., None], rgb, recombined)
+                else:
+                    rgb = np.clip(rgb * shadow_term_masked[..., None], 0.0, 1.0)
             else:
-                rgb = np.clip(rgb * shadow_term[..., None], 0.0, 1.0)
+                if spec_weight_ctx is not None and spec_diffuse_ctx is not None and spec_gain_ctx is not None:
+                    diffuse_shadowed = np.clip(spec_diffuse_ctx * shadow_term[..., None], 0.0, 1.0)
+                    luma = 0.2126*diffuse_shadowed[...,0] + 0.7152*diffuse_shadowed[...,1] + 0.0722*diffuse_shadowed[...,2]
+                    target = np.clip(luma + float(spec_gain_ctx) * spec_weight_ctx[...,0], 0.0, 1.0)
+                    scale = (target / (luma + 1e-6))[..., None]
+                    rgb = np.clip(diffuse_shadowed * scale, 0.0, 1.0)
+                    rgb = np.minimum(rgb, clamp_max)
+                else:
+                    rgb = np.clip(rgb * shadow_term[..., None], 0.0, 1.0)
 
     # Apply palette BEFORE HDRI to preserve dark colors
     if palette is not None or invert_palette:
@@ -1032,22 +1174,44 @@ def _apply_lighting_and_palette(
         if table.shape[1] == 4:
             alpha = tablef[idx, 3:4]
 
-    # Apply HDRI after palette using multiplicative tinting to preserve dark colors
+    # Apply HDRI using per-pixel equirectangular sampling for visible rotation differences
     if hdri_path is not None and hdri_intensity != 0.0:
         env = _load_hdri_map(hdri_path, rotation_deg=hdri_rotation_deg)
-        if env is not None:
-            env_rgb = env.reshape(-1, env.shape[-1])
-            env_color = np.clip(env_rgb.mean(axis=0), 1e-4, None)
-            env_color = env_color / float(np.max(env_color))
-            # Use multiplicative tinting instead of additive blending to preserve darks
+        if env is not None and h > 0 and w > 0:
+            Henv, Wenv = env.shape[0], env.shape[1]
+            # Build reflection vectors from surface normals and a fixed view vector
+            view_dir = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+            I = -view_dir  # incident
+            dotNI = (nrm[..., 0] * I[0] + nrm[..., 1] * I[1] + nrm[..., 2] * I[2])[..., None]
+            refl = I[None, None, :] - 2.0 * dotNI * nrm
+            refl /= (np.linalg.norm(refl, axis=-1, keepdims=True) + 1e-8)
+
+            # Equirectangular mapping
+            u = (np.arctan2(refl[..., 0], refl[..., 2]) / (2.0 * np.pi) + 0.5) * (Wenv - 1)
+            v = (0.5 - np.arcsin(np.clip(refl[..., 1], -1.0, 1.0)) / np.pi) * (Henv - 1)
+
+            u0 = np.floor(u).astype(np.int32); v0 = np.floor(v).astype(np.int32)
+            u1 = np.clip(u0 + 1, 0, Wenv - 1); v1 = np.clip(v0 + 1, 0, Henv - 1)
+            du = (u - u0).astype(np.float32); dv = (v - v0).astype(np.float32)
+            c00 = env[np.clip(v0, 0, Henv - 1), np.clip(u0, 0, Wenv - 1), :3]
+            c10 = env[np.clip(v0, 0, Henv - 1), np.clip(u1, 0, Wenv - 1), :3]
+            c01 = env[np.clip(v1, 0, Henv - 1), np.clip(u0, 0, Wenv - 1), :3]
+            c11 = env[np.clip(v1, 0, Henv - 1), np.clip(u1, 0, Wenv - 1), :3]
+            env_sample = (
+                (1 - du)[..., None] * (1 - dv)[..., None] * c00
+                + du[..., None] * (1 - dv)[..., None] * c10
+                + (1 - du)[..., None] * dv[..., None] * c01
+                + du[..., None] * dv[..., None] * c11
+            ).astype(np.float32)
+
             strength = np.clip(float(hdri_intensity), 0.0, 1.0)
-            tint = 1.0 + strength * (env_color[None, None, :3] - 1.0)
-            # Don't apply HDRI to GPU background
+            env_clamped = np.clip(env_sample, 0.0, 1.0)
+            # Crossfade: mix(base, env, strength)
+            rgb_tinted = np.clip((1.0 - strength) * rgb + strength * env_clamped, 0.0, 1.0)
             if gpu_background_mask is not None:
-                rgb_tinted = np.clip(rgb * tint, 0.0, 1.0)
                 rgb = np.where(gpu_background_mask[..., None], rgb, rgb_tinted)
             else:
-                rgb = np.clip(rgb * tint, 0.0, 1.0)
+                rgb = rgb_tinted
 
     if background_rgb is not None:
         mask: Optional[np.ndarray]

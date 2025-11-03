@@ -66,6 +66,23 @@ pub struct HybridUniforms {
     pub _pad: [u32; 2],
 }
 
+/// Lighting uniforms for configurable lighting models
+/// Total size: 80 bytes (aligned to 16 for uniform buffer)
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Debug)]
+pub struct LightingUniforms {
+    pub light_dir: [f32; 3],       // Directional light direction (normalized) - offset 0, size 12
+    pub lighting_type: u32,        // 0=flat, 1=lambertian, 2=phong, 3=blinn-phong - offset 12, size 4
+    pub light_color: [f32; 3],     // Light color * intensity - offset 16, size 12
+    pub shadows_enabled: u32,      // 0 or 1 - offset 28, size 4
+    pub ambient_color: [f32; 3],   // Ambient/indirect light color - offset 32, size 12
+    pub shadow_intensity: f32,     // Shadow darkness [0,1] - offset 44, size 4
+    pub hdri_intensity: f32,       // HDR environment intensity (for future use) - offset 48, size 4
+    pub hdri_rotation: f32,        // HDR rotation in radians (for future use) - offset 52, size 4
+    pub specular_power: f32,       // Phong/Blinn specular exponent (default 32.0) - offset 56, size 4
+    pub _pad: [u32; 5],            // Padding to 80 bytes (16-byte aligned) - offset 60, size 20
+}
+
 /// Traversal mode for hybrid rendering
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TraversalMode {
@@ -85,6 +102,8 @@ impl Default for TraversalMode {
 pub struct HybridTracerParams {
     /// Base path tracer uniforms
     pub base_uniforms: Uniforms,
+    /// Lighting configuration
+    pub lighting_uniforms: LightingUniforms,
     /// Traversal mode
     pub traversal_mode: TraversalMode,
     /// Early exit distance for optimization
@@ -95,6 +114,15 @@ pub struct HybridTracerParams {
 
 impl Default for HybridTracerParams {
     fn default() -> Self {
+        // Default light direction: azimuth 315°, elevation 45°
+        let azimuth = 315.0_f32.to_radians();
+        let elevation = 45.0_f32.to_radians();
+        let light_dir = [
+            azimuth.cos() * elevation.cos(),
+            elevation.sin(),
+            azimuth.sin() * elevation.cos(),
+        ];
+        
         Self {
             base_uniforms: Uniforms {
                 width: 512,
@@ -111,6 +139,18 @@ impl Default for HybridTracerParams {
                 seed_hi: 12345,
                 seed_lo: 67890,
                 _pad_end: [0, 0, 0],
+            },
+            lighting_uniforms: LightingUniforms {
+                light_dir,
+                lighting_type: 1, // Lambertian by default
+                light_color: [1.0, 0.95, 0.8], // Warm white light
+                shadows_enabled: 1,
+                ambient_color: [0.1, 0.12, 0.15], // Cool ambient
+                shadow_intensity: 0.6,
+                hdri_intensity: 0.0,
+                hdri_rotation: 0.0,
+                specular_power: 32.0,
+                _pad: [0, 0, 0, 0, 0],
             },
             traversal_mode: TraversalMode::Hybrid,
             early_exit_distance: 0.01,
@@ -135,10 +175,11 @@ pub struct HybridPathTracer {
 
 /// Bind group layouts for hybrid path tracer
 struct HybridBindGroupLayouts {
-    uniforms: wgpu::BindGroupLayout, // Group 0: camera uniforms
-    scene: wgpu::BindGroupLayout,    // Group 1: spheres + legacy mesh buffers
-    accum: wgpu::BindGroupLayout,    // Group 2: accumulation buffer
-    output: wgpu::BindGroupLayout,   // Group 3: primary output texture + AOVs
+    uniforms: wgpu::BindGroupLayout,  // Group 0: camera uniforms
+    scene: wgpu::BindGroupLayout,     // Group 1: spheres + legacy mesh buffers
+    accum: wgpu::BindGroupLayout,     // Group 2: accumulation buffer
+    output: wgpu::BindGroupLayout,    // Group 3: primary output texture + AOVs
+    lighting: wgpu::BindGroupLayout,  // Group 4: lighting uniforms
 }
 
 impl HybridPathTracer {
@@ -159,6 +200,7 @@ impl HybridPathTracer {
             scene: Self::create_scene_layout(device),
             accum: Self::create_accum_layout(device),
             output: Self::create_output_layout(device),
+            lighting: Self::create_lighting_layout(device),
         };
 
         // Create pipeline layout
@@ -169,6 +211,7 @@ impl HybridPathTracer {
                 &layouts.scene,
                 &layouts.accum,
                 &layouts.output,
+                &layouts.lighting,
             ],
             push_constant_ranges: &[],
         });
@@ -228,6 +271,13 @@ impl HybridPathTracer {
         let hybrid_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("hybrid-pt-hybrid-ubo"),
             contents: bytemuck::bytes_of(&hybrid_uniforms),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Lighting uniforms buffer
+        let lighting_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("hybrid-pt-lighting-ubo"),
+            contents: bytemuck::bytes_of(&params.lighting_uniforms),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -357,7 +407,15 @@ impl HybridPathTracer {
             entries: &bg3_entries,
         });
 
-        // Removed separate AOV (bg4) and Hybrid (bg5) groups; merged into bg3 and bg1 respectively.
+        // Lighting bind group (Group 4)
+        let bg4 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("hybrid-pt-bg4"),
+            layout: &self.layouts.lighting,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: lighting_ubo.as_entire_binding(),
+            }],
+        });
 
         // Dispatch compute shader
         let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -374,6 +432,7 @@ impl HybridPathTracer {
             cpass.set_bind_group(1, &bg1, &[]);
             cpass.set_bind_group(2, &bg2, &[]);
             cpass.set_bind_group(3, &bg3, &[]);
+            cpass.set_bind_group(4, &bg4, &[]);
 
             let gx = (width + 7) / 8;
             let gy = (height + 7) / 8;
@@ -631,6 +690,22 @@ impl HybridPathTracer {
                     count: None,
                 },
             ],
+        })
+    }
+
+    fn create_lighting_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("hybrid-pt-bgl4-lighting"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
         })
     }
 
