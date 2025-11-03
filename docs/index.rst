@@ -36,6 +36,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    interactive_viewer
    postfx/index
    pbr_materials
+   user/lights_overview
    user/presets_overview
    user/rendering_options_overview
    shadow_mapping

@@ -6,6 +6,7 @@
 use crate::core::material::{texture_flags, PbrLighting, PbrMaterial};
 use crate::mesh::vertex::TbnVertex;
 use crate::lighting::types::ShadowTechnique;
+use crate::lighting::LightBuffer;
 use crate::shadows::{ShadowManager, ShadowManagerConfig};
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
@@ -765,6 +766,8 @@ pub struct PbrPipelineWithShadows {
     pub pipeline_format: Option<TextureFormat>,
     /// Tone mapping configuration
     pub tone_mapping: ToneMappingConfig,
+    /// P1-06: Light buffer for multi-light support with triple-buffering
+    pub light_buffer: LightBuffer,
 }
 
 impl PbrPipelineWithShadows {
@@ -813,6 +816,9 @@ impl PbrPipelineWithShadows {
         let material_bind_group_layout = Self::create_material_bind_group_layout(device);
         let ibl_bind_group_layout = Self::create_ibl_bind_group_layout(device);
         let ibl_resources = create_fallback_ibl_resources(device, queue);
+        
+        // P1-06: Initialize light buffer for multi-light support
+        let light_buffer = LightBuffer::new(device);
         let ibl_bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("pbr_ibl_bind_group"),
             layout: &ibl_bind_group_layout,
@@ -855,6 +861,23 @@ impl PbrPipelineWithShadows {
                     binding: 1,
                     resource: lighting_uniform_buffer.as_entire_binding(),
                 },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: shading_uniform_buffer.as_entire_binding(),
+                },
+                // P1-06: Light buffer bindings (3, 4, 5)
+                BindGroupEntry {
+                    binding: 3,
+                    resource: light_buffer.current_light_buffer().as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: light_buffer.current_count_buffer().as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: light_buffer.environment_buffer().as_entire_binding(),
+                },
             ],
         });
 
@@ -889,6 +912,7 @@ impl PbrPipelineWithShadows {
             render_pipeline: None,
             pipeline_format: None,
             tone_mapping: ToneMappingConfig::new(ToneMappingMode::Reinhard, 1.0),
+            light_buffer,
         }
     }
 
@@ -972,6 +996,37 @@ impl PbrPipelineWithShadows {
             0,
             bytemuck::bytes_of(&self.lighting_uniforms),
         );
+    }
+
+    /// P1-06: Advance light buffer frame counter and refresh bind group
+    /// Call this at the start of each frame before rendering
+    pub fn advance_light_frame(&mut self, device: &Device) {
+        // Advance to next triple-buffered index
+        self.light_buffer.next_frame();
+        
+        // Invalidate bind group to force recreation with new buffers
+        self.globals_bind_group = None;
+    }
+    
+    /// P1-06: Upload lights to GPU via LightBuffer
+    /// Returns error if more than MAX_LIGHTS (16) are provided
+    pub fn update_lights(&mut self, device: &Device, queue: &Queue, lights: &[crate::lighting::types::Light]) -> Result<(), String> {
+        self.light_buffer.update(device, queue, lights)?;
+        
+        // Invalidate bind group to pick up new light data
+        self.globals_bind_group = None;
+        
+        Ok(())
+    }
+    
+    /// P1-06: Get current light count for debugging
+    pub fn light_count(&self) -> usize {
+        self.light_buffer.last_uploaded_lights().len()
+    }
+    
+    /// P1-06: Get debug info string from light buffer
+    pub fn light_debug_info(&self) -> String {
+        self.light_buffer.debug_info()
     }
 
     /// Ensure the material bind group exists, creating defaults if needed.
@@ -1337,6 +1392,39 @@ impl PbrPipelineWithShadows {
                     },
                     count: None,
                 },
+                // P1-06: Binding 3 - Light array SSBO (read-only storage)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // P1-06: Binding 4 - Light metadata uniform (count, frame, seeds)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // P1-06: Binding 5 - Environment params uniform (stub for P4 IBL)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         })
     }
@@ -1358,6 +1446,19 @@ impl PbrPipelineWithShadows {
                     BindGroupEntry {
                         binding: 2,
                         resource: self.shading_uniform_buffer.as_entire_binding(),
+                    },
+                    // P1-06: Light buffer bindings (3, 4, 5)
+                    BindGroupEntry {
+                        binding: 3,
+                        resource: self.light_buffer.current_light_buffer().as_entire_binding(),
+                    },
+                    BindGroupEntry {
+                        binding: 4,
+                        resource: self.light_buffer.current_count_buffer().as_entire_binding(),
+                    },
+                    BindGroupEntry {
+                        binding: 5,
+                        resource: self.light_buffer.environment_buffer().as_entire_binding(),
                     },
                 ],
             });

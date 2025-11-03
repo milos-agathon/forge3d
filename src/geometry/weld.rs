@@ -205,6 +205,7 @@ mod tests {
             ],
             normals: vec![],
             uvs: vec![],
+            tangents: vec![],
             indices: vec![0, 1, 2, 3, 2, 1],
         };
         let result = weld_mesh(&mesh, WeldOptions::default());
@@ -218,6 +219,7 @@ mod tests {
             positions: vec![[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
             normals: vec![],
             uvs: vec![[0.0, 0.0], [1.0, 0.0]],
+            tangents: vec![],
             indices: vec![0, 1, 1],
         };
         let result = weld_mesh(&mesh, WeldOptions::default());

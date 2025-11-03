@@ -1,17 +1,4 @@
 // src/shaders/terrain_pbr_pom.wgsl
-}
-@group(2) @binding(0)
-var ibl_specular_tex : texture_cube<f32>;
-
-@group(2) @binding(1)
-var ibl_irradiance_tex : texture_cube<f32>;
-
-@group(2) @binding(2)
-
-@group(2) @binding(3)
-var ibl_brdf_lut_tex : texture_2d<f32>;
-
-@group(2) @binding(4)
 // Terrain PBR + POM shader implementing normal, triplanar, and BRDF logic
 // Exists to light the terrain renderer milestone with placeholder resources until assets land
 // RELEVANT FILES: src/terrain_renderer.rs, src/terrain_render_params.rs, src/overlay_layer.rs, terrain_demo_task_breakdown.md
@@ -78,6 +65,42 @@ var colormap_samp : sampler;
 
 @group(0) @binding(8)
 var<uniform> u_overlay : OverlayUniforms;
+
+// P1-06: Light buffer bindings (@group(1))
+struct Light {
+    light_type: u32,
+    flags: u32,
+    position: vec3<f32>,
+    direction: vec3<f32>,
+    color: vec3<f32>,
+    intensity: f32,
+    range: f32,
+    inner_angle: f32,
+    outer_angle: f32,
+    area_width: f32,
+    area_height: f32,
+    env_texture_index: u32,
+};
+
+struct LightMetadata {
+    light_count: u32,
+    frame_index: u32,
+    sequence_seed: vec2<f32>,
+};
+
+struct EnvironmentParams {
+    ambient: vec3<f32>,
+    padding: f32,
+};
+
+@group(1) @binding(3)
+var<storage, read> lights: array<Light>;
+
+@group(1) @binding(4)
+var<uniform> light_metadata: LightMetadata;
+
+@group(1) @binding(5)
+var<uniform> environment_params: EnvironmentParams;
 
 @group(2) @binding(0)
 var ibl_specular_tex : texture_cube<f32>;

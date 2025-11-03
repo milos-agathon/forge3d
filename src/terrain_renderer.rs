@@ -23,6 +23,7 @@ use wgpu::util::DeviceExt;
 use wgpu::TextureFormatFeatureFlags;
 
 use crate::terrain_render_params::{AddressModeNative, FilterModeNative};
+use crate::lighting::LightBuffer;
 
 /// Terrain renderer implementing PBR + POM pipeline
 #[pyclass(module = "forge3d._forge3d", name = "TerrainRenderer")]
@@ -32,16 +33,16 @@ pub struct TerrainRenderer {
     adapter: Arc<wgpu::Adapter>,
     pipeline: Mutex<PipelineCache>,
     bind_group_layout: wgpu::BindGroupLayout,
-    placeholder_bind_group_layout: wgpu::BindGroupLayout,
     ibl_bind_group_layout: wgpu::BindGroupLayout,
     blit_bind_group_layout: wgpu::BindGroupLayout,
     blit_pipeline: wgpu::RenderPipeline,
     sampler_linear: wgpu::Sampler,
-    empty_bind_group: wgpu::BindGroup,
     color_format: wgpu::TextureFormat,
     // P0-03: Config plumbing (no shader/pipeline behavior changes)
     #[cfg(feature = "enable-renderer-config")]
     config: Arc<Mutex<crate::render::params::RendererConfig>>,
+    // P1-08: Light buffer for multi-light support
+    light_buffer: Arc<Mutex<LightBuffer>>,
 }
 
 #[repr(C, align(16))]
@@ -351,6 +352,73 @@ impl TerrainRenderer {
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to create TerrainRenderer: {:#}", e)))
     }
 
+    /// P1-08: Set lights from Python dicts
+    /// 
+    /// Args:
+    ///     lights: List of light specification dicts
+    /// 
+    /// Each light dict should have:
+    ///     - `type`: "directional", "point", "spot", "area_rect", etc.
+    ///     - `position` or `pos`: [x, y, z] (for non-directional lights)
+    ///     - `direction` or `dir`: [x, y, z] (for directional/spot lights)
+    ///     - `intensity`: float (default 1.0)
+    ///     - `color` or `rgb`: [r, g, b] (default [1, 1, 1])
+    ///     - `range`: float (for point/spot/area lights)
+    ///     - `cone_angle`: float in degrees (for spot lights)
+    ///     - `area_extent`: [width, height] (for area_rect)
+    ///     - `radius`: float (for area_disk, area_sphere)
+    /// 
+    /// Example:
+    ///     renderer.set_lights([
+    ///         {"type": "directional", "intensity": 3.0, "azimuth": 135, "elevation": 35},
+    ///         {"type": "point", "pos": [0, 10, 0], "intensity": 10, "range": 50}
+    ///     ])
+    #[pyo3(signature = (lights))]
+    fn set_lights(&self, py: Python, lights: &PyAny) -> PyResult<()> {
+        use pyo3::types::PyList;
+        
+        let lights_list = lights.downcast::<PyList>()
+            .map_err(|_| PyRuntimeError::new_err("lights must be a list"))?;
+        
+        // Parse all light dicts to native Light structs
+        let mut native_lights = Vec::new();
+        for (i, light_dict) in lights_list.iter().enumerate() {
+            match crate::lighting::py_bindings::parse_light_dict(py, light_dict) {
+                Ok(light) => native_lights.push(light),
+                Err(e) => {
+                    return Err(PyRuntimeError::new_err(
+                        format!("Failed to parse light {}: {}", i, e)
+                    ));
+                }
+            }
+        }
+        
+        // Update light buffer
+        let mut light_buffer = self.light_buffer.lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock light buffer: {}", e)))?;
+        
+        light_buffer.update(&self.device, &self.queue, &native_lights)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to update lights: {}", e)))?;
+        
+        Ok(())
+    }
+
+    /// P1-09: Get debug info from light buffer
+    /// 
+    /// Returns:
+    ///     String with light buffer state (count, frame index, light details)
+    /// 
+    /// Example:
+    ///     info = renderer.light_debug_info()
+    ///     print(info)
+    #[pyo3(signature = ())]
+    fn light_debug_info(&self) -> PyResult<String> {
+        let light_buffer = self.light_buffer.lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock light buffer: {}", e)))?;
+        
+        Ok(light_buffer.debug_info())
+    }
+
     /// Render terrain using PBR + POM
     ///
     /// Args:
@@ -514,12 +582,6 @@ impl TerrainRenderer {
             ],
         });
 
-        let placeholder_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("terrain_pbr_pom.placeholder.bind_group_layout"),
-                entries: &[],
-            });
-
         let ibl_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("terrain_pbr_pom.ibl_bind_group_layout"),
@@ -573,11 +635,7 @@ impl TerrainRenderer {
                 ],
             });
 
-        let empty_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("terrain_pbr_pom.placeholder.bind_group"),
-            layout: &placeholder_bind_group_layout,
-            entries: &[],
-        });
+        // P1-06: Empty bind group removed - light buffer will provide group(1) bindings
 
         // Create samplers
         // Use Nearest filtering for R32Float heightmap (non-filterable on some hardware)
@@ -615,11 +673,15 @@ impl TerrainRenderer {
             ..Default::default()
         });
 
+        // P1-08: Initialize light buffer before pipeline creation
+        let light_buffer = LightBuffer::new(&device);
+        
         let color_format = wgpu::TextureFormat::Rgba8Unorm;
+        let light_buffer_layout = light_buffer.bind_group_layout();
         let pipeline = Self::create_render_pipeline(
             device.as_ref(),
             &bind_group_layout,
-            &placeholder_bind_group_layout,
+            light_buffer_layout,
             &ibl_bind_group_layout,
             color_format,
             1,
@@ -631,20 +693,19 @@ impl TerrainRenderer {
             sample_count: 1,
             pipeline,
         };
-
+        
         Ok(Self {
             device,
             queue,
             adapter,
             pipeline: Mutex::new(pipeline_cache),
             bind_group_layout,
-            placeholder_bind_group_layout,
             ibl_bind_group_layout,
             blit_bind_group_layout,
             blit_pipeline,
             sampler_linear,
-            empty_bind_group,
             color_format,
+            light_buffer: Arc::new(Mutex::new(light_buffer)),
             // P0-03: Initialize with default config (no behavior changes)
             #[cfg(feature = "enable-renderer-config")]
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
@@ -654,7 +715,7 @@ impl TerrainRenderer {
     fn create_render_pipeline(
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
-        placeholder_bind_group_layout: &wgpu::BindGroupLayout,
+        light_buffer_layout: &wgpu::BindGroupLayout,
         ibl_bind_group_layout: &wgpu::BindGroupLayout,
         color_format: wgpu::TextureFormat,
         sample_count: u32,
@@ -667,9 +728,9 @@ impl TerrainRenderer {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("terrain_pbr_pom.pipeline_layout"),
             bind_group_layouts: &[
-                bind_group_layout,
-                placeholder_bind_group_layout,
-                ibl_bind_group_layout,
+                bind_group_layout,           // @group(0): terrain uniforms/textures (bindings 0-8)
+                light_buffer_layout,         // @group(1): lights (bindings 3-5)
+                ibl_bind_group_layout,       // @group(2): IBL (bindings 0-4)
             ],
             push_constant_ranges: &[],
         });
@@ -764,6 +825,10 @@ impl TerrainRenderer {
         params: &crate::terrain_render_params::TerrainRenderParams,
         heightmap: PyReadonlyArray2<f32>,
     ) -> Result<crate::Frame> {
+        // P1-06: Advance light buffer frame (triple-buffering)
+        self.light_buffer.lock()
+            .map_err(|_| anyhow!("Light buffer mutex poisoned"))?
+            .next_frame();
         let decoded = params.decoded();
         // Get heightmap dimensions
         let heightmap_array = heightmap.as_array();
@@ -955,10 +1020,12 @@ impl TerrainRenderer {
             .lock()
             .map_err(|_| anyhow!("TerrainRenderer pipeline mutex poisoned"))?;
         if pipeline_cache.sample_count != effective_msaa {
+            let light_buffer = self.light_buffer.lock()
+                .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
             pipeline_cache.pipeline = Self::create_render_pipeline(
                 self.device.as_ref(),
                 &self.bind_group_layout,
-                &self.placeholder_bind_group_layout,
+                light_buffer.bind_group_layout(),
                 &self.ibl_bind_group_layout,
                 self.color_format,
                 effective_msaa,
@@ -1066,31 +1133,46 @@ impl TerrainRenderer {
             } else {
                 None
             };
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("terrain.render_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: color_view,
-                    resolve_target,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.1,
-                            b: 0.15,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
 
-            pass.set_pipeline(&pipeline_cache.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            pass.set_bind_group(1, &self.empty_bind_group, &[]);
-            pass.set_bind_group(2, &ibl_bind_group, &[]);
-            pass.draw(0..3, 0..1);
+            // P1-06: Lock light buffer before render pass to get bind group reference
+            let light_buffer_guard = self.light_buffer.lock()
+                .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
+            let light_bind_group_opt = light_buffer_guard.bind_group();
+
+            // Main render pass
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("terrain.render_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: color_view,
+                        resolve_target,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.1,
+                                b: 0.15,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                pass.set_pipeline(&pipeline_cache.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                
+                // Bind light buffer if available
+                if let Some(light_bind_group) = light_bind_group_opt {
+                    pass.set_bind_group(1, light_bind_group, &[]);
+                }
+                
+                pass.set_bind_group(2, &ibl_bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            drop(light_buffer_guard);
         }
         drop(pipeline_cache);
 

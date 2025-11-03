@@ -122,7 +122,72 @@ impl GiTechnique {
 
 /// Light configuration (P1 extended)
 /// GPU-aligned struct for SSBO upload (std430 layout)
-/// Size: 80 bytes (5 * vec4)
+/// 
+/// # Layout Parity (P1-01)
+/// 
+/// This struct MUST maintain exact binary layout parity with WGSL `LightGPU` in
+/// `src/shaders/lights.wgsl` for correct GPU buffer uploads.
+/// 
+/// **Size**: 80 bytes (5 vec4s)  
+/// **Alignment**: 16 bytes (vec4 boundary)  
+/// **Traits**: `Pod` + `Zeroable` (bytemuck) for safe byte casting
+/// 
+/// ## Memory Layout
+/// 
+/// ```text
+/// Offset | Field                | Type      | Size  | Notes
+/// -------|----------------------|-----------|-------|------------------------
+///   0-15 | Vec4 #1              |           |  16   |
+///      0 |   kind               | u32       |   4   | LightType enum
+///      4 |   intensity          | f32       |   4   |
+///      8 |   range              | f32       |   4   | Unused for directional
+///     12 |   env_texture_index  | u32       |   4   | Only for Environment
+///  16-31 | Vec4 #2              |           |  16   |
+///     16 |   color              | [f32; 3]  |  12   | RGB
+///     28 |   _pad1              | f32       |   4   |
+///  32-47 | Vec4 #3              |           |  16   |
+///     32 |   pos_ws             | [f32; 3]  |  12   | Unused for directional
+///     44 |   _pad2              | f32       |   4   |
+///  48-63 | Vec4 #4              |           |  16   |
+///     48 |   dir_ws             | [f32; 3]  |  12   | Unused for point
+///     60 |   _pad3              | f32       |   4   |
+///  64-79 | Vec4 #5              |           |  16   |
+///     64 |   cone_cos           | [f32; 2]  |   8   | Spot: [inner, outer]
+///     72 |   area_half          | [f32; 2]  |   8   | Area: extents or radius
+/// ```
+/// 
+/// ## LightType Values (must match WGSL constants)
+/// 
+/// - Directional = 0 (LIGHT_DIRECTIONAL)
+/// - Point = 1 (LIGHT_POINT)
+/// - Spot = 2 (LIGHT_SPOT)
+/// - Environment = 3 (LIGHT_ENVIRONMENT)
+/// - AreaRect = 4 (LIGHT_AREA_RECT)
+/// - AreaDisk = 5 (LIGHT_AREA_DISK)
+/// - AreaSphere = 6 (LIGHT_AREA_SPHERE)
+/// 
+/// ## Field Usage by Light Type
+/// 
+/// | Field            | Directional | Point | Spot | Environment | Area (Rect/Disk/Sphere) |
+/// |------------------|-------------|-------|------|-------------|-------------------------|
+/// | kind             | ✓           | ✓     | ✓    | ✓           | ✓                       |
+/// | intensity        | ✓           | ✓     | ✓    | ✓           | ✓                       |
+/// | range            | ✗           | ✓     | ✓    | ✗           | ✓                       |
+/// | env_texture_index| ✗           | ✗     | ✗    | ✓           | ✗                       |
+/// | color            | ✓           | ✓     | ✓    | ✓           | ✓                       |
+/// | pos_ws           | ✗           | ✓     | ✓    | ✗           | ✓                       |
+/// | dir_ws           | ✓           | ✗     | ✓    | ✗           | ✓ (rect/disk normal)    |
+/// | cone_cos         | ✗           | ✗     | ✓    | ✗           | ✗                       |
+/// | area_half        | ✗           | ✗     | ✗    | ✗           | ✓                       |
+/// 
+/// ## Verification
+/// 
+/// Unit tests in `#[cfg(test)] mod tests` verify:
+/// - Struct size is exactly 80 bytes
+/// - Field offsets match expected std430 layout
+/// - Enum values match WGSL constants
+/// - Pod/Zeroable traits work correctly
+/// - Constructor functions initialize unused fields consistently
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct Light {
@@ -1281,6 +1346,151 @@ mod tests {
         assert_eq!(std::mem::size_of::<VolumetricSettings>() % 16, 0);
         assert_eq!(std::mem::size_of::<SkySettings>(), 48);
         assert_eq!(std::mem::size_of::<VolumetricSettings>(), 80);
+    }
+
+    // P1-01: Host/device layout parity tests
+    #[test]
+    fn test_light_struct_size_and_alignment() {
+        // Light must be exactly 80 bytes (5 * vec4) for std430 SSBO layout
+        assert_eq!(std::mem::size_of::<Light>(), 80,
+            "Light struct must be 80 bytes to match WGSL LightGPU layout");
+        
+        // Verify 16-byte alignment for vec4 boundary
+        assert_eq!(std::mem::align_of::<Light>(), 16,
+            "Light struct must be 16-byte aligned");
+    }
+
+    #[test]
+    fn test_light_field_offsets() {
+        use std::mem::offset_of;
+        
+        // Vec4 #1: type, intensity, range, env_texture_index (bytes 0-15)
+        assert_eq!(offset_of!(Light, kind), 0);
+        assert_eq!(offset_of!(Light, intensity), 4);
+        assert_eq!(offset_of!(Light, range), 8);
+        assert_eq!(offset_of!(Light, env_texture_index), 12);
+        
+        // Vec4 #2: color + padding (bytes 16-31)
+        assert_eq!(offset_of!(Light, color), 16);
+        assert_eq!(offset_of!(Light, _pad1), 28);
+        
+        // Vec4 #3: pos_ws + padding (bytes 32-47)
+        assert_eq!(offset_of!(Light, pos_ws), 32);
+        assert_eq!(offset_of!(Light, _pad2), 44);
+        
+        // Vec4 #4: dir_ws + padding (bytes 48-63)
+        assert_eq!(offset_of!(Light, dir_ws), 48);
+        assert_eq!(offset_of!(Light, _pad3), 60);
+        
+        // Vec4 #5: cone_cos + area_half (bytes 64-79)
+        assert_eq!(offset_of!(Light, cone_cos), 64);
+        assert_eq!(offset_of!(Light, area_half), 72);
+    }
+
+    #[test]
+    fn test_light_type_enum_values() {
+        // Verify enum values match WGSL constants
+        assert_eq!(LightType::Directional.as_u32(), 0);
+        assert_eq!(LightType::Point.as_u32(), 1);
+        assert_eq!(LightType::Spot.as_u32(), 2);
+        assert_eq!(LightType::Environment.as_u32(), 3);
+        assert_eq!(LightType::AreaRect.as_u32(), 4);
+        assert_eq!(LightType::AreaDisk.as_u32(), 5);
+        assert_eq!(LightType::AreaSphere.as_u32(), 6);
+    }
+
+    #[test]
+    fn test_light_pod_safety() {
+        // Verify Light can be safely cast to bytes (bytemuck Pod trait)
+        let light = Light::default();
+        let _bytes: &[u8] = bytemuck::bytes_of(&light);
+        assert_eq!(_bytes.len(), 80);
+    }
+
+    #[test]
+    fn test_light_directional_unused_fields() {
+        // Directional lights should have well-defined unused fields
+        let light = Light::directional(45.0, 30.0, 2.0, [1.0, 0.9, 0.8]);
+        assert_eq!(light.kind, LightType::Directional.as_u32());
+        assert_eq!(light.pos_ws, [0.0; 3]); // Unused for directional
+        assert_eq!(light.range, 0.0);       // Unused for directional
+    }
+
+    #[test]
+    fn test_light_environment_fields() {
+        // Environment lights should carry env_texture_index
+        let light = Light::environment(1.5, 42);
+        assert_eq!(light.kind, LightType::Environment.as_u32());
+        assert_eq!(light.env_texture_index, 42);
+        assert_eq!(light.intensity, 1.5);
+    }
+
+    #[test]
+    fn test_light_point_fields() {
+        let pos = [10.0, 20.0, 30.0];
+        let light = Light::point(pos, 50.0, 3.0, [1.0, 0.5, 0.2]);
+        assert_eq!(light.kind, LightType::Point.as_u32());
+        assert_eq!(light.pos_ws, pos);
+        assert_eq!(light.range, 50.0);
+        assert_eq!(light.dir_ws, [0.0; 3]); // Unused for point
+    }
+
+    #[test]
+    fn test_light_spot_cone_precompute() {
+        let light = Light::spot(
+            [0.0, 5.0, 0.0],
+            [0.0, -1.0, 0.0],
+            100.0,
+            20.0,  // inner_deg
+            35.0,  // outer_deg
+            5.0,
+            [1.0, 1.0, 1.0],
+        );
+        assert_eq!(light.kind, LightType::Spot.as_u32());
+        // Verify cosines are precomputed (not raw degrees)
+        assert!(light.cone_cos[0] > 0.9 && light.cone_cos[0] < 1.0); // cos(20°) ≈ 0.94
+        assert!(light.cone_cos[1] > 0.8 && light.cone_cos[1] < 0.9); // cos(35°) ≈ 0.82
+    }
+
+    #[test]
+    fn test_light_area_rect_fields() {
+        let light = Light::area_rect(
+            [0.0, 10.0, 0.0],
+            [0.0, -1.0, 0.0],
+            2.5,  // half_width
+            1.5,  // half_height
+            10.0,
+            [1.0, 1.0, 1.0],
+        );
+        assert_eq!(light.kind, LightType::AreaRect.as_u32());
+        assert_eq!(light.area_half, [2.5, 1.5]);
+    }
+
+    #[test]
+    fn test_light_area_disk_fields() {
+        let light = Light::area_disk(
+            [5.0, 5.0, 5.0],
+            [1.0, 0.0, 0.0],
+            3.0,  // radius
+            8.0,
+            [1.0, 1.0, 0.8],
+        );
+        assert_eq!(light.kind, LightType::AreaDisk.as_u32());
+        assert_eq!(light.area_half[0], 3.0); // Radius stored in x
+        assert_eq!(light.area_half[1], 0.0); // y unused
+    }
+
+    #[test]
+    fn test_light_area_sphere_fields() {
+        let light = Light::area_sphere(
+            [0.0, 15.0, 0.0],
+            2.0,  // radius
+            12.0,
+            [1.0, 0.9, 0.7],
+        );
+        assert_eq!(light.kind, LightType::AreaSphere.as_u32());
+        assert_eq!(light.area_half[0], 2.0); // Radius stored in x
+        assert_eq!(light.dir_ws, [0.0; 3]);  // Unused for sphere
     }
 
     #[test]

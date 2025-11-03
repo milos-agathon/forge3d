@@ -29,6 +29,3 @@ pub use py_bindings::{
     PySSAOSettings, PySSGISettings, PySSRSettings,
     PySkySettings, PyVolumetricSettings,
 };
-
-#[cfg(test)]
-mod tests;

@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn test_shadow_map_memory() {
         let settings = ShadowSettings {
-            tech: ShadowTechnique::Hard,
+            tech: ShadowTechnique::Hard.as_u32(),
             map_res: 2048,
             bias: 0.005,
             normal_bias: 0.01,
@@ -249,10 +249,12 @@ mod tests {
 
     #[test]
     fn test_directional_light_matrix() {
+        // Create downward light: azimuth 0, elevation -90 (straight down)
         let light = Light::directional(
-            [0.0, -1.0, 0.0], // downward light
-            1.0,
-            [1.0, 1.0, 1.0],
+            0.0,    // azimuth_deg
+            -90.0,  // elevation_deg (downward)
+            1.0,    // intensity
+            [1.0, 1.0, 1.0],  // color
         );
 
         let bounds = SceneBounds::new([0.0, 0.0, 0.0], 50.0);

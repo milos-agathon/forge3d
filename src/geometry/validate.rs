@@ -216,6 +216,7 @@ mod tests {
             positions,
             normals,
             uvs,
+            tangents: vec![],
             indices,
         }
     }

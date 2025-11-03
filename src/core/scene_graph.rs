@@ -509,6 +509,7 @@ impl Default for SceneGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::Vec4Swizzles;
 
     #[test]
     fn test_scene_graph_basic_operations() {

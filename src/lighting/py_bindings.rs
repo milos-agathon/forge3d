@@ -158,6 +158,169 @@ impl PyLight {
     }
 }
 
+/// P1-08: Parse Python dict to native Light struct
+/// 
+/// Accepts flexible dict formats from Python:
+/// - `type`: "directional", "point", "spot", "area_rect", etc.
+/// - `position` or `pos`: [x, y, z]
+/// - `direction` or `dir`: [x, y, z] (normalized automatically)
+/// - `intensity` or `power`: float
+/// - `color` or `rgb`: [r, g, b]
+/// - `range`: float (point/spot/area)
+/// - `cone_angle` or `angle`: float in degrees (spot)
+/// - `inner_angle`: float in degrees (spot, optional)
+/// - `area_extent`: [width, height] (area_rect)
+/// - `radius`: float (area_disk, area_sphere)
+#[cfg(feature = "extension-module")]
+pub fn parse_light_dict(py: Python, dict: &PyAny) -> PyResult<Light> {
+    use pyo3::types::PyDict;
+    
+    let dict = dict.downcast::<PyDict>()
+        .map_err(|_| PyValueError::new_err("Light spec must be a dict"))?;
+    
+    // Extract light type (required)
+    let light_type: String = dict.get_item("type")?
+        .ok_or_else(|| PyValueError::new_err("Light dict must have 'type' key"))?
+        .extract()?;
+    
+    // Extract common fields
+    let intensity: f32 = dict.get_item("intensity")?
+        .or_else(|| dict.get_item("power").ok().flatten())
+        .map(|v| v.extract())
+        .transpose()?
+        .unwrap_or(1.0);
+    
+    let color: [f32; 3] = dict.get_item("color")?
+        .or_else(|| dict.get_item("rgb").ok().flatten())
+        .map(|v| extract_f32_array::<3>(v, "color"))
+        .transpose()?
+        .unwrap_or([1.0, 1.0, 1.0]);
+    
+    // Match on light type
+    match light_type.to_lowercase().as_str() {
+        "directional" => {
+            let azimuth: f32 = dict.get_item("azimuth")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or(135.0);
+            let elevation: f32 = dict.get_item("elevation")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or(35.0);
+            Ok(Light::directional(azimuth, elevation, intensity, color))
+        },
+        "point" => {
+            let position = dict.get_item("position")?
+                .or_else(|| dict.get_item("pos").ok().flatten())
+                .ok_or_else(|| PyValueError::new_err("Point light requires 'position'"))?
+                .extract::<[f32; 3]>()?;
+            let range: f32 = dict.get_item("range")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or(100.0);
+            Ok(Light::point(position, range, intensity, color))
+        },
+        "spot" => {
+            let position = dict.get_item("position")?
+                .or_else(|| dict.get_item("pos").ok().flatten())
+                .ok_or_else(|| PyValueError::new_err("Spot light requires 'position'"))?
+                .extract::<[f32; 3]>()?;
+            let direction = dict.get_item("direction")?
+                .or_else(|| dict.get_item("dir").ok().flatten())
+                .ok_or_else(|| PyValueError::new_err("Spot light requires 'direction'"))?
+                .extract::<[f32; 3]>()?;
+            let range: f32 = dict.get_item("range")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or(100.0);
+            
+            // Handle cone angles - accept single angle or inner/outer
+            let (inner_angle, outer_angle) = if let Some(cone) = dict.get_item("cone_angle")?
+                .or_else(|| dict.get_item("angle").ok().flatten()) {
+                let angle: f32 = cone.extract()?;
+                (angle * 0.75, angle)  // Inner is 75% of outer
+            } else {
+                let inner: f32 = dict.get_item("inner_angle")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or(15.0);
+                let outer: f32 = dict.get_item("outer_angle")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or(30.0);
+                (inner, outer)
+            };
+            
+            Ok(Light::spot(position, direction, range, inner_angle, outer_angle, intensity, color))
+        },
+        "environment" => {
+            let env_index: u32 = dict.get_item("env_texture_index")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or(0);
+            Ok(Light::environment(intensity, env_index))
+        },
+        "area_rect" | "arearect" => {
+            let position = dict.get_item("position")?
+                .or_else(|| dict.get_item("pos").ok().flatten())
+                .ok_or_else(|| PyValueError::new_err("Area rect light requires 'position'"))?
+                .extract::<[f32; 3]>()?;
+            let direction = dict.get_item("direction")?
+                .or_else(|| dict.get_item("dir").ok().flatten())
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or([0.0, -1.0, 0.0]);
+            
+            let (width, height) = if let Some(extent) = dict.get_item("area_extent")? {
+                let arr: [f32; 2] = extent.extract()?;
+                (arr[0], arr[1])
+            } else {
+                let w: f32 = dict.get_item("width")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or(1.0);
+                let h: f32 = dict.get_item("height")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or(1.0);
+                (w, h)
+            };
+            
+            Ok(Light::area_rect(position, direction, width, height, intensity, color))
+        },
+        "area_disk" | "areadisk" => {
+            let position = dict.get_item("position")?
+                .or_else(|| dict.get_item("pos").ok().flatten())
+                .ok_or_else(|| PyValueError::new_err("Area disk light requires 'position'"))?
+                .extract::<[f32; 3]>()?;
+            let direction = dict.get_item("direction")?
+                .or_else(|| dict.get_item("dir").ok().flatten())
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or([0.0, -1.0, 0.0]);
+            let radius: f32 = dict.get_item("radius")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or(1.0);
+            
+            Ok(Light::area_disk(position, direction, radius, intensity, color))
+        },
+        "area_sphere" | "areasphere" => {
+            let position = dict.get_item("position")?
+                .or_else(|| dict.get_item("pos").ok().flatten())
+                .ok_or_else(|| PyValueError::new_err("Area sphere light requires 'position'"))?
+                .extract::<[f32; 3]>()?;
+            let radius: f32 = dict.get_item("radius")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or(1.0);
+            
+            Ok(Light::area_sphere(position, radius, intensity, color))
+        },
+        _ => Err(PyValueError::new_err(format!("Unknown light type: {}", light_type))),
+    }
+}
+
 /// Python wrapper for Material shading parameters (P2)
 #[cfg(feature = "extension-module")]
 #[pyclass(module = "forge3d._forge3d", name = "MaterialShading")]

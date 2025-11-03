@@ -622,6 +622,11 @@ def _parse_args() -> argparse.Namespace:
         type=str,
         help="Volumetric fog settings (e.g., 'density=0.02,phase=hg,g=0.7').",
     )
+    parser.add_argument(
+        "--debug-lights",
+        action="store_true",
+        help="Print light buffer debug info after setting lights (P1-09).",
+    )
     return parser.parse_args()
 
 
@@ -724,6 +729,52 @@ def main() -> int:
     )
 
     renderer = f3d.TerrainRenderer(sess)
+
+    # P1-09: Wire CLI --light specs to native LightBuffer
+    if renderer_config.lighting.lights:
+        # Convert RendererConfig lights to dicts for set_lights()
+        light_dicts = []
+        for light in renderer_config.lighting.lights:
+            light_dict = {"type": light.type}
+            if hasattr(light, "azimuth") and light.azimuth is not None:
+                light_dict["azimuth"] = light.azimuth
+            if hasattr(light, "elevation") and light.elevation is not None:
+                light_dict["elevation"] = light.elevation
+            if hasattr(light, "position") and light.position is not None:
+                light_dict["position"] = light.position
+            if hasattr(light, "direction") and light.direction is not None:
+                light_dict["direction"] = light.direction
+            if hasattr(light, "intensity") and light.intensity is not None:
+                light_dict["intensity"] = light.intensity
+            if hasattr(light, "color") and light.color is not None:
+                light_dict["color"] = light.color
+            if hasattr(light, "range") and light.range is not None:
+                light_dict["range"] = light.range
+            if hasattr(light, "cone_angle") and light.cone_angle is not None:
+                light_dict["cone_angle"] = light.cone_angle
+            if hasattr(light, "inner_angle") and light.inner_angle is not None:
+                light_dict["inner_angle"] = light.inner_angle
+            if hasattr(light, "outer_angle") and light.outer_angle is not None:
+                light_dict["outer_angle"] = light.outer_angle
+            if hasattr(light, "area_extent") and light.area_extent is not None:
+                light_dict["area_extent"] = light.area_extent
+            if hasattr(light, "radius") and light.radius is not None:
+                light_dict["radius"] = light.radius
+            light_dicts.append(light_dict)
+        
+        try:
+            renderer.set_lights(light_dicts)
+            print(f"[P1-09] Uploaded {len(light_dicts)} light(s) to GPU")
+            
+            # P1-09: Debug output if requested
+            if args.debug_lights:
+                print("\n" + "="*60)
+                print("Light Buffer Debug Info:")
+                print("="*60)
+                print(renderer.light_debug_info())
+                print("="*60 + "\n")
+        except Exception as e:
+            print(f"Warning: Failed to upload lights: {e}")
 
     frame = renderer.render_terrain_pbr_pom(
         material_set=materials,
