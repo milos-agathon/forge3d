@@ -151,18 +151,17 @@ def toon_viz() -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 
 _PRESETS: Dict[str, Callable[[], Dict[str, Any]]] = {
-    "studio_pbr": studio_pbr,
-    "outdoor_sun": outdoor_sun,
-    "toon_viz": toon_viz,
+    "studiopbr": studio_pbr,
+    "outdoorsun": outdoor_sun,
+    "toonviz": toon_viz,
 }
 
 _ALIASES: Dict[str, str] = {
-    "studio": "studio_pbr",
-    "pbr": "studio_pbr",
-    "sun": "outdoor_sun",
-    "outdoor": "outdoor_sun",
-    "toon": "toon_viz",
-    "toonviz": "toon_viz",
+    "studio": "studiopbr",
+    "pbr": "studiopbr",
+    "sun": "outdoorsun",
+    "outdoor": "outdoorsun",
+    "toon": "toonviz",
 }
 
 

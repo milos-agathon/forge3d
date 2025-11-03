@@ -26,6 +26,184 @@ from forge3d.terrain_params import (
 )
 
 
+# ============================================================================
+# P0-09: CLI Integration Smoke Test (CPU-only, no rendering)
+# ============================================================================
+
+def test_terrain_demo_build_renderer_config() -> None:
+    """Smoke test for _build_renderer_config() parsing CLI flags.
+    
+    Tests the terrain_demo CLI flag parsing without requiring GPU or rendering.
+    Validates that _build_renderer_config() correctly translates argparse flags
+    into a normalized RendererConfig.
+    """
+    # Import terrain_demo functions
+    import sys
+    from pathlib import Path
+    
+    # Add examples to path to import terrain_demo
+    examples_path = Path(__file__).parent.parent / "examples"
+    sys.path.insert(0, str(examples_path))
+    
+    try:
+        from terrain_demo import _build_renderer_config
+        import argparse
+    finally:
+        sys.path.pop(0)
+    
+    # Create mock argparse.Namespace with various CLI flags
+    args = argparse.Namespace(
+        light=["type=directional,dir=0.2,0.8,-0.55,intensity=8"],
+        exposure=1.5,
+        brdf="cooktorrance-ggx",
+        shadows="pcf",
+        shadow_map_res=2048,
+        cascades=3,
+        pcss_blocker_radius=None,
+        pcss_filter_radius=None,
+        shadow_light_size=None,
+        shadow_moment_bias=None,
+        gi="ibl,ssao",
+        sky="hosek-wilkie",
+        hdr=None,
+        volumetric=None,
+        preset=None,
+    )
+    
+    # Build config (no rendering, CPU-only)
+    config = _build_renderer_config(args)
+    
+    # Assert config is a RendererConfig instance
+    from forge3d.config import RendererConfig
+    assert isinstance(config, RendererConfig)
+    
+    # Validate config structure
+    config.validate()
+    
+    # Get dict representation for assertions
+    config_dict = config.to_dict()
+    
+    # Assert lighting configuration
+    assert len(config_dict["lighting"]["lights"]) == 1
+    light = config_dict["lighting"]["lights"][0]
+    assert light["type"] == "directional"
+    assert light["intensity"] == pytest.approx(8.0)
+    assert config_dict["lighting"]["exposure"] == pytest.approx(1.5)
+    
+    # Assert shading configuration
+    assert config_dict["shading"]["brdf"] == "cooktorrance-ggx"
+    
+    # Assert shadow configuration
+    assert config_dict["shadows"]["technique"] == "pcf"
+    assert config_dict["shadows"]["map_size"] == 2048
+    assert config_dict["shadows"]["cascades"] == 3
+    
+    # Assert GI configuration
+    assert "ibl" in config_dict["gi"]["modes"]
+    assert "ssao" in config_dict["gi"]["modes"]
+    
+    # Assert atmosphere configuration
+    assert config_dict["atmosphere"]["sky"] == "hosek-wilkie"
+
+
+def test_terrain_demo_build_renderer_config_with_preset() -> None:
+    """Test _build_renderer_config() with preset override.
+    
+    Validates that CLI flags correctly override preset values.
+    """
+    import sys
+    from pathlib import Path
+    
+    examples_path = Path(__file__).parent.parent / "examples"
+    sys.path.insert(0, str(examples_path))
+    
+    try:
+        from terrain_demo import _build_renderer_config
+        import argparse
+    finally:
+        sys.path.pop(0)
+    
+    # Test with preset + overrides
+    args = argparse.Namespace(
+        light=[],
+        exposure=1.0,
+        brdf="toon",
+        shadows="hard",
+        shadow_map_res=None,
+        cascades=2,
+        pcss_blocker_radius=None,
+        pcss_filter_radius=None,
+        shadow_light_size=None,
+        shadow_moment_bias=None,
+        gi=None,
+        sky=None,
+        hdr=None,
+        volumetric=None,
+        preset="outdoor_sun",  # Apply preset
+    )
+    
+    # Build config
+    config = _build_renderer_config(args)
+    config.validate()
+    config_dict = config.to_dict()
+    
+    # Overrides should take precedence over preset
+    assert config_dict["shading"]["brdf"] == "toon"
+    assert config_dict["shadows"]["technique"] == "hard"
+    assert config_dict["shadows"]["cascades"] == 2
+
+
+def test_terrain_demo_build_renderer_config_minimal() -> None:
+    """Test _build_renderer_config() with minimal flags (all defaults).
+    
+    Validates that default config is created when no flags are provided.
+    """
+    import sys
+    from pathlib import Path
+    
+    examples_path = Path(__file__).parent.parent / "examples"
+    sys.path.insert(0, str(examples_path))
+    
+    try:
+        from terrain_demo import _build_renderer_config
+        import argparse
+    finally:
+        sys.path.pop(0)
+    
+    # Minimal args (all None/empty/default)
+    args = argparse.Namespace(
+        light=[],
+        exposure=1.0,
+        brdf=None,
+        shadows=None,
+        shadow_map_res=None,
+        cascades=None,
+        pcss_blocker_radius=None,
+        pcss_filter_radius=None,
+        shadow_light_size=None,
+        shadow_moment_bias=None,
+        gi=None,
+        sky=None,
+        hdr=None,
+        volumetric=None,
+        preset=None,
+    )
+    
+    # Build config
+    config = _build_renderer_config(args)
+    config.validate()
+    config_dict = config.to_dict()
+    
+    # Should have defaults
+    assert config_dict["shading"]["brdf"] == "cooktorrance-ggx"  # Default BRDF
+    assert config_dict["shadows"]["technique"] == "pcf"  # Default shadow technique
+    assert config_dict["lighting"]["exposure"] == pytest.approx(1.0)
+
+
+# ============================================================================
+# GPU-dependent tests below (will be skipped in CPU-only CI)
+# ============================================================================
+
 required_symbols = (
     "TerrainRenderer",
     "TerrainRenderParams",

@@ -392,7 +392,27 @@ _SUPPORTED_MSAA = [1, 2, 4, 8]  # Supported MSAA sample counts
 # Basic Renderer class for triangle rendering (fallback implementation)
 # -----------------------------------------------------------------------------
 class Renderer:
-    """Basic renderer for triangle rendering and terrain."""
+    """Basic renderer for triangle rendering and terrain.
+    
+    Supports flexible configuration via nested config objects or flat keyword arguments.
+    
+    Args:
+        width: Output image width in pixels
+        height: Output image height in pixels
+        config: Optional renderer configuration as RendererConfig, dict, JSON path, or None
+        **kwargs: Flat override keywords (brdf, shadows, gi, cascades, hdr, etc.)
+                  See config.split_renderer_overrides() for recognized keys
+    
+    Examples:
+        >>> # Using flat kwargs
+        >>> renderer = Renderer(1920, 1080, brdf="toon", shadows="pcf", gi=["ibl"])
+        >>> 
+        >>> # Using nested config dict
+        >>> renderer = Renderer(1920, 1080, config={"shading": {"brdf": "ggx"}})
+        >>> 
+        >>> # Mixed: config + overrides
+        >>> renderer = Renderer(1920, 1080, config=my_config, cascades=4)
+    """
 
     def __init__(
         self,
@@ -426,7 +446,19 @@ class Renderer:
         return f"Renderer({self.width}x{self.height}, fallback=True)"
 
     def get_config(self) -> dict:
-        """Return a deep copy of the active renderer configuration."""
+        """Return a deep copy of the active renderer configuration.
+        
+        Returns:
+            dict: Normalized configuration with nested structure:
+                  {"lighting": {...}, "shading": {...}, "shadows": {...},
+                   "gi": {...}, "atmosphere": {...}}
+        
+        Examples:
+            >>> renderer = Renderer(1920, 1080, brdf="toon", shadows="pcf")
+            >>> config = renderer.get_config()
+            >>> config["shading"]["brdf"]  # Returns "toon"
+            >>> config["shadows"]["technique"]  # Returns "pcf"
+        """
         return self._config.copy().to_dict()
 
     def set_lights(self, lights: Sequence[Mapping[str, Any]] | Mapping[str, Any]) -> None:

@@ -39,6 +39,9 @@ pub struct TerrainRenderer {
     sampler_linear: wgpu::Sampler,
     empty_bind_group: wgpu::BindGroup,
     color_format: wgpu::TextureFormat,
+    // P0-03: Config plumbing (no shader/pipeline behavior changes)
+    #[cfg(feature = "enable-renderer-config")]
+    config: Arc<Mutex<crate::render::params::RendererConfig>>,
 }
 
 #[repr(C, align(16))]
@@ -396,6 +399,16 @@ impl TerrainRenderer {
     fn __repr__(&self) -> String {
         format!("TerrainRenderer(features={:?})", self.device.features())
     }
+
+    /// Get renderer config for debugging (P0-03)
+    #[cfg(feature = "enable-renderer-config")]
+    pub fn get_config(&self) -> PyResult<String> {
+        let config = self.config.lock().map_err(|e| {
+            PyRuntimeError::new_err(format!("Failed to lock config: {}", e))
+        })?;
+        serde_json::to_string_pretty(&*config)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to serialize config: {}", e)))
+    }
 }
 
 impl TerrainRenderer {
@@ -632,6 +645,9 @@ impl TerrainRenderer {
             sampler_linear,
             empty_bind_group,
             color_format,
+            // P0-03: Initialize with default config (no behavior changes)
+            #[cfg(feature = "enable-renderer-config")]
+            config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
         })
     }
 

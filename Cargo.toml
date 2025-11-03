@@ -34,6 +34,8 @@ enable-hdr-offscreen = []
 enable-render-bundles = []
 # GPU instancing experimental flag (no-op stub for now)
 enable-gpu-instancing = []
+# P0-03: Renderer config plumbing (no shader/pipeline changes)
+enable-renderer-config = []
 # Workstream O: Resource & Memory Management
 enable-memory-pools = []
 enable-staging-rings = []
