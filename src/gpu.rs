@@ -123,3 +123,35 @@ pub fn create_device_for_test() -> wgpu::Device {
     .expect("request_device failed for tests");
     device
 }
+
+/// Create device and queue for unit tests (P3-08)
+pub fn create_device_and_queue_for_test() -> (wgpu::Device, wgpu::Queue) {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::all(),
+        ..Default::default()
+    });
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::LowPower,
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    }))
+    .expect("No suitable GPU adapter for tests");
+    let mut limits = adapter.limits();
+    let baseline = wgpu::Limits::downlevel_defaults();
+    limits = limits.using_resolution(baseline);
+    let desired_storage_buffers = 8;
+    limits.max_storage_buffers_per_shader_stage = limits
+        .max_storage_buffers_per_shader_stage
+        .max(desired_storage_buffers);
+
+    let (device, queue) = pollster::block_on(adapter.request_device(
+        &wgpu::DeviceDescriptor {
+            required_features: wgpu::Features::empty(),
+            required_limits: limits,
+            label: Some("forge3d-test-device"),
+        },
+        None,
+    ))
+    .expect("request_device failed for tests");
+    (device, queue)
+}

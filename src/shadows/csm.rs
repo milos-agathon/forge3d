@@ -86,6 +86,10 @@ pub struct CsmUniforms {
     pub technique_params: [f32; 4],
     /// Reserved for future expansions (e.g., MSM tuning)
     pub technique_reserved: [f32; 4],
+    /// Cascade blend range (0.0 = no blend, 0.1 = 10% blend at boundaries)
+    pub cascade_blend_range: f32,
+    /// Padding for alignment
+    pub _padding2: [f32; 3],
 }
 
 impl Default for CsmUniforms {
@@ -113,8 +117,10 @@ impl Default for CsmUniforms {
             depth_clip_factor: 1.0,    // Default factor for depth clipping
             technique: ShadowTechnique::PCF.as_u32(),
             technique_flags: 0,
-            technique_params: [0.03, 0.06, 0.0005, 0.25],
+            technique_params: [0.0; 4],
             technique_reserved: [0.0; 4],
+            cascade_blend_range: 0.0,
+            _padding2: [0.0; 3],
         }
     }
 }
@@ -140,12 +146,20 @@ pub struct CsmConfig {
     pub peter_panning_offset: f32,
     /// Enable EVSM filtering
     pub enable_evsm: bool,
+    /// EVSM positive exponent (typical: 20-80)
+    pub evsm_positive_exp: f32,
+    /// EVSM negative exponent (typical: 20-80)
+    pub evsm_negative_exp: f32,
     /// Debug visualization mode
     pub debug_mode: u32,
     /// Enable unclipped depth (B17)
     pub enable_unclipped_depth: bool,
     /// Depth clipping distance factor
     pub depth_clip_factor: f32,
+    /// Enable cascade stabilization (texel snapping)
+    pub stabilize_cascades: bool,
+    /// Cascade blend range (0.0 = no blend, 0.1 = 10% blend at boundaries)
+    pub cascade_blend_range: f32,
 }
 
 impl Default for CsmConfig {
@@ -160,9 +174,13 @@ impl Default for CsmConfig {
             slope_bias: 0.01,
             peter_panning_offset: 0.001,
             enable_evsm: false,
+            evsm_positive_exp: 40.0,
+            evsm_negative_exp: 40.0,
             debug_mode: 0,
             enable_unclipped_depth: false, // Will be enabled based on hardware support
             depth_clip_factor: 1.0,
+            stabilize_cascades: true,      // Enable by default to prevent shimmer
+            cascade_blend_range: 0.0,      // No blend by default (can be enabled for smoother transitions)
         }
     }
 }
@@ -274,7 +292,7 @@ impl CsmRenderer {
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Rgba32Float,
-                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
                 view_formats: &[],
             }))
         } else {
@@ -367,7 +385,10 @@ impl CsmRenderer {
         self.uniforms.slope_bias = self.config.slope_bias;
         self.uniforms.shadow_map_size = self.config.shadow_map_size as f32;
         self.uniforms.debug_mode = self.config.debug_mode;
+        self.uniforms.evsm_positive_exp = self.config.evsm_positive_exp;
+        self.uniforms.evsm_negative_exp = self.config.evsm_negative_exp;
         self.uniforms.peter_panning_offset = self.config.peter_panning_offset;
+        self.uniforms.cascade_blend_range = self.config.cascade_blend_range;
 
         // Calculate frustum corners for each cascade
         let inv_view_proj = (camera_projection * camera_view).inverse();
@@ -404,6 +425,23 @@ impl CsmRenderer {
             min_bounds -= Vec3::splat(expand);
             max_bounds += Vec3::splat(expand);
 
+            // Calculate texel size for stable sampling
+            let world_units_per_texel =
+                (max_bounds.x - min_bounds.x) / self.config.shadow_map_size as f32;
+
+            // TEXEL SNAPPING: Snap bounds to texel grid in world space
+            // This prevents shimmering when camera moves by keeping shadow map
+            // pixels aligned to world space coordinates
+            if self.config.stabilize_cascades {
+                // Round min bounds to nearest texel boundary
+                min_bounds.x = (min_bounds.x / world_units_per_texel).floor() * world_units_per_texel;
+                min_bounds.y = (min_bounds.y / world_units_per_texel).floor() * world_units_per_texel;
+                
+                // Recalculate max bounds to maintain exact shadow map size
+                max_bounds.x = min_bounds.x + world_units_per_texel * self.config.shadow_map_size as f32;
+                max_bounds.y = min_bounds.y + world_units_per_texel * self.config.shadow_map_size as f32;
+            }
+
             // Create orthographic projection for this cascade
             let light_projection = Mat4::orthographic_rh(
                 min_bounds.x,
@@ -413,10 +451,6 @@ impl CsmRenderer {
                 -max_bounds.z - 50.0, // Extended near plane to catch occluders
                 -min_bounds.z,
             );
-
-            // Calculate texel size for stable sampling
-            let world_units_per_texel =
-                (max_bounds.x - min_bounds.x) / self.config.shadow_map_size as f32;
 
             // Create cascade
             self.uniforms.cascades[i] =

@@ -502,6 +502,51 @@ impl ShadowParams {
     pub fn is_power_of_two_map(&self) -> bool {
         self.map_size.is_power_of_two()
     }
+
+    /// Convert ShadowParams from RendererConfig to ShadowManagerConfig (P3-11)
+    pub fn to_shadow_manager_config(&self) -> crate::shadows::ShadowManagerConfig {
+        use crate::shadows::{ShadowManagerConfig, CsmConfig};
+        
+        let csm = CsmConfig {
+            cascade_count: self.cascades,
+            shadow_map_size: self.map_size,
+            max_shadow_distance: 1000.0, // Will be overridden by camera far plane
+            cascade_splits: vec![], // Empty = auto-calculate splits
+            pcf_kernel_size: 3, // Default 3x3 PCF
+            depth_bias: 0.0005,
+            slope_bias: 0.001,
+            peter_panning_offset: 0.002,
+            enable_evsm: matches!(self.technique, ShadowTechnique::Evsm),
+            evsm_positive_exp: 40.0,
+            evsm_negative_exp: 40.0,
+            debug_mode: 0,
+            enable_unclipped_depth: false,
+            depth_clip_factor: 1.0,
+            stabilize_cascades: true,
+            cascade_blend_range: 0.1,
+        };
+        
+        // Convert ShadowTechnique from params to lighting::types::ShadowTechnique
+        let technique = match self.technique {
+            ShadowTechnique::Hard => crate::lighting::types::ShadowTechnique::Hard,
+            ShadowTechnique::Pcf => crate::lighting::types::ShadowTechnique::PCF,
+            ShadowTechnique::Pcss => crate::lighting::types::ShadowTechnique::PCSS,
+            ShadowTechnique::Vsm => crate::lighting::types::ShadowTechnique::VSM,
+            ShadowTechnique::Evsm => crate::lighting::types::ShadowTechnique::EVSM,
+            ShadowTechnique::Msm => crate::lighting::types::ShadowTechnique::MSM,
+            ShadowTechnique::Csm => crate::lighting::types::ShadowTechnique::PCF, // CSM is a layout, use PCF
+        };
+        
+        ShadowManagerConfig {
+            csm,
+            technique,
+            pcss_blocker_radius: self.pcss_blocker_radius,
+            pcss_filter_radius: self.pcss_filter_radius,
+            light_size: self.light_size,
+            moment_bias: self.moment_bias,
+            max_memory_bytes: 256 * 1024 * 1024, // 256 MiB budget
+        }
+    }
 }
 
 impl Default for ShadowParams {

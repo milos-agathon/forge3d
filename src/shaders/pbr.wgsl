@@ -12,7 +12,13 @@
 //!   - @binding(4): sampled texture (occlusion)
 //!   - @binding(5): sampled texture (emissive)
 //!   - @binding(6): sampler (filtering)
-//! - @group(2): IBL textures (optional)
+//! - @group(2): Shadow maps (P3-08)
+//!   - @binding(0): uniform buffer `CsmUniforms`
+//!   - @binding(1): texture_depth_2d_array (shadow maps)
+//!   - @binding(2): sampler_comparison (shadow sampler)
+//!   - @binding(3): texture_2d_array<f32> (moment maps)
+//!   - @binding(4): sampler (moment sampler)
+//! - @group(3): IBL textures (optional)
 //!   - @binding(0): irradiance texture
 //!   - @binding(1): irradiance sampler
 //!   - @binding(2): prefilter texture
@@ -27,6 +33,7 @@
 
 // Import centralized lighting and BRDF definitions
 #include "lighting.wgsl"
+// Note: shadows.wgsl is concatenated before this file in pipeline/pbr.rs
 
 struct Uniforms {
     model_matrix: mat4x4<f32>,
@@ -93,13 +100,16 @@ struct VertexOutput {
 @group(1) @binding(5) var emissive_texture: texture_2d<f32>;
 @group(1) @binding(6) var material_sampler: sampler;
 
-// Optional IBL textures
-@group(2) @binding(0) var irradiance_texture: texture_2d<f32>;
-@group(2) @binding(1) var irradiance_sampler: sampler;
-@group(2) @binding(2) var prefilter_texture: texture_2d<f32>;
-@group(2) @binding(3) var prefilter_sampler: sampler;
-@group(2) @binding(4) var brdf_lut_texture: texture_2d<f32>;
-@group(2) @binding(5) var brdf_lut_sampler: sampler;
+// Shadow resources (P3-08) - group(2) matches shadows.wgsl
+// Note: Shadow bindings are defined in shadows.wgsl, included above
+
+// Optional IBL textures - moved to group(3) to avoid conflict with shadows
+@group(3) @binding(0) var irradiance_texture: texture_2d<f32>;
+@group(3) @binding(1) var irradiance_sampler: sampler;
+@group(3) @binding(2) var prefilter_texture: texture_2d<f32>;
+@group(3) @binding(3) var prefilter_sampler: sampler;
+@group(3) @binding(4) var brdf_lut_texture: texture_2d<f32>;
+@group(3) @binding(5) var brdf_lut_sampler: sampler;
 
 // Texture flags
 const FLAG_BASE_COLOR: u32 = 1u;
@@ -252,7 +262,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let dielectric_f0 = vec3<f32>(0.04);
     let f0 = mix(dielectric_f0, base_color.rgb, metallic);
     
-    // DIRECT LIGHTING (P2-03: BRDF dispatch via eval_brdf)
+    // DIRECT LIGHTING (P2-03: BRDF dispatch via eval_brdf, P3-08: shadow visibility)
     var direct_lighting = vec3<f32>(0.0);
     if n_dot_l > 0.0 {
         // Construct ShadingParamsGPU from material properties and shading uniform
@@ -269,7 +279,17 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // Call unified BRDF dispatch
         let brdf_color = eval_brdf(world_normal, view_dir, light_dir, base_color.rgb, shading_params);
         let radiance = lighting.light_color * lighting.light_intensity;
-        direct_lighting = brdf_color * radiance * n_dot_l;
+        
+        // P3-08: Apply shadow visibility
+        // Calculate view-space depth for cascade selection
+        let view_pos = uniforms.view_matrix * vec4<f32>(input.world_position, 1.0);
+        let view_depth = -view_pos.z; // Positive depth in view space
+        
+        // Sample shadows (returns 0.0 = full shadow, 1.0 = no shadow)
+        let shadow_visibility = calculate_shadow(input.world_position, world_normal, view_depth);
+        
+        // Apply shadow to direct lighting only (IBL unaffected)
+        direct_lighting = brdf_color * radiance * n_dot_l * shadow_visibility;
     }
     
     // INDIRECT LIGHTING (IBL)
@@ -366,7 +386,7 @@ fn fs_pbr_simple(input: VertexOutput) -> @location(0) vec4<f32> {
     // Calculate F0
     let f0 = mix(vec3<f32>(0.04), base_color.rgb, metallic);
     
-    // BRDF calculation (P2-03: using eval_brdf)
+    // BRDF calculation (P2-03: using eval_brdf, P3-08: shadow visibility)
     var color = vec3<f32>(0.0);
     
     if n_dot_l > 0.0 {
@@ -382,7 +402,13 @@ fn fs_pbr_simple(input: VertexOutput) -> @location(0) vec4<f32> {
         
         let brdf_color = eval_brdf(world_normal, view_dir, light_dir, base_color.rgb, shading_params);
         let radiance = lighting.light_color * lighting.light_intensity;
-        color = brdf_color * radiance * n_dot_l;
+        
+        // P3-08: Apply shadow visibility
+        let view_pos = uniforms.view_matrix * vec4<f32>(input.world_position, 1.0);
+        let view_depth = -view_pos.z;
+        let shadow_visibility = calculate_shadow(input.world_position, world_normal, view_depth);
+        
+        color = brdf_color * radiance * n_dot_l * shadow_visibility;
     }
     
     // Simple ambient

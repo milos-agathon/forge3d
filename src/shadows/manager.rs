@@ -1,6 +1,27 @@
 // src/shadows/manager.rs
 // Shadow technique orchestration with atlas budgeting and parameter uniforms
 // Exists to unify cascaded depth resources with pluggable filtering techniques
+//
+// MEMORY BUDGET ENFORCEMENT (P3-01)
+// ==================================
+// The shadow manager enforces a configurable memory budget (default 256 MiB) by:
+// 1. Estimating total GPU memory required for depth + moment textures
+// 2. Downscaling shadow map resolution by powers of 2 until budget is met
+// 3. Respecting minimum resolution (256px) even if budget is exceeded
+// 4. Logging clear warnings when downscaling occurs
+//
+// Memory calculation:
+// - Depth atlas: Depth32Float = 4 bytes/pixel × resolution² × cascades
+// - Moment textures (VSM/EVSM/MSM): Rgba32Float = 16 bytes/pixel × resolution² × cascades
+//
+// Examples:
+// - PCF 2048px × 3 cascades: ~48 MiB (depth only)
+// - EVSM 2048px × 3 cascades: ~240 MiB (depth + moments)
+// - EVSM 4096px × 4 cascades: ~1.25 GiB → downscales to fit budget
+//
+// The budget enforcement is deterministic, single-step stable (no thrashing),
+// and preserves power-of-two resolutions for optimal GPU performance.
+//
 // RELEVANT FILES: src/shadows/csm.rs, shaders/shadows.wgsl, src/pipeline/pbr.rs, python/forge3d/config.py
 
 use glam::{Mat4, Vec3};
@@ -16,7 +37,7 @@ use wgpu::{
 
 use crate::lighting::types::ShadowTechnique;
 
-use super::{CsmConfig, CsmRenderer, CsmUniforms};
+use super::{CsmConfig, CsmRenderer, CsmUniforms, MomentGenerationPass};
 
 const DEFAULT_MEMORY_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 const MIN_SHADOW_RESOLUTION: u32 = 256;
@@ -54,6 +75,7 @@ pub struct ShadowManager {
     renderer: CsmRenderer,
     moment_sampler: Sampler,
     fallback_moment_texture: Option<Texture>,
+    moment_pass: Option<MomentGenerationPass>,
     requires_moments: bool,
     memory_bytes: u64,
 }
@@ -69,7 +91,7 @@ impl ShadowManager {
 
         Self::enforce_memory_budget(&mut config);
 
-        let mut renderer = CsmRenderer::new(device, config.csm.clone());
+        let renderer = CsmRenderer::new(device, config.csm.clone());
 
         let moment_sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("shadow_moment_sampler"),
@@ -91,11 +113,19 @@ impl ShadowManager {
 
         let memory_bytes = renderer.total_memory_bytes();
 
+        // Create moment generation pass if needed
+        let moment_pass = if requires_moments {
+            Some(MomentGenerationPass::new(device))
+        } else {
+            None
+        };
+
         let mut manager = Self {
             config,
             renderer,
             moment_sampler,
             fallback_moment_texture,
+            moment_pass,
             requires_moments,
             memory_bytes,
         };
@@ -134,6 +164,72 @@ impl ShadowManager {
         &self.moment_sampler
     }
 
+    /// Get shadow map resolution (P3-12)
+    pub fn shadow_map_size(&self) -> u32 {
+        self.config.csm.shadow_map_size
+    }
+
+    /// Get cascade count (P3-12)
+    pub fn cascade_count(&self) -> u32 {
+        self.config.csm.cascade_count
+    }
+
+    /// Get debug info string for logging (P3-12)
+    pub fn debug_info(&self) -> String {
+        let technique_name = match self.config.technique {
+            ShadowTechnique::Hard => "Hard",
+            ShadowTechnique::PCF => "PCF",
+            ShadowTechnique::PCSS => "PCSS",
+            ShadowTechnique::VSM => "VSM",
+            ShadowTechnique::EVSM => "EVSM",
+            ShadowTechnique::MSM => "MSM",
+            ShadowTechnique::CSM => "CSM (PCF)",
+        };
+
+        let memory_mib = self.memory_bytes as f64 / (1024.0 * 1024.0);
+
+        format!(
+            "Shadow Manager Configuration:\n\
+             - Technique: {}\n\
+             - Shadow Map Size: {}x{}\n\
+             - Cascade Count: {}\n\
+             - Total Memory: {:.2} MiB\n\
+             - PCSS Blocker Radius: {:.4}\n\
+             - PCSS Filter Radius: {:.4}\n\
+             - Light Size: {:.4}\n\
+             - Moment Bias: {:.6}\n\
+             - Requires Moments: {}",
+            technique_name,
+            self.config.csm.shadow_map_size,
+            self.config.csm.shadow_map_size,
+            self.config.csm.cascade_count,
+            memory_mib,
+            self.config.pcss_blocker_radius,
+            self.config.pcss_filter_radius,
+            self.config.light_size,
+            self.config.moment_bias,
+            self.requires_moments,
+        )
+    }
+
+    /// Get cascade debug info after cascades have been updated (P3-12)
+    pub fn cascade_debug_info(&self) -> String {
+        let uniforms = &self.renderer.uniforms;
+        let mut info = String::from("Cascade Details:\n");
+        
+        for i in 0..uniforms.cascade_count as usize {
+            if i < 4 {
+                let cascade = &uniforms.cascades[i];
+                info.push_str(&format!(
+                    "  Cascade {}: near={:.2}, far={:.2}, texel_size={:.6}\n",
+                    i, cascade.near_distance, cascade.far_distance, cascade.texel_size
+                ));
+            }
+        }
+        
+        info
+    }
+
     /// Create a bind group layout that matches the active shadow technique.
     pub fn create_bind_group_layout(&self, device: &Device) -> BindGroupLayout {
         let entries = [
@@ -167,7 +263,7 @@ impl ShadowManager {
                 binding: 3,
                 visibility: ShaderStages::FRAGMENT,
                 ty: BindingType::Texture {
-                    sample_type: TextureSampleType::Float { filterable: true },
+                    sample_type: TextureSampleType::Float { filterable: false },
                     view_dimension: TextureViewDimension::D2Array,
                     multisampled: false,
                 },
@@ -246,6 +342,51 @@ impl ShadowManager {
     /// Upload uniforms to GPU.
     pub fn upload_uniforms(&self, queue: &Queue) {
         self.renderer.upload_uniforms(queue);
+    }
+
+    /// Populate moment maps from depth maps (VSM/EVSM/MSM only).
+    /// Call this after rendering shadow depth maps for all cascades.
+    pub fn populate_moments(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        // Only execute if technique requires moments
+        if !self.requires_moments {
+            return;
+        }
+
+        let moment_pass = match &mut self.moment_pass {
+            Some(pass) => pass,
+            None => return,
+        };
+
+        // Get depth and moment views
+        let depth_view = self.renderer.shadow_texture_view();
+        let moment_texture = match &self.renderer.evsm_maps {
+            Some(tex) => tex,
+            None => return,
+        };
+
+        let moment_view = super::create_moment_storage_view(
+            moment_texture,
+            self.config.csm.cascade_count,
+        );
+
+        // Prepare bind group
+        moment_pass.prepare_bind_group(device, &depth_view, &moment_view);
+
+        // Execute moment generation compute pass
+        moment_pass.execute(
+            queue,
+            encoder,
+            self.config.technique,
+            self.config.csm.cascade_count,
+            self.config.csm.shadow_map_size,
+            self.config.csm.evsm_positive_exp,
+            self.config.csm.evsm_negative_exp,
+        );
     }
 
     /// Returns true if the active technique reads the moment atlas.
@@ -329,6 +470,9 @@ impl ShadowManager {
     }
 
     fn enforce_memory_budget(config: &mut ShadowManagerConfig) {
+        let initial_resolution = config.csm.shadow_map_size;
+        let budget_mib = config.max_memory_bytes as f64 / (1024.0 * 1024.0);
+        
         loop {
             let usage = Self::estimate_memory_bytes(
                 config.csm.shadow_map_size,
@@ -337,23 +481,49 @@ impl ShadowManager {
             );
 
             if usage <= config.max_memory_bytes {
+                // Log final allocation summary
+                if config.csm.shadow_map_size != initial_resolution {
+                    log::info!(
+                        "Shadow atlas: downscaled from {}px to {}px to fit {:.1} MiB budget (using {:.2} MiB, technique: {:?}, cascades: {})",
+                        initial_resolution,
+                        config.csm.shadow_map_size,
+                        budget_mib,
+                        usage as f64 / (1024.0 * 1024.0),
+                        config.technique.name(),
+                        config.csm.cascade_count
+                    );
+                } else {
+                    log::debug!(
+                        "Shadow atlas: using {}px maps ({:.2} MiB / {:.1} MiB budget, technique: {:?}, cascades: {})",
+                        config.csm.shadow_map_size,
+                        usage as f64 / (1024.0 * 1024.0),
+                        budget_mib,
+                        config.technique.name(),
+                        config.csm.cascade_count
+                    );
+                }
                 break;
             }
 
             let next_res = (config.csm.shadow_map_size / 2).max(MIN_SHADOW_RESOLUTION);
             if next_res == config.csm.shadow_map_size {
+                // Hit minimum resolution; cannot downscale further
                 warn!(
-                    "Shadow atlas exceeds {} MiB budget; continuing with {} px maps ({:.1} MiB).",
-                    config.max_memory_bytes as f64 / (1024.0 * 1024.0),
+                    "Shadow atlas exceeds {:.1} MiB budget at minimum resolution ({}px, {:.2} MiB, technique: {:?}, cascades: {})",
+                    budget_mib,
                     next_res,
-                    usage as f64 / (1024.0 * 1024.0)
+                    usage as f64 / (1024.0 * 1024.0),
+                    config.technique.name(),
+                    config.csm.cascade_count
                 );
                 break;
             }
 
-            warn!(
-                "Shadow atlas over budget ({:.1} MiB); downscaling resolution {} -> {}.",
+            // Single downscaling step
+            log::debug!(
+                "Shadow budget exceeded ({:.2} MiB > {:.1} MiB); downscaling {}px -> {}px",
                 usage as f64 / (1024.0 * 1024.0),
+                budget_mib,
                 config.csm.shadow_map_size,
                 next_res
             );
@@ -361,6 +531,15 @@ impl ShadowManager {
         }
     }
 
+    /// Estimate GPU memory usage for shadow atlas and moment textures.
+    /// 
+    /// Memory breakdown:
+    /// - Depth atlas: Depth32Float = 4 bytes/pixel × resolution² × cascades
+    /// - Moment textures (VSM/EVSM/MSM): Rgba32Float = 16 bytes/pixel × resolution² × cascades
+    /// 
+    /// Note: VSM technically only needs 2 channels (mean, variance), but we use Rgba32Float
+    /// for all moment techniques to simplify the implementation and allow future extensions.
+    /// Does not account for texture padding/alignment; actual GPU usage may be slightly higher.
     fn estimate_memory_bytes(
         map_resolution: u32,
         cascades: u32,
@@ -368,12 +547,17 @@ impl ShadowManager {
     ) -> u64 {
         let res = map_resolution as u64;
         let casc = cascades as u64;
+        
+        // Depth32Float: 4 bytes per pixel
         let depth_bytes = res * res * casc * 4;
 
-        let moment_bytes = match technique {
-            ShadowTechnique::VSM => res * res * casc * 8,
-            ShadowTechnique::EVSM | ShadowTechnique::MSM => res * res * casc * 16,
-            _ => 0,
+        // Moment texture bytes (all use Rgba32Float in current implementation)
+        let moment_bytes = if technique.requires_moments() {
+            // Rgba32Float: 4 channels × 4 bytes = 16 bytes per pixel
+            // Used for VSM (2 channels used), EVSM (4 channels), MSM (4 channels)
+            res * res * casc * 16
+        } else {
+            0
         };
 
         depth_bytes + moment_bytes

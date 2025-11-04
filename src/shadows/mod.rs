@@ -6,11 +6,13 @@
 pub mod csm;
 pub mod state;
 pub mod manager;
+pub mod moment_pass;
 
 pub use csm::{
     detect_peter_panning, CascadeStatistics, CsmConfig, CsmRenderer, CsmUniforms, ShadowCascade,
 };
 pub use manager::{ShadowManager, ShadowManagerConfig};
+pub use moment_pass::{MomentGenerationPass, create_moment_storage_view};
 
 // Re-export common shadow types and utilities
 pub use csm::CsmRenderer as CascadedShadowMaps;

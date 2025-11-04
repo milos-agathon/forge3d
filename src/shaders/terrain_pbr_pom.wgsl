@@ -40,6 +40,10 @@ const PI : f32 = 3.14159265;
 const TERRAIN_USE_BRDF_DISPATCH: bool = false;
 const TERRAIN_BRDF_MODEL: u32 = BRDF_COOK_TORRANCE_GGX;  // Used when TERRAIN_USE_BRDF_DISPATCH = true
 
+// P3-10: Optional shadow sampling flag (default: false to avoid regressions)
+// Set to true to enable CSM shadow visibility on terrain direct lighting
+const TERRAIN_USE_SHADOWS: bool = false;
+
 struct TerrainUniforms {
     view : mat4x4<f32>,
     proj : mat4x4<f32>,
@@ -152,6 +156,115 @@ var ibl_brdf_lut_tex : texture_2d<f32>;
 @group(2) @binding(4)
 var<uniform> u_ibl : IblUniforms;
 
+// P3-10: Optional shadow bindings at @group(3) (only used when TERRAIN_USE_SHADOWS = true)
+// These mirror the shadow bindings from shadows.wgsl but at a different group to avoid IBL conflict
+// Shadow cascade data (matches CsmUniforms from shadows.wgsl)
+struct ShadowCascade {
+    light_projection: mat4x4<f32>,
+    near_distance: f32,
+    far_distance: f32,
+    texel_size: f32,
+    _padding: f32,
+}
+
+struct CsmUniforms {
+    light_direction: vec4<f32>,
+    light_view: mat4x4<f32>,
+    cascades: array<ShadowCascade, 4>,
+    cascade_count: u32,
+    pcf_kernel_size: u32,
+    technique: u32,
+    debug_mode: u32,
+    depth_bias: f32,
+    slope_bias: f32,
+    peter_panning_offset: f32,
+    cascade_blend_range: f32,
+}
+
+@group(3) @binding(0)
+var<uniform> csm_uniforms: CsmUniforms;
+
+@group(3) @binding(1)
+var shadow_maps: texture_depth_2d_array;
+
+@group(3) @binding(2)
+var shadow_sampler: sampler_comparison;
+
+@group(3) @binding(3)
+var moment_maps: texture_2d_array<f32>;
+
+@group(3) @binding(4)
+var moment_sampler: sampler;
+
+// P3-10: Shadow sampling functions (simplified for terrain)
+// These are lightweight versions for terrain use, gated behind TERRAIN_USE_SHADOWS flag
+
+/// Select cascade based on view-space depth
+fn select_cascade_terrain(view_depth: f32) -> u32 {
+    let count = csm_uniforms.cascade_count;
+    for (var i = 0u; i < count; i = i + 1u) {
+        if (view_depth <= csm_uniforms.cascades[i].far_distance) {
+            return i;
+        }
+    }
+    return count - 1u;
+}
+
+/// Sample shadow map with PCF filtering
+fn sample_shadow_pcf_terrain(
+    world_pos: vec3<f32>,
+    normal: vec3<f32>,
+    cascade_idx: u32,
+) -> f32 {
+    let cascade = csm_uniforms.cascades[cascade_idx];
+    
+    // Transform to light space
+    let light_space_pos = cascade.light_projection * csm_uniforms.light_view * vec4<f32>(world_pos, 1.0);
+    let ndc = light_space_pos.xyz / light_space_pos.w;
+    
+    // Convert to texture coordinates [0,1]
+    let shadow_coords = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
+    
+    // Check if outside shadow map bounds
+    if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 || shadow_coords.y < 0.0 || shadow_coords.y > 1.0) {
+        return 1.0; // No shadow outside bounds
+    }
+    
+    // Apply depth bias
+    let light_dir_norm = normalize(csm_uniforms.light_direction.xyz);
+    let n_dot_l = max(dot(normal, light_dir_norm), 0.0);
+    let bias = max(csm_uniforms.depth_bias * (1.0 - n_dot_l), csm_uniforms.peter_panning_offset);
+    let compare_depth = ndc.z - bias;
+    
+    // Simple PCF 3x3
+    let texel_size = cascade.texel_size;
+    var shadow_sum = 0.0;
+    for (var y = -1; y <= 1; y = y + 1) {
+        for (var x = -1; x <= 1; x = x + 1) {
+            let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
+            let sample_coords = shadow_coords + offset;
+            let depth_sample = textureSampleCompare(
+                shadow_maps,
+                shadow_sampler,
+                sample_coords,
+                i32(cascade_idx),
+                compare_depth
+            );
+            shadow_sum = shadow_sum + depth_sample;
+        }
+    }
+    
+    return shadow_sum / 9.0;
+}
+
+/// Calculate shadow visibility for terrain
+fn calculate_shadow_terrain(world_pos: vec3<f32>, normal: vec3<f32>, view_depth: f32) -> f32 {
+    // Select appropriate cascade
+    let cascade_idx = select_cascade_terrain(view_depth);
+    
+    // Sample shadow with PCF
+    return sample_shadow_pcf_terrain(world_pos, normal, cascade_idx);
+}
 
 struct VertexInput {
     @location(0) position : vec3<f32>,
@@ -621,9 +734,24 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     }
     lighting = lighting * u_terrain.sun_exposure.w;
     lighting = lighting * u_shading.light_params.rgb;
-    if (shadow_enabled && pom_enabled) {
-        let shadow_factor = clamp(mix(0.4, 1.0, occlusion), u_shading.clamp1.z, u_shading.clamp1.w);
-        lighting = lighting * shadow_factor;
+    
+    // P3-10: Apply CSM shadow visibility (optional, gated by TERRAIN_USE_SHADOWS)
+    if (TERRAIN_USE_SHADOWS) {
+        // Calculate view-space depth for cascade selection
+        let view_pos = u_terrain.view * vec4<f32>(input.world_position, 1.0);
+        let view_depth = -view_pos.z; // Positive depth in view space
+        
+        // Sample shadow visibility (0.0 = full shadow, 1.0 = no shadow)
+        let shadow_visibility = calculate_shadow_terrain(input.world_position, blended_normal, view_depth);
+        
+        // Apply shadow to direct lighting only
+        lighting = lighting * shadow_visibility;
+    } else {
+        // Legacy POM-based shadow factor (preserved for backward compatibility)
+        if (shadow_enabled && pom_enabled) {
+            let shadow_factor = clamp(mix(0.4, 1.0, occlusion), u_shading.clamp1.z, u_shading.clamp1.w);
+            lighting = lighting * shadow_factor;
+        }
     }
 
     let rotated_normal = rotate_y(blended_normal, u_ibl.sin_theta, u_ibl.cos_theta);

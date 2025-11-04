@@ -38,6 +38,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    pbr_materials
    user/brdf_overview
    user/lights_overview
+   user/shadows_overview
    user/presets_overview
    user/rendering_options_overview
    shadow_mapping

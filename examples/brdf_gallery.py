@@ -14,7 +14,7 @@ This example demonstrates:
 
 Usage:
     python examples/brdf_gallery.py
-    python examples/brdf_gallery.py --output brdf_comparison.png
+    python examples/brdf_gallery.py --output reports/brdf_comparison.png
     python examples/brdf_gallery.py --roughness-steps 5 --tile-size 200
     python examples/brdf_gallery.py --brdfs lambert ggx disney phong
 """

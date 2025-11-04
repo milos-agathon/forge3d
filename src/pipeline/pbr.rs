@@ -1117,10 +1117,11 @@ impl PbrPipelineWithShadows {
             // Safety: bind group pointer derived from stored Option; lifetime tied to `self`.
             pass.set_bind_group(1, unsafe { &*ptr }, &[]);
         }
-        pass.set_bind_group(2, unsafe { &*ibl_bind_group_ptr }, &[]);
+        // P3-08: Shadows at group(2), IBL at group(3) to match shader layout
         if let Some(ptr) = shadow_bind_group_ptr {
-            pass.set_bind_group(3, unsafe { &*ptr }, &[]);
+            pass.set_bind_group(2, unsafe { &*ptr }, &[]);
         }
+        pass.set_bind_group(3, unsafe { &*ibl_bind_group_ptr }, &[]);
     }
 
     /// Bind global scene + lighting uniforms at bind group slot 0.
@@ -1271,13 +1272,15 @@ impl PbrPipelineWithShadows {
             .as_ref()
             .expect("shadow layout must exist before building pipeline");
 
+        // P3-08: Pipeline layout must match shader bind groups
+        // group(0) = globals, group(1) = material, group(2) = shadows, group(3) = IBL
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pbr_pipeline_layout"),
             bind_group_layouts: &[
-                &self.globals_bind_group_layout,
-                &self.material_bind_group_layout,
-                &self.ibl_bind_group_layout,
-                shadow_layout,
+                &self.globals_bind_group_layout,  // group(0)
+                &self.material_bind_group_layout, // group(1)
+                shadow_layout,                     // group(2) - shadows
+                &self.ibl_bind_group_layout,      // group(3) - IBL
             ],
             push_constant_ranges: &[],
         });
