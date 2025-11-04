@@ -1,0 +1,12 @@
+# Golden reference images
+# These are checked in but noted here for reference
+
+# PNG golden images (checked in)
+# mosaic_*.png
+
+# Backup files (not checked in)
+*.backup
+*.old
+
+# Numpy fallback (not checked in)
+*.npy
