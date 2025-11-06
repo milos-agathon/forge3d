@@ -27,6 +27,9 @@ use winit::{
 };
 // once_cell imported via path for INITIAL_CMDS; no direct use import needed
 
+// Quick sanity-check version for viewer lit WGSL
+const LIT_WGSL_VERSION: u32 = 2;
+
 // ------------------------------
 // HUD seven-seg numeric helpers
 // ------------------------------
@@ -318,6 +321,10 @@ pub struct Viewer {
     lit_use_ibl: bool,
     // Lit BRDF selection (0=Lambert,1=Phong,4=GGX,6=Disney)
     lit_brdf: u32,
+    // Lit roughness (used by debug modes and future shading controls)
+    lit_roughness: f32,
+    // Lit debug mode: 0=off, 1=roughness smoke test, 2=NDF-only GGX
+    lit_debug_mode: u32,
     // Fallback pipeline to draw a solid color when GI/geometry path is unavailable
     fallback_pipeline: wgpu::RenderPipeline,
     viz_mode: VizMode,
@@ -1056,13 +1063,13 @@ impl Viewer {
         let lit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewer.lit.compute.shader"),
             source: wgpu::ShaderSource::Wgsl(r#"
-                // M2-04: Add brdf (as f32-coded index) to params
-                // Layout fits in 2x vec4 (32 bytes) for uniform alignment
                 struct LitParams {
                     // x,y,z = sun_dir_vs, w = sun_intensity
                     sun_dir_and_intensity: vec4<f32>,
                     // x = ibl_intensity, y = use_ibl (1.0|0.0), z = brdf index, w = pad
                     ibl_use_brdf_pad: vec4<f32>,
+                    // x = roughness [0,1], y = debug_mode (0=off,1=roughness,2=NDF), z/w pad
+                    debug_extra: vec4<f32>,
                 };
                 @group(0) @binding(0) var normal_tex : texture_2d<f32>;
                 @group(0) @binding(1) var albedo_tex : texture_2d<f32>;
@@ -1088,6 +1095,14 @@ impl Viewer {
                     n = normalize(n);
                     let a = textureLoad(albedo_tex, coord, 0).rgb;
                     let l = normalize(P.sun_dir_and_intensity.xyz);
+                    let rough = clamp(P.debug_extra.x, 0.0, 1.0);
+                    let dbg = u32(P.debug_extra.y + 0.5);
+
+                    // Debug 1: roughness smoke test – output R=roughness
+                    if (dbg == 1u) {
+                        textureStore(out_tex, coord, vec4<f32>(rough, 0.0, 0.0, 1.0));
+                        return;
+                    }
                     let ndl = max(dot(n, l), 0.0);
                     // Simple direct lighting with BRDF dispatch (viewer-only approximation)
                     var col = vec3<f32>(0.0);
@@ -1111,7 +1126,7 @@ impl Viewer {
                             let h = normalize(l + v);
                             let n_dot_h = max(dot(n, h), 0.0);
                             let v_dot_h = max(dot(v, h), 0.0);
-                            let r = 0.5; // fixed roughness for viewer
+                            let r = rough;
                             let alpha = r * r;
                             let denom = n_dot_h * n_dot_h * (alpha * alpha - 1.0) + 1.0;
                             let D = (alpha * alpha) / (3.14159265 * denom * denom + 1e-6);
@@ -1126,6 +1141,18 @@ impl Viewer {
                         // Add a small ambient term
                         col += 0.1 * a;
                     }
+                    // Debug 2: NDF-only GGX grayscale
+                    if (dbg == 2u) {
+                        let v = vec3<f32>(0.0, 0.0, 1.0);
+                        let h = normalize(l + v);
+                        let n_dot_h = max(dot(n, h), 0.0);
+                        let alpha = max(1e-3, rough * rough);
+                        let a2 = alpha * alpha;
+                        let denom = n_dot_h * n_dot_h * (a2 - 1.0) + 1.0;
+                        let D = a2 / max(3.14159265 * denom * denom, 1e-6);
+                        textureStore(out_tex, coord, vec4<f32>(D, D, D, 1.0));
+                        return;
+                    }
                     if (P.ibl_use_brdf_pad.y > 0.5) {
                         let env = textureSampleLevel(env_cube, env_samp, n, 0.0).rgb;
                         col += a * env * P.ibl_use_brdf_pad.x;
@@ -1136,11 +1163,14 @@ impl Viewer {
         });
         let lit_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("viewer.lit.pl"), bind_group_layouts: &[&lit_bgl], push_constant_ranges: &[] });
         let lit_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("viewer.lit.pipeline"), layout: Some(&lit_pl), module: &lit_shader, entry_point: "cs_main" });
-        let lit_params: [f32; 8] = [
+        println!("[viewer] lit compute WGSL version {} compiled", LIT_WGSL_VERSION);
+        let lit_params: [f32; 12] = [
             // sun_dir_vs.xyz, sun_intensity
             0.3, 0.6, -1.0, 1.0,
             // ibl_intensity, use_ibl (as float), brdf (as float), pad
             0.6, 1.0, 4.0, 0.0,
+            // roughness, debug_mode, pad, pad
+            0.5, 0.0, 0.0, 0.0,
         ];
         let lit_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("viewer.lit.uniform"), contents: bytemuck::cast_slice(&lit_params), usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST });
 
@@ -1569,6 +1599,8 @@ impl Viewer {
             lit_ibl_intensity: 0.6,
             lit_use_ibl: true,
             lit_brdf: 4,
+            lit_roughness: 0.5,
+            lit_debug_mode: 0,
             fallback_pipeline: fb_pipeline,
             viz_mode: VizMode::Material,
             use_ssao_composite: true,
@@ -1650,9 +1682,13 @@ impl Viewer {
     fn update_lit_uniform(&mut self) {
         // Keep sun_dir consistent with compute shader default
         let sun_dir = [0.3f32, 0.6, -1.0];
-        let params: [f32; 8] = [
+        let params: [f32; 12] = [
+            // sun_dir.xyz, sun_intensity
             sun_dir[0], sun_dir[1], sun_dir[2], self.lit_sun_intensity,
+            // ibl_intensity, use_ibl, brdf_index, pad
             self.lit_ibl_intensity, if self.lit_use_ibl { 1.0 } else { 0.0 }, self.lit_brdf as f32, 0.0,
+            // roughness, debug_mode, pad, pad
+            self.lit_roughness.clamp(0.0, 1.0), self.lit_debug_mode as f32, 0.0, 0.0,
         ];
         self.queue
             .write_buffer(&self.lit_uniform, 0, bytemuck::cast_slice(&params));
@@ -2577,6 +2613,8 @@ enum ViewerCmd {
     SetLitSun(f32),
     SetLitIbl(f32),
     SetLitBrdf(u32),
+    SetLitRough(f32),
+    SetLitDebug(u32),
     // Sky controls
     SkyToggle(bool),
     SkySetModel(u32), // 0=Preetham,1=Hosek-Wilkie
@@ -2692,6 +2730,14 @@ impl Viewer {
                 self.lit_brdf = idx;
                 self.update_lit_uniform();
             }
+            ViewerCmd::SetLitRough(v) => {
+                self.lit_roughness = v.clamp(0.0, 1.0);
+                self.update_lit_uniform();
+            }
+            ViewerCmd::SetLitDebug(m) => {
+                self.lit_debug_mode = match m { 1|2 => m, _ => 0 };
+                self.update_lit_uniform();
+            }
             // Sky controls
             ViewerCmd::SkyToggle(on) => { self.sky_enabled = on; }
             ViewerCmd::SkySetModel(id) => { self.sky_model_id = id; self.sky_enabled = true; }
@@ -2799,6 +2845,15 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                         _ => 4u32,
                     };
                     pending_cmds.push(ViewerCmd::SetLitBrdf(idx));
+                }
+            } else if l.starts_with(":lit-rough") || l.starts_with("lit-rough ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+                    pending_cmds.push(ViewerCmd::SetLitRough(val));
+                }
+            } else if l.starts_with(":lit-debug") || l.starts_with("lit-debug ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let mode = match tok { "rough"|"1"|"smoke" => 1u32, "ndf"|"2" => 2u32, _ => 0u32 };
+                    pending_cmds.push(ViewerCmd::SetLitDebug(mode));
                 }
             } else if l.starts_with(":size") || l.starts_with("size ") {
                 if let (Some(ws), Some(hs)) = (l.split_whitespace().nth(1), l.split_whitespace().nth(2)) {
@@ -3026,6 +3081,15 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
                     let _ = proxy.send_event(ViewerCmd::SetLitIbl(val));
                 } else { println!("Usage: :lit-ibl <float>"); }
+            } else if l.starts_with(":lit-rough") || l.starts_with("lit-rough ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+                    let _ = proxy.send_event(ViewerCmd::SetLitRough(val));
+                } else { println!("Usage: :lit-rough <0..1>"); }
+            } else if l.starts_with(":lit-debug") || l.starts_with("lit-debug ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let mode = match tok { "rough"|"1"|"smoke" => 1u32, "ndf"|"2" => 2u32, _ => 0u32 };
+                    let _ = proxy.send_event(ViewerCmd::SetLitDebug(mode));
+                } else { println!("Usage: :lit-debug <off|rough|ndf>"); }
             } else if l.starts_with(":ssao-technique") || l.starts_with("ssao-technique ") {
                 if let Some(tok) = l.split_whitespace().nth(1) {
                     let tech = match tok { "gtao"|"1" => 1u32, _ => 0u32 };

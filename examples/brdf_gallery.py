@@ -1,275 +1,135 @@
 #!/usr/bin/env python3
 """
-BRDF Gallery Example (P2-12)
+P7-07: BRDF Gallery Generator (Milestone 0 Complete)
 
-Demonstrates different BRDF models side-by-side with roughness sweeps.
-Renders a 3×N grid comparing Lambert, Cook-Torrance GGX, and Disney Principled
-BRDFs across varying roughness values.
+Renders a gallery mosaic of BRDF tiles using the offscreen renderer.
+Compares different BRDF models across varying roughness values.
 
 This example demonstrates:
-- Global BRDF override (config.brdf_override)
-- Per-material BRDF settings (config.shading.brdf)
-- Roughness parameter sweeps
-- Small tile sizes for quick execution
+- Offscreen BRDF tile rendering via forge3d.render_brdf_tile()
+- CSV parsing for models and roughness values
+- Milestone 0 debug modes: NDF-only, G-only, DFG-only, roughness visualization
+- Deterministic PNG gallery generation with no tone mapping and exposure=1.0
+- Light intensity tuned to prevent clipping (peak < 0.95)
 
 Usage:
+    # Default: GGX and Disney at 5 roughness values
     python examples/brdf_gallery.py
-    python examples/brdf_gallery.py --output reports/brdf_comparison.png
-    python examples/brdf_gallery.py --roughness-steps 5 --tile-size 200
-    python examples/brdf_gallery.py --brdfs lambert ggx disney phong
+    
+    # Custom models and roughness
+    python examples/brdf_gallery.py --models lambert,phong,ggx,disney --roughness 0.1,0.3,0.5,0.7,0.9
+    
+    # NDF-only debug mode
+    python examples/brdf_gallery.py --ndf-only
+    
+    # Milestone 0: G-only debug mode (outputs Smith G as grayscale)
+    python examples/brdf_gallery.py --g-only
+    
+    # Milestone 0: DFG-only debug mode (outputs D*F*G pre-division)
+    python examples/brdf_gallery.py --dfg-only
+    
+    # Milestone 0: Roughness visualization (validates uniform flow)
+    python examples/brdf_gallery.py --roughness-visualize
+    
+    # Custom tile size
+    python examples/brdf_gallery.py --tile-size 256 256
+    
+    # Custom output
+    python examples/brdf_gallery.py --out reports/brdf_comparison.png
 """
 
-from _import_shim import ensure_repo_import
-ensure_repo_import()
+import sys
+from pathlib import Path
+
+# Add python directory to path for development testing
+sys.path.insert(0, str(Path(__file__).parent.parent / 'python'))
 
 import argparse
-from pathlib import Path
-from typing import List, Tuple, Optional
-
+from typing import List, Optional
 import numpy as np
 
 try:
     import forge3d as f3d
-    from forge3d.config import RendererConfig
-except Exception as exc:  # pragma: no cover
-    raise SystemExit("forge3d import failed. Build with `maturin develop --release`.") from exc
+except ImportError as e:
+    print(f"Error: Could not import forge3d: {e}")
+    print("Please build forge3d with: maturin develop --release")
+    sys.exit(1)
+
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+    print("Warning: PIL not available. Mosaic saving will be limited.")
 
 
-# BRDF model configurations
-BRDF_MODELS = {
-    'lambert': {
-        'name': 'Lambert',
-        'description': 'Diffuse only',
-        'config_name': 'lambert',
-    },
-    'phong': {
-        'name': 'Phong',
-        'description': 'Classic specular',
-        'config_name': 'phong',
-    },
-    'ggx': {
-        'name': 'Cook-Torrance GGX',
-        'description': 'Standard PBR',
-        'config_name': 'cooktorrance-ggx',
-    },
-    'disney': {
-        'name': 'Disney Principled',
-        'description': 'Extended PBR',
-        'config_name': 'disney-principled',
-    },
-    'toon': {
-        'name': 'Toon',
-        'description': 'Cel-shaded',
-        'config_name': 'toon',
-    },
-    'oren-nayar': {
-        'name': 'Oren-Nayar',
-        'description': 'Rough diffuse',
-        'config_name': 'oren-nayar',
-    },
-}
+def parse_csv_list(csv_str: str) -> List[str]:
+    """Parse comma-separated values."""
+    return [item.strip() for item in csv_str.split(',') if item.strip()]
 
 
-def _create_sphere_mesh(subdivisions: int = 32) -> Tuple[np.ndarray, np.ndarray]:
-    """Generate a UV sphere mesh for rendering.
-    
-    Returns:
-        vertices: (N, 3) vertex positions
-        indices: (M, 3) triangle indices
-    """
-    # Simple UV sphere generation
-    rings = subdivisions
-    segments = subdivisions
-    
-    vertices = []
-    indices = []
-    
-    # Generate vertices
-    for ring in range(rings + 1):
-        theta = np.pi * ring / rings
-        sin_theta = np.sin(theta)
-        cos_theta = np.cos(theta)
-        
-        for seg in range(segments + 1):
-            phi = 2 * np.pi * seg / segments
-            sin_phi = np.sin(phi)
-            cos_phi = np.cos(phi)
-            
-            x = sin_theta * cos_phi
-            y = cos_theta
-            z = sin_theta * sin_phi
-            
-            vertices.append([x, y, z])
-    
-    # Generate indices
-    for ring in range(rings):
-        for seg in range(segments):
-            v0 = ring * (segments + 1) + seg
-            v1 = v0 + segments + 1
-            v2 = v0 + 1
-            v3 = v1 + 1
-            
-            indices.append([v0, v1, v2])
-            indices.append([v2, v1, v3])
-    
-    return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.uint32)
-
-
-def _render_brdf_tile(
-    brdf_model: str,
-    roughness: float,
-    tile_size: int = 256,
-    use_override: bool = True,
-) -> np.ndarray:
-    """Render a single tile with specified BRDF and roughness.
-    
-    Args:
-        brdf_model: BRDF model name (e.g., 'lambert', 'cooktorrance-ggx')
-        roughness: Roughness value [0, 1]
-        tile_size: Size of output tile in pixels
-        use_override: If True, use global override; else use material setting
-        
-    Returns:
-        RGBA image (tile_size, tile_size, 4) uint8
-    """
-    # Create configuration
-    config = RendererConfig()
-    
-    # Set BRDF via override or material setting
-    if use_override:
-        # Global override (highest precedence)
-        config.brdf_override = brdf_model
-        config.shading.brdf = "lambert"  # Material default (will be overridden)
-    else:
-        # Per-material setting
-        config.shading.brdf = brdf_model
-        config.brdf_override = None
-    
-    # Set material roughness
-    config.shading.roughness = roughness
-    
-    # Simple lighting setup
-    config.lighting.lights = [{
-        'type': 'sun',
-        'azimuth': 135.0,
-        'elevation': 45.0,
-        'intensity': 4.0,
-        'color': [1.0, 0.98, 0.95],
-    }]
-    config.lighting.exposure = 1.0
-    
-    # Disable shadows for simplicity
-    config.shadows.enabled = False
-    
-    # Create a simple placeholder image with distinct color per BRDF
-    # This simulates rendering since actual GPU rendering requires the full pipeline
-    img = np.zeros((tile_size, tile_size, 4), dtype=np.uint8)
-    
-    # Color coding by BRDF model
-    brdf_colors = {
-        'lambert': (180, 180, 180),
-        'phong': (200, 180, 220),
-        'cooktorrance-ggx': (200, 220, 240),
-        'disney-principled': (220, 200, 180),
-        'toon': (255, 200, 200),
-        'oren-nayar': (200, 220, 180),
-    }
-    
-    base_color = brdf_colors.get(brdf_model, (128, 128, 128))
-    
-    # Create gradient sphere with roughness-dependent shading
-    cx, cy = tile_size // 2, tile_size // 2
-    radius = tile_size // 3
-    
-    for y in range(tile_size):
-        for x in range(tile_size):
-            dx = x - cx
-            dy = y - cy
-            dist = np.sqrt(dx * dx + dy * dy)
-            
-            if dist < radius:
-                # Sphere shading with roughness influence
-                factor = (1.0 - dist / radius) ** (0.5 + roughness)
-                
-                # Add specular highlight (reduced by roughness)
-                highlight_x = cx + radius // 3
-                highlight_y = cy - radius // 3
-                hdx = x - highlight_x
-                hdy = y - highlight_y
-                hdist = np.sqrt(hdx * hdx + hdy * hdy)
-                specular = np.exp(-hdist * hdist / (100 * (1.0 - roughness + 0.1)))
-                
-                # Combine diffuse and specular
-                if brdf_model != 'lambert':
-                    factor = factor * 0.7 + specular * 0.3 * (1.0 - roughness)
-                
-                img[y, x, 0] = int(base_color[0] * factor)
-                img[y, x, 1] = int(base_color[1] * factor)
-                img[y, x, 2] = int(base_color[2] * factor)
-                img[y, x, 3] = 255
-            else:
-                # Dark background
-                img[y, x] = [25, 25, 25, 255]
-    
-    return img
-
-
-def _label_tile(img: np.ndarray, text: str, sub: str | None = None) -> np.ndarray:
-    """Add text label to a tile image.
-    
-    Args:
-        img: RGBA image to label
-        text: Main label text
-        sub: Optional sub-label text
-        
-    Returns:
-        Labeled RGBA image
-    """
+def parse_csv_floats(csv_str: str) -> List[float]:
+    """Parse comma-separated float values."""
     try:
-        from PIL import Image, ImageDraw, ImageFont
-        im = Image.fromarray(img, mode="RGBA")
-        draw = ImageDraw.Draw(im)
+        return [float(item.strip()) for item in csv_str.split(',') if item.strip()]
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"Invalid float in CSV: {e}")
+
+
+def add_text_label(img: np.ndarray, text: str, position: str = 'top') -> np.ndarray:
+    """Add text label to an image using PIL.
+    
+    Args:
+        img: RGBA image array
+        text: Text to add
+        position: 'top' or 'bottom'
         
-        try:
-            # Try to use a nice font
-            font_main = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 18)
-            font_sub = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 14)
-        except Exception:
-            # Fallback to default font
-            font_main = ImageFont.load_default()
-            font_sub = ImageFont.load_default()
-        
-        # Draw main label with background
-        bbox = draw.textbbox((0, 0), text, font=font_main)
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-        
-        x = (im.width - text_w) // 2
-        y = 10
-        
-        # Semi-transparent background
-        draw.rectangle([x - 5, y - 2, x + text_w + 5, y + text_h + 2], fill=(0, 0, 0, 180))
-        draw.text((x, y), text, fill=(255, 255, 255, 255), font=font_main)
-        
-        # Draw sub-label if provided
-        if sub:
-            bbox_sub = draw.textbbox((0, 0), sub, font=font_sub)
-            sub_w = bbox_sub[2] - bbox_sub[0]
-            sub_h = bbox_sub[3] - bbox_sub[1]
-            
-            x_sub = (im.width - sub_w) // 2
-            y_sub = im.height - sub_h - 10
-            
-            draw.rectangle([x_sub - 4, y_sub - 2, x_sub + sub_w + 4, y_sub + sub_h + 2], fill=(0, 0, 0, 180))
-            draw.text((x_sub, y_sub), sub, fill=(200, 200, 200, 255), font=font_sub)
-        
-        return np.array(im)
-    except ImportError:
-        # PIL not available, return unlabeled
+    Returns:
+        Labeled image array
+    """
+    if not HAS_PIL:
         return img
+    
+    pil_img = Image.fromarray(img, mode='RGBA')
+    draw = ImageDraw.Draw(pil_img)
+    
+    try:
+        # Try system font
+        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 16)
+    except:
+        try:
+            # Try another common font
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+        except:
+            # Fallback to default
+            font = ImageFont.load_default()
+    
+    # Get text bounding box
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+    
+    # Position text
+    x = (pil_img.width - text_w) // 2
+    if position == 'top':
+        y = 8
+    else:  # bottom
+        y = pil_img.height - text_h - 8
+    
+    # Draw semi-transparent background
+    padding = 4
+    draw.rectangle(
+        [x - padding, y - padding, x + text_w + padding, y + text_h + padding],
+        fill=(0, 0, 0, 200)
+    )
+    
+    # Draw text
+    draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
+    
+    return np.array(pil_img)
 
 
-def _stitch_grid(tiles: List[List[np.ndarray]], gap: int = 2) -> np.ndarray:
+def create_mosaic(tiles: List[List[np.ndarray]], gap: int = 4) -> np.ndarray:
     """Stitch tiles into a grid mosaic.
     
     Args:
@@ -291,7 +151,7 @@ def _stitch_grid(tiles: List[List[np.ndarray]], gap: int = 2) -> np.ndarray:
     mosaic_w = cols * tile_w + (cols - 1) * gap
     
     # Create mosaic with dark background
-    mosaic = np.full((mosaic_h, mosaic_w, 4), [15, 15, 15, 255], dtype=np.uint8)
+    mosaic = np.full((mosaic_h, mosaic_w, 4), [20, 20, 20, 255], dtype=np.uint8)
     
     # Place tiles
     for row in range(rows):
@@ -303,173 +163,302 @@ def _stitch_grid(tiles: List[List[np.ndarray]], gap: int = 2) -> np.ndarray:
     return mosaic
 
 
-def render_brdf_gallery(
-    *,
+def render_gallery(
+    models: List[str],
+    roughness_values: List[float],
+    tile_size: tuple,
+    ndf_only: bool,
+    g_only: bool,
+    dfg_only: bool,
+    spec_only: bool,
+    roughness_visualize: bool,
+    exposure: float,
+    light_intensity: float,
     output_path: Path,
-    outdir: Path,
-    tile_size: int = 256,
-    roughness_steps: int = 4,
-    brdfs: List[str] = ['lambert', 'ggx', 'disney'],
-    save_tiles: bool = False,
-    use_override: bool = True,
+    debug_dot_products: bool,
+    mode: Optional[str],
+    no_labels: bool,
 ) -> None:
-    """Render a BRDF gallery comparing models across roughness values.
+    """Render BRDF gallery mosaic.
     
     Args:
-        output_path: Path to save final mosaic
-        outdir: Directory for individual tiles (if save_tiles=True)
-        tile_size: Size of each tile in pixels
-        roughness_steps: Number of roughness values to test
-        brdfs: List of BRDF models to compare (e.g., ['lambert', 'ggx', 'disney'])
-        save_tiles: If True, save individual tiles
-        use_override: If True, use global BRDF override; else use material setting
+        models: List of BRDF model names
+        roughness_values: List of roughness values
+        tile_size: (width, height) for each tile
+        ndf_only: If True, render NDF-only mode
+        g_only: If True, render G-only mode (Milestone 0)
+        dfg_only: If True, render DFG-only mode (Milestone 0)
+        roughness_visualize: If True, render roughness visualization (Milestone 0)
+        exposure: Exposure multiplier (Milestone 4)
+        light_intensity: Light intensity (Milestone 4)
+        output_path: Path to save the mosaic
+        debug_dot_products: If True, log min/max N·L and N·V values for debugging
     """
-    outdir.mkdir(parents=True, exist_ok=True)
+    width, height = tile_size
+    
+    # Determine active debug mode for display (mode overrides individual toggles)
+    mode_display_map = {
+        None: "Full BRDF",
+        "full": "Full BRDF",
+        "ndf": "NDF-only",
+        "g": "G-only",
+        "dfg": "DFG-only",
+        "spec": "SPEC-only",
+        "roughness": "Roughness Visualize",
+    }
+    if mode is not None:
+        debug_mode = mode_display_map.get(mode, f"Unknown mode: {mode}")
+    else:
+        debug_mode = "Full BRDF"
+        if ndf_only:
+            debug_mode = "NDF-only"
+        elif g_only:
+            debug_mode = "G-only"
+        elif dfg_only:
+            debug_mode = "DFG-only"
+        elif spec_only:
+            debug_mode = "SPEC-only"
+        elif roughness_visualize:
+            debug_mode = "Roughness Visualize"
     
     print(f"Rendering BRDF Gallery:")
-    print(f"  BRDFs: {', '.join(brdfs)}")
-    print(f"  Roughness steps: {roughness_steps}")
-    print(f"  Tile size: {tile_size}×{tile_size}")
-    print(f"  Override mode: {'global override' if use_override else 'per-material'}")
+    print(f"  Models: {', '.join(models)}")
+    print(f"  Roughness values: {', '.join(f'{r:.2f}' for r in roughness_values)}")
+    print(f"  Tile size: {width}×{height}")
+    print(f"  Debug mode: {debug_mode}")
+    print(f"  Output: {output_path}")
     print()
     
-    # Generate roughness values
-    roughness_values = np.linspace(0.1, 0.9, roughness_steps)
+    # Model name mapping for display
+    model_display_names = {
+        'lambert': 'Lambert',
+        'phong': 'Phong',
+        'ggx': 'Cook-Torrance GGX',
+        'disney': 'Disney Principled',
+    }
     
     # Render tiles
-    tiles = []
-    for brdf_key in brdfs:
-        if brdf_key not in BRDF_MODELS:
-            print(f"Warning: Unknown BRDF '{brdf_key}', skipping")
-            continue
-        
-        brdf_info = BRDF_MODELS[brdf_key]
-        brdf_config_name = brdf_info['config_name']
-        
-        row_tiles = []
-        for roughness in roughness_values:
-            print(f"  Rendering {brdf_info['name']} @ roughness {roughness:.2f}...")
-            
-            tile = _render_brdf_tile(
-                brdf_model=brdf_config_name,
-                roughness=roughness,
-                tile_size=tile_size,
-                use_override=use_override,
-            )
-            
-            # Add labels
-            tile = _label_tile(
-                tile,
-                text=brdf_info['name'],
-                sub=f"Roughness {roughness:.2f}",
-            )
-            
-            row_tiles.append(tile)
-            
-            # Optionally save individual tile
-            if save_tiles:
-                tile_path = outdir / f"{brdf_key}_r{roughness:.2f}.png"
-                try:
-                    from PIL import Image
-                    Image.fromarray(tile).save(tile_path)
-                    print(f"    Saved tile: {tile_path}")
-                except ImportError:
-                    pass
-        
-        tiles.append(row_tiles)
+    all_tiles = []
     
-    # Stitch into mosaic
-    print(f"\nStitching {len(tiles)}×{len(tiles[0])} mosaic...")
-    mosaic = _stitch_grid(tiles, gap=4)
+    for model in models:
+        print(f"Rendering {model_display_names.get(model, model)}...")
+        row_tiles = []
+        
+        for roughness in roughness_values:
+            print(f"  Roughness {roughness:.2f}...", end=' ', flush=True)
+            
+            try:
+                # Call offscreen renderer with Milestone 0 debug toggles and Milestone 4 params
+                tile = f3d.render_brdf_tile(
+                    model, roughness, width, height, 
+                    ndf_only=ndf_only,
+                    g_only=g_only,
+                    dfg_only=dfg_only,
+                    spec_only=spec_only,
+                    roughness_visualize=roughness_visualize,
+                    exposure=exposure,
+                    light_intensity=light_intensity,
+                    debug_dot_products=debug_dot_products,
+                    mode=mode,
+                )
+                
+                # Milestone 4: Optional labels - stamp model, r, and alpha=r^2 for audits
+                if not no_labels:
+                    display_name = model_display_names.get(model, model)
+                    alpha = roughness * roughness
+                    tile = add_text_label(tile, display_name, position='top')
+                    tile = add_text_label(tile, f"r={roughness:.2f} α={alpha:.4f}", position='bottom')
+                
+                row_tiles.append(tile)
+                print("✓")
+                
+            except Exception as e:
+                print(f"✗ Failed: {e}")
+                # Create error placeholder
+                error_tile = np.full((height, width, 4), [100, 0, 0, 255], dtype=np.uint8)
+                error_tile = add_text_label(error_tile, "ERROR", position='top')
+                row_tiles.append(error_tile)
+        
+        all_tiles.append(row_tiles)
+    
+    # Create mosaic
+    print("\nStitching mosaic...")
+    mosaic = create_mosaic(all_tiles, gap=4)
+    print(f"  Mosaic size: {mosaic.shape[1]}×{mosaic.shape[0]}")
     
     # Save mosaic
-    try:
-        from PIL import Image
-        Image.fromarray(mosaic).save(output_path)
+    print(f"\nSaving to {output_path}...")
+    
+    if HAS_PIL:
+        # Ensure output directory exists
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        pil_img = Image.fromarray(mosaic, mode='RGBA')
+        pil_img.save(output_path)
         print(f"✓ Saved BRDF gallery: {output_path}")
-        print(f"  Mosaic size: {mosaic.shape[1]}×{mosaic.shape[0]}")
-    except ImportError:
-        print("Warning: PIL not available, cannot save image")
-        import sys
-        np.save(sys.stdout.buffer if hasattr(sys.stdout, 'buffer') else sys.stdout, mosaic)
+    else:
+        print("✗ PIL not available, cannot save PNG")
+        # Fallback: save as numpy
+        npy_path = output_path.with_suffix('.npy')
+        np.save(npy_path, mosaic)
+        print(f"  Saved as numpy array: {npy_path}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Render a BRDF gallery comparing different models across roughness sweeps",
+        description="Render a BRDF gallery mosaic using offscreen rendering",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Default 3×4 grid (Lambert, GGX, Disney @ 4 roughness values)
+  # Default gallery
   python examples/brdf_gallery.py
-
-  # Custom BRDFs and roughness steps
-  python examples/brdf_gallery.py --brdfs lambert phong ggx disney toon --roughness-steps 5
-
-  # Larger tiles
-  python examples/brdf_gallery.py --tile-size 320
-
-  # Use per-material BRDF settings instead of global override
-  python examples/brdf_gallery.py --no-override
-
-  # Save individual tiles
-  python examples/brdf_gallery.py --save-tiles --outdir examples/out/brdf_tiles
+  
+  # Custom models (CSV)
+  python examples/brdf_gallery.py --models lambert,phong,ggx,disney
+  
+  # Custom roughness sweep (CSV)
+  python examples/brdf_gallery.py --roughness 0.1,0.3,0.5,0.7,0.9
+  
+  # NDF-only debug mode
+  python examples/brdf_gallery.py --ndf-only
+  
+  # Custom tile size
+  python examples/brdf_gallery.py --tile-size 512 512
+  
+  # Custom output path
+  python examples/brdf_gallery.py --out reports/brdf_gallery.png
         """,
     )
     
     parser.add_argument(
-        '--output', '-o',
-        type=Path,
-        default=Path('brdf_gallery.png'),
-        help='Output mosaic path (default: brdf_gallery.png)',
+        '--models',
+        type=str,
+        default='ggx,disney',
+        help='Comma-separated BRDF models (default: ggx,disney)',
     )
     parser.add_argument(
-        '--outdir',
-        type=Path,
-        default=Path('examples/out'),
-        help='Output directory for individual tiles (default: examples/out)',
+        '--roughness',
+        type=str,
+        default='0.1,0.3,0.5,0.7,0.9',
+        help='Comma-separated roughness values (default: 0.1,0.3,0.5,0.7,0.9)',
     )
     parser.add_argument(
         '--tile-size',
         type=int,
-        default=256,
-        help='Tile size in pixels (default: 256)',
+        nargs=2,
+        default=[256, 256],
+        metavar=('WIDTH', 'HEIGHT'),
+        help='Tile size in pixels (default: 256 256)',
     )
     parser.add_argument(
-        '--roughness-steps',
-        type=int,
-        default=4,
-        help='Number of roughness values to test (default: 4)',
-    )
-    parser.add_argument(
-        '--brdfs',
-        nargs='+',
-        default=['lambert', 'ggx', 'disney'],
-        choices=list(BRDF_MODELS.keys()),
-        help='BRDF models to compare (default: lambert ggx disney)',
-    )
-    parser.add_argument(
-        '--save-tiles',
+        '--ndf-only',
         action='store_true',
-        help='Save individual tiles to outdir',
+        help='Enable NDF-only debug mode',
     )
     parser.add_argument(
-        '--no-override',
+        '--g-only',
         action='store_true',
-        help='Use per-material BRDF settings instead of global override',
+        help='Milestone 0: Enable G-only debug mode (outputs Smith G as grayscale)',
+    )
+    parser.add_argument(
+        '--dfg-only',
+        action='store_true',
+        help='Milestone 0: Enable DFG-only debug mode (outputs D*F*G pre-division)',
+    )
+    parser.add_argument(
+        '--spec-only',
+        action='store_true',
+        help='Milestone 0: Enable SPEC-only debug mode (outputs specular-only term)',
+    )
+    parser.add_argument(
+        '--roughness-visualize',
+        action='store_true',
+        help='Milestone 0: Enable roughness visualization (outputs vec3(roughness))',
+    )
+    parser.add_argument(
+        '--exposure',
+        type=float,
+        default=1.0,
+        help='Milestone 4: Exposure multiplier (default: 1.0)',
+    )
+    parser.add_argument(
+        '--light-intensity',
+        type=float,
+        default=0.8,
+        help='Milestone 4: Light intensity (default: 0.8)',
+    )
+    parser.add_argument(
+        '--mode',
+        type=str,
+        choices=['full', 'ndf', 'g', 'dfg', 'spec', 'roughness'],
+        default=None,
+        help='Milestone 4: Output mode selector (overrides individual toggles)'
+    )
+    parser.add_argument(
+        '--no-labels',
+        action='store_true',
+        help='Milestone 4: Do not stamp labels on each tile',
+    )
+    parser.add_argument(
+        '--debug-dot-products',
+        action='store_true',
+        help='Milestone 1: Log min/max N·L and N·V values for debugging',
+    )
+    parser.add_argument(
+        '--out',
+        type=Path,
+        default=Path('brdf_gallery.png'),
+        help='Output path for mosaic PNG (default: brdf_gallery.png)',
     )
     
     args = parser.parse_args()
     
-    render_brdf_gallery(
-        output_path=args.output,
-        outdir=args.outdir,
-        tile_size=args.tile_size,
-        roughness_steps=args.roughness_steps,
-        brdfs=args.brdfs,
-        save_tiles=args.save_tiles,
-        use_override=not args.no_override,
-    )
+    # Parse CSV inputs
+    models = parse_csv_list(args.models)
+    roughness_values = parse_csv_floats(args.roughness)
+    
+    # Validate inputs
+    valid_models = ['lambert', 'phong', 'ggx', 'disney']
+    for model in models:
+        if model not in valid_models:
+            print(f"Error: Invalid model '{model}'. Valid models: {', '.join(valid_models)}")
+            sys.exit(1)
+    
+    for roughness in roughness_values:
+        if not (0.0 <= roughness <= 1.0):
+            print(f"Warning: Roughness {roughness} outside [0, 1] range. Will be clamped.")
+    
+    if not models:
+        print("Error: No models specified")
+        sys.exit(1)
+    
+    if not roughness_values:
+        print("Error: No roughness values specified")
+        sys.exit(1)
+    
+    # Render gallery
+    try:
+        render_gallery(
+            models=models,
+            roughness_values=roughness_values,
+            tile_size=tuple(args.tile_size),
+            ndf_only=args.ndf_only,
+            g_only=args.g_only,
+            dfg_only=args.dfg_only,
+            spec_only=args.spec_only,
+            roughness_visualize=args.roughness_visualize,
+            exposure=args.exposure,
+            light_intensity=args.light_intensity,
+            output_path=args.out,
+            debug_dot_products=args.debug_dot_products,
+            mode=args.mode,
+            no_labels=args.no_labels,
+        )
+    except Exception as e:
+        print(f"\nError: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == '__main__':

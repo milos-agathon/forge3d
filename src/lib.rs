@@ -300,6 +300,7 @@ fn render_debug_pattern_frame(py: Python<'_>, width: u32, height: u32) -> PyResu
 
     Py::new(py, frame)
 }
+
 // Core modules
 pub mod math {
     /// Orthonormalize a tangent `t` against normal `n` and return (tangent, bitangent).
@@ -364,6 +365,7 @@ pub mod io; // IO: OBJ/PLY/glTF readers/writers
 pub mod loaders;
 mod material_set;
 pub mod mesh;
+pub mod offscreen; // P7: Offscreen PBR harness for BRDF galleries and CI goldens
 mod overlay_layer;
 pub mod path_tracing;
 pub mod pipeline;
@@ -1045,6 +1047,7 @@ fn vector_render_oit_py(
         }
         drop(data);
         buf.unmap();
+
         let arr1 = PyArray1::<u8>::from_vec_bound(py, rgba);
         let arr3 = arr1.reshape([height as usize, width as usize, 4])?;
         Ok(arr3.into_py(py))
@@ -1288,12 +1291,12 @@ fn vector_render_oit_and_pick_py(
     py: Python<'_>,
     width: u32,
     height: u32,
-    points_xy: Option<&Bound<'_, PyAny>>,  // sequence of (x,y)
-    point_rgba: Option<&Bound<'_, PyAny>>, // sequence of (r,g,b,a)
-    point_size: Option<&Bound<'_, PyAny>>, // sequence of size
-    polylines: Option<&Bound<'_, PyAny>>,  // sequence of sequence of (x,y)
-    polyline_rgba: Option<&Bound<'_, PyAny>>, // sequence of (r,g,b,a)
-    stroke_width: Option<&Bound<'_, PyAny>>, // sequence of width
+    points_xy: Option<&Bound<'_, PyAny>>,
+    point_rgba: Option<&Bound<'_, PyAny>>,
+    point_size: Option<&Bound<'_, PyAny>>,
+    polylines: Option<&Bound<'_, PyAny>>,
+    polyline_rgba: Option<&Bound<'_, PyAny>>,
+    stroke_width: Option<&Bound<'_, PyAny>>,
     base_pick_id: Option<u32>,
 ) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
     #[cfg(not(feature = "weighted-oit"))]
@@ -2092,6 +2095,7 @@ fn vector_oit_and_pick_demo(py: Python<'_>, width: u32, height: u32) -> PyResult
         Ok((arr3.into_py(py), pick_id))
     }
 }
+
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 fn hybrid_render(
@@ -3059,6 +3063,199 @@ fn open_viewer(
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Viewer error: {}", e)))
 }
 
+/// P7-05: Render a BRDF tile offscreen and return as numpy array
+/// 
+/// Maps model names to BRDF indices and renders a UV-sphere with the specified parameters.
+/// Returns a tight numpy array of shape (height, width, 4) with dtype uint8.
+/// 
+/// # Arguments
+/// * `model` - BRDF model name: "lambert", "phong", "ggx", or "disney"
+/// * `roughness` - Material roughness in [0, 1], clamped automatically
+/// * `width` - Output image width in pixels
+/// * `height` - Output image height in pixels
+/// * `ndf_only` - Debug mode: if true, outputs NDF values as grayscale
+/// * `debug_dot_products` - Debug mode: if true, outputs dot products as color
+/// * `mode` - Optional mode selector to override debug toggles (default: None)
+/// 
+/// # Returns
+/// NumPy array of shape (height, width, 4) with dtype uint8 (RGBA)
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (
+    model, roughness, width, height,
+    ndf_only=false, g_only=false, dfg_only=false, spec_only=false, roughness_visualize=false,
+    exposure=1.0, light_intensity=0.8, base_color=(0.5, 0.5, 0.5),
+    clearcoat=0.0, clearcoat_roughness=0.0, sheen=0.0, sheen_tint=0.0, specular_tint=0.0,
+    debug_dot_products=false,
+    // M2 additions (all optional with safe defaults)
+    debug_lambert_only=false, debug_d=false, debug_spec_no_nl=false, debug_energy=false,
+    debug_angle_sweep=false, debug_angle_component=2,
+    debug_no_srgb=false, output_mode=1, metallic_override=0.0,
+    mode=None
+))]
+fn render_brdf_tile<'py>(
+    py: Python<'py>,
+    model: &str,
+    roughness: f32,
+    width: u32,
+    height: u32,
+    ndf_only: bool,
+    g_only: bool,
+    dfg_only: bool,
+    spec_only: bool,
+    roughness_visualize: bool,
+    exposure: f32,
+    light_intensity: f32,
+    base_color: (f32, f32, f32),
+    // M4: Disney Principled BRDF extensions
+    clearcoat: f32,
+    clearcoat_roughness: f32,
+    sheen: f32,
+    sheen_tint: f32,
+    specular_tint: f32,
+    debug_dot_products: bool,
+    // M2 debug toggles
+    debug_lambert_only: bool,
+    debug_d: bool,
+    debug_spec_no_nl: bool,
+    debug_energy: bool,
+    debug_angle_sweep: bool,
+    debug_angle_component: u32,
+    debug_no_srgb: bool,
+    output_mode: u32,
+    metallic_override: f32,
+    // M4: Optional mode selector to override debug toggles
+    mode: Option<&str>,
+) -> PyResult<Bound<'py, PyArray3<u8>>> {
+    // Map model name to BRDF index
+    let model_u32 = match model.to_lowercase().as_str() {
+        "lambert" => 0,
+        "phong" => 1,
+        "ggx" => 4,
+        "disney" => 6,
+        _ => {
+            return Err(PyValueError::new_err(format!(
+                "Invalid BRDF model '{}'. Expected one of: lambert, phong, ggx, disney",
+                model
+            )));
+        }
+    };
+
+    // Clamp roughness to [0, 1]
+    let roughness = roughness.clamp(0.0, 1.0);
+
+    // Map optional mode to toggles (M4)
+    let (mut ndf_only, mut g_only, mut dfg_only, mut spec_only, mut roughness_visualize,
+        mut debug_lambert_only, mut debug_d, mut debug_spec_no_nl, mut debug_energy, mut debug_angle_sweep,
+        mut debug_angle_component, mut debug_no_srgb, mut output_mode) =
+        (ndf_only, g_only, dfg_only, spec_only, roughness_visualize,
+         debug_lambert_only, debug_d, debug_spec_no_nl, debug_energy, debug_angle_sweep,
+         debug_angle_component, debug_no_srgb, output_mode);
+
+    if let Some(mode_str) = mode {
+        let m = mode_str.to_lowercase();
+        match m.as_str() {
+            "full" => {
+                ndf_only = false; g_only = false; dfg_only = false; spec_only = false; roughness_visualize = false;
+            }
+            "ndf" => {
+                ndf_only = true; g_only = false; dfg_only = false; spec_only = false; roughness_visualize = false;
+            }
+            "g" => {
+                ndf_only = false; g_only = true; dfg_only = false; spec_only = false; roughness_visualize = false;
+            }
+            "dfg" => {
+                ndf_only = false; g_only = false; dfg_only = true; spec_only = false; roughness_visualize = false;
+            }
+            "spec" => {
+                ndf_only = false; g_only = false; dfg_only = false; spec_only = true; roughness_visualize = false;
+            }
+            "roughness" => {
+                ndf_only = false; g_only = false; dfg_only = false; spec_only = false; roughness_visualize = true;
+            }
+            // M2 extended modes
+            "lambert" | "flatness" => { debug_lambert_only = true; }
+            "d" | "ndf_only" | "debug_d" => { debug_d = true; }
+            "spec_no_nl" => { spec_only = true; debug_spec_no_nl = true; }
+            "energy" | "kskd" => { debug_energy = true; }
+            "angle_spec" => { debug_angle_sweep = true; debug_angle_component = 0; }
+            "angle_diffuse" => { debug_angle_sweep = true; debug_angle_component = 1; }
+            "angle_combined" | "angle" => { debug_angle_sweep = true; debug_angle_component = 2; }
+            "linear" => { output_mode = 0; debug_no_srgb = true; }
+            "srgb" => { output_mode = 1; debug_no_srgb = false; }
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Invalid mode '{}'. Expected one of: full, ndf, g, dfg, spec, roughness, lambert, d, spec_no_nl, energy, angle_spec, angle_diffuse, angle_combined, linear, srgb",
+                    mode_str
+                )));
+            }
+        }
+        log::info!(
+            "[M4/M2] Mode mapping applied: mode={} -> ndf_only={} g_only={} dfg_only={} spec_only={} roughness_visualize={} lambert_only={} debug_d={} spec_no_nl={} energy={} angle_sweep={} angle_comp={} no_srgb={} out_mode={}",
+            m, ndf_only, g_only, dfg_only, spec_only, roughness_visualize, debug_lambert_only, debug_d, debug_spec_no_nl, debug_energy, debug_angle_sweep, debug_angle_component, debug_no_srgb, output_mode
+        );
+    }
+
+    // Get GPU context
+    let ctx = crate::gpu::ctx();
+
+    // Call offscreen renderer
+    let buffer = crate::offscreen::brdf_tile::render_brdf_tile_offscreen(
+        ctx.device.as_ref(),
+        ctx.queue.as_ref(),
+        model_u32,
+        roughness,
+        width,
+        height,
+        ndf_only,
+        g_only,
+        dfg_only,
+        spec_only,
+        roughness_visualize,
+        exposure,
+        light_intensity,
+        [base_color.0, base_color.1, base_color.2],
+        // M4: Disney Principled BRDF extensions
+        clearcoat,
+        clearcoat_roughness,
+        sheen,
+        sheen_tint,
+        specular_tint,
+        debug_dot_products,
+        // M2 extensions
+        debug_lambert_only,
+        debug_d,
+        debug_spec_no_nl,
+        debug_energy,
+        debug_angle_sweep,
+        debug_angle_component,
+        debug_no_srgb,
+        output_mode,
+        metallic_override,
+    )
+    .map_err(|e| PyRuntimeError::new_err(format!("Failed to render BRDF tile: {}", e)))?;
+
+    // Verify buffer size
+    let expected_size = (height * width * 4) as usize;
+    if buffer.len() != expected_size {
+        return Err(PyRuntimeError::new_err(format!(
+            "Buffer size mismatch: got {} bytes, expected {}",
+            buffer.len(),
+            expected_size
+        )));
+    }
+
+    // Convert to numpy array with shape (height, width, 4)
+    // Buffer is row-major RGBA8, so we can reshape directly via ndarray
+    let array = ndarray::Array3::from_shape_vec(
+        (height as usize, width as usize, 4),
+        buffer,
+    )
+    .map_err(|e| PyRuntimeError::new_err(format!("Failed to reshape buffer to array: {}", e)))?;
+
+    Ok(array.into_pyarray_bound(py))
+}
+
 // PyO3 module entry point so Python can `import forge3d._forge3d`
 // This must be named exactly `_forge3d` to match [tool.maturin].module-name in pyproject.toml
 #[cfg(feature = "extension-module")]
@@ -3108,7 +3305,10 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         crate::geometry::geometry_validate_mesh_py,
         m
     )?)?;
-    m.add_function(wrap_pyfunction!(crate::geometry::geometry_weld_mesh_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::geometry_weld_mesh_py,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(
         crate::geometry::geometry_transform_center_py,
         m
@@ -3282,6 +3482,8 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(crate::grid::grid_generate, m)?)?;
     // Path tracing (GPU MVP)
     m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
+    // P7-05: Offscreen BRDF tile renderer
+    m.add_function(wrap_pyfunction!(render_brdf_tile, m)?)?;
 
     // Add main classes
     m.add_class::<crate::session::Session>()?;

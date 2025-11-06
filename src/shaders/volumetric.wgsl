@@ -98,44 +98,11 @@ fn fog_density_at_height(world_pos: vec3<f32>) -> f32 {
 // ============================================================================
 
 fn sample_shadow(world_pos: vec3<f32>) -> f32 {
-    if (params.use_shadows == 0u) {
-        return 1.0;
-    }
-
-    // Transform to shadow map space
-    let shadow_pos = shadow_matrix * vec4<f32>(world_pos, 1.0);
-    let shadow_ndc = shadow_pos.xyz / shadow_pos.w;
-
-    // Convert to shadow map UV
-    let shadow_uv = vec2<f32>(shadow_ndc.x * 0.5 + 0.5, 1.0 - (shadow_ndc.y * 0.5 + 0.5));
-
-    // Out of shadow map bounds = fully lit
-    if (shadow_uv.x < 0.0 || shadow_uv.x > 1.0 || shadow_uv.y < 0.0 || shadow_uv.y > 1.0) {
-        return 1.0;
-    }
-
-    // PCF shadow sampling for smoother god-rays
-    let shadow_depth = shadow_ndc.z;
-    var shadow_sum = 0.0;
-    let pcf_radius = 2;
-    var sample_count = 0.0;
-
-    let texel_size = 1.0 / vec2<f32>(textureDimensions(shadow_map));
-
-    for (var y = -pcf_radius; y <= pcf_radius; y = y + 1) {
-        for (var x = -pcf_radius; x <= pcf_radius; x = x + 1) {
-            let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-            shadow_sum = shadow_sum + textureSampleCompare(
-                shadow_map,
-                shadow_sampler,
-                shadow_uv + offset,
-                shadow_depth - 0.001  // Small bias
-            );
-            sample_count = sample_count + 1.0;
-        }
-    }
-
-    return shadow_sum / sample_count;
+    // TODO P6: textureSampleCompare requires derivatives and is forbidden in compute shaders.
+    // Implement compute-compatible shadow sampling using textureLoad with manual depth comparison,
+    // or render volumetric shadows in a fragment shader pass.
+    // For now, disable shadows to unblock viewer launch.
+    return 1.0;
 }
 
 // ============================================================================
@@ -235,8 +202,8 @@ fn cs_volumetric(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let uv = (vec2<f32>(pixel) + 0.5) / vec2<f32>(dims);
 
-    // Sample scene depth
-    let scene_depth = textureSample(depth_texture, depth_sampler, uv).r;
+    // Sample scene depth (explicit LOD for compute)
+    let scene_depth = textureSampleLevel(depth_texture, depth_sampler, uv, 0.0).r;
 
     // Reconstruct view ray
     let ndc = vec2<f32>(uv.x * 2.0 - 1.0, (1.0 - uv.y) * 2.0 - 1.0);
@@ -266,7 +233,7 @@ fn cs_volumetric(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Temporal reprojection for stability
     var final_fog = fog_result;
     if (params.temporal_alpha > 0.0) {
-        let history = textureSample(history_fog, history_sampler, uv);
+        let history = textureSampleLevel(history_fog, history_sampler, uv, 0.0);
         final_fog = mix(fog_result, history, params.temporal_alpha);
     }
 
@@ -351,8 +318,8 @@ fn cs_apply_froxels(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let uv = (vec2<f32>(pixel) + 0.5) / vec2<f32>(dims);
 
-    // Sample scene depth
-    let scene_depth = textureSample(depth_texture, depth_sampler, uv).r;
+    // Sample scene depth (explicit LOD for compute)
+    let scene_depth = textureSampleLevel(depth_texture, depth_sampler, uv, 0.0).r;
     let world_depth_pos = reconstruct_world_pos(uv, scene_depth);
     let scene_distance = length(world_depth_pos - camera.eye_position);
 
@@ -374,8 +341,8 @@ fn cs_apply_froxels(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         let froxel_uvw = vec3<f32>(uv.x, uv.y, froxel_z);
 
-        // Sample froxel
-        let froxel_data = textureSample(froxel_texture, froxel_sampler, froxel_uvw);
+        // Sample froxel (explicit LOD for compute)
+        let froxel_data = textureSampleLevel(froxel_texture, froxel_sampler, froxel_uvw, 0.0);
         let inscatter = froxel_data.rgb;
         let extinction = froxel_data.a;
 

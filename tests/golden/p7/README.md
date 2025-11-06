@@ -6,6 +6,11 @@ Reference images for BRDF mosaic regression testing.
 
 Golden images validate that BRDF tile rendering remains consistent across code changes and GPU hardware. Tests use SSIM/PSNR thresholds to tolerate minor GPU variance while catching visual regressions.
 
+**Last Updated**: November 5, 2025  
+**GPU**: Apple M3 Max (Metal)  
+**Reason**: M2 corrected - roughness-invariant D_norm = D × π / α²  
+**BRDF Shader Version**: Post-M2 (corrected: D_norm = D × π / α² brings all peaks to ~1.0)
+
 ## Golden Images
 
 ### `mosaic_3x3_128.png` (Primary)

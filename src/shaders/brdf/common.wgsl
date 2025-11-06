@@ -29,18 +29,22 @@ fn fresnel_schlick_scalar(cos_theta: f32, f0: f32) -> f32 {
 }
 
 fn distribution_ggx(normal: vec3<f32>, half_vec: vec3<f32>, roughness: f32) -> f32 {
-    let a = max(roughness * roughness, 1e-4);
-    let a2 = a * a;
+    // Treat input as linear roughness (alpha directly), not perceptual
+    // Standard GGX: D = alpha² / (π * ((N·H)²(alpha² - 1) + 1)²)
+    let alpha = clamp(roughness, 0.045, 1.0);  // Clamp to avoid singularities
+    let alpha2 = alpha * alpha;
     let n_dot_h = saturate(dot(normal, half_vec));
     let n_dot_h2 = n_dot_h * n_dot_h;
-    let denom = n_dot_h2 * (a2 - 1.0) + 1.0;
-    return a2 / (PI * denom * denom + 1e-6);
+    let denom = n_dot_h2 * (alpha2 - 1.0) + 1.0;
+    return alpha2 / (PI * denom * denom + 1e-6);
 }
 
 fn geometry_smith_ggx(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, roughness: f32) -> f32 {
     let n_dot_v = saturate(dot(normal, view));
     let n_dot_l = saturate(dot(normal, light));
-    let r = roughness + 1.0;
+    // Direct lighting: k = (alpha + 1)² / 8 (Disney's remapping)
+    let alpha = clamp(roughness, 0.045, 1.0);
+    let r = alpha + 1.0;
     let k = (r * r) / 8.0;
     let ggx_v = n_dot_v / (n_dot_v * (1.0 - k) + k);
     let ggx_l = n_dot_l / (n_dot_l * (1.0 - k) + k);
@@ -48,18 +52,20 @@ fn geometry_smith_ggx(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, roug
 }
 
 fn distribution_beckmann(normal: vec3<f32>, half_vec: vec3<f32>, roughness: f32) -> f32 {
-    let alpha = max(roughness * roughness, 1e-4);
+    // Treat input as linear roughness (alpha)
+    let alpha = clamp(roughness, 0.045, 1.0);
+    let alpha2 = alpha * alpha;
     let n_dot_h = saturate(dot(normal, half_vec));
     if (n_dot_h <= 0.0) {
         return 0.0;
     }
     let tan_theta = sqrt(max(1.0 - n_dot_h * n_dot_h, 0.0)) / n_dot_h;
-    let exponent = -(tan_theta * tan_theta) / (alpha * alpha);
-    return exp(exponent) / (PI * alpha * alpha * n_dot_h * n_dot_h * n_dot_h * n_dot_h + 1e-6);
+    let exponent = -(tan_theta * tan_theta) / alpha2;
+    return exp(exponent) / (PI * alpha2 * n_dot_h * n_dot_h * n_dot_h * n_dot_h + 1e-6);
 }
 
 fn geometry_beckmann(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, roughness: f32) -> f32 {
-    let alpha = max(roughness * roughness, 1e-4);
+    let alpha = clamp(roughness, 0.045, 1.0);
     let n_dot_v = saturate(dot(normal, view));
     let n_dot_l = saturate(dot(normal, light));
     let lambda_v = lambda_beckmann(n_dot_v, alpha);
@@ -81,8 +87,11 @@ fn lambda_beckmann(n_dot_w: f32, alpha: f32) -> f32 {
 }
 
 fn to_shininess(roughness: f32) -> f32 {
-    let r = saturate(roughness);
-    return max(1.0, pow(1.0 - r, 5.0) * 512.0);
+    // Map linear roughness to Blinn-Phong exponent
+    // Calibrated to approximate GGX width: s ≈ 2/alpha² - 2
+    let alpha = clamp(roughness, 0.045, 0.99);
+    let exponent = 2.0 / (alpha * alpha) - 2.0;
+    return clamp(exponent, 4.0, 8192.0);  // Reasonable range for Blinn-Phong
 }
 
 fn build_orthonormal_basis(normal: vec3<f32>) -> mat3x3<f32> {

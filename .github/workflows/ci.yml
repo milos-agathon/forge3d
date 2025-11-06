@@ -194,6 +194,11 @@ jobs:
           pip install dist/*.whl
           pip install pytest numpy
 
+      - name: Log shader version and GPU info (Milestone 5)
+        run: |
+          python -c "import forge3d as f3d; print('\n=== Milestone 5: Shader Version ===' ); print('BRDF_SHADER_VERSION: Check Rust logs during render')" || true
+        continue-on-error: true
+
       - name: Run pytest
         run: pytest tests/ -v --tb=short
         continue-on-error: true

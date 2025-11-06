@@ -1,0 +1,701 @@
+// src/shaders/brdf_tile.wgsl
+// P7-03: Simplified offscreen PBR shader for BRDF tile rendering
+// Renders UV-sphere with direct BRDF evaluation for gallery generation
+// RELEVANT FILES: src/offscreen/brdf_tile.rs, src/shaders/lighting.wgsl, src/shaders/brdf/dispatch.wgsl
+
+// Milestone 0: Shader version stamp for CI diff tracking
+// Milestone 1: Incremented to 2 for GGX donut fix and proper vector handling
+// Milestone 2: Incremented to 3 for normalized Blinn-Phong with comparable mapping
+// Milestone 3: Incremented to 4 for Disney Principled with IOR-based F0
+const BRDF_SHADER_VERSION: u32 = 4u;
+
+// Minimal inline BRDF constants to avoid include conflicts
+// REQ-M2: SHADING STAGE (LINEAR) — all BRDF math stays in linear RGB
+// sRGB/OETF happens only in the final write based on output_mode/debug flag
+const PI: f32 = 3.14159265359;
+const INV_PI: f32 = 0.318309886;
+
+// sRGB helpers (piecewise exact curve)
+fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    let a = 0.055;
+    var outc = vec3<f32>(0.0);
+    for (var i: i32 = 0; i < 3; i = i + 1) {
+        let x = c[i];
+        outc[i] = select(
+            x * 12.92,
+            (1.0 + a) * pow(max(x, 0.0), 1.0 / 2.4) - a,
+            x > 0.0031308
+        );
+    }
+    return clamp(outc, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// Small stamp to verify which branch rendered this pixel
+fn apply_debug_stamp(uv: vec2<f32>, color_lin: vec3<f32>, stamp: vec3<f32>) -> vec3<f32> {
+    // Draw a thin band at the bottom 5% of the sphere UV to avoid top-left label overlay
+    if (uv.y < 0.05) {
+        return stamp;
+    }
+    return color_lin;
+}
+
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    let a = 0.055;
+    var outc = vec3<f32>(0.0);
+    for (var i: i32 = 0; i < 3; i = i + 1) {
+        let x = c[i];
+        outc[i] = select(
+            x / 12.92,
+            pow((x + a) / (1.0 + a), 2.4),
+            x > 0.04045
+        );
+    }
+    return clamp(outc, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// BRDF model constants (matches lighting.wgsl and Rust BrdfModel enum)
+const BRDF_LAMBERT: u32 = 0u;
+const BRDF_PHONG: u32 = 1u;
+const BRDF_COOK_TORRANCE_GGX: u32 = 4u;
+const BRDF_DISNEY_PRINCIPLED: u32 = 6u;
+
+// Minimal ShadingParamsGPU structure (matches lighting.wgsl)
+struct ShadingParamsGPU {
+    brdf: u32,
+    metallic: f32,
+    roughness: f32,
+    sheen: f32,
+    clearcoat: f32,
+    subsurface: f32,
+    anisotropy: f32,
+    exposure: f32,    // Milestone 0: carry exposure (default 1.0 in tests)
+    // M2: Output encoding selection (0=linear, 1=srgb)
+    output_mode: u32,
+    _pad_out0: u32,
+    _pad_out1: u32,
+    _pad_out2: u32,
+}
+
+// Camera and transform uniforms
+struct Uniforms {
+    model_matrix: mat4x4<f32>,
+    view_matrix: mat4x4<f32>,
+    projection_matrix: mat4x4<f32>,
+}
+
+// Material and lighting parameters
+struct BrdfTileParams {
+    light_dir: vec3<f32>,
+    _pad0: f32,
+    light_color: vec3<f32>,
+    light_intensity: f32,
+    camera_pos: vec3<f32>,
+    _pad1: f32,
+    base_color: vec3<f32>,
+    metallic: f32,
+    roughness: f32,
+    ndf_only: u32,  // Boolean: 1 = NDF-only mode, 0 = full BRDF
+    g_only: u32,    // Milestone 0: 1 = output Smith G as grayscale
+    dfg_only: u32,  // Milestone 0: 1 = output D*F*G (pre-division)
+    spec_only: u32, // Milestone 0: 1 = output specular-only (Cook–Torrance)
+    roughness_visualize: u32,  // Milestone 0: 1 = output vec3(r) for uniform validation
+    f0: vec3<f32>,             // Milestone 0: explicitly provide F0
+    _pad_f0: f32,
+    // M4: Disney Principled BRDF extensions
+    clearcoat: f32,              // Clearcoat layer intensity [0,1]
+    clearcoat_roughness: f32,    // Clearcoat layer roughness [0,1]
+    sheen: f32,                  // Sheen intensity [0,1] for fabric-like materials
+    sheen_tint: f32,             // Sheen tint [0,1]: 0=white, 1=base color
+    specular_tint: f32,          // Specular tint [0,1]: 0=achromatic, 1=base color tint
+    // M2: Debug toggles
+    debug_lambert_only: u32,   // 1 = lambert-only output (disable specular)
+    debug_energy: u32,         // 1 = output kS/Kd diagnostics (packed R,G,B)
+    debug_d: u32,              // 1 = output D only (grayscale)
+    debug_g_dbg: u32,          // 1 = output correlated G only (grayscale)
+    debug_spec_no_nl: u32,     // 1 = output spec without NL and without Li
+    debug_angle_sweep: u32,    // 1 = override normal with sweep across uv.x and force V=L=+Z
+    debug_angle_component: u32,// 0=spec,1=diffuse,2=combined
+    debug_no_srgb: u32,        // 1 = bypass sRGB conversion at end
+}
+;
+
+// Vertex input (matches TbnVertex from sphere.rs)
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) normal: vec3<f32>,
+    @location(3) tangent: vec3<f32>,
+    @location(4) bitangent: vec3<f32>,
+}
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) world_position: vec3<f32>,
+    @location(1) world_normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(1) var<uniform> params: BrdfTileParams;
+@group(0) @binding(2) var<uniform> shading: ShadingParamsGPU;
+
+// M1: Optional debug buffer for min/max N·L and N·V tracking
+// Binding 3 is only used when debug_dot_products flag is enabled
+@group(0) @binding(3) var<storage, read_write> debug_buffer: array<atomic<u32>, 4>;
+// Layout: [0]=min_nl, [1]=max_nl, [2]=min_nv, [3]=max_nv
+// Values are stored as atomicMin/Max of floatBitsToUint
+
+@vertex
+fn vs_main(input: VertexInput) -> VertexOutput {
+    var output: VertexOutput;
+    
+    // Transform to world space
+    let world_pos = uniforms.model_matrix * vec4<f32>(input.position, 1.0);
+    output.world_position = world_pos.xyz;
+    
+    // Transform to clip space
+    output.clip_position = uniforms.projection_matrix * uniforms.view_matrix * world_pos;
+    
+    // Transform normal to world space (assuming uniform scale, no normal matrix needed)
+    let world_normal = (uniforms.model_matrix * vec4<f32>(input.normal, 0.0)).xyz;
+    output.world_normal = normalize(world_normal);
+    
+    // Pass through UV
+    output.uv = input.uv;
+    
+    return output;
+}
+
+// Milestone 1: Compute NDF (Normal Distribution Function) with correct GGX/GTR2 formula
+// Matches the D term in Cook-Torrance BRDF
+fn compute_ndf(normal: vec3<f32>, half_vec: vec3<f32>, roughness: f32) -> f32 {
+    // Milestone 1: Single roughness convention with clamping
+    let alpha = clamp(roughness * roughness, 1e-4, 1.0);
+    let alpha2 = alpha * alpha;
+    
+    // Milestone 1: Use saturate for proper [0,1] clamping
+    let n_dot_h = saturate(dot(normal, half_vec));
+    let n_dot_h2 = n_dot_h * n_dot_h;
+    
+    let denom = n_dot_h2 * (alpha2 - 1.0) + 1.0;
+    let denom2 = denom * denom;
+    
+    // Milestone 1: Stable division guard
+    if denom2 < 1e-6 {
+        return 0.0;
+    }
+    
+    return alpha2 / (PI * denom2);
+}
+
+// Inline BRDF implementations for main models
+
+// Fresnel-Schlick approximation
+fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
+    return f0 + (1.0 - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
+}
+
+// M1: Stable denominator for Cook–Torrance specular term
+// den_spec = max(4 * NL * NV, 1e-4)
+fn spec_den(n_dot_l: f32, n_dot_v: f32) -> f32 {
+    return max(4.0 * n_dot_l * n_dot_v, 1e-4);
+}
+
+// Milestone 1: GGX/GTR2 Normal Distribution Function with correct formula
+fn distribution_ggx(n_dot_h: f32, roughness: f32) -> f32 {
+    // Milestone 1: Single roughness convention - alpha = clamp(r^2, 1e-4, 1.0)
+    let alpha = clamp(roughness * roughness, 1e-4, 1.0);
+    let alpha2 = alpha * alpha;
+    let n_dot_h2 = n_dot_h * n_dot_h;
+    
+    // GGX/GTR2 formula: D = α² / (π * (N·H² * (α² - 1) + 1)²)
+    let denom = n_dot_h2 * (alpha2 - 1.0) + 1.0;
+    let denom2 = denom * denom;
+    
+    // Milestone 1: Guard against division by near-zero
+    if denom2 < 1e-6 {
+        return 0.0;
+    }
+    
+    return alpha2 / (PI * denom2);
+}
+
+// M1.1: Schlick-GGX Smith G1 (single direction)
+// Uses height-correlated approximation with k = alpha * 0.5
+fn smithG1_ggx(n_dot_x: f32, alpha: f32) -> f32 {
+    let k = alpha * 0.5;  // height-correlated
+    let denom = n_dot_x * (1.0 - k) + k;
+    
+    // Guard against division by near-zero
+    if denom < 1e-6 {
+        return 0.0;
+    }
+    
+    return n_dot_x / denom;
+}
+
+// Helper: Heitz lambda(NdotX) for GGX
+fn lambda_term(n_dot_x: f32, a2: f32) -> f32 {
+    let ndx = clamp(n_dot_x, 1e-4, 1.0);
+    let ndx2 = ndx * ndx;
+    let t2 = (1.0 - ndx2) / ndx2;
+    return 0.5 * (sqrt(1.0 + a2 * t2) - 1.0);
+}
+
+// M2: Heitz correlated Smith G (physically-based, correlated)
+// Reference: "Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs" (Heitz 2014)
+fn geometry_smith_correlated(n_dot_v: f32, n_dot_l: f32, roughness: f32) -> f32 {
+    // Use alpha = roughness (Heitz parametrization), not roughness^2
+    let a  = clamp(roughness, 1e-4, 1.0);
+    let a2 = a * a;
+    let lambda_v = lambda_term(n_dot_v, a2);
+    let lambda_l = lambda_term(n_dot_l, a2);
+    let g = 1.0 / (1.0 + lambda_v + lambda_l);
+    return clamp(g, 0.0, 1.0);
+}
+
+// Lambert BRDF (diffuse)
+fn brdf_lambert(base_color: vec3<f32>) -> vec3<f32> {
+    return base_color * INV_PI;
+}
+
+// Milestone 2: Normalized Blinn-Phong BRDF
+fn brdf_phong(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, base_color: vec3<f32>, roughness: f32) -> vec3<f32> {
+    // Milestone 2: Normalize all input vectors
+    let n = normalize(normal);
+    let v = normalize(view);
+    let l = normalize(light);
+    
+    // Milestone 2: Guard against degenerate half vector
+    let v_plus_l = v + l;
+    let v_plus_l_len = length(v_plus_l);
+    if v_plus_l_len < 1e-6 {
+        return vec3<f32>(0.0);
+    }
+    let h = normalize(v_plus_l);
+    
+    // Milestone 2: Use saturate for proper [0,1] clamping
+    let n_dot_h = saturate(dot(n, h));
+    let n_dot_v = saturate(dot(n, v));
+    let n_dot_l = saturate(dot(n, l));
+    let v_dot_h = saturate(dot(v, h));
+    
+    // Early exit if surface not visible
+    if n_dot_v < 1e-6 || n_dot_l < 1e-6 {
+        return vec3<f32>(0.0);
+    }
+    
+    // Milestone 2: Roughness → exponent mapping
+    // Start from same alpha = r^2 as GGX for consistency
+    let alpha = clamp(roughness * roughness, 1e-4, 1.0);
+    let alpha2 = alpha * alpha;
+    
+    // Map to Phong exponent: s = max(1.0, 2.0/(alpha*alpha) - 2.0)
+    let s = max(1.0, 2.0 / alpha2 - 2.0);
+    
+    // Milestone 2: Normalized Blinn-Phong NDF
+    // Dp = (s + 2.0) / (2π) * (N·H)^s
+    let INV_2PI = 1.0 / (2.0 * PI);
+    let Dp = (s + 2.0) * INV_2PI * pow(n_dot_h, s);
+    
+    // Milestone 2: Use Schlick Fresnel (same as GGX for fair comparison)
+    let dielectric_f0 = vec3<f32>(0.04);
+    let F = fresnel_schlick(v_dot_h, dielectric_f0);
+    
+    // Milestone 0: Energy scaling to prevent clipping (peak < 0.95)
+    // Phong produces very bright highlights at low roughness, so scale more aggressively
+    let energy_scale = 0.5;
+    let specular = Dp * F * energy_scale;
+    
+    // Diffuse component with energy conservation
+    let kD = vec3<f32>(1.0) - F;
+    let diffuse = kD * base_color * INV_PI;
+    
+    let result = diffuse + specular;
+    
+    // Milestone 2: NaN check
+    if any(result != result) {
+        return vec3<f32>(0.0);
+    }
+    
+    return result;
+}
+
+// Milestone 1: Cook-Torrance GGX BRDF with proper vector handling and sanitation
+fn brdf_ggx(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, base_color: vec3<f32>, metallic: f32, roughness: f32) -> vec3<f32> {
+    // Milestone 1: Normalize all input vectors for vector integrity
+    let n = normalize(normal);
+    let v = normalize(view);
+    let l = normalize(light);
+    
+    // Milestone 1: Guard against degenerate half vector (v + l near zero)
+    let v_plus_l = v + l;
+    let v_plus_l_len = length(v_plus_l);
+    if v_plus_l_len < 1e-6 {
+        return vec3<f32>(0.0);
+    }
+    let h = normalize(v_plus_l);
+    
+    // Milestone 1: Use saturate to clamp all dot products to [0,1]
+    let n_dot_v = saturate(dot(n, v));
+    let n_dot_l = saturate(dot(n, l));
+    let n_dot_h = saturate(dot(n, h));
+    let v_dot_h = saturate(dot(v, h));
+    
+    // Early exit if surface not visible from view or light
+    if n_dot_v < 1e-6 || n_dot_l < 1e-6 {
+        return vec3<f32>(0.0);
+    }
+    
+    // Calculate F0 (surface reflection at zero incidence)
+    let dielectric_f0 = vec3<f32>(0.04);
+    let f0 = mix(dielectric_f0, base_color, metallic);
+    
+    // Cook-Torrance BRDF components
+    let D = distribution_ggx(n_dot_h, roughness);
+    let F = fresnel_schlick(v_dot_h, f0);
+    let G = geometry_smith_correlated(n_dot_v, n_dot_l, roughness);
+    
+    // Milestone 2: Proper denominator with max guard (spec = D*F*G / max(4*nl*nv, 1e-4))
+    let numerator = D * F * G;
+    let denominator = spec_den(n_dot_l, n_dot_v);
+    var specular = numerator / denominator;
+    
+    // Milestone 1: Sanitize NaN/Inf - replace non-finite with zero
+    // NaN check: if value != itself, it's NaN
+    if any(specular != specular) {
+        specular = vec3<f32>(0.0);
+    }
+    // Numerical safety only
+    specular = max(specular, vec3<f32>(0.0));
+    
+    // Diffuse component (energy conservation)
+    let kD = (vec3<f32>(1.0) - F) * (1.0 - metallic);
+    let diffuse = kD * base_color * INV_PI;
+    
+    let result = diffuse + specular;
+    
+    // Milestone 1: Final NaN check on output
+    if any(result != result) {
+        return vec3<f32>(0.0);
+    }
+    
+    return result;
+}
+
+// Milestone 3: Disney Principled BRDF (basic dielectric path)
+fn brdf_disney(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, base_color: vec3<f32>, metallic: f32, roughness: f32) -> vec3<f32> {
+    // Milestone 3: Normalize all input vectors
+    let n = normalize(normal);
+    let v = normalize(view);
+    let l = normalize(light);
+    
+    // Milestone 3: Guard against degenerate half vector
+    let v_plus_l = v + l;
+    let v_plus_l_len = length(v_plus_l);
+    if v_plus_l_len < 1e-6 {
+        return vec3<f32>(0.0);
+    }
+    let h = normalize(v_plus_l);
+    
+    // Milestone 3: Use saturate for proper [0,1] clamping
+    let n_dot_v = saturate(dot(n, v));
+    let n_dot_l = saturate(dot(n, l));
+    let n_dot_h = saturate(dot(n, h));
+    let v_dot_h = saturate(dot(v, h));
+    let l_dot_h = saturate(dot(l, h));
+    
+    // Early exit if surface not visible
+    if n_dot_v < 1e-6 || n_dot_l < 1e-6 {
+        return vec3<f32>(0.0);
+    }
+    
+    // Milestone 3: F0 from IOR (default IOR=1.5 → F0=0.04)
+    // F0 = ((ior - 1) / (ior + 1))^2
+    // For ior=1.5: F0 = ((1.5-1)/(1.5+1))^2 = (0.5/2.5)^2 = 0.04
+    let ior = 1.5;
+    let f0_dielectric_scalar = ((ior - 1.0) / (ior + 1.0)) * ((ior - 1.0) / (ior + 1.0));
+    let f0_dielectric = vec3<f32>(f0_dielectric_scalar);
+    let f0 = mix(f0_dielectric, base_color, metallic);
+    
+    // Milestone 3: Disney uses same GGX specular as Milestone 1
+    // Same alpha convention: alpha = clamp(r^2, 1e-4, 1.0)
+    let D = distribution_ggx(n_dot_h, roughness);
+    let F = fresnel_schlick(v_dot_h, f0);
+    let G = geometry_smith_correlated(n_dot_v, n_dot_l, roughness);
+    
+    // Specular BRDF (Milestone 2 denominator guard 1e-4)
+    let numerator = D * F * G;
+    let denominator = spec_den(n_dot_l, n_dot_v);
+    var specular = numerator / denominator;
+    
+    // Milestone 3: NaN check
+    if any(specular != specular) {
+        specular = vec3<f32>(0.0);
+    }
+    specular = min(specular, vec3<f32>(10.0));
+    
+    // Milestone 3: Disney diffuse (simplified - no subsurface for basic path)
+    // Uses Schlick Fresnel for better energy conservation than pure Lambert
+    let FL = fresnel_schlick(n_dot_l, vec3<f32>(1.0));
+    let FV = fresnel_schlick(n_dot_v, vec3<f32>(1.0));
+    
+    // Disney diffuse retro-reflection approximation
+    // Fd = baseColor/π * (1 + (FL - 1)(1 - roughness)^5) * (1 + (FV - 1)(1 - roughness)^5)
+    // Simplified for basic path: just use energy-conserving Lambert-like
+    let one_minus_FL = 1.0 - FL.x;
+    let one_minus_FV = 1.0 - FV.x;
+    let Fd = base_color * INV_PI;
+    
+    // Energy conservation: diffuse scaled by (1 - F) and (1 - metallic)
+    let kD = (vec3<f32>(1.0) - F) * (1.0 - metallic);
+    let diffuse = kD * Fd;
+    
+    let result = diffuse + specular;
+    
+    // Milestone 3: Final NaN check
+    if any(result != result) {
+        return vec3<f32>(0.0);
+    }
+    
+    // Milestone 3: Clearcoat, sheen, subsurface disabled for basic gallery path
+    // (would be added here in full Disney implementation)
+    
+    return result;
+}
+
+fn finalize_output_linear(color_lin: vec3<f32>) -> vec4<f32> {
+    // debug_no_srgb overrides and forces linear write
+    if params.debug_no_srgb != 0u {
+        return vec4<f32>(color_lin, 1.0);
+    }
+    // shading.output_mode selects 0=linear, 1=srgb
+    if shading.output_mode == 1u {
+        return vec4<f32>(linear_to_srgb(color_lin), 1.0);
+    }
+    return vec4<f32>(color_lin, 1.0);
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    var normal = normalize(input.world_normal);
+    var view_dir = normalize(params.camera_pos - input.world_position);
+    var light_dir = normalize(-params.light_dir);
+    
+    // Milestone 0: Debug toggles (check in priority order)
+
+    // Angle sweep override: replace normal, view, light
+    if params.debug_angle_sweep != 0u {
+        let nx = mix(0.0, 0.99, input.uv.x);
+        normal = normalize(vec3<f32>(nx, 0.0, 1.0));
+        view_dir = vec3<f32>(0.0, 0.0, 1.0);
+        light_dir = vec3<f32>(0.0, 0.0, 1.0);
+        // Recompute dot products after override
+        let nl = dot(normal, light_dir);
+        let nv = dot(normal, view_dir);
+        // clamp to [0,1]
+        _ = 0; // no-op to preserve structure; WGSL requires statements
+        // overwrite locals
+        // Note: reusing the same names; redeclare is not allowed, so recompute now
+        // We will just shadow earlier calculations by reassigning below
+    }
+    // Derive N·L/N·V after potential override
+    let n_dot_l = max(dot(normal, light_dir), 0.0);
+    let n_dot_v = max(dot(normal, view_dir), 0.0);
+
+    // M1: Track min/max N·L and N·V for debug validation (after override)
+    let nl_u32: u32 = u32(clamp(n_dot_l, 0.0, 1.0) * 4294967295.0);
+    let nv_u32: u32 = u32(clamp(n_dot_v, 0.0, 1.0) * 4294967295.0);
+    atomicMin(&debug_buffer[0], nl_u32);
+    atomicMax(&debug_buffer[1], nl_u32);
+    atomicMin(&debug_buffer[2], nv_u32);
+    atomicMax(&debug_buffer[3], nv_u32);
+    
+    // 1. Roughness visualize: output vec3(r) to validate uniform flow
+    if params.roughness_visualize != 0u {
+        let r = params.roughness;
+        return vec4<f32>(r, r, r, 1.0);
+    }
+    
+    // Lambert-only path (T3): diffuse only, no specular
+    if params.debug_lambert_only != 0u {
+        // Standard Lambert diffuse
+        let diffuse = params.base_color * INV_PI;
+        let radiance = params.light_color * params.light_intensity;
+        let final_color = diffuse * radiance * n_dot_l * shading.exposure;
+        return finalize_output_linear(final_color);
+    }
+
+    // 2. G-only: output Smith G as grayscale
+    if params.g_only != 0u {
+        if n_dot_l <= 0.0 || n_dot_v <= 0.0 {
+            return finalize_output_linear(vec3<f32>(0.0));
+        }
+        // Use Schlick-GGX G1 product with alpha = roughness for clearer falloff
+        let alpha = clamp(params.roughness, 1e-4, 1.0);
+        let g_v = smithG1_ggx(n_dot_v, alpha);
+        let g_l = smithG1_ggx(n_dot_l, alpha);
+        let g_value = clamp(g_v * g_l, 0.0, 1.0);
+        let rgb = apply_debug_stamp(input.uv, vec3<f32>(g_value), vec3<f32>(0.0, 1.0, 0.0));
+        return finalize_output_linear(rgb);
+    }
+
+    // 2b. D-only: NDF visualization (no F, no G, no denominator, no N·L multiply)
+    if params.debug_d != 0u {
+        // Center the lobe using N·V (treat H ≈ V for visualization)
+        // Then normalize by peak so all roughness values have peak=1
+        let n_dot_h = n_dot_v;
+        let D = distribution_ggx(n_dot_h, params.roughness);
+        // Peak D occurs at n_dot_h=1: D_peak = 1 / (π * α²) where α = roughness²
+        let alpha = clamp(params.roughness * params.roughness, 1e-4, 1.0);
+        let alpha2 = alpha * alpha; // = roughness^4
+        // Normalize by peak: D_norm = D / D_peak = D * π * α²
+        let D_vis = clamp(D * PI * alpha2, 0.0, 1.0);
+        let rgb = apply_debug_stamp(input.uv, vec3<f32>(D_vis), vec3<f32>(1.0, 0.0, 0.0));
+        return finalize_output_linear(rgb);
+    }
+    
+    // 3. DFG-only: output normalized D*F*G/(4*nl*nv) energy core
+    if params.dfg_only != 0u {
+        if n_dot_l <= 0.0 || n_dot_v <= 0.0 {
+            return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        }
+        let half_vec = normalize(view_dir + light_dir);
+        let n_dot_h = max(dot(normal, half_vec), 0.0);
+        let v_dot_h = max(dot(view_dir, half_vec), 0.0);
+        
+        // Milestone 0: Use uniform-provided F0
+        let f0 = params.f0;
+        
+        let D = distribution_ggx(n_dot_h, params.roughness);
+        let F = fresnel_schlick(v_dot_h, f0);
+        let G = geometry_smith_correlated(n_dot_v, n_dot_l, params.roughness);
+        
+        // M2.2: Compute specular BRDF term (D*F*G)/(4*nl*nv)
+        let numerator = D * F * G;
+        let denominator = spec_den(n_dot_l, n_dot_v);
+        let specular_term = numerator / denominator;
+        
+        // M2.2: Normalize by D_max (since G_max=1 at nl=nv=1)
+        // D_max = 1 / (PI * alpha^2)
+        let alpha = clamp(params.roughness * params.roughness, 1e-4, 1.0);
+        let alpha2 = alpha * alpha;
+        let D_max = 1.0 / (PI * alpha2);
+        
+        // DG_norm = clamp(specular_term / D_max, 0, 1)
+        let dfg_norm = clamp(specular_term / D_max, vec3<f32>(0.0), vec3<f32>(1.0));
+        
+        return finalize_output_linear(dfg_norm);
+    }
+    
+    // 4. SPEC-only: output specular BRDF term only (Cook–Torrance)
+    if params.spec_only != 0u {
+        if n_dot_l <= 0.0 || n_dot_v <= 0.0 {
+            return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        }
+        let half_vec = normalize(view_dir + light_dir);
+        let n_dot_h = max(dot(normal, half_vec), 0.0);
+        let v_dot_h = max(dot(view_dir, half_vec), 0.0);
+        let f0 = params.f0;
+        let D = distribution_ggx(n_dot_h, params.roughness);
+        let F = fresnel_schlick(v_dot_h, f0);
+        let G = geometry_smith_correlated(n_dot_v, n_dot_l, params.roughness);
+        let numerator = D * F * G;
+        let denominator = spec_den(n_dot_l, n_dot_v);
+        var specular = numerator / denominator;
+        if params.debug_spec_no_nl != 0u {
+            let rgb = apply_debug_stamp(input.uv, specular, vec3<f32>(0.0, 0.0, 1.0));
+            return finalize_output_linear(rgb);
+        }
+        let radiance = params.light_color * params.light_intensity;
+        let final_color = specular * radiance * n_dot_l * shading.exposure;
+        let rgb = apply_debug_stamp(input.uv, final_color, vec3<f32>(0.0, 0.0, 1.0));
+        return finalize_output_linear(rgb);
+    }
+    
+    // 5. NDF-only debug mode: output normalized D for shape visualization
+    if params.ndf_only != 0u {
+        let half_vec = normalize(view_dir + light_dir);
+        let n_dot_h = max(dot(normal, half_vec), 0.0);
+        
+        // M2.1: Compute GGX NDF
+        let D = distribution_ggx(n_dot_h, params.roughness);
+        
+        // M2.1: Roughness-invariant normalization
+        // At peak (n_dot_h=1): D_peak = α²/π, so normalize by D_max = π/α²
+        // D_norm = D * (π/α²) brings peak to 1.0 for all roughness values
+        let alpha = clamp(params.roughness * params.roughness, 1e-4, 1.0);
+        let alpha2 = alpha * alpha;
+        let D_norm = clamp(D * PI / alpha2, 0.0, 1.0);
+        
+        return finalize_output_linear(vec3<f32>(D_norm));
+    }
+
+    // Energy debug: output kS (R), kD (G), (kS+kD) (B)
+    if params.debug_energy != 0u {
+        // Setup
+        let half_vec = normalize(view_dir + light_dir);
+        let v_dot_h = max(dot(view_dir, half_vec), 0.0);
+        let dielectric_f0 = vec3<f32>(0.04);
+        let f0 = mix(dielectric_f0, params.base_color, params.metallic);
+        let F = fresnel_schlick(v_dot_h, f0);
+        let kS = F;
+        let kD = (vec3<f32>(1.0) - kS) * (1.0 - params.metallic);
+        let ks_r = clamp(kS.x, 0.0, 1.0);
+        let kd_g = clamp(kD.x, 0.0, 1.0);
+        let sum_b = clamp(ks_r + kd_g, 0.0, 1.0);
+        return finalize_output_linear(vec3<f32>(ks_r, kd_g, sum_b));
+    }
+    
+    // Full BRDF evaluation
+    if n_dot_l <= 0.0 {
+        // No lighting from this direction
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    
+    // Dispatch to appropriate BRDF based on model index
+    var brdf_color: vec3<f32>;
+    
+    if shading.brdf == BRDF_LAMBERT {
+        brdf_color = brdf_lambert(params.base_color);
+    } else if shading.brdf == BRDF_PHONG {
+        brdf_color = brdf_phong(normal, view_dir, light_dir, params.base_color, shading.roughness);
+    } else if shading.brdf == BRDF_COOK_TORRANCE_GGX {
+        brdf_color = brdf_ggx(normal, view_dir, light_dir, params.base_color, shading.metallic, shading.roughness);
+    } else if shading.brdf == BRDF_DISNEY_PRINCIPLED {
+        // Milestone 3: Use proper Disney Principled BRDF
+        brdf_color = brdf_disney(normal, view_dir, light_dir, params.base_color, shading.metallic, shading.roughness);
+    } else {
+        // Default to Lambert for unknown models
+        brdf_color = brdf_lambert(params.base_color);
+    }
+    
+    // Apply lighting (no tone mapping). exposure is carried but defaults to 1.0 in tests.
+    let radiance = params.light_color * params.light_intensity;
+    let final_color = brdf_color * radiance * n_dot_l * shading.exposure;
+
+    // Angle sweep components: override output if requested
+    if params.debug_angle_sweep != 0u {
+        if params.debug_angle_component == 0u {
+            // spec only
+            let half_vec = normalize(view_dir + light_dir);
+            let n_dot_h = max(dot(normal, half_vec), 0.0);
+            let v_dot_h = max(dot(view_dir, half_vec), 0.0);
+            let D = distribution_ggx(n_dot_h, shading.roughness);
+            let F = fresnel_schlick(v_dot_h, vec3<f32>(0.04));
+            let G = geometry_smith_correlated(n_dot_v, n_dot_l, shading.roughness);
+            let specular = (D * F * G) / spec_den(n_dot_l, n_dot_v);
+            return finalize_output_linear(specular);
+        } else if params.debug_angle_component == 1u {
+            // diffuse only
+            let F = fresnel_schlick(n_dot_v, vec3<f32>(0.04));
+            let kD = (vec3<f32>(1.0) - F) * (1.0 - shading.metallic);
+            let diffuse = kD * params.base_color * INV_PI;
+            return finalize_output_linear(diffuse);
+        }
+        // combined
+        return finalize_output_linear(final_color);
+    }
+
+    return finalize_output_linear(final_color);
+}

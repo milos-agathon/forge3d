@@ -1445,6 +1445,158 @@ except Exception:
     pass
 
 
+# P7-06: Offscreen BRDF tile renderer Python shim
+def render_brdf_tile(
+    model: str,
+    roughness: float,
+    width: int,
+    height: int,
+    ndf_only: bool = False,
+    g_only: bool = False,
+    dfg_only: bool = False,
+    spec_only: bool = False,
+    roughness_visualize: bool = False,
+    exposure: float = 1.0,
+    light_intensity: float = 0.8,
+    base_color: tuple[float, float, float] = (0.5, 0.5, 0.5),
+    # M4: Disney Principled BRDF extensions
+    clearcoat: float = 0.0,
+    clearcoat_roughness: float = 0.0,
+    sheen: float = 0.0,
+    sheen_tint: float = 0.0,
+    specular_tint: float = 0.0,
+    debug_dot_products: bool = False,
+    # M2: Additional debug and output controls
+    debug_lambert_only: bool = False,
+    debug_d: bool = False,
+    debug_spec_no_nl: bool = False,
+    debug_energy: bool = False,
+    debug_angle_sweep: bool = False,
+    debug_angle_component: int = 2,
+    debug_no_srgb: bool = False,
+    output_mode: int = 1,
+    metallic_override: float = 0.0,
+    # M4: Optional mode selector to override debug toggles
+    mode: str | None = None,
+) -> np.ndarray:
+    """
+    Render a BRDF tile offscreen and return as numpy array.
+    
+    Renders a UV-sphere with the specified BRDF model and material parameters.
+    Returns a tight numpy array suitable for PNG export or gallery generation.
+    
+    Parameters
+    ----------
+    model : str
+        BRDF model name. Must be one of: "lambert", "phong", "ggx", "disney".
+    roughness : float
+        Material roughness in [0, 1]. Values outside this range are clamped.
+    width : int
+        Output image width in pixels.
+    height : int
+        Output image height in pixels.
+    ndf_only : bool, default False
+        Debug mode: if True, outputs only the Normal Distribution Function (NDF)
+        as grayscale values instead of the full BRDF.
+    g_only : bool, default False
+        Milestone 0 debug mode: if True, outputs Smith G (geometry term) as grayscale.
+    dfg_only : bool, default False
+        Milestone 0 debug mode: if True, outputs D*F*G product (pre-division by 4*nl*nv).
+    spec_only : bool, default False
+        Milestone 0 debug mode: if True, outputs specular-only BRDF term (Cook–Torrance) with lighting.
+    roughness_visualize : bool, default False
+        Milestone 0 debug mode: if True, outputs vec3(roughness) to validate uniform flow.
+    exposure : float, default 1.0
+        Milestone 4: Exposure multiplier for final output. Higher values brighten the image.
+    light_intensity : float, default 0.8
+        Milestone 4: Light source intensity. Default 0.8 prevents clipping (peak < 0.95).
+    clearcoat : float, default 0.0
+        Milestone 4: Clearcoat layer strength (0.0 = disabled, 1.0 = fully enabled).
+    clearcoat_roughness : float, default 0.0
+        Milestone 4: Clearcoat layer roughness (0.0 = sharp, 1.0 = rough).
+    sheen : float, default 0.0
+        Milestone 4: Sheen layer strength (0.0 = disabled, 1.0 = fully enabled).
+    sheen_tint : float, default 0.0
+        Milestone 4: Sheen layer tint (0.0 = white, 1.0 = fully tinted).
+    specular_tint : float, default 0.0
+        Milestone 4: Specular layer tint (0.0 = white, 1.0 = fully tinted).
+    debug_dot_products : bool, default False
+        Milestone 1: If True, logs min/max N·L and N·V values to console for debugging.
+    
+    Returns
+    -------
+    np.ndarray
+        Array of shape (height, width, 4) with dtype uint8 (RGBA).
+        Row-major layout with no padding, suitable for PNG export via numpy_to_png().
+    
+    Raises
+    ------
+    RuntimeError
+        If the native module is not available or GPU initialization fails.
+    ValueError
+        If the model name is invalid or parameters are out of range.
+    
+    Examples
+    --------
+    >>> import forge3d as f3d
+    >>> # Render GGX sphere at roughness 0.5
+    >>> tile = f3d.render_brdf_tile("ggx", 0.5, 256, 256)
+    >>> tile.shape
+    (256, 256, 4)
+    >>> tile.dtype
+    dtype('uint8')
+    
+    >>> # Save as PNG
+    >>> f3d.numpy_to_png("brdf_ggx_r0.5.png", tile)
+    
+    >>> # NDF-only debug mode
+    >>> ndf_tile = f3d.render_brdf_tile("ggx", 0.3, 128, 128, ndf_only=True)
+    
+    >>> # G-only debug mode (Milestone 0)
+    >>> g_tile = f3d.render_brdf_tile("ggx", 0.5, 256, 256, g_only=True)
+    >>> # SPEC-only debug mode (Milestone 0)
+    >>> spec_tile = f3d.render_brdf_tile("ggx", 0.5, 256, 256, spec_only=True)
+    >>> # Milestone 4: Use 'mode' to select debug output succinctly
+    >>> g_tile2 = f3d.render_brdf_tile("ggx", 0.3, 256, 256, mode="g")
+    
+    Notes
+    -----
+    - Requires native module with GPU support
+    - Uses exposure=1.0 and disables tone mapping for reproducible output (Milestone 0)
+    - Light intensity set to 0.8 to prevent clipping (peak < 0.95, Milestone 0)
+    - Suitable for BRDF gallery generation and CI golden comparisons
+    """
+    if _NATIVE_MODULE is None:
+        raise RuntimeError(
+            "render_brdf_tile requires the native module with GPU support. "
+            "Please ensure forge3d was built with GPU features enabled."
+        )
+    
+    if not hasattr(_NATIVE_MODULE, 'render_brdf_tile'):
+        raise RuntimeError(
+            "render_brdf_tile is not available in the native module. "
+            "This may indicate an incompatible version or build configuration."
+        )
+    
+    # Delegate to native implementation
+    try:
+        return _NATIVE_MODULE.render_brdf_tile(
+            model, float(roughness), int(width), int(height),
+            bool(ndf_only), bool(g_only), bool(dfg_only), bool(spec_only), bool(roughness_visualize),
+            float(exposure), float(light_intensity), (float(base_color[0]), float(base_color[1]), float(base_color[2])),
+            # M4: Disney Principled BRDF extensions
+            float(clearcoat), float(clearcoat_roughness), float(sheen), float(sheen_tint), float(specular_tint),
+            bool(debug_dot_products),
+            # M2: Extended debug and output controls
+            bool(debug_lambert_only), bool(debug_d), bool(debug_spec_no_nl), bool(debug_energy), bool(debug_angle_sweep), int(debug_angle_component),
+            bool(debug_no_srgb), int(output_mode), float(metallic_override),
+            mode
+        )
+    except Exception as e:
+        # Re-raise with more context
+        raise RuntimeError(f"Failed to render BRDF tile: {e}") from e
+
+
 __all__ = [
     # Basic rendering
     "Renderer",
@@ -1487,6 +1639,8 @@ __all__ = [
     "utilization_ratio",
     "override_memory_limit",
     "grid_generate",
+    # P7: Offscreen BRDF renderer
+    "render_brdf_tile",
     # DEM utilities
     "dem_stats",
     "dem_normalize",

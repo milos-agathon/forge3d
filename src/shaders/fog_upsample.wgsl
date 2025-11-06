@@ -32,8 +32,8 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
   }
 
   // Depth-aware upsample guided by full-resolution depth
-  // Reference depth at the full-resolution pixel
-  let d_ref = textureSample(full_depth, depth_samp, uv).r;
+  // Reference depth at the full-resolution pixel (explicit LOD for compute)
+  let d_ref = textureSampleLevel(full_depth, depth_samp, uv, 0.0).r;
 
   // Sample the four nearest low-res texels with bilinear base weights
   let tex_size = vec2<f32>(textureDimensions(src_tex));
@@ -53,10 +53,10 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let uv01_full = uv01 * 2.0;
   let uv11_full = uv11 * 2.0;
 
-  let d00 = textureSample(full_depth, depth_samp, uv00_full).r;
-  let d10 = textureSample(full_depth, depth_samp, uv10_full).r;
-  let d01 = textureSample(full_depth, depth_samp, uv01_full).r;
-  let d11 = textureSample(full_depth, depth_samp, uv11_full).r;
+  let d00 = textureSampleLevel(full_depth, depth_samp, uv00_full, 0.0).r;
+  let d10 = textureSampleLevel(full_depth, depth_samp, uv10_full, 0.0).r;
+  let d01 = textureSampleLevel(full_depth, depth_samp, uv01_full, 0.0).r;
+  let d11 = textureSampleLevel(full_depth, depth_samp, uv11_full, 0.0).r;
 
   // Bilinear weights
   var w00 = (1.0 - f.x) * (1.0 - f.y);
