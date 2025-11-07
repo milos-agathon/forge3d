@@ -21,7 +21,7 @@ import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 
@@ -102,6 +102,7 @@ class ValidationResult:
     sample_count: int
     sphere_sectors: int
     sphere_stacks: int
+    light_dir: np.ndarray
     analysis_shrink: float
     analysis_nv_min: float
     gpu_linear: np.ndarray
@@ -110,6 +111,7 @@ class ValidationResult:
     diff_rgb_tile: np.ndarray
     analysis_mask_eval: np.ndarray
     analysis_mask_tile: np.ndarray
+    debug_tiles: Dict[int, np.ndarray]
     samples: List[SampleResult]
     rms: np.ndarray
     max_abs: np.ndarray
@@ -157,9 +159,23 @@ def save_png(path: Path, array: np.ndarray) -> None:
     Image.fromarray(array, mode="RGB").save(path)
 
 
-def render_gpu_tile(roughness: float, size: int, sphere_sectors: int, sphere_stacks: int) -> np.ndarray:
+def _as_python_light_dir(light_dir: np.ndarray | None) -> tuple[float, float, float] | None:
+    if light_dir is None:
+        return None
+    vec = np.asarray(light_dir, dtype=np.float32)
+    return float(vec[0]), float(vec[1]), float(vec[2])
+
+
+def render_gpu_tile(
+    roughness: float,
+    size: int,
+    sphere_sectors: int,
+    sphere_stacks: int,
+    light_dir: np.ndarray | None,
+) -> np.ndarray:
     """Render the GGX tile on the GPU and return RGBA8 array."""
-    tile = f3d.render_brdf_tile(
+    light_tuple = _as_python_light_dir(light_dir)
+    tile = f3d.render_brdf_tile_full(
         "ggx",
         roughness,
         size,
@@ -169,6 +185,32 @@ def render_gpu_tile(roughness: float, size: int, sphere_sectors: int, sphere_sta
         base_color=tuple(BASE_COLOR.tolist()),
         sphere_sectors=sphere_sectors,
         sphere_stacks=sphere_stacks,
+        light_dir=light_tuple,
+    )
+    return tile.astype(np.uint8)
+
+
+def render_gpu_term_tile(
+    roughness: float,
+    size: int,
+    sphere_sectors: int,
+    sphere_stacks: int,
+    light_dir: np.ndarray | None,
+    debug_kind: int,
+) -> np.ndarray:
+    light_tuple = _as_python_light_dir(light_dir)
+    tile = f3d.render_brdf_tile_debug(
+        "ggx",
+        roughness,
+        size,
+        size,
+        light_intensity=3.0,
+        exposure=1.0,
+        base_color=tuple(BASE_COLOR.tolist()),
+        sphere_sectors=sphere_sectors,
+        sphere_stacks=sphere_stacks,
+        light_dir=light_tuple,
+        debug_kind=debug_kind,
     )
     return tile.astype(np.uint8)
 
@@ -520,7 +562,7 @@ def build_meta(
             "worst_pixel": {"x": int(result.max_idx[1]), "y": int(result.max_idx[0])},
         },
         "light": {
-            "direction": LIGHT_DIR.tolist(),
+            "direction": result.light_dir.tolist(),
             "radiance": 3.0,
         },
         "camera": {
@@ -575,6 +617,7 @@ def run_validation(
     sphere_sectors: int = SPHERE_SECTORS_DEFAULT,
     sphere_stacks: int = SPHERE_STACKS_DEFAULT,
     seed_label: str = RNG_SEED_LABEL,
+    light_dir: Sequence[float] | np.ndarray | None = None,
 ) -> ValidationResult:
     if tile_size <= 0:
         raise ValueError("Tile size must be positive.")
@@ -582,8 +625,16 @@ def run_validation(
     eval_scale = max(1, int(eval_scale))
     eval_width = width * eval_scale
     eval_height = height * eval_scale
+    if light_dir is None:
+        light_vec = LIGHT_DIR.copy()
+    else:
+        light_vec = np.asarray(light_dir, dtype=np.float32)
+        norm = np.linalg.norm(light_vec)
+        if norm < 1e-6:
+            raise ValueError("light_dir must have non-zero length")
+        light_vec /= norm
 
-    gpu_rgba = render_gpu_tile(roughness, eval_width, sphere_sectors, sphere_stacks)
+    gpu_rgba = render_gpu_tile(roughness, eval_width, sphere_sectors, sphere_stacks, light_vec)
     gpu_linear = srgb_to_linear(gpu_rgba[..., :3] / 255.0)
     gpu_mask = (gpu_rgba[..., :3].sum(axis=2) > 0)
 
@@ -591,11 +642,22 @@ def run_validation(
         eval_width,
         eval_height,
         roughness,
-        LIGHT_DIR,
+        light_vec,
         BASE_COLOR,
         light_intensity=3.0,
         gpu_mask=gpu_mask,
     )
+    debug_tiles = {
+        kind: render_gpu_term_tile(
+            roughness,
+            eval_width,
+            sphere_sectors,
+            sphere_stacks,
+            light_vec,
+            kind,
+        )
+        for kind in (1, 2, 3)
+    }
 
     cpu_linear = cpu_ref.linear_rgb
     cpu_srgb = linear_to_srgb(np.clip(cpu_linear, 0.0, 1.0))
@@ -654,6 +716,7 @@ def run_validation(
         sample_count=sample_count,
         sphere_sectors=sphere_sectors,
         sphere_stacks=sphere_stacks,
+        light_dir=light_vec,
         analysis_shrink=ANALYSIS_MASK_SHRINK,
         analysis_nv_min=ANALYSIS_NV_MIN,
         gpu_linear=gpu_linear,
@@ -662,6 +725,7 @@ def run_validation(
         diff_rgb_tile=diff_rgb_tile,
         analysis_mask_eval=analysis_mask,
         analysis_mask_tile=mask_tile,
+        debug_tiles=debug_tiles,
         samples=samples,
         rms=rms.astype(np.float32),
         max_abs=max_abs.astype(np.float32),
@@ -711,6 +775,10 @@ def main() -> None:
         f"(eval: {result.eval_width}x{result.eval_height}, scale={result.eval_scale})"
     )
     print(f"Sphere mesh    : sectors={result.sphere_sectors}, stacks={result.sphere_stacks}")
+    print(
+        "Light dir      : "
+        f"({result.light_dir[0]:.6f}, {result.light_dir[1]:.6f}, {result.light_dir[2]:.6f})"
+    )
     print(
         f"Analysis mask  : shrink={result.analysis_shrink:.2f}, "
         f"nv_min={result.analysis_nv_min:.2f}, coverage={result.analysis_mask_tile.mean():.3f}"

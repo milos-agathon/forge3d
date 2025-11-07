@@ -175,6 +175,8 @@ struct BrdfTileParams {
     debug_angle_sweep: u32,    // 1 = override normal with sweep across uv.x and force V=L=+Z
     debug_angle_component: u32,// 0=spec,1=diffuse,2=combined
     debug_no_srgb: u32,        // 1 = bypass sRGB conversion at end
+    debug_kind: u32,           // 0=full, 1=D-only, 2=G-only, 3=F-only
+    _pad_debug_kind: vec3<u32>,
 }
 ;
 
@@ -542,7 +544,7 @@ fn finalize_output_linear(color_lin: vec3<f32>) -> vec4<f32> {
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     var normal = normalize(input.world_normal);
     var view_dir = normalize(params.camera_pos - input.world_position);
-    var light_dir = normalize(-params.light_dir);
+    var light_dir = normalize(params.light_dir);
     
     // Milestone 0: Debug toggles (check in priority order)
 
@@ -571,6 +573,17 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         h = normalize(h);
     }
     let NoH = saturate(dot(normal, h));
+    let VoH = saturate(dot(view_dir, h));
+    var debug_d = 0.0;
+    var debug_g = 0.0;
+    var debug_f = vec3<f32>(0.0);
+    if NoL > 0.0 && NoV > 0.0 {
+        debug_d = distribution_ggx(NoH, shading.roughness);
+        debug_g = geometry_smith_correlated(NoV, NoL, shading.roughness);
+        let dielectric_f0 = vec3<f32>(0.04);
+        let f0_mix = mix(dielectric_f0, params.base_color, shading.metallic);
+        debug_f = fresnel_schlick(VoH, f0_mix);
+    }
 
     if debug_push.mode != 0u {
         let cosines = wi3_cosines(normal, view_dir, light_dir);
@@ -860,6 +873,25 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Apply lighting (no tone mapping). exposure is carried but defaults to 1.0 in tests.
     let radiance = params.light_color * params.light_intensity;
     let final_color = brdf_color * radiance * n_dot_l * shading.exposure;
+
+    if params.debug_kind != 0u {
+        var debug_rgb = final_color;
+        switch params.debug_kind {
+            case 1u: {
+                debug_rgb = vec3<f32>(debug_d);
+            }
+            case 2u: {
+                debug_rgb = vec3<f32>(debug_g);
+            }
+            case 3u: {
+                debug_rgb = debug_f;
+            }
+            default: {
+                debug_rgb = final_color;
+            }
+        }
+        return vec4<f32>(debug_rgb, 1.0);
+    }
 
     // Angle sweep components: override output if requested
     if params.debug_angle_sweep != 0u {

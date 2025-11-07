@@ -3080,21 +3080,7 @@ fn open_viewer(
 /// # Returns
 /// NumPy array of shape (height, width, 4) with dtype uint8 (RGBA)
 #[cfg(feature = "extension-module")]
-#[pyfunction]
-#[pyo3(signature = (
-    model, roughness, width, height,
-    ndf_only=false, g_only=false, dfg_only=false, spec_only=false, roughness_visualize=false,
-    exposure=1.0, light_intensity=0.8, base_color=(0.5, 0.5, 0.5),
-    clearcoat=0.0, clearcoat_roughness=0.0, sheen=0.0, sheen_tint=0.0, specular_tint=0.0,
-    debug_dot_products=false,
-    // M2 additions (all optional with safe defaults)
-    debug_lambert_only=false, debug_diffuse_only=false, debug_d=false, debug_spec_no_nl=false, debug_energy=false,
-    debug_angle_sweep=false, debug_angle_component=2,
-    debug_no_srgb=false, output_mode=1, metallic_override=0.0,
-    mode=None, wi3_debug_mode=0, wi3_debug_roughness=0.0,
-    sphere_sectors=64, sphere_stacks=32
-))]
-fn render_brdf_tile<'py>(
+fn render_brdf_tile_impl<'py>(
     py: Python<'py>,
     model: &str,
     roughness: f32,
@@ -3132,6 +3118,8 @@ fn render_brdf_tile<'py>(
     wi3_debug_roughness: f32,
     sphere_sectors: u32,
     sphere_stacks: u32,
+    light_dir: Option<(f32, f32, f32)>,
+    debug_kind: u32,
 ) -> PyResult<Bound<'py, PyArray3<u8>>> {
     // Map model name to BRDF index
     let model_u32 = match model.to_lowercase().as_str() {
@@ -3151,6 +3139,7 @@ fn render_brdf_tile<'py>(
     let roughness = roughness.clamp(0.0, 1.0);
     let sphere_sectors = sphere_sectors.clamp(8, 1024);
     let sphere_stacks = sphere_stacks.clamp(4, 512);
+    let debug_kind = debug_kind.min(3);
 
     // Map optional mode to toggles (M4)
     let (mut ndf_only, mut g_only, mut dfg_only, mut spec_only, mut roughness_visualize,
@@ -3212,11 +3201,16 @@ fn render_brdf_tile<'py>(
     }
     wi3_debug_roughness = wi3_debug_roughness.clamp(0.0, 1.0);
 
+    let overrides = crate::offscreen::brdf_tile::BrdfTileOverrides {
+        light_dir: light_dir.map(|(x, y, z)| [x, y, z]),
+        debug_kind: Some(debug_kind),
+    };
+
     // Get GPU context
     let ctx = crate::gpu::ctx();
 
     // Call offscreen renderer
-    let buffer = crate::offscreen::brdf_tile::render_brdf_tile_offscreen(
+    let buffer = crate::offscreen::brdf_tile::render_brdf_tile_with_overrides(
         ctx.device.as_ref(),
         ctx.queue.as_ref(),
         model_u32,
@@ -3253,6 +3247,7 @@ fn render_brdf_tile<'py>(
         wi3_debug_roughness,
         sphere_sectors,
         sphere_stacks,
+        &overrides,
     )
     .map_err(|e| PyRuntimeError::new_err(format!("Failed to render BRDF tile: {}", e)))?;
 
@@ -3275,6 +3270,187 @@ fn render_brdf_tile<'py>(
     .map_err(|e| PyRuntimeError::new_err(format!("Failed to reshape buffer to array: {}", e)))?;
 
     Ok(array.into_pyarray_bound(py))
+}
+
+#[pyfunction]
+#[pyo3(signature = (
+    model, roughness, width, height,
+    ndf_only=false, g_only=false, dfg_only=false, spec_only=false, roughness_visualize=false,
+    exposure=1.0, light_intensity=0.8, base_color=(0.5, 0.5, 0.5),
+    clearcoat=0.0, clearcoat_roughness=0.0, sheen=0.0, sheen_tint=0.0, specular_tint=0.0,
+    debug_dot_products=false,
+    debug_lambert_only=false, debug_diffuse_only=false, debug_d=false, debug_spec_no_nl=false, debug_energy=false,
+    debug_angle_sweep=false, debug_angle_component=2,
+    debug_no_srgb=false, output_mode=1, metallic_override=0.0,
+    mode=None, wi3_debug_mode=0, wi3_debug_roughness=0.0,
+    sphere_sectors=64, sphere_stacks=32
+))]
+fn render_brdf_tile<'py>(
+    py: Python<'py>,
+    model: &str,
+    roughness: f32,
+    width: u32,
+    height: u32,
+    ndf_only: bool,
+    g_only: bool,
+    dfg_only: bool,
+    spec_only: bool,
+    roughness_visualize: bool,
+    exposure: f32,
+    light_intensity: f32,
+    base_color: (f32, f32, f32),
+    clearcoat: f32,
+    clearcoat_roughness: f32,
+    sheen: f32,
+    sheen_tint: f32,
+    specular_tint: f32,
+    debug_dot_products: bool,
+    debug_lambert_only: bool,
+    debug_diffuse_only: bool,
+    debug_d: bool,
+    debug_spec_no_nl: bool,
+    debug_energy: bool,
+    debug_angle_sweep: bool,
+    debug_angle_component: u32,
+    debug_no_srgb: bool,
+    output_mode: u32,
+    metallic_override: f32,
+    mode: Option<&str>,
+    wi3_debug_mode: u32,
+    wi3_debug_roughness: f32,
+    sphere_sectors: u32,
+    sphere_stacks: u32,
+) -> PyResult<Bound<'py, PyArray3<u8>>> {
+    render_brdf_tile_impl(
+        py,
+        model,
+        roughness,
+        width,
+        height,
+        ndf_only,
+        g_only,
+        dfg_only,
+        spec_only,
+        roughness_visualize,
+        exposure,
+        light_intensity,
+        base_color,
+        clearcoat,
+        clearcoat_roughness,
+        sheen,
+        sheen_tint,
+        specular_tint,
+        debug_dot_products,
+        debug_lambert_only,
+        debug_diffuse_only,
+        debug_d,
+        debug_spec_no_nl,
+        debug_energy,
+        debug_angle_sweep,
+        debug_angle_component,
+        debug_no_srgb,
+        output_mode,
+        metallic_override,
+        mode,
+        wi3_debug_mode,
+        wi3_debug_roughness,
+        sphere_sectors,
+        sphere_stacks,
+        None,
+        0,
+    )
+}
+
+#[pyfunction]
+#[pyo3(signature = (
+    model, roughness, width, height,
+    ndf_only=false, g_only=false, dfg_only=false, spec_only=false, roughness_visualize=false,
+    exposure=1.0, light_intensity=0.8, base_color=(0.5, 0.5, 0.5),
+    clearcoat=0.0, clearcoat_roughness=0.0, sheen=0.0, sheen_tint=0.0, specular_tint=0.0,
+    debug_dot_products=false,
+    debug_lambert_only=false, debug_diffuse_only=false, debug_d=false, debug_spec_no_nl=false, debug_energy=false,
+    debug_angle_sweep=false, debug_angle_component=2,
+    debug_no_srgb=false, output_mode=1, metallic_override=0.0,
+    mode=None, wi3_debug_mode=0, wi3_debug_roughness=0.0,
+    sphere_sectors=64, sphere_stacks=32,
+    light_dir=None, debug_kind=0
+))]
+fn render_brdf_tile_overrides<'py>(
+    py: Python<'py>,
+    model: &str,
+    roughness: f32,
+    width: u32,
+    height: u32,
+    ndf_only: bool,
+    g_only: bool,
+    dfg_only: bool,
+    spec_only: bool,
+    roughness_visualize: bool,
+    exposure: f32,
+    light_intensity: f32,
+    base_color: (f32, f32, f32),
+    clearcoat: f32,
+    clearcoat_roughness: f32,
+    sheen: f32,
+    sheen_tint: f32,
+    specular_tint: f32,
+    debug_dot_products: bool,
+    debug_lambert_only: bool,
+    debug_diffuse_only: bool,
+    debug_d: bool,
+    debug_spec_no_nl: bool,
+    debug_energy: bool,
+    debug_angle_sweep: bool,
+    debug_angle_component: u32,
+    debug_no_srgb: bool,
+    output_mode: u32,
+    metallic_override: f32,
+    mode: Option<&str>,
+    wi3_debug_mode: u32,
+    wi3_debug_roughness: f32,
+    sphere_sectors: u32,
+    sphere_stacks: u32,
+    light_dir: Option<(f32, f32, f32)>,
+    debug_kind: u32,
+) -> PyResult<Bound<'py, PyArray3<u8>>> {
+    render_brdf_tile_impl(
+        py,
+        model,
+        roughness,
+        width,
+        height,
+        ndf_only,
+        g_only,
+        dfg_only,
+        spec_only,
+        roughness_visualize,
+        exposure,
+        light_intensity,
+        base_color,
+        clearcoat,
+        clearcoat_roughness,
+        sheen,
+        sheen_tint,
+        specular_tint,
+        debug_dot_products,
+        debug_lambert_only,
+        debug_diffuse_only,
+        debug_d,
+        debug_spec_no_nl,
+        debug_energy,
+        debug_angle_sweep,
+        debug_angle_component,
+        debug_no_srgb,
+        output_mode,
+        metallic_override,
+        mode,
+        wi3_debug_mode,
+        wi3_debug_roughness,
+        sphere_sectors,
+        sphere_stacks,
+        light_dir,
+        debug_kind,
+    )
 }
 
 // PyO3 module entry point so Python can `import forge3d._forge3d`
@@ -3505,6 +3681,7 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
     // P7-05: Offscreen BRDF tile renderer
     m.add_function(wrap_pyfunction!(render_brdf_tile, m)?)?;
+    m.add_function(wrap_pyfunction!(render_brdf_tile_overrides, m)?)?;
 
     // Add main classes
     m.add_class::<crate::session::Session>()?;

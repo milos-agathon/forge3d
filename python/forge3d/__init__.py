@@ -1446,7 +1446,7 @@ except Exception:
 
 
 # P7-06: Offscreen BRDF tile renderer Python shim
-def render_brdf_tile(
+def _render_brdf_tile_core(
     model: str,
     roughness: float,
     width: int,
@@ -1483,6 +1483,9 @@ def render_brdf_tile(
     wi3_debug_roughness: float = 0.0,
     sphere_sectors: int = 64,
     sphere_stacks: int = 32,
+    *,
+    _light_dir: tuple[float, float, float] | None = None,
+    _debug_kind: int = 0,
 ) -> np.ndarray:
     """
     Render a BRDF tile offscreen and return as numpy array.
@@ -1586,6 +1589,9 @@ def render_brdf_tile(
             "render_brdf_tile is not available in the native module. "
             "This may indicate an incompatible version or build configuration."
         )
+    debug_kind_val = int(_debug_kind)
+    if debug_kind_val < 0 or debug_kind_val > 3:
+        raise ValueError("debug_kind must be between 0 and 3")
     
     # Delegate to native implementation
     wi3_mode_val = int(wi3_debug_mode)
@@ -1601,15 +1607,38 @@ def render_brdf_tile(
         wi3_rough_val = float(roughness)
     wi3_rough_val = max(0.0, min(1.0, wi3_rough_val))
 
+    light_tuple = None
+    if _light_dir is not None:
+        if len(_light_dir) != 3:
+            raise ValueError("light_dir must be a 3-tuple when provided")
+        light_tuple = (float(_light_dir[0]), float(_light_dir[1]), float(_light_dir[2]))
+
     try:
+        native_overrides = getattr(_NATIVE_MODULE, 'render_brdf_tile_overrides', None)
+        if native_overrides is not None:
+            return native_overrides(
+                model, float(roughness), int(width), int(height),
+                bool(ndf_only), bool(g_only), bool(dfg_only), bool(spec_only), bool(roughness_visualize),
+                float(exposure), float(light_intensity), (float(base_color[0]), float(base_color[1]), float(base_color[2])),
+                float(clearcoat), float(clearcoat_roughness), float(sheen), float(sheen_tint), float(specular_tint),
+                bool(debug_dot_products),
+                bool(debug_lambert_only), bool(debug_diffuse_only), bool(debug_d), bool(debug_spec_no_nl), bool(debug_energy), bool(debug_angle_sweep), int(debug_angle_component),
+                bool(debug_no_srgb), int(output_mode), float(metallic_override),
+                mode, wi3_mode_val, wi3_rough_val,
+                int(sphere_sectors), int(sphere_stacks),
+                light_tuple, debug_kind_val,
+            )
+        if light_tuple is not None or debug_kind_val:
+            raise RuntimeError(
+                "render_brdf_tile_overrides is not available in the native module. "
+                "Please rebuild forge3d to enable light/debug overrides."
+            )
         return _NATIVE_MODULE.render_brdf_tile(
             model, float(roughness), int(width), int(height),
             bool(ndf_only), bool(g_only), bool(dfg_only), bool(spec_only), bool(roughness_visualize),
             float(exposure), float(light_intensity), (float(base_color[0]), float(base_color[1]), float(base_color[2])),
-            # M4: Disney Principled BRDF extensions
             float(clearcoat), float(clearcoat_roughness), float(sheen), float(sheen_tint), float(specular_tint),
             bool(debug_dot_products),
-            # M2: Extended debug and output controls
             bool(debug_lambert_only), bool(debug_diffuse_only), bool(debug_d), bool(debug_spec_no_nl), bool(debug_energy), bool(debug_angle_sweep), int(debug_angle_component),
             bool(debug_no_srgb), int(output_mode), float(metallic_override),
             mode, wi3_mode_val, wi3_rough_val,
@@ -1620,12 +1649,32 @@ def render_brdf_tile(
         raise RuntimeError(f"Failed to render BRDF tile: {e}") from e
 
 
+def render_brdf_tile(*args, **kwargs):
+    """Render a BRDF tile with the default light direction and full shading output."""
+    return _render_brdf_tile_core(*args, **kwargs)
+
+
+render_brdf_tile.__doc__ = _render_brdf_tile_core.__doc__
+
+
+def render_brdf_tile_full(*args, light_dir=None, **kwargs):
+    """Render a BRDF tile with an optional custom light direction."""
+    return _render_brdf_tile_core(*args, _light_dir=light_dir, _debug_kind=0, **kwargs)
+
+
+def render_brdf_tile_debug(*args, light_dir=None, debug_kind=0, **kwargs):
+    """Render a BRDF tile with debug_kind in {0=Full,1=D,2=G,3=F}."""
+    return _render_brdf_tile_core(*args, _light_dir=light_dir, _debug_kind=debug_kind, **kwargs)
+
+
 __all__ = [
     # Basic rendering
     "Renderer",
     "RendererConfig",
     "render_triangle_rgba",
     "render_triangle_png",
+    "render_brdf_tile_full",
+    "render_brdf_tile_debug",
     "numpy_to_png",
     "png_to_numpy",
     "__version__",

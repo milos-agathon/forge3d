@@ -52,6 +52,8 @@ pub struct BrdfTileParams {
     pub debug_angle_sweep: u32,    // 1 = override normal with sweep across uv.x and force V=L=+Z
     pub debug_angle_component: u32,// 0=spec,1=diffuse,2=combined
     pub debug_no_srgb: u32,        // 1 = bypass sRGB conversion at end
+    pub debug_kind: u32,           // 0=full, 1=D-only, 2=G-only, 3=F-only
+    pub _pad_debug_kind: [u32; 3],
     // Preserve total size with padding (brdf_tile.rs overprovisions to 256 bytes)
     pub _pad2: u32,
     pub _pad3: u32,

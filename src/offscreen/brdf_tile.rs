@@ -7,6 +7,23 @@
 use anyhow::{ensure, Result};
 use wgpu::util::DeviceExt;
 
+const DEFAULT_LIGHT_DIR: [f32; 3] = [0.408_248_28, 0.408_248_28, 0.816_496_55];
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BrdfTileOverrides {
+    pub light_dir: Option<[f32; 3]>,
+    pub debug_kind: Option<u32>,
+}
+
+fn normalize_light_dir(dir: [f32; 3]) -> Option<[f32; 3]> {
+    let len_sq = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+    if len_sq <= 1e-8 {
+        return None;
+    }
+    let inv_len = len_sq.sqrt().recip();
+    Some([dir[0] * inv_len, dir[1] * inv_len, dir[2] * inv_len])
+}
+
 /// Create identity matrix
 fn identity_matrix() -> [[f32; 4]; 4] {
     [
@@ -111,7 +128,7 @@ fn create_perspective_matrix(fov_y: f32, aspect: f32, near: f32, far: f32) -> [[
 /// - Roughness is clamped to [0.0, 1.0] and mapped to alpha = roughness^2 in shader
 /// - Tone mapping is disabled and exposure defaults to 1.0 for reproducible output
 /// - NDF-only mode matches viewer math for D(α) to enable visual comparisons
-pub fn render_brdf_tile_offscreen(
+fn render_brdf_tile_internal(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     model_u32: u32,
@@ -150,6 +167,7 @@ pub fn render_brdf_tile_offscreen(
     wi3_debug_roughness: f32,
     sphere_sectors: u32,
     sphere_stacks: u32,
+    overrides: &BrdfTileOverrides,
 ) -> Result<Vec<u8>> {
     // M0.1: Log GPU adapter info once per run (use static flag to log only once)
     use std::sync::Once;
@@ -283,10 +301,15 @@ pub fn render_brdf_tile_offscreen(
         dielectric_f0[2] * (1.0 - metallic) + base_color[2] * metallic,
     ];
 
-    // Set up lighting (M1): directional L = normalize(0.5, 0.5, 1)
-    // Shader uses light_dir as a direction that is negated in the fragment: light_dir = normalize(-params.light_dir)
-    // Therefore, set params.light_dir = -L.
-    let light_dir = [-0.5, -0.5, -1.0];
+    let light_dir = overrides
+        .light_dir
+        .and_then(normalize_light_dir)
+        .unwrap_or(DEFAULT_LIGHT_DIR);
+    let debug_kind = overrides.debug_kind.unwrap_or(0);
+    let debug_kind = match debug_kind {
+        0 | 1 | 2 | 3 => debug_kind,
+        _ => 0,
+    };
     let params = crate::offscreen::pipeline::BrdfTileParams {
         light_dir,
         _pad0: 0.0,
@@ -322,6 +345,8 @@ pub fn render_brdf_tile_offscreen(
         debug_angle_sweep: if debug_angle_sweep { 1 } else { 0 },
         debug_angle_component: debug_angle_component,
         debug_no_srgb: if debug_no_srgb { 1 } else { 0 },
+        debug_kind,
+        _pad_debug_kind: [0, 0, 0],
         // padding to keep total struct size stable
         _pad2: 0,
         _pad3: 0,
@@ -504,6 +529,157 @@ pub fn render_brdf_tile_offscreen(
     );
 
     Ok(buffer)
+}
+
+pub fn render_brdf_tile_offscreen(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    model_u32: u32,
+    roughness: f32,
+    width: u32,
+    height: u32,
+    ndf_only: bool,
+    g_only: bool,
+    dfg_only: bool,
+    spec_only: bool,
+    roughness_visualize: bool,
+    exposure: f32,
+    light_intensity: f32,
+    base_color: [f32; 3],
+    clearcoat: f32,
+    clearcoat_roughness: f32,
+    sheen: f32,
+    sheen_tint: f32,
+    specular_tint: f32,
+    debug_dot_products: bool,
+    debug_lambert_only: bool,
+    debug_diffuse_only: bool,
+    debug_d: bool,
+    debug_spec_no_nl: bool,
+    debug_energy: bool,
+    debug_angle_sweep: bool,
+    debug_angle_component: u32,
+    debug_no_srgb: bool,
+    output_mode: u32,
+    metallic_override: f32,
+    wi3_debug_mode: u32,
+    wi3_debug_roughness: f32,
+    sphere_sectors: u32,
+    sphere_stacks: u32,
+) -> Result<Vec<u8>> {
+    render_brdf_tile_internal(
+        device,
+        queue,
+        model_u32,
+        roughness,
+        width,
+        height,
+        ndf_only,
+        g_only,
+        dfg_only,
+        spec_only,
+        roughness_visualize,
+        exposure,
+        light_intensity,
+        base_color,
+        clearcoat,
+        clearcoat_roughness,
+        sheen,
+        sheen_tint,
+        specular_tint,
+        debug_dot_products,
+        debug_lambert_only,
+        debug_diffuse_only,
+        debug_d,
+        debug_spec_no_nl,
+        debug_energy,
+        debug_angle_sweep,
+        debug_angle_component,
+        debug_no_srgb,
+        output_mode,
+        metallic_override,
+        wi3_debug_mode,
+        wi3_debug_roughness,
+        sphere_sectors,
+        sphere_stacks,
+        &BrdfTileOverrides::default(),
+    )
+}
+
+pub fn render_brdf_tile_with_overrides(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    model_u32: u32,
+    roughness: f32,
+    width: u32,
+    height: u32,
+    ndf_only: bool,
+    g_only: bool,
+    dfg_only: bool,
+    spec_only: bool,
+    roughness_visualize: bool,
+    exposure: f32,
+    light_intensity: f32,
+    base_color: [f32; 3],
+    clearcoat: f32,
+    clearcoat_roughness: f32,
+    sheen: f32,
+    sheen_tint: f32,
+    specular_tint: f32,
+    debug_dot_products: bool,
+    debug_lambert_only: bool,
+    debug_diffuse_only: bool,
+    debug_d: bool,
+    debug_spec_no_nl: bool,
+    debug_energy: bool,
+    debug_angle_sweep: bool,
+    debug_angle_component: u32,
+    debug_no_srgb: bool,
+    output_mode: u32,
+    metallic_override: f32,
+    wi3_debug_mode: u32,
+    wi3_debug_roughness: f32,
+    sphere_sectors: u32,
+    sphere_stacks: u32,
+    overrides: &BrdfTileOverrides,
+) -> Result<Vec<u8>> {
+    render_brdf_tile_internal(
+        device,
+        queue,
+        model_u32,
+        roughness,
+        width,
+        height,
+        ndf_only,
+        g_only,
+        dfg_only,
+        spec_only,
+        roughness_visualize,
+        exposure,
+        light_intensity,
+        base_color,
+        clearcoat,
+        clearcoat_roughness,
+        sheen,
+        sheen_tint,
+        specular_tint,
+        debug_dot_products,
+        debug_lambert_only,
+        debug_diffuse_only,
+        debug_d,
+        debug_spec_no_nl,
+        debug_energy,
+        debug_angle_sweep,
+        debug_angle_component,
+        debug_no_srgb,
+        output_mode,
+        metallic_override,
+        wi3_debug_mode,
+        wi3_debug_roughness,
+        sphere_sectors,
+        sphere_stacks,
+        overrides,
+    )
 }
 
 #[cfg(test)]
