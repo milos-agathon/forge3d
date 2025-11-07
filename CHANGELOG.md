@@ -305,6 +305,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Terrain renderer now queries adapter sample-count support, downgrades unsupported MSAA requests, and logs the effective sample count to avoid WebGPU validation errors.
 
 ### Fixed
+- WI-3 GGX debug outputs match ground truth; D-only emits the raw GGX NDF and G-only applies the Schlick-Smith masking term while leaving the specular path unchanged (`src/shaders/brdf_tile.wgsl`).
 - Terrain renderer honors TerrainRenderParams toggles for MSAA and parallax occlusion flags so user settings directly drive the GPU pipeline.
 
 ### Documentation

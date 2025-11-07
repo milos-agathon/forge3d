@@ -3091,7 +3091,7 @@ fn open_viewer(
     debug_lambert_only=false, debug_d=false, debug_spec_no_nl=false, debug_energy=false,
     debug_angle_sweep=false, debug_angle_component=2,
     debug_no_srgb=false, output_mode=1, metallic_override=0.0,
-    mode=None
+    mode=None, wi3_debug_mode=0, wi3_debug_roughness=0.0
 ))]
 fn render_brdf_tile<'py>(
     py: Python<'py>,
@@ -3126,6 +3126,8 @@ fn render_brdf_tile<'py>(
     metallic_override: f32,
     // M4: Optional mode selector to override debug toggles
     mode: Option<&str>,
+    wi3_debug_mode: u32,
+    wi3_debug_roughness: f32,
 ) -> PyResult<Bound<'py, PyArray3<u8>>> {
     // Map model name to BRDF index
     let model_u32 = match model.to_lowercase().as_str() {
@@ -3196,6 +3198,13 @@ fn render_brdf_tile<'py>(
         );
     }
 
+    let mut wi3_debug_mode = wi3_debug_mode;
+    let mut wi3_debug_roughness = wi3_debug_roughness;
+    if wi3_debug_mode != 0 && wi3_debug_roughness <= 0.0 {
+        wi3_debug_roughness = roughness;
+    }
+    wi3_debug_roughness = wi3_debug_roughness.clamp(0.0, 1.0);
+
     // Get GPU context
     let ctx = crate::gpu::ctx();
 
@@ -3232,6 +3241,8 @@ fn render_brdf_tile<'py>(
         debug_no_srgb,
         output_mode,
         metallic_override,
+        wi3_debug_mode,
+        wi3_debug_roughness,
     )
     .map_err(|e| PyRuntimeError::new_err(format!("Failed to render BRDF tile: {}", e)))?;
 

@@ -79,6 +79,14 @@ pub struct ShadingParamsGPU {
     pub _pad_out2: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Zeroable, Pod)]
+pub struct DebugPush {
+    pub mode: u32,
+    pub roughness: f32,
+    pub _pad: [f32; 2],
+}
+
 /// BRDF tile rendering pipeline
 pub struct BrdfTilePipeline {
     pipeline: wgpu::RenderPipeline,
@@ -157,6 +165,17 @@ impl BrdfTilePipeline {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // @binding(7): WI-3 debug selector
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -265,6 +284,7 @@ impl BrdfTilePipeline {
         params_buffer: &wgpu::Buffer,
         shading_buffer: &wgpu::Buffer,
         debug_buffer: &wgpu::Buffer,
+        debug_push_buffer: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("brdf_tile.bind_group"),
@@ -285,6 +305,10 @@ impl BrdfTilePipeline {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: debug_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: debug_push_buffer.as_entire_binding(),
                 },
             ],
         })

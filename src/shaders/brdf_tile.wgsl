@@ -12,8 +12,49 @@ const BRDF_SHADER_VERSION: u32 = 4u;
 // Minimal inline BRDF constants to avoid include conflicts
 // REQ-M2: SHADING STAGE (LINEAR) — all BRDF math stays in linear RGB
 // sRGB/OETF happens only in the final write based on output_mode/debug flag
-const PI: f32 = 3.14159265359;
+const PI: f32 = 3.141592653589793;
 const INV_PI: f32 = 0.318309886;
+
+fn saturate(x: f32) -> f32 {
+    return clamp(x, 0.0, 1.0);
+}
+
+fn alpha_from_roughness(r: f32) -> f32 {
+    let a = r * r;
+    return max(1e-4, a);
+}
+
+fn G1_smith_height_ggx(nDotX: f32, roughness: f32) -> f32 {
+    let nx = saturate(nDotX);
+    let a = clamp(roughness, 1e-4, 1.0);
+    let k = ((a + 1.0) * (a + 1.0)) * 0.125;
+    return nx / (nx * (1.0 - k) + k);
+}
+
+fn ggx_ndf(NoH: f32, alpha: f32) -> f32 {
+    let noh = saturate(NoH);
+    let a2 = alpha * alpha;
+    let noh2 = noh * noh;
+    let d = noh2 * (a2 - 1.0) + 1.0;
+    let denom = PI * d * d + 1e-8;
+    return a2 / denom;
+}
+
+fn wi3_cosines(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>) -> vec3<f32> {
+    let n = normalize(N);
+    let v = normalize(V);
+    let l = normalize(L);
+    var h = v + l;
+    if all(h == vec3<f32>(0.0)) {
+        h = n;
+    } else {
+        h = normalize(h);
+    }
+    let NoV = saturate(dot(n, v));
+    let NoL = saturate(dot(n, l));
+    let NoH = saturate(dot(n, h));
+    return vec3<f32>(NoV, NoL, NoH);
+}
 
 // sRGB helpers (piecewise exact curve)
 fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
@@ -119,6 +160,12 @@ struct BrdfTileParams {
 }
 ;
 
+struct DebugPush {
+    mode: u32,
+    roughness: f32,
+    _pad: vec2<f32>,
+}
+
 // Vertex input (matches TbnVertex from sphere.rs)
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -144,6 +191,7 @@ struct VertexOutput {
 @group(0) @binding(3) var<storage, read_write> debug_buffer: array<atomic<u32>, 4>;
 // Layout: [0]=min_nl, [1]=max_nl, [2]=min_nv, [3]=max_nv
 // Values are stored as atomicMin/Max of floatBitsToUint
+@group(0) @binding(7) var<uniform> debug_push: DebugPush;
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
@@ -201,37 +249,47 @@ fn spec_den(n_dot_l: f32, n_dot_v: f32) -> f32 {
     return max(4.0 * n_dot_l * n_dot_v, 1e-4);
 }
 
-// Milestone 1: GGX/GTR2 Normal Distribution Function with correct formula
-fn distribution_ggx(n_dot_h: f32, roughness: f32) -> f32 {
-    // Milestone 1: Single roughness convention - alpha = clamp(r^2, 1e-4, 1.0)
-    let alpha = clamp(roughness * roughness, 1e-4, 1.0);
-    let alpha2 = alpha * alpha;
-    let n_dot_h2 = n_dot_h * n_dot_h;
-    
-    // GGX/GTR2 formula: D = α² / (π * (N·H² * (α² - 1) + 1)²)
-    let denom = n_dot_h2 * (alpha2 - 1.0) + 1.0;
+fn roughness_to_alpha(r: f32) -> f32 {
+    let rr = max(r, 0.001);
+    return rr * rr;
+}
+
+fn D_ggx(alpha: f32, n_dot_h: f32) -> f32 {
+    let a2 = alpha * alpha;
+    let nh = clamp(n_dot_h, 0.0, 1.0);
+    let cos2 = nh * nh;
+    let denom = cos2 * (a2 - 1.0) + 1.0;
     let denom2 = denom * denom;
-    
-    // Milestone 1: Guard against division by near-zero
     if denom2 < 1e-6 {
         return 0.0;
     }
-    
-    return alpha2 / (PI * denom2);
+    return a2 / (PI * denom2);
 }
 
-// M1.1: Schlick-GGX Smith G1 (single direction)
-// Uses height-correlated approximation with k = alpha * 0.5
-fn smithG1_ggx(n_dot_x: f32, alpha: f32) -> f32 {
-    let k = alpha * 0.5;  // height-correlated
-    let denom = n_dot_x * (1.0 - k) + k;
-    
-    // Guard against division by near-zero
+fn ndf_ggx(NdotH: f32, a2: f32) -> f32 {
+    let nh = clamp(NdotH, 0.0, 1.0);
+    let denom = (nh * nh) * (a2 - 1.0) + 1.0;
+    return a2 / (PI * denom * denom + 1e-7);
+}
+
+// Milestone 1: GGX/GTR2 Normal Distribution Function with correct formula
+fn distribution_ggx(n_dot_h: f32, roughness: f32) -> f32 {
+    let alpha = clamp(roughness * roughness, 1e-4, 1.0);
+    return D_ggx(alpha, n_dot_h);
+}
+
+fn G1_schlick(alpha: f32, n_dot_x: f32) -> f32 {
+    let ndx = clamp(n_dot_x, 0.0, 1.0);
+    let k = ((alpha + 1.0) * (alpha + 1.0)) / 8.0;
+    let denom = ndx * (1.0 - k) + k;
     if denom < 1e-6 {
         return 0.0;
     }
-    
-    return n_dot_x / denom;
+    return ndx / denom;
+}
+
+fn G_schlick(alpha: f32, n_dot_l: f32, n_dot_v: f32) -> f32 {
+    return G1_schlick(alpha, n_dot_l) * G1_schlick(alpha, n_dot_v);
 }
 
 // Helper: Heitz lambda(NdotX) for GGX
@@ -500,8 +558,68 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // We will just shadow earlier calculations by reassigning below
     }
     // Derive N·L/N·V after potential override
-    let n_dot_l = max(dot(normal, light_dir), 0.0);
-    let n_dot_v = max(dot(normal, view_dir), 0.0);
+    let NoL = saturate(dot(normal, light_dir));
+    let NoV = saturate(dot(normal, view_dir));
+    var h = view_dir + light_dir;
+    if all(h == vec3<f32>(0.0)) {
+        h = normal;
+    } else {
+        h = normalize(h);
+    }
+    let NoH = saturate(dot(normal, h));
+
+    if debug_push.mode != 0u {
+        let cosines = wi3_cosines(normal, view_dir, light_dir);
+        let dbgNoV = cosines.x;
+        let dbgNoL = cosines.y;
+        let dbgNoH = cosines.z;
+        let alpha = alpha_from_roughness(debug_push.roughness);
+
+        if debug_push.mode == 1u {
+            var preview = 0.0;
+            if dbgNoL > 0.0 && dbgNoV > 0.0 {
+                let D = ggx_ndf(dbgNoH, alpha);
+                let D_vis = saturate(D * 0.35);
+                preview = D_vis;
+            }
+            return vec4<f32>(preview, preview, preview, 1.0);
+        }
+
+        if debug_push.mode == 2u {
+            var vis = 0.0;
+            if dbgNoL > 0.0 && dbgNoV > 0.0 {
+                vis = geometry_smith_correlated(dbgNoV, dbgNoL, debug_push.roughness);
+            }
+            return vec4<f32>(vis, vis, vis, 1.0);
+        }
+
+        if debug_push.mode == 3u {
+            if dbgNoL <= 0.0 || dbgNoV <= 0.0 {
+                return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+            }
+            var dbg_h = view_dir + light_dir;
+            if all(dbg_h == vec3<f32>(0.0)) {
+                dbg_h = normal;
+            } else {
+                dbg_h = normalize(dbg_h);
+            }
+            let dbgNoH_spec = saturate(dot(normal, dbg_h));
+            let dbgVoH = saturate(dot(view_dir, dbg_h));
+            let D = distribution_ggx(dbgNoH_spec, debug_push.roughness);
+            let F = fresnel_schlick(dbgVoH, params.f0);
+            let G = geometry_smith_correlated(dbgNoV, dbgNoL, debug_push.roughness);
+            let numerator = D * F * G;
+            let denominator = spec_den(dbgNoL, dbgNoV);
+            var specular = numerator / denominator;
+            let radiance = params.light_color * params.light_intensity;
+            let final_color = specular * radiance * dbgNoL * shading.exposure;
+            return vec4<f32>(final_color, 1.0);
+        }
+    }
+
+    let n_dot_l = NoL;
+    let n_dot_v = NoV;
+    let n_dot_h = NoH;
 
     // M1: Track min/max N·L and N·V for debug validation (after override)
     let nl_u32: u32 = u32(clamp(n_dot_l, 0.0, 1.0) * 4294967295.0);
@@ -528,31 +646,53 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // 2. G-only: output Smith G as grayscale
     if params.g_only != 0u {
-        if n_dot_l <= 0.0 || n_dot_v <= 0.0 {
-            return finalize_output_linear(vec3<f32>(0.0));
+        // === DEBUG: G-ONLY BEGIN (WI-3) ===
+        let n = normal;
+        let l = light_dir;
+        let v = view_dir;
+
+        let NoL_dbg = saturate(dot(n, l));
+        let NoV_dbg = saturate(dot(n, v));
+        if (NoL_dbg <= 0.0 || NoV_dbg <= 0.0) {
+            return vec4<f32>(0.0, 0.0, 0.0, 1.0);
         }
-        // Use Schlick-GGX G1 product with alpha = roughness for clearer falloff
-        let alpha = clamp(params.roughness, 1e-4, 1.0);
-        let g_v = smithG1_ggx(n_dot_v, alpha);
-        let g_l = smithG1_ggx(n_dot_l, alpha);
-        let g_value = clamp(g_v * g_l, 0.0, 1.0);
-        let rgb = apply_debug_stamp(input.uv, vec3<f32>(g_value), vec3<f32>(0.0, 1.0, 0.0));
-        return finalize_output_linear(rgb);
+
+        let G_dbg = geometry_smith_correlated(NoV_dbg, NoL_dbg, params.roughness);
+        // === DEBUG: G-ONLY END (WI-3) ===
+        return vec4<f32>(G_dbg, G_dbg, G_dbg, 1.0);
     }
 
-    // 2b. D-only: NDF visualization (no F, no G, no denominator, no N·L multiply)
+    // 2b. D-only: pure GGX NDF visualization (normalized, hemisphere masked)
     if params.debug_d != 0u {
-        // Center the lobe using N·V (treat H ≈ V for visualization)
-        // Then normalize by peak so all roughness values have peak=1
-        let n_dot_h = n_dot_v;
-        let D = distribution_ggx(n_dot_h, params.roughness);
-        // Peak D occurs at n_dot_h=1: D_peak = 1 / (π * α²) where α = roughness²
-        let alpha = clamp(params.roughness * params.roughness, 1e-4, 1.0);
-        let alpha2 = alpha * alpha; // = roughness^4
-        // Normalize by peak: D_norm = D / D_peak = D * π * α²
-        let D_vis = clamp(D * PI * alpha2, 0.0, 1.0);
-        let rgb = apply_debug_stamp(input.uv, vec3<f32>(D_vis), vec3<f32>(1.0, 0.0, 0.0));
-        return finalize_output_linear(rgb);
+        // === DEBUG: D-ONLY BEGIN (WI-3) ===
+        {
+            let n = normal;
+            let l = light_dir;
+            let v = view_dir;
+
+            let NoL_dbg = saturate(dot(n, l));
+            let NoV_dbg = saturate(dot(n, v));
+            if (NoL_dbg <= 0.0 || NoV_dbg <= 0.0) {
+                return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+            }
+
+            var h_dbg = l + v;
+            if all(h_dbg == vec3<f32>(0.0)) {
+                h_dbg = n;
+            } else {
+                h_dbg = normalize(h_dbg);
+            }
+            let NoH_dbg = saturate(dot(n, h_dbg));
+
+            let alpha_dbg = max(1e-4, params.roughness * params.roughness);
+            let a2_dbg = alpha_dbg * alpha_dbg;
+            let d_dbg = (NoH_dbg * NoH_dbg) * (a2_dbg - 1.0) + 1.0;
+            let D_dbg = a2_dbg / (PI * d_dbg * d_dbg);
+
+            let D_vis = saturate(D_dbg * 0.35);
+            return vec4<f32>(D_vis, D_vis, D_vis, 1.0);
+        }
+        // === DEBUG: D-ONLY END (WI-3) ===
     }
     
     // 3. DFG-only: output normalized D*F*G/(4*nl*nv) energy core

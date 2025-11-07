@@ -143,6 +143,8 @@ pub fn render_brdf_tile_offscreen(
     debug_no_srgb: bool,
     output_mode: u32, // 0=linear, 1=srgb
     metallic_override: f32,
+    wi3_debug_mode: u32,
+    wi3_debug_roughness: f32,
 ) -> Result<Vec<u8>> {
     // M0.1: Log GPU adapter info once per run (use static flag to log only once)
     use std::sync::Once;
@@ -161,6 +163,12 @@ pub fn render_brdf_tile_offscreen(
     let roughness = roughness.clamp(0.0, 1.0);
     let _exposure = exposure.max(1e-6);
     let light_intensity = light_intensity.max(1e-6);  // Milestone 4: Clamp light intensity
+    let wi3_mode = wi3_debug_mode;
+    let wi3_roughness = if wi3_mode != 0 {
+        wi3_debug_roughness.clamp(0.0, 1.0)
+    } else {
+        roughness
+    };
 
     // M0: Validate BRDF model index (restrict to baseline set {0,1,4,6})
     ensure!(matches!(model_u32, 0 | 1 | 4 | 6),
@@ -335,6 +343,17 @@ pub fn render_brdf_tile_offscreen(
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
+    let debug_push = crate::offscreen::pipeline::DebugPush {
+        mode: wi3_mode,
+        roughness: wi3_roughness,
+        _pad: [0.0, 0.0],
+    };
+    let debug_push_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("offscreen.brdf_tile.debug_push"),
+        contents: bytemuck::bytes_of(&debug_push),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
     // M1: Create debug buffer for min/max N·L, N·V tracking
     // Initialize with sentinel values in fixed-point u32 space:
     // min set to u32::MAX (so atomicMin will decrease), max set to 0 (so atomicMax will increase)
@@ -351,7 +370,14 @@ pub fn render_brdf_tile_offscreen(
     });
 
     // Create bind group
-    let bind_group = pipeline.create_bind_group(device, &uniforms_buffer, &params_buffer, &shading_buffer, &debug_buffer);
+    let bind_group = pipeline.create_bind_group(
+        device,
+        &uniforms_buffer,
+        &params_buffer,
+        &shading_buffer,
+        &debug_buffer,
+        &debug_push_buffer,
+    );
 
     // Render the sphere
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -511,6 +537,7 @@ mod tests {
             0.0,  // specular_tint
             false, // debug_dot_products
             // M2 defaults
+            false, // debug_lambert_only
             false, // debug_d
             false, // debug_spec_no_nl
             false, // debug_energy
@@ -519,6 +546,8 @@ mod tests {
             false, // debug_no_srgb
             1,     // output_mode (srgb)
             0.0,   // metallic_override
+            0,     // wi3_debug_mode
+            0.5,   // wi3_debug_roughness
         );
 
         assert!(result.is_ok(), "render_brdf_tile_offscreen failed: {:?}", result.err());
@@ -543,11 +572,73 @@ mod tests {
             .expect("Failed to create device");
 
         // Invalid BRDF model
-        let result = render_brdf_tile_offscreen(&device, &queue, 99, 0.5, 256, 256, false, false, false, false, false, 1.0, 0.8, [0.5,0.5,0.5], 0.0, 0.0, 0.0, 0.0, 0.0, false, false, false, false, false, 2, false, 1, 0.0);
+        let result = render_brdf_tile_offscreen(
+            &device,
+            &queue,
+            99,
+            0.5,
+            256,
+            256,
+            false,
+            false,
+            false,
+            false,
+            false,
+            1.0,
+            0.8,
+            [0.5, 0.5, 0.5],
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            false,
+            false,
+            false,
+            false,
+            false,
+            2,
+            false,
+            1,
+            0.0,
+            0,
+            0.5,
+        );
         assert!(result.is_err(), "should reject invalid BRDF model");
 
         // Zero dimensions
-        let result = render_brdf_tile_offscreen(&device, &queue, 4, 0.5, 0, 256, false, false, false, false, false, 1.0, 0.8, [0.5,0.5,0.5], 0.0, 0.0, 0.0, 0.0, 0.0, false, false, false, false, false, 2, false, 1, 0.0);
+        let result = render_brdf_tile_offscreen(
+            &device,
+            &queue,
+            4,
+            0.5,
+            0,
+            256,
+            false,
+            false,
+            false,
+            false,
+            false,
+            1.0,
+            0.8,
+            [0.5, 0.5, 0.5],
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            false,
+            false,
+            false,
+            false,
+            false,
+            2,
+            false,
+            1,
+            0.0,
+            0,
+            0.5,
+        );
         assert!(result.is_err(), "should reject zero width");
     }
 
@@ -603,7 +694,7 @@ mod tests {
             0.0,   // sheen_tint
             0.0,   // specular_tint
             false, // debug_dot_products
-            // M2 defaults
+            false, // debug_lambert_only
             false, // debug_d
             false, // debug_spec_no_nl
             false, // debug_energy
@@ -612,6 +703,8 @@ mod tests {
             false, // debug_no_srgb
             1,     // output_mode
             0.0,   // metallic_override
+            0,     // wi3_debug_mode
+            0.3,   // wi3_debug_roughness
         );
 
         assert!(result.is_ok(), "render_brdf_tile_offscreen failed: {:?}", result.err());

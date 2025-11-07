@@ -1478,6 +1478,8 @@ def render_brdf_tile(
     metallic_override: float = 0.0,
     # M4: Optional mode selector to override debug toggles
     mode: str | None = None,
+    wi3_debug_mode: int = 0,
+    wi3_debug_roughness: float = 0.0,
 ) -> np.ndarray:
     """
     Render a BRDF tile offscreen and return as numpy array.
@@ -1579,6 +1581,19 @@ def render_brdf_tile(
         )
     
     # Delegate to native implementation
+    wi3_mode_val = int(wi3_debug_mode)
+    wi3_rough_val = float(wi3_debug_roughness)
+    if wi3_mode_val == 0:
+        if bool(debug_d):
+            wi3_mode_val = 1
+        elif bool(g_only):
+            wi3_mode_val = 2
+        elif bool(spec_only):
+            wi3_mode_val = 3
+    if wi3_mode_val != 0 and wi3_debug_roughness == 0.0:
+        wi3_rough_val = float(roughness)
+    wi3_rough_val = max(0.0, min(1.0, wi3_rough_val))
+
     try:
         return _NATIVE_MODULE.render_brdf_tile(
             model, float(roughness), int(width), int(height),
@@ -1590,7 +1605,7 @@ def render_brdf_tile(
             # M2: Extended debug and output controls
             bool(debug_lambert_only), bool(debug_d), bool(debug_spec_no_nl), bool(debug_energy), bool(debug_angle_sweep), int(debug_angle_component),
             bool(debug_no_srgb), int(output_mode), float(metallic_override),
-            mode
+            mode, wi3_mode_val, wi3_rough_val
         )
     except Exception as e:
         # Re-raise with more context
