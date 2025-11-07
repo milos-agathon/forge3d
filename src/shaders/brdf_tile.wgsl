@@ -7,7 +7,8 @@
 // Milestone 1: Incremented to 2 for GGX donut fix and proper vector handling
 // Milestone 2: Incremented to 3 for normalized Blinn-Phong with comparable mapping
 // Milestone 3: Incremented to 4 for Disney Principled with IOR-based F0
-const BRDF_SHADER_VERSION: u32 = 4u;
+// Milestone 7: Incremented to 5 for Clearcoat and Sheen extensions
+const BRDF_SHADER_VERSION: u32 = 5u;
 
 // Minimal inline BRDF constants to avoid include conflicts
 // REQ-M2: SHADING STAGE (LINEAR) — all BRDF math stays in linear RGB
@@ -332,6 +333,31 @@ fn geometry_smith_correlated(n_dot_v: f32, n_dot_l: f32, roughness: f32) -> f32 
     return clamp(g, 0.0, 1.0);
 }
 
+// M7: Smith G for GGX (Schlick-GGX form, used for clearcoat)
+fn geometry_smith_ggx(n_dot_v: f32, n_dot_l: f32, roughness: f32) -> f32 {
+    let a = clamp(roughness, 1e-4, 1.0);
+    let k = ((a + 1.0) * (a + 1.0)) / 8.0;
+    let g1_v = n_dot_v / (n_dot_v * (1.0 - k) + k);
+    let g1_l = n_dot_l / (n_dot_l * (1.0 - k) + k);
+    return g1_v * g1_l;
+}
+
+// M7: Charlie NDF for sheen (Disney's form)
+// D_charlie(α, θh) = ((2 + 1/α) * pow(cos(θh), 1/α)) / (2π)
+fn distribution_charlie(n_dot_h: f32, roughness: f32) -> f32 {
+    let alpha = max(roughness, 1e-3);
+    let inv_alpha = 1.0 / alpha;
+    let cos_theta_h = saturate(n_dot_h);
+    let cos_power = pow(cos_theta_h, inv_alpha);
+    let factor = (2.0 + inv_alpha) / (2.0 * PI);
+    return factor * cos_power;
+}
+
+// M7: Scalar Fresnel for clearcoat (IOR=1.5 → F0≈0.04)
+fn fresnel_schlick_scalar(cos_theta: f32, f0: f32) -> f32 {
+    return f0 + (1.0 - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
+}
+
 // Lambert BRDF (diffuse)
 fn brdf_lambert(base_color: vec3<f32>) -> vec3<f32> {
     return base_color * INV_PI;
@@ -462,6 +488,7 @@ fn brdf_ggx(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, base_color: ve
 }
 
 // Milestone 3: Disney Principled BRDF (basic dielectric path)
+// M7: Extended with Clearcoat and Sheen
 fn brdf_disney(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, base_color: vec3<f32>, metallic: f32, roughness: f32) -> vec3<f32> {
     // Milestone 3: Normalize all input vectors
     let n = normalize(normal);
@@ -481,6 +508,7 @@ fn brdf_disney(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, base_color:
     let n_dot_l = saturate(dot(n, l));
     let n_dot_h = saturate(dot(n, h));
     let v_dot_h = saturate(dot(v, h));
+    let l_dot_h = saturate(dot(l, h));
     
     // Early exit if surface not visible
     if n_dot_v < 1e-6 || n_dot_l < 1e-6 {
@@ -515,15 +543,51 @@ fn brdf_disney(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, base_color:
     
     let diffuse = burley_diffuse(base_color, n_dot_l, n_dot_v, v_dot_h, roughness) * (vec3<f32>(1.0) - F) * (1.0 - metallic);
     
-    let result = diffuse + specular;
+    var result = diffuse + specular;
+    
+    // M7: Clearcoat layer (secondary GGX lobe with fixed IOR=1.5, narrow roughness)
+    let clearcoat_strength = params.clearcoat;
+    if clearcoat_strength > 1e-4 {
+        // Clearcoat roughness: clamp to [0.03, 0.2] range
+        let r_clearcoat = clamp(params.clearcoat_roughness, 0.03, 0.2);
+        let alpha_clearcoat = r_clearcoat * r_clearcoat;
+        
+        // Clearcoat uses separate half vector (same as base)
+        let D_clearcoat = distribution_ggx(n_dot_h, r_clearcoat);
+        let F0_clearcoat = 0.04; // Fixed IOR=1.5
+        let F_clearcoat = fresnel_schlick_scalar(v_dot_h, F0_clearcoat);
+        let G_clearcoat = geometry_smith_ggx(n_dot_v, n_dot_l, r_clearcoat);
+        
+        let num_clearcoat = D_clearcoat * F_clearcoat * G_clearcoat;
+        let den_clearcoat = spec_den(n_dot_l, n_dot_v);
+        var clearcoat_spec = num_clearcoat / den_clearcoat;
+        
+        // Energy-conserving mix: coat over base
+        // Lo = coat * mix + base * (1 - mix)
+        // where mix = clearcoat_strength * F_clearcoat
+        let coat_mix = clearcoat_strength * F_clearcoat;
+        let coat_contrib = vec3<f32>(clearcoat_spec) * coat_mix;
+        result = result * (1.0 - coat_mix) + coat_contrib;
+    }
+    
+    // M7: Sheen layer (Charlie NDF for grazing retro-reflection)
+    let sheen_strength = params.sheen;
+    if sheen_strength > 1e-4 {
+        let D_sheen = distribution_charlie(n_dot_h, roughness);
+        let sheen_tint = params.sheen_tint;
+        let sheen_color = mix(vec3<f32>(1.0), base_color, sheen_tint);
+        
+        // Sheen is a grazing-angle effect, typically applied at grazing angles
+        // Use a simple grazing factor: (1 - n_dot_v)^5
+        let grazing_factor = pow(1.0 - n_dot_v, 5.0);
+        let sheen_contrib = sheen_color * D_sheen * sheen_strength * grazing_factor * INV_PI;
+        result = result + sheen_contrib;
+    }
     
     // Milestone 3: Final NaN check
     if any(result != result) {
         return vec3<f32>(0.0);
     }
-    
-    // Milestone 3: Clearcoat, sheen, subsurface disabled for basic gallery path
-    // (would be added here in full Disney implementation)
     
     return result;
 }

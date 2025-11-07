@@ -190,7 +190,7 @@ impl BrdfTilePipeline {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("brdf_tile.pipeline_layout"),
             bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            push_constant_ranges: &[], // M7: Keep as uniform for compatibility
         });
         
         // Create render pipeline
