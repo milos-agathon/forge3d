@@ -94,6 +94,23 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
     return clamp(outc, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+fn burley_diffuse(base_color: vec3<f32>, n_dot_l: f32, n_dot_v: f32, v_dot_h: f32, roughness: f32) -> vec3<f32> {
+    let r = clamp(roughness, 0.0, 1.0);
+    let fd90 = 0.5 + 2.0 * r * v_dot_h * v_dot_h;
+    let FL = pow(1.0 - n_dot_l, 5.0);
+    let FV = pow(1.0 - n_dot_v, 5.0);
+    let scatter = (1.0 + (fd90 - 1.0) * FL) * (1.0 + (fd90 - 1.0) * FV);
+    return base_color * INV_PI * scatter;
+}
+
+fn energy_comp_factor(f0: vec3<f32>, roughness: f32) -> f32 {
+    let r = clamp(roughness, 0.0, 1.0);
+    let gloss = 1.0 - r;
+    let f_add = 0.04 * gloss + gloss * gloss * 0.5;
+    let energy = clamp(f_add + 0.16 * r + 0.01, 0.0, 1.0);
+    return clamp(1.0 - energy, 0.0, 1.0);
+}
+
 // BRDF model constants (matches lighting.wgsl and Rust BrdfModel enum)
 const BRDF_LAMBERT: u32 = 0u;
 const BRDF_PHONG: u32 = 1u;
@@ -461,7 +478,6 @@ fn brdf_disney(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, base_color:
     let n_dot_l = saturate(dot(n, l));
     let n_dot_h = saturate(dot(n, h));
     let v_dot_h = saturate(dot(v, h));
-    let l_dot_h = saturate(dot(l, h));
     
     // Early exit if surface not visible
     if n_dot_v < 1e-6 || n_dot_l < 1e-6 {
@@ -482,32 +498,19 @@ fn brdf_disney(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, base_color:
     let F = fresnel_schlick(v_dot_h, f0);
     let G = geometry_smith_correlated(n_dot_v, n_dot_l, roughness);
     
-    // Specular BRDF (Milestone 2 denominator guard 1e-4)
     let numerator = D * F * G;
     let denominator = spec_den(n_dot_l, n_dot_v);
     var specular = numerator / denominator;
     
-    // Milestone 3: NaN check
     if any(specular != specular) {
         specular = vec3<f32>(0.0);
     }
-    specular = min(specular, vec3<f32>(10.0));
+    specular = clamp(specular, vec3<f32>(0.0), vec3<f32>(10.0));
     
-    // Milestone 3: Disney diffuse (simplified - no subsurface for basic path)
-    // Uses Schlick Fresnel for better energy conservation than pure Lambert
-    let FL = fresnel_schlick(n_dot_l, vec3<f32>(1.0));
-    let FV = fresnel_schlick(n_dot_v, vec3<f32>(1.0));
+    let k_comp = energy_comp_factor(f0, roughness);
+    specular = specular * k_comp;
     
-    // Disney diffuse retro-reflection approximation
-    // Fd = baseColor/π * (1 + (FL - 1)(1 - roughness)^5) * (1 + (FV - 1)(1 - roughness)^5)
-    // Simplified for basic path: just use energy-conserving Lambert-like
-    let one_minus_FL = 1.0 - FL.x;
-    let one_minus_FV = 1.0 - FV.x;
-    let Fd = base_color * INV_PI;
-    
-    // Energy conservation: diffuse scaled by (1 - F) and (1 - metallic)
-    let kD = (vec3<f32>(1.0) - F) * (1.0 - metallic);
-    let diffuse = kD * Fd;
+    let diffuse = burley_diffuse(base_color, n_dot_l, n_dot_v, v_dot_h, roughness) * (vec3<f32>(1.0) - F) * (1.0 - metallic);
     
     let result = diffuse + specular;
     
@@ -771,9 +774,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         return finalize_output_linear(vec3<f32>(D_norm));
     }
 
-    // Energy debug: output kS (R), kD (G), (kS+kD) (B)
+    // Energy debug: Principled mode visualizes compensation factor, GGX shows kS/kD
     if params.debug_energy != 0u {
-        // Setup
+        if shading.brdf == BRDF_DISNEY_PRINCIPLED {
+            let dielectric_f0 = vec3<f32>(0.04);
+            let f0 = mix(dielectric_f0, params.base_color, params.metallic);
+            let comp = energy_comp_factor(f0, shading.roughness);
+            return finalize_output_linear(vec3<f32>(comp));
+        }
         let half_vec = normalize(view_dir + light_dir);
         let v_dot_h = max(dot(view_dir, half_vec), 0.0);
         let dielectric_f0 = vec3<f32>(0.04);
