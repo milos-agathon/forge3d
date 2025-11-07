@@ -85,6 +85,8 @@ fn create_perspective_matrix(fov_y: f32, aspect: f32, near: f32, far: f32) -> [[
 /// * `sheen_tint` - Disney Principled sheen tint (default 0.0)
 /// * `specular_tint` - Disney Principled specular tint (default 0.0)
 /// * `debug_dot_products` - Debug mode: when true, output min/max N·L, N·V to console
+/// * `sphere_sectors` - UV-sphere longitudinal divisions (default 64)
+/// * `sphere_stacks` - UV-sphere latitudinal divisions (default 32)
 ///
 /// # Returns
 /// Tight row-major RGBA8 buffer of shape (height, width, 4) with no padding.
@@ -146,6 +148,8 @@ pub fn render_brdf_tile_offscreen(
     metallic_override: f32,
     wi3_debug_mode: u32,
     wi3_debug_roughness: f32,
+    sphere_sectors: u32,
+    sphere_stacks: u32,
 ) -> Result<Vec<u8>> {
     // M0.1: Log GPU adapter info once per run (use static flag to log only once)
     use std::sync::Once;
@@ -160,6 +164,14 @@ pub fn render_brdf_tile_offscreen(
     
     ensure!(width > 0 && height > 0, "tile dimensions must be positive");
     ensure!(width <= 4096 && height <= 4096, "tile dimensions must be <= 4096 to avoid GPU timeouts");
+    ensure!(
+        sphere_sectors >= 8 && sphere_sectors <= 1024,
+        "sphere sectors must be in [8, 1024]"
+    );
+    ensure!(
+        sphere_stacks >= 4 && sphere_stacks <= 512,
+        "sphere stacks must be in [4, 512]"
+    );
     
     let roughness = roughness.clamp(0.0, 1.0);
     let _exposure = exposure.max(1e-6);
@@ -218,7 +230,7 @@ pub fn render_brdf_tile_offscreen(
     let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
     // P7-02: Generate UV-sphere mesh with normals and tangents
-    let (vertices, indices) = crate::offscreen::sphere::generate_uv_sphere(64, 32, 1.0);
+    let (vertices, indices) = crate::offscreen::sphere::generate_uv_sphere(sphere_sectors, sphere_stacks, 1.0);
     
     // Create vertex buffer
     let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -557,10 +569,12 @@ mod tests {
             2,     // debug_angle_component
             false, // debug_no_srgb
             1,     // output_mode (srgb)
-            0.0,   // metallic_override
-            0,     // wi3_debug_mode
-            0.5,   // wi3_debug_roughness
-        );
+        0.0,   // metallic_override
+        0,     // wi3_debug_mode
+        0.5,   // wi3_debug_roughness
+        64,    // sphere_sectors
+        32,    // sphere_stacks
+    );
 
         assert!(result.is_ok(), "render_brdf_tile_offscreen failed: {:?}", result.err());
         let buffer = result.unwrap();
@@ -614,10 +628,12 @@ mod tests {
             2,     // debug_angle_component
             false, // debug_no_srgb
             1,     // output_mode
-            0.0,
-            0,
-            0.5,
-        );
+        0.0,
+        0,
+        0.5,
+        64,
+        32,
+    );
         assert!(result.is_err(), "should reject invalid BRDF model");
 
         // Zero dimensions
@@ -651,10 +667,12 @@ mod tests {
             2,     // debug_angle_component
             false, // debug_no_srgb
             1,     // output_mode
-            0.0,
-            0,
-            0.5,
-        );
+        0.0,
+        0,
+        0.5,
+        64,
+        32,
+    );
         assert!(result.is_err(), "should reject zero width");
     }
 
@@ -719,10 +737,12 @@ mod tests {
             2,     // debug_angle_component
             false, // debug_no_srgb
             1,     // output_mode
-            0.0,   // metallic_override
-            0,     // wi3_debug_mode
-            0.3,   // wi3_debug_roughness
-        );
+        0.0,   // metallic_override
+        0,     // wi3_debug_mode
+        0.3,   // wi3_debug_roughness
+        64,
+        32,
+    );
 
         assert!(result.is_ok(), "render_brdf_tile_offscreen failed: {:?}", result.err());
         let buffer = result.unwrap();

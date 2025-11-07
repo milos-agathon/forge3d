@@ -1481,6 +1481,8 @@ def render_brdf_tile(
     mode: str | None = None,
     wi3_debug_mode: int = 0,
     wi3_debug_roughness: float = 0.0,
+    sphere_sectors: int = 64,
+    sphere_stacks: int = 32,
 ) -> np.ndarray:
     """
     Render a BRDF tile offscreen and return as numpy array.
@@ -1525,6 +1527,10 @@ def render_brdf_tile(
         Milestone 4: Specular layer tint (0.0 = white, 1.0 = fully tinted).
     debug_dot_products : bool, default False
         Milestone 1: If True, logs min/max N·L and N·V values to console for debugging.
+    sphere_sectors : int, default 64
+        UV-sphere longitudinal tessellation (higher values reduce shading aliasing).
+    sphere_stacks : int, default 32
+        UV-sphere latitudinal tessellation.
     
     Returns
     -------
@@ -1606,7 +1612,8 @@ def render_brdf_tile(
             # M2: Extended debug and output controls
             bool(debug_lambert_only), bool(debug_diffuse_only), bool(debug_d), bool(debug_spec_no_nl), bool(debug_energy), bool(debug_angle_sweep), int(debug_angle_component),
             bool(debug_no_srgb), int(output_mode), float(metallic_override),
-            mode, wi3_mode_val, wi3_rough_val
+            mode, wi3_mode_val, wi3_rough_val,
+            int(sphere_sectors), int(sphere_stacks),
         )
     except Exception as e:
         # Re-raise with more context

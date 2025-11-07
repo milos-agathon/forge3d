@@ -3091,7 +3091,8 @@ fn open_viewer(
     debug_lambert_only=false, debug_diffuse_only=false, debug_d=false, debug_spec_no_nl=false, debug_energy=false,
     debug_angle_sweep=false, debug_angle_component=2,
     debug_no_srgb=false, output_mode=1, metallic_override=0.0,
-    mode=None, wi3_debug_mode=0, wi3_debug_roughness=0.0
+    mode=None, wi3_debug_mode=0, wi3_debug_roughness=0.0,
+    sphere_sectors=64, sphere_stacks=32
 ))]
 fn render_brdf_tile<'py>(
     py: Python<'py>,
@@ -3129,6 +3130,8 @@ fn render_brdf_tile<'py>(
     mode: Option<&str>,
     wi3_debug_mode: u32,
     wi3_debug_roughness: f32,
+    sphere_sectors: u32,
+    sphere_stacks: u32,
 ) -> PyResult<Bound<'py, PyArray3<u8>>> {
     // Map model name to BRDF index
     let model_u32 = match model.to_lowercase().as_str() {
@@ -3146,6 +3149,8 @@ fn render_brdf_tile<'py>(
 
     // Clamp roughness to [0, 1]
     let roughness = roughness.clamp(0.0, 1.0);
+    let sphere_sectors = sphere_sectors.clamp(8, 1024);
+    let sphere_stacks = sphere_stacks.clamp(4, 512);
 
     // Map optional mode to toggles (M4)
     let (mut ndf_only, mut g_only, mut dfg_only, mut spec_only, mut roughness_visualize,
@@ -3246,6 +3251,8 @@ fn render_brdf_tile<'py>(
         metallic_override,
         wi3_debug_mode,
         wi3_debug_roughness,
+        sphere_sectors,
+        sphere_stacks,
     )
     .map_err(|e| PyRuntimeError::new_err(format!("Failed to render BRDF tile: {}", e)))?;
 

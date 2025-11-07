@@ -252,6 +252,128 @@ Create a **CPU GGX reference** renderer at **32×32** sample points on the spher
 
 ---
 
+## M6.1
+
+## ROLE
+
+You are a senior graphics engineer. Make **minimal, auditable** edits to implement CPU↔GPU validation hardening for **M6** in the `forge3d` repo.
+
+## OBJECTIVE (exact)
+
+1. **Keep all rendered images bit-for-bit unchanged** vs current main.
+2. Strengthen M6 validation to guarantee parity across more cases and surface the root of worst-pixel errors.
+3. Produce updated artifacts + tests that **pass** with the current shaders.
+
+## SCOPE (only these)
+
+* `examples/m6_generate.py`
+* `python/forge3d/` (add small helper if needed)
+* `tests/test_m6_validation.py`
+* Do **not** change WGSL shaders or any rendering code paths.
+
+## WHAT TO IMPLEMENT
+
+1. **Multi-case validation run**
+
+   * Extend `run_validation(...)` to accept a list of **cases**. Each case has:
+
+     ```python
+     {
+       "roughness": float,        # e.g., 0.1, 0.5, 0.9
+       "light_dir": [x,y,z],      # normalized
+       "mask_nv_cutoff": 0.2,     # same for CPU/GPU
+       "mask_shrink": 0.85        # same for CPU/GPU
+     }
+     ```
+   * Default cases (exact order):
+
+     * C1: r=0.10, light=[0.408248, 0.408248, 0.816497]
+     * C2: r=0.50, light=[0.408248, 0.408248, 0.816497]
+     * C3: r=0.90, light=[0.408248, 0.408248, 0.816497]
+     * C4: r=0.50, light=[0.200000, 0.800000, 0.556776] (normalized to 6 decimals)
+   * Execute all cases; aggregate metrics (RMS, P99.9, MAX) per case **and** global (mean across cases).
+
+2. **Per-term error breakdown (diagnostics)**
+
+   * In addition to the current full BRDF diff, compute RMS and P99.9 for **D-only**, **G-only**, **F-only** contributions (CPU vs GPU) at the *same* masked pixels.
+   * Persist to CSV (`m6_diff_terms.csv`) with columns:
+
+     ```
+     case_id, kind, rms_r, rms_g, rms_b, p999_r, p999_g, p999_b
+     ```
+
+     where `kind ∈ {D,G,F,Full}`.
+
+3. **Determinism + parity guards**
+
+   * Confirm/ensure all comparisons occur in **linear** (no tone map/gamma).
+   * Record in meta:
+
+     * `alpha_mapping`: literal string `"alpha = roughness^2"`
+     * `clamps`: `{NoL: [1e-4,1], NoV: [1e-4,1], NoH: [1e-4,1], LoH: "unclamped"}`
+     * `precision`: `"f32"`
+   * Keep the existing stratified concentric sampling; **do not change** sample count defaults.
+
+4. **Acceptance thresholds (codified)**
+
+   * For **each case** and **global aggregate** assert:
+
+     * `RMS ≤ 1.0e-3` (per channel)
+     * `P99.9 ≤ 5.0e-3` (per channel)
+   * Log **MAX** (informational). If `MAX > 6.0e-3`, print a **WARN** but **do not fail**.
+   * On failure, write `reports/m6_FAIL.txt` with a one-line reason and exit non-zero.
+
+5. **Artifacts (exact names)**
+
+   * `reports/m6_diff.csv` (unchanged schema; keep writing it)
+   * `reports/m6_diff_terms.csv` (new; per-term metrics)
+   * `reports/m6_meta.json` (extend with `cases`, `global_metrics`, `alpha_mapping`, `clamps`, `precision`, `seed`, `csv_sha256`)
+   * `reports/m6_diff_heatmap.png` (keep existing behavior)
+
+6. **Tests**
+
+   * Update `tests/test_m6_validation.py` to:
+
+     * Run the default multi-case set at **256×256**.
+     * Assert **all cases** and **global** meet thresholds above.
+     * Assert `alpha_mapping == "alpha = roughness^2"` and the `clamps` dict matches exactly.
+     * Assert `m6_diff_terms.csv` exists and contains rows for `D,G,F,Full` for each case.
+
+## NON-GOALS (do not do these)
+
+* No WGSL edits.
+* No change to image outputs or tone mapping anywhere.
+* No new dependencies.
+* No refactors beyond what’s required to add the above.
+
+## IMPLEMENTATION NOTES (binders)
+
+* Keep current RNG/seed recording.
+* Use **exact** light vectors above (normalize once, retain 6-decimal strings in JSON).
+* Per-term CPU references must reuse the **same** dot products, alpha mapping, and clamps as the full reference; compute D/G/F numerically isolated but from identical inputs.
+
+## ACCEPTANCE COMMANDS
+
+```bash
+# fast CI-sized run at 256²
+pytest -q tests/test_m6_validation.py
+
+# full artifact run (current defaults)
+python examples/m6_generate.py --outdir reports
+```
+
+## DELIVERABLES
+
+* Modified files committed with a single concise message:
+
+  ```
+  M6: multi-case CPU↔GPU validation + per-term diagnostics; thresholds codified; meta/clamps parity recorded
+  ```
+* All tests green; artifacts written; **no** changes to any rendered PNG content beyond M6 diagnostics.
+
+---
+
+
 ## M7 — **Extensions & Performance**  *(expanded, strict)*
 
 **Goal**
