@@ -135,6 +135,7 @@ pub fn render_brdf_tile_offscreen(
     debug_dot_products: bool,
     // M2: Additional debug toggles and controls
     debug_lambert_only: bool,
+    debug_diffuse_only: bool,
     debug_d: bool,
     debug_spec_no_nl: bool,
     debug_energy: bool,
@@ -261,6 +262,15 @@ pub fn render_brdf_tile_offscreen(
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
+    // Compute metallic override and resulting F0 mix for debug views
+    let metallic = metallic_override.clamp(0.0, 1.0);
+    let dielectric_f0 = [0.04f32, 0.04, 0.04];
+    let f0 = [
+        dielectric_f0[0] * (1.0 - metallic) + base_color[0] * metallic,
+        dielectric_f0[1] * (1.0 - metallic) + base_color[1] * metallic,
+        dielectric_f0[2] * (1.0 - metallic) + base_color[2] * metallic,
+    ];
+
     // Set up lighting (M1): directional L = normalize(0.5, 0.5, 1)
     // Shader uses light_dir as a direction that is negated in the fragment: light_dir = normalize(-params.light_dir)
     // Therefore, set params.light_dir = -L.
@@ -274,15 +284,15 @@ pub fn render_brdf_tile_offscreen(
         _pad1: 0.0,
         // M1/M2: Base color override
         base_color,
-        metallic: metallic_override,
+        metallic,
         roughness,
         ndf_only: if ndf_only { 1 } else { 0 },
         g_only: if g_only { 1 } else { 0 },
         dfg_only: if dfg_only { 1 } else { 0 },
         spec_only: if spec_only { 1 } else { 0 },
         roughness_visualize: if roughness_visualize { 1 } else { 0 },
-        // M0: Provide explicit F0 (dielectric default 0.04)
-        f0: [0.04, 0.04, 0.04],
+        // M0/M3: Provide explicit F0 (mix dielectric 0.04 with base color by metallic)
+        f0,
         _pad_f0: 0.0,
         // M4: Disney Principled BRDF extensions
         clearcoat: clearcoat.clamp(0.0, 1.0),
@@ -292,6 +302,7 @@ pub fn render_brdf_tile_offscreen(
         specular_tint: specular_tint.clamp(0.0, 1.0),
         // M2: Debug toggles
         debug_lambert_only: if debug_lambert_only { 1 } else { 0 },
+        debug_diffuse_only: if debug_diffuse_only { 1 } else { 0 },
         debug_energy: if debug_energy { 1 } else { 0 },
         debug_d: if debug_d { 1 } else { 0 },
         debug_g_dbg: 0, // reserved (we use g_only above for the primary G)
@@ -324,7 +335,7 @@ pub fn render_brdf_tile_offscreen(
     // Create shading parameters for BRDF dispatch
     let shading = crate::offscreen::pipeline::ShadingParamsGPU {
         brdf: model_u32,
-        metallic: metallic_override,
+        metallic,
         roughness, // α = roughness^2 computed in shader
         sheen: 0.0,
         clearcoat: 0.0,
@@ -538,6 +549,7 @@ mod tests {
             false, // debug_dot_products
             // M2 defaults
             false, // debug_lambert_only
+            false, // debug_diffuse_only
             false, // debug_d
             false, // debug_spec_no_nl
             false, // debug_energy
@@ -592,14 +604,16 @@ mod tests {
             0.0,
             0.0,
             0.0,
-            false,
-            false,
-            false,
-            false,
-            false,
-            2,
-            false,
-            1,
+            false, // debug_dot_products
+            false, // debug_lambert_only
+            false, // debug_diffuse_only
+            false, // debug_d
+            false, // debug_spec_no_nl
+            false, // debug_energy
+            false, // debug_angle_sweep
+            2,     // debug_angle_component
+            false, // debug_no_srgb
+            1,     // output_mode
             0.0,
             0,
             0.5,
@@ -627,14 +641,16 @@ mod tests {
             0.0,
             0.0,
             0.0,
-            false,
-            false,
-            false,
-            false,
-            false,
-            2,
-            false,
-            1,
+            false, // debug_dot_products
+            false, // debug_lambert_only
+            false, // debug_diffuse_only
+            false, // debug_d
+            false, // debug_spec_no_nl
+            false, // debug_energy
+            false, // debug_angle_sweep
+            2,     // debug_angle_component
+            false, // debug_no_srgb
+            1,     // output_mode
             0.0,
             0,
             0.5,
@@ -695,6 +711,7 @@ mod tests {
             0.0,   // specular_tint
             false, // debug_dot_products
             false, // debug_lambert_only
+            false, // debug_diffuse_only
             false, // debug_d
             false, // debug_spec_no_nl
             false, // debug_energy

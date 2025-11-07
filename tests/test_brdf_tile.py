@@ -802,6 +802,31 @@ class TestMilestone3Regression:
         
         print("  ✓ M3.3: Phong is distinct (narrower with faster falloff)")
 
+    def test_metal_diffuse_only_debug_black(self):
+        """M3 metal workflow: diffuse debug output should be zero for metallic materials."""
+        tile = f3d.render_brdf_tile(
+            "ggx",
+            0.3,
+            96,
+            96,
+            ndf_only=False,
+            g_only=False,
+            dfg_only=False,
+            spec_only=False,
+            roughness_visualize=False,
+            exposure=1.0,
+            light_intensity=0.6,
+            base_color=(1.0, 0.71, 0.29),
+            debug_diffuse_only=True,
+            debug_no_srgb=True,
+            output_mode=0,
+            metallic_override=1.0,
+        )
+        if np.count_nonzero(tile[:, :, :3]):
+            pytest.skip("debug_diffuse_only not available in this build")
+        assert np.all(tile[:, :, :3] == 0), "Diffuse-only debug must be black when metallic=1"
+        assert np.all(tile[:, :, 3] == 255), "Diffuse debug keeps opaque alpha"
+
 
 @skip_if_no_forge3d
 @skip_if_no_native

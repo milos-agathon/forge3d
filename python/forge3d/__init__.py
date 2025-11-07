@@ -1468,6 +1468,7 @@ def render_brdf_tile(
     debug_dot_products: bool = False,
     # M2: Additional debug and output controls
     debug_lambert_only: bool = False,
+    debug_diffuse_only: bool = False,
     debug_d: bool = False,
     debug_spec_no_nl: bool = False,
     debug_energy: bool = False,
@@ -1603,7 +1604,7 @@ def render_brdf_tile(
             float(clearcoat), float(clearcoat_roughness), float(sheen), float(sheen_tint), float(specular_tint),
             bool(debug_dot_products),
             # M2: Extended debug and output controls
-            bool(debug_lambert_only), bool(debug_d), bool(debug_spec_no_nl), bool(debug_energy), bool(debug_angle_sweep), int(debug_angle_component),
+            bool(debug_lambert_only), bool(debug_diffuse_only), bool(debug_d), bool(debug_spec_no_nl), bool(debug_energy), bool(debug_angle_sweep), int(debug_angle_component),
             bool(debug_no_srgb), int(output_mode), float(metallic_override),
             mode, wi3_mode_val, wi3_rough_val
         )

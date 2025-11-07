@@ -167,6 +167,7 @@ struct BrdfTileParams {
     specular_tint: f32,          // Specular tint [0,1]: 0=achromatic, 1=base color tint
     // M2: Debug toggles
     debug_lambert_only: u32,   // 1 = lambert-only output (disable specular)
+    debug_diffuse_only: u32,   // 1 = output physical diffuse term only
     debug_energy: u32,         // 1 = output kS/Kd diagnostics (packed R,G,B)
     debug_d: u32,              // 1 = output D only (grayscale)
     debug_g_dbg: u32,          // 1 = output correlated G only (grayscale)
@@ -642,6 +643,44 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if params.debug_lambert_only != 0u {
         // Standard Lambert diffuse
         let diffuse = params.base_color * INV_PI;
+        let radiance = params.light_color * params.light_intensity;
+        let final_color = diffuse * radiance * n_dot_l * shading.exposure;
+        return finalize_output_linear(final_color);
+    }
+
+    if params.debug_diffuse_only != 0u {
+        let n = normal;
+        let v = view_dir;
+        let l = light_dir;
+        var h = v + l;
+        if all(h == vec3<f32>(0.0)) {
+            h = n;
+        } else {
+            h = normalize(h);
+        }
+
+        let n_dot_v = saturate(dot(n, v));
+        let n_dot_l = saturate(dot(n, l));
+        let v_dot_h = saturate(dot(v, h));
+
+        if (n_dot_v < 1e-6 || n_dot_l < 1e-6) {
+            return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        }
+
+        let dielectric_f0 = vec3<f32>(0.04);
+        let f0 = mix(dielectric_f0, params.base_color, params.metallic);
+
+        var diffuse = vec3<f32>(0.0);
+        if shading.brdf == BRDF_DISNEY_PRINCIPLED {
+            let F = fresnel_schlick(v_dot_h, f0);
+            let burley = burley_diffuse(params.base_color, n_dot_l, n_dot_v, v_dot_h, shading.roughness);
+            diffuse = burley * (vec3<f32>(1.0) - F) * (1.0 - shading.metallic);
+        } else {
+            let F = fresnel_schlick(v_dot_h, f0);
+            let kD = (vec3<f32>(1.0) - F) * (1.0 - shading.metallic);
+            diffuse = kD * params.base_color * INV_PI;
+        }
+
         let radiance = params.light_color * params.light_intensity;
         let final_color = diffuse * radiance * n_dot_l * shading.exposure;
         return finalize_output_linear(final_color);

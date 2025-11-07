@@ -3088,7 +3088,7 @@ fn open_viewer(
     clearcoat=0.0, clearcoat_roughness=0.0, sheen=0.0, sheen_tint=0.0, specular_tint=0.0,
     debug_dot_products=false,
     // M2 additions (all optional with safe defaults)
-    debug_lambert_only=false, debug_d=false, debug_spec_no_nl=false, debug_energy=false,
+    debug_lambert_only=false, debug_diffuse_only=false, debug_d=false, debug_spec_no_nl=false, debug_energy=false,
     debug_angle_sweep=false, debug_angle_component=2,
     debug_no_srgb=false, output_mode=1, metallic_override=0.0,
     mode=None, wi3_debug_mode=0, wi3_debug_roughness=0.0
@@ -3116,6 +3116,7 @@ fn render_brdf_tile<'py>(
     debug_dot_products: bool,
     // M2 debug toggles
     debug_lambert_only: bool,
+    debug_diffuse_only: bool,
     debug_d: bool,
     debug_spec_no_nl: bool,
     debug_energy: bool,
@@ -3148,10 +3149,10 @@ fn render_brdf_tile<'py>(
 
     // Map optional mode to toggles (M4)
     let (mut ndf_only, mut g_only, mut dfg_only, mut spec_only, mut roughness_visualize,
-        mut debug_lambert_only, mut debug_d, mut debug_spec_no_nl, mut debug_energy, mut debug_angle_sweep,
+        mut debug_lambert_only, mut debug_diffuse_only, mut debug_d, mut debug_spec_no_nl, mut debug_energy, mut debug_angle_sweep,
         mut debug_angle_component, mut debug_no_srgb, mut output_mode) =
         (ndf_only, g_only, dfg_only, spec_only, roughness_visualize,
-         debug_lambert_only, debug_d, debug_spec_no_nl, debug_energy, debug_angle_sweep,
+         debug_lambert_only, debug_diffuse_only, debug_d, debug_spec_no_nl, debug_energy, debug_angle_sweep,
          debug_angle_component, debug_no_srgb, output_mode);
 
     if let Some(mode_str) = mode {
@@ -3177,6 +3178,7 @@ fn render_brdf_tile<'py>(
             }
             // M2 extended modes
             "lambert" | "flatness" => { debug_lambert_only = true; }
+            "diffuse" | "diffuse_only" => { debug_diffuse_only = true; }
             "d" | "ndf_only" | "debug_d" => { debug_d = true; }
             "spec_no_nl" => { spec_only = true; debug_spec_no_nl = true; }
             "energy" | "kskd" => { debug_energy = true; }
@@ -3193,8 +3195,8 @@ fn render_brdf_tile<'py>(
             }
         }
         log::info!(
-            "[M4/M2] Mode mapping applied: mode={} -> ndf_only={} g_only={} dfg_only={} spec_only={} roughness_visualize={} lambert_only={} debug_d={} spec_no_nl={} energy={} angle_sweep={} angle_comp={} no_srgb={} out_mode={}",
-            m, ndf_only, g_only, dfg_only, spec_only, roughness_visualize, debug_lambert_only, debug_d, debug_spec_no_nl, debug_energy, debug_angle_sweep, debug_angle_component, debug_no_srgb, output_mode
+            "[M4/M2] Mode mapping applied: mode={} -> ndf_only={} g_only={} dfg_only={} spec_only={} roughness_visualize={} lambert_only={} diffuse_only={} debug_d={} spec_no_nl={} energy={} angle_sweep={} angle_comp={} no_srgb={} out_mode={}",
+            m, ndf_only, g_only, dfg_only, spec_only, roughness_visualize, debug_lambert_only, debug_diffuse_only, debug_d, debug_spec_no_nl, debug_energy, debug_angle_sweep, debug_angle_component, debug_no_srgb, output_mode
         );
     }
 
@@ -3233,6 +3235,7 @@ fn render_brdf_tile<'py>(
         debug_dot_products,
         // M2 extensions
         debug_lambert_only,
+        debug_diffuse_only,
         debug_d,
         debug_spec_no_nl,
         debug_energy,

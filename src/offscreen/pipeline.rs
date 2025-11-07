@@ -43,7 +43,8 @@ pub struct BrdfTileParams {
     pub sheen_tint: f32,
     pub specular_tint: f32,
     // M2: Debug toggles
-    pub debug_lambert_only: u32,   // 1 = output diffuse lambert only (disable specular)
+    pub debug_lambert_only: u32,   // 1 = output legacy lambert-only visualization
+    pub debug_diffuse_only: u32,   // 1 = output physically-derived diffuse term only
     pub debug_energy: u32,         // 1 = output (kS + kD)
     pub debug_d: u32,              // 1 = output D only (grayscale)
     pub debug_g_dbg: u32,          // 1 = output G only (grayscale, correlated)
