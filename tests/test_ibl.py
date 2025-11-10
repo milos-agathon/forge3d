@@ -132,3 +132,113 @@ def test_ibl_repr(test_hdr_file):
     assert "intensity=" in repr_str
     assert "rotation_deg=" in repr_str
     assert "quality=" in repr_str
+
+
+# ------------------------------
+# Milestone 4 — Unit tests (4.1)
+# ------------------------------
+
+def _import_m4_generate():
+    import importlib.util, sys
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[1]
+    m4_path = repo_root / "examples" / "m4_generate.py"
+    if not m4_path.exists():
+        raise ImportError(f"m4_generate.py not found at {m4_path}")
+    spec = importlib.util.spec_from_file_location("m4_generate", str(m4_path))
+    if spec is None or spec.loader is None:
+        raise ImportError("Failed to import examples/m4_generate.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules['m4_generate'] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_p4_lut_bounds_random_samples():
+    """LUT bounds: random UV samples produce [0,1] with no NaNs."""
+    m4 = _import_m4_generate()
+    lut = m4.compute_dfg_lut(128, m4.DFG_LUT_SAMPLES)
+    H, W, C = lut.shape
+    assert C == 2
+    # Sample 256 random points
+    rng = np.random.default_rng(123)
+    xs = rng.integers(0, W, size=256)
+    ys = rng.integers(0, H, size=256)
+    samples = lut[ys, xs]
+    assert np.isfinite(samples).all()
+    assert (samples >= 0.0).all() and (samples <= 1.0).all()
+
+
+def test_p4_cache_roundtrip_metric():
+    """Cache round-trip determinism using CPU reference path (backend-agnostic).
+
+    We use examples/m4_generate.py to compute small artifacts twice and
+    assert determinism at the array level. Production path remains GPU-first.
+    """
+    import tempfile
+    m4 = _import_m4_generate()
+    with tempfile.TemporaryDirectory() as _td:
+        hdr, _ = m4.load_hdr_environment(m4.HDR_DEFAULT, force_synthetic=True)
+        base = 128
+        irr = 32
+        brdf = 128
+
+        # First compute
+        faces1, _ = m4.equirect_to_cubemap(hdr, base)
+        pre1, _geoms1, _ = m4.compute_prefilter_chain(
+            hdr, base, m4.PREFILTER_SAMPLES_TOP, m4.PREFILTER_SAMPLES_BOTTOM
+        )
+        irr1 = m4.build_irradiance_cubemap(hdr, irr, m4.IRRADIANCE_SAMPLES)
+        lut1 = m4.compute_dfg_lut(brdf, m4.DFG_LUT_SAMPLES)
+
+        # Second compute
+        faces2, _ = m4.equirect_to_cubemap(hdr, base)
+        pre2, _geoms2, _ = m4.compute_prefilter_chain(
+            hdr, base, m4.PREFILTER_SAMPLES_TOP, m4.PREFILTER_SAMPLES_BOTTOM
+        )
+        irr2 = m4.build_irradiance_cubemap(hdr, irr, m4.IRRADIANCE_SAMPLES)
+        lut2 = m4.compute_dfg_lut(brdf, m4.DFG_LUT_SAMPLES)
+
+        # Hashes must match across runs
+        h1 = m4.hash_prefilter_levels(pre1)
+        h2 = m4.hash_prefilter_levels(pre2)
+        assert h1 == h2
+        assert np.allclose(faces1, faces2)
+        assert np.allclose(irr1, irr2)
+        assert np.allclose(lut1, lut2)
+
+
+def test_p4_quality_mapping_sizes_and_mips():
+    """Quality mapping: Low/Medium/High → exact sizes/mips via Scene API."""
+    # Scene is GPU-backed; skip gracefully if native module or GPU not available
+    if not hasattr(f3d, "Scene"):
+        pytest.skip("forge3d native Scene unavailable")
+    try:
+        if hasattr(f3d, "has_gpu") and not f3d.has_gpu():
+            pytest.skip("No GPU available for Scene-based IBL test")
+    except Exception:
+        pass
+
+    scene = f3d.Scene(128, 128, grid=8)
+    scene.enable_ibl('low')
+
+    # Map expected sizes per quality from src/core/ibl.rs
+    expected = {
+        'low':   {'irr': 64,  'spec': 128,  'mips': 5},
+        'medium':{'irr': 128, 'spec': 256,  'mips': 6},
+        'high':  {'irr': 256, 'spec': 512,  'mips': 7},
+    }
+
+    # Load a tiny synthetic environment
+    m4 = _import_m4_generate()
+    env = m4.generate_synthetic_environment(64, 32)
+    scene.load_environment_map(env.flatten().tolist(), env.shape[1], env.shape[0])
+    scene.generate_ibl_textures()
+
+    for quality, exp in expected.items():
+        scene.set_ibl_quality(quality)
+        scene.generate_ibl_textures()
+        irr_info, spec_info, _ = scene.get_ibl_texture_info()
+        assert f"{exp['irr']}x{exp['irr']}" in irr_info
+        assert f"{exp['spec']}x{exp['spec']}" in spec_info
+        assert f"{exp['mips']} mips" in spec_info

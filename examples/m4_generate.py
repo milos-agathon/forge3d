@@ -786,6 +786,99 @@ def sample_lut(lut: np.ndarray, NoV: np.ndarray, roughness: float) -> np.ndarray
     )
 
 
+def render_panel_brdf(
+    prefilter_levels,
+    irradiance_faces: np.ndarray,
+    lut: np.ndarray,
+    *,
+    roughness: float,
+    metallic: float,
+    base_color: Tuple[float, float, float] = (0.5, 0.5, 0.5),
+    f0: float = 0.04,
+    env_rotation_deg: float = 0.0,
+    size: int = 512,
+) -> np.ndarray:
+    """
+    Render a BRDF tile panel using IBL (M4 approach).
+    
+    Uses CPU-side IBL evaluation with split-sum approximation to match BRDF tile renderer
+    material parameters and visual style.
+    """
+    # Build sphere geometry
+    normals, mask = build_sphere_geometry(size)
+    V = np.array([0.0, 0.0, 1.0], dtype=np.float32)  # View direction (camera looking at sphere)
+    
+    # Compute NoV
+    NoV = np.clip(normals[..., 2], 0.0, 1.0)
+    
+    # Compute reflection direction for specular IBL
+    reflection = normalize_vec3(2.0 * NoV[..., None] * normals - V)
+    
+    # Apply environment rotation to sampling directions (rotate environment, not surface)
+    if env_rotation_deg != 0.0:
+        rot_rad = math.radians(env_rotation_deg)
+        cos_r = math.cos(rot_rad)
+        sin_r = math.sin(rot_rad)
+        # Rotate around Y axis (azimuthal rotation)
+        rot_matrix = np.array([
+            [cos_r, 0.0, sin_r],
+            [0.0, 1.0, 0.0],
+            [-sin_r, 0.0, cos_r],
+        ], dtype=np.float32)
+        # Rotate directions used to sample environment maps
+        reflection_rot = reflection @ rot_matrix.T
+        reflection_rot = normalize_vec3(reflection_rot)
+        normals_rot = normals @ rot_matrix.T
+        normals_rot = normalize_vec3(normals_rot)
+    else:
+        reflection_rot = reflection
+        normals_rot = normals
+    
+    # Sample prefiltered specular (use rotated reflection direction)
+    spec_color = sample_prefilter(prefilter_levels, reflection_rot, roughness)
+    
+    # Sample DFG LUT
+    lut_sample = sample_lut(lut, NoV, roughness)
+    
+    # Compute F0 (mix dielectric with base color by metallic)
+    f0_vec = np.array([f0, f0, f0], dtype=np.float32)
+    f0_final = f0_vec * (1.0 - metallic) + np.array(base_color, dtype=np.float32) * metallic
+    
+    # Specular IBL: prefiltered_color * (F0 * scale + bias)
+    specular = spec_color * (f0_final * lut_sample[..., 0:1] + lut_sample[..., 1:2])
+    
+    # Diffuse IBL: sample irradiance (use rotated normals for environment rotation)
+    irradiance = sample_cubemap_faces(irradiance_faces, normals_rot)
+    
+    # Compute Fresnel for energy conservation
+    # F_ibl = fresnel_schlick_roughness(NoV, f0_final, roughness)
+    fresnel = f0_final + (np.maximum(1.0 - roughness, f0_final) - f0_final) * np.power(
+        np.clip(1.0 - NoV, 0.0, 1.0), 5.0
+    )[..., None]
+    
+    # kD = (1 - kS) * (1 - metallic)
+    kD = (1.0 - fresnel) * (1.0 - metallic)
+    
+    # Diffuse: kD * base_color * irradiance / PI
+    diffuse = kD * np.array(base_color, dtype=np.float32) * irradiance / math.pi
+    
+    # Combine
+    linear = np.clip(specular + diffuse, 0.0, None)
+    linear[~mask] = 0.0
+    
+    # Convert to sRGB
+    srgb = linear_to_srgb(linear)
+    rgb = (srgb * 255.0).astype(np.uint8)
+    
+    # Add alpha channel
+    rgba = np.zeros((size, size, 4), dtype=np.uint8)
+    rgba[..., :3] = rgb
+    rgba[..., 3] = 255
+    rgba[~mask, 3] = 0  # Transparent outside sphere
+    
+    return rgba
+
+
 def render_gallery_tiles(
     prefilter_levels: Sequence[PrefilterLevel],
     irradiance_faces: np.ndarray,

@@ -89,7 +89,7 @@ fn hammersley_2d(i: u32, n: u32) -> vec2<f32> {
 }
 
 @compute @workgroup_size(8, 8, 1)
-fn cs_irradiance_convolution(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn cs_irradiance_convolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     let face = gid.z;
     if face >= params.face_count {
         return;

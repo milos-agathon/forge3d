@@ -440,7 +440,7 @@ impl IBLRenderer {
                     },
                 )),
                 module: &shader_prefilter,
-                entry_point: "cs_irradiance_convolution",
+                entry_point: "cs_irradiance_convolve",
             });
 
         let specular_pipeline =
