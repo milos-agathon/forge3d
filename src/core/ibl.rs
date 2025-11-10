@@ -21,6 +21,39 @@ const CACHE_MAGIC: &[u8; 8] = b"IBLCACHE";
 const CACHE_VERSION: u32 = 1;
 const COPY_ALIGNMENT: usize = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
 
+/// Resize HDR image data using simple box filtering (nearest neighbor for downsampling)
+fn resize_hdr_data(
+    src_data: &[f32],
+    src_width: u32,
+    src_height: u32,
+    dst_width: u32,
+    dst_height: u32,
+    channels: usize,
+) -> Vec<f32> {
+    let src_w = src_width as usize;
+    let src_h = src_height as usize;
+    let dst_w = dst_width as usize;
+    let dst_h = dst_height as usize;
+
+    let mut dst_data = Vec::with_capacity(dst_w * dst_h * channels);
+
+    for y in 0..dst_h {
+        for x in 0..dst_w {
+            // Map destination pixel to source coordinates
+            let src_x = (x * src_w) / dst_w;
+            let src_y = (y * src_h) / dst_h;
+            let src_idx = (src_y * src_w + src_x) * channels;
+
+            // Copy pixel channels
+            for c in 0..channels {
+                dst_data.push(src_data[src_idx + c]);
+            }
+        }
+    }
+
+    dst_data
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IBLQuality {
     Low,
@@ -434,7 +467,7 @@ impl IBLRenderer {
                 },
             )),
             module: &shader_brdf,
-            entry_point: "cs_brdf_integration",
+            entry_point: "cs_brdf_lut",
         });
 
         let base_resolution = quality.base_environment_size();
@@ -448,20 +481,6 @@ impl IBLRenderer {
         let env_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("ibl.runtime.sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
-            lod_min_clamp: 0.0,
-            lod_max_clamp: 16.0,
-            ..Default::default()
-        });
-
-        // Separate sampler for equirectangular sampling: Repeat on U to avoid horizontal seam
-        let equirect_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("ibl.precompute.equirect.sampler"),
-            address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
@@ -544,6 +563,7 @@ impl IBLRenderer {
         });
         Ok(())
     }
+
     pub fn load_environment_map(
         &mut self,
         device: &wgpu::Device,
@@ -568,28 +588,84 @@ impl IBLRenderer {
             3
         };
 
-        let mut texels = Vec::with_capacity(pixel_count * 4);
-        for idx in 0..pixel_count {
+        // Clamp dimensions to GPU limits
+        let max_dim = device.limits().max_texture_dimension_2d;
+        let (target_width, target_height) = if width > max_dim || height > max_dim {
+            let scale = (max_dim as f32 / width.max(height) as f32).min(1.0);
+            let new_width = (width as f32 * scale) as u32;
+            let new_height = (height as f32 * scale) as u32;
+            if new_width != width || new_height != height {
+                warn!(
+                    "HDR image {}x{} exceeds GPU limit {}, resizing to {}x{}",
+                    width, height, max_dim, new_width, new_height
+                );
+            }
+            // Ensure both dimensions are within limits
+            (new_width.max(1).min(max_dim), new_height.max(1).min(max_dim))
+        } else {
+            // Even if original dimensions are within limits, ensure they don't exceed
+            (width.min(max_dim), height.min(max_dim))
+        };
+
+        // Resize HDR data if needed
+        let (resized_data, resized_width, resized_height) = if target_width != width || target_height != height {
+            let resized = resize_hdr_data(hdr_data, width, height, target_width, target_height, channel_count);
+            (resized, target_width, target_height)
+        } else {
+            (hdr_data.to_vec(), width, height)
+        };
+
+        let resized_pixel_count = (resized_width as usize) * (resized_height as usize);
+        let mut texels = Vec::with_capacity(resized_pixel_count * 4);
+        for idx in 0..resized_pixel_count {
             let src = idx * channel_count;
-            texels.push(f16::from_f32(hdr_data[src]).to_bits());
-            texels.push(f16::from_f32(hdr_data[src + 1]).to_bits());
-            texels.push(f16::from_f32(hdr_data[src + 2]).to_bits());
+            texels.push(f16::from_f32(resized_data[src]).to_bits());
+            texels.push(f16::from_f32(resized_data[src + 1]).to_bits());
+            texels.push(f16::from_f32(resized_data[src + 2]).to_bits());
             let alpha = if channel_count == 4 {
-                hdr_data[src + 3]
+                resized_data[src + 3]
             } else {
                 1.0
             };
             texels.push(f16::from_f32(alpha).to_bits());
         }
 
-        let raw_bytes = bytemuck::cast_slice(&texels);
-        let (padded, bpr) = pad_image_rows(raw_bytes, width, height, 8);
+        // Final safety check: ensure dimensions never exceed device limits
+        // This should not be necessary if resize logic works correctly, but serves as a safeguard
+        let max_dim_final = device.limits().max_texture_dimension_2d;
+        let final_width = resized_width.min(max_dim_final).max(1);
+        let final_height = resized_height.min(max_dim_final).max(1);
+        
+        // If we need to clamp further, we need to resize the data again
+        let (padded, bpr) = if final_width != resized_width || final_height != resized_height {
+            warn!(
+                "CRITICAL: Resized dimensions {}x{} still exceed device limit {}! Clamping to {}x{}.",
+                resized_width, resized_height, max_dim_final, final_width, final_height
+            );
+            // Resize the data to the final clamped dimensions
+            let clamped_data = resize_hdr_data(&resized_data, resized_width, resized_height, final_width, final_height, 4);
+            // Convert to f16 and pad
+            let clamped_pixel_count = (final_width as usize) * (final_height as usize);
+            let mut clamped_texels = Vec::with_capacity(clamped_pixel_count * 4);
+            for idx in 0..clamped_pixel_count {
+                let src = idx * 4;
+                clamped_texels.push(f16::from_f32(clamped_data[src]).to_bits());
+                clamped_texels.push(f16::from_f32(clamped_data[src + 1]).to_bits());
+                clamped_texels.push(f16::from_f32(clamped_data[src + 2]).to_bits());
+                clamped_texels.push(f16::from_f32(clamped_data[src + 3]).to_bits());
+            }
+            let clamped_raw_bytes = bytemuck::cast_slice(&clamped_texels);
+            pad_image_rows(clamped_raw_bytes, final_width, final_height, 8)
+        } else {
+            let raw_bytes = bytemuck::cast_slice(&texels);
+            pad_image_rows(raw_bytes, resized_width, resized_height, 8)
+        };
 
         let equirect = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("ibl.environment.equirect"),
             size: wgpu::Extent3d {
-                width,
-                height,
+                width: final_width,
+                height: final_height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -611,11 +687,11 @@ impl IBLRenderer {
             wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(bpr),
-                rows_per_image: Some(height),
+                rows_per_image: Some(final_height),
             },
             wgpu::Extent3d {
-                width,
-                height,
+                width: final_width,
+                height: final_height,
                 depth_or_array_layers: 1,
             },
         );
@@ -650,8 +726,8 @@ impl IBLRenderer {
             array_layer_count: Some(CUBE_FACE_COUNT),
         });
 
-        self.uniforms.src_width = width;
-        self.uniforms.src_height = height;
+        self.uniforms.src_width = final_width;
+        self.uniforms.src_height = final_height;
         self.uniforms.env_size = env_size;
         self.uniforms.face_count = CUBE_FACE_COUNT;
         self.uniforms.mip_level = 0;
@@ -742,6 +818,12 @@ impl IBLRenderer {
             return Ok(());
         }
 
+        // Cache miss - building IBL resources
+        info!(
+            "IBL cache miss: building irradiance_{}.cube, prefilter_mips.cube, brdf_{}.png",
+            self.quality.irradiance_size(),
+            self.quality.brdf_size()
+        );
         self.generate_irradiance_map(device, queue)?;
         self.generate_specular_map(device, queue)?;
         self.generate_brdf_lut(device, queue)?;
@@ -806,7 +888,8 @@ impl IBLRenderer {
         });
 
         self.uniforms.env_size = size;
-        self.uniforms.sample_count = 1024;
+        // Irradiance uses fixed 128 samples (handled in shader, but set for consistency)
+        self.uniforms.sample_count = 128;
         self.uniforms.mip_level = 0;
         self.uniforms.roughness = 0.0;
         self.write_uniforms(queue);
@@ -908,7 +991,16 @@ impl IBLRenderer {
             let mip_size = (size >> mip).max(1);
             self.uniforms.env_size = mip_size;
             self.uniforms.mip_level = mip;
-            self.uniforms.roughness = mip as f32 / ((mip_levels - 1).max(1) as f32);
+            // Spec: mip0=1024, mip1=512, mip2=256, ... min 64
+            let sample_count = (1024u32 >> mip).max(64);
+            self.uniforms.sample_count = sample_count;
+            // Roughness mapping: mip = roughness² * (mipCount-1)
+            // For prefilter, we use: roughness = sqrt(mip / (mipCount-1))
+            self.uniforms.roughness = if mip_levels > 1 {
+                (mip as f32 / ((mip_levels - 1) as f32)).sqrt()
+            } else {
+                0.0
+            };
             self.write_uniforms(queue);
 
             let storage_view = texture.create_view(&wgpu::TextureViewDescriptor {
@@ -993,6 +1085,8 @@ impl IBLRenderer {
         });
 
         self.uniforms.brdf_size = size;
+        // Use fixed sample count for deterministic BRDF LUT (spec requirement: no random seeds)
+        self.uniforms.sample_count = 1024;
         self.write_uniforms(queue);
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1231,6 +1325,18 @@ impl IBLRenderer {
             return Ok(false);
         }
 
+        // Validate sha256 hash (spec requirement: graceful invalidate on mismatch)
+        self.ensure_cache_key();
+        if let Some(expected_key) = self.cache_key() {
+            if metadata.sha256 != expected_key {
+                warn!(
+                    "IBL cache sha256 mismatch: expected {}, got {}",
+                    expected_key, metadata.sha256
+                );
+                return Ok(false);
+            }
+        }
+
         let irradiance_bytes = read_blob(&mut reader)?;
         let specular_bytes = read_blob(&mut reader)?;
         let brdf_bytes = read_blob(&mut reader)?;
@@ -1263,11 +1369,14 @@ impl IBLRenderer {
         self.brdf_lut = Some(brdf_tex);
         self.brdf_view = Some(brdf_view);
 
+        let cache_size_mib = (irradiance_bytes.len() + specular_bytes.len() + brdf_bytes.len()) as f32
+            / (1024.0 * 1024.0);
         info!(
-            "Loaded IBL cache '{}' ({:.2} MiB)",
+            "IBL cache hit: '{}' ({:.2} MiB) - irradiance_{}.cube, prefilter_mips.cube, brdf_{}.png",
             path.display(),
-            (irradiance_bytes.len() + specular_bytes.len() + brdf_bytes.len()) as f32
-                / (1024.0 * 1024.0)
+            cache_size_mib,
+            metadata.irradiance_size,
+            metadata.brdf_size
         );
         Ok(true)
     }

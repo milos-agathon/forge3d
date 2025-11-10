@@ -330,59 +330,9 @@ fn shadow_vis(
     return 1.0;  // No shadows
 }
 
-fn rotate_y(vec3_value: vec3<f32>, angle_rad: f32) -> vec3<f32> {
-    let s = sin(angle_rad);
-    let c = cos(angle_rad);
-    return vec3<f32>(
-        vec3_value.x * c - vec3_value.z * s,
-        vec3_value.y,
-        vec3_value.x * s + vec3_value.z * c,
-    );
-}
-
-fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
-    return f0 + (vec3<f32>(1.0) - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
-}
-
-fn eval_ibl(
-    normal: vec3<f32>,
-    view_dir: vec3<f32>,
-    albedo: vec3<f32>,
-    mat: ShadingParamsGPU,
-    gi: GiSettings,
-) -> vec3<f32> {
-    if (gi.tech != GI_IBL) {
-        return vec3<f32>(0.0);
-    }
-
-    let rotation = gi.ibl_rotation_deg * (3.14159265 / 180.0);
-    let rotated_normal = rotate_y(normalize(normal), rotation);
-    let rotated_view = rotate_y(normalize(view_dir), rotation);
-    let n_dot_v = max(dot(rotated_normal, rotated_view), 0.0);
-
-    let diffuse_radiance = textureSample(ibl_env_irradiance, ibl_env_sampler, rotated_normal).rgb;
-
-    let reflection_dir = reflect(-rotated_view, rotated_normal);
-    let mip_levels = max(f32(textureNumLevels(ibl_env_specular)), 1.0);
-    let lod = clamp(mat.roughness * (mip_levels - 1.0), 0.0, mip_levels - 1.0);
-    let specular_radiance =
-        textureSampleLevel(ibl_env_specular, ibl_env_sampler, reflection_dir, lod).rgb;
-
-    let brdf = textureSample(ibl_brdf_lut, ibl_env_sampler, vec2<f32>(n_dot_v, mat.roughness)).rg;
-
-    let clamped_albedo = clamp(albedo, vec3<f32>(0.0), vec3<f32>(1.0));
-    let metallic = clamp(mat.metallic, 0.0, 1.0);
-    let f0 = mix(vec3<f32>(0.04), clamped_albedo, metallic);
-
-    let fresnel = fresnel_schlick(n_dot_v, f0);
-    let k_s = fresnel;
-    let k_d = (vec3<f32>(1.0) - k_s) * (1.0 - metallic);
-
-    let diffuse = diffuse_radiance * clamped_albedo;
-    let specular = specular_radiance * (fresnel * brdf.x + brdf.y);
-
-    return (k_d * diffuse + specular) * gi.ibl_intensity;
-}
+// Note: rotate_y is provided by terrain_pbr_pom.wgsl (different signature: takes sin_theta, cos_theta)
+// Note: fresnel_schlick is provided by brdf/common.wgsl (included via brdf/dispatch.wgsl)
+// Note: eval_ibl is provided by lighting_ibl.wgsl (unified IBL evaluator)
 
 // ====================
 // Main Lighting Function
@@ -414,7 +364,15 @@ fn calculate_lighting(
     let direct = eval_direct_light(light, mat, world_pos, normal, view_dir, albedo, shadow);
 
     // Indirect lighting (IBL)
-    let indirect = eval_ibl(normal, view_dir, albedo, mat, gi);
+    // Note: Using unified eval_ibl from lighting_ibl.wgsl (requires converting ShadingParamsGPU to individual params)
+    let metallic = clamp(mat.metallic, 0.0, 1.0);
+    let roughness = clamp(mat.roughness, 0.0, 1.0);
+    let clamped_albedo = clamp(albedo, vec3<f32>(0.0), vec3<f32>(1.0));
+    let f0 = mix(vec3<f32>(0.04), clamped_albedo, metallic);
+    var indirect = vec3<f32>(0.0);
+    if (gi.tech == GI_IBL) {
+        indirect = eval_ibl(normal, view_dir, clamped_albedo, metallic, roughness, f0) * gi.ibl_intensity;
+    }
 
     // Combine
     var final_color = direct + indirect;

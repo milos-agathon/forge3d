@@ -49,7 +49,7 @@ fn importance_sample_ggx(xi: vec2<f32>, roughness: f32) -> vec3<f32> {
 }
 
 @compute @workgroup_size(8, 8, 1)
-fn cs_brdf_integration(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn cs_brdf_lut(@builtin(global_invocation_id) gid: vec3<u32>) {
     if gid.z > 0u {
         return;
     }
@@ -59,10 +59,13 @@ fn cs_brdf_integration(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     let uv = (vec2<f32>(f32(gid.x), f32(gid.y)) + 0.5) / f32(size);
-    let n_dot_v = uv.x;
-    let roughness = uv.y;
+    // Clamp to [0,1] domain as per spec
+    let n_dot_v = clamp(uv.x, 0.0, 1.0);
+    let roughness = clamp(uv.y, 0.0, 1.0);
 
-    let view = vec3<f32>(sqrt(1.0 - n_dot_v * n_dot_v), 0.0, n_dot_v);
+    // Ensure sqrt doesn't produce NaN
+    let sin_theta = sqrt(max(1.0 - n_dot_v * n_dot_v, 0.0));
+    let view = vec3<f32>(sin_theta, 0.0, n_dot_v);
     let normal = vec3<f32>(0.0, 0.0, 1.0);
 
     var a = 0.0;
@@ -90,6 +93,10 @@ fn cs_brdf_integration(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     a /= f32(sample_count);
     b /= f32(sample_count);
+
+    // Clamp output to [0,1] and ensure no NaNs (spec requirement)
+    a = saturate(a);
+    b = saturate(b);
 
     textureStore(brdf_target, vec2<i32>(i32(gid.x), i32(gid.y)), vec4<f32>(a, b, 0.0, 0.0));
 }

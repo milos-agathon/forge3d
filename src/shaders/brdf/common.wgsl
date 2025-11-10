@@ -2,8 +2,8 @@
 // Shared BRDF math utilities and helper functions
 // Exists to consolidate Fresnel/geometry terms for all BRDF implementations
 // RELEVANT FILES: src/shaders/brdf/dispatch.wgsl, src/shaders/brdf/cook_torrance.wgsl, src/shaders/lighting.wgsl, src/lighting/types.rs
+// Note: PI is expected to be defined by including files (e.g., via lighting.wgsl -> lights.wgsl)
 
-const PI: f32 = 3.14159265359;
 const INV_PI: f32 = 1.0 / PI;
 
 fn saturate(value: f32) -> f32 {

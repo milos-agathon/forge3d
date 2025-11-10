@@ -123,6 +123,81 @@ impl MaterialSet {
         })
     }
 
+    /// Create a material set with a single custom material
+    ///
+    /// Args:
+    ///     base_color: Base color (RGB) as tuple (r, g, b) in [0, 1]
+    ///     metallic: Metallic factor [0, 1]
+    ///     roughness: Roughness factor [0.04, 1.0]
+    ///     triplanar_scale: Texture scaling for triplanar mapping (default: 1.0)
+    ///     normal_strength: Normal map strength multiplier (default: 0.0)
+    ///     blend_sharpness: Triplanar blend sharpness (default: 1.0)
+    ///
+    /// Returns:
+    ///     MaterialSet with a single material with the specified properties
+    #[staticmethod]
+    #[pyo3(signature = (base_color, metallic, roughness, triplanar_scale=1.0, normal_strength=0.0, blend_sharpness=1.0))]
+    pub fn custom(
+        base_color: (f32, f32, f32),
+        metallic: f32,
+        roughness: f32,
+        triplanar_scale: f32,
+        normal_strength: f32,
+        blend_sharpness: f32,
+    ) -> PyResult<Self> {
+        // Validate inputs
+        if triplanar_scale <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "triplanar_scale must be > 0",
+            ));
+        }
+        if normal_strength < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "normal_strength must be >= 0",
+            ));
+        }
+        if blend_sharpness <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "blend_sharpness must be > 0",
+            ));
+        }
+        if !(0.0..=1.0).contains(&metallic) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "metallic must be in [0, 1]",
+            ));
+        }
+        if !(0.04..=1.0).contains(&roughness) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "roughness must be in [0.04, 1.0]",
+            ));
+        }
+
+        let mut materials = Vec::new();
+        let mut texture_paths = Vec::new();
+
+        // Create a single material with the specified properties
+        let color = glam::Vec3::new(base_color.0, base_color.1, base_color.2);
+        let material = if metallic > 0.5 {
+            crate::core::material::PbrMaterial::metallic(color, roughness)
+                .with_normal_scale(normal_strength)
+        } else {
+            crate::core::material::PbrMaterial::dielectric(color, roughness)
+                .with_normal_scale(normal_strength)
+        };
+        materials.push(material);
+        texture_paths.push(None); // No texture for custom material
+
+        Ok(Self {
+            materials,
+            triplanar_scale,
+            normal_strength,
+            blend_sharpness,
+            texture_paths,
+            #[cfg(feature = "extension-module")]
+            gpu_cache: OnceCell::new(),
+        })
+    }
+
     /// Get number of materials
     #[getter]
     pub fn material_count(&self) -> usize {

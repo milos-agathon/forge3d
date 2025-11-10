@@ -3272,6 +3272,7 @@ fn render_brdf_tile_impl<'py>(
     Ok(array.into_pyarray_bound(py))
 }
 
+#[cfg(feature = "extension-module")]
 #[pyfunction]
 #[pyo3(signature = (
     model, roughness, width, height,
@@ -3361,6 +3362,7 @@ fn render_brdf_tile<'py>(
     )
 }
 
+#[cfg(feature = "extension-module")]
 #[pyfunction]
 #[pyo3(signature = (
     model, roughness, width, height,

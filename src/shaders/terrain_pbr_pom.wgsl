@@ -32,8 +32,9 @@
 // P2-05: Include lighting.wgsl for optional eval_brdf dispatch
 // Note: This adds BRDF constants and eval_brdf function, but terrain uses calculate_pbr_brdf by default
 #include "lighting.wgsl"
-
-const PI : f32 = 3.14159265;
+// P4 spec: Include unified IBL evaluator (group(2) bindings)
+// Note: lighting_ibl.wgsl defines PI, so we don't redefine it here
+#include "lighting_ibl.wgsl"
 
 // P2-05: Optional BRDF dispatch flag (default: false = use calculate_pbr_brdf for current look)
 // Set to true to enable eval_brdf dispatch, allowing BRDF model switching on terrain
@@ -121,7 +122,9 @@ struct Light {
     env_texture_index: u32,
 };
 
-struct LightMetadata {
+// Note: LightMetadata from lights.wgsl is used via lighting.wgsl, but terrain uses a different structure
+// Renamed to avoid conflict
+struct TerrainLightMetadata {
     light_count: u32,
     frame_index: u32,
     sequence_seed: vec2<f32>,
@@ -133,26 +136,21 @@ struct EnvironmentParams {
 };
 
 @group(1) @binding(3)
-var<storage, read> lights: array<Light>;
+var<storage, read> terrain_lights: array<Light>;
 
 @group(1) @binding(4)
-var<uniform> light_metadata: LightMetadata;
+var<uniform> light_metadata: TerrainLightMetadata;
 
 @group(1) @binding(5)
 var<uniform> environment_params: EnvironmentParams;
 
-@group(2) @binding(0)
-var ibl_specular_tex : texture_cube<f32>;
+// IBL bindings are declared in lighting_ibl.wgsl (P4 spec: group(2) bindings 0-3)
+// @group(2) @binding(0) envSpecular : texture_cube<f32>
+// @group(2) @binding(1) envIrradiance : texture_cube<f32>
+// @group(2) @binding(2) envSampler : sampler
+// @group(2) @binding(3) brdfLUT : texture_2d<f32>
 
-@group(2) @binding(1)
-var ibl_irradiance_tex : texture_cube<f32>;
-
-@group(2) @binding(2)
-var ibl_env_sampler : sampler;
-
-@group(2) @binding(3)
-var ibl_brdf_lut_tex : texture_2d<f32>;
-
+// Terrain-specific IBL uniforms (rotation, intensity, mip count)
 @group(2) @binding(4)
 var<uniform> u_ibl : IblUniforms;
 
@@ -393,10 +391,7 @@ fn rotate_y(v : vec3<f32>, sin_theta : f32, cos_theta : f32) -> vec3<f32> {
     );
 }
 
-fn fresnel_schlick(cos_theta : f32, f0 : vec3<f32>) -> vec3<f32> {
-    let clamped = clamp(1.0 - cos_theta, 0.0, 1.0);
-    return f0 + (vec3<f32>(1.0, 1.0, 1.0) - f0) * pow(clamped, 5.0);
-}
+// Note: fresnel_schlick is provided by brdf/common.wgsl (included via lighting.wgsl)
 
 /// Parallax Occlusion Mapping with binary search refinement.
 fn parallax_occlusion_mapping(
@@ -754,21 +749,13 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         }
     }
 
+    // Apply IBL rotation (terrain-specific feature)
     let rotated_normal = rotate_y(blended_normal, u_ibl.sin_theta, u_ibl.cos_theta);
     let rotated_view = rotate_y(view_dir, u_ibl.sin_theta, u_ibl.cos_theta);
-    let irradiance = textureSample(ibl_irradiance_tex, ibl_env_sampler, rotated_normal).rgb;
-    let reflection_dir = reflect(-rotated_view, rotated_normal);
-    let max_mips = max(u_ibl.specular_mip_count - 1.0, 0.0);
-    let lod = clamp(roughness * max_mips, 0.0, max_mips);
-    let prefiltered = textureSampleLevel(ibl_specular_tex, ibl_env_sampler, reflection_dir, lod).rgb;
-    let n_dot_v_ibl = max(dot(rotated_normal, rotated_view), 0.0);
-    let brdf_sample = textureSample(ibl_brdf_lut_tex, ibl_env_sampler, vec2<f32>(n_dot_v_ibl, roughness)).rg;
-    let fresnel_ibl = fresnel_schlick(n_dot_v_ibl, f0);
-    let k_s = fresnel_ibl;
-    let k_d = (vec3<f32>(1.0, 1.0, 1.0) - k_s) * (1.0 - metallic);
-    let diffuse_ibl = irradiance * albedo;
-    let specular_ibl = prefiltered * (fresnel_ibl * brdf_sample.x + brdf_sample.y);
-    let ibl_contrib = (diffuse_ibl * k_d + specular_ibl) * (u_ibl.intensity * occlusion);
+    
+    // Use unified eval_ibl function from lighting_ibl.wgsl (P4 spec)
+    var ibl_contrib = eval_ibl(rotated_normal, rotated_view, albedo, metallic, roughness, f0);
+    ibl_contrib = ibl_contrib * (u_ibl.intensity * occlusion);
 
     // ──────────────────────────────────────────────────────────────────────────
     // Debug Modes (bypass PBR when debug_mode > 0)

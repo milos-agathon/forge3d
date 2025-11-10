@@ -793,33 +793,31 @@ impl PbrPipelineWithShadows {
         
         // P1-06: Initialize light buffer for multi-light support
         let light_buffer = LightBuffer::new(device);
+        // P4 spec: group(2) bindings - binding(0)=specular, binding(1)=irradiance, binding(2)=sampler, binding(3)=brdfLUT
+        // Note: Using fallback resources for now (will be replaced with IBLRenderer resources)
         let ibl_bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("pbr_ibl_bind_group"),
             layout: &ibl_bind_group_layout,
             entries: &[
+                // @group(2) @binding(0) envSpecular : texture_cube<f32>
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&ibl_resources.irradiance_view),
+                    resource: BindingResource::TextureView(&ibl_resources.prefilter_view), // TODO: Use cubemap
                 },
+                // @group(2) @binding(1) envIrradiance : texture_cube<f32>
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&ibl_resources.irradiance_sampler),
+                    resource: BindingResource::TextureView(&ibl_resources.irradiance_view), // TODO: Use cubemap
                 },
+                // @group(2) @binding(2) envSampler : sampler
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::TextureView(&ibl_resources.prefilter_view),
+                    resource: BindingResource::Sampler(&ibl_resources.irradiance_sampler), // Shared sampler
                 },
+                // @group(2) @binding(3) brdfLUT : texture_2d<f32>
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::Sampler(&ibl_resources.prefilter_sampler),
-                },
-                BindGroupEntry {
-                    binding: 4,
                     resource: BindingResource::TextureView(&ibl_resources.brdf_lut_view),
-                },
-                BindGroupEntry {
-                    binding: 5,
-                    resource: BindingResource::Sampler(&ibl_resources.brdf_lut_sampler),
                 },
             ],
         });
@@ -1075,14 +1073,14 @@ impl PbrPipelineWithShadows {
         }
     }
 
-    /// Bind IBL textures/samplers at bind group slot 2.
+    /// Bind IBL textures/samplers at bind group slot 2 (P4 spec requirement).
     pub fn bind_ibl_resources<'a>(
         &'a mut self,
         device: &Device,
         pass: &mut wgpu::RenderPass<'a>,
     ) {
         let bind_group = self.ensure_ibl_bind_group(device);
-        pass.set_bind_group(2, bind_group, &[]);
+        pass.set_bind_group(2, bind_group, &[]); // group(2) as per P4 spec
     }
 
     /// Set pipeline state and bind all dependent resources for a render pass.
@@ -1117,11 +1115,11 @@ impl PbrPipelineWithShadows {
             // Safety: bind group pointer derived from stored Option; lifetime tied to `self`.
             pass.set_bind_group(1, unsafe { &*ptr }, &[]);
         }
-        // P3-08: Shadows at group(2), IBL at group(3) to match shader layout
+        // P4 spec: IBL at group(2), Shadows at group(3) to match shader layout
+        pass.set_bind_group(2, unsafe { &*ibl_bind_group_ptr }, &[]);
         if let Some(ptr) = shadow_bind_group_ptr {
-            pass.set_bind_group(2, unsafe { &*ptr }, &[]);
+            pass.set_bind_group(3, unsafe { &*ptr }, &[]);
         }
-        pass.set_bind_group(3, unsafe { &*ibl_bind_group_ptr }, &[]);
     }
 
     /// Bind global scene + lighting uniforms at bind group slot 0.
@@ -1272,22 +1270,26 @@ impl PbrPipelineWithShadows {
             .as_ref()
             .expect("shadow layout must exist before building pipeline");
 
-        // P3-08: Pipeline layout must match shader bind groups
-        // group(0) = globals, group(1) = material, group(2) = shadows, group(3) = IBL
+        // P4 spec: Pipeline layout must match shader bind groups
+        // group(0) = globals, group(1) = material, group(2) = IBL (spec requirement), group(3) = shadows
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pbr_pipeline_layout"),
             bind_group_layouts: &[
                 &self.globals_bind_group_layout,  // group(0)
                 &self.material_bind_group_layout, // group(1)
-                shadow_layout,                     // group(2) - shadows
-                &self.ibl_bind_group_layout,      // group(3) - IBL
+                &self.ibl_bind_group_layout,      // group(2) - IBL (P4 spec requirement)
+                shadow_layout,                     // group(3) - shadows (moved to avoid conflict)
             ],
             push_constant_ranges: &[],
         });
 
+        // Remap shadows from group(2) to group(3) to allow IBL at group(2) per P4 spec
+        let shadows_source = include_str!("../../shaders/shadows.wgsl")
+            .replace("@group(2)", "@group(3)");
+        
         let shader_source = format!(
             "{}\n{}",
-            include_str!("../../shaders/shadows.wgsl"),
+            shadows_source,
             include_str!("../../shaders/pbr.wgsl")
         );
 
@@ -1485,33 +1487,30 @@ impl PbrPipelineWithShadows {
 
     fn ensure_ibl_bind_group(&mut self, device: &Device) -> &BindGroup {
         if self.ibl_bind_group.is_none() {
+            // P4 spec: group(2) bindings - binding(0)=specular, binding(1)=irradiance, binding(2)=sampler, binding(3)=brdfLUT
             let bind_group = device.create_bind_group(&BindGroupDescriptor {
                 label: Some("pbr_ibl_bind_group"),
                 layout: &self.ibl_bind_group_layout,
                 entries: &[
+                    // @group(2) @binding(0) envSpecular : texture_cube<f32>
                     BindGroupEntry {
                         binding: 0,
-                        resource: BindingResource::TextureView(&self.ibl_resources.irradiance_view),
+                        resource: BindingResource::TextureView(&self.ibl_resources.prefilter_view), // TODO: Use cubemap
                     },
+                    // @group(2) @binding(1) envIrradiance : texture_cube<f32>
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::Sampler(&self.ibl_resources.irradiance_sampler),
+                        resource: BindingResource::TextureView(&self.ibl_resources.irradiance_view), // TODO: Use cubemap
                     },
+                    // @group(2) @binding(2) envSampler : sampler
                     BindGroupEntry {
                         binding: 2,
-                        resource: BindingResource::TextureView(&self.ibl_resources.prefilter_view),
+                        resource: BindingResource::Sampler(&self.ibl_resources.irradiance_sampler), // Shared sampler
                     },
+                    // @group(2) @binding(3) brdfLUT : texture_2d<f32>
                     BindGroupEntry {
                         binding: 3,
-                        resource: BindingResource::Sampler(&self.ibl_resources.prefilter_sampler),
-                    },
-                    BindGroupEntry {
-                        binding: 4,
                         resource: BindingResource::TextureView(&self.ibl_resources.brdf_lut_view),
-                    },
-                    BindGroupEntry {
-                        binding: 5,
-                        resource: BindingResource::Sampler(&self.ibl_resources.brdf_lut_sampler),
                     },
                 ],
             });
@@ -1597,55 +1596,48 @@ impl PbrPipelineWithShadows {
     }
 
     fn create_ibl_bind_group_layout(device: &Device) -> BindGroupLayout {
+        // P4 spec: group(2) bindings - cubemaps for env/spec/irr, 2D for BRDF LUT
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("pbr_ibl_bind_group_layout"),
             entries: &[
+                // @group(2) @binding(0) envSpecular : texture_cube<f32>
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::Cube,
                         multisampled: false,
                     },
                     count: None,
                 },
+                // @group(2) @binding(1) envIrradiance : texture_cube<f32>
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::Cube,
+                        multisampled: false,
+                    },
                     count: None,
                 },
+                // @group(2) @binding(2) envSampler : sampler (filtering + clamp-to-edge)
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // @group(2) @binding(3) brdfLUT : texture_2d<f32>
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
             ],

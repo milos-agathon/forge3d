@@ -319,6 +319,7 @@ pub struct Viewer {
     lit_sun_intensity: f32,
     lit_ibl_intensity: f32,
     lit_use_ibl: bool,
+    lit_ibl_rotation_deg: f32,
     // Lit BRDF selection (0=Lambert,1=Phong,4=GGX,6=Disney)
     lit_brdf: u32,
     // Lit roughness (used by debug modes and future shading controls)
@@ -334,6 +335,9 @@ pub struct Viewer {
     ibl_renderer: Option<IBLRenderer>,
     ibl_env_view: Option<wgpu::TextureView>,
     ibl_sampler: Option<wgpu::Sampler>,
+    ibl_hdr_path: Option<String>,
+    ibl_cache_dir: Option<std::path::PathBuf>,
+    ibl_base_resolution: Option<u32>,
     // Viz depth override
     viz_depth_max_override: Option<f32>,
     // Auto-snapshot support (one-time)
@@ -483,7 +487,20 @@ impl Viewer {
 
         // Build IBL renderer and upload environment
         let mut ibl = IBLRenderer::new(&self.device, IBLQuality::Low);
-        ibl.set_base_resolution(IBLQuality::Low.base_environment_size());
+        
+        // Apply cached resolution if set
+        if let Some(res) = self.ibl_base_resolution {
+            ibl.set_base_resolution(res);
+        } else {
+            ibl.set_base_resolution(IBLQuality::Low.base_environment_size());
+        }
+        
+        // Configure cache if set
+        if let Some(ref cache_dir) = self.ibl_cache_dir {
+            ibl.configure_cache(cache_dir, std::path::Path::new(path))
+                .map_err(|e| anyhow::anyhow!("failed to configure IBL cache: {}", e))?;
+        }
+        
         ibl.load_environment_map(
             &self.device,
             &self.queue,
@@ -531,6 +548,7 @@ impl Viewer {
 
         // Keep IBL resources alive
         self.ibl_renderer = Some(ibl);
+        self.ibl_hdr_path = Some(path.to_string());
         Ok(())
     }
     pub async fn new(
@@ -1598,6 +1616,7 @@ impl Viewer {
             lit_sun_intensity: 1.0,
             lit_ibl_intensity: 0.6,
             lit_use_ibl: true,
+            lit_ibl_rotation_deg: 0.0,
             lit_brdf: 4,
             lit_roughness: 0.5,
             lit_debug_mode: 0,
@@ -1607,6 +1626,9 @@ impl Viewer {
             ibl_renderer: None,
             ibl_env_view: Some(dummy_env_view),
             ibl_sampler: Some(dummy_env_sampler),
+            ibl_hdr_path: None,
+            ibl_cache_dir: None,
+            ibl_base_resolution: None,
             viz_depth_max_override: None,
             auto_snapshot_path: std::env::var("FORGE3D_AUTO_SNAPSHOT_PATH").ok(),
             auto_snapshot_done: false,
@@ -2590,6 +2612,11 @@ enum ViewerCmd {
     LoadGltf(String),
     SetViz(String),
     LoadIbl(String),
+    IblToggle(bool),
+    IblIntensity(f32),
+    IblRotate(f32),
+    IblCache(Option<String>),
+    IblRes(u32),
     #[allow(dead_code)] SetSsaoRadius(f32),
     #[allow(dead_code)] SetSsaoIntensity(f32),
     #[allow(dead_code)] SetSsgiSteps(u32),
@@ -2781,6 +2808,61 @@ impl Viewer {
                     Err(e) => eprintln!("IBL load failed: {}", e),
                 }
             }
+            ViewerCmd::IblToggle(on) => {
+                self.lit_use_ibl = on;
+                if on && self.ibl_renderer.is_none() {
+                    println!("IBL enabled (no environment loaded; use :ibl load <path> to load HDR)");
+                } else if !on {
+                    println!("IBL disabled");
+                }
+                self.update_lit_uniform();
+            }
+            ViewerCmd::IblIntensity(v) => {
+                self.lit_ibl_intensity = v.max(0.0);
+                self.lit_use_ibl = self.lit_ibl_intensity > 0.0;
+                self.update_lit_uniform();
+                println!("IBL intensity: {:.2}", self.lit_ibl_intensity);
+            }
+            ViewerCmd::IblRotate(deg) => {
+                self.lit_ibl_rotation_deg = deg;
+                // Rotation is stored and will be applied in shader sampling
+                // Note: Full rotation support in lit shader requires shader modification
+                println!("IBL rotation: {:.1}°", deg);
+            }
+            ViewerCmd::IblCache(dir) => {
+                if let Some(ref cache_path) = dir {
+                    self.ibl_cache_dir = Some(std::path::PathBuf::from(cache_path));
+                    println!("IBL cache directory: {} (will be used on next load)", cache_path);
+                    // If IBL is already loaded, reconfigure it
+                    if let Some(ref mut ibl) = self.ibl_renderer {
+                        let hdr_path = self.ibl_hdr_path.as_ref()
+                            .map(|p| Path::new(p))
+                            .unwrap_or_else(|| Path::new(""));
+                        if let Err(e) = ibl.configure_cache(cache_path, hdr_path) {
+                            eprintln!("Failed to configure IBL cache: {}", e);
+                        } else {
+                            println!("IBL cache reconfigured");
+                        }
+                    }
+                } else {
+                    self.ibl_cache_dir = None;
+                    println!("IBL cache directory cleared (cache will be disabled on next load)");
+                }
+            }
+            ViewerCmd::IblRes(res) => {
+                self.ibl_base_resolution = Some(res);
+                println!("IBL base resolution: {} (will be used on next load)", res);
+                // If IBL is already loaded, reconfigure it
+                if let Some(ref mut ibl) = self.ibl_renderer {
+                    ibl.set_base_resolution(res);
+                    // Reinitialize with new resolution
+                    if let Err(e) = ibl.initialize(&self.device, &self.queue) {
+                        eprintln!("Failed to reinitialize IBL with new resolution: {}", e);
+                    } else {
+                        println!("IBL reinitialized with resolution {}", res);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -2880,7 +2962,52 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     pending_cmds.push(ViewerCmd::SetCamLookAt { eye: [ex,ey,ez], target: [tx,ty,tz], up: [ux,uy,uz] });
                 }
             } else if l.starts_with(":ibl") || l.starts_with("ibl ") {
-                if let Some(path) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::LoadIbl(path.to_string())); }
+                let toks: Vec<&str> = l.split_whitespace().collect();
+                if toks.len() >= 2 {
+                    match toks[1] {
+                        "on" | "1" | "true" => pending_cmds.push(ViewerCmd::IblToggle(true)),
+                        "off" | "0" | "false" => pending_cmds.push(ViewerCmd::IblToggle(false)),
+                        "load" => {
+                            if let Some(path) = toks.get(2) {
+                                pending_cmds.push(ViewerCmd::LoadIbl(path.to_string()));
+                            }
+                        }
+                        "intensity" => {
+                            if let Some(val_str) = toks.get(2) {
+                                if let Ok(val) = val_str.parse::<f32>() {
+                                    pending_cmds.push(ViewerCmd::IblIntensity(val));
+                                }
+                            }
+                        }
+                        "rotate" => {
+                            if let Some(val_str) = toks.get(2) {
+                                if let Ok(val) = val_str.parse::<f32>() {
+                                    pending_cmds.push(ViewerCmd::IblRotate(val));
+                                }
+                            }
+                        }
+                        "cache" => {
+                            if let Some(dir) = toks.get(2) {
+                                pending_cmds.push(ViewerCmd::IblCache(Some(dir.to_string())));
+                            } else {
+                                pending_cmds.push(ViewerCmd::IblCache(None));
+                            }
+                        }
+                        "res" => {
+                            if let Some(val_str) = toks.get(2) {
+                                if let Ok(val) = val_str.parse::<u32>() {
+                                    pending_cmds.push(ViewerCmd::IblRes(val));
+                                }
+                            }
+                        }
+                        _ => {
+                            // Legacy: treat as path if it looks like a path
+                            if toks[1].contains('.') || toks[1].starts_with('/') || toks[1].starts_with("\\") {
+                                pending_cmds.push(ViewerCmd::LoadIbl(toks[1].to_string()));
+                            }
+                        }
+                    }
+                }
             }
             // Sky initial commands
             else if l.starts_with(":sky ") || l == ":sky" || l.starts_with("sky ") {
@@ -3031,10 +3158,73 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     let _ = proxy.send_event(ViewerCmd::SetSsgiNormalExp(val));
                 } else { println!("Usage: :ssgi-normexp <float>"); }
             } else if l.starts_with(":ibl") || l.starts_with("ibl ") {
-                if let Some(path) = l.split_whitespace().nth(1) {
-                    let _ = proxy.send_event(ViewerCmd::LoadIbl(path.to_string()));
+                let toks: Vec<&str> = l.split_whitespace().collect();
+                if toks.len() >= 2 {
+                    match toks[1] {
+                        "on" | "1" | "true" => {
+                            let _ = proxy.send_event(ViewerCmd::IblToggle(true));
+                        }
+                        "off" | "0" | "false" => {
+                            let _ = proxy.send_event(ViewerCmd::IblToggle(false));
+                        }
+                        "load" => {
+                            if let Some(path) = toks.get(2) {
+                                let _ = proxy.send_event(ViewerCmd::LoadIbl(path.to_string()));
+                            } else {
+                                println!("Usage: :ibl load <path.hdr|path.exr>");
+                            }
+                        }
+                        "intensity" => {
+                            if let Some(val_str) = toks.get(2) {
+                                if let Ok(val) = val_str.parse::<f32>() {
+                                    let _ = proxy.send_event(ViewerCmd::IblIntensity(val));
+                                } else {
+                                    println!("Usage: :ibl intensity <float>");
+                                }
+                            } else {
+                                println!("Usage: :ibl intensity <float>");
+                            }
+                        }
+                        "rotate" => {
+                            if let Some(val_str) = toks.get(2) {
+                                if let Ok(val) = val_str.parse::<f32>() {
+                                    let _ = proxy.send_event(ViewerCmd::IblRotate(val));
+                                } else {
+                                    println!("Usage: :ibl rotate <degrees>");
+                                }
+                            } else {
+                                println!("Usage: :ibl rotate <degrees>");
+                            }
+                        }
+                        "cache" => {
+                            if let Some(dir) = toks.get(2) {
+                                let _ = proxy.send_event(ViewerCmd::IblCache(Some(dir.to_string())));
+                            } else {
+                                let _ = proxy.send_event(ViewerCmd::IblCache(None));
+                            }
+                        }
+                        "res" => {
+                            if let Some(val_str) = toks.get(2) {
+                                if let Ok(val) = val_str.parse::<u32>() {
+                                    let _ = proxy.send_event(ViewerCmd::IblRes(val));
+                                } else {
+                                    println!("Usage: :ibl res <u32>");
+                                }
+                            } else {
+                                println!("Usage: :ibl res <u32>");
+                            }
+                        }
+                        _ => {
+                            // Legacy: treat as path if it looks like a path
+                            if toks[1].contains('.') || toks[1].starts_with('/') || toks[1].starts_with("\\") {
+                                let _ = proxy.send_event(ViewerCmd::LoadIbl(toks[1].to_string()));
+                            } else {
+                                println!("Usage: :ibl <on|off|load <path>|intensity <f>|rotate <deg>|cache <dir>|res <u32>>");
+                            }
+                        }
+                    }
                 } else {
-                    println!("Usage: :ibl <path.hdr|path.exr>");
+                    println!("Usage: :ibl <on|off|load <path>|intensity <f>|rotate <deg>|cache <dir>|res <u32>>");
                 }
             } else if l.starts_with(":ssao-radius") || l.starts_with("ssao-radius ") {
                 if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
@@ -3184,7 +3374,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 break;
             } else {
                 println!(
-                    "Commands:\n  :gi <ssao|ssgi|ssr> <on|off>\n  :viz <material|normal|depth|gi|lit>\n  :viz-depth-max <float>\n  :ibl <path.hdr|path.exr>\n  :brdf <lambert|phong|ggx|disney>\n  :snapshot [path]\n  :obj <path> | :gltf <path>\n  :sky off|on|preetham|hosek-wilkie | :sky-turbidity <f> | :sky-ground <f> | :sky-exposure <f> | :sky-sun <f>\n  :fog <on|off> | :fog-density <f> | :fog-g <f> | :fog-steps <u32> | :fog-shadow <on|off> | :fog-temporal <0..0.9> | :fog-mode <raymarch|froxels> | :fog-preset <low|med|high>\n  Lit:  :lit-sun <float> | :lit-ibl <float>\n  SSAO: :ssao-technique <ssao|gtao> | :ssao-radius <f> | :ssao-intensity <f> | :ssao-composite <on|off> | :ssao-mul <0..1>\n  SSGI: :ssgi-steps <u32> | :ssgi-radius <f> | :ssgi-half <on|off> | :ssgi-temporal-alpha <0..1> | :ssgi-edges <on|off> | :ssgi-upsigma <f> | :ssgi-normexp <f>\n  SSR:  :ssr-max-steps <u32> | :ssr-thickness <f>\n  :quit"
+                    "Commands:\n  :gi <ssao|ssgi|ssr> <on|off>\n  :viz <material|normal|depth|gi|lit>\n  :viz-depth-max <float>\n  :ibl <on|off|load <path>|intensity <f>|rotate <deg>|cache <dir>|res <u32>>\n  :brdf <lambert|phong|ggx|disney>\n  :snapshot [path]\n  :obj <path> | :gltf <path>\n  :sky off|on|preetham|hosek-wilkie | :sky-turbidity <f> | :sky-ground <f> | :sky-exposure <f> | :sky-sun <f>\n  :fog <on|off> | :fog-density <f> | :fog-g <f> | :fog-steps <u32> | :fog-shadow <on|off> | :fog-temporal <0..0.9> | :fog-mode <raymarch|froxels> | :fog-preset <low|med|high>\n  Lit:  :lit-sun <float> | :lit-ibl <float>\n  SSAO: :ssao-technique <ssao|gtao> | :ssao-radius <f> | :ssao-intensity <f> | :ssao-composite <on|off> | :ssao-mul <0..1>\n  SSGI: :ssgi-steps <u32> | :ssgi-radius <f> | :ssgi-half <on|off> | :ssgi-temporal-alpha <0..1> | :ssgi-edges <on|off> | :ssgi-upsigma <f> | :ssgi-normexp <f>\n  SSR:  :ssr-max-steps <u32> | :ssr-thickness <f>\n  :quit"
                 );
             }
         }

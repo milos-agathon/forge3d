@@ -103,12 +103,19 @@ fn cs_irradiance_convolution(@builtin(global_invocation_id) gid: vec3<u32>) {
     let normal = uv_to_direction(uv, face);
 
     var irradiance = vec3<f32>(0.0);
-    let sample_count = max(params.sample_count, 1u);
+    // Fixed 128 samples per texel for deterministic results (spec requirement)
+    let sample_count = 128u;
     for (var i = 0u; i < sample_count; i = i + 1u) {
-        let sample_dir_local = hemisphere_sample_uniform(vec2<f32>(
-            f32(i) / f32(sample_count),
-            f32(i32(i * 16807u % sample_count)) / f32(sample_count)
-        ));
+        // Stratified hemisphere sampling (cos-weighted)
+        let xi = hammersley_2d(i, sample_count);
+        let phi = TWO_PI * xi.x;
+        let cos_theta = sqrt(1.0 - xi.y); // cos-weighted distribution
+        let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+        let sample_dir_local = vec3<f32>(
+            cos(phi) * sin_theta,
+            sin(phi) * sin_theta,
+            cos_theta,
+        );
 
         let up = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(1.0, 0.0, 0.0), abs(normal.z) < 0.999);
         let tangent = normalize(cross(up, normal));
@@ -123,6 +130,8 @@ fn cs_irradiance_convolution(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     irradiance = PI * irradiance / f32(sample_count);
+    // Clamp to prevent NaNs/inf and ensure no pixel > 1.0 for unit-intensity HDR (spec requirement)
+    irradiance = saturate(irradiance);
     textureStore(
         target_cube,
         vec2<i32>(i32(gid.x), i32(gid.y)),
@@ -176,6 +185,8 @@ fn cs_specular_prefilter(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     prefiltered = prefiltered / max(total_weight, 1e-3);
+    // Clamp to prevent NaNs/inf and ensure no pixel > 1.0 for unit-intensity HDR (spec requirement)
+    prefiltered = saturate(prefiltered);
     textureStore(
         target_cube,
         vec2<i32>(i32(gid.x), i32(gid.y)),

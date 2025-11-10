@@ -33,6 +33,8 @@
 
 // Import centralized lighting and BRDF definitions
 #include "lighting.wgsl"
+// Import unified IBL evaluator (P4 spec: group(2) bindings)
+#include "lighting_ibl.wgsl"
 // Note: shadows.wgsl is concatenated before this file in pipeline/pbr.rs
 
 struct Uniforms {
@@ -103,13 +105,12 @@ struct VertexOutput {
 // Shadow resources (P3-08) - group(2) matches shadows.wgsl
 // Note: Shadow bindings are defined in shadows.wgsl, included above
 
-// Optional IBL textures - moved to group(3) to avoid conflict with shadows
-@group(3) @binding(0) var irradiance_texture: texture_2d<f32>;
-@group(3) @binding(1) var irradiance_sampler: sampler;
-@group(3) @binding(2) var prefilter_texture: texture_2d<f32>;
-@group(3) @binding(3) var prefilter_sampler: sampler;
-@group(3) @binding(4) var brdf_lut_texture: texture_2d<f32>;
-@group(3) @binding(5) var brdf_lut_sampler: sampler;
+// IBL textures - group(2) as per P4 spec (unified bindings in lighting_ibl.wgsl)
+// Note: Bindings are declared in lighting_ibl.wgsl:
+// @group(2) @binding(0) envSpecular : texture_cube<f32>
+// @group(2) @binding(1) envIrradiance : texture_cube<f32>
+// @group(2) @binding(2) envSampler : sampler
+// @group(2) @binding(3) brdfLUT : texture_2d<f32>
 
 // Texture flags
 const FLAG_BASE_COLOR: u32 = 1u;
@@ -168,40 +169,10 @@ fn sample_normal_map(uv: vec2<f32>, tbn: mat3x3<f32>) -> vec3<f32> {
 
 // Note: Common BRDF math (distribution_ggx, geometry_smith, fresnel_schlick) now imported from brdf/common.wgsl via lighting.wgsl
 
-// Fresnel-Schlick with roughness for IBL
-fn fresnel_schlick_roughness(cos_theta: f32, f0: vec3<f32>, roughness: f32) -> vec3<f32> {
-    return f0 + (max(vec3<f32>(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
-}
+// Fresnel-Schlick with roughness moved to lighting_ibl.wgsl (used by eval_ibl)
 
-// Convert direction to equirectangular UV coordinates
-fn direction_to_uv(direction: vec3<f32>) -> vec2<f32> {
-    let phi = atan2(direction.z, direction.x);
-    let theta = acos(direction.y);
-    
-    let u = (phi / (2.0 * 3.14159265359) + 0.5) % 1.0;
-    let v = theta / 3.14159265359;
-    
-    return vec2<f32>(u, v);
-}
-
-// Sample IBL irradiance
-fn sample_irradiance(normal: vec3<f32>) -> vec3<f32> {
-    let uv = direction_to_uv(normal);
-    return textureSample(irradiance_texture, irradiance_sampler, uv).rgb * lighting.ibl_intensity;
-}
-
-// Sample IBL prefiltered environment map
-fn sample_prefilter(reflection: vec3<f32>, roughness: f32) -> vec3<f32> {
-    let uv = direction_to_uv(reflection);
-    let mip_level = roughness * 6.0; // Assume 7 mip levels (0-6)
-    return textureSampleLevel(prefilter_texture, prefilter_sampler, uv, mip_level).rgb * lighting.ibl_intensity;
-}
-
-// Sample BRDF LUT
-fn sample_brdf_lut(n_dot_v: f32, roughness: f32) -> vec2<f32> {
-    let uv = vec2<f32>(n_dot_v, roughness);
-    return textureSample(brdf_lut_texture, brdf_lut_sampler, uv).rg;
-}
+// IBL sampling functions removed - now using eval_ibl from lighting_ibl.wgsl
+// Old 2D equirectangular sampling replaced with cubemap + LUT (P4 spec requirement)
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
@@ -292,26 +263,16 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         direct_lighting = brdf_color * radiance * n_dot_l * shadow_visibility;
     }
     
-    // INDIRECT LIGHTING (IBL)
+    // INDIRECT LIGHTING (IBL) - using unified eval_ibl from lighting_ibl.wgsl
     var indirect_lighting = vec3<f32>(0.0);
     
-    // Check if we have IBL textures available (simplified check)
+    // Check if we have IBL enabled
     let has_ibl = lighting.ibl_intensity > 0.0;
     
     if has_ibl {
-        // Diffuse IBL
-        let irradiance = sample_irradiance(world_normal);
-        let F_ibl = fresnel_schlick_roughness(n_dot_v, f0, roughness);
-        let kS_ibl = F_ibl;
-        let kD_ibl = (vec3<f32>(1.0) - kS_ibl) * (1.0 - metallic);
-        let diffuse_ibl = kD_ibl * base_color.rgb * irradiance;
-        
-        // Specular IBL
-        let prefiltered_color = sample_prefilter(reflection_dir, roughness);
-        let brdf_lut = sample_brdf_lut(n_dot_v, roughness);
-        let specular_ibl = prefiltered_color * (F_ibl * brdf_lut.x + brdf_lut.y);
-        
-        indirect_lighting = diffuse_ibl + specular_ibl;
+        // Use unified IBL evaluator (split-sum approximation with cubemaps + LUT)
+        indirect_lighting = eval_ibl(world_normal, view_dir, base_color.rgb, metallic, roughness, f0);
+        indirect_lighting = indirect_lighting * lighting.ibl_intensity;
     } else {
         // Simple ambient lighting fallback
         let ambient = vec3<f32>(0.03) * base_color.rgb;

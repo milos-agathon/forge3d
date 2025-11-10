@@ -349,6 +349,7 @@ def _build_params(
     colormap,
     albedo_mode: str = "mix",
     colormap_strength: float = 0.5,
+    ibl_enabled: bool = True,
 ):
     config = f3d.TerrainRenderParamsConfig(
         size_px=size,
@@ -370,7 +371,7 @@ def _build_params(
             color=[1.0, 1.0, 1.0],
         ),
         ibl=f3d.IblSettings(
-            enabled=True,
+            enabled=ibl_enabled,
             intensity=1.0,
             rotation_deg=0.0,
         ),
@@ -705,16 +706,25 @@ def main() -> int:
         if env_hdr is not None:
             hdr_path_value = Path(env_hdr)
 
-    ibl = f3d.IBL.from_hdr(
-        str(hdr_path_value),
-        intensity=1.0,
-        rotate_deg=0.0,
-    )
-    if args.ibl_res <= 0:
-        raise SystemExit("Error: --ibl-res must be greater than zero.")
-    ibl.set_base_resolution(int(args.ibl_res))
-    if args.ibl_cache is not None:
-        ibl.set_cache_dir(str(args.ibl_cache))
+    # Check if IBL should be enabled based on --gi flag
+    gi_modes = []
+    if args.gi:
+        gi_modes = [item.strip() for item in args.gi.split(",") if item.strip()]
+    ibl_enabled = "ibl" in gi_modes
+
+    # Only create IBL if it's enabled via --gi ibl
+    ibl = None
+    if ibl_enabled:
+        ibl = f3d.IBL.from_hdr(
+            str(hdr_path_value),
+            intensity=1.0,
+            rotate_deg=0.0,
+        )
+        if args.ibl_res <= 0:
+            raise SystemExit("Error: --ibl-res must be greater than zero.")
+        ibl.set_base_resolution(int(args.ibl_res))
+        if args.ibl_cache is not None:
+            ibl.set_cache_dir(str(args.ibl_cache))
 
     params = _build_params(
         size=(int(args.size[0]), int(args.size[1])),
@@ -726,6 +736,7 @@ def main() -> int:
         colormap=colormap,
         albedo_mode=args.albedo_mode,
         colormap_strength=float(args.colormap_strength),
+        ibl_enabled=ibl_enabled,
     )
 
     renderer = f3d.TerrainRenderer(sess)
@@ -778,7 +789,7 @@ def main() -> int:
 
     frame = renderer.render_terrain_pbr_pom(
         material_set=materials,
-        env_maps=ibl,
+        env_maps=ibl if ibl_enabled else None,
         params=params,
         heightmap=heightmap_array,
         target=None,
@@ -796,7 +807,7 @@ def main() -> int:
             # Accepted values: "preetham", "hosek-wilkie"
             if args.sky:
                 os.environ["FORGE3D_SKY_MODEL"] = str(args.sky)
-            with viewer_cls(sess, renderer, heightmap_array, materials, ibl, params) as view:
+            with viewer_cls(sess, renderer, heightmap_array, materials, ibl if ibl_enabled else None, params) as view:
                 view.run()
 
     return 0

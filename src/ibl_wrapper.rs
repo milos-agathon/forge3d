@@ -223,6 +223,37 @@ impl IBL {
             .as_ref()
             .map(|p| p.display().to_string())
     }
+
+    /// Configure IBL quality level
+    ///
+    /// Args:
+    ///     quality: Quality level: "low", "medium", "high", or "ultra"
+    ///
+    /// Note:
+    ///     This invalidates any cached GPU resources; they will be regenerated on next use.
+    #[pyo3(text_signature = "($self, quality)")]
+    pub fn configure_quality(&mut self, quality: &str) -> PyResult<()> {
+        let quality_str = quality.to_lowercase();
+        let quality_level = match quality_str.as_str() {
+            "low" => crate::core::ibl::IBLQuality::Low,
+            "medium" => crate::core::ibl::IBLQuality::Medium,
+            "high" => crate::core::ibl::IBLQuality::High,
+            "ultra" => crate::core::ibl::IBLQuality::Ultra,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Invalid quality level: '{}'. Must be 'low', 'medium', 'high', or 'ultra'",
+                    quality
+                )));
+            }
+        };
+        self.quality = quality_level;
+        self.use_auto_quality = false;
+        self.base_resolution = quality_level.base_environment_size();
+        if let Ok(mut guard) = self.gpu_state.lock() {
+            *guard = None;
+        }
+        Ok(())
+    }
 }
 
 impl IBL {

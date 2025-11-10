@@ -188,6 +188,39 @@ impl LightBuffer {
             mapped_at_creation: false,
         });
 
+        // Initialize count buffer with zero lights for default bind group
+        let seed = r2_sample(0);
+        let count_data = [
+            0u32,  // light_count = 0
+            0u32,  // frame_index = 0
+            seed[0].to_bits(),
+            seed[1].to_bits(),
+        ];
+        // Initialize the first count buffer with zero lights
+        // Note: We'll use a queue to write, but for initialization we can use write_buffer
+        // However, we need a queue. For now, create the default bind group after initialization.
+        // Actually, we can create it here since buffers are already created.
+
+        // Create default bind group with zero lights (neutral/empty state)
+        let default_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Light Bind Group Default (Zero Lights)"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: buffers[0].as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: count_buffers[0].as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: environment_stub.as_entire_binding(),
+                },
+            ],
+        });
+
         Self {
             buffers,
             count_buffers,
@@ -196,7 +229,7 @@ impl LightBuffer {
             frame_counter: 0,
             sequence_seed: r2_sample(0),
             light_count: 0,
-            bind_group: None,
+            bind_group: Some(default_bind_group),
             bind_group_layout,
             last_uploaded_lights: Vec::new(),
         }
@@ -336,6 +369,9 @@ impl LightBuffer {
     }
 
     /// Get bind group for current frame
+    /// 
+    /// Always returns a bind group. If no lights have been uploaded via `update()`,
+    /// returns a default bind group with zero lights (neutral state).
     pub fn bind_group(&self) -> Option<&wgpu::BindGroup> {
         self.bind_group.as_ref()
     }

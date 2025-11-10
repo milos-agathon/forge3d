@@ -24,6 +24,8 @@ use wgpu::TextureFormatFeatureFlags;
 
 use crate::terrain_render_params::{AddressModeNative, FilterModeNative};
 use crate::lighting::LightBuffer;
+use crate::lighting::types::{Light, LightType};
+use crate::core::shadow_mapping::{CsmUniforms, CsmCascadeData};
 
 /// Terrain renderer implementing PBR + POM pipeline
 #[pyclass(module = "forge3d._forge3d", name = "TerrainRenderer")]
@@ -43,6 +45,21 @@ pub struct TerrainRenderer {
     config: Arc<Mutex<crate::render::params::RendererConfig>>,
     // P1-08: Light buffer for multi-light support
     light_buffer: Arc<Mutex<LightBuffer>>,
+    // Noop shadow resources for bind group at index 3 (required by pipeline layout)
+    noop_shadow: NoopShadow,
+}
+
+/// Noop shadow resources for terrain_pbr_pom pipeline
+/// Provides dummy shadow bind group at index 3 when shadows are not used
+struct NoopShadow {
+    _csm_uniform_buffer: wgpu::Buffer,
+    _shadow_maps_texture: wgpu::Texture,
+    shadow_maps_view: wgpu::TextureView,
+    shadow_sampler: wgpu::Sampler,
+    _moment_maps_texture: wgpu::Texture,
+    moment_maps_view: wgpu::TextureView,
+    moment_sampler: wgpu::Sampler,
+    bind_group: wgpu::BindGroup,
 }
 
 #[repr(C, align(16))]
@@ -678,16 +695,24 @@ impl TerrainRenderer {
         
         let color_format = wgpu::TextureFormat::Rgba8Unorm;
         let light_buffer_layout = light_buffer.bind_group_layout();
+        
+        // Create shadow bind group layout (reused for noop shadow and pipeline)
+        let shadow_bind_group_layout = Self::create_shadow_bind_group_layout(device.as_ref());
+        
         let pipeline = Self::create_render_pipeline(
             device.as_ref(),
             &bind_group_layout,
             light_buffer_layout,
             &ibl_bind_group_layout,
+            &shadow_bind_group_layout,
             color_format,
             1,
         );
         let blit_pipeline =
             Self::create_blit_pipeline(device.as_ref(), &blit_bind_group_layout, color_format);
+
+        // Create noop shadow resources for bind group at index 3
+        let noop_shadow = Self::create_noop_shadow(device.as_ref(), &shadow_bind_group_layout)?;
 
         let pipeline_cache = PipelineCache {
             sample_count: 1,
@@ -706,9 +731,313 @@ impl TerrainRenderer {
             sampler_linear,
             color_format,
             light_buffer: Arc::new(Mutex::new(light_buffer)),
+            noop_shadow,
             // P0-03: Initialize with default config (no behavior changes)
             #[cfg(feature = "enable-renderer-config")]
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
+        })
+    }
+
+    /// Preprocess terrain shader by resolving #include directives
+    /// WGSL doesn't have a preprocessor, so we manually expand includes
+    fn preprocess_terrain_shader() -> String {
+        // Helper to strip #include lines from a shader source
+        fn strip_includes(source: &str) -> String {
+            source
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("#include"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        
+        // Load nested includes for lighting.wgsl
+        let lights = include_str!("shaders/lights.wgsl");
+        
+        // Load BRDF dispatch and its includes
+        let brdf_common = include_str!("shaders/brdf/common.wgsl");
+        let brdf_lambert = include_str!("shaders/brdf/lambert.wgsl");
+        let brdf_phong = include_str!("shaders/brdf/phong.wgsl");
+        let brdf_oren_nayar = include_str!("shaders/brdf/oren_nayar.wgsl");
+        let brdf_cook_torrance = include_str!("shaders/brdf/cook_torrance.wgsl");
+        let brdf_disney_principled = include_str!("shaders/brdf/disney_principled.wgsl");
+        let brdf_ashikhmin_shirley = include_str!("shaders/brdf/ashikhmin_shirley.wgsl");
+        let brdf_ward = include_str!("shaders/brdf/ward.wgsl");
+        let brdf_toon = include_str!("shaders/brdf/toon.wgsl");
+        let brdf_minnaert = include_str!("shaders/brdf/minnaert.wgsl");
+        
+        let brdf_dispatch_raw = include_str!("shaders/brdf/dispatch.wgsl");
+        let brdf_dispatch = strip_includes(brdf_dispatch_raw);
+        
+        // Load lighting.wgsl and strip its includes
+        let lighting_raw = include_str!("shaders/lighting.wgsl");
+        let lighting = strip_includes(lighting_raw);
+        
+        // Load lighting_ibl.wgsl (no includes)
+        let lighting_ibl = include_str!("shaders/lighting_ibl.wgsl");
+        
+        // Load main terrain shader and strip includes
+        let terrain_raw = include_str!("shaders/terrain_pbr_pom.wgsl");
+        let terrain = strip_includes(terrain_raw);
+        
+        // Concatenate in dependency order
+        format!(
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            lights,
+            brdf_common,
+            brdf_lambert,
+            brdf_phong,
+            brdf_oren_nayar,
+            brdf_cook_torrance,
+            brdf_disney_principled,
+            brdf_ashikhmin_shirley,
+            brdf_ward,
+            brdf_toon,
+            brdf_minnaert,
+            brdf_dispatch,
+            lighting,
+            lighting_ibl,
+            terrain
+        )
+    }
+
+    /// Create noop shadow resources for bind group at index 3
+    /// Provides dummy shadow resources when shadows are not used (e.g., IBL rotation mode)
+    fn create_noop_shadow(
+        device: &wgpu::Device,
+        shadow_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Result<NoopShadow> {
+        use crate::core::shadow_mapping::CsmUniforms;
+        
+        // Create dummy CSM uniforms buffer (binding 0)
+        let csm_uniforms = CsmUniforms {
+            light_direction: [0.0, -1.0, 0.0, 0.0],
+            light_view: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            cascades: [CsmCascadeData {
+                light_projection: [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                near_distance: 0.1,
+                far_distance: 1000.0,
+                texel_size: 1.0,
+                _padding: 0.0,
+            }; 4],
+            cascade_count: 0,
+            pcf_kernel_size: 0,
+            depth_bias: 0.0,
+            slope_bias: 0.0,
+            shadow_map_size: 1.0,
+            debug_mode: 0,
+            _padding: [0.0; 2],
+        };
+        let csm_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain.noop_shadow.csm_uniforms"),
+            contents: bytemuck::bytes_of(&csm_uniforms),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        // Create 1x1 depth texture array (binding 1: shadow_maps)
+        let shadow_maps_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.noop_shadow.maps"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let shadow_maps_view = shadow_maps_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("terrain.noop_shadow.maps.view"),
+            format: Some(wgpu::TextureFormat::Depth32Float),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            aspect: wgpu::TextureAspect::DepthOnly,
+            base_mip_level: 0,
+            mip_level_count: Some(1),
+            base_array_layer: 0,
+            array_layer_count: Some(1),
+        });
+
+        // Create comparison sampler (binding 2: shadow_sampler)
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain.noop_shadow.sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+
+        // Create 1x1 RGBA texture array (binding 3: moment_maps)
+        // Must use Rgba16Float (not Rgba32Float) because the layout expects Float { filterable: true }
+        // Rgba32Float is not filterable in WebGPU
+        let moment_maps_format = wgpu::TextureFormat::Rgba16Float;
+        let moment_maps_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.noop_shadow.moments"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: moment_maps_format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        // Verify texture format is filterable (Rgba16Float, not Rgba32Float)
+        debug_assert_eq!(
+            moment_maps_format,
+            wgpu::TextureFormat::Rgba16Float,
+            "Moment maps texture must use Rgba16Float (filterable), not Rgba32Float"
+        );
+        let moment_maps_view = moment_maps_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("terrain.noop_shadow.moments.view"),
+            format: Some(wgpu::TextureFormat::Rgba16Float), // Explicitly set filterable format
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            aspect: wgpu::TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: Some(1),
+            base_array_layer: 0,
+            array_layer_count: Some(1),
+        });
+
+        // Create filtering sampler (binding 4: moment_sampler)
+        let moment_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain.noop_shadow.moment_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        // Noop shadow resources satisfy `terrain_pbr_pom.shadow_bind_group_layout` when shadows are disabled;
+        // uses filterable `Rgba16Float` for float textures.
+        // Sanity checks: verify we're creating the correct number of entries matching the layout
+        let entries = [
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: csm_uniform_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&shadow_maps_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&moment_maps_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::Sampler(&moment_sampler),
+            },
+        ];
+        
+        // Debug assertions: verify entry count matches layout expectations
+        // The layout should have 5 entries: buffer(0), shadow texture(1), shadow sampler(2), moment texture(3), moment sampler(4)
+        debug_assert_eq!(entries.len(), 5, "Noop shadow bind group must have 5 entries matching the layout");
+        // Note: View dimensions are verified by construction - shadow_maps_view and moment_maps_view
+        // are both created with D2Array dimension to match the layout expectations
+        
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain.noop_shadow.bind_group"),
+            layout: shadow_bind_group_layout,
+            entries: &entries,
+        });
+
+        Ok(NoopShadow {
+            _csm_uniform_buffer: csm_uniform_buffer,
+            _shadow_maps_texture: shadow_maps_texture,
+            shadow_maps_view,
+            shadow_sampler,
+            _moment_maps_texture: moment_maps_texture,
+            moment_maps_view,
+            moment_sampler,
+            bind_group,
+        })
+    }
+
+    /// Create shadow bind group layout for terrain shader (group 3)
+    /// Matches terrain_pbr_pom.wgsl @group(3) bindings: CSM uniforms, shadow maps, moment maps
+    fn create_shadow_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        use crate::core::shadow_mapping::CsmUniforms;
+        
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain_pbr_pom.shadow_bind_group_layout"),
+            entries: &[
+                // @binding(0): CSM uniforms
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(
+                            std::num::NonZeroU64::new(std::mem::size_of::<CsmUniforms>() as u64)
+                                .unwrap(),
+                        ),
+                    },
+                    count: None,
+                },
+                // @binding(1): Shadow maps (texture_depth_2d_array)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        sample_type: wgpu::TextureSampleType::Depth,
+                    },
+                    count: None,
+                },
+                // @binding(2): Shadow sampler (sampler_comparison)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+                // @binding(3): Moment maps (texture_2d_array<f32>)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                // @binding(4): Moment sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         })
     }
 
@@ -717,12 +1046,14 @@ impl TerrainRenderer {
         bind_group_layout: &wgpu::BindGroupLayout,
         light_buffer_layout: &wgpu::BindGroupLayout,
         ibl_bind_group_layout: &wgpu::BindGroupLayout,
+        shadow_bind_group_layout: &wgpu::BindGroupLayout,
         color_format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> wgpu::RenderPipeline {
+        let shader_source = Self::preprocess_terrain_shader();
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("terrain_pbr_pom.shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/terrain_pbr_pom.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -731,6 +1062,7 @@ impl TerrainRenderer {
                 bind_group_layout,           // @group(0): terrain uniforms/textures (bindings 0-8)
                 light_buffer_layout,         // @group(1): lights (bindings 3-5)
                 ibl_bind_group_layout,       // @group(2): IBL (bindings 0-4)
+                &shadow_bind_group_layout,  // @group(3): shadows (bindings 0-4)
             ],
             push_constant_ranges: &[],
         });
@@ -826,10 +1158,50 @@ impl TerrainRenderer {
         heightmap: PyReadonlyArray2<f32>,
     ) -> Result<crate::Frame> {
         // P1-06: Advance light buffer frame (triple-buffering)
-        self.light_buffer.lock()
-            .map_err(|_| anyhow!("Light buffer mutex poisoned"))?
-            .next_frame();
+        let mut light_buffer_guard = self.light_buffer.lock()
+            .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
+        light_buffer_guard.next_frame();
+        
+        // Always update light buffer with lights from params (or neutral light for rotation mode)
+        // This ensures the bind group is valid for the current frame and matches the pipeline layout
         let decoded = params.decoded();
+        let lights = if decoded.light.intensity > 0.0 {
+            // Create directional light from params
+            vec![Light {
+                kind: LightType::Directional.as_u32(),
+                intensity: decoded.light.intensity,
+                range: 0.0,
+                env_texture_index: 0,
+                color: decoded.light.color,
+                _pad1: 0.0,
+                pos_ws: [0.0; 3],
+                _pad2: 0.0,
+                dir_ws: decoded.light.direction,
+                _pad3: 0.0,
+                cone_cos: [1.0, 1.0],
+                area_half: [0.0, 0.0],
+            }]
+        } else {
+            // Neutral light with zero intensity for rotation mode (IBL only)
+            vec![Light {
+                kind: LightType::Directional.as_u32(),
+                intensity: 0.0,
+                range: 0.0,
+                env_texture_index: 0,
+                color: [1.0, 1.0, 1.0],
+                _pad1: 0.0,
+                pos_ws: [0.0; 3],
+                _pad2: 0.0,
+                dir_ws: [0.0, 1.0, 0.0], // Default up direction
+                _pad3: 0.0,
+                cone_cos: [1.0, 1.0],
+                area_half: [0.0, 0.0],
+            }]
+        };
+        
+        light_buffer_guard.update(self.device.as_ref(), self.queue.as_ref(), &lights)
+            .map_err(|e| anyhow!("Failed to update light buffer: {}", e))?;
+        drop(light_buffer_guard);
         // Get heightmap dimensions
         let heightmap_array = heightmap.as_array();
         let (height, width) = (heightmap_array.shape()[0], heightmap_array.shape()[1]);
@@ -1022,11 +1394,14 @@ impl TerrainRenderer {
         if pipeline_cache.sample_count != effective_msaa {
             let light_buffer = self.light_buffer.lock()
                 .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
+            // Reuse the same shadow layout (create it here since we don't store it)
+            let shadow_bind_group_layout = Self::create_shadow_bind_group_layout(self.device.as_ref());
             pipeline_cache.pipeline = Self::create_render_pipeline(
                 self.device.as_ref(),
                 &self.bind_group_layout,
                 light_buffer.bind_group_layout(),
                 &self.ibl_bind_group_layout,
+                &shadow_bind_group_layout,
                 self.color_format,
                 effective_msaa,
             );
@@ -1135,9 +1510,12 @@ impl TerrainRenderer {
             };
 
             // P1-06: Lock light buffer before render pass to get bind group reference
+            // The bind group was already updated above with lights from params
             let light_buffer_guard = self.light_buffer.lock()
                 .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
-            let light_bind_group_opt = light_buffer_guard.bind_group();
+            // LightBuffer always provides a bind group (updated above with lights from params)
+            let light_bind_group = light_buffer_guard.bind_group()
+                .expect("LightBuffer should always provide a bind group");
 
             // Main render pass
             {
@@ -1164,12 +1542,16 @@ impl TerrainRenderer {
                 pass.set_pipeline(&pipeline_cache.pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
                 
-                // Bind light buffer if available
-                if let Some(light_bind_group) = light_bind_group_opt {
-                    pass.set_bind_group(1, light_bind_group, &[]);
-                }
+                // Always bind light buffer at index 1 (required by pipeline layout)
+                // The pipeline expects "Light Buffer Bind Group Layout" at index 1
+                pass.set_bind_group(1, light_bind_group, &[]);
                 
                 pass.set_bind_group(2, &ibl_bind_group, &[]);
+                
+                // Always bind noop shadow at index 3 (required by pipeline layout)
+                // The pipeline expects "terrain_pbr_pom.shadow_bind_group_layout" at index 3
+                pass.set_bind_group(3, &self.noop_shadow.bind_group, &[]);
+                
                 pass.draw(0..3, 0..1);
             }
             drop(light_buffer_guard);
