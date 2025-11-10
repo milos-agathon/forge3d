@@ -236,6 +236,11 @@ pub struct IBLRenderer {
     brdf_lut: Option<wgpu::Texture>,
     brdf_view: Option<wgpu::TextureView>,
 
+    // M7: Optional overrides for budget fitting
+    specular_size_override: Option<u32>,
+    irradiance_size_override: Option<u32>,
+    brdf_size_override: Option<u32>,
+
     env_sampler: wgpu::Sampler,
     equirect_sampler: wgpu::Sampler,
     cache: Option<IblCacheConfig>,
@@ -527,6 +532,9 @@ impl IBLRenderer {
             specular_view: None,
             brdf_lut: None,
             brdf_view: None,
+            specular_size_override: None,
+            irradiance_size_override: None,
+            brdf_size_override: None,
             env_sampler,
             equirect_sampler,
             cache: None,
@@ -847,7 +855,9 @@ impl IBLRenderer {
             .as_ref()
             .ok_or("Environment cube not available")?;
 
-        let size = self.quality.irradiance_size();
+        let size = self
+            .irradiance_size_override
+            .unwrap_or(self.quality.irradiance_size());
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("ibl.irradiance.cubemap"),
             size: wgpu::Extent3d {
@@ -949,8 +959,14 @@ impl IBLRenderer {
             .as_ref()
             .ok_or("Environment cube not available")?;
 
-        let size = self.quality.specular_size();
-        let mip_levels = self.quality.specular_mip_levels();
+        let size = self
+            .specular_size_override
+            .unwrap_or(self.quality.specular_size());
+        let mip_levels = self
+            .uniforms
+            .max_mip_levels
+            .min(self.quality.specular_mip_levels())
+            .max(1);
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("ibl.specular.cubemap"),
@@ -1061,7 +1077,10 @@ impl IBLRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<(), String> {
-        let size = self.quality.brdf_size();
+        let size = self
+            .brdf_size_override
+            .unwrap_or(self.quality.brdf_size())
+            .max(16);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("ibl.brdf.lut"),
             size: wgpu::Extent3d {
@@ -1125,6 +1144,34 @@ impl IBLRenderer {
         self.brdf_lut = Some(texture);
         self.brdf_view = Some(view);
         Ok(())
+    }
+
+    // M7: Override helpers for budget fitting
+    pub fn override_specular_mip_levels(&mut self, levels: u32) {
+        let lv = levels.max(1);
+        self.uniforms.max_mip_levels = lv;
+        self.is_initialized = false;
+        self.invalidate_cache_key();
+    }
+
+    pub fn override_specular_face_size(&mut self, size: u32) {
+        self.specular_size_override = Some(size.max(32));
+        self.is_initialized = false;
+        self.invalidate_cache_key();
+    }
+
+    pub fn override_irradiance_size(&mut self, size: u32) {
+        self.irradiance_size_override = Some(size.max(32));
+        self.is_initialized = false;
+        self.invalidate_cache_key();
+    }
+
+    pub fn override_brdf_size(&mut self, size: u32) {
+        let s = size.max(16);
+        self.brdf_size_override = Some(s);
+        self.uniforms.brdf_size = s;
+        self.is_initialized = false;
+        self.invalidate_cache_key();
     }
     pub fn set_quality(&mut self, quality: IBLQuality) {
         if self.quality == quality {

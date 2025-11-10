@@ -204,6 +204,26 @@ Meta must include
 * `cargo clippy --all-features -- -D warnings` passes
 * **Exit criteria**: CI green on Linux/macOS/Windows; no new warnings.
 
+What it proves GPU BRDF output matches a deterministic CPU reference within strict error tolerances; debug D/G/F outputs and per-case light overrides work.
+
+Backend expectation • Both CPU and GPU are required.
+
+CLI
+```bash
+python examples/m6_generate.py --outdir reports/m6
+--tile 256 --samples 1024 --seed 1337 --cases default,highlight,glancing pytest -q tests/test_m6_validation.py
+```
+
+Outputs • m6_diff_heatmap.png (visual diff; optional) • m6_diff.csv (per-pixel errors; optional when large) • m6_meta.json
+
+Acceptance checks • F1_rms: GPU vs CPU RMS error ≤ 0.002 in linear space • F2_p999: 99.9th percentile absolute error ≤ 0.01 • F3_hash: CSV/tile hashes match across repeated runs (same seed)
+
+Meta must include
+
+```json
+{ "milestone": "M6", "backend": "gpu", "cpu_reference": {"backend": "cpu", "cpu_impl": "forge3d.cpu_ref.v1"}, "cases": [ { "name": "default", "light_dir": [0.4082, 0.4082, 0.8165], "metrics": {"rms": 0.0012, "p999": 0.0089}, "accept": {"F1_rms": true, "F2_p999": true} } ], "hashes": {"csv_sha256": "", "gpu_tile_sha256": ""}, "random_seed": 1337, "accept": {"F3_hash": true} }
+```
+
 ---
 
 ## Milestone 7 — **Performance & memory budgets**
@@ -213,6 +233,25 @@ Meta must include
   * Max VRAM for IBL assets: **≤ 64 MiB** (default quality)
   * Degrade order: base cube ↓, then specular mips ↓, then irradiance ↓ (never below 32²), LUT last
 * **Exit criteria**: On a 4 GB iGPU target profile, IBL alloc succeeds and renders; logs include chosen quality tier.
+
+What it proves The project can be installed, documented, and reproduced; smoke GPU render confirms install.
+
+Backend expectation • No new shading, but GPU smoke test required to prove runtime.
+
+CLI
+```bash
+pip install . forge3d --help python -m pip install -r requirements-dev.txt pytest -q
+```
+
+Outputs • m7_meta.json (environment, versions, smoke test hashes) • Built wheels/sdist in dist/
+
+Acceptance checks • G1: Wheel builds on target platforms; pip install OK. • G2: CLI works; forge3d --version prints coherent version + git SHA. • G3: Smoke render succeeds on GPU; hash recorded. • G4: Docs build (if present) with zero errors.
+
+Meta must include
+
+```json
+{ "milestone": "M7", "backend": "gpu", "package": {"version": "0.4.0", "wheel": "forge3d-0.4.0-cp311-manylinux.whl"}, "env": {"python": "3.11.9", "platform": "win_amd64"}, "smoke": {"render_hash": "", "elapsed_ms": 412}, "accept": {"G1": true, "G2": true, "G3": true, "G4": true} }
+```
 
 ---
 

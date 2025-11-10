@@ -14,6 +14,12 @@ pub const MEMORY_BUDGET_CAP: u64 = 512 * 1024 * 1024;
 /// Conservative estimate threshold for auto-tier selection (384 MiB)
 pub const MEMORY_BUDGET_CONSERVATIVE: u64 = 384 * 1024 * 1024;
 
+/// Default IBL VRAM budget (MiB)
+/// Milestone 7 requires that the IBL assets respect a hard cap in default quality.
+/// This cap is applied specifically to the sum of: base environment cube (single mip),
+/// specular prefilter cubemap (mip chain), irradiance cubemap, and BRDF LUT.
+pub const IBL_MEMORY_BUDGET_DEFAULT: u64 = 64 * 1024 * 1024;
+
 /// Quality tier for textures
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextureQualityTier {
@@ -21,6 +27,29 @@ pub enum TextureQualityTier {
     Medium,
     High,
     Ultra,
+}
+
+/// Estimate memory for a single-mip cubemap (6 faces) in bytes_per_pixel
+pub fn estimate_cubemap_single(face_size: u32, bytes_per_pixel: u32) -> u64 {
+    (face_size as u64) * (face_size as u64) * 6 * (bytes_per_pixel as u64)
+}
+
+/// Compute total IBL bytes given explicit sizes and mip levels.
+/// Includes: base environment cubemap (single mip), specular cubemap (mip chain),
+/// irradiance cubemap (single mip), and BRDF LUT 2D.
+pub fn total_ibl_bytes_explicit(
+    base_env_face: u32,
+    specular_face: u32,
+    specular_mips: u32,
+    irradiance_face: u32,
+    brdf_size: u32,
+) -> u64 {
+    let bpp = 8; // RGBA16F per Global constraints
+    let base_bytes = estimate_cubemap_single(base_env_face, bpp);
+    let spec_bytes = estimate_cubemap_with_mips(specular_face, specular_mips, bpp);
+    let irr_bytes = estimate_cubemap_single(irradiance_face, bpp);
+    let brdf_bytes = estimate_rgba16_texture(brdf_size, brdf_size, 1);
+    base_bytes + spec_bytes + irr_bytes + brdf_bytes
 }
 
 impl TextureQualityTier {

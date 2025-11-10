@@ -346,8 +346,56 @@ impl IBL {
             }
         }
 
+        // M7: Enforce IBL VRAM cap with degrade order
+        let mut base_face = self.base_resolution.max(32);
+        let mut spec_face = quality_to_use.specular_size().max(32);
+        let mut spec_mips = quality_to_use.specular_mip_levels().max(1);
+        let mut irr_face = quality_to_use.irradiance_size().max(32);
+        let mut brdf_size = quality_to_use.brdf_size().max(16);
+
+        let mut total_bytes = memory_budget::total_ibl_bytes_explicit(
+            base_face,
+            spec_face,
+            spec_mips,
+            irr_face,
+            brdf_size,
+        );
+        let cap = memory_budget::IBL_MEMORY_BUDGET_DEFAULT;
+        if total_bytes > cap {
+            warn!(
+                "IBL estimate {:.2} MiB exceeds default cap {:.2} MiB; enforcing degrade order",
+                total_bytes as f32 / (1024.0 * 1024.0),
+                cap as f32 / (1024.0 * 1024.0)
+            );
+        }
+        // Degrade order: base cube ↓, then specular mips ↓, then irradiance ↓ (>=32²), LUT last
+        while total_bytes > cap {
+            if base_face > 32 {
+                base_face = (base_face / 2).max(32);
+            } else if spec_mips > 1 {
+                spec_mips -= 1;
+            } else if irr_face > 32 {
+                irr_face = (irr_face / 2).max(32);
+            } else if brdf_size > 64 {
+                brdf_size = (brdf_size / 2).max(64);
+            } else {
+                warn!(
+                    "Reached minimal IBL settings but still above cap: {:.2} MiB",
+                    total_bytes as f32 / (1024.0 * 1024.0)
+                );
+                break;
+            }
+            total_bytes = memory_budget::total_ibl_bytes_explicit(
+                base_face, spec_face, spec_mips, irr_face, brdf_size,
+            );
+        }
+
         let mut renderer = crate::core::ibl::IBLRenderer::new(device.as_ref(), quality_to_use);
-        renderer.set_base_resolution(self.base_resolution);
+        // Apply enforced sizes
+        renderer.set_base_resolution(base_face);
+        renderer.override_specular_mip_levels(spec_mips);
+        renderer.override_irradiance_size(irr_face);
+        renderer.override_brdf_size(brdf_size);
         if let Some(cache_dir) = self.cache_dir.as_ref() {
             renderer
                 .configure_cache(cache_dir, Path::new(&self.environment_path))
@@ -416,7 +464,7 @@ impl IBL {
             specular_view,
             brdf_view,
             sampler,
-            specular_mip_count: quality_to_use.specular_mip_levels(),
+            specular_mip_count: spec_mips,
         });
 
         *state_guard = Some(IblGpuState {
@@ -425,6 +473,18 @@ impl IBL {
             _renderer: renderer,
             shared: shared.clone(),
         });
+
+        // Log final IBL sizes
+        log::info!(
+            "IBL final sizes: base={} irr={} spec={} (mips={}) brdf={} -> {:.2} MiB",
+            base_face,
+            irr_face,
+            spec_face,
+            spec_mips,
+            brdf_size,
+            memory_budget::total_ibl_bytes_explicit(base_face, spec_face, spec_mips, irr_face, brdf_size) as f32
+                / (1024.0 * 1024.0)
+        );
 
         Ok(shared)
     }
