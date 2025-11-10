@@ -8,6 +8,7 @@ struct SsaoSettings {
     bias: f32,
     num_samples: u32,
     technique: u32, // 0 = SSAO, 1 = GTAO
+    _pad_align: u32, // Padding to align vec2<f32> to 8-byte boundary
     inv_resolution: vec2<f32>,
     _pad0: vec2<f32>,
 };
@@ -24,7 +25,7 @@ struct CameraParams {
 // SSAO/GTAO compute pass
 @group(0) @binding(0) var depth_tex: texture_2d<f32>;
 @group(0) @binding(1) var normal_tex: texture_2d<f32>;
-@group(0) @binding(2) var ssao_output: texture_storage_2d<r16float, write>;
+@group(0) @binding(2) var ssao_output: texture_storage_2d<r32float, write>;
 @group(0) @binding(3) var<uniform> settings: SsaoSettings;
 @group(0) @binding(4) var<uniform> camera: CameraParams;
 
@@ -51,11 +52,12 @@ fn hash(p: vec2<f32>) -> f32 {
 // @group(1) @binding(2) var<uniform> blur_settings: SsaoSettings;
 // @group(1) @binding(3) var normal_depth_tex_blur: texture_2d<f32>;
 
-@group(2) @binding(0) var color_input: texture_2d<f32>;
-@group(2) @binding(1) var color_storage: texture_storage_2d<rgba8unorm, write>;
-@group(2) @binding(2) var ssao_blurred_tex: texture_2d<f32>;
+// Composite pass (uses @group(0) since it's a separate pipeline)
+@group(0) @binding(0) var color_input: texture_2d<f32>;
+@group(0) @binding(1) var color_storage: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(2) var ssao_blurred_tex: texture_2d<f32>;
 // x = composite multiplier (0=no AO, 1=full AO), yzw reserved
-@group(2) @binding(3) var<uniform> comp_params: vec4<f32>;
+@group(0) @binding(3) var<uniform> comp_params: vec4<f32>;
 
 // GTAO compute shader
 @compute @workgroup_size(8, 8, 1)
@@ -126,11 +128,11 @@ fn cs_ssao(@builtin(global_invocation_id) global_id: vec3<u32>) {
     textureStore(ssao_output, coord, vec4<f32>(ao));
 }
 
-// Bilateral blur pass
-@group(1) @binding(0) var ssao_input: texture_2d<f32>;
-@group(1) @binding(1) var depth_tex_blur: texture_2d<f32>;
-@group(1) @binding(2) var ssao_blur_output: texture_storage_2d<r16float, write>;
-@group(1) @binding(3) var<uniform> blur_settings: SsaoSettings;
+// Bilateral blur pass (uses @group(0) since it's a separate pipeline)
+@group(0) @binding(0) var ssao_input: texture_2d<f32>;
+@group(0) @binding(1) var depth_tex_blur: texture_2d<f32>;
+@group(0) @binding(2) var ssao_blur_output: texture_storage_2d<r32float, write>;
+@group(0) @binding(3) var<uniform> blur_settings: SsaoSettings;
 
 @compute @workgroup_size(8, 8, 1)
 fn cs_ssao_blur(@builtin(global_invocation_id) global_id: vec3<u32>) {

@@ -28,7 +28,8 @@ pub fn write_png_rgba8(path: &Path, data: &[u8], width: u32, height: u32) -> Res
     let file = File::create(path)
         .with_context(|| format!("failed to create output PNG at {}", path.display()))?;
     let writer = BufWriter::new(file);
-    let encoder = PngEncoder::new(writer);
+    // Use fast compression (level 1) instead of default (level 6) for 5-10x faster encoding
+    let encoder = PngEncoder::new_with_quality(writer, image::codecs::png::CompressionType::Fast, image::codecs::png::FilterType::NoFilter);
     encoder
         .write_image(data, width, height, ColorType::Rgba8.into())
         .context("failed to encode RGBA8 PNG")?;

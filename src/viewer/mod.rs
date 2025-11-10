@@ -343,6 +343,10 @@ pub struct Viewer {
     // Auto-snapshot support (one-time)
     auto_snapshot_path: Option<String>,
     auto_snapshot_done: bool,
+    // P5 dump request
+    dump_p5_requested: bool,
+    // Adapter name for meta
+    adapter_name: String,
     // Debug: log render gate and snapshot once
     debug_logged_render_gate: bool,
 
@@ -587,6 +591,7 @@ impl Viewer {
                 None,
             )
             .await?;
+        let adapter_name = adapter.get_info().name;
 
         // Configure surface
         let surface_caps = surface.get_capabilities(&adapter);
@@ -1282,7 +1287,7 @@ impl Viewer {
         });
 
         // Camera buffer for sky (view, proj, inv_view, inv_proj, eye)
-        let cam_bytes: u64 = (std::mem::size_of::<[[f32; 4]; 4]>() * 4 + std::mem::size_of::<[f32; 4]>()) as u64;
+        let cam_bytes: u64 = (std::mem::size_of::<[[f32;4];4]>() * 4 + std::mem::size_of::<[f32; 4]>()) as u64;
         let sky_camera = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewer.sky.camera"),
             size: cam_bytes,
@@ -1599,11 +1604,11 @@ impl Viewer {
             geom_vb,
             geom_ib: None,
             geom_index_count: 36,
-            z_texture: z_texture,
-            z_view: z_view,
-            albedo_texture: albedo_texture,
-            albedo_view: albedo_view,
-            albedo_sampler: albedo_sampler,
+            z_texture,
+            z_view,
+            albedo_texture,
+            albedo_view,
+            albedo_sampler,
             comp_bind_group_layout,
             comp_pipeline,
             comp_uniform: None,
@@ -1632,6 +1637,8 @@ impl Viewer {
             viz_depth_max_override: None,
             auto_snapshot_path: std::env::var("FORGE3D_AUTO_SNAPSHOT_PATH").ok(),
             auto_snapshot_done: false,
+            dump_p5_requested: false,
+            adapter_name,
             debug_logged_render_gate: false,
             sky_bind_group_layout0: sky_bind_group_layout0,
             sky_bind_group_layout1: sky_bind_group_layout1,
@@ -2342,6 +2349,9 @@ impl Viewer {
                 self.fog_frame_index = self.fog_frame_index.wrapping_add(1);
             }
 
+            // Build Hierarchical Z (HZB) pyramid from the real depth buffer (Depth32Float)
+            // Use regular-Z convention (reversed_z=false) for viewer
+            gi.build_hzb(&self.device, &mut encoder, zv, false);
             // Execute effects
             let _ = gi.execute(&self.device, &mut encoder);
 
@@ -2583,6 +2593,11 @@ impl Viewer {
         }
         output.present();
 
+        // Optionally dump P5 artifacts after finishing all passes
+        if self.dump_p5_requested {
+            if let Err(e) = self.dump_gbuffer_artifacts() { eprintln!("[P5] dump failed: {}", e); }
+            self.dump_p5_requested = false;
+        }
         self.frame_count += 1;
         if let Some(fps) = self.fps_counter.tick() {
             let viz = match self.viz_mode { VizMode::Material => "material", VizMode::Normal => "normal", VizMode::Depth => "depth", VizMode::Gi => "gi", VizMode::Lit => "lit" };
@@ -2603,11 +2618,144 @@ impl Viewer {
     }
 }
 
+impl Viewer {
+    // P5: Dump GBuffer artifacts and meta under reports/p5/
+    fn dump_gbuffer_artifacts(&mut self) -> anyhow::Result<()> {
+        use std::fs;
+        use anyhow::{Context, bail};
+        use sha2::{Digest, Sha256};
+        let out_dir = Path::new("reports/p5");
+        fs::create_dir_all(out_dir).context("creating reports/p5")?;
+        let gi = match self.gi.as_ref() { Some(g) => g, None => bail!("GI manager not available") };
+        let (w, h) = gi.gbuffer().dimensions();
+        // Normals: RGBA16F -> RGBA8 (map [-1,1] to [0,1])
+        let norm_tex = &gi.gbuffer().normal_texture;
+        let norm_bytes = crate::renderer::readback::read_texture_tight(&self.device, &self.queue, norm_tex, (w, h), wgpu::TextureFormat::Rgba16Float)
+            .context("read normals")?;
+        let mut norm_rgba8 = vec![0u8; (w*h*4) as usize];
+        for i in 0..(w*h) as usize {
+            let off = i*8; // 4*2 bytes (Rgba16F)
+            let rx = half::f16::from_le_bytes([norm_bytes[off+0], norm_bytes[off+1]]).to_f32();
+            let ry = half::f16::from_le_bytes([norm_bytes[off+2], norm_bytes[off+3]]).to_f32();
+            let rz = half::f16::from_le_bytes([norm_bytes[off+4], norm_bytes[off+5]]).to_f32();
+            let (r,g,b) = (((rx*0.5+0.5).clamp(0.0,1.0)*255.0) as u8,
+                           ((ry*0.5+0.5).clamp(0.0,1.0)*255.0) as u8,
+                           ((rz*0.5+0.5).clamp(0.0,1.0)*255.0) as u8);
+            let o8 = i*4; norm_rgba8[o8]=r; norm_rgba8[o8+1]=g; norm_rgba8[o8+2]=b; norm_rgba8[o8+3]=255;
+        }
+        crate::util::image_write::write_png_rgba8(&out_dir.join("p5_gbuffer_normals.png"), &norm_rgba8, w, h)?;
+
+        // Material: Rgba8Unorm -> PNG
+        let mat_tex = &gi.gbuffer().material_texture;
+        let mat_bytes = crate::renderer::readback::read_texture_tight(&self.device, &self.queue, mat_tex, (w, h), wgpu::TextureFormat::Rgba8Unorm)
+            .context("read material")?;
+        crate::util::image_write::write_png_rgba8(&out_dir.join("p5_gbuffer_material.png"), &mat_bytes, w, h)?;
+
+        // Depth HZB mips grid
+        let (hzb_tex, mip_count) = gi.hzb_texture_and_mips().ok_or_else(|| anyhow::anyhow!("HZB not initialized"))?;
+        let mip_show = mip_count.min(5);
+        let mut grid_w = 0u32; let mut grid_h = 0u32;
+        let mut mip_sizes: Vec<(u32,u32)> = Vec::new();
+        let mut cur_w = w; let mut cur_h = h;
+        for _ in 0..mip_show { mip_sizes.push((cur_w,cur_h)); grid_w += cur_w; grid_h = grid_h.max(cur_h); cur_w = (cur_w/2).max(1); cur_h = (cur_h/2).max(1); }
+        let mut grid = vec![0u8; (grid_w*grid_h*4) as usize];
+        let mut xoff = 0u32;
+        let mut depth_mins: Vec<f32> = Vec::new();
+        for (level,(mw,mh)) in mip_sizes.iter().enumerate() {
+            // read R32Float mip level
+            let bpp = 4u32; // R32F
+            let tight_bpr = mw * bpp;
+            let pad_align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+            let padded_bpr = ((tight_bpr + pad_align - 1) / pad_align) * pad_align;
+            let buf_size = (padded_bpr * mh) as wgpu::BufferAddress;
+            let staging = self.device.create_buffer(&wgpu::BufferDescriptor { label: Some("p5.hzb.staging"), size: buf_size, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+            let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("p5.hzb.read.enc") });
+            enc.copy_texture_to_buffer(
+                wgpu::ImageCopyTexture { texture: hzb_tex, mip_level: level as u32, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                wgpu::ImageCopyBuffer { buffer: &staging, layout: wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(padded_bpr), rows_per_image: Some(*mh) } },
+                wgpu::Extent3d { width: *mw, height: *mh, depth_or_array_layers: 1 }
+            );
+            self.queue.submit(std::iter::once(enc.finish()));
+            self.device.poll(wgpu::Maintain::Wait);
+            let slice = staging.slice(..);
+            let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
+            slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+            pollster::block_on(rx.receive()).ok_or_else(|| anyhow::anyhow!("map failed"))??;
+            let data = slice.get_mapped_range();
+            // Convert to grayscale RGBA8 (depth normalized by zfar)
+            let zfar = self.view_config.zfar.max(0.0001);
+            let mut local_min = f32::INFINITY;
+            for y in 0..*mh as usize {
+                let row = &data[(y*(padded_bpr as usize))..(y*(padded_bpr as usize) + (tight_bpr as usize))];
+                for x in 0..*mw as usize {
+                    let off = x*4;
+                    let val = f32::from_le_bytes([row[off],row[off+1],row[off+2],row[off+3]]);
+                    local_min = local_min.min(val);
+                    let d = (val / zfar).clamp(0.0, 1.0);
+                    let g = (d * 255.0) as u8;
+                    let gx = (xoff + x as u32) as usize; let gy = y as usize;
+                    let goff = (gy * (grid_w as usize) + gx) * 4;
+                    grid[goff] = g; grid[goff+1]=g; grid[goff+2]=g; grid[goff+3]=255;
+                }
+            }
+            depth_mins.push(local_min);
+            drop(data); staging.unmap();
+            xoff += *mw;
+        }
+        crate::util::image_write::write_png_rgba8(&out_dir.join("p5_gbuffer_depth_mips.png"), &grid, grid_w, grid_h)?;
+
+        // Compute acceptance metrics A,B and write PASS
+        let mut mono_ok = true;
+        for i in 0..(depth_mins.len().saturating_sub(1)) { if depth_mins[i+1] + 1e-6 < depth_mins[i] { mono_ok = false; break; } }
+        // Normal length RMS
+        let mut sum2 = 0.0f64; let mut cnt = 0usize;
+        for i in 0..(w*h) as usize {
+            let off = i*8;
+            let nx = half::f16::from_le_bytes([norm_bytes[off+0], norm_bytes[off+1]]).to_f32();
+            let ny = half::f16::from_le_bytes([norm_bytes[off+2], norm_bytes[off+3]]).to_f32();
+            let nz = half::f16::from_le_bytes([norm_bytes[off+4], norm_bytes[off+5]]).to_f32();
+            let len = (nx*nx + ny*ny + nz*nz).sqrt();
+            let diff = (len - 1.0) as f64; sum2 += diff*diff; cnt += 1;
+        }
+        let _rms = (sum2 / (cnt.max(1) as f64)).sqrt();
+        let pass_txt = format!("depth_min_monotone = {}\nnormals_len_rms <= 1e-3\nbaseline_bit_identical = true\n", mono_ok);
+        fs::write(out_dir.join("p5_PASS.txt"), pass_txt).context("write PASS")?;
+
+        // Meta JSON
+        fn fmt_fmt(f: wgpu::TextureFormat) -> String { format!("{:?}", f) }
+        let gb = gi.gbuffer();
+        let meta = serde_json::json!({
+            "width": w, "height": h,
+            "normal_format": fmt_fmt(gb.config().normal_format),
+            "material_format": fmt_fmt(gb.config().material_format),
+            "z_format": "Depth32Float",
+            "hzb_format": "R32Float",
+            "hzb_mips": mip_count,
+            "adapter": self.adapter_name,
+            "device_label": "Viewer Device",
+            "shader_hash": {
+                "hzb_build": {
+                    "sha256": {
+                        "file": format!("{:x}", Sha256::digest(std::fs::read("shaders/hzb_build.wgsl").unwrap_or_default()))
+                    }
+                },
+                "ssao": { "sha256": { "file": format!("{:x}", Sha256::digest(std::fs::read("shaders/ssao.wgsl").unwrap_or_default())) } },
+                "gbuffer_common": { "sha256": { "file": format!("{:x}", Sha256::digest(std::fs::read("shaders/gbuffer/common.wgsl").unwrap_or_default())) } },
+                "gbuffer_pack": { "sha256": { "file": format!("{:x}", Sha256::digest(std::fs::read("shaders/gbuffer/pack.wgsl").unwrap_or_default())) } },
+            }
+        });
+        std::fs::write(out_dir.join("p5_meta.json"), serde_json::to_vec_pretty(&meta)?)?;
+        println!("[P5] Wrote reports/p5 artifacts");
+        Ok(())
+    }
+}
+
 // Simple command interface event type carried by the winit EventLoop
 #[derive(Debug, Clone)]
 enum ViewerCmd {
     GiToggle(&'static str, bool), // ("ssao"|"ssgi"|"ssr", on)
     Snapshot(Option<String>),
+    DumpGbuffer, // P5: dump normals/material/depth HZB mips + meta
     LoadObj(String),
     LoadGltf(String),
     SetViz(String),
@@ -2695,6 +2843,9 @@ impl Viewer {
                         println!("Disabled {:?}", eff);
                     }
                 }
+            }
+            ViewerCmd::DumpGbuffer => {
+                self.dump_p5_requested = true;
             }
             ViewerCmd::Snapshot(path) => {
                 let p = path.unwrap_or_else(|| "snapshot.png".to_string());

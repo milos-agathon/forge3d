@@ -36,6 +36,14 @@ impl FrameGraph {
     pub fn full(&mut self) -> &mut NewFrameGraph {
         &mut self.inner
     }
+
+    /// P5.0: Add optional GI passes branch after lighting and before tonemap.
+    /// Currently a no-op placeholder; effects are orchestrated by the viewer/manager when enabled.
+    /// Keeping this hook allows future migration to the full framegraph without breaking legacy code.
+    pub fn add_gi_passes(&mut self) -> RenderResult<()> {
+        // Intentionally no-op to maintain bit-identical baseline when GI is disabled.
+        Ok(())
+    }
 }
 
 impl Default for FrameGraph {

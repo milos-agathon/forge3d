@@ -87,6 +87,10 @@ required-features = ["async_readback"]
 name = "interactive_viewer"
 path = "examples/interactive_viewer.rs"
 
+[[example]]
+name = "p5_dump_gbuffer"
+path = "examples/p5_dump_gbuffer.rs"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

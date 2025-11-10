@@ -3,6 +3,7 @@
 //! Provides depth, normals, and material data for screen-space techniques
 
 use crate::error::RenderResult;
+use crate::core::mipmap::calculate_mip_levels;
 use wgpu::*;
 
 /// GBuffer configuration
@@ -27,9 +28,9 @@ impl Default for GBufferConfig {
         Self {
             width: 1920,
             height: 1080,
-            // Use a widely color-renderable single-channel float format to store view-space depth
-            // R32Float as a color attachment may not be renderable on some backends (e.g., Metal)
-            depth_format: TextureFormat::R16Float,
+            // R32Float supports both RENDER_ATTACHMENT and STORAGE_BINDING (needed for HZB mip generation)
+            // R16Float doesn't support STORAGE_BINDING on most platforms
+            depth_format: TextureFormat::R32Float,
             normal_format: TextureFormat::Rgba16Float,
             material_format: TextureFormat::Rgba8Unorm,
             use_half_precision: true,
@@ -62,7 +63,8 @@ pub struct GBuffer {
 impl GBuffer {
     /// Create new GBuffer
     pub fn new(device: &Device, config: GBufferConfig) -> RenderResult<Self> {
-        // Create depth texture
+        // Create depth texture (single mip; HZB is built into a separate texture)
+        let depth_mips = 1u32;
         let depth_texture = device.create_texture(&TextureDescriptor {
             label: Some("gbuffer_depth"),
             size: Extent3d {
@@ -70,15 +72,25 @@ impl GBuffer {
                 height: config.height,
                 depth_or_array_layers: 1,
             },
-            mip_level_count: 1,
+            mip_level_count: depth_mips,
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: config.depth_format,
-            usage: TextureUsages::TEXTURE_BINDING 
+            usage: TextureUsages::TEXTURE_BINDING
                 | TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
-        let depth_view = depth_texture.create_view(&TextureViewDescriptor::default());
+        // Render attachments must have exactly one mip level
+        let depth_view = depth_texture.create_view(&TextureViewDescriptor {
+            label: Some("gbuffer_depth_mip0"),
+            format: Some(config.depth_format),
+            dimension: Some(TextureViewDimension::D2),
+            aspect: TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: Some(1),
+            base_array_layer: 0,
+            array_layer_count: Some(1),
+        });
         
         // Create normal texture
         let normal_texture = device.create_texture(&TextureDescriptor {
@@ -93,7 +105,8 @@ impl GBuffer {
             dimension: TextureDimension::D2,
             format: config.normal_format,
             usage: TextureUsages::TEXTURE_BINDING 
-                | TextureUsages::RENDER_ATTACHMENT,
+                | TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let normal_view = normal_texture.create_view(&TextureViewDescriptor::default());
@@ -111,7 +124,8 @@ impl GBuffer {
             dimension: TextureDimension::D2,
             format: config.material_format,
             usage: TextureUsages::TEXTURE_BINDING 
-                | TextureUsages::RENDER_ATTACHMENT,
+                | TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let material_view = material_texture.create_view(&TextureViewDescriptor::default());
