@@ -174,9 +174,26 @@
 
 * `docs/user/ibl_overview.rst` (or `docs/environment_mapping.md`) must contain:
 
-  * Concept diagram of split-sum; binding table; quality table; cache format snippet
-  * CLI examples (terrain + gallery); troubleshooting (seams, NaNs, wrong layout)
-* **Exit criteria**: `make html` builds; docs linked from index; two thumbnails checked into repo.
+  * GPU supples the linear HDR frames (from M4 resources + M1 dir light).
+  * CPU must apply tone mapping and build the 3x5 grid.
+
+What it proves Tone-map stage is correct, monotone, and does not introduce clipping beyond configured tolerance.
+
+Backend expectation • GPU supplies the linear HDR frames (from M4 resources + M1 dir light). • CPU must apply tone mapping and build the 3×5 grid.
+
+CLI
+
+```python
+python examples/m5_generate.py --hdr assets/snow_field_4k.hdr --outdir reports/m5
+```
+
+Outputs • m5_tonemap_compare.png (columns: Linear, Reinhard, ACES × roughness) • m5_meta.json
+
+Acceptance checks • E1: Linear column equals the pre-tonemap baseline pixel-for-pixel. • E2: Clipped channel ratio for Reinhard/ACES ≤ 0.01%. • E3: Reinhard and ACES curves monotone over [0, 32].
+
+Meta must include
+
+{ "milestone": "M5", "backend": "gpu", // frames came from GPU; tone-map on CPU is implied "tone_curves": ["linear", "reinhard", "aces"], "exposure": 1.0, "clip_fraction": {"reinhard": 0.00005, "aces": 0.00012}, "accept": {"E1": true, "E2": true, "E3": true} }
 
 ---
 

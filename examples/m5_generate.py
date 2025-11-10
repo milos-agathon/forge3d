@@ -320,7 +320,25 @@ def build_meta(
             entry[f"{mode}_median_luminance"] = round(tile.median_luminance, 4)
             entry[f"{mode}_clipped_fraction"] = round(tile.clipped_fraction, 6)
         meta_tiles.append(entry)
+    # Aggregate clip fractions by tone curve for summary section
+    clip_summary = {
+        "reinhard": float(max(t.clipped_fraction for t in modes_stats[tm.TONEMAP_REINHARD])),
+        "aces": float(max(t.clipped_fraction for t in modes_stats[tm.TONEMAP_ACES])),
+    }
+
+    # Flatten acceptance flags per spec (E1/E2/E3)
+    accept_flags = {
+        "E1": bool(acceptance.get("E1_linear_bypass", {}).get("pass", False)),
+        "E2": bool(acceptance.get("E2_clipping", {}).get("pass", False)),
+        "E3": bool(acceptance.get("E3_monotone", {}).get("pass", False)),
+    }
+
     return {
+        # Spec-required headline fields
+        "milestone": "M5",
+        # Frames are expected to come from GPU; tone map is CPU-side.
+        # In backend-agnostic runs this may be informational.
+        "backend": "gpu",
         "description": "Milestone 5 tone mapping comparison",
         "rng_seed": RNG_SEED,
         "input_hdr": str(hdr_path),
@@ -331,7 +349,9 @@ def build_meta(
         "f0": F0,
         "white_point": WHITE_POINT,
         "exposure": EXPOSURE,
+        # Keep legacy field and add spec-friendly alias
         "tonemap_modes": list(MODES),
+        "tone_curves": [tm.TONEMAP_LINEAR, tm.TONEMAP_REINHARD, tm.TONEMAP_ACES],
         "prefilter_samples": list(prefilter_samples),
         "irradiance_size": irradiance_size,
         "irradiance_samples": irradiance_samples,
@@ -339,6 +359,9 @@ def build_meta(
         "lut_samples": lut_samples,
         "tiles": meta_tiles,
         "hashes": hashes,
+        "clip_fraction": clip_summary,
+        "accept": accept_flags,
+        # Full acceptance breakdown retained for detailed diagnostics
         "acceptance": acceptance,
     }
 
