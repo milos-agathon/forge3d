@@ -158,10 +158,11 @@ pub struct SsaoSettings {
     pub intensity: f32,
     pub bias: f32,
     pub num_samples: u32,
-    pub technique: u32, // 0=SSAO, 1=GTAO
-    pub _pad_align: u32, // Padding to align vec2<f32> to 8-byte boundary in WGSL
+    pub technique: u32,   // 0=SSAO, 1=GTAO
+    pub frame_index: u32, // frame counter for noise
     pub inv_resolution: [f32; 2],
-    pub _pad0: [f32; 2],
+    pub proj_scale: f32,  // 0.5 * height / tan(fov/2) = 0.5 * height * P[1][1]
+    pub ao_min: f32,      // minimum AO value to prevent full black (default 0.35)
 }
 
 impl Default for SsaoSettings {
@@ -172,9 +173,10 @@ impl Default for SsaoSettings {
             bias: 0.025,
             num_samples: 16,
             technique: 0,
-            _pad_align: 0,
+            frame_index: 0,
             inv_resolution: [1.0 / 1920.0, 1.0 / 1080.0],
-            _pad0: [0.0; 2],
+            proj_scale: 0.5 * 1080.0 * (1.0 / (45.0_f32.to_radians() * 0.5).tan()),
+            ao_min: 0.35,  // P5.1: prevent fully black objects at grazing angles
         }
     }
 }
@@ -283,9 +285,15 @@ pub struct SsaoRenderer {
     ssao_pipeline: ComputePipeline,
     ssao_bind_group_layout: BindGroupLayout,
     
-    // Blur pipeline
-    blur_pipeline: ComputePipeline,
+    // Separable bilateral blur pipelines (H and V) + settings
+    blur_h_pipeline: ComputePipeline,
+    blur_v_pipeline: ComputePipeline,
     blur_bind_group_layout: BindGroupLayout,
+    blur_settings: Buffer,
+    // Temporal resolve pipeline and layout
+    temporal_pipeline: ComputePipeline,
+    temporal_bind_group_layout: BindGroupLayout,
+    temporal_params: Buffer,
     
     // Composite pipeline
     composite_pipeline: ComputePipeline,
@@ -297,18 +305,33 @@ pub struct SsaoRenderer {
     ssao_view: TextureView,
     ssao_blurred: Texture,
     ssao_blurred_view: TextureView,
+    // Temporal history and resolved outputs
+    ssao_history: Texture,
+    ssao_history_view: TextureView,
+    ssao_resolved: Texture,
+    ssao_resolved_view: TextureView,
+    // Intermediate blur target
+    ssao_tmp: Texture,
+    ssao_tmp_view: TextureView,
     // Color composited with AO for display
     ssao_composited: Texture,
     ssao_composited_view: TextureView,
     
     width: u32,
     height: u32,
+    frame_index: u32,
+    temporal_enabled: bool,
+    temporal_alpha: f32,
+    // Enable/disable bilateral blur stage
+    blur_enabled: bool,
 }
 
 impl SsaoRenderer {
     pub fn new(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
         let mut settings = SsaoSettings::default();
         settings.inv_resolution = [1.0 / width as f32, 1.0 / height as f32];
+        // proj_scale will be filled on first update_camera; set a conservative default
+        settings.proj_scale = 0.5 * height as f32; 
         
         // Create uniform buffers
         let settings_buffer = device.create_buffer(&BufferDescriptor {
@@ -328,7 +351,15 @@ impl SsaoRenderer {
         // Load shaders
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("ssao_shader"),
-            source: ShaderSource::Wgsl(include_str!("../../shaders/ssao.wgsl").into()),
+            source: ShaderSource::Wgsl(include_str!("../shaders/ssao.wgsl").into()),
+        });
+        let filter_shader = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("ssao_filter_shader"),
+            source: ShaderSource::Wgsl(include_str!("../shaders/filters/bilateral_separable.wgsl").into()),
+        });
+        let temporal_shader = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("ssao_temporal_shader"),
+            source: ShaderSource::Wgsl(include_str!("../shaders/temporal/resolve_ao.wgsl").into()),
         });
         
         // Create bind group layouts
@@ -398,50 +429,16 @@ impl SsaoRenderer {
         let blur_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("ssao_blur_bind_group_layout"),
             entries: &[
-                // SSAO input
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Depth for bilateral
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Output (R32Float for STORAGE_BINDING support)
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::R32Float,
-                        view_dimension: TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                // Settings
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
+                // AO input
+                BindGroupLayoutEntry { binding: 0, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
+                // Depth
+                BindGroupLayoutEntry { binding: 1, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
+                // Normal
+                BindGroupLayoutEntry { binding: 2, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
+                // Output (R32Float)
+                BindGroupLayoutEntry { binding: 3, visibility: ShaderStages::COMPUTE, ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::R32Float, view_dimension: TextureViewDimension::D2 }, count: None },
+                // Settings (blur radius, sigmas)
+                BindGroupLayoutEntry { binding: 4, visibility: ShaderStages::COMPUTE, ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
             ],
         });
         
@@ -507,16 +504,39 @@ impl SsaoRenderer {
             entry_point: "cs_ssao",
         });
         
-        let blur_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("ssao_blur_pipeline"),
-            layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: Some("ssao_blur_pipeline_layout"),
-                bind_group_layouts: &[&blur_bind_group_layout],
-                push_constant_ranges: &[],
-            })),
-            module: &shader,
-            entry_point: "cs_ssao_blur",
+        let blur_pl = device.create_pipeline_layout(&PipelineLayoutDescriptor { label: Some("ssao_blur_pipeline_layout"), bind_group_layouts: &[&blur_bind_group_layout], push_constant_ranges: &[] });
+        let blur_h_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor { label: Some("ssao_blur_h_pipeline"), layout: Some(&blur_pl), module: &filter_shader, entry_point: "cs_blur_h" });
+        let blur_v_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor { label: Some("ssao_blur_v_pipeline"), layout: Some(&blur_pl), module: &filter_shader, entry_point: "cs_blur_v" });
+
+        // Blur settings buffer (u32 radius, f32 depth_sigma, f32 normal_sigma, u32 _pad)
+        #[repr(C)]
+        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+        struct BlurSettingsStd140 { blur_radius: u32, depth_sigma: f32, normal_sigma: f32, _pad: u32 }
+        let blur_params = BlurSettingsStd140 { blur_radius: 2, depth_sigma: 0.02, normal_sigma: 0.25, _pad: 0 };
+        let blur_settings = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("ssao.blur.settings"), contents: bytemuck::bytes_of(&blur_params), usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST });
+
+        // Temporal resolve layout: current, history, output, params
+        let temporal_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("ssao_temporal_bgl"),
+            entries: &[
+                BindGroupLayoutEntry { binding: 0, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
+                BindGroupLayoutEntry { binding: 1, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
+                BindGroupLayoutEntry { binding: 2, visibility: ShaderStages::COMPUTE, ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::R32Float, view_dimension: TextureViewDimension::D2 }, count: None },
+                BindGroupLayoutEntry { binding: 3, visibility: ShaderStages::COMPUTE, ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            ],
         });
+        let temporal_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("ssao_temporal_pipeline"),
+            layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor { label: Some("ssao_temporal_pl"), bind_group_layouts: &[&temporal_bind_group_layout], push_constant_ranges: &[] })),
+            module: &temporal_shader,
+            entry_point: "cs_resolve_temporal",
+        });
+        // Temporal params buffer: alpha (32 bytes for uniform buffer alignment)
+        #[repr(C)]
+        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+        struct TemporalParams { temporal_alpha: f32, _pad: [f32; 7] }
+        let temporal_params = TemporalParams { temporal_alpha: 0.2, _pad: [0.0; 7] };
+        let temporal_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("ssao.temporal.params"), contents: bytemuck::bytes_of(&temporal_params), usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST });
         
         let composite_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("ssao_composite_pipeline"),
@@ -555,6 +575,43 @@ impl SsaoRenderer {
         });
         let ssao_blurred_view = ssao_blurred.create_view(&TextureViewDescriptor::default());
 
+        // Intermediate target for separable blur
+        let ssao_tmp = device.create_texture(&TextureDescriptor {
+            label: Some("ssao_tmp"),
+            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R32Float,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let ssao_tmp_view = ssao_tmp.create_view(&TextureViewDescriptor::default());
+
+        // Temporal history and resolved targets
+        let ssao_history = device.create_texture(&TextureDescriptor {
+            label: Some("ssao_history"),
+            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R32Float,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let ssao_history_view = ssao_history.create_view(&TextureViewDescriptor::default());
+        let ssao_resolved = device.create_texture(&TextureDescriptor {
+            label: Some("ssao_resolved"),
+            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R32Float,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let ssao_resolved_view = ssao_resolved.create_view(&TextureViewDescriptor::default());
+
         // Composited color (material * AO)
         let ssao_composited = device.create_texture(&TextureDescriptor {
             label: Some("ssao_composited"),
@@ -582,8 +639,13 @@ impl SsaoRenderer {
             camera_buffer,
             ssao_pipeline,
             ssao_bind_group_layout,
-            blur_pipeline,
+            blur_h_pipeline,
+            blur_v_pipeline,
             blur_bind_group_layout,
+            blur_settings,
+            temporal_pipeline,
+            temporal_bind_group_layout,
+            temporal_params: temporal_params_buf,
             composite_pipeline,
             composite_bind_group_layout,
             comp_uniform,
@@ -591,10 +653,20 @@ impl SsaoRenderer {
             ssao_view,
             ssao_blurred,
             ssao_blurred_view,
+            ssao_tmp,
+            ssao_tmp_view,
+            ssao_history,
+            ssao_history_view,
+            ssao_resolved,
+            ssao_resolved_view,
             ssao_composited,
             ssao_composited_view,
             width,
             height,
+            frame_index: 0,
+            temporal_enabled: true,
+            temporal_alpha: 0.2,
+            blur_enabled: true,
         })
     }
     
@@ -609,15 +681,27 @@ impl SsaoRenderer {
     /// Update camera parameters
     pub fn update_camera(&mut self, queue: &Queue, camera: &CameraParams) {
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(camera));
+        // Update proj_scale from camera projection matrix and current height
+        let p11 = camera.proj_matrix[1][1];
+        self.settings.proj_scale = 0.5 * self.height as f32 * p11;
+        queue.write_buffer(&self.settings_buffer, 0, bytemuck::bytes_of(&self.settings));
     }
     
-    /// Execute SSAO pass
-    pub fn execute(
-        &self,
-        device: &Device,
-        encoder: &mut CommandEncoder,
-        gbuffer: &GBuffer,
-    ) -> RenderResult<()> {
+    /// Encode only the raw SSAO generation pass into the provided encoder
+    pub fn encode_ssao(&self, device: &Device, encoder: &mut CommandEncoder, gbuffer: &GBuffer) -> RenderResult<()> {
+        // Increment frame index and push to GPU before dispatch
+        let mut settings_shadow = self.settings;
+        // Note: we cannot mutate &self.settings here since &self is borrowed immutably in execute;
+        // For simplicity, write a local copy with incremented frame index.
+        settings_shadow.frame_index = self.settings.frame_index.wrapping_add(1);
+        // Update inv_resolution in case of resize
+        settings_shadow.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32];
+        let staging = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ssao.settings.staging"),
+            contents: bytemuck::bytes_of(&settings_shadow),
+            usage: BufferUsages::COPY_SRC,
+        });
+        encoder.copy_buffer_to_buffer(&staging, 0, &self.settings_buffer, 0, std::mem::size_of::<SsaoSettings>() as u64);
         // Create bind group
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("ssao_bind_group"),
@@ -645,56 +729,102 @@ impl SsaoRenderer {
                 },
             ],
         });
-        
-        let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("ssao_pass"),
-            timestamp_writes: None,
-        });
-        
+        let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("ssao_pass"), timestamp_writes: None });
         pass.set_pipeline(&self.ssao_pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        
         let workgroup_x = (self.width + 7) / 8;
         let workgroup_y = (self.height + 7) / 8;
         pass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
-        
         drop(pass);
-        
-        // Blur pass
-        let blur_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("ssao_blur_bind_group"),
+        Ok(())
+    }
+
+    /// Encode bilateral blur (H and V)
+    pub fn encode_blur(&self, device: &Device, encoder: &mut CommandEncoder, gbuffer: &GBuffer) -> RenderResult<()> {
+        let workgroup_x = (self.width + 7) / 8;
+        let workgroup_y = (self.height + 7) / 8;
+
+        // Blur pass H
+        let blur_bg_h = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("ssao_blur_bg_h"),
             layout: &self.blur_bind_group_layout,
             entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(&self.ssao_view),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::TextureView(&gbuffer.depth_view),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::TextureView(&self.ssao_blurred_view),
-                },
-                BindGroupEntry {
-                    binding: 3,
-                    resource: self.settings_buffer.as_entire_binding(),
-                },
+                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&self.ssao_view) },
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&gbuffer.depth_view) },
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&gbuffer.normal_view) },
+                BindGroupEntry { binding: 3, resource: BindingResource::TextureView(&self.ssao_tmp_view) },
+                BindGroupEntry { binding: 4, resource: self.blur_settings.as_entire_binding() },
             ],
         });
-        
-        let mut blur_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label: Some("ssao_blur_pass"),
-            timestamp_writes: None,
-        });
-        
-        blur_pass.set_pipeline(&self.blur_pipeline);
-        blur_pass.set_bind_group(0, &blur_bind_group, &[]);
-        blur_pass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
-        drop(blur_pass);
+        let mut blur_h = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("ssao_blur_h"), timestamp_writes: None });
+        blur_h.set_pipeline(&self.blur_h_pipeline);
+        blur_h.set_bind_group(0, &blur_bg_h, &[]);
+        blur_h.dispatch_workgroups(workgroup_x, workgroup_y, 1);
+        drop(blur_h);
 
-        // Composite pass: material * AO -> composited RGBA8
+        // Blur pass V
+        let blur_bg_v = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("ssao_blur_bg_v"),
+            layout: &self.blur_bind_group_layout,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&self.ssao_tmp_view) },
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&gbuffer.depth_view) },
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&gbuffer.normal_view) },
+                BindGroupEntry { binding: 3, resource: BindingResource::TextureView(&self.ssao_blurred_view) },
+                BindGroupEntry { binding: 4, resource: self.blur_settings.as_entire_binding() },
+            ],
+        });
+        let mut blur_v = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("ssao_blur_v"), timestamp_writes: None });
+        blur_v.set_pipeline(&self.blur_v_pipeline);
+        blur_v.set_bind_group(0, &blur_bg_v, &[]);
+        blur_v.dispatch_workgroups(workgroup_x, workgroup_y, 1);
+        drop(blur_v);
+        Ok(())
+    }
+
+    /// Encode temporal resolve (or copy blurred->resolved)
+    pub fn encode_temporal(&self, device: &Device, encoder: &mut CommandEncoder) -> RenderResult<()> {
+        let workgroup_x = (self.width + 7) / 8;
+        let workgroup_y = (self.height + 7) / 8;
+        // Temporal resolve (optional)
+        if self.temporal_enabled {
+            // Choose input depending on blur toggle
+            let input_view = if self.blur_enabled { &self.ssao_blurred_view } else { &self.ssao_view };
+            let temporal_bg = device.create_bind_group(&BindGroupDescriptor {
+                label: Some("ssao_temporal_bg"),
+                layout: &self.temporal_bind_group_layout,
+                entries: &[
+                    BindGroupEntry { binding: 0, resource: BindingResource::TextureView(input_view) },
+                    BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&self.ssao_history_view) },
+                    BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&self.ssao_resolved_view) },
+                    BindGroupEntry { binding: 3, resource: self.temporal_params.as_entire_binding() },
+                ],
+            });
+            let mut tpass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("ssao_temporal"), timestamp_writes: None });
+            tpass.set_pipeline(&self.temporal_pipeline);
+            tpass.set_bind_group(0, &temporal_bg, &[]);
+            tpass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
+            drop(tpass);
+            // Copy resolved to history for next frame
+            encoder.copy_texture_to_texture(
+                ImageCopyTexture { texture: &self.ssao_resolved, mip_level: 0, origin: Origin3d::ZERO, aspect: TextureAspect::All },
+                ImageCopyTexture { texture: &self.ssao_history, mip_level: 0, origin: Origin3d::ZERO, aspect: TextureAspect::All },
+                Extent3d { width: self.width, height: self.height, depth_or_array_layers: 1 },
+            );
+        } else {
+            // If temporal disabled, keep resolved identical to blurred via a copy
+            let src_tex = if self.blur_enabled { &self.ssao_blurred } else { &self.ssao_texture };
+            encoder.copy_texture_to_texture(
+                ImageCopyTexture { texture: src_tex, mip_level: 0, origin: Origin3d::ZERO, aspect: TextureAspect::All },
+                ImageCopyTexture { texture: &self.ssao_resolved, mip_level: 0, origin: Origin3d::ZERO, aspect: TextureAspect::All },
+                Extent3d { width: self.width, height: self.height, depth_or_array_layers: 1 },
+            );
+        }
+        Ok(())
+    }
+
+    /// Encode composite of material * AO -> RGBA8 target
+    pub fn encode_composite(&self, device: &Device, encoder: &mut CommandEncoder, gbuffer: &GBuffer) -> RenderResult<()> {
         let comp_bg = device.create_bind_group(&BindGroupDescriptor {
             label: Some("ssao_composite_bind_group"),
             layout: &self.composite_bind_group_layout,
@@ -703,8 +833,8 @@ impl SsaoRenderer {
                 BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&gbuffer.material_view) },
                 // output
                 BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&self.ssao_composited_view) },
-                // blurred AO
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&self.ssao_blurred_view) },
+                // resolved AO (temporal if enabled, else blurred is copied)
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&self.ssao_resolved_view) },
                 // composite params
                 BindGroupEntry { binding: 3, resource: self.comp_uniform.as_entire_binding() },
             ],
@@ -716,8 +846,18 @@ impl SsaoRenderer {
         });
         comp_pass.set_pipeline(&self.composite_pipeline);
         comp_pass.set_bind_group(0, &comp_bg, &[]);
+        let workgroup_x = (self.width + 7) / 8;
+        let workgroup_y = (self.height + 7) / 8;
         comp_pass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
+        Ok(())
+    }
 
+    /// Execute full SSAO pipeline (raw -> blur -> temporal -> composite)
+    pub fn execute(&self, device: &Device, encoder: &mut CommandEncoder, gbuffer: &GBuffer) -> RenderResult<()> {
+        self.encode_ssao(device, encoder, gbuffer)?;
+        self.encode_blur(device, encoder, gbuffer)?;
+        self.encode_temporal(device, encoder)?;
+        self.encode_composite(device, encoder, gbuffer)?;
         Ok(())
     }
 
@@ -727,6 +867,12 @@ impl SsaoRenderer {
     pub fn get_output(&self) -> &TextureView {
         &self.ssao_blurred_view
     }
+
+    /// Get raw SSAO texture view (pre-blur)
+    pub fn get_raw_ao_view(&self) -> &TextureView { &self.ssao_view }
+
+    /// Get resolved (temporal) AO view
+    pub fn get_resolved_ao_view(&self) -> &TextureView { &self.ssao_resolved_view }
 
     /// Get composited color (material * AO)
     pub fn get_composited(&self) -> &TextureView {
@@ -738,6 +884,15 @@ impl SsaoRenderer {
         let params: [f32; 4] = [m, 0.0, 0.0, 0.0];
         queue.write_buffer(&self.comp_uniform, 0, bytemuck::cast_slice(&params));
     }
+
+    pub fn set_blur_enabled(&mut self, on: bool) { self.blur_enabled = on; }
+    pub fn blur_enabled(&self) -> bool { self.blur_enabled }
+
+    // Expose underlying textures for readback
+    pub fn raw_ao_texture(&self) -> &Texture { &self.ssao_texture }
+    pub fn blurred_ao_texture(&self) -> &Texture { &self.ssao_blurred }
+    pub fn resolved_ao_texture(&self) -> &Texture { &self.ssao_resolved }
+    pub fn composited_texture(&self) -> &Texture { &self.ssao_composited }
 }
 
 /// Screen-space effects manager
@@ -890,10 +1045,41 @@ impl ScreenSpaceEffectsManager {
 
     /// Return the material composited with SSAO if available
     pub fn material_with_ao_view(&self) -> Option<&TextureView> {
-        if let Some(ref ssao) = self.ssao_renderer {
-            return Some(ssao.get_composited());
+        if self.enabled_effects.contains(&ScreenSpaceEffect::SSAO) {
+            if let Some(ref ssao) = self.ssao_renderer {
+                return Some(ssao.get_composited());
+            }
         }
         None
+    }
+
+    /// Provide access to AO AOVs for metrics/readbacks
+    pub fn ao_raw_view(&self) -> Option<&TextureView> { self.ssao_renderer.as_ref().map(|r| r.get_raw_ao_view()) }
+    pub fn ao_blur_view(&self) -> Option<&TextureView> { self.ssao_renderer.as_ref().map(|r| r.get_output()) }
+    pub fn ao_resolved_view(&self) -> Option<&TextureView> { self.ssao_renderer.as_ref().map(|r| r.get_resolved_ao_view()) }
+
+    /// Direct texture accessors for readback
+    pub fn ao_raw_texture(&self) -> Option<&Texture> { self.ssao_renderer.as_ref().map(|r| r.raw_ao_texture()) }
+    pub fn ao_blur_texture(&self) -> Option<&Texture> { self.ssao_renderer.as_ref().map(|r| r.blurred_ao_texture()) }
+    pub fn ao_resolved_texture(&self) -> Option<&Texture> { self.ssao_renderer.as_ref().map(|r| r.resolved_ao_texture()) }
+    pub fn ao_composited_texture(&self) -> Option<&Texture> { self.ssao_renderer.as_ref().map(|r| r.composited_texture()) }
+
+    /// Enable/disable temporal AO
+    pub fn set_ssao_temporal(&mut self, on: bool) {
+        if let Some(ref mut r) = self.ssao_renderer {
+            r.temporal_enabled = on;
+        }
+    }
+    /// Set temporal alpha for AO
+    pub fn set_ssao_temporal_alpha(&mut self, queue: &Queue, alpha: f32) {
+        if let Some(ref mut r) = self.ssao_renderer {
+            r.temporal_alpha = alpha.clamp(0.0, 1.0);
+            #[repr(C)]
+            #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+            struct TemporalParams { temporal_alpha: f32, _pad: [f32; 7] }
+            let params = TemporalParams { temporal_alpha: r.temporal_alpha, _pad: [0.0; 7] };
+            queue.write_buffer(&r.temporal_params, 0, bytemuck::bytes_of(&params));
+        }
     }
 
     pub fn set_ssao_composite_multiplier(&mut self, queue: &Queue, mul: f32) {
@@ -902,10 +1088,41 @@ impl ScreenSpaceEffectsManager {
         }
     }
 
+    /// Check if an effect is enabled
+    pub fn is_enabled(&self, effect: ScreenSpaceEffect) -> bool {
+        self.enabled_effects.contains(&effect)
+    }
+
+    /// Get current SSAO settings for HUD display
+    pub fn ssao_settings(&self) -> SsaoSettings {
+        self.ssao_renderer.as_ref().map(|r| r.settings).unwrap_or_default()
+    }
+
+    /// Get SSAO temporal alpha for HUD display
+    pub fn ssao_temporal_alpha(&self) -> f32 {
+        self.ssao_renderer.as_ref().map(|r| r.temporal_alpha).unwrap_or(0.0)
+    }
+
     pub fn update_ssao_settings(&mut self, queue: &Queue, mut f: impl FnMut(&mut SsaoSettings)) {
         if let Some(ref mut r) = self.ssao_renderer {
             let mut s = r.get_settings();
             f(&mut s);
+            r.update_settings(queue, s);
+        }
+    }
+
+    /// Toggle SSAO bilateral blur on/off
+    pub fn set_ssao_blur(&mut self, on: bool) {
+        if let Some(ref mut r) = self.ssao_renderer {
+            r.set_blur_enabled(on);
+        }
+    }
+
+    /// Set SSAO bias
+    pub fn set_ssao_bias(&mut self, queue: &Queue, bias: f32) {
+        if let Some(ref mut r) = self.ssao_renderer {
+            let mut s = r.get_settings();
+            s.bias = bias.max(0.0);
             r.update_settings(queue, s);
         }
     }

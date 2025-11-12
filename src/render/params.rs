@@ -571,16 +571,43 @@ pub struct GiParams {
     pub modes: Vec<GiMode>,
     #[serde(default = "GiParams::default_ao_strength")]
     pub ambient_occlusion_strength: f32,
+    
+    // P5.1: SSAO/GTAO parameters
+    #[serde(default = "GiParams::default_ssao_radius")]
+    pub ssao_radius: f32,
+    #[serde(default = "GiParams::default_ssao_intensity")]
+    pub ssao_intensity: f32,
+    #[serde(default = "GiParams::default_ssao_technique")]
+    pub ssao_technique: String,  // "ssao" or "gtao"
+    #[serde(default = "GiParams::default_ssao_composite")]
+    pub ssao_composite: bool,
+    #[serde(default = "GiParams::default_ssao_mul")]
+    pub ssao_mul: f32,
 }
 
 impl GiParams {
     fn default_modes() -> Vec<GiMode> { vec![GiMode::None] }
     const fn default_ao_strength() -> f32 { 1.0 }
+    
+    // P5.1 defaults
+    const fn default_ssao_radius() -> f32 { 0.5 }
+    const fn default_ssao_intensity() -> f32 { 1.0 }
+    fn default_ssao_technique() -> String { "ssao".to_string() }
+    const fn default_ssao_composite() -> bool { true }
+    const fn default_ssao_mul() -> f32 { 1.0 }
 }
 
 impl Default for GiParams {
     fn default() -> Self {
-        Self { modes: Self::default_modes(), ambient_occlusion_strength: Self::default_ao_strength() }
+        Self {
+            modes: Self::default_modes(),
+            ambient_occlusion_strength: Self::default_ao_strength(),
+            ssao_radius: Self::default_ssao_radius(),
+            ssao_intensity: Self::default_ssao_intensity(),
+            ssao_technique: Self::default_ssao_technique(),
+            ssao_composite: Self::default_ssao_composite(),
+            ssao_mul: Self::default_ssao_mul(),
+        }
     }
 }
 

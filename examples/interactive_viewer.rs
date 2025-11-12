@@ -32,6 +32,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //   --ssao-intensity <float>
     //   --ssao-composite <on|off>
     //   --ssao-mul <0..1>
+    //   --ssao-bias <float>
+    //   --ao-blur <on|off>
+    //   --ao-temporal-alpha <0..1>
     //   --ssgi-steps <u32>
     //   --ssgi-radius <float>
     //   --ssgi-half <on|off>
@@ -39,6 +42,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //   --ssr-max-steps <u32>
     //   --ssr-thickness <float>
     //   --ssao-technique <ssao|gtao>
+    //   --ssao-samples <u32>
+    //   --ssao-directions <u32>
+    //   --ssao-temporal-alpha <0..1>
     //   --size <WxH>
     //   --fov <degrees>
     //   --cam-lookat ex,ey,ez,tx,ty,tz[,ux,uy,uz]
@@ -80,10 +86,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some((eff, state)) = spec.split_once(':') {
                         let eff_l = eff.to_lowercase();
                         let state_l = state.to_lowercase();
-                        if ["ssao", "ssgi", "ssr"].contains(&eff_l.as_str())
+                        if ["ssao", "ssgi", "ssr", "gtao"].contains(&eff_l.as_str())
                             && ["on", "off"].contains(&state_l.as_str())
                         {
-                            cmds.push(format!(":gi {} {}", eff_l, state_l));
+                            if eff_l == "gtao" {
+                                cmds.push(format!(":gi ssao {}", state_l));
+                                if state_l == "on" { cmds.push(":ssao-technique gtao".to_string()); }
+                            } else {
+                                cmds.push(format!(":gi {} {}", eff_l, state_l));
+                            }
                         }
                     }
                 }
@@ -155,6 +166,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--ssao-intensity" => {
                 if let Some(val) = args.next() { cmds.push(format!(":ssao-intensity {}", val)); }
             }
+            "--ssao-bias" => {
+                if let Some(val) = args.next() { cmds.push(format!(":ssao-bias {}", val)); }
+            }
+            "--ssao-samples" => {
+                if let Some(val) = args.next() { cmds.push(format!(":ssao-samples {}", val)); }
+            }
+            "--ssao-directions" => {
+                if let Some(val) = args.next() { cmds.push(format!(":ssao-directions {}", val)); }
+            }
             "--ssao-composite" => {
                 if let Some(val) = args.next() { cmds.push(format!(":ssao-composite {}", val)); }
             }
@@ -172,6 +192,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--ssgi-temporal-alpha" => {
                 if let Some(val) = args.next() { cmds.push(format!(":ssgi-temporal-alpha {}", val)); }
+            }
+            "--ao-blur" => {
+                if let Some(val) = args.next() { cmds.push(format!(":ao-blur {}", val)); }
+            }
+            "--ao-temporal-alpha" => {
+                if let Some(val) = args.next() { cmds.push(format!(":ao-temporal-alpha {}", val)); }
+            }
+            "--ssao-temporal-alpha" => {
+                if let Some(val) = args.next() { cmds.push(format!(":ssao-temporal-alpha {}", val)); }
             }
             "--ssr-max-steps" => {
                 if let Some(val) = args.next() { cmds.push(format!(":ssr-max-steps {}", val)); }

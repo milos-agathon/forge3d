@@ -9,6 +9,7 @@ pub mod camera_controller;
 
 use camera_controller::{CameraController, CameraMode};
 use glam::Mat4;
+use serde_json::json;
 use std::io::BufRead;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -29,6 +30,8 @@ use winit::{
 
 // Quick sanity-check version for viewer lit WGSL
 const LIT_WGSL_VERSION: u32 = 2;
+// Limit for P5.1 capture outputs (in megapixels). Images larger than this will be downscaled.
+const P51_MAX_MEGAPIXELS: f32 = 2.0;
 
 // ------------------------------
 // HUD seven-seg numeric helpers
@@ -291,6 +294,8 @@ pub struct Viewer {
     snapshot_request: Option<String>,
     // Offscreen color to read back when snapshotting this frame
     pending_snapshot_tex: Option<wgpu::Texture>,
+    // P5.1: deferred capture kind to process after rendering
+    pending_capture: Option<CaptureKind>,
     // GBuffer geometry pipeline and resources
     geom_bind_group_layout: Option<wgpu::BindGroupLayout>,
     geom_pipeline: Option<wgpu::RenderPipeline>,
@@ -455,6 +460,68 @@ impl FpsCounter {
 }
 
 impl Viewer {
+    // Compute mean luma in a region of an RGBA8 buffer
+    fn mean_luma_region(buf: &Vec<u8>, w: u32, h: u32, x0: u32, y0: u32, rw: u32, rh: u32) -> f32 {
+        let (w, h) = (w as usize, h as usize);
+        let (x0, y0, rw, rh) = (x0 as usize, y0 as usize, rw as usize, rh as usize);
+        let mut sum = 0.0f64; let mut count = 0usize;
+        for y in y0..(y0+rh).min(h) {
+            for x in x0..(x0+rw).min(w) {
+                let i = (y*w + x) * 4; let r=buf[i] as f32; let g=buf[i+1] as f32; let b=buf[i+2] as f32;
+                let l = 0.2126*r + 0.7152*g + 0.0722*b; sum += (l/255.0) as f64; count += 1;
+            }
+        }
+        if count==0 { 0.0 } else { (sum / count as f64) as f32 }
+    }
+
+    // Compute variance of luma over entire RGBA8 image
+    fn variance_luma(buf: &Vec<u8>, w: u32, h: u32) -> f32 {
+        let (w, h) = (w as usize, h as usize);
+        let n = (w*h).max(1);
+        let mut sum=0.0f64; let mut sum2=0.0f64;
+        for i in (0..(n*4)).step_by(4) { let r=buf[i] as f32; let g=buf[i+1] as f32; let b=buf[i+2] as f32; let l=(0.2126*r+0.7152*g+0.0722*b)/255.0; sum += l as f64; sum2 += (l*l) as f64; }
+        let mean = sum / n as f64; let var = (sum2 / n as f64) - mean*mean; var.max(0.0) as f32
+    }
+
+    // Write or update p5_1_meta.json with provided patcher
+    fn write_p51_meta<F: FnOnce(&mut std::collections::BTreeMap<String, serde_json::Value>)>(&self, patch: F) -> anyhow::Result<()> {
+        use std::fs;
+        use std::io::Write;
+        let out_dir = std::path::Path::new("reports/p5_1");
+        fs::create_dir_all(out_dir)?;
+        let path = out_dir.join("p5_1_meta.json");
+        let mut meta: std::collections::BTreeMap<String, serde_json::Value> = if path.exists() {
+            let txt = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
+            serde_json::from_str(&txt).unwrap_or_default()
+        } else { std::collections::BTreeMap::new() };
+
+        // Add static hashes of WGSL sources
+        let ssao_src = include_str!("../shaders/ssao.wgsl");
+        let blur_src = include_str!("../shaders/filters/bilateral_separable.wgsl");
+        let temporal_src = include_str!("../shaders/temporal/resolve_ao.wgsl");
+        let mut h = std::collections::BTreeMap::new();
+        h.insert("ssao.wgsl".to_string(), Self::sha256_hex(ssao_src));
+        h.insert("bilateral_separable.wgsl".to_string(), Self::sha256_hex(blur_src));
+        h.insert("resolve_ao.wgsl".to_string(), Self::sha256_hex(temporal_src));
+        meta.insert("hashes".to_string(), json!(h));
+
+        // Allow caller to patch dynamic fields
+        patch(&mut meta);
+
+        // Status default
+        meta.entry("status".to_string()).or_insert(json!("OK"));
+
+        let mut f = fs::File::create(&path)?;
+        f.write_all(serde_json::to_string_pretty(&meta)?.as_bytes())?;
+        println!("[P5.1] Wrote {}", path.display());
+        Ok(())
+    }
+
+    fn sha256_hex(s: &str) -> String {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new(); hasher.update(s.as_bytes()); let out = hasher.finalize();
+        out.iter().map(|b| format!("{:02x}", b)).collect()
+    }
     // Read back a surface or offscreen texture and save as PNG (RGBA8/BGRA8 only)
     fn snapshot_swapchain_to_png(&mut self, tex: &wgpu::Texture, path: &str) -> anyhow::Result<()> {
         use anyhow::{bail, Context};
@@ -655,7 +722,7 @@ impl Viewer {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Depth32Float,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
             let z_view = z_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -995,6 +1062,10 @@ impl Viewer {
                             // depth: view-space depth mapped by far
                             let d = clamp(c.r / max(0.0001, uComp.far), 0.0, 1.0);
                             c = vec4<f32>(d, d, d, 1.0);
+                        } else if (uComp.mode == 3u) {
+                            // AO/debug grayscale from single-channel source (no sky/fog composite)
+                            let r = textureSample(gbuf_tex, gbuf_sam, uv).r;
+                            c = vec4<f32>(r, r, r, 1.0);
                         } else {
                             // Composite sky behind geometry when depth indicates background
                             let dval = textureSample(depth_tex, gbuf_sam, uv).r;
@@ -1117,7 +1188,9 @@ impl Viewer {
                     var n = textureLoad(normal_tex, coord, 0).xyz; // view-space [-1,1]
                     n = normalize(n);
                     let a = textureLoad(albedo_tex, coord, 0).rgb;
-                    let l = normalize(P.sun_dir_and_intensity.xyz);
+                    // Interpret P.sun_dir as the direction FROM light to the origin.
+                    // Use L = -sun_dir (direction from point TO the light).
+                    let l = -normalize(P.sun_dir_and_intensity.xyz);
                     let rough = clamp(P.debug_extra.x, 0.0, 1.0);
                     let dbg = u32(P.debug_extra.y + 0.5);
 
@@ -1161,9 +1234,9 @@ impl Viewer {
                             let specular = F * D; // skip G for simplicity in viewer
                             col = (diffuse + specular) * P.sun_dir_and_intensity.w * ndl;
                         }
-                        // Add a small ambient term
-                        col += 0.1 * a;
                     }
+                    // Add a small ambient term always so fully unlit pixels are not black
+                    col += 0.1 * a;
                     // Debug 2: NDF-only GGX grayscale
                     if (dbg == 2u) {
                         let v = vec3<f32>(0.0, 0.0, 1.0);
@@ -1597,6 +1670,7 @@ impl Viewer {
             gi,
             snapshot_request: None,
             pending_snapshot_tex: None,
+            pending_capture: None,
             geom_bind_group_layout,
             geom_pipeline,
             geom_camera_buffer,
@@ -1764,7 +1838,7 @@ impl Viewer {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: wgpu::TextureFormat::Depth32Float,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
                     view_formats: &[],
                 });
                 let z_view = z_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -2610,12 +2684,18 @@ impl Viewer {
             ));
         }
 
+        // Process any pending P5.1 capture requests using current frame data
+        if let Some(kind) = self.pending_capture.take() {
+            match kind {
+                CaptureKind::P51CornellSplit => if let Err(e) = self.capture_p51_cornell_split() { eprintln!("[P5.1] Cornell split failed: {}", e); },
+                CaptureKind::P51AoGrid => if let Err(e) = self.capture_p51_ao_grid() { eprintln!("[P5.1] AO grid failed: {}", e); },
+                CaptureKind::P51ParamSweep => if let Err(e) = self.capture_p51_param_sweep() { eprintln!("[P5.1] AO sweep failed: {}", e); },
+            }
+        }
+
         Ok(())
     }
 
-    pub fn fps(&self) -> f32 {
-        self.fps_counter.fps()
-    }
 }
 
 impl Viewer {
@@ -2748,71 +2828,434 @@ impl Viewer {
         println!("[P5] Wrote reports/p5 artifacts");
         Ok(())
     }
+
+    // ---------- P5.1 capture helpers ----------
+    fn render_view_to_rgba8_ex(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        comp_pl: &wgpu::RenderPipeline,
+        comp_bgl: &wgpu::BindGroupLayout,
+        sky_view: &wgpu::TextureView,
+        depth_view: &wgpu::TextureView,
+        fog_view: &wgpu::TextureView,
+        surface_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        far: f32,
+        src_view: &wgpu::TextureView,
+        mode: u32,
+    ) -> anyhow::Result<Vec<u8>> {
+        use anyhow::Context;
+        // Uniform for mode and far
+        let params: [f32;4] = [mode as f32, far, 0.0, 0.0];
+        let ub = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("p51.comp.params"), contents: bytemuck::cast_slice(&params), usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST });
+        // Sampler
+        let comp_sampler = device.create_sampler(&wgpu::SamplerDescriptor { label: Some("p51.comp.sampler"), mag_filter: wgpu::FilterMode::Nearest, min_filter: wgpu::FilterMode::Nearest, mipmap_filter: wgpu::FilterMode::Nearest, ..Default::default() });
+        // Bind group
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("p51.comp.bg"),
+            layout: comp_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(src_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&comp_sampler) },
+                wgpu::BindGroupEntry { binding: 2, resource: ub.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(sky_view) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(depth_view) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(fog_view) },
+            ],
+        });
+        // Offscreen texture
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("p51.offscreen"), size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 }, mip_level_count: 1, sample_count: 1,
+            dimension: wgpu::TextureDimension::D2, format: surface_format, usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC, view_formats: &[],
+        });
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("p51.comp.encoder") });
+        {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("p51.comp.pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }), store: wgpu::StoreOp::Store } })],
+                depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None,
+            });
+            pass.set_pipeline(comp_pl);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        queue.submit(std::iter::once(enc.finish()));
+        // Read back and format
+        let mut data = read_texture_tight(device, queue, &tex, (width, height), surface_format)
+            .context("read back offscreen")?;
+        match surface_format { wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
+            for px in data.chunks_exact_mut(4) { px.swap(0,2); }
+        }, _ => {} }
+        Ok(data)
+    }
+
+    // Simple bilinear downscale for tightly-packed RGBA8 buffers
+    fn downscale_rgba8_bilinear(src: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
+        if dst_w == 0 || dst_h == 0 { return Vec::new(); }
+        if src_w == dst_w && src_h == dst_h { return src.to_vec(); }
+        let s_w = src_w as usize; let s_h = src_h as usize; let d_w = dst_w as usize; let d_h = dst_h as usize;
+        let mut out = vec![0u8; d_w * d_h * 4];
+        let scale_x = src_w as f32 / dst_w as f32;
+        let scale_y = src_h as f32 / dst_h as f32;
+        for dy in 0..d_h {
+            let sy = (dy as f32 + 0.5) * scale_y - 0.5;
+            let y0 = sy.floor().max(0.0) as i32;
+            let y1 = (y0 + 1).min(src_h as i32 - 1);
+            let wy = (sy - y0 as f32).clamp(0.0, 1.0);
+            for dx in 0..d_w {
+                let sx = (dx as f32 + 0.5) * scale_x - 0.5;
+                let x0 = sx.floor().max(0.0) as i32;
+                let x1 = (x0 + 1).min(src_w as i32 - 1);
+                let wx = (sx - x0 as f32).clamp(0.0, 1.0);
+                let i00 = ((y0 as usize) * s_w + (x0 as usize)) * 4;
+                let i10 = ((y0 as usize) * s_w + (x1 as usize)) * 4;
+                let i01 = ((y1 as usize) * s_w + (x0 as usize)) * 4;
+                let i11 = ((y1 as usize) * s_w + (x1 as usize)) * 4;
+                let o = (dy * d_w + dx) * 4;
+                for c in 0..4 {
+                    let p00 = src[i00 + c] as f32;
+                    let p10 = src[i10 + c] as f32;
+                    let p01 = src[i01 + c] as f32;
+                    let p11 = src[i11 + c] as f32;
+                    let top = p00 * (1.0 - wx) + p10 * wx;
+                    let bot = p01 * (1.0 - wx) + p11 * wx;
+                    let val = top * (1.0 - wy) + bot * wy;
+                    out[o + c] = val.round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        out
+    }
+
+    fn capture_p51_cornell_split(&mut self) -> anyhow::Result<()> {
+        use anyhow::{Context, bail};
+        use std::fs; let out_dir = std::path::Path::new("reports/p5_1"); fs::create_dir_all(out_dir)?;
+        let (off_bytes, on_bytes, w, h) = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            let (w,h) = gi.gbuffer().dimensions();
+            let comp_pl = self.comp_pipeline.as_ref().context("comp pipeline")?;
+            let comp_bgl = self.comp_bind_group_layout.as_ref().context("comp bgl")?;
+            let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
+            let off_bytes = Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gi.gbuffer().depth_view, if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view }, self.config.format, self.config.width, self.config.height, far, &gi.gbuffer().material_view, 0)?;
+            let on_view = gi.material_with_ao_view().unwrap_or(&gi.gbuffer().material_view);
+            let on_bytes = Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gi.gbuffer().depth_view, if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view }, self.config.format, self.config.width, self.config.height, far, on_view, 0)?;
+            (off_bytes, on_bytes, w, h)
+        };
+        // Assemble side-by-side
+        let mut out = vec![0u8; (w*2*h*4) as usize];
+        for y in 0..h as usize {
+            let row_off = &off_bytes[(y*(w as usize)*4)..((y+1)*(w as usize)*4)];
+            let row_on  = &on_bytes [(y*(w as usize)*4)..((y+1)*(w as usize)*4)];
+            let dst = &mut out[(y*(2*w as usize)*4)..((y+1)*(2*w as usize)*4)];
+            dst[..(w as usize*4)].copy_from_slice(row_off);
+            dst[(w as usize*4)..].copy_from_slice(row_on);
+        }
+        // Downscale if the composite exceeds the pixel budget
+        let out_w = w * 2; let out_h = h;
+        let max_px = (P51_MAX_MEGAPIXELS * 1_000_000.0) as f64;
+        let px = (out_w as u64 as f64) * (out_h as u64 as f64);
+        let mut write_buf: Vec<u8>;
+        let (final_w, final_h, data_ref): (u32, u32, &[u8]) = if px > max_px {
+            let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
+            let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
+            let dh = (out_h as f64 * scale).floor().max(1.0) as u32;
+            write_buf = Self::downscale_rgba8_bilinear(&out, out_w, out_h, dw, dh);
+            (dw, dh, &write_buf)
+        } else {
+            (out_w, out_h, &out)
+        };
+        crate::util::image_write::write_png_rgba8_small(&out_dir.join("ao_cornell_off_on.png"), data_ref, final_w, final_h)?;
+        if final_w != out_w || final_h != out_h {
+            println!("[P5.1] downscaled Cornell capture to {}x{} (from {}x{})", final_w, final_h, out_w, out_h);
+        }
+        println!("[P5.1] Wrote reports/p5_1/ao_cornell_off_on.png");
+
+        // Derive specular preservation metric from OFF vs ON split
+        // Use top-1% brightest pixels by luma in OFF image then compare delta with ON
+        let mut off_lumas: Vec<f32> = Vec::with_capacity((w*h) as usize);
+        let mut on_lumas: Vec<f32> = Vec::with_capacity((w*h) as usize);
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let i = (y*w as usize + x) * 4;
+                let lo = 0.2126*(off_bytes[i] as f32) + 0.7152*(off_bytes[i+1] as f32) + 0.0722*(off_bytes[i+2] as f32);
+                let ln = 0.2126*(on_bytes[i] as f32) + 0.7152*(on_bytes[i+1] as f32) + 0.0722*(on_bytes[i+2] as f32);
+                off_lumas.push(lo/255.0);
+                on_lumas.push(ln/255.0);
+            }
+        }
+        let mut idxs: Vec<usize> = (0..off_lumas.len()).collect();
+        idxs.sort_by(|&a,&b| off_lumas[b].partial_cmp(&off_lumas[a]).unwrap_or(std::cmp::Ordering::Equal));
+        let top_n = (off_lumas.len() as f32 * 0.01).ceil() as usize;
+        let top_n = top_n.max(1).min(off_lumas.len());
+        let mut sum_off=0.0; let mut sum_on=0.0;
+        for k in 0..top_n { let i = idxs[k]; sum_off += off_lumas[i]; sum_on += on_lumas[i]; }
+        let mean_off = sum_off / top_n as f32;
+        let mean_on  = sum_on  / top_n as f32;
+        let spec_delta = (mean_on - mean_off).abs();
+        let specular_preservation = if spec_delta <= 0.01 { "PASS" } else { "FAIL" };
+        self.write_p51_meta(|meta| {
+            meta.insert("specular_preservation".to_string(), json!(format!("{} (delta={:.4})", specular_preservation, spec_delta)));
+        })?;
+        Ok(())
+    }
+
+    fn reexecute_ssao_with(&mut self, technique: u32) -> anyhow::Result<()> {
+        use anyhow::Context;
+        if let Some(ref mut gi) = self.gi {
+            // Ensure SSAO is enabled so AO AOVs are allocated
+            if !gi.is_enabled(crate::core::screen_space_effects::ScreenSpaceEffect::SSAO) {
+                let _ = gi.enable_effect(&self.device, crate::core::screen_space_effects::ScreenSpaceEffect::SSAO);
+            }
+            gi.update_ssao_settings(&self.queue, |s| { s.technique = technique; });
+            // Rebuild HZB and execute
+            let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("p51.ssao.reexec") });
+            gi.build_hzb(&self.device, &mut enc, self.z_view.as_ref().unwrap(), false);
+            let _ = gi.execute(&self.device, &mut enc);
+            self.queue.submit(std::iter::once(enc.finish()));
+        }
+        Ok(())
+    }
+
+    fn capture_p51_ao_grid(&mut self) -> anyhow::Result<()> {
+        use anyhow::{Context, bail};
+        use std::fs; let out_dir = std::path::Path::new("reports/p5_1"); fs::create_dir_all(out_dir)?;
+        let (w,h) = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            gi.gbuffer().dimensions()
+        };
+        // Grid layout: rows = [SSAO, GTAO], cols = [raw, blurred, resolved, composited]
+        let mut tiles: Vec<Vec<u8>> = Vec::new();
+        for tech in [0u32, 1u32].iter() {
+            self.reexecute_ssao_with(*tech)?;
+            let (raw_bytes, blur_bytes, res_bytes, comp_bytes) = {
+                let gi = self.gi.as_ref().unwrap();
+                let comp_pl = self.comp_pipeline.as_ref().context("comp pipeline")?;
+                let comp_bgl = self.comp_bind_group_layout.as_ref().context("comp bgl")?;
+                let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
+                let raw = gi.ao_raw_view().context("raw AO view missing")?;
+                let blur = gi.ao_blur_view().context("blur AO view missing")?;
+                let res = gi.ao_resolved_view().context("resolved AO view missing")?;
+                let comp_view = gi.material_with_ao_view().unwrap_or(&gi.gbuffer().material_view);
+                let fog_v = if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view };
+                let raw_b = Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gi.gbuffer().depth_view, fog_v, self.config.format, self.config.width, self.config.height, far, raw, 3)?;
+                let blur_b = Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gi.gbuffer().depth_view, fog_v, self.config.format, self.config.width, self.config.height, far, blur, 3)?;
+                let res_b = Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gi.gbuffer().depth_view, fog_v, self.config.format, self.config.width, self.config.height, far, res, 3)?;
+                let comp_b = Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gi.gbuffer().depth_view, fog_v, self.config.format, self.config.width, self.config.height, far, comp_view, 0)?;
+                (raw_b, blur_b, res_b, comp_b)
+            };
+            tiles.push(raw_bytes);
+            tiles.push(blur_bytes);
+            tiles.push(res_bytes);
+            tiles.push(comp_bytes);
+        }
+        // Assemble 4x2 grid
+        let grid_w = (w*4) as usize; let grid_h = (h*2) as usize; let mut out = vec![0u8; grid_w*grid_h*4];
+        for row in 0..2usize { for col in 0..4usize {
+            let idx = row*4 + col; let tile = &tiles[idx];
+            for y in 0..(h as usize) {
+                let src = &tile[(y*(w as usize)*4)..((y+1)*(w as usize)*4)];
+                let dst_y = row*(h as usize) + y; let dst_x = col*(w as usize);
+                let dst_off = (dst_y*grid_w + dst_x)*4;
+                out[dst_off..dst_off + (w as usize*4)].copy_from_slice(src);
+            }
+        }}
+        // Downscale if needed
+        let out_w = grid_w as u32; let out_h = grid_h as u32;
+        let max_px = (P51_MAX_MEGAPIXELS * 1_000_000.0) as f64;
+        let px = (out_w as u64 as f64) * (out_h as u64 as f64);
+        let mut write_buf: Vec<u8>;
+        let (final_w, final_h, data_ref): (u32, u32, &[u8]) = if px > max_px {
+            let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
+            let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
+            let dh = (out_h as f64 * scale).floor().max(1.0) as u32;
+            write_buf = Self::downscale_rgba8_bilinear(&out, out_w, out_h, dw, dh);
+            (dw, dh, &write_buf)
+        } else {
+            (out_w, out_h, &out)
+        };
+        crate::util::image_write::write_png_rgba8_small(&out_dir.join("ao_buffers_grid.png"), data_ref, final_w, final_h)?;
+        if final_w != out_w || final_h != out_h {
+            println!("[P5.1] downscaled Grid capture to {}x{} (from {}x{})", final_w, final_h, out_w, out_h);
+        }
+        println!("[P5.1] Wrote reports/p5_1/ao_buffers_grid.png");
+
+        // Compute metrics from the last technique (GTAO = technique=1)
+        if let Some((raw, blur, res)) = tiles.get(tiles.len().saturating_sub(3)..).and_then(|s| Some((&s[0], &s[1], &s[2]))) {
+            // Mean in center 10%x10% region and corner 10%x10%
+            let (cw, ch) = (w as usize, h as usize);
+            let rx = cw/10; let ry = ch/10;
+            let cx0 = cw/2 - rx/2; let cy0 = ch/2 - ry/2;
+            let corner_x0 = 0usize; let corner_y0 = 0usize;
+            let mean_center = Self::mean_luma_region(res, w, h, cx0 as u32, cy0 as u32, rx as u32, ry as u32);
+            let mean_corner = Self::mean_luma_region(res, w, h, corner_x0 as u32, corner_y0 as u32, rx as u32, ry as u32);
+            // Variance reduction from raw -> blur
+            let var_raw = Self::variance_luma(raw, w, h);
+            let var_blur = Self::variance_luma(blur, w, h);
+            let reduction = if var_raw > 1e-6 { ((var_raw - var_blur)/var_raw * 100.0).max(0.0) } else { 0.0 };
+
+            self.write_p51_meta(|meta| {
+                // Params/technique
+                if let Some(ref gi) = self.gi {
+                    let s = gi.ssao_settings();
+                    let technique = if s.technique == 0 { "SSAO" } else { "GTAO" };
+                    meta.insert("technique".to_string(), json!(technique));
+                    meta.insert("params".to_string(), json!({
+                        "radius": s.radius,
+                        "intensity": s.intensity,
+                        "bias": s.bias,
+                        "temporal_alpha": gi.ssao_temporal_alpha(),
+                        "blur": true,
+                        "samples": s.num_samples,
+                        "directions": if s.technique==0 { 0 } else { (s.num_samples/4).max(1) }
+                    }));
+                }
+                // Metrics
+                meta.insert("corner_ao_mean".to_string(), json!(mean_corner));
+                meta.insert("center_ao_mean".to_string(), json!(mean_center));
+                meta.insert("blur_gradient_reduction".to_string(), json!(reduction));
+            })?;
+        }
+        Ok(())
+    }
+
+    fn capture_p51_param_sweep(&mut self) -> anyhow::Result<()> {
+        use std::fs; use anyhow::Context;
+        let out_dir = std::path::Path::new("reports/p5_1"); fs::create_dir_all(out_dir)?;
+        let (w,h) = { let gi = self.gi.as_ref().context("GI manager not available")?; gi.gbuffer().dimensions() };
+        let radii = [0.25f32, 0.5, 1.0];
+        let intens = [0.5f32, 1.0, 1.5];
+        let mut tiles: Vec<Vec<u8>> = Vec::new();
+        for &r in &radii {
+            for &i in &intens {
+                if let Some(ref mut gim) = self.gi {
+                    gim.update_ssao_settings(&self.queue, |s| { s.radius = r; s.intensity = i; });
+                    let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("p51.sweep.exec") });
+                    gim.build_hzb(&self.device, &mut enc, self.z_view.as_ref().unwrap(), false);
+                    let _ = gim.execute(&self.device, &mut enc);
+                    self.queue.submit(std::iter::once(enc.finish()));
+                    let (tile_bytes) = {
+                        let comp_pl = self.comp_pipeline.as_ref().context("comp pipeline")?;
+                        let comp_bgl = self.comp_bind_group_layout.as_ref().context("comp bgl")?;
+                        let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
+                        let view = gim.material_with_ao_view().unwrap_or(&gim.gbuffer().material_view);
+                        let fog_v = if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view };
+                        Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gim.gbuffer().depth_view, fog_v, self.config.format, self.config.width, self.config.height, far, view, 0)?
+                    };
+                    tiles.push(tile_bytes);
+                }
+            }
+        }
+        // Assemble 3x3 grid (rows=radii, cols=intens)
+        let grid_w = (w*3) as usize; let grid_h = (h*3) as usize; let mut out = vec![0u8; grid_w*grid_h*4];
+        for ri in 0..3usize { for ci in 0..3usize {
+            let idx = ri*3 + ci; let tile = &tiles[idx];
+            for y in 0..(h as usize) {
+                let src = &tile[(y*(w as usize)*4)..((y+1)*(w as usize)*4)];
+                let dst_y = ri*(h as usize) + y; let dst_x = ci*(w as usize);
+                let dst_off = (dst_y*grid_w + dst_x)*4;
+                out[dst_off..dst_off + (w as usize*4)].copy_from_slice(src);
+            }
+        }}
+        // Downscale if needed
+        let out_w = grid_w as u32; let out_h = grid_h as u32;
+        let max_px = (P51_MAX_MEGAPIXELS * 1_000_000.0) as f64;
+        let px = (out_w as u64 as f64) * (out_h as u64 as f64);
+        let mut write_buf: Vec<u8>;
+        let (final_w, final_h, data_ref): (u32, u32, &[u8]) = if px > max_px {
+            let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
+            let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
+            let dh = (out_h as f64 * scale).floor().max(1.0) as u32;
+            write_buf = Self::downscale_rgba8_bilinear(&out, out_w, out_h, dw, dh);
+            (dw, dh, &write_buf)
+        } else {
+            (out_w, out_h, &out)
+        };
+        crate::util::image_write::write_png_rgba8_small(&out_dir.join("ao_params_sweep.png"), data_ref, final_w, final_h)?;
+        if final_w != out_w || final_h != out_h {
+            println!("[P5.1] downscaled Sweep capture to {}x{} (from {}x{})", final_w, final_h, out_w, out_h);
+        }
+        println!("[P5.1] Wrote reports/p5_1/ao_params_sweep.png");
+        Ok(())
+    }
 }
 
-// Simple command interface event type carried by the winit EventLoop
-#[derive(Debug, Clone)]
-enum ViewerCmd {
-    GiToggle(&'static str, bool), // ("ssao"|"ssgi"|"ssr", on)
-    Snapshot(Option<String>),
-    DumpGbuffer, // P5: dump normals/material/depth HZB mips + meta
-    LoadObj(String),
-    LoadGltf(String),
-    SetViz(String),
-    LoadIbl(String),
-    IblToggle(bool),
-    IblIntensity(f32),
-    IblRotate(f32),
-    IblCache(Option<String>),
-    IblRes(u32),
-    #[allow(dead_code)] SetSsaoRadius(f32),
-    #[allow(dead_code)] SetSsaoIntensity(f32),
-    #[allow(dead_code)] SetSsgiSteps(u32),
-    #[allow(dead_code)] SetSsgiRadius(f32),
-    #[allow(dead_code)] SetSsrMaxSteps(u32),
-    #[allow(dead_code)] SetSsrThickness(f32),
-    #[allow(dead_code)] SetSsgiHalf(bool),
-    #[allow(dead_code)] SetSsgiTemporalAlpha(f32),
-    #[allow(dead_code)] SetSsaoTechnique(u32),
-    #[allow(dead_code)] SetVizDepthMax(f32),
-    #[allow(dead_code)] SetFov(f32),
-    #[allow(dead_code)] SetCamLookAt { eye: [f32;3], target: [f32;3], up: [f32;3] },
-    #[allow(dead_code)] SetSize(u32, u32),
-    #[allow(dead_code)] SetSsaoComposite(bool),
-    #[allow(dead_code)] SetSsaoCompositeMul(f32),
-    // SSGI edge-aware upsample controls
-    #[allow(dead_code)] SetSsgiEdges(bool),
-    #[allow(dead_code)] SetSsgiUpsigma(f32),
-    #[allow(dead_code)] SetSsgiNormalExp(f32),
-    // Lit viz controls
-    SetLitSun(f32),
-    SetLitIbl(f32),
-    SetLitBrdf(u32),
-    SetLitRough(f32),
-    SetLitDebug(u32),
-    // Sky controls
-    SkyToggle(bool),
-    SkySetModel(u32), // 0=Preetham,1=Hosek-Wilkie
-    SkySetTurbidity(f32),
-    SkySetGround(f32),
-    SkySetExposure(f32),
-    SkySetSunIntensity(f32),
-    // Fog controls
-    FogToggle(bool),
-    FogSetDensity(f32),
-    FogSetG(f32),
-    FogSetSteps(u32),
-    FogSetShadow(bool),
-    FogSetTemporal(f32),
-    SetFogMode(u32),
-    FogPreset(u32),
-    // P6-10 half-res upsample controls
-    FogHalf(bool),
-    FogEdges(bool),
-    FogUpsigma(f32),
-    HudToggle(bool),
-    Quit,
-}
+    // Simple command interface event type carried by the winit EventLoop
+    #[derive(Debug, Clone)]
+    enum ViewerCmd {
+        GiToggle(&'static str, bool), // ("ssao"|"ssgi"|"ssr", on)
+        Snapshot(Option<String>),
+        DumpGbuffer, // P5: dump normals/material/depth HZB mips + meta
+        Quit,
+        LoadObj(String),
+        LoadGltf(String),
+        SetViz(String),
+        LoadIbl(String),
+        IblToggle(bool),
+        IblIntensity(f32),
+        IblRotate(f32),
+        IblCache(Option<String>),
+        IblRes(u32),
+        #[allow(dead_code)] SetSsaoRadius(f32),
+        #[allow(dead_code)] SetSsaoIntensity(f32),
+        #[allow(dead_code)] SetSsaoBias(f32),
+        #[allow(dead_code)] SetSsgiSteps(u32),
+        #[allow(dead_code)] SetSsgiRadius(f32),
+        #[allow(dead_code)] SetSsrMaxSteps(u32),
+        #[allow(dead_code)] SetSsrThickness(f32),
+        #[allow(dead_code)] SetSsgiHalf(bool),
+        #[allow(dead_code)] SetSsgiTemporalAlpha(f32), // existing SSGI
+        #[allow(dead_code)] SetAoTemporalAlpha(f32),   // new: AO temporal alpha
+        // SSAO-specific controls
+        #[allow(dead_code)] SetSsaoSamples(u32),
+        #[allow(dead_code)] SetSsaoDirections(u32),
+        #[allow(dead_code)] SetSsaoTemporalAlpha(f32), // alias of SetAoTemporalAlpha
+        #[allow(dead_code)] SetSsaoTechnique(u32),
+        #[allow(dead_code)] SetVizDepthMax(f32),
+        #[allow(dead_code)] SetFov(f32),
+        #[allow(dead_code)] SetCamLookAt { eye: [f32;3], target: [f32;3], up: [f32;3] },
+        #[allow(dead_code)] SetSize(u32, u32),
+        #[allow(dead_code)] SetSsaoComposite(bool),
+        #[allow(dead_code)] SetSsaoCompositeMul(f32),
+        // AO blur toggle
+        #[allow(dead_code)] SetAoBlur(bool),
+        // SSGI edge-aware upsample controls
+        #[allow(dead_code)] SetSsgiEdges(bool),
+        #[allow(dead_code)] SetSsgiUpsigma(f32),
+        #[allow(dead_code)] SetSsgiNormalExp(f32),
+        // Lit viz controls
+        SetLitSun(f32),
+        SetLitIbl(f32),
+        SetLitBrdf(u32),
+        SetLitRough(f32),
+        SetLitDebug(u32),
+        // Sky controls
+        SkyToggle(bool),
+        SkySetModel(u32), // 0=Preetham,1=Hosek-Wilkie
+        SkySetTurbidity(f32),
+        SkySetGround(f32),
+        SkySetExposure(f32),
+        SkySetSunIntensity(f32),
+        // Fog controls
+        FogToggle(bool),
+        FogSetDensity(f32),
+        FogSetG(f32),
+        FogSetSteps(u32),
+        FogSetShadow(bool),
+        FogSetTemporal(f32),
+        SetFogMode(u32),
+        FogPreset(u32),
+        // P6-10 half-res upsample controls
+        FogHalf(bool),
+        FogEdges(bool),
+        FogUpsigma(f32),
+        HudToggle(bool),
+        // P5.1: AO artifact captures
+        CaptureP51Cornell,
+        CaptureP51Grid,
+        CaptureP51Sweep,
+    }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VizMode { Material, Normal, Depth, Gi, Lit }
@@ -2820,9 +3263,17 @@ enum VizMode { Material, Normal, Depth, Gi, Lit }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FogMode { Raymarch, Froxels }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptureKind {
+    P51CornellSplit,
+    P51AoGrid,
+    P51ParamSweep,
+}
+
 impl Viewer {
     fn handle_cmd(&mut self, cmd: ViewerCmd) {
         match cmd {
+            ViewerCmd::Quit => { /* handled in event loop */ }
             ViewerCmd::GiToggle(effect, on) => {
                 use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
                 let eff = match effect {
@@ -2846,6 +3297,22 @@ impl Viewer {
             }
             ViewerCmd::DumpGbuffer => {
                 self.dump_p5_requested = true;
+            }
+            // SSAO parameter updates
+            ViewerCmd::SetSsaoSamples(n) => {
+                if let Some(ref mut gi) = self.gi {
+                    gi.update_ssao_settings(&self.queue, |s| { s.num_samples = n.max(1); });
+                }
+            }
+            ViewerCmd::SetSsaoDirections(dirs) => {
+                // Our GTAO shader derives direction_count = max(num_samples/4,2). Map `dirs` to num_samples = dirs*4.
+                if let Some(ref mut gi) = self.gi {
+                    let ns = dirs.saturating_mul(4).max(8); // ensure a reasonable floor
+                    gi.update_ssao_settings(&self.queue, |s| { s.num_samples = ns; });
+                }
+            }
+            ViewerCmd::SetSsaoTemporalAlpha(a) | ViewerCmd::SetAoTemporalAlpha(a) => {
+                if let Some(ref mut gi) = self.gi { gi.set_ssao_temporal_alpha(&self.queue, a); }
             }
             ViewerCmd::Snapshot(path) => {
                 let p = path.unwrap_or_else(|| "snapshot.png".to_string());
@@ -2916,6 +3383,10 @@ impl Viewer {
                 self.lit_debug_mode = match m { 1|2 => m, _ => 0 };
                 self.update_lit_uniform();
             }
+            // P5.1 capture commands
+            ViewerCmd::CaptureP51Cornell => { self.pending_capture = Some(CaptureKind::P51CornellSplit); println!("[P5.1] capture: Cornell OFF/ON split queued"); }
+            ViewerCmd::CaptureP51Grid => { self.pending_capture = Some(CaptureKind::P51AoGrid); println!("[P5.1] capture: AO buffers grid queued"); }
+            ViewerCmd::CaptureP51Sweep => { self.pending_capture = Some(CaptureKind::P51ParamSweep); println!("[P5.1] capture: AO parameter sweep queued"); }
             // Sky controls
             ViewerCmd::SkyToggle(on) => { self.sky_enabled = on; }
             ViewerCmd::SkySetModel(id) => { self.sky_model_id = id; self.sky_enabled = true; }
@@ -3055,13 +3526,45 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
             if l.starts_with(":gi") || l.starts_with("gi ") {
                 let toks: Vec<&str> = l.trim_start_matches(":").split_whitespace().collect();
                 if toks.len() >= 3 {
-                    let eff = match toks[1] { "ssao"|"ssgi"|"ssr" => toks[1], _ => continue };
+                    let eff = match toks[1] { "ssao"|"ssgi"|"ssr"|"gtao" => toks[1], _ => continue };
                     let on = matches!(toks[2], "on"|"1"|"true");
-                    pending_cmds.push(ViewerCmd::GiToggle(match eff {"ssao"=>"ssao","ssgi"=>"ssgi","ssr"=>"ssr", _=>"ssao"}, on));
+                    if eff == "gtao" {
+                        // Enable SSAO and set technique to GTAO when turning on
+                        pending_cmds.push(ViewerCmd::GiToggle("ssao", on));
+                        if on { pending_cmds.push(ViewerCmd::SetSsaoTechnique(1)); }
+                    } else {
+                        pending_cmds.push(ViewerCmd::GiToggle(match eff {"ssao"=>"ssao","ssgi"=>"ssgi","ssr"=>"ssr", _=>"ssao"}, on));
+                    }
                 }
             } else if l.starts_with(":snapshot") || l.starts_with("snapshot ") {
                 let path = l.split_whitespace().nth(1).map(|s| s.to_string());
                 pending_cmds.push(ViewerCmd::Snapshot(path));
+            } else if l.starts_with(":ssao-radius") || l.starts_with("ssao-radius ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsaoRadius(val)); }
+            } else if l.starts_with(":ssao-intensity") || l.starts_with("ssao-intensity ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsaoIntensity(val)); }
+            } else if l.starts_with(":ssao-bias") || l.starts_with("ssao-bias ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsaoBias(val)); }
+            } else if l.starts_with(":ssao-samples") || l.starts_with("ssao-samples ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) { pending_cmds.push(ViewerCmd::SetSsaoSamples(val)); }
+            } else if l.starts_with(":ssao-directions") || l.starts_with("ssao-directions ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) { pending_cmds.push(ViewerCmd::SetSsaoDirections(val)); }
+            } else if l.starts_with(":ssao-temporal-alpha") || l.starts_with("ssao-temporal-alpha ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsaoTemporalAlpha(val)); }
+            } else if l.starts_with(":ssao-blur") || l.starts_with("ssao-blur ") {
+                if let Some(tok) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::SetAoBlur(matches!(tok, "on"|"1"|"true"))); }
+            } else if l.starts_with(":ao-temporal-alpha") || l.starts_with("ao-temporal-alpha ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetAoTemporalAlpha(val)); }
+            } else if l.starts_with(":ao-blur") || l.starts_with("ao-blur ") {
+                if let Some(tok) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::SetAoBlur(matches!(tok, "on"|"1"|"true"))); }
+            } else if l.starts_with(":p5") || l.starts_with("p5 ") {
+                let sub = l.split_whitespace().nth(1).unwrap_or("");
+                match sub {
+                    "cornell" => pending_cmds.push(ViewerCmd::CaptureP51Cornell),
+                    "grid" => pending_cmds.push(ViewerCmd::CaptureP51Grid),
+                    "sweep" => pending_cmds.push(ViewerCmd::CaptureP51Sweep),
+                    _ => println!("Usage: :p5 <cornell|grid|sweep>"),
+                }
             } else if l.starts_with(":obj") || l.starts_with("obj ") {
                 if let Some(path) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::LoadObj(path.to_string())); }
             } else if l.starts_with(":gltf") || l.starts_with("gltf ") {
@@ -3218,15 +3721,49 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
             if l.starts_with(":gi") || l.starts_with("gi ") {
                 let toks: Vec<&str> = l.trim_start_matches(":").split_whitespace().collect();
                 if toks.len() >= 3 {
-                    let eff = match toks[1] { "ssao"|"ssgi"|"ssr" => toks[1], _ => { println!("Unknown effect '{}'", toks[1]); continue; } };
+                    let eff = match toks[1] { "ssao"|"ssgi"|"ssr"|"gtao" => toks[1], _ => { println!("Unknown effect '{}'", toks[1]); continue; } };
                     let on = match toks[2] { "on"|"1"|"true" => true, "off"|"0"|"false" => false, _ => { println!("Unknown state '{}', expected on/off", toks[2]); continue; } };
-                    let _ = proxy.send_event(ViewerCmd::GiToggle(match eff {"ssao"=>"ssao","ssgi"=>"ssgi","ssr"=>"ssr",_=>"ssao"}, on));
+                    if eff == "gtao" {
+                        let _ = proxy.send_event(ViewerCmd::GiToggle("ssao", on));
+                        if on { let _ = proxy.send_event(ViewerCmd::SetSsaoTechnique(1)); }
+                    } else {
+                        let _ = proxy.send_event(ViewerCmd::GiToggle(match eff {"ssao"=>"ssao","ssgi"=>"ssgi","ssr"=>"ssr",_=>"ssao"}, on));
+                    }
                 } else {
                     println!("Usage: :gi <ssao|ssgi|ssr> <on|off>");
                 }
             } else if l.starts_with(":snapshot") || l.starts_with("snapshot") {
                 let path = l.split_whitespace().nth(1).map(|s| s.to_string());
                 let _ = proxy.send_event(ViewerCmd::Snapshot(path));
+            } else if l.starts_with(":ssao-radius") || l.starts_with("ssao-radius ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { let _ = proxy.send_event(ViewerCmd::SetSsaoRadius(val)); } else { println!("Usage: :ssao-radius <float>"); }
+            } else if l.starts_with(":ssao-intensity") || l.starts_with("ssao-intensity ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { let _ = proxy.send_event(ViewerCmd::SetSsaoIntensity(val)); } else { println!("Usage: :ssao-intensity <float>"); }
+            } else if l.starts_with(":ssao-bias") || l.starts_with("ssao-bias ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { let _ = proxy.send_event(ViewerCmd::SetSsaoBias(val)); } else { println!("Usage: :ssao-bias <float>"); }
+            } else if l.starts_with(":ssao-samples") || l.starts_with("ssao-samples ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) { let _ = proxy.send_event(ViewerCmd::SetSsaoSamples(val)); } else { println!("Usage: :ssao-samples <u32>"); }
+            } else if l.starts_with(":ssao-directions") || l.starts_with("ssao-directions ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) { let _ = proxy.send_event(ViewerCmd::SetSsaoDirections(val)); } else { println!("Usage: :ssao-directions <u32>"); }
+            } else if l.starts_with(":ssao-temporal-alpha") || l.starts_with("ssao-temporal-alpha ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { let _ = proxy.send_event(ViewerCmd::SetSsaoTemporalAlpha(val)); } else { println!("Usage: :ssao-temporal-alpha <0..1>"); }
+            } else if l.starts_with(":ssao-blur") || l.starts_with("ssao-blur ") {
+                if let Some(tok) = l.split_whitespace().nth(1) { let on = matches!(tok, "on"|"1"|"true"); let _ = proxy.send_event(ViewerCmd::SetAoBlur(on)); } else { println!("Usage: :ssao-blur <on|off>"); }
+            } else if l.starts_with(":ao-temporal-alpha") || l.starts_with("ao-temporal-alpha ") {
+                if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { let _ = proxy.send_event(ViewerCmd::SetAoTemporalAlpha(val)); } else { println!("Usage: :ao-temporal-alpha <0..1>"); }
+            } else if l.starts_with(":ao-blur") || l.starts_with("ao-blur ") {
+                if let Some(tok) = l.split_whitespace().nth(1) { let on = matches!(tok, "on"|"1"|"true"); let _ = proxy.send_event(ViewerCmd::SetAoBlur(on)); } else { println!("Usage: :ao-blur <on|off>"); }
+            } else if l.starts_with(":p5") || l.starts_with("p5 ") {
+                if let Some(sub) = l.split_whitespace().nth(1) {
+                    match sub {
+                        "cornell" => { let _ = proxy.send_event(ViewerCmd::CaptureP51Cornell); }
+                        "grid" => { let _ = proxy.send_event(ViewerCmd::CaptureP51Grid); }
+                        "sweep" => { let _ = proxy.send_event(ViewerCmd::CaptureP51Sweep); }
+                        _ => println!("Usage: :p5 <cornell|grid|sweep>"),
+                    }
+                } else {
+                    println!("Usage: :p5 <cornell|grid|sweep>");
+                }
             } else if l.starts_with(":obj") || l.starts_with("obj ") {
                 if let Some(path) = l.split_whitespace().nth(1) {
                     let _ = proxy.send_event(ViewerCmd::LoadObj(path.to_string()));
@@ -3601,7 +4138,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     match viewer.render() {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                            viewer.resize(viewer.window().inner_size())
+                            viewer.resize(viewer.window.inner_size())
                         }
                         Err(wgpu::SurfaceError::OutOfMemory) => {
                             eprintln!("Out of memory!");
@@ -3631,3 +4168,4 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
 
     Ok(())
 }
+

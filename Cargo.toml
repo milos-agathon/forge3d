@@ -91,6 +91,14 @@ path = "examples/interactive_viewer.rs"
 name = "p5_dump_gbuffer"
 path = "examples/p5_dump_gbuffer.rs"
 
+[[example]]
+name = "p5_1_generate"
+path = "examples/p5_1_generate.rs"
+
+[[example]]
+name = "p5_ao_export"
+path = "examples/p5_ao_export.rs"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"
