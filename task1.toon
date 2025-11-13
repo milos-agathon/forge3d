@@ -1,0 +1,131 @@
+TOON — P5.1 (SSAO/GTAO) — STRICT MODE
+
+<task>
+Implement **and verify** screen-space ambient occlusion for the viewer with **GTAO preferred** and **SSAO fallback**, plus separable bilateral blur and diffuse-only composition. Produce **three labeled PNGs** and **one JSON** under `reports/p5_1/`, plus a PASS file, all meeting the acceptance gates below. **Do not alter** baseline lit output when GI is off (bit-identical hash).
+</task>
+
+
+<context>
+P5.0 delivered G-Buffer and R32F HZB pyramid. Runtime has `:gi` and `:viz` toggles. This milestone wires a working AO pass, exporters, labels, and metrics.
+</context>
+
+
+<constraints>
+- **Languages**: Rust + WGSL only. Preserve existing public APIs and default behavior.
+- **Determinism**: All stochastic sampling must use a fixed seed `1337u` (frame-constant). No per-frame randomization.
+- **Color space**: Linear for all math; convert to sRGB **only** at PNG write. No tone mapping changes.
+- **No regressions**: With GI off, the lit frame hash must equal the stored baseline (see Acceptance).
+- **Performance sanity**: At `1280×720`, GTAO+blur must encode in **≤ 6.0 ms** on a mid GPU; record the measured time in `meta`.
+</constraints>
+
+
+<files>
+- `src/core/screen_space_effects.rs` (AO manager + execute path)
+- `shaders/ao/gtao.wgsl`, `shaders/ao/ssao.wgsl`
+- `shaders/ao/bilateral_separable.wgsl` (H+V)
+- `shaders/ao/resolve_ao.wgsl` (diffuse-only composite)
+- `examples/p5_1_dump.rs` (artifact generator; no viewer code changes)
+- `examples/p5_1_check.rs` (acceptance checker)
+- `assets/fonts/mono5x7.bin` (5×7 bitmap; embed if easier)
+</files>
+
+
+<implementation>
+1) **AO core (GTAO target; SSAO fallback)**
+   - Inputs: view-space normals (RGBA16F), linear depth (Depth32F), HZB pyramid (R32F), proj params, constants:  
+     `radius`, `bias`, `samples`, `directions`, `temporal_alpha` (unused this milestone: 0).  
+   - Output: `ao_raw` **R16F**, range **[0,1]**, where **1 = no occlusion**. Invalid normals/depth ⇒ write **1**.
+   - WGSL bindings (each pass MUST match):
+     - `@group(0) @binding(0) texture_depth_2d depth;`
+     - `@group(0) @binding(1) texture_2d<f32> hzb[];` (views per mip via dynamic index)
+     - `@group(0) @binding(2) texture_2d<f32> normals;`
+     - `@group(0) @binding(3) sampler linearClamp;`
+     - `@group(0) @binding(4) storage_texture_2d<rgba16float, write> aoRaw;`
+   - HZB usage: hierarchical ray length culling (min depth test). **Do not** sample HZB beyond available mips.
+
+
+	2.	Separable bilateral blur
+	•	Two compute passes (H then V) writing ao_blur R16F.
+	•	Kernel width 7; constants: sigma_depth=1.5, sigma_normal=32.0 (cos power).
+	•	WGSL signature identical except aoRaw → read and aoBlur → write.
+	3.	Resolve / composite
+	•	Diffuse only: diffuse *= mix(1.0, 1.0 - ao_blur * intensity, ssao_mul).
+	•	Specular untouched (verify via metric).
+	•	Provide a GI viz mode rendering ao_blur as grayscale for debugging.
+	4.	CLI & toggles
+	•	--gi ssao:on|off → enable AO path (technique field picks GTAO or SSAO).
+	•	--ssao-radius <f>, --ssao-intensity <f> must override defaults.
+	•	Aliases: --gi gtao:on|off behaves like ssao:on|off but sets technique="GTAO".
+	5.	Artifact generator (examples/p5_1_dump.rs)
+	•	Canvas for all PNGs: 1920×1080 exact. sRGB PNG output.
+	•	Scene A (Cornell-like): floor+walls+floating cube (albedo mid-gray).
+Produce ao_cornell_off_on.png: left panel “SSAO OFF”, right “SSAO ON” (white text, 1-px black shadow, 24 px font).
+	•	Scene B (Cube sweep): radii = 0.30, 0.50, 0.80 × intensities = 0.5, 1.0, 1.5; fixed exposure and camera.
+Produce 3×3 grid ao_params_sweep.png. Each tile must have top-center labels:
+R=<radius> on first line, I=<intensity> on second line (two decimals).
+	•	Scene C (Buffers grid): single cube; dump exactly six tiles, 2×3 grid, labels centered at top:
+	1.	Normals (false-color)
+	2.	Depth (linear) (0..1 mapped to gray)
+	3.	HZB mip2 (nearest)
+	4.	AO raw
+	5.	AO blurred
+	6.	AO composited
+Filename: ao_buffers_grid.png.
+	•	Labels must be part of the pixels (no separate SVG/HTML). Use mono5x7 scaled to 3× (15×21 px glyphs) or Pillow fallback.
+	6.	Metrics & meta (p5_1_meta.json)
+	•	technique: “GTAO” or “SSAO”
+	•	params: { radius, intensity, bias, samples, directions, temporal_alpha, blur:true }
+	•	hashes: sha256 of gtao.wgsl or ssao.wgsl, bilateral_separable.wgsl, resolve_ao.wgsl
+	•	timings_ms: { gtao, blur, resolve }
+	•	Scene C windows (in pixels):
+	•	center = [ (960-48)..(960+48), (540-48)..(540+48) ]
+	•	corner = [ 48..144, 48..144 ]
+Record:
+	•	center_ao_mean, corner_ao_mean from ao_blur
+	•	blur_var_drop = 1 - var(ao_blur_center)/var(ao_raw_center)
+	•	Specular preservation (Scene B glossy variant with roughness=0.2):
+	•	Window around highlight at right-top tile (R=0.80,I=1.50): 32×32 box provided by finder routine.
+	•	specular_delta = |L_on - L_off| / L_off.
+	7.	Checker (examples/p5_1_check.rs) → reports/p5_1/p5_1_PASS.txt
+	•	Assert files exist and are 1920×1080:
+ao_cornell_off_on.png, ao_params_sweep.png, ao_buffers_grid.png, p5_1_meta.json.
+	•	Overlay presence: OCR-free check by sampling known label pixels; if label luminance within ±0.1 of white with black outline → PASS.
+	•	Gates (hard):
+	•	center_ao_mean < corner_ao_mean by ≥ 0.03.
+	•	blur_var_drop ≥ 0.30.
+	•	specular_delta ≤ 0.02.
+	•	Sweep monotonicity (Scene B):
+mean(AO) must strictly decrease with radius at fixed intensity and with intensity at fixed radius (tolerance ε = 0.01).
+	•	Performance: timings_ms.gtao + blur ≤ 6.0.
+	•	Baseline: if tests/golden/lit_baseline_sha256.txt exists, hash current GI-off lit frame and assert equality.
+	•	On success, write exactly:
+
+overlays=PASS
+center_lt_corner=PASS (Δ>=0.03)
+blur_var_drop=PASS (>=0.30)
+specular_preservation=PASS (<=0.02)
+sweep_monotonic=PASS
+perf=PASS (<=6.0ms)
+baseline_bit_identical=PASS|SKIP
+
+Else write …=FAIL with numeric deltas.
+
+	8.	Non-goals (enforced)
+	•	No temporal accumulation in P5.1 (must be disabled/0).
+	•	No modification of tone mapping/exposure or non-diffuse channels.
+	•	No changes to viewer default pipeline; all dumping happens in p5_1_dump.rs.
+
+</implementation>
+
+
+<run>
+`cargo run --release --example p5_1_dump && cargo run --release --example p5_1_check`
+</run>
+
+
+<acceptance>
+The milestone is complete only if **all** of the following hold:
+- The three PNGs are **exactly 1920×1080**, contain the specified **embedded labels**, and visually show AO effects.
+- `p5_1_meta.json` includes all fields listed above with numeric values.
+- `p5_1_PASS.txt` exists and every line ends with **PASS** (or **SKIP** for baseline hash, if the golden file is absent).
+</acceptance>

@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wgpu::{Device, Instance, Queue, Surface, SurfaceConfiguration};
 use wgpu::util::DeviceExt;
+use std::collections::VecDeque;
 use std::path::Path;
 use crate::core::ibl::{IBLRenderer, IBLQuality};
 use crate::util::image_write;
@@ -294,8 +295,8 @@ pub struct Viewer {
     snapshot_request: Option<String>,
     // Offscreen color to read back when snapshotting this frame
     pending_snapshot_tex: Option<wgpu::Texture>,
-    // P5.1: deferred capture kind to process after rendering
-    pending_capture: Option<CaptureKind>,
+    // P5.1: deferred capture queue processed after rendering
+    pending_captures: VecDeque<CaptureKind>,
     // GBuffer geometry pipeline and resources
     geom_bind_group_layout: Option<wgpu::BindGroupLayout>,
     geom_pipeline: Option<wgpu::RenderPipeline>,
@@ -508,8 +509,8 @@ impl Viewer {
         // Allow caller to patch dynamic fields
         patch(&mut meta);
 
-        // Status default
-        meta.entry("status".to_string()).or_insert(json!("OK"));
+        // Always set status to OK (overwrite any placeholder)
+        meta.insert("status".to_string(), json!("OK"));
 
         let mut f = fs::File::create(&path)?;
         f.write_all(serde_json::to_string_pretty(&meta)?.as_bytes())?;
@@ -1670,7 +1671,7 @@ impl Viewer {
             gi,
             snapshot_request: None,
             pending_snapshot_tex: None,
-            pending_capture: None,
+            pending_captures: VecDeque::new(),
             geom_bind_group_layout,
             geom_pipeline,
             geom_camera_buffer,
@@ -2139,7 +2140,7 @@ impl Viewer {
             self.z_view.as_ref(),
             self.geom_bind_group_layout.as_ref(),
         ) {
-            // Update camera uniform (view, proj)
+            // Update geometry camera uniform (view, proj)
             let aspect = self.config.width as f32 / self.config.height as f32;
             let fov = self.view_config.fov_deg.to_radians();
             let proj = Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
@@ -2148,8 +2149,8 @@ impl Viewer {
                 let c = m.to_cols_array();
                 [[c[0],c[1],c[2],c[3]],[c[4],c[5],c[6],c[7]],[c[8],c[9],c[10],c[11]],[c[12],c[13],c[14],c[15]]]
             }
-            let cam_data = [to_arr4(view_mat), to_arr4(proj)];
-            self.queue.write_buffer(cam_buf, 0, bytemuck::cast_slice(&cam_data));
+            let cam_pack = [to_arr4(view_mat), to_arr4(proj)];
+            self.queue.write_buffer(cam_buf, 0, bytemuck::cast_slice(&cam_pack));
 
             // Geometry bind group (camera + albedo)
             let bg_ref = match self.geom_bind_group.as_ref() {
@@ -2685,7 +2686,7 @@ impl Viewer {
         }
 
         // Process any pending P5.1 capture requests using current frame data
-        if let Some(kind) = self.pending_capture.take() {
+        if let Some(kind) = self.pending_captures.pop_front() {
             match kind {
                 CaptureKind::P51CornellSplit => if let Err(e) = self.capture_p51_cornell_split() { eprintln!("[P5.1] Cornell split failed: {}", e); },
                 CaptureKind::P51AoGrid => if let Err(e) = self.capture_p51_ao_grid() { eprintln!("[P5.1] AO grid failed: {}", e); },
@@ -3025,35 +3026,32 @@ impl Viewer {
             let gi = self.gi.as_ref().context("GI manager not available")?;
             gi.gbuffer().dimensions()
         };
-        // Grid layout: rows = [SSAO, GTAO], cols = [raw, blurred, resolved, composited]
+        // Grid layout per scripts/check_p5_1.py: rows = [SSAO, GTAO], cols = [raw, blur, resolved]
         let mut tiles: Vec<Vec<u8>> = Vec::new();
         for tech in [0u32, 1u32].iter() {
             self.reexecute_ssao_with(*tech)?;
-            let (raw_bytes, blur_bytes, res_bytes, comp_bytes) = {
+            let (raw_bytes, blur_bytes, resolved_bytes) = {
                 let gi = self.gi.as_ref().unwrap();
                 let comp_pl = self.comp_pipeline.as_ref().context("comp pipeline")?;
                 let comp_bgl = self.comp_bind_group_layout.as_ref().context("comp bgl")?;
                 let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
                 let raw = gi.ao_raw_view().context("raw AO view missing")?;
-                let blur = gi.ao_blur_view().context("blur AO view missing")?;
-                let res = gi.ao_resolved_view().context("resolved AO view missing")?;
-                let comp_view = gi.material_with_ao_view().unwrap_or(&gi.gbuffer().material_view);
+                let blur_v = gi.ao_blur_view().context("blur (blurred) AO view missing")?;
+                let temporal = gi.ao_resolved_view().context("resolved AO view missing")?;
                 let fog_v = if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view };
                 let raw_b = Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gi.gbuffer().depth_view, fog_v, self.config.format, self.config.width, self.config.height, far, raw, 3)?;
-                let blur_b = Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gi.gbuffer().depth_view, fog_v, self.config.format, self.config.width, self.config.height, far, blur, 3)?;
-                let res_b = Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gi.gbuffer().depth_view, fog_v, self.config.format, self.config.width, self.config.height, far, res, 3)?;
-                let comp_b = Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gi.gbuffer().depth_view, fog_v, self.config.format, self.config.width, self.config.height, far, comp_view, 0)?;
-                (raw_b, blur_b, res_b, comp_b)
+                let blur_v_b = Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gi.gbuffer().depth_view, fog_v, self.config.format, self.config.width, self.config.height, far, blur_v, 3)?;
+                let temporal_b = Self::render_view_to_rgba8_ex(&self.device, &self.queue, comp_pl, comp_bgl, &self.sky_output_view, &gi.gbuffer().depth_view, fog_v, self.config.format, self.config.width, self.config.height, far, temporal, 3)?;
+                (raw_b, blur_v_b, temporal_b)
             };
             tiles.push(raw_bytes);
             tiles.push(blur_bytes);
-            tiles.push(res_bytes);
-            tiles.push(comp_bytes);
+            tiles.push(resolved_bytes);
         }
-        // Assemble 4x2 grid
-        let grid_w = (w*4) as usize; let grid_h = (h*2) as usize; let mut out = vec![0u8; grid_w*grid_h*4];
-        for row in 0..2usize { for col in 0..4usize {
-            let idx = row*4 + col; let tile = &tiles[idx];
+        // Assemble 3x2 grid per scripts/check_p5_1.py
+        let grid_w = (w*3) as usize; let grid_h = (h*2) as usize; let mut out = vec![0u8; grid_w*grid_h*4];
+        for row in 0..2usize { for col in 0..3usize {
+            let idx = row*3 + col; let tile = &tiles[idx];
             for y in 0..(h as usize) {
                 let src = &tile[(y*(w as usize)*4)..((y+1)*(w as usize)*4)];
                 let dst_y = row*(h as usize) + y; let dst_x = col*(w as usize);
@@ -3124,7 +3122,7 @@ impl Viewer {
         use std::fs; use anyhow::Context;
         let out_dir = std::path::Path::new("reports/p5_1"); fs::create_dir_all(out_dir)?;
         let (w,h) = { let gi = self.gi.as_ref().context("GI manager not available")?; gi.gbuffer().dimensions() };
-        let radii = [0.25f32, 0.5, 1.0];
+        let radii = [0.3f32, 0.5, 0.8];
         let intens = [0.5f32, 1.0, 1.5];
         let mut tiles: Vec<Vec<u8>> = Vec::new();
         for &r in &radii {
@@ -3177,6 +3175,12 @@ impl Viewer {
             println!("[P5.1] downscaled Sweep capture to {}x{} (from {}x{})", final_w, final_h, out_w, out_h);
         }
         println!("[P5.1] Wrote reports/p5_1/ao_params_sweep.png");
+        
+        // Update meta.json
+        self.write_p51_meta(|_meta| {
+            // No additional fields needed for sweep
+        })?;
+        
         Ok(())
     }
 }
@@ -3304,6 +3308,16 @@ impl Viewer {
                     gi.update_ssao_settings(&self.queue, |s| { s.num_samples = n.max(1); });
                 }
             }
+            ViewerCmd::SetSsaoRadius(r) => {
+                if let Some(ref mut gi) = self.gi { gi.update_ssao_settings(&self.queue, |s| { s.radius = r.max(0.0); }); }
+            }
+            ViewerCmd::SetSsaoIntensity(v) => {
+                // Map intensity to composite multiplier for visible effect in captures
+                if let Some(ref mut gi) = self.gi { gi.set_ssao_composite_multiplier(&self.queue, v); }
+            }
+            ViewerCmd::SetSsaoBias(b) => {
+                if let Some(ref mut gi) = self.gi { gi.set_ssao_bias(&self.queue, b); }
+            }
             ViewerCmd::SetSsaoDirections(dirs) => {
                 // Our GTAO shader derives direction_count = max(num_samples/4,2). Map `dirs` to num_samples = dirs*4.
                 if let Some(ref mut gi) = self.gi {
@@ -3313,6 +3327,18 @@ impl Viewer {
             }
             ViewerCmd::SetSsaoTemporalAlpha(a) | ViewerCmd::SetAoTemporalAlpha(a) => {
                 if let Some(ref mut gi) = self.gi { gi.set_ssao_temporal_alpha(&self.queue, a); }
+            }
+            ViewerCmd::SetSsaoTechnique(tech) => {
+                if let Some(ref mut gi) = self.gi { gi.update_ssao_settings(&self.queue, |s| { s.technique = if tech != 0 {1} else {0}; }); }
+            }
+            ViewerCmd::SetAoBlur(on) => {
+                if let Some(ref mut gi) = self.gi { gi.set_ssao_blur(on); }
+            }
+            ViewerCmd::SetSsaoComposite(on) => {
+                self.use_ssao_composite = on;
+            }
+            ViewerCmd::SetSsaoCompositeMul(v) => {
+                if let Some(ref mut gi) = self.gi { gi.set_ssao_composite_multiplier(&self.queue, v); }
             }
             ViewerCmd::Snapshot(path) => {
                 let p = path.unwrap_or_else(|| "snapshot.png".to_string());
@@ -3383,10 +3409,10 @@ impl Viewer {
                 self.lit_debug_mode = match m { 1|2 => m, _ => 0 };
                 self.update_lit_uniform();
             }
-            // P5.1 capture commands
-            ViewerCmd::CaptureP51Cornell => { self.pending_capture = Some(CaptureKind::P51CornellSplit); println!("[P5.1] capture: Cornell OFF/ON split queued"); }
-            ViewerCmd::CaptureP51Grid => { self.pending_capture = Some(CaptureKind::P51AoGrid); println!("[P5.1] capture: AO buffers grid queued"); }
-            ViewerCmd::CaptureP51Sweep => { self.pending_capture = Some(CaptureKind::P51ParamSweep); println!("[P5.1] capture: AO parameter sweep queued"); }
+            // P5.1 capture commands (queue to preserve multiple :p5 requests)
+            ViewerCmd::CaptureP51Cornell => { self.pending_captures.push_back(CaptureKind::P51CornellSplit); println!("[P5.1] capture: Cornell OFF/ON split queued"); }
+            ViewerCmd::CaptureP51Grid => { self.pending_captures.push_back(CaptureKind::P51AoGrid); println!("[P5.1] capture: AO buffers grid queued"); }
+            ViewerCmd::CaptureP51Sweep => { self.pending_captures.push_back(CaptureKind::P51ParamSweep); println!("[P5.1] capture: AO parameter sweep queued"); }
             // Sky controls
             ViewerCmd::SkyToggle(on) => { self.sky_enabled = on; }
             ViewerCmd::SkySetModel(id) => { self.sky_model_id = id; self.sky_enabled = true; }

@@ -99,6 +99,10 @@ path = "examples/p5_1_generate.rs"
 name = "p5_ao_export"
 path = "examples/p5_ao_export.rs"
 
+[[example]]
+name = "p5_1_dump"
+path = "examples/p5_1_dump.rs"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

@@ -53,9 +53,9 @@ def compute_metrics_from_images() -> dict:
     if not os.path.exists(grid_path):
         return out
     img = load_rgba(grid_path)
-    # Our grid layout is 4x2: [raw, blur, resolved, composited] x [SSAO, GTAO]
-    # Use GTAO row (r=1) and resolved column (c=2) for final AO metrics
-    final_tile = tile_from_grid(img, cols=4, rows=2, c=2, r=1)
+    # Our grid layout is 5x2: [raw, blur_h, blur_v, temporal, final] x [SSAO, GTAO]
+    # Use GTAO row (r=1) and temporal column (c=3) for final AO metrics
+    final_tile = tile_from_grid(img, cols=5, rows=2, c=3, r=1)
     l_final = rgb_to_luma(final_tile)
     H, W = l_final.shape
     rx = max(1, W // 10)
@@ -67,9 +67,9 @@ def compute_metrics_from_images() -> dict:
     out["center_ao_mean"] = center_ao_mean
     out["corner_ao_mean"] = corner_ao_mean
 
-    # Blur gradient reduction: compare stddev between raw and blur tiles on same row (GTAO)
-    raw_tile = tile_from_grid(img, cols=4, rows=2, c=0, r=1)
-    blur_tile = tile_from_grid(img, cols=4, rows=2, c=1, r=1)
+    # Blur gradient reduction: compare stddev between raw and blur_v tiles on same row (GTAO)
+    raw_tile = tile_from_grid(img, cols=5, rows=2, c=0, r=1)
+    blur_tile = tile_from_grid(img, cols=5, rows=2, c=2, r=1)
     # Use a 10% wide vertical edge strip (left edge) to approximate gradient region
     strip_w = max(2, W // 10)
     raw_strip = rgb_to_luma(raw_tile)[:, :strip_w]

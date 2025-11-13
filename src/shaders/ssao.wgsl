@@ -25,10 +25,13 @@ struct CameraParams {
 
 // SSAO compute pass
 @group(0) @binding(0) var depth_texture: texture_2d<f32>;
-@group(0) @binding(1) var normal_texture: texture_2d<f32>;
-@group(0) @binding(2) var output_ao: texture_storage_2d<r32float, write>;
-@group(0) @binding(3) var<uniform> settings: SsaoSettings;
-@group(0) @binding(4) var<uniform> camera: CameraParams;
+@group(0) @binding(1) var hzb_texture: texture_2d<f32>;
+@group(0) @binding(2) var normal_texture: texture_2d<f32>;
+@group(0) @binding(3) var noise_texture: texture_2d<f32>;
+@group(0) @binding(4) var tex_sampler: sampler;
+@group(0) @binding(5) var output_ao: texture_storage_2d<r32float, write>;
+@group(0) @binding(6) var<uniform> settings: SsaoSettings;
+@group(0) @binding(7) var<uniform> camera: CameraParams;
 
 const PI: f32 = 3.14159265359;
 const TWO_PI: f32 = 6.28318530718;
@@ -37,11 +40,11 @@ const TWO_PI: f32 = 6.28318530718;
 fn reconstruct_view_pos_linear(uv: vec2<f32>, linear_depth: f32) -> vec3<f32> {
     // UV [0,1] -> NDC [-1,1] with Y up
     let ndc_xy = vec2<f32>(uv.x * 2.0 - 1.0, (1.0 - uv.y) * 2.0 - 1.0);
-    // Extract terms from inverse projection for fast reconstruction
-    let focal = vec2<f32>(camera.inv_proj_matrix[0][0], camera.inv_proj_matrix[1][1]);
-    let center = vec2<f32>(camera.inv_proj_matrix[2][0], camera.inv_proj_matrix[2][1]);
-    let view_xy = (ndc_xy - center) / focal;
-    return vec3<f32>(view_xy * linear_depth, -linear_depth);
+    // Use projection matrix diagonal to back-project NDC to view at given linear depth
+    let p00 = camera.proj_matrix[0][0];
+    let p11 = camera.proj_matrix[1][1];
+    let view_xy = vec2<f32>(ndc_xy.x / p00, ndc_xy.y / p11) * linear_depth;
+    return vec3<f32>(view_xy, -linear_depth);
 }
 
 // Unpack normal from texture
@@ -108,7 +111,7 @@ fn compute_ssao(pixel: vec2<u32>, uv: vec2<f32>, view_pos: vec3<f32>, view_norma
         // pixel_size_in_view = z / proj_scale, with z = linear depth = -view.z
         let z_lin = -view_pos.z;
         let pixel_size_in_view = z_lin / max(settings.proj_scale, 1e-4);
-        let bias = max(0.001, 2.0 * pixel_size_in_view);
+        let bias = settings.bias + 0.5 * pixel_size_in_view;
         // Occlusion if the sampled surface is closer than the test position along view direction
         let sample_z_lin = -sample_view_pos.z;
         if (sample_z_lin + bias < z_lin) {
@@ -186,8 +189,9 @@ fn cs_ssao(@builtin(global_invocation_id) gid: vec3<u32>) {
     let depth = textureLoad(depth_texture, pixel, 0).r;
     let normal_packed = textureLoad(normal_texture, pixel, 0);
     
-    // Sky/far plane check
-    if (depth >= 0.9999) {
+    // Background check: our GBuffer depth channel stores linear view depth and clears to 0.0 for background.
+    // Treat near-zero as no geometry and return AO=1.0 (no occlusion).
+    if (depth <= 1e-6) {
         textureStore(output_ao, pixel, vec4<f32>(1.0));
         return;
     }
