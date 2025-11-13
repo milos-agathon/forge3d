@@ -3312,8 +3312,11 @@ impl Viewer {
                 if let Some(ref mut gi) = self.gi { gi.update_ssao_settings(&self.queue, |s| { s.radius = r.max(0.0); }); }
             }
             ViewerCmd::SetSsaoIntensity(v) => {
-                // Map intensity to composite multiplier for visible effect in captures
-                if let Some(ref mut gi) = self.gi { gi.set_ssao_composite_multiplier(&self.queue, v); }
+                // Update both AO intensity in settings AND composite multiplier for full effect
+                if let Some(ref mut gi) = self.gi {
+                    gi.update_ssao_settings(&self.queue, |s| { s.intensity = v.max(0.0); });
+                    gi.set_ssao_composite_multiplier(&self.queue, v);
+                }
             }
             ViewerCmd::SetSsaoBias(b) => {
                 if let Some(ref mut gi) = self.gi { gi.set_ssao_bias(&self.queue, b); }

@@ -21,7 +21,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ":gi gtao on".to_string(),
         ":viz material".to_string(),
         ":ssao-radius 0.5".to_string(),
-        ":ssao-intensity 1.0".to_string(),
+        ":ssao-intensity 1.5".to_string(), // Higher intensity for stronger AO effect
+        ":ssao-mul 1.0".to_string(), // Ensure full AO composite strength
         ":ao-blur on".to_string(),
         ":ao-temporal-alpha 0.0".to_string(), // P5.1 strict: temporal disabled
         // Generate the three artifacts and metadata in sequence

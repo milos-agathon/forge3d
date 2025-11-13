@@ -120,7 +120,8 @@ fn compute_ssao(pixel: vec2<u32>, uv: vec2<f32>, view_pos: vec3<f32>, view_norma
     }
     
     occlusion = occlusion / num_samples_f;
-    let ao_raw = 1.0 - occlusion;
+    // Apply intensity to make occlusion stronger: higher intensity = more occlusion
+    let ao_raw = 1.0 - clamp(occlusion * settings.intensity, 0.0, 1.0);
     // P5.1: clamp to [ao_min, 1.0] to prevent fully black objects
     return clamp(ao_raw, settings.ao_min, 1.0);
 }
@@ -171,7 +172,8 @@ fn compute_gtao(pixel: vec2<u32>, uv: vec2<f32>, view_pos: vec3<f32>, view_norma
     }
     
     visibility = visibility / (f32(direction_count) * PI);
-    let ao_raw = 1.0 - visibility;
+    // Apply intensity to make occlusion stronger: higher intensity = more occlusion
+    let ao_raw = 1.0 - clamp(visibility * settings.intensity, 0.0, 1.0);
     // P5.1: clamp to [ao_min, 1.0] to prevent fully black objects
     return clamp(ao_raw, settings.ao_min, 1.0);
 }
@@ -221,7 +223,8 @@ fn cs_ssao(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 fn bilateral_weight(center_depth: f32, sample_depth: f32) -> f32 {
     let depth_diff = abs(center_depth - sample_depth);
-    let depth_sigma = 0.02;
+    // More aggressive depth sigma to ensure blur reduces noise effectively
+    let depth_sigma = 0.01;
     return exp(-depth_diff * depth_diff / (2.0 * depth_sigma * depth_sigma));
 }
 
@@ -240,7 +243,8 @@ fn cs_ssao_blur(@builtin(global_invocation_id) gid: vec3<u32>) {
     var ao_sum = center_ao;
     var weight_sum = 1.0;
     
-    let radius = 2i;
+    // Larger blur radius to ensure noise reduction meets acceptance criteria
+    let radius = 3i;
     
     for (var dy = -radius; dy <= radius; dy++) {
         for (var dx = -radius; dx <= radius; dx++) {
@@ -289,9 +293,12 @@ fn cs_ssao_composite(@builtin(global_invocation_id) gid: vec3<u32>) {
     let color = textureLoad(color_input, pixel, 0);
     let ao = textureLoad(ao_input, pixel, 0).r;
     
-    let ao_intensity = composite_params.x;
-    // Apply in linear: diffuse *= mix(1.0, ao, ao_intensity)
-    let ao_factor = mix(1.0, ao, ao_intensity);
+    let ao_multiplier = composite_params.x;
+    // Apply AO: final = color * (1.0 - (1.0 - ao) * multiplier)
+    // This ensures that when multiplier=1.0, full occlusion (ao=0) darkens completely,
+    // and when ao=1.0 (no occlusion), there's no darkening regardless of multiplier.
+    let occlusion = 1.0 - ao;
+    let ao_factor = 1.0 - occlusion * ao_multiplier;
     let result = vec4<f32>(color.rgb * ao_factor, color.a);
     textureStore(composite_output, pixel, result);
 }
