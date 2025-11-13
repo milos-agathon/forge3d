@@ -579,8 +579,10 @@ pub struct GiParams {
     pub ssao_intensity: f32,
     #[serde(default = "GiParams::default_ssao_technique")]
     pub ssao_technique: String,  // "ssao" or "gtao"
-    #[serde(default = "GiParams::default_ssao_composite")]
-    pub ssao_composite: bool,
+    #[serde(default = "GiParams::default_ssao_temporal_enabled")]
+    pub ssao_temporal_enabled: bool,
+    #[serde(default = "GiParams::default_ssao_composite_enabled", alias = "ssao_composite")]
+    pub ssao_composite_enabled: bool,
     #[serde(default = "GiParams::default_ssao_mul")]
     pub ssao_mul: f32,
 }
@@ -593,7 +595,8 @@ impl GiParams {
     const fn default_ssao_radius() -> f32 { 0.5 }
     const fn default_ssao_intensity() -> f32 { 1.0 }
     fn default_ssao_technique() -> String { "ssao".to_string() }
-    const fn default_ssao_composite() -> bool { true }
+    const fn default_ssao_temporal_enabled() -> bool { false }
+    const fn default_ssao_composite_enabled() -> bool { true }
     const fn default_ssao_mul() -> f32 { 1.0 }
 }
 
@@ -605,7 +608,8 @@ impl Default for GiParams {
             ssao_radius: Self::default_ssao_radius(),
             ssao_intensity: Self::default_ssao_intensity(),
             ssao_technique: Self::default_ssao_technique(),
-            ssao_composite: Self::default_ssao_composite(),
+            ssao_temporal_enabled: Self::default_ssao_temporal_enabled(),
+            ssao_composite_enabled: Self::default_ssao_composite_enabled(),
             ssao_mul: Self::default_ssao_mul(),
         }
     }

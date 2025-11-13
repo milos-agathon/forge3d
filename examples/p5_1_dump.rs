@@ -1,10 +1,10 @@
 // examples/p5_1_dump.rs
 // P5.1 SSAO/GTAO Artifact Generator (viewer-driven)
 // Launches the interactive viewer once and queues capture commands to generate:
-//   - reports/p5_1/ao_cornell_off_on.png
-//   - reports/p5_1/ao_buffers_grid.png
-//   - reports/p5_1/ao_params_sweep.png
-//   - reports/p5_1/p5_1_meta.json
+//   - reports/p5/p5_ssao_cornell.png
+//   - reports/p5/p5_ssao_buffers_grid.png
+//   - reports/p5/p5_ssao_params_grid.png
+//   - reports/p5/p5_meta.json
 // This preserves the single-terminal workflow and uses the existing capture
 // pipeline implemented in the viewer. No viewer code changes are required.
 //

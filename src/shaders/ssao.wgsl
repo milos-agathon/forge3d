@@ -49,8 +49,8 @@ fn reconstruct_view_pos_linear(uv: vec2<f32>, linear_depth: f32) -> vec3<f32> {
 
 // Unpack normal from texture
 fn unpack_normal(packed: vec4<f32>) -> vec3<f32> {
-    // GBuffer stores normals directly in view space in [-1, 1]
-    return normalize(packed.xyz);
+    // GBuffer encodes view-space normals into [0,1]; decode back to [-1,1]
+    return normalize(packed.xyz * 2.0 - vec3<f32>(1.0));
 }
 
 // Interleaved gradient noise for temporal dithering

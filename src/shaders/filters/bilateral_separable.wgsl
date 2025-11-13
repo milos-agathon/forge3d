@@ -16,8 +16,8 @@ struct BlurSettings {
 @group(0) @binding(4) var<uniform> settings: BlurSettings;
 
 fn unpack_normal(packed: vec4<f32>) -> vec3<f32> {
-    // Our GBuffer stores view-space normals directly in [-1,1]
-    return normalize(packed.xyz);
+    // Normals are stored in [0,1]; decode back to view-space [-1,1]
+    return normalize(packed.xyz * 2.0 - vec3<f32>(1.0));
 }
 
 fn compute_weight(center_depth: f32, center_normal: vec3<f32>,

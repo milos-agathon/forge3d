@@ -484,26 +484,49 @@ impl Viewer {
         let mean = sum / n as f64; let var = (sum2 / n as f64) - mean*mean; var.max(0.0) as f32
     }
 
-    // Write or update p5_1_meta.json with provided patcher
-    fn write_p51_meta<F: FnOnce(&mut std::collections::BTreeMap<String, serde_json::Value>)>(&self, patch: F) -> anyhow::Result<()> {
+    // Simple Sobel-like gradient energy (used for blur effectiveness metric)
+    fn gradient_energy(buf: &Vec<u8>, w: u32, h: u32) -> f32 {
+        if w < 2 || h < 2 { return 0.0; }
+        let (w_usize, h_usize) = (w as usize, h as usize);
+        let mut energy = 0.0f64;
+        let mut samples = 0usize;
+        for y in 0..(h_usize.saturating_sub(1)) {
+            for x in 0..(w_usize.saturating_sub(1)) {
+                let idx = (y * w_usize + x) * 4;
+                let l = (0.2126 * buf[idx] as f32 + 0.7152 * buf[idx + 1] as f32 + 0.0722 * buf[idx + 2] as f32) / 255.0;
+                let idx_x = (y * w_usize + (x + 1)) * 4;
+                let lx = (0.2126 * buf[idx_x] as f32 + 0.7152 * buf[idx_x + 1] as f32 + 0.0722 * buf[idx_x + 2] as f32) / 255.0;
+                let idx_y = ((y + 1) * w_usize + x) * 4;
+                let ly = (0.2126 * buf[idx_y] as f32 + 0.7152 * buf[idx_y + 1] as f32 + 0.0722 * buf[idx_y + 2] as f32) / 255.0;
+                let dx = lx - l;
+                let dy = ly - l;
+                energy += (dx * dx + dy * dy) as f64;
+                samples += 1;
+            }
+        }
+        if samples == 0 { 0.0 } else { (energy / samples as f64) as f32 }
+    }
+
+    // Write or update p5_meta.json with provided patcher
+    fn write_p5_meta<F: FnOnce(&mut std::collections::BTreeMap<String, serde_json::Value>)>(&self, patch: F) -> anyhow::Result<()> {
         use std::fs;
         use std::io::Write;
-        let out_dir = std::path::Path::new("reports/p5_1");
+        let out_dir = std::path::Path::new("reports/p5");
         fs::create_dir_all(out_dir)?;
-        let path = out_dir.join("p5_1_meta.json");
+        let path = out_dir.join("p5_meta.json");
         let mut meta: std::collections::BTreeMap<String, serde_json::Value> = if path.exists() {
             let txt = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
             serde_json::from_str(&txt).unwrap_or_default()
         } else { std::collections::BTreeMap::new() };
 
         // Add static hashes of WGSL sources
-        let ssao_src = include_str!("../shaders/ssao.wgsl");
-        let blur_src = include_str!("../shaders/filters/bilateral_separable.wgsl");
-        let temporal_src = include_str!("../shaders/temporal/resolve_ao.wgsl");
         let mut h = std::collections::BTreeMap::new();
-        h.insert("ssao.wgsl".to_string(), Self::sha256_hex(ssao_src));
-        h.insert("bilateral_separable.wgsl".to_string(), Self::sha256_hex(blur_src));
-        h.insert("resolve_ao.wgsl".to_string(), Self::sha256_hex(temporal_src));
+        h.insert("ssao/common.wgsl".to_string(), Self::sha256_hex(include_str!("../shaders/ssao/common.wgsl")));
+        h.insert("ssao/ssao.wgsl".to_string(), Self::sha256_hex(include_str!("../shaders/ssao/ssao.wgsl")));
+        h.insert("ssao/gtao.wgsl".to_string(), Self::sha256_hex(include_str!("../shaders/ssao/gtao.wgsl")));
+        h.insert("ssao/composite.wgsl".to_string(), Self::sha256_hex(include_str!("../shaders/ssao/composite.wgsl")));
+        h.insert("filters/bilateral_separable.wgsl".to_string(), Self::sha256_hex(include_str!("../shaders/filters/bilateral_separable.wgsl")));
+        h.insert("temporal/resolve_ao.wgsl".to_string(), Self::sha256_hex(include_str!("../shaders/temporal/resolve_ao.wgsl")));
         meta.insert("hashes".to_string(), json!(h));
 
         // Allow caller to patch dynamic fields
@@ -514,7 +537,7 @@ impl Viewer {
 
         let mut f = fs::File::create(&path)?;
         f.write_all(serde_json::to_string_pretty(&meta)?.as_bytes())?;
-        println!("[P5.1] Wrote {}", path.display());
+        println!("[P5] Wrote {}", path.display());
         Ok(())
     }
 
@@ -2133,7 +2156,7 @@ impl Viewer {
             }
         }
         if let (Some(gi), Some(pipe), Some(cam_buf), Some(vb), Some(zv), Some(_bgl)) = (
-            self.gi.as_ref(),
+            self.gi.as_mut(),
             self.geom_pipeline.as_ref(),
             self.geom_camera_buffer.as_ref(),
             self.geom_vb.as_ref(),
@@ -2932,7 +2955,11 @@ impl Viewer {
 
     fn capture_p51_cornell_split(&mut self) -> anyhow::Result<()> {
         use anyhow::{Context, bail};
-        use std::fs; let out_dir = std::path::Path::new("reports/p5_1"); fs::create_dir_all(out_dir)?;
+        use std::fs; let out_dir = std::path::Path::new("reports/p5"); fs::create_dir_all(out_dir)?;
+        // Ensure SSAO has up-to-date buffers for the current view before capturing ON/OFF.
+        if let Some(technique) = self.gi.as_ref().map(|gi| gi.ssao_settings().technique) {
+            self.reexecute_ssao_with(technique)?;
+        }
         let (off_bytes, on_bytes, w, h) = {
             let gi = self.gi.as_ref().context("GI manager not available")?;
             let (w,h) = gi.gbuffer().dimensions();
@@ -2967,11 +2994,11 @@ impl Viewer {
         } else {
             (out_w, out_h, &out)
         };
-        crate::util::image_write::write_png_rgba8_small(&out_dir.join("ao_cornell_off_on.png"), data_ref, final_w, final_h)?;
+        crate::util::image_write::write_png_rgba8_small(&out_dir.join("p5_ssao_cornell.png"), data_ref, final_w, final_h)?;
         if final_w != out_w || final_h != out_h {
             println!("[P5.1] downscaled Cornell capture to {}x{} (from {}x{})", final_w, final_h, out_w, out_h);
         }
-        println!("[P5.1] Wrote reports/p5_1/ao_cornell_off_on.png");
+        println!("[P5] Wrote reports/p5/p5_ssao_cornell.png");
 
         // Derive specular preservation metric from OFF vs ON split
         // Use top-1% brightest pixels by luma in OFF image then compare delta with ON
@@ -2996,7 +3023,7 @@ impl Viewer {
         let mean_on  = sum_on  / top_n as f32;
         let spec_delta = (mean_on - mean_off).abs();
         let specular_preservation = if spec_delta <= 0.01 { "PASS" } else { "FAIL" };
-        self.write_p51_meta(|meta| {
+        self.write_p5_meta(|meta| {
             meta.insert("specular_preservation".to_string(), json!(format!("{} (delta={:.4})", specular_preservation, spec_delta)));
         })?;
         Ok(())
@@ -3021,7 +3048,7 @@ impl Viewer {
 
     fn capture_p51_ao_grid(&mut self) -> anyhow::Result<()> {
         use anyhow::{Context, bail};
-        use std::fs; let out_dir = std::path::Path::new("reports/p5_1"); fs::create_dir_all(out_dir)?;
+        use std::fs; let out_dir = std::path::Path::new("reports/p5"); fs::create_dir_all(out_dir)?;
         let (w,h) = {
             let gi = self.gi.as_ref().context("GI manager not available")?;
             gi.gbuffer().dimensions()
@@ -3073,11 +3100,11 @@ impl Viewer {
         } else {
             (out_w, out_h, &out)
         };
-        crate::util::image_write::write_png_rgba8_small(&out_dir.join("ao_buffers_grid.png"), data_ref, final_w, final_h)?;
+        crate::util::image_write::write_png_rgba8_small(&out_dir.join("p5_ssao_buffers_grid.png"), data_ref, final_w, final_h)?;
         if final_w != out_w || final_h != out_h {
             println!("[P5.1] downscaled Grid capture to {}x{} (from {}x{})", final_w, final_h, out_w, out_h);
         }
-        println!("[P5.1] Wrote reports/p5_1/ao_buffers_grid.png");
+        println!("[P5] Wrote reports/p5/p5_ssao_buffers_grid.png");
 
         // Compute metrics from the last technique (GTAO = technique=1)
         if let Some((raw, blur, res)) = tiles.get(tiles.len().saturating_sub(3)..).and_then(|s| Some((&s[0], &s[1], &s[2]))) {
@@ -3088,12 +3115,12 @@ impl Viewer {
             let corner_x0 = 0usize; let corner_y0 = 0usize;
             let mean_center = Self::mean_luma_region(res, w, h, cx0 as u32, cy0 as u32, rx as u32, ry as u32);
             let mean_corner = Self::mean_luma_region(res, w, h, corner_x0 as u32, corner_y0 as u32, rx as u32, ry as u32);
-            // Variance reduction from raw -> blur
-            let var_raw = Self::variance_luma(raw, w, h);
-            let var_blur = Self::variance_luma(blur, w, h);
-            let reduction = if var_raw > 1e-6 { ((var_raw - var_blur)/var_raw * 100.0).max(0.0) } else { 0.0 };
+            // Gradient energy reduction from raw -> blur
+            let grad_raw = Self::gradient_energy(raw, w, h);
+            let grad_blur = Self::gradient_energy(blur, w, h);
+            let reduction = if grad_raw > 1e-6 { (1.0 - (grad_blur / grad_raw)).clamp(0.0, 1.0) } else { 0.0 };
 
-            self.write_p51_meta(|meta| {
+            self.write_p5_meta(|meta| {
                 // Params/technique
                 if let Some(ref gi) = self.gi {
                     let s = gi.ssao_settings();
@@ -3104,10 +3131,19 @@ impl Viewer {
                         "intensity": s.intensity,
                         "bias": s.bias,
                         "temporal_alpha": gi.ssao_temporal_alpha(),
+                        "temporal_enabled": gi.ssao_temporal_enabled(),
                         "blur": true,
                         "samples": s.num_samples,
                         "directions": if s.technique==0 { 0 } else { (s.num_samples/4).max(1) }
                     }));
+                    if let Some((ao_ms, blur_ms, temporal_ms)) = gi.ssao_timings_ms() {
+                        meta.insert("timings_ms".to_string(), json!({
+                            "ao_ms": ao_ms,
+                            "blur_ms": blur_ms,
+                            "temporal_ms": temporal_ms,
+                            "total_ms": ao_ms + blur_ms + temporal_ms,
+                        }));
+                    }
                 }
                 // Metrics
                 meta.insert("corner_ao_mean".to_string(), json!(mean_corner));
@@ -3120,7 +3156,7 @@ impl Viewer {
 
     fn capture_p51_param_sweep(&mut self) -> anyhow::Result<()> {
         use std::fs; use anyhow::Context;
-        let out_dir = std::path::Path::new("reports/p5_1"); fs::create_dir_all(out_dir)?;
+        let out_dir = std::path::Path::new("reports/p5"); fs::create_dir_all(out_dir)?;
         let (w,h) = { let gi = self.gi.as_ref().context("GI manager not available")?; gi.gbuffer().dimensions() };
         let radii = [0.3f32, 0.5, 0.8];
         let intens = [0.5f32, 1.0, 1.5];
@@ -3170,14 +3206,14 @@ impl Viewer {
         } else {
             (out_w, out_h, &out)
         };
-        crate::util::image_write::write_png_rgba8_small(&out_dir.join("ao_params_sweep.png"), data_ref, final_w, final_h)?;
+        crate::util::image_write::write_png_rgba8_small(&out_dir.join("p5_ssao_params_grid.png"), data_ref, final_w, final_h)?;
         if final_w != out_w || final_h != out_h {
             println!("[P5.1] downscaled Sweep capture to {}x{} (from {}x{})", final_w, final_h, out_w, out_h);
         }
-        println!("[P5.1] Wrote reports/p5_1/ao_params_sweep.png");
+        println!("[P5] Wrote reports/p5/p5_ssao_params_grid.png");
         
         // Update meta.json
-        self.write_p51_meta(|_meta| {
+        self.write_p5_meta(|_meta| {
             // No additional fields needed for sweep
         })?;
         
@@ -3215,6 +3251,7 @@ impl Viewer {
         #[allow(dead_code)] SetSsaoSamples(u32),
         #[allow(dead_code)] SetSsaoDirections(u32),
         #[allow(dead_code)] SetSsaoTemporalAlpha(f32), // alias of SetAoTemporalAlpha
+        #[allow(dead_code)] SetSsaoTemporalEnabled(bool),
         #[allow(dead_code)] SetSsaoTechnique(u32),
         #[allow(dead_code)] SetVizDepthMax(f32),
         #[allow(dead_code)] SetFov(f32),
@@ -3330,6 +3367,9 @@ impl Viewer {
             }
             ViewerCmd::SetSsaoTemporalAlpha(a) | ViewerCmd::SetAoTemporalAlpha(a) => {
                 if let Some(ref mut gi) = self.gi { gi.set_ssao_temporal_alpha(&self.queue, a); }
+            }
+            ViewerCmd::SetSsaoTemporalEnabled(on) => {
+                if let Some(ref mut gi) = self.gi { gi.set_ssao_temporal(on); }
             }
             ViewerCmd::SetSsaoTechnique(tech) => {
                 if let Some(ref mut gi) = self.gi { gi.update_ssao_settings(&self.queue, |s| { s.technique = if tech != 0 {1} else {0}; }); }
@@ -3580,6 +3620,21 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) { pending_cmds.push(ViewerCmd::SetSsaoDirections(val)); }
             } else if l.starts_with(":ssao-temporal-alpha") || l.starts_with("ssao-temporal-alpha ") {
                 if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { pending_cmds.push(ViewerCmd::SetSsaoTemporalAlpha(val)); }
+            } else if l.starts_with(":ssao-temporal ") || l.starts_with("ssao-temporal ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let state = if tok.eq_ignore_ascii_case("on") || tok == "1" || tok.eq_ignore_ascii_case("true") {
+                        Some(true)
+                    } else if tok.eq_ignore_ascii_case("off") || tok == "0" || tok.eq_ignore_ascii_case("false") {
+                        Some(false)
+                    } else { None };
+                    if let Some(on) = state {
+                        pending_cmds.push(ViewerCmd::SetSsaoTemporalEnabled(on));
+                    } else {
+                        println!("Usage: :ssao-temporal <on|off>");
+                    }
+                } else {
+                    println!("Usage: :ssao-temporal <on|off>");
+                }
             } else if l.starts_with(":ssao-blur") || l.starts_with("ssao-blur ") {
                 if let Some(tok) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::SetAoBlur(matches!(tok, "on"|"1"|"true"))); }
             } else if l.starts_with(":ao-temporal-alpha") || l.starts_with("ao-temporal-alpha ") {
@@ -3776,6 +3831,21 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) { let _ = proxy.send_event(ViewerCmd::SetSsaoDirections(val)); } else { println!("Usage: :ssao-directions <u32>"); }
             } else if l.starts_with(":ssao-temporal-alpha") || l.starts_with("ssao-temporal-alpha ") {
                 if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) { let _ = proxy.send_event(ViewerCmd::SetSsaoTemporalAlpha(val)); } else { println!("Usage: :ssao-temporal-alpha <0..1>"); }
+            } else if l.starts_with(":ssao-temporal ") || l.starts_with("ssao-temporal ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let state = if tok.eq_ignore_ascii_case("on") || tok == "1" || tok.eq_ignore_ascii_case("true") {
+                        Some(true)
+                    } else if tok.eq_ignore_ascii_case("off") || tok == "0" || tok.eq_ignore_ascii_case("false") {
+                        Some(false)
+                    } else { None };
+                    if let Some(on) = state {
+                        let _ = proxy.send_event(ViewerCmd::SetSsaoTemporalEnabled(on));
+                    } else {
+                        println!("Usage: :ssao-temporal <on|off>");
+                    }
+                } else {
+                    println!("Usage: :ssao-temporal <on|off>");
+                }
             } else if l.starts_with(":ssao-blur") || l.starts_with("ssao-blur ") {
                 if let Some(tok) = l.split_whitespace().nth(1) { let on = matches!(tok, "on"|"1"|"true"); let _ = proxy.send_event(ViewerCmd::SetAoBlur(on)); } else { println!("Usage: :ssao-blur <on|off>"); }
             } else if l.starts_with(":ao-temporal-alpha") || l.starts_with("ao-temporal-alpha ") {

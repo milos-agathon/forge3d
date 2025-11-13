@@ -3,9 +3,9 @@
 P5.1 Acceptance Check for SSAO/GTAO artifacts.
 
 Validates three artifacts produced by the viewer:
-  - reports/p5_1/ao_cornell_off_on.png
-  - reports/p5_1/ao_buffers_grid.png
-  - reports/p5_1/ao_params_sweep.png
+  - reports/p5/p5_ssao_cornell.png
+  - reports/p5/p5_ssao_buffers_grid.png
+  - reports/p5/p5_ssao_params_grid.png
 
 Usage:
   python scripts/check_p5_1.py
@@ -25,7 +25,7 @@ except ImportError:
 
 import numpy as np
 
-REPORT_DIR = os.path.join("reports", "p5_1")
+REPORT_DIR = os.path.join("reports", "p5")
 
 
 @dataclass
@@ -133,9 +133,9 @@ def check_param_sweep(path: str) -> CheckResult:
 
 
 def main() -> int:
-    cornell = os.path.join(REPORT_DIR, "ao_cornell_off_on.png")
-    grid = os.path.join(REPORT_DIR, "ao_buffers_grid.png")
-    sweep = os.path.join(REPORT_DIR, "ao_params_sweep.png")
+    cornell = os.path.join(REPORT_DIR, "p5_ssao_cornell.png")
+    grid = os.path.join(REPORT_DIR, "p5_ssao_buffers_grid.png")
+    sweep = os.path.join(REPORT_DIR, "p5_ssao_params_grid.png")
 
     checks = [
         check_cornell_split(cornell),
