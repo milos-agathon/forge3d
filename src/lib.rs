@@ -388,6 +388,7 @@ pub mod transforms;
 pub mod util;
 pub mod vector;
 pub mod viewer; // Interactive windowed viewer (Workstream I1)
+pub mod passes; // P5.2: render passes wrappers
 
 // Re-export commonly used types
 pub use core::cloud_shadows::{

@@ -1173,8 +1173,14 @@ impl ScreenSpaceEffectsManager {
                     }
                 }
                 ScreenSpaceEffect::SSGI => {
-                    if let Some(ref ssgi) = self.ssgi_renderer {
-                        ssgi.execute(device, encoder, &self.gbuffer)?;
+                    if let Some(ref mut ssgi) = self.ssgi_renderer {
+                        if let Some(ref hzb) = self.hzb {
+                            let hzb_view = hzb.texture_view();
+                            ssgi.execute(device, encoder, &self.gbuffer, &hzb_view)?;
+                        } else {
+                            // Fallback to depth view if HZB is unavailable
+                            ssgi.execute(device, encoder, &self.gbuffer, &self.gbuffer.depth_view)?;
+                        }
                     }
                 }
                 ScreenSpaceEffect::SSR => {
@@ -1365,6 +1371,45 @@ impl ScreenSpaceEffectsManager {
             let _ = ssgi.set_half_res(device, queue, on);
         }
     }
+
+    pub fn ssgi_settings(&self) -> Option<SsgiSettings> {
+        self.ssgi_renderer.as_ref().map(|r| r.get_settings())
+    }
+
+    pub fn ssgi_timings_ms(&self) -> Option<(f32, f32, f32, f32)> {
+        self.ssgi_renderer.as_ref().map(|r| r.timings_ms())
+    }
+
+    pub fn ssgi_dimensions(&self) -> Option<(u32, u32)> {
+        self.ssgi_renderer.as_ref().map(|r| r.dimensions())
+    }
+
+    pub fn ssgi_half_res(&self) -> Option<bool> {
+        self.ssgi_renderer.as_ref().map(|r| r.is_half_res())
+    }
+
+    pub fn ssgi_hit_texture(&self) -> Option<&Texture> {
+        self.ssgi_renderer.as_ref().map(|r| r.hit_texture())
+    }
+
+    pub fn ssgi_filtered_texture(&self) -> Option<&Texture> {
+        self.ssgi_renderer.as_ref().map(|r| r.filtered_texture())
+    }
+
+    pub fn ssgi_history_texture(&self) -> Option<&Texture> {
+        self.ssgi_renderer.as_ref().map(|r| r.history_texture())
+    }
+
+    pub fn ssgi_upscaled_texture(&self) -> Option<&Texture> {
+        self.ssgi_renderer.as_ref().map(|r| r.upscaled_texture())
+    }
+
+    pub fn ssgi_reset_history(&mut self, device: &Device, queue: &Queue) -> RenderResult<()> {
+        if let Some(ref mut ssgi) = self.ssgi_renderer {
+            ssgi.reset_history(device, queue)?;
+        }
+        Ok(())
+    }
 }
 
 /// SSGI renderer
@@ -1374,14 +1419,19 @@ pub struct SsgiRenderer {
     camera_buffer: Buffer,
 
     // Pipelines
-    ssgi_pipeline: ComputePipeline,
-    ssgi_bind_group_layout: BindGroupLayout,
+    trace_pipeline: ComputePipeline,
+    trace_bind_group_layout: BindGroupLayout,
+    shade_pipeline: ComputePipeline,
+    shade_bind_group_layout: BindGroupLayout,
     temporal_pipeline: ComputePipeline,
     temporal_bind_group_layout: BindGroupLayout,
     upsample_pipeline: ComputePipeline,
     upsample_bind_group_layout: BindGroupLayout,
 
     // Output and temporal textures
+    // Half-res hit buffer (uv.xy, dist, mask)
+    ssgi_hit: Texture,
+    ssgi_hit_view: TextureView,
     ssgi_texture: Texture,
     ssgi_view: TextureView,
     ssgi_history: Texture,
@@ -1401,6 +1451,12 @@ pub struct SsgiRenderer {
     width: u32,
     height: u32,
     half_res: bool,
+
+    // Timings (ms)
+    last_trace_ms: f32,
+    last_shade_ms: f32,
+    last_temporal_ms: f32,
+    last_upsample_ms: f32,
 }
 
 impl SsgiRenderer {
@@ -1422,76 +1478,81 @@ impl SsgiRenderer {
             mapped_at_creation: false,
         });
 
-        // Shader
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("ssgi_shader"),
-            source: ShaderSource::Wgsl(include_str!("../../shaders/ssgi.wgsl").into()),
+        // Shaders (split per stage per P5.2)
+        let trace_shader = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("p5.ssgi.trace"),
+            source: ShaderSource::Wgsl(include_str!("../shaders/ssgi/trace.wgsl").into()),
+        });
+        let shade_shader = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("p5.ssgi.shade"),
+            source: ShaderSource::Wgsl(include_str!("../shaders/ssgi/shade.wgsl").into()),
+        });
+        let temporal_shader = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("p5.ssgi.temporal"),
+            source: ShaderSource::Wgsl(include_str!("../shaders/ssgi/resolve_temporal.wgsl").into()),
+        });
+        let upsample_shader = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("p5.ssgi.upsample"),
+            source: ShaderSource::Wgsl(include_str!("../shaders/filters/edge_aware_upsample.wgsl").into()),
         });
 
-        // Bind group layouts
-        // group(0): depth, normal, color, output, settings, camera, ibl cube, sampler
-        let ssgi_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("ssgi_bind_group_layout"),
+        // Trace pass: depth, normal, HZB, outHit, settings, camera
+        let trace_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("ssgi_trace_bgl"),
             entries: &[
-                // depth
                 BindGroupLayoutEntry { binding: 0, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
-                // normal
                 BindGroupLayoutEntry { binding: 1, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
-                // color
                 BindGroupLayoutEntry { binding: 2, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
-                // output
                 BindGroupLayoutEntry { binding: 3, visibility: ShaderStages::COMPUTE, ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rgba16Float, view_dimension: TextureViewDimension::D2 }, count: None },
-                // settings
                 BindGroupLayoutEntry { binding: 4, visibility: ShaderStages::COMPUTE, ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                // camera
                 BindGroupLayoutEntry { binding: 5, visibility: ShaderStages::COMPUTE, ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                // ibl cube
-                BindGroupLayoutEntry { binding: 6, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::Cube, multisampled: false }, count: None },
-                // ibl sampler
-                BindGroupLayoutEntry { binding: 7, visibility: ShaderStages::COMPUTE, ty: BindingType::Sampler(SamplerBindingType::Filtering), count: None },
             ],
         });
+        let trace_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("ssgi_trace_pipeline"),
+            layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor { label: Some("ssgi_trace_pl"), bind_group_layouts: &[&trace_bind_group_layout], push_constant_ranges: &[] })),
+            module: &trace_shader,
+            entry_point: "cs_trace",
+        });
 
-        // group(1): temporal current, history, filtered, settings (reuse settings layout for simplicity)
+        // Shade pass: prevColor, envCube, envSampler, hit, outRadiance, settings, normalFull
+        let shade_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("ssgi_shade_bgl"),
+            entries: &[
+                BindGroupLayoutEntry { binding: 0, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
+                BindGroupLayoutEntry { binding: 1, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::Cube, multisampled: false }, count: None },
+                BindGroupLayoutEntry { binding: 2, visibility: ShaderStages::COMPUTE, ty: BindingType::Sampler(SamplerBindingType::Filtering), count: None },
+                BindGroupLayoutEntry { binding: 3, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
+                BindGroupLayoutEntry { binding: 4, visibility: ShaderStages::COMPUTE, ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rgba16Float, view_dimension: TextureViewDimension::D2 }, count: None },
+                BindGroupLayoutEntry { binding: 5, visibility: ShaderStages::COMPUTE, ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                BindGroupLayoutEntry { binding: 6, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
+            ],
+        });
+        let shade_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("ssgi_shade_pipeline"),
+            layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor { label: Some("ssgi_shade_pl"), bind_group_layouts: &[&shade_bind_group_layout], push_constant_ranges: &[] })),
+            module: &shade_shader,
+            entry_point: "cs_shade",
+        });
+
+        // Temporal resolve layout: current, history, filtered, settings
         let temporal_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("ssgi_temporal_bind_group_layout"),
             entries: &[
-                // current
                 BindGroupLayoutEntry { binding: 0, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
-                // history
                 BindGroupLayoutEntry { binding: 1, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
-                // filtered
                 BindGroupLayoutEntry { binding: 2, visibility: ShaderStages::COMPUTE, ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rgba16Float, view_dimension: TextureViewDimension::D2 }, count: None },
-                // settings
                 BindGroupLayoutEntry { binding: 3, visibility: ShaderStages::COMPUTE, ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
             ],
         });
-
-        // Pipelines
-        let ssgi_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("ssgi_pipeline"),
-            layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: Some("ssgi_pipeline_layout"),
-                bind_group_layouts: &[&ssgi_bind_group_layout],
-                push_constant_ranges: &[],
-            })),
-            module: &shader,
-            entry_point: "cs_ssgi",
-        });
-
         let temporal_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("ssgi_temporal_pipeline"),
-            layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: Some("ssgi_temporal_pipeline_layout"),
-                // The temporal shader uses @group(1); include the main group at index 0
-                bind_group_layouts: &[&ssgi_bind_group_layout, &temporal_bind_group_layout],
-                push_constant_ranges: &[],
-            })),
-            module: &shader,
-            entry_point: "cs_ssgi_temporal",
+            layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor { label: Some("ssgi_temporal_pl"), bind_group_layouts: &[&temporal_bind_group_layout], push_constant_ranges: &[] })),
+            module: &temporal_shader,
+            entry_point: "cs_resolve_temporal",
         });
 
-        // Define upsample bind group layout here (local variable)
+        // Edge-aware upsample layout/pipeline
         let upsample_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("ssgi_upsample_bind_group_layout"),
             entries: &[
@@ -1499,26 +1560,29 @@ impl SsgiRenderer {
                 BindGroupLayoutEntry { binding: 1, visibility: ShaderStages::COMPUTE, ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rgba16Float, view_dimension: TextureViewDimension::D2 }, count: None },
                 BindGroupLayoutEntry { binding: 2, visibility: ShaderStages::COMPUTE, ty: BindingType::Sampler(SamplerBindingType::Filtering), count: None },
                 BindGroupLayoutEntry { binding: 3, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
-                // full-res normal for edge-aware weights
                 BindGroupLayoutEntry { binding: 4, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None },
-                // settings (for upsample weights)
                 BindGroupLayoutEntry { binding: 5, visibility: ShaderStages::COMPUTE, ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
             ],
         });
-
         let upsample_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("ssgi_upsample_pipeline"),
-            layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: Some("ssgi_upsample_pipeline_layout"),
-                // Upsample shader uses @group(2); include main and temporal groups first
-                bind_group_layouts: &[&ssgi_bind_group_layout, &temporal_bind_group_layout, &upsample_bind_group_layout],
-                push_constant_ranges: &[],
-            })),
-            module: &shader,
-            entry_point: "cs_ssgi_upsample",
+            layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor { label: Some("ssgi_upsample_pl"), bind_group_layouts: &[&upsample_bind_group_layout], push_constant_ranges: &[] })),
+            module: &upsample_shader,
+            entry_point: "cs_edge_aware_upsample",
         });
 
-        // Output and temporal textures
+        // Output and temporal textures (half-res by default disabled)
+        let ssgi_hit = device.create_texture(&TextureDescriptor {
+            label: Some("ssgi_hit"),
+            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba16Float,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let ssgi_hit_view = ssgi_hit.create_view(&TextureViewDescriptor::default());
         let ssgi_texture = device.create_texture(&TextureDescriptor {
             label: Some("ssgi_texture"),
             size: Extent3d { width, height, depth_or_array_layers: 1 },
@@ -1526,7 +1590,7 @@ impl SsgiRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let ssgi_view = ssgi_texture.create_view(&TextureViewDescriptor::default());
@@ -1538,7 +1602,7 @@ impl SsgiRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let ssgi_history_view = ssgi_history.create_view(&TextureViewDescriptor::default());
@@ -1563,7 +1627,7 @@ impl SsgiRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             view_formats: &[],
         });
         let ssgi_upscaled_view = ssgi_upscaled.create_view(&TextureViewDescriptor::default());
@@ -1605,12 +1669,16 @@ impl SsgiRenderer {
             settings,
             settings_buffer,
             camera_buffer,
-            ssgi_pipeline,
-            ssgi_bind_group_layout,
+            trace_pipeline,
+            trace_bind_group_layout,
+            shade_pipeline,
+            shade_bind_group_layout,
             temporal_pipeline,
             temporal_bind_group_layout,
             upsample_pipeline,
             upsample_bind_group_layout,
+            ssgi_hit,
+            ssgi_hit_view,
             ssgi_texture,
             ssgi_view,
             ssgi_history,
@@ -1626,6 +1694,10 @@ impl SsgiRenderer {
             width,
             height,
             half_res: false,
+            last_trace_ms: 0.0,
+            last_shade_ms: 0.0,
+            last_temporal_ms: 0.0,
+            last_upsample_ms: 0.0,
         })
     }
 
@@ -1675,6 +1747,17 @@ impl SsgiRenderer {
         let (w, h) = if on { (self.width.max(2) / 2, self.height.max(2) / 2) } else { (self.width, self.height) };
 
         // Recreate output and temporal textures at new resolution
+        self.ssgi_hit = device.create_texture(&TextureDescriptor {
+            label: Some("ssgi_hit"),
+            size: Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba16Float,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        self.ssgi_hit_view = self.ssgi_hit.create_view(&TextureViewDescriptor::default());
         self.ssgi_texture = device.create_texture(&TextureDescriptor {
             label: Some("ssgi_texture"),
             size: Extent3d { width: w, height: h, depth_or_array_layers: 1 },
@@ -1718,44 +1801,59 @@ impl SsgiRenderer {
         Ok(())
     }
 
-    pub fn execute(&self, device: &Device, encoder: &mut CommandEncoder, gbuffer: &GBuffer) -> RenderResult<()> {
-        // Bind group for main pass
-        let bg = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("ssgi_bind_group"),
-            layout: &self.ssgi_bind_group_layout,
-            entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&gbuffer.depth_view) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&gbuffer.normal_view) },
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&gbuffer.material_view) },
-                BindGroupEntry { binding: 3, resource: BindingResource::TextureView(&self.ssgi_view) },
-                BindGroupEntry { binding: 4, resource: self.settings_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 5, resource: self.camera_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 6, resource: BindingResource::TextureView(&self.env_view) },
-                BindGroupEntry { binding: 7, resource: BindingResource::Sampler(&self.env_sampler) },
-            ],
-        });
-
-        // Dispatch using the current SSGI output resolution. In half-res mode the
-        // output textures are reallocated at half the base resolution via
-        // `set_half_res()`, so we must also halve the dispatch grid here.
-        let (w_out, h_out) = if self.half_res {
-            (self.width.max(2) / 2, self.height.max(2) / 2)
-        } else {
-            (self.width, self.height)
-        };
+    pub fn execute(&mut self, device: &Device, encoder: &mut CommandEncoder, gbuffer: &GBuffer, hzb_view: &TextureView) -> RenderResult<()> {
+        // Compute dispatch size for half/full resolution outputs
+        let (w_out, h_out) = if self.half_res { (self.width.max(2) / 2, self.height.max(2) / 2) } else { (self.width, self.height) };
         let gx = (w_out + 7) / 8;
         let gy = (h_out + 7) / 8;
 
+        let t0 = Instant::now();
+        // Trace pass (half-res): produces hit buffer with reprojection info
+        let trace_bg = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("p5.ssgi.trace.bg"),
+            layout: &self.trace_bind_group_layout,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&gbuffer.depth_view) },
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&gbuffer.normal_view) },
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(hzb_view) },
+                BindGroupEntry { binding: 3, resource: BindingResource::TextureView(&self.ssgi_hit_view) },
+                BindGroupEntry { binding: 4, resource: self.settings_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 5, resource: self.camera_buffer.as_entire_binding() },
+            ],
+        });
         {
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("ssgi_pass"), timestamp_writes: None });
-            pass.set_pipeline(&self.ssgi_pipeline);
-            pass.set_bind_group(0, &bg, &[]);
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("p5.ssgi.trace"), timestamp_writes: None });
+            pass.set_pipeline(&self.trace_pipeline);
+            pass.set_bind_group(0, &trace_bg, &[]);
             pass.dispatch_workgroups(gx, gy, 1);
         }
+        let t1 = Instant::now();
 
-        // Temporal pass (optional)
+        // Shade pass: sample previous frame color / IBL fallback
+        let shade_bg = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("p5.ssgi.shade.bg"),
+            layout: &self.shade_bind_group_layout,
+            entries: &[
+                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&gbuffer.material_view) },
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&self.env_view) },
+                BindGroupEntry { binding: 2, resource: BindingResource::Sampler(&self.env_sampler) },
+                BindGroupEntry { binding: 3, resource: BindingResource::TextureView(&self.ssgi_hit_view) },
+                BindGroupEntry { binding: 4, resource: BindingResource::TextureView(&self.ssgi_view) },
+                BindGroupEntry { binding: 5, resource: self.settings_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 6, resource: BindingResource::TextureView(&gbuffer.normal_view) },
+            ],
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("p5.ssgi.shade"), timestamp_writes: None });
+            pass.set_pipeline(&self.shade_pipeline);
+            pass.set_bind_group(0, &shade_bg, &[]);
+            pass.dispatch_workgroups(gx, gy, 1);
+        }
+        let t2 = Instant::now();
+
+        // Temporal resolve pass (half-res accumulation)
         let temporal_bg = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("ssgi_temporal_bg"),
+            label: Some("p5.ssgi.temporal.bg"),
             layout: &self.temporal_bind_group_layout,
             entries: &[
                 BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&self.ssgi_view) },
@@ -1765,35 +1863,25 @@ impl SsgiRenderer {
             ],
         });
         {
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("ssgi_temporal"), timestamp_writes: None });
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("p5.ssgi.temporal"), timestamp_writes: None });
             pass.set_pipeline(&self.temporal_pipeline);
-            // Bind main group(0) and temporal resources at group(1) per pipeline layout
-            pass.set_bind_group(0, &bg, &[]);
-            pass.set_bind_group(1, &temporal_bg, &[]);
+            pass.set_bind_group(0, &temporal_bg, &[]);
             pass.dispatch_workgroups(gx, gy, 1);
         }
+        let t3 = Instant::now();
 
-        // Copy temporal filtered output to history for next frame
+        // Refresh history for next frame
         encoder.copy_texture_to_texture(
-            ImageCopyTexture {
-                texture: &self.ssgi_filtered,
-                mip_level: 0,
-                origin: Origin3d::ZERO,
-                aspect: TextureAspect::All,
-            },
-            ImageCopyTexture {
-                texture: &self.ssgi_history,
-                mip_level: 0,
-                origin: Origin3d::ZERO,
-                aspect: TextureAspect::All,
-            },
+            ImageCopyTexture { texture: &self.ssgi_filtered, mip_level: 0, origin: Origin3d::ZERO, aspect: TextureAspect::All },
+            ImageCopyTexture { texture: &self.ssgi_history, mip_level: 0, origin: Origin3d::ZERO, aspect: TextureAspect::All },
             Extent3d { width: w_out, height: h_out, depth_or_array_layers: 1 },
         );
 
-        // If half-res, upsample filtered SSGI to full resolution for display
+        // Optional upsample when operating in half-resolution mode
+        let mut up_ms = 0.0f32;
         if self.half_res {
             let up_bg = device.create_bind_group(&BindGroupDescriptor {
-                label: Some("ssgi_upsample_bg"),
+                label: Some("p5.ssgi.upsample.bg"),
                 layout: &self.upsample_bind_group_layout,
                 entries: &[
                     BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&self.ssgi_filtered_view) },
@@ -1806,24 +1894,62 @@ impl SsgiRenderer {
             });
             let gx_full = (self.width + 7) / 8;
             let gy_full = (self.height + 7) / 8;
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("ssgi_upsample"), timestamp_writes: None });
+            let t_up0 = Instant::now();
+            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor { label: Some("p5.ssgi.upsample"), timestamp_writes: None });
             pass.set_pipeline(&self.upsample_pipeline);
-            // Bind main group(0), temporal group(1) and upsample group(2) per pipeline layout
-            pass.set_bind_group(0, &bg, &[]);
-            pass.set_bind_group(1, &temporal_bg, &[]);
-            pass.set_bind_group(2, &up_bg, &[]);
+            pass.set_bind_group(0, &up_bg, &[]);
             pass.dispatch_workgroups(gx_full, gy_full, 1);
+            let t_up1 = Instant::now();
+            up_ms = (t_up1 - t_up0).as_secs_f32() * 1000.0;
+        } else {
+            // Maintain a valid upscaled target for consumers expecting full-res texture
+            encoder.copy_texture_to_texture(
+                ImageCopyTexture { texture: &self.ssgi_filtered, mip_level: 0, origin: Origin3d::ZERO, aspect: TextureAspect::All },
+                ImageCopyTexture { texture: &self.ssgi_upscaled, mip_level: 0, origin: Origin3d::ZERO, aspect: TextureAspect::All },
+                Extent3d { width: w_out, height: h_out, depth_or_array_layers: 1 },
+            );
         }
+
+        self.last_trace_ms = (t1 - t0).as_secs_f32() * 1000.0;
+        self.last_shade_ms = (t2 - t1).as_secs_f32() * 1000.0;
+        self.last_temporal_ms = (t3 - t2).as_secs_f32() * 1000.0;
+        self.last_upsample_ms = up_ms;
 
         Ok(())
     }
 
+
     #[allow(dead_code)]
     pub fn get_output(&self) -> &TextureView { &self.ssgi_filtered_view }
+
+    pub fn get_output_view(&self) -> &TextureView { &self.ssgi_filtered_view }
+
+    pub fn get_upscaled_view(&self) -> &TextureView { &self.ssgi_upscaled_view }
 
     /// Get display-ready output (upscaled if running half-res)
     pub fn get_output_for_display(&self) -> &TextureView {
         if self.half_res { &self.ssgi_upscaled_view } else { &self.ssgi_filtered_view }
+    }
+
+    pub fn timings_ms(&self) -> (f32, f32, f32, f32) {
+        (self.last_trace_ms, self.last_shade_ms, self.last_temporal_ms, self.last_upsample_ms)
+    }
+
+    pub fn dimensions(&self) -> (u32, u32) { (self.width, self.height) }
+
+    pub fn is_half_res(&self) -> bool { self.half_res }
+
+    pub fn hit_texture(&self) -> &Texture { &self.ssgi_hit }
+
+    pub fn filtered_texture(&self) -> &Texture { &self.ssgi_filtered }
+
+    pub fn history_texture(&self) -> &Texture { &self.ssgi_history }
+
+    pub fn upscaled_texture(&self) -> &Texture { &self.ssgi_upscaled }
+
+    pub fn reset_history(&mut self, device: &Device, queue: &Queue) -> RenderResult<()> {
+        // Reallocate internal targets to clear history buffers
+        self.set_half_res(device, queue, self.half_res)
     }
 }
 

@@ -20,6 +20,9 @@ use std::path::Path;
 use crate::core::ibl::{IBLRenderer, IBLQuality};
 use crate::util::image_write;
 use crate::renderer::readback::read_texture_tight;
+use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
+use half::f16;
+use anyhow::bail;
 use winit::{
     dpi::PhysicalSize,
     event::*,
@@ -33,6 +36,7 @@ use winit::{
 const LIT_WGSL_VERSION: u32 = 2;
 // Limit for P5.1 capture outputs (in megapixels). Images larger than this will be downscaled.
 const P51_MAX_MEGAPIXELS: f32 = 2.0;
+const P52_MAX_MEGAPIXELS: f32 = 2.0;
 
 // ------------------------------
 // HUD seven-seg numeric helpers
@@ -539,6 +543,334 @@ impl Viewer {
         f.write_all(serde_json::to_string_pretty(&meta)?.as_bytes())?;
         println!("[P5] Wrote {}", path.display());
         Ok(())
+    }
+
+    fn capture_p52_ssgi_cornell(&mut self) -> anyhow::Result<()> {
+        use anyhow::Context;
+        use std::fs;
+        let out_dir = std::path::Path::new("reports/p5");
+        fs::create_dir_all(out_dir)?;
+
+        let (w, h) = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            gi.gbuffer().dimensions()
+        };
+
+        let was_enabled = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            gi.is_enabled(SSE::SSGI)
+        };
+        if !was_enabled {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.enable_effect(&self.device, SSE::SSGI)?;
+        }
+
+        let original_settings = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            gi.ssgi_settings().context("SSGI settings unavailable")?
+        };
+
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.disable_effect(SSE::SSGI);
+        }
+        self.reexecute_gi()?;
+        let off_bytes = self.capture_material_rgba8()?;
+
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.enable_effect(&self.device, SSE::SSGI)?;
+            gi.update_ssgi_settings(&self.queue, |s| { *s = original_settings; });
+            gi.ssgi_reset_history(&self.device, &self.queue)?;
+        }
+        self.reexecute_gi()?;
+        let on_bytes = self.capture_material_rgba8()?;
+
+        // Combine split image
+        let out_w = w * 2;
+        let out_h = h;
+        let mut combined = vec![0u8; (out_w * out_h * 4) as usize];
+        for y in 0..h as usize {
+            let dst_off = y * (out_w as usize) * 4;
+            combined[dst_off..dst_off + (w as usize * 4)].copy_from_slice(&off_bytes[y * (w as usize) * 4..(y + 1) * (w as usize) * 4]);
+            combined[dst_off + (w as usize * 4)..dst_off + (w as usize * 8)].copy_from_slice(&on_bytes[y * (w as usize) * 4..(y + 1) * (w as usize) * 4]);
+        }
+
+        let mut write_buf: Vec<u8>;
+        let (final_w, final_h, data_ref): (u32, u32, &[u8]) = {
+            let px = (out_w as u64 as f64) * (out_h as u64 as f64);
+            let max_px = (P52_MAX_MEGAPIXELS * 1_000_000.0) as f64;
+            if px > max_px {
+                let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
+                let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
+                let dh = (out_h as f64 * scale).floor().max(1.0) as u32;
+                write_buf = Self::downscale_rgba8_bilinear(&combined, out_w, out_h, dw, dh);
+                (dw, dh, &write_buf)
+            } else {
+                (out_w, out_h, &combined)
+            }
+        };
+        crate::util::image_write::write_png_rgba8_small(&out_dir.join("p5_ssgi_cornell.png"), data_ref, final_w, final_h)?;
+        if final_w != out_w || final_h != out_h {
+            println!("[P5.2] downscaled SSGI Cornell capture to {}x{} (from {}x{})", final_w, final_h, out_w, out_h);
+        }
+        println!("[P5] Wrote reports/p5/p5_ssgi_cornell.png");
+
+        // Metrics: miss ratio & avg steps
+        let (miss_ratio, avg_steps) = {
+            let (hit_bytes, dims) = self.read_ssgi_hit_bytes()?;
+            let step_len = {
+                let s = original_settings;
+                let steps = s.num_steps.max(1) as f32;
+                s.step_size.max(s.radius / steps)
+            };
+            let mut miss = 0u64;
+            let mut hit = 0u64;
+            let mut step_acc = 0.0f64;
+            for i in 0..(dims.0 * dims.1) as usize {
+                let off = i * 8;
+                let dist = f16::from_le_bytes([hit_bytes[off + 4], hit_bytes[off + 5]]).to_f32();
+                let mask = f16::from_le_bytes([hit_bytes[off + 6], hit_bytes[off + 7]]).to_f32();
+                if mask >= 0.5 {
+                    hit += 1;
+                    let steps = if step_len > 0.0 { dist / step_len } else { 0.0 };
+                    step_acc += steps as f64;
+                } else {
+                    miss += 1;
+                }
+            }
+            let total = (dims.0 as u64) * (dims.1 as u64);
+            let miss_ratio = if total > 0 { miss as f32 / total as f32 } else { 0.0 };
+            let avg_steps = if hit > 0 { (step_acc / hit as f64) as f32 } else { 0.0 };
+            (miss_ratio, avg_steps)
+        };
+
+        // Timings
+        let (trace_ms, shade_ms, temporal_ms, upsample_ms) = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            gi.ssgi_timings_ms().unwrap_or((0.0, 0.0, 0.0, 0.0))
+        };
+
+        // ΔE fallback (steps=0) – compare SSGI output with fallback reference
+        let max_delta_e = {
+            {
+                let gi = self.gi.as_mut().context("GI manager not available")?;
+                gi.update_ssgi_settings(&self.queue, |s| {
+                    s.num_steps = 0;
+                    s.step_size = original_settings.step_size;
+                    s.temporal_alpha = 0.0;
+                });
+                gi.ssgi_reset_history(&self.device, &self.queue)?;
+            }
+            self.reexecute_gi()?;
+            let reference_bytes = self.read_ssgi_filtered_bytes()?.0;
+
+            {
+                let gi = self.gi.as_mut().context("GI manager not available")?;
+                gi.update_ssgi_settings(&self.queue, |s| { *s = original_settings; });
+                gi.ssgi_reset_history(&self.device, &self.queue)?;
+            }
+            self.reexecute_gi()?;
+            let current_bytes = self.read_ssgi_filtered_bytes()?.0;
+
+            compute_max_delta_e(&current_bytes, &reference_bytes)
+        };
+
+        // Restore effect enablement
+        if !was_enabled {
+            if let Some(ref mut gi) = self.gi {
+                gi.disable_effect(SSE::SSGI);
+            }
+        }
+
+        self.write_p5_meta(|meta| {
+            meta.insert("ssgi".to_string(), json!({
+                "miss_ratio": miss_ratio,
+                "avg_steps": avg_steps,
+                "accumulation_alpha": original_settings.temporal_alpha,
+                "perf_ms": {
+                    "trace_ms": trace_ms,
+                    "shade_ms": shade_ms,
+                    "temporal_ms": temporal_ms,
+                    "upsample_ms": upsample_ms,
+                    "total_ssgi_ms": trace_ms + shade_ms + temporal_ms + upsample_ms,
+                },
+                "max_delta_e": max_delta_e,
+            }));
+        })?;
+
+        Ok(())
+    }
+
+    fn capture_p52_ssgi_temporal(&mut self) -> anyhow::Result<()> {
+        use anyhow::Context;
+        use std::fs;
+        let out_dir = std::path::Path::new("reports/p5");
+        fs::create_dir_all(out_dir)?;
+
+        let (w, h) = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            gi.gbuffer().dimensions()
+        };
+
+        let was_enabled = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            gi.is_enabled(SSE::SSGI)
+        };
+        if !was_enabled {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.enable_effect(&self.device, SSE::SSGI)?;
+        }
+
+        let original_settings = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            gi.ssgi_settings().context("SSGI settings unavailable")?
+        };
+
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.update_ssgi_settings(&self.queue, |s| {
+                s.temporal_alpha = 0.0;
+            });
+            gi.ssgi_reset_history(&self.device, &self.queue)?;
+        }
+        self.reexecute_gi()?;
+        let single_bytes = self.capture_material_rgba8()?;
+
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.update_ssgi_settings(&self.queue, |s| { *s = original_settings; });
+            gi.ssgi_reset_history(&self.device, &self.queue)?;
+        }
+
+        let mut frame8_luma = Vec::new();
+        let mut frame9_luma = Vec::new();
+
+        for frame in 0..16 {
+            self.reexecute_gi()?;
+            if frame == 7 || frame == 8 {
+                let (bytes, _) = self.read_ssgi_filtered_bytes()?;
+                let luma = rgba16_to_luma(&bytes);
+                if frame == 7 { frame8_luma = luma; } else { frame9_luma = luma; }
+            }
+        }
+
+        let accum_bytes = self.capture_material_rgba8()?;
+
+        // Combine side-by-side
+        let out_w = w * 2;
+        let out_h = h;
+        let mut combined = vec![0u8; (out_w * out_h * 4) as usize];
+        for y in 0..h as usize {
+            let dst_off = y * (out_w as usize) * 4;
+            combined[dst_off..dst_off + (w as usize * 4)].copy_from_slice(&single_bytes[y * (w as usize) * 4..(y + 1) * (w as usize) * 4]);
+            combined[dst_off + (w as usize * 4)..dst_off + (w as usize * 8)].copy_from_slice(&accum_bytes[y * (w as usize) * 4..(y + 1) * (w as usize) * 4]);
+        }
+
+        let mut write_buf: Vec<u8>;
+        let (final_w, final_h, data_ref): (u32, u32, &[u8]) = {
+            let px = (out_w as u64 as f64) * (out_h as u64 as f64);
+            let max_px = (P52_MAX_MEGAPIXELS * 1_000_000.0) as f64;
+            if px > max_px {
+                let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
+                let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
+                let dh = (out_h as f64 * scale).floor().max(1.0) as u32;
+                write_buf = Self::downscale_rgba8_bilinear(&combined, out_w, out_h, dw, dh);
+                (dw, dh, &write_buf)
+            } else {
+                (out_w, out_h, &combined)
+            }
+        };
+        crate::util::image_write::write_png_rgba8_small(&out_dir.join("p5_ssgi_temporal_compare.png"), data_ref, final_w, final_h)?;
+        if final_w != out_w || final_h != out_h {
+            println!("[P5.2] downscaled SSGI temporal capture to {}x{} (from {}x{})", final_w, final_h, out_w, out_h);
+        }
+        println!("[P5] Wrote reports/p5/p5_ssgi_temporal_compare.png");
+
+        let ssim = if !frame8_luma.is_empty() && frame8_luma.len() == frame9_luma.len() {
+            compute_ssim(&frame8_luma, &frame9_luma)
+        } else {
+            1.0
+        };
+
+        self.write_p5_meta(|meta| {
+            let entry = meta.entry("ssgi_temporal".to_string()).or_insert(json!({}));
+            if let Some(obj) = entry.as_object_mut() {
+                obj.insert("ssim_frame8_9".to_string(), json!(ssim));
+                obj.insert("accumulation_frames".to_string(), json!(16));
+            }
+        })?;
+
+        // Restore settings
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.update_ssgi_settings(&self.queue, |s| { *s = original_settings; });
+            gi.ssgi_reset_history(&self.device, &self.queue)?;
+        }
+        if !was_enabled {
+            if let Some(ref mut gi) = self.gi {
+                gi.disable_effect(SSE::SSGI);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn reexecute_gi(&mut self) -> anyhow::Result<()> {
+        use anyhow::Context;
+        let depth_view = self.z_view.as_ref().context("Depth view unavailable")?;
+        if let Some(ref mut gi) = self.gi {
+            let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("p5.gi.reexec") });
+            gi.build_hzb(&self.device, &mut enc, depth_view, false);
+            gi.execute(&self.device, &mut enc)?;
+            self.queue.submit(std::iter::once(enc.finish()));
+            self.device.poll(wgpu::Maintain::Wait);
+        }
+        Ok(())
+    }
+
+    fn capture_material_rgba8(&self) -> anyhow::Result<Vec<u8>> {
+        use anyhow::Context;
+        let gi = self.gi.as_ref().context("GI manager not available")?;
+        let comp_pl = self.comp_pipeline.as_ref().context("comp pipeline")?;
+        let comp_bgl = self.comp_bind_group_layout.as_ref().context("comp bgl")?;
+        let fog_view = if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view };
+        let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
+        Self::render_view_to_rgba8_ex(
+            &self.device,
+            &self.queue,
+            comp_pl,
+            comp_bgl,
+            &self.sky_output_view,
+            &gi.gbuffer().depth_view,
+            fog_view,
+            self.config.format,
+            self.config.width,
+            self.config.height,
+            far,
+            gi.material_with_ao_view().unwrap_or(&gi.gbuffer().material_view),
+            0,
+        )
+    }
+
+    fn read_ssgi_filtered_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
+        use anyhow::Context;
+        let gi = self.gi.as_ref().context("GI manager not available")?;
+        let dims = gi.ssgi_dimensions().context("SSGI dimensions unavailable")?;
+        let tex = gi.ssgi_filtered_texture().context("SSGI filtered texture unavailable")?;
+        let bytes = read_texture_tight(&self.device, &self.queue, tex, dims, wgpu::TextureFormat::Rgba16Float)
+            .context("read SSGI filtered texture")?;
+        Ok((bytes, dims))
+    }
+
+    fn read_ssgi_hit_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
+        use anyhow::Context;
+        let gi = self.gi.as_ref().context("GI manager not available")?;
+        let dims = gi.ssgi_dimensions().context("SSGI dimensions unavailable")?;
+        let tex = gi.ssgi_hit_texture().context("SSGI hit texture unavailable")?;
+        let bytes = read_texture_tight(&self.device, &self.queue, tex, dims, wgpu::TextureFormat::Rgba16Float)
+            .context("read SSGI hit texture")?;
+        Ok((bytes, dims))
     }
 
     fn sha256_hex(s: &str) -> String {
@@ -2714,6 +3046,8 @@ impl Viewer {
                 CaptureKind::P51CornellSplit => if let Err(e) = self.capture_p51_cornell_split() { eprintln!("[P5.1] Cornell split failed: {}", e); },
                 CaptureKind::P51AoGrid => if let Err(e) = self.capture_p51_ao_grid() { eprintln!("[P5.1] AO grid failed: {}", e); },
                 CaptureKind::P51ParamSweep => if let Err(e) = self.capture_p51_param_sweep() { eprintln!("[P5.1] AO sweep failed: {}", e); },
+                CaptureKind::P52SsgiCornell => if let Err(e) = self.capture_p52_ssgi_cornell() { eprintln!("[P5.2] SSGI Cornell capture failed: {}", e); },
+                CaptureKind::P52SsgiTemporal => if let Err(e) = self.capture_p52_ssgi_temporal() { eprintln!("[P5.2] SSGI temporal capture failed: {}", e); },
             }
         }
 
@@ -2726,7 +3060,7 @@ impl Viewer {
     // P5: Dump GBuffer artifacts and meta under reports/p5/
     fn dump_gbuffer_artifacts(&mut self) -> anyhow::Result<()> {
         use std::fs;
-        use anyhow::{Context, bail};
+        use anyhow::Context;
         use sha2::{Digest, Sha256};
         let out_dir = Path::new("reports/p5");
         fs::create_dir_all(out_dir).context("creating reports/p5")?;
@@ -3221,6 +3555,107 @@ impl Viewer {
     }
 }
 
+fn rgba16_to_luma(bytes: &[u8]) -> Vec<f32> {
+    let mut out = Vec::with_capacity(bytes.len() / 8);
+    for chunk in bytes.chunks_exact(8) {
+        let r = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
+        let g = f16::from_le_bytes([chunk[2], chunk[3]]).to_f32();
+        let b = f16::from_le_bytes([chunk[4], chunk[5]]).to_f32();
+        let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        out.push(luma);
+    }
+    out
+}
+
+fn compute_max_delta_e(a: &[u8], b: &[u8]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let mut max_de = 0.0f32;
+    for (chunk_a, chunk_b) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
+        let ra = f16::from_le_bytes([chunk_a[0], chunk_a[1]]).to_f32();
+        let ga = f16::from_le_bytes([chunk_a[2], chunk_a[3]]).to_f32();
+        let ba = f16::from_le_bytes([chunk_a[4], chunk_a[5]]).to_f32();
+
+        let rb = f16::from_le_bytes([chunk_b[0], chunk_b[1]]).to_f32();
+        let gb = f16::from_le_bytes([chunk_b[2], chunk_b[3]]).to_f32();
+        let bb = f16::from_le_bytes([chunk_b[4], chunk_b[5]]).to_f32();
+
+        let (l1, a1, b1) = rgb_to_lab(ra, ga, ba);
+        let (l2, a2, b2) = rgb_to_lab(rb, gb, bb);
+        let delta = ((l1 - l2).powi(2) + (a1 - a2).powi(2) + (b1 - b2).powi(2)).sqrt();
+        if delta > max_de {
+            max_de = delta;
+        }
+    }
+    max_de
+}
+
+fn rgb_to_lab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    // Assume linear sRGB inputs in [0,1]
+    let x = 0.412_456_4 * r + 0.357_576_1 * g + 0.180_437_5 * b;
+    let y = 0.212_672_9 * r + 0.715_152_2 * g + 0.072_175 * b;
+    let z = 0.019_333_9 * r + 0.119_192 * g + 0.950_304_1 * b;
+
+    let xn = 0.950_47;
+    let yn = 1.0;
+    let zn = 1.088_83;
+
+    let fx = lab_pivot(x / xn);
+    let fy = lab_pivot(y / yn);
+    let fz = lab_pivot(z / zn);
+
+    let l = (116.0 * fy - 16.0).clamp(0.0, 100.0);
+    let a = 500.0 * (fx - fy);
+    let b = 200.0 * (fy - fz);
+    (l, a, b)
+}
+
+fn lab_pivot(t: f32) -> f32 {
+    const EPSILON: f32 = 0.008856;
+    const KAPPA: f32 = 903.3;
+    if t > EPSILON {
+        t.cbrt()
+    } else {
+        (KAPPA * t + 16.0) / 116.0
+    }
+}
+
+fn compute_ssim(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 1.0;
+    }
+    let n = a.len() as f32;
+    let mean_a = a.iter().copied().sum::<f32>() / n;
+    let mean_b = b.iter().copied().sum::<f32>() / n;
+
+    let mut var_a = 0.0f32;
+    let mut var_b = 0.0f32;
+    let mut cov = 0.0f32;
+    for (&xa, &xb) in a.iter().zip(b.iter()) {
+        var_a += (xa - mean_a).powi(2);
+        var_b += (xb - mean_b).powi(2);
+        cov += (xa - mean_a) * (xb - mean_b);
+    }
+    if n > 1.0 {
+        var_a /= n - 1.0;
+        var_b /= n - 1.0;
+        cov /= n - 1.0;
+    }
+
+    const L: f32 = 1.0;
+    const C1: f32 = 0.0001; // (0.01 * L)^2 with L=1
+    const C2: f32 = 0.0009; // (0.03 * L)^2 with L=1
+
+    let numerator = (2.0 * mean_a * mean_b + C1) * (2.0 * cov + C2);
+    let denominator = (mean_a.powi(2) + mean_b.powi(2) + C1) * (var_a + var_b + C2);
+    if denominator.abs() < f32::EPSILON {
+        1.0
+    } else {
+        (numerator / denominator).clamp(-1.0, 1.0)
+    }
+}
+
     // Simple command interface event type carried by the winit EventLoop
     #[derive(Debug, Clone)]
     enum ViewerCmd {
@@ -3296,6 +3731,8 @@ impl Viewer {
         CaptureP51Cornell,
         CaptureP51Grid,
         CaptureP51Sweep,
+        CaptureP52SsgiCornell,
+        CaptureP52SsgiTemporal,
     }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3309,6 +3746,8 @@ enum CaptureKind {
     P51CornellSplit,
     P51AoGrid,
     P51ParamSweep,
+    P52SsgiCornell,
+    P52SsgiTemporal,
 }
 
 impl Viewer {
@@ -3383,6 +3822,42 @@ impl Viewer {
             ViewerCmd::SetSsaoCompositeMul(v) => {
                 if let Some(ref mut gi) = self.gi { gi.set_ssao_composite_multiplier(&self.queue, v); }
             }
+            // P5.2 SSGI controls
+            ViewerCmd::SetSsgiSteps(n) => {
+                if let Some(ref mut gi) = self.gi {
+                    gi.update_ssgi_settings(&self.queue, |s| { s.num_steps = n.max(0); });
+                }
+            }
+            ViewerCmd::SetSsgiRadius(r) => {
+                if let Some(ref mut gi) = self.gi {
+                    gi.update_ssgi_settings(&self.queue, |s| { s.radius = r.max(0.0); });
+                }
+            }
+            ViewerCmd::SetSsgiHalf(on) => {
+                if let Some(ref mut gi) = self.gi {
+                    gi.set_ssgi_half_res_with_queue(&self.device, &self.queue, on);
+                }
+            }
+            ViewerCmd::SetSsgiTemporalAlpha(a) => {
+                if let Some(ref mut gi) = self.gi {
+                    gi.update_ssgi_settings(&self.queue, |s| { s.temporal_alpha = a.clamp(0.0, 1.0); });
+                }
+            }
+            ViewerCmd::SetSsgiEdges(on) => {
+                if let Some(ref mut gi) = self.gi {
+                    gi.update_ssgi_settings(&self.queue, |s| { s.use_edge_aware = if on {1} else {0}; });
+                }
+            }
+            ViewerCmd::SetSsgiUpsigma(sig) => {
+                if let Some(ref mut gi) = self.gi {
+                    gi.update_ssgi_settings(&self.queue, |s| { s.upsample_depth_sigma = sig.max(1e-4); });
+                }
+            }
+            ViewerCmd::SetSsgiNormalExp(exp) => {
+                if let Some(ref mut gi) = self.gi {
+                    gi.update_ssgi_settings(&self.queue, |s| { s.upsample_normal_exp = exp.max(0.0); });
+                }
+            }
             ViewerCmd::Snapshot(path) => {
                 let p = path.unwrap_or_else(|| "snapshot.png".to_string());
                 self.snapshot_request = Some(p);
@@ -3456,6 +3931,8 @@ impl Viewer {
             ViewerCmd::CaptureP51Cornell => { self.pending_captures.push_back(CaptureKind::P51CornellSplit); println!("[P5.1] capture: Cornell OFF/ON split queued"); }
             ViewerCmd::CaptureP51Grid => { self.pending_captures.push_back(CaptureKind::P51AoGrid); println!("[P5.1] capture: AO buffers grid queued"); }
             ViewerCmd::CaptureP51Sweep => { self.pending_captures.push_back(CaptureKind::P51ParamSweep); println!("[P5.1] capture: AO parameter sweep queued"); }
+            ViewerCmd::CaptureP52SsgiCornell => { self.pending_captures.push_back(CaptureKind::P52SsgiCornell); println!("[P5.2] capture: SSGI Cornell split queued"); }
+            ViewerCmd::CaptureP52SsgiTemporal => { self.pending_captures.push_back(CaptureKind::P52SsgiTemporal); println!("[P5.2] capture: SSGI temporal compare queued"); }
             // Sky controls
             ViewerCmd::SkyToggle(on) => { self.sky_enabled = on; }
             ViewerCmd::SkySetModel(id) => { self.sky_model_id = id; self.sky_enabled = true; }
@@ -3647,7 +4124,9 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     "cornell" => pending_cmds.push(ViewerCmd::CaptureP51Cornell),
                     "grid" => pending_cmds.push(ViewerCmd::CaptureP51Grid),
                     "sweep" => pending_cmds.push(ViewerCmd::CaptureP51Sweep),
-                    _ => println!("Usage: :p5 <cornell|grid|sweep>"),
+                    "ssgi-cornell" => pending_cmds.push(ViewerCmd::CaptureP52SsgiCornell),
+                    "ssgi-temporal" => pending_cmds.push(ViewerCmd::CaptureP52SsgiTemporal),
+                    _ => println!("Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal>"),
                 }
             } else if l.starts_with(":obj") || l.starts_with("obj ") {
                 if let Some(path) = l.split_whitespace().nth(1) { pending_cmds.push(ViewerCmd::LoadObj(path.to_string())); }
@@ -3858,10 +4337,12 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                         "cornell" => { let _ = proxy.send_event(ViewerCmd::CaptureP51Cornell); }
                         "grid" => { let _ = proxy.send_event(ViewerCmd::CaptureP51Grid); }
                         "sweep" => { let _ = proxy.send_event(ViewerCmd::CaptureP51Sweep); }
-                        _ => println!("Usage: :p5 <cornell|grid|sweep>"),
+                        "ssgi-cornell" => { let _ = proxy.send_event(ViewerCmd::CaptureP52SsgiCornell); }
+                        "ssgi-temporal" => { let _ = proxy.send_event(ViewerCmd::CaptureP52SsgiTemporal); }
+                        _ => println!("Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal>"),
                     }
                 } else {
-                    println!("Usage: :p5 <cornell|grid|sweep>");
+                    println!("Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal>");
                 }
             } else if l.starts_with(":obj") || l.starts_with("obj ") {
                 if let Some(path) = l.split_whitespace().nth(1) {

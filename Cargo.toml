@@ -103,6 +103,10 @@ path = "examples/p5_ao_export.rs"
 name = "p5_1_dump"
 path = "examples/p5_1_dump.rs"
 
+[[example]]
+name = "p5_ssgi_generate"
+path = "examples/p5_ssgi_generate.rs"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"
