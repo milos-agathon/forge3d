@@ -1,8 +1,8 @@
 // src/lighting/light_buffer.rs
 // P1: Light buffer management with triple-buffering for multi-light support
 // SSBO storage buffer layout (std430) for efficient GPU upload
-use wgpu::{Device, Queue, Buffer, BufferUsages};
 use crate::lighting::types::Light;
+use wgpu::{Buffer, BufferUsages, Device, Queue};
 
 /// Maximum number of lights supported (P1 default)
 pub const MAX_LIGHTS: usize = 16;
@@ -93,14 +93,14 @@ pub struct LightBuffer {
     /// Uniform buffer for light count (triple-buffered)
     count_buffers: [Buffer; 3],
     /// Uniform buffer placeholder for environment lighting parameters (P1-05)
-    /// 
+    ///
     /// Currently initialized to zeros. Full IBL with importance sampling is
     /// deferred to P4. This stub allows shaders to link successfully without
     /// asset dependencies (no texture samplers required).
-    /// 
+    ///
     /// Size: 16 bytes (vec4<f32> in WGSL)
     /// Binding: @group(0) @binding(5)
-    /// 
+    ///
     /// Future P4 fields may include:
     /// - x: environment intensity multiplier
     /// - y: environment rotation (degrees)
@@ -183,7 +183,7 @@ impl LightBuffer {
         // P1-05: Environment params stub (zeros for now, full IBL in P4)
         let environment_stub = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Light Environment Stub Buffer"),
-            size: 16,  // vec4<f32>
+            size: 16, // vec4<f32>
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -191,8 +191,8 @@ impl LightBuffer {
         // Initialize count buffer with zero lights for default bind group
         let seed = r2_sample(0);
         let count_data = [
-            0u32,  // light_count = 0
-            0u32,  // frame_index = 0
+            0u32, // light_count = 0
+            0u32, // frame_index = 0
             seed[0].to_bits(),
             seed[1].to_bits(),
         ];
@@ -249,7 +249,7 @@ impl LightBuffer {
     fn create_count_buffer(device: &Device, index: usize) -> Buffer {
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("Light Count Buffer {}", index)),
-            size: 16,  // Single u32 with padding to 16 bytes (uniform buffer alignment)
+            size: 16, // Single u32 with padding to 16 bytes (uniform buffer alignment)
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         })
@@ -263,7 +263,12 @@ impl LightBuffer {
     ///
     /// # Returns
     /// Result indicating success or error if too many lights
-    pub fn update(&mut self, device: &Device, queue: &Queue, lights: &[Light]) -> Result<(), String> {
+    pub fn update(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        lights: &[Light],
+    ) -> Result<(), String> {
         if lights.len() > MAX_LIGHTS {
             return Err(format!(
                 "Too many lights: {} (max {})",
@@ -294,7 +299,7 @@ impl LightBuffer {
         queue.write_buffer(&self.environment_stub, 0, &[0u8; 16]);
 
         self.light_count = lights.len() as u32;
-        
+
         // P1-07: Store copy for debug inspection
         self.last_uploaded_lights = lights.to_vec();
 
@@ -369,7 +374,7 @@ impl LightBuffer {
     }
 
     /// Get bind group for current frame
-    /// 
+    ///
     /// Always returns a bind group. If no lights have been uploaded via `update()`,
     /// returns a default bind group with zero lights (neutral state).
     pub fn bind_group(&self) -> Option<&wgpu::BindGroup> {
@@ -428,11 +433,11 @@ impl LightBuffer {
     // P1-07: Debug inspection API
 
     /// Get reference to last uploaded lights (P1-07)
-    /// 
+    ///
     /// Returns a slice of lights uploaded via the most recent `update()` call.
     /// Useful for debug inspection, validation, and acceptance testing without
     /// GPU readback.
-    /// 
+    ///
     /// # Example
     /// ```rust,ignore
     /// light_buffer.update(&device, &queue, &lights)?;
@@ -444,14 +449,14 @@ impl LightBuffer {
     }
 
     /// Format debug information for light buffer state (P1-07)
-    /// 
+    ///
     /// Returns a human-readable string describing:
     /// - Light count and frame counter
     /// - Current R2 seed values
     /// - Summary of each uploaded light (type, intensity, key fields)
-    /// 
+    ///
     /// Intended for debug output, logging, and acceptance validation.
-    /// 
+    ///
     /// # Example Output
     /// ```text
     /// LightBuffer Debug Info:
@@ -469,70 +474,113 @@ impl LightBuffer {
     pub fn debug_info(&self) -> String {
         use std::fmt::Write;
         let mut output = String::new();
-        
+
         writeln!(output, "LightBuffer Debug Info:").unwrap();
         writeln!(output, "  Count: {} lights", self.light_count).unwrap();
-        writeln!(output, "  Frame: {} (seed: [{:.3}, {:.3}])",
-            self.frame_counter,
-            self.sequence_seed[0],
-            self.sequence_seed[1]
-        ).unwrap();
+        writeln!(
+            output,
+            "  Frame: {} (seed: [{:.3}, {:.3}])",
+            self.frame_counter, self.sequence_seed[0], self.sequence_seed[1]
+        )
+        .unwrap();
         writeln!(output).unwrap();
-        
+
         for (i, light) in self.last_uploaded_lights.iter().enumerate() {
             writeln!(output, "  Light {}: {}", i, light_type_name(light.kind)).unwrap();
-            writeln!(output, "    Intensity: {:.2}, Color: [{:.2}, {:.2}, {:.2}]",
-                light.intensity,
-                light.color[0],
-                light.color[1],
-                light.color[2]
-            ).unwrap();
-            
+            writeln!(
+                output,
+                "    Intensity: {:.2}, Color: [{:.2}, {:.2}, {:.2}]",
+                light.intensity, light.color[0], light.color[1], light.color[2]
+            )
+            .unwrap();
+
             // Type-specific fields
             match light.kind {
-                0 => { // Directional
-                    writeln!(output, "    Direction: [{:.2}, {:.2}, {:.2}]",
+                0 => {
+                    // Directional
+                    writeln!(
+                        output,
+                        "    Direction: [{:.2}, {:.2}, {:.2}]",
                         light.dir_ws[0], light.dir_ws[1], light.dir_ws[2]
-                    ).unwrap();
+                    )
+                    .unwrap();
                 }
-                1 => { // Point
-                    writeln!(output, "    Position: [{:.2}, {:.2}, {:.2}], Range: {:.2}",
-                        light.pos_ws[0], light.pos_ws[1], light.pos_ws[2],
-                        light.range
-                    ).unwrap();
+                1 => {
+                    // Point
+                    writeln!(
+                        output,
+                        "    Position: [{:.2}, {:.2}, {:.2}], Range: {:.2}",
+                        light.pos_ws[0], light.pos_ws[1], light.pos_ws[2], light.range
+                    )
+                    .unwrap();
                 }
-                2 => { // Spot
-                    writeln!(output, "    Position: [{:.2}, {:.2}, {:.2}], Direction: [{:.2}, {:.2}, {:.2}]",
-                        light.pos_ws[0], light.pos_ws[1], light.pos_ws[2],
-                        light.dir_ws[0], light.dir_ws[1], light.dir_ws[2]
-                    ).unwrap();
-                    writeln!(output, "    Cone: inner_cos={:.2}, outer_cos={:.2}, Range: {:.2}",
+                2 => {
+                    // Spot
+                    writeln!(
+                        output,
+                        "    Position: [{:.2}, {:.2}, {:.2}], Direction: [{:.2}, {:.2}, {:.2}]",
+                        light.pos_ws[0],
+                        light.pos_ws[1],
+                        light.pos_ws[2],
+                        light.dir_ws[0],
+                        light.dir_ws[1],
+                        light.dir_ws[2]
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "    Cone: inner_cos={:.2}, outer_cos={:.2}, Range: {:.2}",
                         light.cone_cos[0], light.cone_cos[1], light.range
-                    ).unwrap();
+                    )
+                    .unwrap();
                 }
-                3 => { // Environment
+                3 => {
+                    // Environment
                     writeln!(output, "    Texture Index: {}", light.env_texture_index).unwrap();
                 }
-                4 => { // AreaRect
-                    writeln!(output, "    Position: [{:.2}, {:.2}, {:.2}], Normal: [{:.2}, {:.2}, {:.2}]",
-                        light.pos_ws[0], light.pos_ws[1], light.pos_ws[2],
-                        light.dir_ws[0], light.dir_ws[1], light.dir_ws[2]
-                    ).unwrap();
-                    writeln!(output, "    Half-extents: width={:.2}, height={:.2}",
+                4 => {
+                    // AreaRect
+                    writeln!(
+                        output,
+                        "    Position: [{:.2}, {:.2}, {:.2}], Normal: [{:.2}, {:.2}, {:.2}]",
+                        light.pos_ws[0],
+                        light.pos_ws[1],
+                        light.pos_ws[2],
+                        light.dir_ws[0],
+                        light.dir_ws[1],
+                        light.dir_ws[2]
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "    Half-extents: width={:.2}, height={:.2}",
                         light.area_half[0], light.area_half[1]
-                    ).unwrap();
+                    )
+                    .unwrap();
                 }
-                5 => { // AreaDisk
-                    writeln!(output, "    Position: [{:.2}, {:.2}, {:.2}], Normal: [{:.2}, {:.2}, {:.2}]",
-                        light.pos_ws[0], light.pos_ws[1], light.pos_ws[2],
-                        light.dir_ws[0], light.dir_ws[1], light.dir_ws[2]
-                    ).unwrap();
+                5 => {
+                    // AreaDisk
+                    writeln!(
+                        output,
+                        "    Position: [{:.2}, {:.2}, {:.2}], Normal: [{:.2}, {:.2}, {:.2}]",
+                        light.pos_ws[0],
+                        light.pos_ws[1],
+                        light.pos_ws[2],
+                        light.dir_ws[0],
+                        light.dir_ws[1],
+                        light.dir_ws[2]
+                    )
+                    .unwrap();
                     writeln!(output, "    Radius: {:.2}", light.area_half[0]).unwrap();
                 }
-                6 => { // AreaSphere
-                    writeln!(output, "    Position: [{:.2}, {:.2}, {:.2}]",
+                6 => {
+                    // AreaSphere
+                    writeln!(
+                        output,
+                        "    Position: [{:.2}, {:.2}, {:.2}]",
                         light.pos_ws[0], light.pos_ws[1], light.pos_ws[2]
-                    ).unwrap();
+                    )
+                    .unwrap();
                     writeln!(output, "    Radius: {:.2}", light.area_half[0]).unwrap();
                 }
                 _ => {
@@ -541,7 +589,7 @@ impl LightBuffer {
             }
             writeln!(output).unwrap();
         }
-        
+
         output
     }
 }
@@ -571,15 +619,15 @@ mod tests {
         assert_eq!(light_size, 80);
 
         // Memory calculation
-        let light_buffer_size = MAX_LIGHTS * light_size;  // 16 * 80 = 1280 bytes
+        let light_buffer_size = MAX_LIGHTS * light_size; // 16 * 80 = 1280 bytes
         let count_buffer_size = 16;
-        let total_per_buffer = light_buffer_size + count_buffer_size;  // 1296 bytes
-        let total = 3 * total_per_buffer;  // 3888 bytes
+        let total_per_buffer = light_buffer_size + count_buffer_size; // 1296 bytes
+        let total = 3 * total_per_buffer; // 3888 bytes
 
         assert_eq!(total, 3888);
 
         let mb = total as f64 / (1024.0 * 1024.0);
-        assert!(mb < 0.01);  // Less than 10 KB = ~0.0037 MiB
+        assert!(mb < 0.01); // Less than 10 KB = ~0.0037 MiB
     }
 
     #[test]
@@ -591,7 +639,7 @@ mod tests {
         assert_eq!(MAX_LIGHTS, 16);
 
         let total_bytes = 3 * MAX_LIGHTS * std::mem::size_of::<Light>();
-        assert!(total_bytes < 512 * 1024 * 1024);  // < 512 MiB
+        assert!(total_bytes < 512 * 1024 * 1024); // < 512 MiB
     }
 
     #[test]
@@ -604,7 +652,7 @@ mod tests {
     }
 
     // P1-02: Triple-buffered SSBO manager parity tests
-    
+
     #[test]
     fn test_light_metadata_size() {
         // LightMetadata in WGSL is 4 u32s (count, frame_index, seed_bits_x, seed_bits_y)
@@ -616,26 +664,26 @@ mod tests {
     fn test_max_lights_budget() {
         // Verify MAX_LIGHTS=16 is correct
         assert_eq!(MAX_LIGHTS, 16);
-        
+
         // Verify total memory is reasonable
         let light_size = std::mem::size_of::<Light>();
-        let total_light_memory = 3 * MAX_LIGHTS * light_size;  // Triple-buffered
-        let total_metadata = 3 * 16;  // 3 count buffers
+        let total_light_memory = 3 * MAX_LIGHTS * light_size; // Triple-buffered
+        let total_metadata = 3 * 16; // 3 count buffers
         let environment_stub = 16;
         let total = total_light_memory + total_metadata + environment_stub;
-        
+
         // Total should be: 3 * 16 * 80 + 3 * 16 + 16 = 3840 + 48 + 16 = 3904 bytes
         assert_eq!(total, 3904);
-        assert!(total < 5000);  // Well under 5 KB
+        assert!(total < 5000); // Well under 5 KB
     }
 
     #[test]
     fn test_memory_bytes_calculation() {
         // Verify memory_bytes() matches manual calculation
-        let light_buffer_size = (MAX_LIGHTS * std::mem::size_of::<Light>()) as u64;  // 1280
+        let light_buffer_size = (MAX_LIGHTS * std::mem::size_of::<Light>()) as u64; // 1280
         let count_buffer_size = 16u64;
         let environment_stub_size = 16u64;
-        
+
         let expected = 3 * (light_buffer_size + count_buffer_size) + environment_stub_size;
         // 3 * (1280 + 16) + 16 = 3 * 1296 + 16 = 3888 + 16 = 3904
         assert_eq!(expected, 3904);
@@ -659,7 +707,7 @@ mod tests {
         const LIGHTS_BINDING: u32 = 3;
         const METADATA_BINDING: u32 = 4;
         const ENVIRONMENT_BINDING: u32 = 5;
-        
+
         assert_eq!(LIGHTS_BINDING, 3);
         assert_eq!(METADATA_BINDING, 4);
         assert_eq!(ENVIRONMENT_BINDING, 5);
@@ -691,7 +739,7 @@ mod tests {
         let seed1a = r2_sample(42);
         let seed1b = r2_sample(42);
         assert_eq!(seed1a, seed1b);
-        
+
         // Different indices produce different seeds
         let seed2 = r2_sample(43);
         assert_ne!(seed1a, seed2);
@@ -702,10 +750,18 @@ mod tests {
         // Verify R2 samples stay in [0, 1] range
         for i in 0..100 {
             let sample = r2_sample(i);
-            assert!(sample[0] >= 0.0 && sample[0] <= 1.0,
-                "R2 x sample {} out of range: {}", i, sample[0]);
-            assert!(sample[1] >= 0.0 && sample[1] <= 1.0,
-                "R2 y sample {} out of range: {}", i, sample[1]);
+            assert!(
+                sample[0] >= 0.0 && sample[0] <= 1.0,
+                "R2 x sample {} out of range: {}",
+                i,
+                sample[0]
+            );
+            assert!(
+                sample[1] >= 0.0 && sample[1] <= 1.0,
+                "R2 y sample {} out of range: {}",
+                i,
+                sample[1]
+            );
         }
     }
 
@@ -749,8 +805,11 @@ mod tests {
         // Verify all 10 seeds are unique
         for i in 0..seeds.len() {
             for j in (i + 1)..seeds.len() {
-                assert_ne!(seeds[i], seeds[j], 
-                    "Seeds at frames {} and {} should differ", i, j);
+                assert_ne!(
+                    seeds[i], seeds[j],
+                    "Seeds at frames {} and {} should differ",
+                    i, j
+                );
             }
         }
     }
@@ -759,15 +818,15 @@ mod tests {
     fn test_seed_encoding_roundtrip() {
         // Verify seed encoding matches WGSL bitcast behavior
         let seed = r2_sample(42);
-        
+
         // Encode as bits (what we upload to GPU)
         let bits_x = seed[0].to_bits();
         let bits_y = seed[1].to_bits();
-        
+
         // Decode (what WGSL bitcast<f32>() does)
         let decoded_x = f32::from_bits(bits_x);
         let decoded_y = f32::from_bits(bits_y);
-        
+
         // Should match exactly
         assert_eq!(seed[0], decoded_x);
         assert_eq!(seed[1], decoded_y);
@@ -802,10 +861,10 @@ mod tests {
         // Verify we can create lights and they would be stored
         let light1 = Light::directional(45.0, 30.0, 3.0, [1.0, 0.9, 0.8]);
         let light2 = Light::point([0.0, 5.0, 0.0], 10.0, 20.0, [1.0, 1.0, 1.0]);
-        
+
         let lights = vec![light1, light2];
         assert_eq!(lights.len(), 2);
-        
+
         // Verify fields are accessible
         assert_eq!(lights[0].kind, 0); // Directional
         assert_eq!(lights[1].kind, 1); // Point
@@ -815,11 +874,11 @@ mod tests {
     fn test_debug_info_format() {
         // Test that debug_info produces expected structure
         let light = Light::directional(45.0, 30.0, 3.0, [1.0, 0.9, 0.8]);
-        
+
         // Verify light type name helper
         let type_name = light_type_name(light.kind);
         assert_eq!(type_name, "Directional");
-        
+
         // Verify point light type
         let point = Light::point([1.0, 2.0, 3.0], 5.0, 10.0, [0.5, 0.6, 0.7]);
         assert_eq!(light_type_name(point.kind), "Point");
@@ -842,7 +901,7 @@ mod tests {
     fn test_debug_info_output_structure() {
         // Create a simple light setup
         let dir_light = Light::directional(0.0, 45.0, 2.5, [1.0, 0.95, 0.9]);
-        
+
         // Simulate what debug_info would output
         let output = format!(
             "Light 0: {}\n  Intensity: {:.2}, Color: [{:.2}, {:.2}, {:.2}]",
@@ -852,7 +911,7 @@ mod tests {
             dir_light.color[1],
             dir_light.color[2]
         );
-        
+
         assert!(output.contains("Light 0: Directional"));
         assert!(output.contains("Intensity: 2.50"));
         assert!(output.contains("Color: [1.00, 0.95, 0.90]"));
@@ -862,7 +921,7 @@ mod tests {
     fn test_max_lights_not_exceeded_in_debug() {
         // Verify MAX_LIGHTS constant is reasonable for debug output
         assert_eq!(MAX_LIGHTS, 16);
-        
+
         // Debug output for 16 lights should be manageable
         // Rough estimate: ~150 bytes per light * 16 = 2.4 KB
         let estimated_size = 150 * MAX_LIGHTS;
@@ -875,10 +934,7 @@ fn r2_sample(index: u64) -> [f32; 2] {
     const A1: f64 = 1.0 / PHI;
     const A2: f64 = 1.0 / (PHI * PHI);
     let idx = index as f64;
-    [
-        frac(0.5 + A1 * idx) as f32,
-        frac(0.5 + A2 * idx) as f32,
-    ]
+    [frac(0.5 + A1 * idx) as f32, frac(0.5 + A2 * idx) as f32]
 }
 
 fn frac(x: f64) -> f64 {

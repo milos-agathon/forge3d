@@ -71,16 +71,16 @@ pub struct HybridUniforms {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
 pub struct LightingUniforms {
-    pub light_dir: [f32; 3],       // Directional light direction (normalized) - offset 0, size 12
-    pub lighting_type: u32,        // 0=flat, 1=lambertian, 2=phong, 3=blinn-phong - offset 12, size 4
-    pub light_color: [f32; 3],     // Light color * intensity - offset 16, size 12
-    pub shadows_enabled: u32,      // 0 or 1 - offset 28, size 4
-    pub ambient_color: [f32; 3],   // Ambient/indirect light color - offset 32, size 12
-    pub shadow_intensity: f32,     // Shadow darkness [0,1] - offset 44, size 4
-    pub hdri_intensity: f32,       // HDR environment intensity (for future use) - offset 48, size 4
-    pub hdri_rotation: f32,        // HDR rotation in radians (for future use) - offset 52, size 4
-    pub specular_power: f32,       // Phong/Blinn specular exponent (default 32.0) - offset 56, size 4
-    pub _pad: [u32; 5],            // Padding to 80 bytes (16-byte aligned) - offset 60, size 20
+    pub light_dir: [f32; 3], // Directional light direction (normalized) - offset 0, size 12
+    pub lighting_type: u32,  // 0=flat, 1=lambertian, 2=phong, 3=blinn-phong - offset 12, size 4
+    pub light_color: [f32; 3], // Light color * intensity - offset 16, size 12
+    pub shadows_enabled: u32, // 0 or 1 - offset 28, size 4
+    pub ambient_color: [f32; 3], // Ambient/indirect light color - offset 32, size 12
+    pub shadow_intensity: f32, // Shadow darkness [0,1] - offset 44, size 4
+    pub hdri_intensity: f32, // HDR environment intensity (for future use) - offset 48, size 4
+    pub hdri_rotation: f32,  // HDR rotation in radians (for future use) - offset 52, size 4
+    pub specular_power: f32, // Phong/Blinn specular exponent (default 32.0) - offset 56, size 4
+    pub _pad: [u32; 5],      // Padding to 80 bytes (16-byte aligned) - offset 60, size 20
 }
 
 /// Traversal mode for hybrid rendering
@@ -122,7 +122,7 @@ impl Default for HybridTracerParams {
             elevation.sin(),
             azimuth.sin() * elevation.cos(),
         ];
-        
+
         Self {
             base_uniforms: Uniforms {
                 width: 512,
@@ -142,7 +142,7 @@ impl Default for HybridTracerParams {
             },
             lighting_uniforms: LightingUniforms {
                 light_dir,
-                lighting_type: 1, // Lambertian by default
+                lighting_type: 1,              // Lambertian by default
                 light_color: [1.0, 0.95, 0.8], // Warm white light
                 shadows_enabled: 1,
                 ambient_color: [0.1, 0.12, 0.15], // Cool ambient
@@ -175,11 +175,11 @@ pub struct HybridPathTracer {
 
 /// Bind group layouts for hybrid path tracer
 struct HybridBindGroupLayouts {
-    uniforms: wgpu::BindGroupLayout,  // Group 0: camera uniforms
-    scene: wgpu::BindGroupLayout,     // Group 1: spheres + legacy mesh buffers
-    accum: wgpu::BindGroupLayout,     // Group 2: accumulation buffer
-    output: wgpu::BindGroupLayout,    // Group 3: primary output texture + AOVs
-    lighting: wgpu::BindGroupLayout,  // Group 4: lighting uniforms
+    uniforms: wgpu::BindGroupLayout, // Group 0: camera uniforms
+    scene: wgpu::BindGroupLayout,    // Group 1: spheres + legacy mesh buffers
+    accum: wgpu::BindGroupLayout,    // Group 2: accumulation buffer
+    output: wgpu::BindGroupLayout,   // Group 3: primary output texture + AOVs
+    lighting: wgpu::BindGroupLayout, // Group 4: lighting uniforms
 }
 
 impl HybridPathTracer {

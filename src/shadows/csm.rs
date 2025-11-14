@@ -179,8 +179,8 @@ impl Default for CsmConfig {
             debug_mode: 0,
             enable_unclipped_depth: false, // Will be enabled based on hardware support
             depth_clip_factor: 1.0,
-            stabilize_cascades: true,      // Enable by default to prevent shimmer
-            cascade_blend_range: 0.0,      // No blend by default (can be enabled for smoother transitions)
+            stabilize_cascades: true, // Enable by default to prevent shimmer
+            cascade_blend_range: 0.0, // No blend by default (can be enabled for smoother transitions)
         }
     }
 }
@@ -292,7 +292,9 @@ impl CsmRenderer {
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Rgba32Float,
-                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+                usage: TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::STORAGE_BINDING,
                 view_formats: &[],
             }))
         } else {
@@ -434,12 +436,16 @@ impl CsmRenderer {
             // pixels aligned to world space coordinates
             if self.config.stabilize_cascades {
                 // Round min bounds to nearest texel boundary
-                min_bounds.x = (min_bounds.x / world_units_per_texel).floor() * world_units_per_texel;
-                min_bounds.y = (min_bounds.y / world_units_per_texel).floor() * world_units_per_texel;
-                
+                min_bounds.x =
+                    (min_bounds.x / world_units_per_texel).floor() * world_units_per_texel;
+                min_bounds.y =
+                    (min_bounds.y / world_units_per_texel).floor() * world_units_per_texel;
+
                 // Recalculate max bounds to maintain exact shadow map size
-                max_bounds.x = min_bounds.x + world_units_per_texel * self.config.shadow_map_size as f32;
-                max_bounds.y = min_bounds.y + world_units_per_texel * self.config.shadow_map_size as f32;
+                max_bounds.x =
+                    min_bounds.x + world_units_per_texel * self.config.shadow_map_size as f32;
+                max_bounds.y =
+                    min_bounds.y + world_units_per_texel * self.config.shadow_map_size as f32;
             }
 
             // Create orthographic projection for this cascade

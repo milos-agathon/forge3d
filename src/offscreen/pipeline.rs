@@ -30,10 +30,10 @@ pub struct BrdfTileParams {
     pub metallic: f32,
     pub roughness: f32,
     pub ndf_only: u32,
-    pub g_only: u32,    // Milestone 0: 1 = output Smith G as grayscale
-    pub dfg_only: u32,  // Milestone 0: 1 = output D*F*G (pre-division)
-    pub spec_only: u32, // Milestone 0: 1 = output specular-only (Cook–Torrance)
-    pub roughness_visualize: u32,  // Milestone 0: 1 = output vec3(r) for uniform validation
+    pub g_only: u32,              // Milestone 0: 1 = output Smith G as grayscale
+    pub dfg_only: u32,            // Milestone 0: 1 = output D*F*G (pre-division)
+    pub spec_only: u32,           // Milestone 0: 1 = output specular-only (Cook–Torrance)
+    pub roughness_visualize: u32, // Milestone 0: 1 = output vec3(r) for uniform validation
     pub f0: [f32; 3],             // Milestone 0: explicit F0 vector
     pub _pad_f0: f32,
     // M4: Disney Principled BRDF extensions
@@ -43,16 +43,16 @@ pub struct BrdfTileParams {
     pub sheen_tint: f32,
     pub specular_tint: f32,
     // M2: Debug toggles
-    pub debug_lambert_only: u32,   // 1 = output legacy lambert-only visualization
-    pub debug_diffuse_only: u32,   // 1 = output physically-derived diffuse term only
-    pub debug_energy: u32,         // 1 = output (kS + kD)
-    pub debug_d: u32,              // 1 = output D only (grayscale)
-    pub debug_g_dbg: u32,          // 1 = output G only (grayscale, correlated)
-    pub debug_spec_no_nl: u32,     // 1 = output spec only without NL/Li
-    pub debug_angle_sweep: u32,    // 1 = override normal with sweep across uv.x and force V=L=+Z
-    pub debug_angle_component: u32,// 0=spec,1=diffuse,2=combined
-    pub debug_no_srgb: u32,        // 1 = bypass sRGB conversion at end
-    pub debug_kind: u32,           // 0=full, 1=D-only, 2=G-only, 3=F-only
+    pub debug_lambert_only: u32, // 1 = output legacy lambert-only visualization
+    pub debug_diffuse_only: u32, // 1 = output physically-derived diffuse term only
+    pub debug_energy: u32,       // 1 = output (kS + kD)
+    pub debug_d: u32,            // 1 = output D only (grayscale)
+    pub debug_g_dbg: u32,        // 1 = output G only (grayscale, correlated)
+    pub debug_spec_no_nl: u32,   // 1 = output spec only without NL/Li
+    pub debug_angle_sweep: u32,  // 1 = override normal with sweep across uv.x and force V=L=+Z
+    pub debug_angle_component: u32, // 0=spec,1=diffuse,2=combined
+    pub debug_no_srgb: u32,      // 1 = bypass sRGB conversion at end
+    pub debug_kind: u32,         // 0=full, 1=D-only, 2=G-only, 3=F-only
     pub _pad_debug_kind: [u32; 3],
     // Preserve total size with padding (brdf_tile.rs overprovisions to 256 bytes)
     pub _pad2: u32,
@@ -105,7 +105,10 @@ impl BrdfTilePipeline {
     /// Common formats:
     /// - Rgba8Unorm: linear 8-bit per channel (shader can apply sRGB)
     /// - Rgba16Float: linear 16-bit float per channel (HDR)
-    pub fn new_with_format(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Result<Self> {
+    pub fn new_with_format(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+    ) -> Result<Self> {
         // Load standalone shader (no includes needed - all BRDF code is inline)
         let shader_src = include_str!("../shaders/brdf_tile.wgsl");
 
@@ -115,16 +118,26 @@ impl BrdfTilePipeline {
             .lines()
             .find(|l| l.contains("BRDF_SHADER_VERSION"))
             .and_then(|l| l.split('=').nth(1))
-            .map(|rhs| rhs.chars().filter(|c| c.is_ascii_digit()).collect::<String>())
-            .and_then(|digits| if digits.is_empty() { None } else { Some(digits) })
+            .map(|rhs| {
+                rhs.chars()
+                    .filter(|c| c.is_ascii_digit())
+                    .collect::<String>()
+            })
+            .and_then(|digits| {
+                if digits.is_empty() {
+                    None
+                } else {
+                    Some(digits)
+                }
+            })
             .unwrap_or_else(|| "unknown".to_string());
         log::info!("BRDF_SHADER_VERSION = {}", shader_version);
-        
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("brdf_tile.shader"),
             source: wgpu::ShaderSource::Wgsl(shader_src.into()),
         });
-        
+
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("brdf_tile.bind_group_layout"),
@@ -186,13 +199,13 @@ impl BrdfTilePipeline {
                 },
             ],
         });
-        
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("brdf_tile.pipeline_layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[], // M7: Keep as uniform for compatibility
         });
-        
+
         // Create render pipeline
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("brdf_tile.pipeline"),
@@ -203,7 +216,8 @@ impl BrdfTilePipeline {
                 buffers: &[
                     // TbnVertex layout from sphere.rs
                     wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<crate::offscreen::sphere::TbnVertex>() as wgpu::BufferAddress,
+                        array_stride: std::mem::size_of::<crate::offscreen::sphere::TbnVertex>()
+                            as wgpu::BufferAddress,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &[
                             // position
@@ -272,13 +286,13 @@ impl BrdfTilePipeline {
             },
             multiview: None,
         });
-        
+
         Ok(Self {
             pipeline,
             bind_group_layout,
         })
     }
-    
+
     /// Create bind group for rendering
     pub fn create_bind_group(
         &self,
@@ -316,7 +330,7 @@ impl BrdfTilePipeline {
             ],
         })
     }
-    
+
     pub fn pipeline(&self) -> &wgpu::RenderPipeline {
         &self.pipeline
     }

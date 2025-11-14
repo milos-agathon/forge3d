@@ -4,20 +4,20 @@
 //! for PBR materials using the metallic-roughness workflow.
 
 use crate::core::material::{texture_flags, PbrLighting, PbrMaterial};
-use crate::mesh::vertex::TbnVertex;
-use crate::lighting::types::{ShadowTechnique, MaterialShading};
+use crate::lighting::types::{MaterialShading, ShadowTechnique};
 use crate::lighting::LightBuffer;
+use crate::mesh::vertex::TbnVertex;
 use crate::shadows::{ShadowManager, ShadowManagerConfig};
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use std::collections::HashMap;
+use wgpu::util::DeviceExt;
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindingResource,
     Buffer, BufferDescriptor, BufferUsages, Device, Extent3d, FilterMode, ImageCopyTexture,
     ImageDataLayout, Origin3d, Queue, Sampler, SamplerDescriptor, Texture, TextureDescriptor,
     TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
 };
-use wgpu::util::DeviceExt;
 
 // P2-06: Use centralized MaterialShading from lighting::types instead of duplicate definition
 // MaterialShading is GPU-aligned and matches WGSL ShadingParamsGPU exactly
@@ -617,12 +617,8 @@ fn create_fallback_ibl_resources(device: &Device, queue: &Queue) -> PbrIblResour
         "pbr_fallback_prefilter",
         [255, 255, 255, 255],
     );
-    let brdf_lut_texture = create_default_texture(
-        device,
-        queue,
-        "pbr_fallback_brdf_lut",
-        [255, 255, 255, 255],
-    );
+    let brdf_lut_texture =
+        create_default_texture(device, queue, "pbr_fallback_brdf_lut", [255, 255, 255, 255]);
 
     let irradiance_sampler = device.create_sampler(&SamplerDescriptor {
         label: Some("pbr_fallback_ibl_irradiance_sampler"),
@@ -709,7 +705,7 @@ pub struct PbrPipelineWithShadows {
     /// CPU copy of lighting parameters
     pub lighting_uniforms: PbrLighting,
     /// GPU buffer storing lighting parameters
-   pub lighting_uniform_buffer: Buffer,
+    pub lighting_uniform_buffer: Buffer,
     /// CPU copy of shading parameters (BRDF routing) - P2-06
     pub shading_uniforms: MaterialShading,
     /// GPU buffer storing shading parameters
@@ -790,7 +786,7 @@ impl PbrPipelineWithShadows {
         let material_bind_group_layout = Self::create_material_bind_group_layout(device);
         let ibl_bind_group_layout = Self::create_ibl_bind_group_layout(device);
         let ibl_resources = create_fallback_ibl_resources(device, queue);
-        
+
         // P1-06: Initialize light buffer for multi-light support
         let light_buffer = LightBuffer::new(device);
         // P4 spec: group(2) bindings - binding(0)=specular, binding(1)=irradiance, binding(2)=sampler, binding(3)=brdfLUT
@@ -975,27 +971,32 @@ impl PbrPipelineWithShadows {
     pub fn advance_light_frame(&mut self, device: &Device) {
         // Advance to next triple-buffered index
         self.light_buffer.next_frame();
-        
+
         // Invalidate bind group to force recreation with new buffers
         self.globals_bind_group = None;
     }
-    
+
     /// P1-06: Upload lights to GPU via LightBuffer
     /// Returns error if more than MAX_LIGHTS (16) are provided
-    pub fn update_lights(&mut self, device: &Device, queue: &Queue, lights: &[crate::lighting::types::Light]) -> Result<(), String> {
+    pub fn update_lights(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        lights: &[crate::lighting::types::Light],
+    ) -> Result<(), String> {
         self.light_buffer.update(device, queue, lights)?;
-        
+
         // Invalidate bind group to pick up new light data
         self.globals_bind_group = None;
-        
+
         Ok(())
     }
-    
+
     /// P1-06: Get current light count for debugging
     pub fn light_count(&self) -> usize {
         self.light_buffer.last_uploaded_lights().len()
     }
-    
+
     /// P1-06: Get debug info string from light buffer
     pub fn light_debug_info(&self) -> String {
         self.light_buffer.debug_info()
@@ -1009,8 +1010,12 @@ impl PbrPipelineWithShadows {
         sampler: &Sampler,
     ) {
         if self.material.bind_group.is_none() {
-            self.material
-                .create_bind_group(device, queue, &self.material_bind_group_layout, sampler);
+            self.material.create_bind_group(
+                device,
+                queue,
+                &self.material_bind_group_layout,
+                sampler,
+            );
         }
     }
 
@@ -1074,11 +1079,7 @@ impl PbrPipelineWithShadows {
     }
 
     /// Bind IBL textures/samplers at bind group slot 2 (P4 spec requirement).
-    pub fn bind_ibl_resources<'a>(
-        &'a mut self,
-        device: &Device,
-        pass: &mut wgpu::RenderPass<'a>,
-    ) {
+    pub fn bind_ibl_resources<'a>(&'a mut self, device: &Device, pass: &mut wgpu::RenderPass<'a>) {
         let bind_group = self.ensure_ibl_bind_group(device);
         pass.set_bind_group(2, bind_group, &[]); // group(2) as per P4 spec
     }
@@ -1096,8 +1097,7 @@ impl PbrPipelineWithShadows {
             .as_ref()
             .expect("render pipeline should be initialized")
             as *const wgpu::RenderPipeline;
-        let globals_bind_group_ptr =
-            self.ensure_globals_bind_group(device) as *const BindGroup;
+        let globals_bind_group_ptr = self.ensure_globals_bind_group(device) as *const BindGroup;
         let material_bind_group_ptr = self
             .material
             .bind_group
@@ -1155,10 +1155,7 @@ impl PbrPipelineWithShadows {
     }
 
     /// Get shadow bind group for rendering (recreates if necessary)
-    pub fn get_or_create_shadow_bind_group(
-        &mut self,
-        device: &Device,
-    ) -> Option<&BindGroup> {
+    pub fn get_or_create_shadow_bind_group(&mut self, device: &Device) -> Option<&BindGroup> {
         let manager = match self.shadow_manager.as_ref() {
             Some(manager) => manager,
             None => return None,
@@ -1181,10 +1178,7 @@ impl PbrPipelineWithShadows {
             let entries = [
                 BindGroupEntry {
                     binding: 0,
-                    resource: manager
-                        .renderer()
-                        .uniform_buffer
-                        .as_entire_binding(),
+                    resource: manager.renderer().uniform_buffer.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -1278,15 +1272,15 @@ impl PbrPipelineWithShadows {
                 &self.globals_bind_group_layout,  // group(0)
                 &self.material_bind_group_layout, // group(1)
                 &self.ibl_bind_group_layout,      // group(2) - IBL (P4 spec requirement)
-                shadow_layout,                     // group(3) - shadows (moved to avoid conflict)
+                shadow_layout,                    // group(3) - shadows (moved to avoid conflict)
             ],
             push_constant_ranges: &[],
         });
 
         // Remap shadows from group(2) to group(3) to allow IBL at group(2) per P4 spec
-        let shadows_source = include_str!("../../shaders/shadows.wgsl")
-            .replace("@group(2)", "@group(3)");
-        
+        let shadows_source =
+            include_str!("../../shaders/shadows.wgsl").replace("@group(2)", "@group(3)");
+
         let shader_source = format!(
             "{}\n{}",
             shadows_source,
@@ -1459,21 +1453,21 @@ impl PbrPipelineWithShadows {
     }
 
     /// P2-06: Update full MaterialShading parameters from CPU to GPU
-    /// 
+    ///
     /// This uploads all BRDF dispatch parameters to the GPU uniform buffer,
     /// allowing dynamic control over shading model, metallic, roughness,
     /// and extended parameters (sheen, clearcoat, subsurface, anisotropy).
-    /// 
+    ///
     /// # Example
     /// ```ignore
     /// use forge3d::lighting::types::{MaterialShading, BrdfModel};
-    /// 
+    ///
     /// let mut shading = MaterialShading::default();
     /// shading.brdf = BrdfModel::DisneyPrincipled.as_u32();
     /// shading.metallic = 1.0;
     /// shading.roughness = 0.3;
     /// shading.sheen = 0.2;
-    /// 
+    ///
     /// pbr_state.update_shading_uniforms(&queue, &shading);
     /// ```
     pub fn update_shading_uniforms(&mut self, queue: &Queue, shading: &MaterialShading) {

@@ -1,5 +1,5 @@
-    //   --lit-sun <float>
-    //   --lit-ibl <float>
+//   --lit-sun <float>
+//   --lit-ibl <float>
 // examples/interactive_viewer.rs
 // Workstream I1: Interactive Viewer demonstration
 // Simple example showing the windowed viewer with orbit and FPS camera modes
@@ -39,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //   --ssgi-radius <float>
     //   --ssgi-half <on|off>
     //   --ssgi-temporal-alpha <float>
+    //   --ssr-enable <on|off>
     //   --ssr-max-steps <u32>
     //   --ssr-thickness <float>
     //   --ssao-technique <ssao|gtao>
@@ -70,13 +71,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(spec) = args.next() {
                     let parts: Vec<&str> = spec.split(',').collect();
                     if parts.len() == 6 || parts.len() == 9 {
-                        let ex = parts[0]; let ey = parts[1]; let ez = parts[2];
-                        let tx = parts[3]; let ty = parts[4]; let tz = parts[5];
+                        let ex = parts[0];
+                        let ey = parts[1];
+                        let ez = parts[2];
+                        let tx = parts[3];
+                        let ty = parts[4];
+                        let tz = parts[5];
                         if parts.len() == 9 {
-                            let ux = parts[6]; let uy = parts[7]; let uz = parts[8];
-                            cmds.push(format!(":cam-lookat {} {} {} {} {} {} {} {} {}", ex, ey, ez, tx, ty, tz, ux, uy, uz));
+                            let ux = parts[6];
+                            let uy = parts[7];
+                            let uz = parts[8];
+                            cmds.push(format!(
+                                ":cam-lookat {} {} {} {} {} {} {} {} {}",
+                                ex, ey, ez, tx, ty, tz, ux, uy, uz
+                            ));
                         } else {
-                            cmds.push(format!(":cam-lookat {} {} {} {} {} {}", ex, ey, ez, tx, ty, tz));
+                            cmds.push(format!(
+                                ":cam-lookat {} {} {} {} {} {}",
+                                ex, ey, ez, tx, ty, tz
+                            ));
                         }
                     }
                 }
@@ -91,7 +104,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         {
                             if eff_l == "gtao" {
                                 cmds.push(format!(":gi ssao {}", state_l));
-                                if state_l == "on" { cmds.push(":ssao-technique gtao".to_string()); }
+                                if state_l == "on" {
+                                    cmds.push(":ssao-technique gtao".to_string());
+                                }
                             } else {
                                 cmds.push(format!(":gi {} {}", eff_l, state_l));
                             }
@@ -115,24 +130,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "--viz" => {
-                if let Some(mode) = args.next() { cmds.push(format!(":viz {}", mode.to_lowercase())); }
+                if let Some(mode) = args.next() {
+                    cmds.push(format!(":viz {}", mode.to_lowercase()));
+                }
             }
             "--brdf" => {
                 if let Some(model) = args.next() {
                     let m = model.to_lowercase();
-                    if ["lambert","lam","phong","ggx","disney","disney-principled","principled"].contains(&m.as_str()) {
+                    if [
+                        "lambert",
+                        "lam",
+                        "phong",
+                        "ggx",
+                        "disney",
+                        "disney-principled",
+                        "principled",
+                    ]
+                    .contains(&m.as_str())
+                    {
                         cmds.push(format!(":brdf {}", m));
                     }
                 }
             }
             "--lit-sun" => {
-                if let Some(val) = args.next() { cmds.push(format!(":lit-sun {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":lit-sun {}", val));
+                }
             }
             "--lit-ibl" => {
-                if let Some(val) = args.next() { cmds.push(format!(":lit-ibl {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":lit-ibl {}", val));
+                }
             }
             "--ibl" => {
-                if let Some(path) = args.next() { cmds.push(format!(":ibl {}", path)); }
+                if let Some(path) = args.next() {
+                    cmds.push(format!(":ibl {}", path));
+                }
             }
             "--sky" => {
                 if let Some(mode) = args.next() {
@@ -140,76 +173,153 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     cmds.push(format!(":sky {}", m));
                 }
             }
-            "--sky-turbidity" => { if let Some(v) = args.next() { cmds.push(format!(":sky-turbidity {}", v)); } }
-            "--sky-ground" => { if let Some(v) = args.next() { cmds.push(format!(":sky-ground {}", v)); } }
-            "--sky-exposure" => { if let Some(v) = args.next() { cmds.push(format!(":sky-exposure {}", v)); } }
-            "--sky-sun" => { if let Some(v) = args.next() { cmds.push(format!(":sky-sun {}", v)); } }
+            "--sky-turbidity" => {
+                if let Some(v) = args.next() {
+                    cmds.push(format!(":sky-turbidity {}", v));
+                }
+            }
+            "--sky-ground" => {
+                if let Some(v) = args.next() {
+                    cmds.push(format!(":sky-ground {}", v));
+                }
+            }
+            "--sky-exposure" => {
+                if let Some(v) = args.next() {
+                    cmds.push(format!(":sky-exposure {}", v));
+                }
+            }
+            "--sky-sun" => {
+                if let Some(v) = args.next() {
+                    cmds.push(format!(":sky-sun {}", v));
+                }
+            }
             "--fog" => {
                 if let Some(arg) = args.next() {
-                    let on = matches!(arg.as_str(), "on"|"1"|"true");
-                    cmds.push(format!(":fog {}", if on {"on"} else {"off"}));
+                    let on = matches!(arg.as_str(), "on" | "1" | "true");
+                    cmds.push(format!(":fog {}", if on { "on" } else { "off" }));
                 }
             }
-            "--fog-density" => { if let Some(v) = args.next() { cmds.push(format!(":fog-density {}", v)); } }
-            "--fog-g" => { if let Some(v) = args.next() { cmds.push(format!(":fog-g {}", v)); } }
-            "--fog-steps" => { if let Some(v) = args.next() { cmds.push(format!(":fog-steps {}", v)); } }
+            "--fog-density" => {
+                if let Some(v) = args.next() {
+                    cmds.push(format!(":fog-density {}", v));
+                }
+            }
+            "--fog-g" => {
+                if let Some(v) = args.next() {
+                    cmds.push(format!(":fog-g {}", v));
+                }
+            }
+            "--fog-steps" => {
+                if let Some(v) = args.next() {
+                    cmds.push(format!(":fog-steps {}", v));
+                }
+            }
             "--fog-shadow" => {
                 if let Some(arg) = args.next() {
-                    let on = matches!(arg.as_str(), "on"|"1"|"true");
-                    cmds.push(format!(":fog-shadow {}", if on {"on"} else {"off"}));
+                    let on = matches!(arg.as_str(), "on" | "1" | "true");
+                    cmds.push(format!(":fog-shadow {}", if on { "on" } else { "off" }));
                 }
             }
-            "--fog-temporal" => { if let Some(v) = args.next() { cmds.push(format!(":fog-temporal {}", v)); } }
+            "--fog-temporal" => {
+                if let Some(v) = args.next() {
+                    cmds.push(format!(":fog-temporal {}", v));
+                }
+            }
             "--ssao-radius" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssao-radius {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssao-radius {}", val));
+                }
             }
             "--ssao-intensity" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssao-intensity {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssao-intensity {}", val));
+                }
             }
             "--ssao-bias" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssao-bias {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssao-bias {}", val));
+                }
             }
             "--ssao-samples" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssao-samples {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssao-samples {}", val));
+                }
             }
             "--ssao-directions" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssao-directions {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssao-directions {}", val));
+                }
             }
             "--ssao-composite" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssao-composite {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssao-composite {}", val));
+                }
             }
             "--ssao-mul" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssao-mul {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssao-mul {}", val));
+                }
             }
             "--ssgi-steps" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssgi-steps {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssgi-steps {}", val));
+                }
             }
             "--ssgi-radius" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssgi-radius {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssgi-radius {}", val));
+                }
             }
             "--ssgi-half" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssgi-half {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssgi-half {}", val));
+                }
             }
             "--ssgi-temporal-alpha" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssgi-temporal-alpha {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssgi-temporal-alpha {}", val));
+                }
+            }
+            "--ssr-enable" => {
+                if let Some(val) = args.next() {
+                    let norm = val.to_lowercase();
+                    let state = if matches!(norm.as_str(), "on" | "1" | "true") {
+                        "on"
+                    } else {
+                        "off"
+                    };
+                    cmds.push(format!(":gi ssr {}", state));
+                }
             }
             "--ao-blur" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ao-blur {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ao-blur {}", val));
+                }
             }
             "--ao-temporal-alpha" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ao-temporal-alpha {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ao-temporal-alpha {}", val));
+                }
             }
             "--ssao-temporal-alpha" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssao-temporal-alpha {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssao-temporal-alpha {}", val));
+                }
             }
             "--ssr-max-steps" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssr-max-steps {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssr-max-steps {}", val));
+                }
             }
             "--ssr-thickness" => {
-                if let Some(val) = args.next() { cmds.push(format!(":ssr-thickness {}", val)); }
+                if let Some(val) = args.next() {
+                    cmds.push(format!(":ssr-thickness {}", val));
+                }
             }
             "--ssao-technique" => {
-                if let Some(mode) = args.next() { cmds.push(format!(":ssao-technique {}", mode.to_lowercase())); }
+                if let Some(mode) = args.next() {
+                    cmds.push(format!(":ssao-technique {}", mode.to_lowercase()));
+                }
             }
             _ => {}
         }

@@ -2,24 +2,29 @@
 // PyO3 bindings for P0 lighting types
 // Exposes Rust lighting types to Python
 
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
-use pyo3::exceptions::PyValueError;
 
 use super::types::*;
 
 // Helper function to extract f32 array from Python
 fn extract_f32_array<const N: usize>(obj: &PyAny, name: &str) -> PyResult<[f32; N]> {
-    let list: &PyList = obj.downcast()
+    let list: &PyList = obj
+        .downcast()
         .map_err(|_| PyValueError::new_err(format!("{} must be a list", name)))?;
 
     if list.len() != N {
-        return Err(PyValueError::new_err(format!("{} must have {} elements", name, N)));
+        return Err(PyValueError::new_err(format!(
+            "{} must have {} elements",
+            name, N
+        )));
     }
 
     let mut arr = [0.0f32; N];
     for (i, item) in list.iter().enumerate() {
-        arr[i] = item.extract::<f32>()
+        arr[i] = item
+            .extract::<f32>()
             .map_err(|_| PyValueError::new_err(format!("{} elements must be floats", name)))?;
     }
     Ok(arr)
@@ -89,7 +94,9 @@ impl PyLight {
             return Err(PyValueError::new_err("position must have 3 elements (XYZ)"));
         }
         if direction.len() != 3 {
-            return Err(PyValueError::new_err("direction must have 3 elements (XYZ)"));
+            return Err(PyValueError::new_err(
+                "direction must have 3 elements (XYZ)",
+            ));
         }
 
         Ok(Self {
@@ -118,7 +125,9 @@ impl PyLight {
         let direction = [self.direction[0], self.direction[1], self.direction[2]];
 
         let light = match self.light_type.as_str() {
-            "Directional" => Light::directional(self.azimuth, self.elevation, self.intensity, color),
+            "Directional" => {
+                Light::directional(self.azimuth, self.elevation, self.intensity, color)
+            }
             "Point" => Light::point(position, self.range, self.intensity, color),
             "Spot" => Light::spot(
                 position,
@@ -141,17 +150,22 @@ impl PyLight {
             "AreaDisk" => Light::area_disk(
                 position,
                 direction,
-                self.area_width,  // Use width as radius
+                self.area_width, // Use width as radius
                 self.intensity,
                 color,
             ),
             "AreaSphere" => Light::area_sphere(
                 position,
-                self.area_width,  // Use width as radius
+                self.area_width, // Use width as radius
                 self.intensity,
                 color,
             ),
-            _ => return Err(PyValueError::new_err(format!("Unknown light type: {}", self.light_type))),
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown light type: {}",
+                    self.light_type
+                )))
+            }
         };
 
         Ok(light)
@@ -159,7 +173,7 @@ impl PyLight {
 }
 
 /// P1-08: Parse Python dict to native Light struct
-/// 
+///
 /// Accepts flexible dict formats from Python:
 /// - `type`: "directional", "point", "spot", "area_rect", etc.
 /// - `position` or `pos`: [x, y, z]
@@ -174,150 +188,190 @@ impl PyLight {
 #[cfg(feature = "extension-module")]
 pub fn parse_light_dict(py: Python, dict: &PyAny) -> PyResult<Light> {
     use pyo3::types::PyDict;
-    
-    let dict = dict.downcast::<PyDict>()
+
+    let dict = dict
+        .downcast::<PyDict>()
         .map_err(|_| PyValueError::new_err("Light spec must be a dict"))?;
-    
+
     // Extract light type (required)
-    let light_type: String = dict.get_item("type")?
+    let light_type: String = dict
+        .get_item("type")?
         .ok_or_else(|| PyValueError::new_err("Light dict must have 'type' key"))?
         .extract()?;
-    
+
     // Extract common fields
-    let intensity: f32 = dict.get_item("intensity")?
+    let intensity: f32 = dict
+        .get_item("intensity")?
         .or_else(|| dict.get_item("power").ok().flatten())
         .map(|v| v.extract())
         .transpose()?
         .unwrap_or(1.0);
-    
-    let color: [f32; 3] = dict.get_item("color")?
+
+    let color: [f32; 3] = dict
+        .get_item("color")?
         .or_else(|| dict.get_item("rgb").ok().flatten())
         .map(|v| extract_f32_array::<3>(v, "color"))
         .transpose()?
         .unwrap_or([1.0, 1.0, 1.0]);
-    
+
     // Match on light type
     match light_type.to_lowercase().as_str() {
         "directional" => {
-            let azimuth: f32 = dict.get_item("azimuth")?
+            let azimuth: f32 = dict
+                .get_item("azimuth")?
                 .map(|v| v.extract())
                 .transpose()?
                 .unwrap_or(135.0);
-            let elevation: f32 = dict.get_item("elevation")?
+            let elevation: f32 = dict
+                .get_item("elevation")?
                 .map(|v| v.extract())
                 .transpose()?
                 .unwrap_or(35.0);
             Ok(Light::directional(azimuth, elevation, intensity, color))
-        },
+        }
         "point" => {
-            let position = dict.get_item("position")?
+            let position = dict
+                .get_item("position")?
                 .or_else(|| dict.get_item("pos").ok().flatten())
                 .ok_or_else(|| PyValueError::new_err("Point light requires 'position'"))?
                 .extract::<[f32; 3]>()?;
-            let range: f32 = dict.get_item("range")?
+            let range: f32 = dict
+                .get_item("range")?
                 .map(|v| v.extract())
                 .transpose()?
                 .unwrap_or(100.0);
             Ok(Light::point(position, range, intensity, color))
-        },
+        }
         "spot" => {
-            let position = dict.get_item("position")?
+            let position = dict
+                .get_item("position")?
                 .or_else(|| dict.get_item("pos").ok().flatten())
                 .ok_or_else(|| PyValueError::new_err("Spot light requires 'position'"))?
                 .extract::<[f32; 3]>()?;
-            let direction = dict.get_item("direction")?
+            let direction = dict
+                .get_item("direction")?
                 .or_else(|| dict.get_item("dir").ok().flatten())
                 .ok_or_else(|| PyValueError::new_err("Spot light requires 'direction'"))?
                 .extract::<[f32; 3]>()?;
-            let range: f32 = dict.get_item("range")?
+            let range: f32 = dict
+                .get_item("range")?
                 .map(|v| v.extract())
                 .transpose()?
                 .unwrap_or(100.0);
-            
+
             // Handle cone angles - accept single angle or inner/outer
-            let (inner_angle, outer_angle) = if let Some(cone) = dict.get_item("cone_angle")?
-                .or_else(|| dict.get_item("angle").ok().flatten()) {
+            let (inner_angle, outer_angle) = if let Some(cone) = dict
+                .get_item("cone_angle")?
+                .or_else(|| dict.get_item("angle").ok().flatten())
+            {
                 let angle: f32 = cone.extract()?;
-                (angle * 0.75, angle)  // Inner is 75% of outer
+                (angle * 0.75, angle) // Inner is 75% of outer
             } else {
-                let inner: f32 = dict.get_item("inner_angle")?
+                let inner: f32 = dict
+                    .get_item("inner_angle")?
                     .map(|v| v.extract())
                     .transpose()?
                     .unwrap_or(15.0);
-                let outer: f32 = dict.get_item("outer_angle")?
+                let outer: f32 = dict
+                    .get_item("outer_angle")?
                     .map(|v| v.extract())
                     .transpose()?
                     .unwrap_or(30.0);
                 (inner, outer)
             };
-            
-            Ok(Light::spot(position, direction, range, inner_angle, outer_angle, intensity, color))
-        },
+
+            Ok(Light::spot(
+                position,
+                direction,
+                range,
+                inner_angle,
+                outer_angle,
+                intensity,
+                color,
+            ))
+        }
         "environment" => {
-            let env_index: u32 = dict.get_item("env_texture_index")?
+            let env_index: u32 = dict
+                .get_item("env_texture_index")?
                 .map(|v| v.extract())
                 .transpose()?
                 .unwrap_or(0);
             Ok(Light::environment(intensity, env_index))
-        },
+        }
         "area_rect" | "arearect" => {
-            let position = dict.get_item("position")?
+            let position = dict
+                .get_item("position")?
                 .or_else(|| dict.get_item("pos").ok().flatten())
                 .ok_or_else(|| PyValueError::new_err("Area rect light requires 'position'"))?
                 .extract::<[f32; 3]>()?;
-            let direction = dict.get_item("direction")?
+            let direction = dict
+                .get_item("direction")?
                 .or_else(|| dict.get_item("dir").ok().flatten())
                 .map(|v| v.extract())
                 .transpose()?
                 .unwrap_or([0.0, -1.0, 0.0]);
-            
+
             let (width, height) = if let Some(extent) = dict.get_item("area_extent")? {
                 let arr: [f32; 2] = extent.extract()?;
                 (arr[0], arr[1])
             } else {
-                let w: f32 = dict.get_item("width")?
+                let w: f32 = dict
+                    .get_item("width")?
                     .map(|v| v.extract())
                     .transpose()?
                     .unwrap_or(1.0);
-                let h: f32 = dict.get_item("height")?
+                let h: f32 = dict
+                    .get_item("height")?
                     .map(|v| v.extract())
                     .transpose()?
                     .unwrap_or(1.0);
                 (w, h)
             };
-            
-            Ok(Light::area_rect(position, direction, width, height, intensity, color))
-        },
+
+            Ok(Light::area_rect(
+                position, direction, width, height, intensity, color,
+            ))
+        }
         "area_disk" | "areadisk" => {
-            let position = dict.get_item("position")?
+            let position = dict
+                .get_item("position")?
                 .or_else(|| dict.get_item("pos").ok().flatten())
                 .ok_or_else(|| PyValueError::new_err("Area disk light requires 'position'"))?
                 .extract::<[f32; 3]>()?;
-            let direction = dict.get_item("direction")?
+            let direction = dict
+                .get_item("direction")?
                 .or_else(|| dict.get_item("dir").ok().flatten())
                 .map(|v| v.extract())
                 .transpose()?
                 .unwrap_or([0.0, -1.0, 0.0]);
-            let radius: f32 = dict.get_item("radius")?
+            let radius: f32 = dict
+                .get_item("radius")?
                 .map(|v| v.extract())
                 .transpose()?
                 .unwrap_or(1.0);
-            
-            Ok(Light::area_disk(position, direction, radius, intensity, color))
-        },
+
+            Ok(Light::area_disk(
+                position, direction, radius, intensity, color,
+            ))
+        }
         "area_sphere" | "areasphere" => {
-            let position = dict.get_item("position")?
+            let position = dict
+                .get_item("position")?
                 .or_else(|| dict.get_item("pos").ok().flatten())
                 .ok_or_else(|| PyValueError::new_err("Area sphere light requires 'position'"))?
                 .extract::<[f32; 3]>()?;
-            let radius: f32 = dict.get_item("radius")?
+            let radius: f32 = dict
+                .get_item("radius")?
                 .map(|v| v.extract())
                 .transpose()?
                 .unwrap_or(1.0);
-            
+
             Ok(Light::area_sphere(position, radius, intensity, color))
-        },
-        _ => Err(PyValueError::new_err(format!("Unknown light type: {}", light_type))),
+        }
+        _ => Err(PyValueError::new_err(format!(
+            "Unknown light type: {}",
+            light_type
+        ))),
     }
 }
 
@@ -393,7 +447,15 @@ impl PyMaterialShading {
         clearcoat: f32,
         subsurface: f32,
     ) -> PyResult<Self> {
-        Self::new("DisneyPrincipled", roughness, metallic, sheen, clearcoat, subsurface, 0.0)
+        Self::new(
+            "DisneyPrincipled",
+            roughness,
+            metallic,
+            sheen,
+            clearcoat,
+            subsurface,
+            0.0,
+        )
     }
 
     /// Create an anisotropic material
@@ -420,7 +482,12 @@ impl PyMaterialShading {
             "Minnaert" => BrdfModel::Minnaert,
             "Subsurface" => BrdfModel::Subsurface,
             "Hair" => BrdfModel::Hair,
-            _ => return Err(PyValueError::new_err(format!("Unknown BRDF model: {}", self.brdf))),
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown BRDF model: {}",
+                    self.brdf
+                )))
+            }
         };
 
         let mat = MaterialShading {
@@ -434,8 +501,7 @@ impl PyMaterialShading {
             _pad: 0.0,
         };
 
-        mat.validate()
-            .map_err(|e| PyValueError::new_err(e))?;
+        mat.validate().map_err(|e| PyValueError::new_err(e))?;
 
         Ok(mat)
     }
@@ -527,7 +593,12 @@ impl PyShadowSettings {
             "EVSM" => ShadowTechnique::EVSM,
             "MSM" => ShadowTechnique::MSM,
             "CSM" => ShadowTechnique::CSM,
-            _ => return Err(PyValueError::new_err(format!("Unknown shadow technique: {}", self.technique))),
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown shadow technique: {}",
+                    self.technique
+                )))
+            }
         };
 
         let settings = ShadowSettings {
@@ -543,8 +614,7 @@ impl PyShadowSettings {
             _pad: [0.0; 3],
         };
 
-        settings.validate()
-            .map_err(|e| PyValueError::new_err(e))?;
+        settings.validate().map_err(|e| PyValueError::new_err(e))?;
 
         Ok(settings)
     }
@@ -583,7 +653,12 @@ impl PyGiSettings {
         let tech = match self.technique.as_str() {
             "None" => GiTechnique::None,
             "IBL" => GiTechnique::Ibl,
-            _ => return Err(PyValueError::new_err(format!("Unknown GI technique: {}", self.technique))),
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown GI technique: {}",
+                    self.technique
+                )))
+            }
         };
 
         Ok(GiSettings {
@@ -628,7 +703,12 @@ impl PyAtmosphere {
         let sky = match self.sky_model.as_str() {
             "Off" => 0u32,
             "Preetham" => 1u32,
-            _ => return Err(PyValueError::new_err(format!("Unknown sky model: {}", self.sky_model))),
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown sky model: {}",
+                    self.sky_model
+                )))
+            }
         };
 
         Ok(Atmosphere {
@@ -660,7 +740,7 @@ pub struct PySSAOSettings {
     #[pyo3(get, set)]
     pub spiral_turns: f32,
     #[pyo3(get, set)]
-    pub technique: String,  // "SSAO" or "GTAO"
+    pub technique: String, // "SSAO" or "GTAO"
     #[pyo3(get, set)]
     pub blur_radius: u32,
     #[pyo3(get, set)]
@@ -729,7 +809,12 @@ impl PySSAOSettings {
         let technique = match self.technique.as_str() {
             "SSAO" => 0u32,
             "GTAO" => 1u32,
-            _ => return Err(PyValueError::new_err(format!("Unknown SSAO technique: {}", self.technique))),
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown SSAO technique: {}",
+                    self.technique
+                )))
+            }
         };
 
         let settings = SSAOSettings {
@@ -743,8 +828,7 @@ impl PySSAOSettings {
             temporal_alpha: self.temporal_alpha,
         };
 
-        settings.validate()
-            .map_err(|e| PyValueError::new_err(e))?;
+        settings.validate().map_err(|e| PyValueError::new_err(e))?;
 
         Ok(settings)
     }
@@ -811,8 +895,7 @@ impl PySSGISettings {
             _pad: 0.0,
         };
 
-        settings.validate()
-            .map_err(|e| PyValueError::new_err(e))?;
+        settings.validate().map_err(|e| PyValueError::new_err(e))?;
 
         Ok(settings)
     }
@@ -883,8 +966,7 @@ impl PySSRSettings {
             temporal_alpha: self.temporal_alpha,
         };
 
-        settings.validate()
-            .map_err(|e| PyValueError::new_err(e))?;
+        settings.validate().map_err(|e| PyValueError::new_err(e))?;
 
         Ok(settings)
     }
@@ -906,7 +988,7 @@ pub struct PySkySettings {
     #[pyo3(get, set)]
     pub ground_albedo: f32,
     #[pyo3(get, set)]
-    pub model: String,  // "off", "preetham", or "hosek-wilkie"
+    pub model: String, // "off", "preetham", or "hosek-wilkie"
     #[pyo3(get, set)]
     pub sun_intensity: f32,
     #[pyo3(get, set)]
@@ -979,7 +1061,12 @@ impl PySkySettings {
             "off" => 0u32,
             "preetham" => 1u32,
             "hosek-wilkie" | "hosek_wilkie" | "hosekwilkie" => 2u32,
-            _ => return Err(PyValueError::new_err(format!("Unknown sky model: {}", self.model))),
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown sky model: {}",
+                    self.model
+                )))
+            }
         };
 
         let settings = SkySettings {
@@ -992,8 +1079,7 @@ impl PySkySettings {
             _pad: [0.0; 4],
         };
 
-        settings.validate()
-            .map_err(|e| PyValueError::new_err(e))?;
+        settings.validate().map_err(|e| PyValueError::new_err(e))?;
 
         Ok(settings)
     }
@@ -1031,7 +1117,7 @@ pub struct PyVolumetricSettings {
     #[pyo3(get, set)]
     pub jitter_strength: f32,
     #[pyo3(get, set)]
-    pub phase_function: String,  // "isotropic" or "hg"
+    pub phase_function: String, // "isotropic" or "hg"
 }
 
 #[cfg(feature = "extension-module")]
@@ -1135,7 +1221,12 @@ impl PyVolumetricSettings {
         let phase_function = match self.phase_function.to_lowercase().as_str() {
             "isotropic" | "iso" => 0u32,
             "hg" | "henyey-greenstein" | "henyey_greenstein" => 1u32,
-            _ => return Err(PyValueError::new_err(format!("Unknown phase function: {}", self.phase_function))),
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown phase function: {}",
+                    self.phase_function
+                )))
+            }
         };
 
         let settings = VolumetricSettings {
@@ -1156,8 +1247,7 @@ impl PyVolumetricSettings {
             _pad: [0.0; 2],
         };
 
-        settings.validate()
-            .map_err(|e| PyValueError::new_err(e))?;
+        settings.validate().map_err(|e| PyValueError::new_err(e))?;
 
         Ok(settings)
     }

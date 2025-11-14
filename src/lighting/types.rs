@@ -12,9 +12,9 @@ pub enum LightType {
     Point = 1,
     Spot = 2,
     Environment = 3,
-    AreaRect = 4,      // P1: Rectangular area light
-    AreaDisk = 5,      // P1: Disk area light
-    AreaSphere = 6,    // P1: Spherical area light
+    AreaRect = 4,   // P1: Rectangular area light
+    AreaDisk = 5,   // P1: Disk area light
+    AreaSphere = 6, // P1: Spherical area light
 }
 
 impl LightType {
@@ -54,11 +54,11 @@ impl BrdfModel {
 pub enum ShadowTechnique {
     Hard = 0,
     PCF = 1,
-    PCSS = 2,       // P3: Percentage Closer Soft Shadows
-    VSM = 3,        // P3: Variance Shadow Maps
-    EVSM = 4,       // P3: Exponential Variance Shadow Maps
-    MSM = 5,        // P3: Moment Shadow Maps
-    CSM = 6,        // P3: Cascaded Shadow Maps (can combine with others)
+    PCSS = 2, // P3: Percentage Closer Soft Shadows
+    VSM = 3,  // P3: Variance Shadow Maps
+    EVSM = 4, // P3: Exponential Variance Shadow Maps
+    MSM = 5,  // P3: Moment Shadow Maps
+    CSM = 6,  // P3: Cascaded Shadow Maps (can combine with others)
 }
 
 impl ShadowTechnique {
@@ -93,7 +93,10 @@ impl ShadowTechnique {
 
     /// Returns true if technique requires moment textures (VSM/EVSM/MSM)
     pub fn requires_moments(&self) -> bool {
-        matches!(self, ShadowTechnique::VSM | ShadowTechnique::EVSM | ShadowTechnique::MSM)
+        matches!(
+            self,
+            ShadowTechnique::VSM | ShadowTechnique::EVSM | ShadowTechnique::MSM
+        )
     }
 
     /// Returns number of channels needed (1 for depth, 2 for VSM, 4 for EVSM/MSM)
@@ -122,18 +125,18 @@ impl GiTechnique {
 
 /// Light configuration (P1 extended)
 /// GPU-aligned struct for SSBO upload (std430 layout)
-/// 
+///
 /// # Layout Parity (P1-01)
-/// 
+///
 /// This struct MUST maintain exact binary layout parity with WGSL `LightGPU` in
 /// `src/shaders/lights.wgsl` for correct GPU buffer uploads.
-/// 
+///
 /// **Size**: 80 bytes (5 vec4s)  
 /// **Alignment**: 16 bytes (vec4 boundary)  
 /// **Traits**: `Pod` + `Zeroable` (bytemuck) for safe byte casting
-/// 
+///
 /// ## Memory Layout
-/// 
+///
 /// ```text
 /// Offset | Field                | Type      | Size  | Notes
 /// -------|----------------------|-----------|-------|------------------------
@@ -155,9 +158,9 @@ impl GiTechnique {
 ///     64 |   cone_cos           | [f32; 2]  |   8   | Spot: [inner, outer]
 ///     72 |   area_half          | [f32; 2]  |   8   | Area: extents or radius
 /// ```
-/// 
+///
 /// ## LightType Values (must match WGSL constants)
-/// 
+///
 /// - Directional = 0 (LIGHT_DIRECTIONAL)
 /// - Point = 1 (LIGHT_POINT)
 /// - Spot = 2 (LIGHT_SPOT)
@@ -165,9 +168,9 @@ impl GiTechnique {
 /// - AreaRect = 4 (LIGHT_AREA_RECT)
 /// - AreaDisk = 5 (LIGHT_AREA_DISK)
 /// - AreaSphere = 6 (LIGHT_AREA_SPHERE)
-/// 
+///
 /// ## Field Usage by Light Type
-/// 
+///
 /// | Field            | Directional | Point | Spot | Environment | Area (Rect/Disk/Sphere) |
 /// |------------------|-------------|-------|------|-------------|-------------------------|
 /// | kind             | ✓           | ✓     | ✓    | ✓           | ✓                       |
@@ -179,9 +182,9 @@ impl GiTechnique {
 /// | dir_ws           | ✓           | ✗     | ✓    | ✗           | ✓ (rect/disk normal)    |
 /// | cone_cos         | ✗           | ✗     | ✓    | ✗           | ✗                       |
 /// | area_half        | ✗           | ✗     | ✗    | ✗           | ✓                       |
-/// 
+///
 /// ## Verification
-/// 
+///
 /// Unit tests in `#[cfg(test)] mod tests` verify:
 /// - Struct size is exactly 80 bytes
 /// - Field offsets match expected std430 layout
@@ -234,9 +237,9 @@ impl Default for Light {
             _pad1: 0.0,
             pos_ws: [0.0, 0.0, 0.0],
             _pad2: 0.0,
-            dir_ws: [0.0, -1.0, 0.0],  // Downward by default
+            dir_ws: [0.0, -1.0, 0.0], // Downward by default
             _pad3: 0.0,
-            cone_cos: [0.939, 0.819],  // ~20° inner, ~35° outer
+            cone_cos: [0.939, 0.819], // ~20° inner, ~35° outer
             area_half: [1.0, 1.0],
         }
     }
@@ -244,7 +247,12 @@ impl Default for Light {
 
 impl Light {
     /// Create a directional light from azimuth and elevation angles
-    pub fn directional(azimuth_deg: f32, elevation_deg: f32, intensity: f32, color: [f32; 3]) -> Self {
+    pub fn directional(
+        azimuth_deg: f32,
+        elevation_deg: f32,
+        intensity: f32,
+        color: [f32; 3],
+    ) -> Self {
         let az_rad = azimuth_deg.to_radians();
         let el_rad = elevation_deg.to_radians();
 
@@ -260,11 +268,11 @@ impl Light {
             env_texture_index: 0,
             color,
             _pad1: 0.0,
-            pos_ws: [0.0; 3],  // Unused for directional
+            pos_ws: [0.0; 3], // Unused for directional
             _pad2: 0.0,
             dir_ws: [x, y, z],
             _pad3: 0.0,
-            cone_cos: [1.0, 1.0],  // Unused for directional
+            cone_cos: [1.0, 1.0], // Unused for directional
             area_half: [0.0, 0.0],
         }
     }
@@ -280,7 +288,7 @@ impl Light {
             _pad1: 0.0,
             pos_ws: position,
             _pad2: 0.0,
-            dir_ws: [0.0; 3],  // Unused for point
+            dir_ws: [0.0; 3], // Unused for point
             _pad3: 0.0,
             cone_cos: [1.0, 1.0],
             area_half: [0.0, 0.0],
@@ -302,7 +310,7 @@ impl Light {
         let dir_norm = if len > 0.0001 {
             [direction[0] / len, direction[1] / len, direction[2] / len]
         } else {
-            [0.0, -1.0, 0.0]  // Default downward
+            [0.0, -1.0, 0.0] // Default downward
         };
 
         // Precompute cosines for GPU
@@ -346,7 +354,7 @@ impl Light {
     /// Create a rectangular area light (P1)
     pub fn area_rect(
         position: [f32; 3],
-        direction: [f32; 3],  // Normal direction
+        direction: [f32; 3], // Normal direction
         half_width: f32,
         half_height: f32,
         intensity: f32,
@@ -363,7 +371,7 @@ impl Light {
         Self {
             kind: LightType::AreaRect.as_u32(),
             intensity,
-            range: 0.0,  // Area lights typically have infinite range or separate falloff
+            range: 0.0, // Area lights typically have infinite range or separate falloff
             env_texture_index: 0,
             color,
             _pad1: 0.0,
@@ -379,7 +387,7 @@ impl Light {
     /// Create a disk area light (P1)
     pub fn area_disk(
         position: [f32; 3],
-        direction: [f32; 3],  // Normal direction
+        direction: [f32; 3], // Normal direction
         radius: f32,
         intensity: f32,
         color: [f32; 3],
@@ -403,17 +411,12 @@ impl Light {
             dir_ws: dir_norm,
             _pad3: 0.0,
             cone_cos: [1.0, 1.0],
-            area_half: [radius, 0.0],  // Store radius in x component
+            area_half: [radius, 0.0], // Store radius in x component
         }
     }
 
     /// Create a spherical area light (P1)
-    pub fn area_sphere(
-        position: [f32; 3],
-        radius: f32,
-        intensity: f32,
-        color: [f32; 3],
-    ) -> Self {
+    pub fn area_sphere(position: [f32; 3], radius: f32, intensity: f32, color: [f32; 3]) -> Self {
         Self {
             kind: LightType::AreaSphere.as_u32(),
             intensity,
@@ -423,10 +426,10 @@ impl Light {
             _pad1: 0.0,
             pos_ws: position,
             _pad2: 0.0,
-            dir_ws: [0.0; 3],  // Unused for sphere
+            dir_ws: [0.0; 3], // Unused for sphere
             _pad3: 0.0,
             cone_cos: [1.0, 1.0],
-            area_half: [radius, 0.0],  // Store radius in x component
+            area_half: [radius, 0.0], // Store radius in x component
         }
     }
 }
@@ -434,18 +437,18 @@ impl Light {
 /// Material shading parameters (P0/P2)
 /// GPU-aligned struct for uniform buffer upload
 /// Material shading parameters for BRDF dispatch (P2-06)
-/// 
+///
 /// This struct is GPU-aligned and matches WGSL `ShadingParamsGPU` exactly.
 /// Can be uploaded directly to GPU via uniform buffer at @group(0) @binding(2).
-/// 
+///
 /// **Layout Parity**: Must match `ShadingParamsGPU` in `src/shaders/lighting.wgsl`
-/// 
+///
 /// **Size**: 32 bytes (2 vec4s)  
 /// **Alignment**: 16 bytes (vec4 boundary)  
 /// **Traits**: `Pod` + `Zeroable` (bytemuck) for safe GPU upload
-/// 
+///
 /// ## Memory Layout
-/// 
+///
 /// ```text
 /// Offset | Field       | Type | Size | Notes
 /// -------|-------------|------|------|------------------
@@ -501,14 +504,14 @@ impl Default for MaterialShading {
 
 /// Type alias clarifying that MaterialShading is the CPU-side representation
 /// of WGSL `ShadingParamsGPU` (P2-06)
-/// 
+///
 /// **Usage**: Create `MaterialShading` on CPU, upload to GPU uniform buffer
 /// at @group(0) @binding(2), where it becomes `ShadingParamsGPU` in shaders.
-/// 
+///
 /// **Example**:
 /// ```rust
 /// use forge3d::lighting::MaterialShading;
-/// 
+///
 /// let shading = MaterialShading {
 ///     brdf: BrdfModel::DisneyPrincipled.as_u32(),
 ///     metallic: 1.0,
@@ -516,7 +519,7 @@ impl Default for MaterialShading {
 ///     sheen: 0.1,
 ///     ..Default::default()
 /// };
-/// 
+///
 /// // Upload to GPU (in pipeline code):
 /// queue.write_buffer(&shading_uniform, 0, bytemuck::bytes_of(&shading));
 /// ```
@@ -526,7 +529,10 @@ impl MaterialShading {
     /// Validate material parameters
     pub fn validate(&self) -> Result<(), String> {
         if self.roughness < 0.0 || self.roughness > 1.0 {
-            return Err(format!("roughness must be in [0,1], got {}", self.roughness));
+            return Err(format!(
+                "roughness must be in [0,1], got {}",
+                self.roughness
+            ));
         }
         if self.metallic < 0.0 || self.metallic > 1.0 {
             return Err(format!("metallic must be in [0,1], got {}", self.metallic));
@@ -535,13 +541,22 @@ impl MaterialShading {
             return Err(format!("sheen must be in [0,1], got {}", self.sheen));
         }
         if self.clearcoat < 0.0 || self.clearcoat > 1.0 {
-            return Err(format!("clearcoat must be in [0,1], got {}", self.clearcoat));
+            return Err(format!(
+                "clearcoat must be in [0,1], got {}",
+                self.clearcoat
+            ));
         }
         if self.subsurface < 0.0 || self.subsurface > 1.0 {
-            return Err(format!("subsurface must be in [0,1], got {}", self.subsurface));
+            return Err(format!(
+                "subsurface must be in [0,1], got {}",
+                self.subsurface
+            ));
         }
         if self.anisotropy < -1.0 || self.anisotropy > 1.0 {
-            return Err(format!("anisotropy must be in [-1,1], got {}", self.anisotropy));
+            return Err(format!(
+                "anisotropy must be in [-1,1], got {}",
+                self.anisotropy
+            ));
         }
         Ok(())
     }
@@ -664,7 +679,10 @@ impl ShadowSettings {
             return Err(format!("map_res must be <= 4096, got {}", self.map_res));
         }
         if !self.map_res.is_power_of_two() {
-            return Err(format!("map_res must be power of two, got {}", self.map_res));
+            return Err(format!(
+                "map_res must be power of two, got {}",
+                self.map_res
+            ));
         }
         let technique = self
             .technique_enum()
@@ -690,10 +708,7 @@ impl ShadowSettings {
     pub fn memory_budget(&self) -> u64 {
         let pixels = (self.map_res as u64) * (self.map_res as u64);
         let depth_bytes = pixels * 4;
-        let moment_bytes = match self
-            .technique_enum()
-            .unwrap_or(ShadowTechnique::Hard)
-        {
+        let moment_bytes = match self.technique_enum().unwrap_or(ShadowTechnique::Hard) {
             ShadowTechnique::VSM => pixels * 8,
             ShadowTechnique::EVSM | ShadowTechnique::MSM => pixels * 16,
             _ => 0,
@@ -763,10 +778,10 @@ impl Default for Atmosphere {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScreenSpaceEffect {
     None = 0,
-    SSAO = 1,      // Screen-space ambient occlusion
-    GTAO = 2,      // Ground-truth ambient occlusion
-    SSGI = 3,      // Screen-space global illumination
-    SSR = 4,       // Screen-space reflections
+    SSAO = 1, // Screen-space ambient occlusion
+    GTAO = 2, // Ground-truth ambient occlusion
+    SSGI = 3, // Screen-space global illumination
+    SSR = 4,  // Screen-space reflections
 }
 
 impl ScreenSpaceEffect {
@@ -1120,7 +1135,7 @@ pub struct SkySettings {
 impl Default for SkySettings {
     fn default() -> Self {
         Self {
-            sun_direction: [0.3, 0.8, 0.5],  // Default sun angle
+            sun_direction: [0.3, 0.8, 0.5], // Default sun angle
             turbidity: 2.5,
             ground_albedo: 0.2,
             model: SkyModel::HosekWilkie.as_u32(),
@@ -1203,7 +1218,9 @@ impl VolumetricPhase {
     pub fn from_name(name: &str) -> Option<Self> {
         match name.to_lowercase().as_str() {
             "isotropic" | "iso" => Some(VolumetricPhase::Isotropic),
-            "hg" | "henyey-greenstein" | "henyey_greenstein" => Some(VolumetricPhase::HenyeyGreenstein),
+            "hg" | "henyey-greenstein" | "henyey_greenstein" => {
+                Some(VolumetricPhase::HenyeyGreenstein)
+            }
             _ => None,
         }
     }
@@ -1293,7 +1310,7 @@ impl VolumetricSettings {
     pub fn uniform_fog(density: f32) -> Self {
         Self {
             density,
-            phase_g: 0.0,  // Isotropic
+            phase_g: 0.0, // Isotropic
             use_shadows: 0,
             height_falloff: 0.0,
             ..Default::default()
@@ -1362,7 +1379,7 @@ impl AtmosphericsSettings {
         turbidity: f32,
         ground_albedo: f32,
         fog_density: f32,
-        phase_g: f32
+        phase_g: f32,
     ) -> Self {
         Self {
             sky: Some(SkySettings::hosek_wilkie(turbidity, ground_albedo)),
@@ -1401,36 +1418,42 @@ mod tests {
     #[test]
     fn test_light_struct_size_and_alignment() {
         // Light must be exactly 80 bytes (5 * vec4) for std430 SSBO layout
-        assert_eq!(std::mem::size_of::<Light>(), 80,
-            "Light struct must be 80 bytes to match WGSL LightGPU layout");
-        
+        assert_eq!(
+            std::mem::size_of::<Light>(),
+            80,
+            "Light struct must be 80 bytes to match WGSL LightGPU layout"
+        );
+
         // Verify 16-byte alignment for vec4 boundary
-        assert_eq!(std::mem::align_of::<Light>(), 16,
-            "Light struct must be 16-byte aligned");
+        assert_eq!(
+            std::mem::align_of::<Light>(),
+            16,
+            "Light struct must be 16-byte aligned"
+        );
     }
 
     #[test]
     fn test_light_field_offsets() {
         use std::mem::offset_of;
-        
+
         // Vec4 #1: type, intensity, range, env_texture_index (bytes 0-15)
         assert_eq!(offset_of!(Light, kind), 0);
         assert_eq!(offset_of!(Light, intensity), 4);
         assert_eq!(offset_of!(Light, range), 8);
         assert_eq!(offset_of!(Light, env_texture_index), 12);
-        
+
         // Vec4 #2: color + padding (bytes 16-31)
         assert_eq!(offset_of!(Light, color), 16);
         assert_eq!(offset_of!(Light, _pad1), 28);
-        
+
         // Vec4 #3: pos_ws + padding (bytes 32-47)
         assert_eq!(offset_of!(Light, pos_ws), 32);
         assert_eq!(offset_of!(Light, _pad2), 44);
-        
+
         // Vec4 #4: dir_ws + padding (bytes 48-63)
         assert_eq!(offset_of!(Light, dir_ws), 48);
         assert_eq!(offset_of!(Light, _pad3), 60);
-        
+
         // Vec4 #5: cone_cos + area_half (bytes 64-79)
         assert_eq!(offset_of!(Light, cone_cos), 64);
         assert_eq!(offset_of!(Light, area_half), 72);
@@ -1462,7 +1485,7 @@ mod tests {
         let light = Light::directional(45.0, 30.0, 2.0, [1.0, 0.9, 0.8]);
         assert_eq!(light.kind, LightType::Directional.as_u32());
         assert_eq!(light.pos_ws, [0.0; 3]); // Unused for directional
-        assert_eq!(light.range, 0.0);       // Unused for directional
+        assert_eq!(light.range, 0.0); // Unused for directional
     }
 
     #[test]
@@ -1490,8 +1513,8 @@ mod tests {
             [0.0, 5.0, 0.0],
             [0.0, -1.0, 0.0],
             100.0,
-            20.0,  // inner_deg
-            35.0,  // outer_deg
+            20.0, // inner_deg
+            35.0, // outer_deg
             5.0,
             [1.0, 1.0, 1.0],
         );
@@ -1506,8 +1529,8 @@ mod tests {
         let light = Light::area_rect(
             [0.0, 10.0, 0.0],
             [0.0, -1.0, 0.0],
-            2.5,  // half_width
-            1.5,  // half_height
+            2.5, // half_width
+            1.5, // half_height
             10.0,
             [1.0, 1.0, 1.0],
         );
@@ -1520,7 +1543,7 @@ mod tests {
         let light = Light::area_disk(
             [5.0, 5.0, 5.0],
             [1.0, 0.0, 0.0],
-            3.0,  // radius
+            3.0, // radius
             8.0,
             [1.0, 1.0, 0.8],
         );
@@ -1533,13 +1556,13 @@ mod tests {
     fn test_light_area_sphere_fields() {
         let light = Light::area_sphere(
             [0.0, 15.0, 0.0],
-            2.0,  // radius
+            2.0, // radius
             12.0,
             [1.0, 0.9, 0.7],
         );
         assert_eq!(light.kind, LightType::AreaSphere.as_u32());
         assert_eq!(light.area_half[0], 2.0); // Radius stored in x
-        assert_eq!(light.dir_ws, [0.0; 3]);  // Unused for sphere
+        assert_eq!(light.dir_ws, [0.0; 3]); // Unused for sphere
     }
 
     #[test]

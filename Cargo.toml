@@ -107,6 +107,14 @@ path = "examples/p5_1_dump.rs"
 name = "p5_ssgi_generate"
 path = "examples/p5_ssgi_generate.rs"
 
+[[example]]
+name = "p5_ssr_generate"
+path = "examples/p5_ssr_generate.rs"
+
+[[example]]
+name = "p5_ssr_glossy"
+path = "examples/p5_ssr_glossy.rs"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

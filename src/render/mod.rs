@@ -6,9 +6,9 @@
 
 pub mod colormap;
 pub mod instancing;
-pub mod params;
 pub mod memory_budget;
-#[cfg(all(feature = "enable-pbr", feature = "enable-tbn"))]
-pub mod pbr_pass;
 #[cfg(feature = "enable-gpu-instancing")]
 pub mod mesh_instanced;
+pub mod params;
+#[cfg(all(feature = "enable-pbr", feature = "enable-tbn"))]
+pub mod pbr_pass;

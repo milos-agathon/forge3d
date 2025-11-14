@@ -1,8 +1,8 @@
 // src/lighting/shadow_map.rs
 // P0-S3: Shadow mapping infrastructure (Hard + PCF)
 
-use wgpu::{Device, TextureView, Texture, TextureFormat};
 use crate::lighting::types::{Light, ShadowSettings, ShadowTechnique};
+use wgpu::{Device, Texture, TextureFormat, TextureView};
 
 /// Shadow map atlas for rendering depth from light's perspective
 pub struct ShadowMap {
@@ -132,10 +132,7 @@ pub struct ShadowMatrixCalculator;
 impl ShadowMatrixCalculator {
     /// Calculate view-projection matrix for directional light shadow map
     /// Returns a matrix that transforms world space to light's NDC space
-    pub fn directional_light_matrix(
-        light: &Light,
-        scene_bounds: &SceneBounds,
-    ) -> [[f32; 4]; 4] {
+    pub fn directional_light_matrix(light: &Light, scene_bounds: &SceneBounds) -> [[f32; 4]; 4] {
         // Light looks down its direction vector
         let light_dir = glam::Vec3::from_slice(&light.dir_ws).normalize();
         let light_pos = scene_bounds.center - light_dir * scene_bounds.radius * 2.0;
@@ -152,14 +149,8 @@ impl ShadowMatrixCalculator {
         let near = 0.1;
         let far = scene_bounds.radius * 4.0;
 
-        let projection = glam::Mat4::orthographic_rh(
-            -half_size,
-            half_size,
-            -half_size,
-            half_size,
-            near,
-            far,
-        );
+        let projection =
+            glam::Mat4::orthographic_rh(-half_size, half_size, -half_size, half_size, near, far);
 
         // Combine view and projection
         let view_proj = projection * view;
@@ -251,10 +242,10 @@ mod tests {
     fn test_directional_light_matrix() {
         // Create downward light: azimuth 0, elevation -90 (straight down)
         let light = Light::directional(
-            0.0,    // azimuth_deg
-            -90.0,  // elevation_deg (downward)
-            1.0,    // intensity
-            [1.0, 1.0, 1.0],  // color
+            0.0,             // azimuth_deg
+            -90.0,           // elevation_deg (downward)
+            1.0,             // intensity
+            [1.0, 1.0, 1.0], // color
         );
 
         let bounds = SceneBounds::new([0.0, 0.0, 0.0], 50.0);

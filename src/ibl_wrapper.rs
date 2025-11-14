@@ -219,9 +219,7 @@ impl IBL {
 
     #[pyo3(text_signature = "($self)")]
     pub fn cache_dir(&self) -> Option<String> {
-        self.cache_dir
-            .as_ref()
-            .map(|p| p.display().to_string())
+        self.cache_dir.as_ref().map(|p| p.display().to_string())
     }
 
     /// Configure IBL quality level
@@ -354,11 +352,7 @@ impl IBL {
         let mut brdf_size = quality_to_use.brdf_size().max(16);
 
         let mut total_bytes = memory_budget::total_ibl_bytes_explicit(
-            base_face,
-            spec_face,
-            spec_mips,
-            irr_face,
-            brdf_size,
+            base_face, spec_face, spec_mips, irr_face, brdf_size,
         );
         let cap = memory_budget::IBL_MEMORY_BUDGET_DEFAULT;
         if total_bytes > cap {
@@ -482,7 +476,9 @@ impl IBL {
             spec_face,
             spec_mips,
             brdf_size,
-            memory_budget::total_ibl_bytes_explicit(base_face, spec_face, spec_mips, irr_face, brdf_size) as f32
+            memory_budget::total_ibl_bytes_explicit(
+                base_face, spec_face, spec_mips, irr_face, brdf_size
+            ) as f32
                 / (1024.0 * 1024.0)
         );
 

@@ -12,7 +12,11 @@ fn create_device_queue() -> Option<(wgpu::Device, wgpu::Queue)> {
         force_fallback_adapter: false,
     }))?;
     let limits = wgpu::Limits::downlevel_defaults();
-    let desc = DeviceDescriptor { required_features: wgpu::Features::empty(), required_limits: limits, label: Some("p6_sky_test_device") };
+    let desc = DeviceDescriptor {
+        required_features: wgpu::Features::empty(),
+        required_limits: limits,
+        label: Some("p6_sky_test_device"),
+    };
     let (device, queue) = pollster::block_on(adapter.request_device(&desc, None)).ok()?;
     Some((device, queue))
 }
@@ -42,7 +46,10 @@ struct CameraUniforms {
 
 #[test]
 fn sky_midday_vs_low_sun_chromatic_shift() {
-    let Some((device, queue)) = create_device_queue() else { eprintln!("Skipping sky test: no adapter"); return; };
+    let Some((device, queue)) = create_device_queue() else {
+        eprintln!("Skipping sky test: no adapter");
+        return;
+    };
 
     let sky_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("sky.test.shader"),
@@ -51,15 +58,40 @@ fn sky_midday_vs_low_sun_chromatic_shift() {
     let bgl0 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("sky.test.bgl0"),
         entries: &[
-            wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer{ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None}, count: None },
-            wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::StorageTexture { access: wgpu::StorageTextureAccess::WriteOnly, format: TextureFormat::Rgba8Unorm, view_dimension: wgpu::TextureViewDimension::D2 }, count: None },
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: TextureFormat::Rgba8Unorm,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                },
+                count: None,
+            },
         ],
     });
     let bgl1 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("sky.test.bgl1"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer{ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None}, count: None },
-        ],
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
     });
     let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("sky.test.pl"),
@@ -76,7 +108,11 @@ fn sky_midday_vs_low_sun_chromatic_shift() {
     let size = (64u32, 64u32);
     let tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("sky.test.out"),
-        size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: size.0,
+            height: size.1,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -89,23 +125,66 @@ fn sky_midday_vs_low_sun_chromatic_shift() {
     // Camera uniforms (identity with plausible inv)
     let ident = glam::Mat4::IDENTITY.to_cols_array_2d();
     let eye = [0.0f32, 0.0, 0.0];
-    let cam = CameraUniforms { view: ident, proj: ident, inv_view: ident, inv_proj: ident, eye_position: eye, _pad0: 0.0 };
-    let cam_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("sky.test.cam"), contents: bytemuck::bytes_of(&cam), usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST });
+    let cam = CameraUniforms {
+        view: ident,
+        proj: ident,
+        inv_view: ident,
+        inv_proj: ident,
+        eye_position: eye,
+        _pad0: 0.0,
+    };
+    let cam_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("sky.test.cam"),
+        contents: bytemuck::bytes_of(&cam),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
 
     // Helper to render with given sun and get pixel data
-    let mut render_with = |sun_dir: [f32;3], exposure: f32| -> Vec<u8> {
-        let params = SkyParams { sun_direction: sun_dir, turbidity: 3.0, ground_albedo: 0.2, model: 1, sun_intensity: 20.0, exposure, _pad: [0.0;2] };
-        let pbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("sky.test.params"), contents: bytemuck::bytes_of(&params), usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST });
-        let bg0 = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("sky.test.bg0"), layout: &bgl0, entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: pbuf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
-        ]});
-        let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("sky.test.bg1"), layout: &bgl1, entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: cam_buf.as_entire_binding() },
-        ]});
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sky.test.encoder") });
+    let mut render_with = |sun_dir: [f32; 3], exposure: f32| -> Vec<u8> {
+        let params = SkyParams {
+            sun_direction: sun_dir,
+            turbidity: 3.0,
+            ground_albedo: 0.2,
+            model: 1,
+            sun_intensity: 20.0,
+            exposure,
+            _pad: [0.0; 2],
+        };
+        let pbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("sky.test.params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let bg0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("sky.test.bg0"),
+            layout: &bgl0,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: pbuf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+            ],
+        });
+        let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("sky.test.bg1"),
+            layout: &bgl1,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: cam_buf.as_entire_binding(),
+            }],
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("sky.test.encoder"),
+        });
         {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("sky.test.pass"), timestamp_writes: None });
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("sky.test.pass"),
+                timestamp_writes: None,
+            });
             pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &bg0, &[]);
             pass.set_bind_group(1, &bg1, &[]);
@@ -114,7 +193,14 @@ fn sky_midday_vs_low_sun_chromatic_shift() {
         queue.submit(Some(encoder.finish()));
         device.poll(wgpu::Maintain::Wait);
         // Read back
-        let data = crate::renderer::readback::read_texture_tight(&device, &queue, &tex, size, TextureFormat::Rgba8Unorm).expect("readback");
+        let data = crate::renderer::readback::read_texture_tight(
+            &device,
+            &queue,
+            &tex,
+            size,
+            TextureFormat::Rgba8Unorm,
+        )
+        .expect("readback");
         data
     };
 
@@ -126,13 +212,17 @@ fn sky_midday_vs_low_sun_chromatic_shift() {
     // Compare average (R-B) near horizon band (bottom 8 rows)
     let stride = (size.0 * 4) as usize;
     let horizon_rows = 56..64; // bottom band
-    let mut sum_day = 0f64; let mut sum_low = 0f64; let mut count = 0f64;
+    let mut sum_day = 0f64;
+    let mut sum_low = 0f64;
+    let mut count = 0f64;
     for y in horizon_rows.clone() {
         let row = y as usize;
         for x in 0..size.0 as usize {
             let i = row * stride + x * 4;
-            let r_day = img_day[i] as f64; let b_day = img_day[i+2] as f64;
-            let r_low = img_low[i] as f64; let b_low = img_low[i+2] as f64;
+            let r_day = img_day[i] as f64;
+            let b_day = img_day[i + 2] as f64;
+            let r_low = img_low[i] as f64;
+            let b_low = img_low[i + 2] as f64;
             sum_day += r_day - b_day;
             sum_low += r_low - b_low;
             count += 1.0;
@@ -142,5 +232,8 @@ fn sky_midday_vs_low_sun_chromatic_shift() {
     let avg_low = sum_low / count;
 
     // Expect low sun to be warmer near horizon than midday
-    assert!(avg_low > avg_day, "expected warmer horizon at low sun: low={avg_low:.2} > day={avg_day:.2}");
+    assert!(
+        avg_low > avg_day,
+        "expected warmer horizon at low sun: low={avg_low:.2} > day={avg_day:.2}"
+    );
 }

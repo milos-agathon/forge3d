@@ -22,10 +22,10 @@ use std::sync::{Arc, Mutex};
 use wgpu::util::DeviceExt;
 use wgpu::TextureFormatFeatureFlags;
 
-use crate::terrain_render_params::{AddressModeNative, FilterModeNative};
-use crate::lighting::LightBuffer;
+use crate::core::shadow_mapping::{CsmCascadeData, CsmUniforms};
 use crate::lighting::types::{Light, LightType};
-use crate::core::shadow_mapping::{CsmUniforms, CsmCascadeData};
+use crate::lighting::LightBuffer;
+use crate::terrain_render_params::{AddressModeNative, FilterModeNative};
 
 /// Terrain renderer implementing PBR + POM pipeline
 #[pyclass(module = "forge3d._forge3d", name = "TerrainRenderer")]
@@ -370,10 +370,10 @@ impl TerrainRenderer {
     }
 
     /// P1-08: Set lights from Python dicts
-    /// 
+    ///
     /// Args:
     ///     lights: List of light specification dicts
-    /// 
+    ///
     /// Each light dict should have:
     ///     - `type`: "directional", "point", "spot", "area_rect", etc.
     ///     - `position` or `pos`: [x, y, z] (for non-directional lights)
@@ -384,7 +384,7 @@ impl TerrainRenderer {
     ///     - `cone_angle`: float in degrees (for spot lights)
     ///     - `area_extent`: [width, height] (for area_rect)
     ///     - `radius`: float (for area_disk, area_sphere)
-    /// 
+    ///
     /// Example:
     ///     renderer.set_lights([
     ///         {"type": "directional", "intensity": 3.0, "azimuth": 135, "elevation": 35},
@@ -393,46 +393,53 @@ impl TerrainRenderer {
     #[pyo3(signature = (lights))]
     fn set_lights(&self, py: Python, lights: &PyAny) -> PyResult<()> {
         use pyo3::types::PyList;
-        
-        let lights_list = lights.downcast::<PyList>()
+
+        let lights_list = lights
+            .downcast::<PyList>()
             .map_err(|_| PyRuntimeError::new_err("lights must be a list"))?;
-        
+
         // Parse all light dicts to native Light structs
         let mut native_lights = Vec::new();
         for (i, light_dict) in lights_list.iter().enumerate() {
             match crate::lighting::py_bindings::parse_light_dict(py, light_dict) {
                 Ok(light) => native_lights.push(light),
                 Err(e) => {
-                    return Err(PyRuntimeError::new_err(
-                        format!("Failed to parse light {}: {}", i, e)
-                    ));
+                    return Err(PyRuntimeError::new_err(format!(
+                        "Failed to parse light {}: {}",
+                        i, e
+                    )));
                 }
             }
         }
-        
+
         // Update light buffer
-        let mut light_buffer = self.light_buffer.lock()
+        let mut light_buffer = self
+            .light_buffer
+            .lock()
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock light buffer: {}", e)))?;
-        
-        light_buffer.update(&self.device, &self.queue, &native_lights)
+
+        light_buffer
+            .update(&self.device, &self.queue, &native_lights)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to update lights: {}", e)))?;
-        
+
         Ok(())
     }
 
     /// P1-09: Get debug info from light buffer
-    /// 
+    ///
     /// Returns:
     ///     String with light buffer state (count, frame index, light details)
-    /// 
+    ///
     /// Example:
     ///     info = renderer.light_debug_info()
     ///     print(info)
     #[pyo3(signature = ())]
     fn light_debug_info(&self) -> PyResult<String> {
-        let light_buffer = self.light_buffer.lock()
+        let light_buffer = self
+            .light_buffer
+            .lock()
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock light buffer: {}", e)))?;
-        
+
         Ok(light_buffer.debug_info())
     }
 
@@ -488,9 +495,10 @@ impl TerrainRenderer {
     /// Get renderer config for debugging (P0-03)
     #[cfg(feature = "enable-renderer-config")]
     pub fn get_config(&self) -> PyResult<String> {
-        let config = self.config.lock().map_err(|e| {
-            PyRuntimeError::new_err(format!("Failed to lock config: {}", e))
-        })?;
+        let config = self
+            .config
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock config: {}", e)))?;
         serde_json::to_string_pretty(&*config)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to serialize config: {}", e)))
     }
@@ -692,13 +700,13 @@ impl TerrainRenderer {
 
         // P1-08: Initialize light buffer before pipeline creation
         let light_buffer = LightBuffer::new(&device);
-        
+
         let color_format = wgpu::TextureFormat::Rgba8Unorm;
         let light_buffer_layout = light_buffer.bind_group_layout();
-        
+
         // Create shadow bind group layout (reused for noop shadow and pipeline)
         let shadow_bind_group_layout = Self::create_shadow_bind_group_layout(device.as_ref());
-        
+
         let pipeline = Self::create_render_pipeline(
             device.as_ref(),
             &bind_group_layout,
@@ -718,7 +726,7 @@ impl TerrainRenderer {
             sample_count: 1,
             pipeline,
         };
-        
+
         Ok(Self {
             device,
             queue,
@@ -749,10 +757,10 @@ impl TerrainRenderer {
                 .collect::<Vec<_>>()
                 .join("\n")
         }
-        
+
         // Load nested includes for lighting.wgsl
         let lights = include_str!("shaders/lights.wgsl");
-        
+
         // Load BRDF dispatch and its includes
         let brdf_common = include_str!("shaders/brdf/common.wgsl");
         let brdf_lambert = include_str!("shaders/brdf/lambert.wgsl");
@@ -764,21 +772,21 @@ impl TerrainRenderer {
         let brdf_ward = include_str!("shaders/brdf/ward.wgsl");
         let brdf_toon = include_str!("shaders/brdf/toon.wgsl");
         let brdf_minnaert = include_str!("shaders/brdf/minnaert.wgsl");
-        
+
         let brdf_dispatch_raw = include_str!("shaders/brdf/dispatch.wgsl");
         let brdf_dispatch = strip_includes(brdf_dispatch_raw);
-        
+
         // Load lighting.wgsl and strip its includes
         let lighting_raw = include_str!("shaders/lighting.wgsl");
         let lighting = strip_includes(lighting_raw);
-        
+
         // Load lighting_ibl.wgsl (no includes)
         let lighting_ibl = include_str!("shaders/lighting_ibl.wgsl");
-        
+
         // Load main terrain shader and strip includes
         let terrain_raw = include_str!("shaders/terrain_pbr_pom.wgsl");
         let terrain = strip_includes(terrain_raw);
-        
+
         // Concatenate in dependency order
         format!(
             "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
@@ -807,7 +815,7 @@ impl TerrainRenderer {
         shadow_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> Result<NoopShadow> {
         use crate::core::shadow_mapping::CsmUniforms;
-        
+
         // Create dummy CSM uniforms buffer (binding 0)
         let csm_uniforms = CsmUniforms {
             light_direction: [0.0, -1.0, 0.0, 0.0],
@@ -954,13 +962,17 @@ impl TerrainRenderer {
                 resource: wgpu::BindingResource::Sampler(&moment_sampler),
             },
         ];
-        
+
         // Debug assertions: verify entry count matches layout expectations
         // The layout should have 5 entries: buffer(0), shadow texture(1), shadow sampler(2), moment texture(3), moment sampler(4)
-        debug_assert_eq!(entries.len(), 5, "Noop shadow bind group must have 5 entries matching the layout");
+        debug_assert_eq!(
+            entries.len(),
+            5,
+            "Noop shadow bind group must have 5 entries matching the layout"
+        );
         // Note: View dimensions are verified by construction - shadow_maps_view and moment_maps_view
         // are both created with D2Array dimension to match the layout expectations
-        
+
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain.noop_shadow.bind_group"),
             layout: shadow_bind_group_layout,
@@ -983,7 +995,7 @@ impl TerrainRenderer {
     /// Matches terrain_pbr_pom.wgsl @group(3) bindings: CSM uniforms, shadow maps, moment maps
     fn create_shadow_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         use crate::core::shadow_mapping::CsmUniforms;
-        
+
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain_pbr_pom.shadow_bind_group_layout"),
             entries: &[
@@ -1059,10 +1071,10 @@ impl TerrainRenderer {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("terrain_pbr_pom.pipeline_layout"),
             bind_group_layouts: &[
-                bind_group_layout,           // @group(0): terrain uniforms/textures (bindings 0-8)
-                light_buffer_layout,         // @group(1): lights (bindings 3-5)
-                ibl_bind_group_layout,       // @group(2): IBL (bindings 0-4)
-                &shadow_bind_group_layout,  // @group(3): shadows (bindings 0-4)
+                bind_group_layout,         // @group(0): terrain uniforms/textures (bindings 0-8)
+                light_buffer_layout,       // @group(1): lights (bindings 3-5)
+                ibl_bind_group_layout,     // @group(2): IBL (bindings 0-4)
+                &shadow_bind_group_layout, // @group(3): shadows (bindings 0-4)
             ],
             push_constant_ranges: &[],
         });
@@ -1158,10 +1170,12 @@ impl TerrainRenderer {
         heightmap: PyReadonlyArray2<f32>,
     ) -> Result<crate::Frame> {
         // P1-06: Advance light buffer frame (triple-buffering)
-        let mut light_buffer_guard = self.light_buffer.lock()
+        let mut light_buffer_guard = self
+            .light_buffer
+            .lock()
             .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
         light_buffer_guard.next_frame();
-        
+
         // Always update light buffer with lights from params (or neutral light for rotation mode)
         // This ensures the bind group is valid for the current frame and matches the pipeline layout
         let decoded = params.decoded();
@@ -1198,8 +1212,9 @@ impl TerrainRenderer {
                 area_half: [0.0, 0.0],
             }]
         };
-        
-        light_buffer_guard.update(self.device.as_ref(), self.queue.as_ref(), &lights)
+
+        light_buffer_guard
+            .update(self.device.as_ref(), self.queue.as_ref(), &lights)
             .map_err(|e| anyhow!("Failed to update light buffer: {}", e))?;
         drop(light_buffer_guard);
         // Get heightmap dimensions
@@ -1311,9 +1326,7 @@ impl TerrainRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::Sampler(
-                        ibl_resources.sampler.as_ref(),
-                    ),
+                    resource: wgpu::BindingResource::Sampler(ibl_resources.sampler.as_ref()),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -1374,7 +1387,8 @@ impl TerrainRenderer {
         // MSAA Selection (single authoritative source)
         // ──────────────────────────────────────────────────────────────────────────
         let requested_msaa = params.msaa_samples.max(1);
-        let effective_msaa = select_effective_msaa(requested_msaa, self.color_format, &self.adapter);
+        let effective_msaa =
+            select_effective_msaa(requested_msaa, self.color_format, &self.adapter);
 
         // Log downgrade warning (exactly once)
         if effective_msaa != requested_msaa {
@@ -1392,10 +1406,13 @@ impl TerrainRenderer {
             .lock()
             .map_err(|_| anyhow!("TerrainRenderer pipeline mutex poisoned"))?;
         if pipeline_cache.sample_count != effective_msaa {
-            let light_buffer = self.light_buffer.lock()
+            let light_buffer = self
+                .light_buffer
+                .lock()
                 .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
             // Reuse the same shadow layout (create it here since we don't store it)
-            let shadow_bind_group_layout = Self::create_shadow_bind_group_layout(self.device.as_ref());
+            let shadow_bind_group_layout =
+                Self::create_shadow_bind_group_layout(self.device.as_ref());
             pipeline_cache.pipeline = Self::create_render_pipeline(
                 self.device.as_ref(),
                 &self.bind_group_layout,
@@ -1491,7 +1508,7 @@ impl TerrainRenderer {
             has_resolve_target: effective_msaa > 1,
             resolve_sample_count,
             depth_sample_count: None, // No depth in this pipeline
-            readback_sample_count: 1,  // internal_texture is always sample_count=1
+            readback_sample_count: 1, // internal_texture is always sample_count=1
         };
         assert_msaa_invariants(&invariants, self.color_format)?;
 
@@ -1511,10 +1528,13 @@ impl TerrainRenderer {
 
             // P1-06: Lock light buffer before render pass to get bind group reference
             // The bind group was already updated above with lights from params
-            let light_buffer_guard = self.light_buffer.lock()
+            let light_buffer_guard = self
+                .light_buffer
+                .lock()
                 .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
             // LightBuffer always provides a bind group (updated above with lights from params)
-            let light_bind_group = light_buffer_guard.bind_group()
+            let light_bind_group = light_buffer_guard
+                .bind_group()
                 .expect("LightBuffer should always provide a bind group");
 
             // Main render pass
@@ -1541,17 +1561,17 @@ impl TerrainRenderer {
 
                 pass.set_pipeline(&pipeline_cache.pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                
+
                 // Always bind light buffer at index 1 (required by pipeline layout)
                 // The pipeline expects "Light Buffer Bind Group Layout" at index 1
                 pass.set_bind_group(1, light_bind_group, &[]);
-                
+
                 pass.set_bind_group(2, &ibl_bind_group, &[]);
-                
+
                 // Always bind noop shadow at index 3 (required by pipeline layout)
                 // The pipeline expects "terrain_pbr_pom.shadow_bind_group_layout" at index 3
                 pass.set_bind_group(3, &self.noop_shadow.bind_group, &[]);
-                
+
                 pass.draw(0..3, 0..1);
             }
             drop(light_buffer_guard);

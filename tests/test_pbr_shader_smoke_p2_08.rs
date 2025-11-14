@@ -1,6 +1,6 @@
 // tests/test_pbr_shader_smoke_p2_08.rs
 // P2-08: Shader compile smoke tests for PBR pipeline
-// 
+//
 // Verifies that the PBR shader with BRDF dispatch compiles correctly
 // across all platforms without requiring actual rendering. Tests:
 // - pbr.wgsl shader module creation
@@ -52,15 +52,15 @@ mod p2_08_pbr_shader_smoke_tests {
         // This validates WGSL shader compilation with all includes resolved
         use forge3d::core::material::PbrMaterial;
         use forge3d::render::pbr_pass::PbrRenderPass;
-        
+
         let material = PbrMaterial::default();
         let mut render_pass = PbrRenderPass::new(&device, &queue, material, true);
-        
+
         // Prepare pipeline for a render format (triggers shader compilation)
         use forge3d::core::material::PbrLighting;
         use forge3d::pipeline::pbr::PbrSceneUniforms;
         use wgpu::TextureFormat;
-        
+
         let scene_uniforms = PbrSceneUniforms::default();
         let lighting = PbrLighting::default();
         render_pass.prepare(
@@ -168,7 +168,8 @@ mod p2_08_pbr_shader_smoke_tests {
 
         // Verify ShadingParamsGPU struct exists
         assert!(
-            shader_source.contains("struct ShadingParamsGPU") || shader_source.contains("ShadingParams"),
+            shader_source.contains("struct ShadingParamsGPU")
+                || shader_source.contains("ShadingParams"),
             "P2-08: lighting.wgsl missing ShadingParamsGPU struct"
         );
 
@@ -208,14 +209,23 @@ mod p2_08_pbr_shader_smoke_tests {
         // Note: Individual BRDF modules cannot compile standalone as they reference
         // constants like INV_PI from common.wgsl. They are meant to be included.
         // Instead, verify they exist and have expected content.
-        
+
         let brdf_sources = [
             ("Lambert", include_str!("../src/shaders/brdf/lambert.wgsl")),
             ("Phong", include_str!("../src/shaders/brdf/phong.wgsl")),
-            ("Cook-Torrance", include_str!("../src/shaders/brdf/cook_torrance.wgsl")),
-            ("Disney", include_str!("../src/shaders/brdf/disney_principled.wgsl")),
+            (
+                "Cook-Torrance",
+                include_str!("../src/shaders/brdf/cook_torrance.wgsl"),
+            ),
+            (
+                "Disney",
+                include_str!("../src/shaders/brdf/disney_principled.wgsl"),
+            ),
             ("Toon", include_str!("../src/shaders/brdf/toon.wgsl")),
-            ("Minnaert", include_str!("../src/shaders/brdf/minnaert.wgsl")),
+            (
+                "Minnaert",
+                include_str!("../src/shaders/brdf/minnaert.wgsl"),
+            ),
         ];
 
         for (name, source) in brdf_sources {

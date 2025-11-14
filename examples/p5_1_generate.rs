@@ -1,40 +1,39 @@
 #!/usr/bin/env cargo
 //! P5.1 SSAO/GTAO Artifact Generator
-//! 
+//!
 //! Generates acceptance test artifacts:
 //! - ao_cornell_off_on.png: Split-view comparison (left=OFF, right=ON)
 //! - ao_buffers_grid.png: 3×2 grid of raw/blur for SSAO/GTAO
 //! - ao_params_sweep.png: Radius × intensity parameter sweep
 //! - p5_1_meta.json: Metadata with settings, timings, corner/center metrics
 
-use std::path::PathBuf;
+use anyhow::{Context, Result};
 use std::fs::File;
 use std::io::Write;
-use anyhow::{Result, Context};
+use std::path::PathBuf;
 
 fn main() -> Result<()> {
     env_logger::init();
-    
+
     let args: Vec<String> = std::env::args().collect();
     let output_dir = if args.len() > 1 {
         PathBuf::from(&args[1])
     } else {
         PathBuf::from("reports/p5_1")
     };
-    
-    std::fs::create_dir_all(&output_dir)
-        .context("Failed to create output directory")?;
-    
+
+    std::fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
+
     println!("╔════════════════════════════════════════════════════════════╗");
     println!("║       P5.1 SSAO/GTAO Artifact Generator (Placeholder)     ║");
     println!("╚════════════════════════════════════════════════════════════╝");
     println!();
     println!("Output directory: {}", output_dir.display());
     println!();
-    
+
     // Placeholder: Generate synthetic artifacts
     generate_placeholder_artifacts(&output_dir)?;
-    
+
     println!();
     println!("╔════════════════════════════════════════════════════════════╗");
     println!("║  ✓ All P5.1 artifacts generated successfully             ║");
@@ -50,31 +49,31 @@ fn main() -> Result<()> {
     println!("  1. Implement GPU rendering pipeline with Cornell scene");
     println!("  2. Add specular-preserving AO composition verification");
     println!("  3. Run: python scripts/check_p5_1.py");
-    
+
     Ok(())
 }
 
 fn generate_placeholder_artifacts(output_dir: &PathBuf) -> Result<()> {
     use std::fs::File;
     use std::io::Write;
-    
+
     println!("=== Generating placeholder artifacts ===");
-    
+
     // 1. Cornell OFF/ON split-view
     let cornell_path = output_dir.join("ao_cornell_off_on.png");
     generate_placeholder_image(&cornell_path, 1920, 1080, "Cornell AO OFF|ON")?;
     println!("✓ Generated: {}", cornell_path.display());
-    
+
     // 2. AO buffers grid (3×2: raw/blur for SSAO/GTAO)
     let buffers_path = output_dir.join("ao_buffers_grid.png");
     generate_placeholder_image(&buffers_path, 1920, 1280, "AO Buffers Grid")?;
     println!("✓ Generated: {}", buffers_path.display());
-    
+
     // 3. Parameter sweep (radius × intensity)
     let sweep_path = output_dir.join("ao_params_sweep.png");
     generate_placeholder_image(&sweep_path, 1920, 1080, "Param Sweep")?;
     println!("✓ Generated: {}", sweep_path.display());
-    
+
     // 4. Metadata JSON
     let meta_path = output_dir.join("p5_1_meta.json");
     let meta = serde_json::json!({
@@ -113,11 +112,11 @@ fn generate_placeholder_artifacts(output_dir: &PathBuf) -> Result<()> {
         },
         "status": "PLACEHOLDER - Awaiting GPU implementation"
     });
-    
+
     let mut file = File::create(&meta_path)?;
     file.write_all(serde_json::to_string_pretty(&meta)?.as_bytes())?;
     println!("✓ Generated: {}", meta_path.display());
-    
+
     Ok(())
 }
 

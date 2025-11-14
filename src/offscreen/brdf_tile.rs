@@ -36,11 +36,7 @@ fn identity_matrix() -> [[f32; 4]; 4] {
 
 /// Create look-at view matrix
 fn create_look_at_matrix(eye: [f32; 3], center: [f32; 3], up: [f32; 3]) -> [[f32; 4]; 4] {
-    let f = [
-        center[0] - eye[0],
-        center[1] - eye[1],
-        center[2] - eye[2],
-    ];
+    let f = [center[0] - eye[0], center[1] - eye[1], center[2] - eye[2]];
     let f_len = (f[0] * f[0] + f[1] * f[1] + f[2] * f[2]).sqrt();
     let f = [f[0] / f_len, f[1] / f_len, f[2] / f_len];
 
@@ -62,10 +58,12 @@ fn create_look_at_matrix(eye: [f32; 3], center: [f32; 3], up: [f32; 3]) -> [[f32
         [s[0], u[0], -f[0], 0.0],
         [s[1], u[1], -f[1], 0.0],
         [s[2], u[2], -f[2], 0.0],
-        [-s[0] * eye[0] - s[1] * eye[1] - s[2] * eye[2],
-         -u[0] * eye[0] - u[1] * eye[1] - u[2] * eye[2],
-         f[0] * eye[0] + f[1] * eye[1] + f[2] * eye[2],
-         1.0],
+        [
+            -s[0] * eye[0] - s[1] * eye[1] - s[2] * eye[2],
+            -u[0] * eye[0] - u[1] * eye[1] - u[2] * eye[2],
+            f[0] * eye[0] + f[1] * eye[1] + f[2] * eye[2],
+            1.0,
+        ],
     ]
 }
 
@@ -176,12 +174,19 @@ fn render_brdf_tile_internal(
         // Get adapter info from global GPU context
         let gpu_ctx = crate::gpu::ctx();
         let adapter_info = gpu_ctx.adapter.get_info();
-        log::info!("[M0] GPU Adapter: {} ({})", adapter_info.name, adapter_info.backend.to_str());
+        log::info!(
+            "[M0] GPU Adapter: {} ({})",
+            adapter_info.name,
+            adapter_info.backend.to_str()
+        );
         log::info!("[M0] Device Type: {:?}", adapter_info.device_type);
     });
-    
+
     ensure!(width > 0 && height > 0, "tile dimensions must be positive");
-    ensure!(width <= 4096 && height <= 4096, "tile dimensions must be <= 4096 to avoid GPU timeouts");
+    ensure!(
+        width <= 4096 && height <= 4096,
+        "tile dimensions must be <= 4096 to avoid GPU timeouts"
+    );
     ensure!(
         sphere_sectors >= 8 && sphere_sectors <= 1024,
         "sphere sectors must be in [8, 1024]"
@@ -190,10 +195,10 @@ fn render_brdf_tile_internal(
         sphere_stacks >= 4 && sphere_stacks <= 512,
         "sphere stacks must be in [4, 512]"
     );
-    
+
     let roughness = roughness.clamp(0.0, 1.0);
     let _exposure = exposure.max(1e-6);
-    let light_intensity = light_intensity.max(1e-6);  // Milestone 4: Clamp light intensity
+    let light_intensity = light_intensity.max(1e-6); // Milestone 4: Clamp light intensity
     let wi3_mode = wi3_debug_mode;
     let wi3_roughness = if wi3_mode != 0 {
         wi3_debug_roughness.clamp(0.0, 1.0)
@@ -202,9 +207,11 @@ fn render_brdf_tile_internal(
     };
 
     // M0: Validate BRDF model index (restrict to baseline set {0,1,4,6})
-    ensure!(matches!(model_u32, 0 | 1 | 4 | 6),
+    ensure!(
+        matches!(model_u32, 0 | 1 | 4 | 6),
         "invalid BRDF model index: {}. Allowed: 0(Lambert),1(Phong),4(GGX),6(Disney)",
-        model_u32);
+        model_u32
+    );
 
     // M0: Log model and flags for each render
     log::info!(
@@ -248,8 +255,9 @@ fn render_brdf_tile_internal(
     let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
     // P7-02: Generate UV-sphere mesh with normals and tangents
-    let (vertices, indices) = crate::offscreen::sphere::generate_uv_sphere(sphere_sectors, sphere_stacks, 1.0);
-    
+    let (vertices, indices) =
+        crate::offscreen::sphere::generate_uv_sphere(sphere_sectors, sphere_stacks, 1.0);
+
     // Create vertex buffer
     let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("offscreen.brdf_tile.vertex_buffer"),
@@ -273,7 +281,7 @@ fn render_brdf_tile_internal(
     let camera_pos = [0.0f32, 0.0, 2.0];
     let look_at = [0.0f32, 0.0, 0.0];
     let up = [0.0f32, 1.0, 0.0];
-    
+
     let view_matrix = create_look_at_matrix(camera_pos, look_at, up);
     let aspect = width as f32 / height as f32;
     let projection_matrix = create_perspective_matrix(60.0_f32.to_radians(), aspect, 0.1, 100.0);
@@ -285,7 +293,7 @@ fn render_brdf_tile_internal(
         view_matrix,
         projection_matrix,
     };
-    
+
     let uniforms_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("offscreen.brdf_tile.uniforms"),
         contents: bytemuck::cast_slice(&[uniforms]),
@@ -314,7 +322,7 @@ fn render_brdf_tile_internal(
         light_dir,
         _pad0: 0.0,
         light_color: [1.0, 1.0, 1.0],
-        light_intensity,  // Milestone 4: Use parameter instead of hardcoded 0.8
+        light_intensity, // Milestone 4: Use parameter instead of hardcoded 0.8
         camera_pos,
         _pad1: 0.0,
         // M1/M2: Base color override
@@ -355,7 +363,7 @@ fn render_brdf_tile_internal(
         _pad6: 0,
         _pad7: 0,
     };
-    
+
     // Pad the uniform buffer to the WGSL-expected size to avoid size drift issues.
     let params_bytes = bytemuck::bytes_of(&params);
     const PARAMS_MIN_SIZE: usize = 256; // Overprovision to 256 bytes to avoid WGSL/Rust drift
@@ -384,7 +392,7 @@ fn render_brdf_tile_internal(
         _pad_out1: 0,
         _pad_out2: 0,
     };
-    
+
     let shading_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("offscreen.brdf_tile.shading"),
         contents: bytemuck::cast_slice(&[shading]),
@@ -406,10 +414,10 @@ fn render_brdf_tile_internal(
     // Initialize with sentinel values in fixed-point u32 space:
     // min set to u32::MAX (so atomicMin will decrease), max set to 0 (so atomicMax will increase)
     let debug_init: [u32; 4] = [
-        u32::MAX,  // min_nl
-        0,         // max_nl
-        u32::MAX,  // min_nv
-        0,         // max_nv
+        u32::MAX, // min_nl
+        0,        // max_nl
+        u32::MAX, // min_nv
+        0,        // max_nv
     ];
     let debug_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("offscreen.brdf_tile.debug_buffer"),
@@ -496,7 +504,7 @@ fn render_brdf_tile_internal(
             timestamp_writes,
             occlusion_query_set: None,
         });
-        
+
         // M7: Optimized - set all state before draw to reduce state changes
         render_pass.set_pipeline(pipeline.pipeline());
         render_pass.set_bind_group(0, &bind_group, &[]);
@@ -506,7 +514,9 @@ fn render_brdf_tile_internal(
     }
 
     // M7: Resolve and copy timestamp queries if supported
-    if let (Some(ref query_set), Some(ref buffer), Some(ref readback)) = (timestamp_query_set, timestamp_buffer, timestamp_readback) {
+    if let (Some(ref query_set), Some(ref buffer), Some(ref readback)) =
+        (timestamp_query_set, timestamp_buffer, timestamp_readback)
+    {
         encoder.resolve_query_set(query_set, 0..2, buffer, 0);
         encoder.copy_buffer_to_buffer(buffer, 0, readback, 0, 16);
     }
@@ -536,21 +546,21 @@ fn render_brdf_tile_internal(
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        
+
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("offscreen.brdf_tile.debug_readback"),
         });
         encoder.copy_buffer_to_buffer(&debug_buffer, 0, &debug_staging, 0, 16);
         queue.submit(Some(encoder.finish()));
         device.poll(wgpu::Maintain::Wait);
-        
+
         let slice = debug_staging.slice(..);
         let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
         slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).ok();
         });
         device.poll(wgpu::Maintain::Wait);
-        
+
         if let Some(Ok(())) = pollster::block_on(receiver.receive()) {
             let data = slice.get_mapped_range();
             let values: &[u32; 4] = bytemuck::from_bytes(&data[..16]);
@@ -560,16 +570,16 @@ fn render_brdf_tile_internal(
             let max_nl = (values[1] as f32) / denom;
             let min_nv = (values[2] as f32) / denom;
             let max_nv = (values[3] as f32) / denom;
-            
+
             log::info!("[M1] Debug Dot Products:");
             log::info!("  N·L range: [{:.4}, {:.4}]", min_nl, max_nl);
             log::info!("  N·V range: [{:.4}, {:.4}]", min_nv, max_nv);
-            
+
             drop(data);
             debug_staging.unmap();
         }
     }
-    
+
     // Verify buffer size matches expected tight layout (H x W x 4 bytes)
     let expected_size = (height * width * 4) as usize;
     ensure!(
@@ -751,7 +761,7 @@ mod tests {
             force_fallback_adapter: false,
             compatible_surface: None,
         }));
-        
+
         let Some(adapter) = adapter else {
             eprintln!("No GPU adapter available, skipping test");
             return;
@@ -764,30 +774,31 @@ mod tests {
                 required_limits: wgpu::Limits::default(),
             },
             None,
-        )).expect("Failed to create device");
+        ))
+        .expect("Failed to create device");
 
         // Test GGX at roughness 0.5
         let result = render_brdf_tile_offscreen(
             &device,
             &queue,
-            4,    // GGX
-            0.5,  // roughness
-            256,  // width
-            256,  // height
-            false, // ndf_only
-            false, // g_only
-            false, // dfg_only
-            false, // spec_only
-            false, // roughness_visualize
-            1.0,  // exposure
-            0.8,  // light_intensity
+            4,               // GGX
+            0.5,             // roughness
+            256,             // width
+            256,             // height
+            false,           // ndf_only
+            false,           // g_only
+            false,           // dfg_only
+            false,           // spec_only
+            false,           // roughness_visualize
+            1.0,             // exposure
+            0.8,             // light_intensity
             [0.5, 0.5, 0.5], // base_color
-            0.0,  // clearcoat
-            0.0,  // clearcoat_roughness
-            0.0,  // sheen
-            0.0,  // sheen_tint
-            0.0,  // specular_tint
-            false, // debug_dot_products
+            0.0,             // clearcoat
+            0.0,             // clearcoat_roughness
+            0.0,             // sheen
+            0.0,             // sheen_tint
+            0.0,             // specular_tint
+            false,           // debug_dot_products
             // M2 defaults
             false, // debug_lambert_only
             false, // debug_diffuse_only
@@ -798,19 +809,23 @@ mod tests {
             2,     // debug_angle_component
             false, // debug_no_srgb
             1,     // output_mode (srgb)
-        0.0,   // metallic_override
-        0,     // wi3_debug_mode
-        0.5,   // wi3_debug_roughness
-        64,    // sphere_sectors
-        32,    // sphere_stacks
-    );
+            0.0,   // metallic_override
+            0,     // wi3_debug_mode
+            0.5,   // wi3_debug_roughness
+            64,    // sphere_sectors
+            32,    // sphere_stacks
+        );
 
-        assert!(result.is_ok(), "render_brdf_tile_offscreen failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "render_brdf_tile_offscreen failed: {:?}",
+            result.err()
+        );
         let buffer = result.unwrap();
-        
+
         // Verify tight buffer shape: (H, W, 4)
         assert_eq!(buffer.len(), 256 * 256 * 4, "buffer size mismatch");
-        
+
         // Scaffold encodes model/roughness in clear color; verify it's non-zero
         assert!(buffer.iter().any(|&b| b > 0), "buffer is all zeros");
     }
@@ -821,10 +836,14 @@ mod tests {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()));
-        let Some(adapter) = adapter else { return; };
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
-            .expect("Failed to create device");
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()));
+        let Some(adapter) = adapter else {
+            return;
+        };
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
+                .expect("Failed to create device");
 
         // Invalid BRDF model
         let result = render_brdf_tile_offscreen(
@@ -857,12 +876,12 @@ mod tests {
             2,     // debug_angle_component
             false, // debug_no_srgb
             1,     // output_mode
-        0.0,
-        0,
-        0.5,
-        64,
-        32,
-    );
+            0.0,
+            0,
+            0.5,
+            64,
+            32,
+        );
         assert!(result.is_err(), "should reject invalid BRDF model");
 
         // Zero dimensions
@@ -896,12 +915,12 @@ mod tests {
             2,     // debug_angle_component
             false, // debug_no_srgb
             1,     // output_mode
-        0.0,
-        0,
-        0.5,
-        64,
-        32,
-    );
+            0.0,
+            0,
+            0.5,
+            64,
+            32,
+        );
         assert!(result.is_err(), "should reject zero width");
     }
 
@@ -918,7 +937,7 @@ mod tests {
             force_fallback_adapter: false,
             compatible_surface: None,
         }));
-        
+
         let Some(adapter) = adapter else {
             eprintln!("No GPU adapter available, skipping PNG compatibility test");
             return;
@@ -931,7 +950,8 @@ mod tests {
                 required_limits: wgpu::Limits::default(),
             },
             None,
-        )).expect("Failed to create device");
+        ))
+        .expect("Failed to create device");
 
         // Render GGX at roughness 0.3
         let width = 128u32;
@@ -939,62 +959,77 @@ mod tests {
         let result = render_brdf_tile_offscreen(
             &device,
             &queue,
-            4,     // GGX
-            0.3,   // roughness
+            4,   // GGX
+            0.3, // roughness
             width,
             height,
-            false, // ndf_only
-            false, // g_only
-            false, // dfg_only
-            false, // spec_only
-            false, // roughness_visualize
-            1.0,   // exposure
-            0.8,   // light_intensity
+            false,           // ndf_only
+            false,           // g_only
+            false,           // dfg_only
+            false,           // spec_only
+            false,           // roughness_visualize
+            1.0,             // exposure
+            0.8,             // light_intensity
             [0.5, 0.5, 0.5], // base_color
-            0.0,   // clearcoat
-            0.0,   // clearcoat_roughness
-            0.0,   // sheen
-            0.0,   // sheen_tint
-            0.0,   // specular_tint
-            false, // debug_dot_products
-            false, // debug_lambert_only
-            false, // debug_diffuse_only
-            false, // debug_d
-            false, // debug_spec_no_nl
-            false, // debug_energy
-            false, // debug_angle_sweep
-            2,     // debug_angle_component
-            false, // debug_no_srgb
-            1,     // output_mode
-        0.0,   // metallic_override
-        0,     // wi3_debug_mode
-        0.3,   // wi3_debug_roughness
-        64,
-        32,
-    );
+            0.0,             // clearcoat
+            0.0,             // clearcoat_roughness
+            0.0,             // sheen
+            0.0,             // sheen_tint
+            0.0,             // specular_tint
+            false,           // debug_dot_products
+            false,           // debug_lambert_only
+            false,           // debug_diffuse_only
+            false,           // debug_d
+            false,           // debug_spec_no_nl
+            false,           // debug_energy
+            false,           // debug_angle_sweep
+            2,               // debug_angle_component
+            false,           // debug_no_srgb
+            1,               // output_mode
+            0.0,             // metallic_override
+            0,               // wi3_debug_mode
+            0.3,             // wi3_debug_roughness
+            64,
+            32,
+        );
 
-        assert!(result.is_ok(), "render_brdf_tile_offscreen failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "render_brdf_tile_offscreen failed: {:?}",
+            result.err()
+        );
         let buffer = result.unwrap();
-        
+
         // P7-04 Exit Criteria: Verify buffer is PNG-compatible
         // 1. Tight layout: H × W × 4 bytes (no padding)
-        assert_eq!(buffer.len(), (height * width * 4) as usize, "buffer must be tight row-major RGBA8");
-        
+        assert_eq!(
+            buffer.len(),
+            (height * width * 4) as usize,
+            "buffer must be tight row-major RGBA8"
+        );
+
         // 2. Non-trivial content: should have some variation (not all black or all white)
-        let unique_pixels = buffer.chunks_exact(4)
+        let unique_pixels = buffer
+            .chunks_exact(4)
             .map(|rgba| (rgba[0], rgba[1], rgba[2], rgba[3]))
             .collect::<std::collections::HashSet<_>>();
-        assert!(unique_pixels.len() > 10, "rendered output should have variation, got {} unique pixels", unique_pixels.len());
-        
+        assert!(
+            unique_pixels.len() > 10,
+            "rendered output should have variation, got {} unique pixels",
+            unique_pixels.len()
+        );
+
         // 3. Valid RGBA range: all bytes in [0, 255] (automatically true for u8)
         // 4. Alpha channel: should be 255 (opaque)
         let all_opaque = buffer.chunks_exact(4).all(|rgba| rgba[3] == 255);
         assert!(all_opaque, "all pixels should be opaque (alpha=255)");
-        
+
         // 5. Some pixels should be non-black (sphere should be lit)
-        let has_lighting = buffer.chunks_exact(4).any(|rgba| rgba[0] > 10 || rgba[1] > 10 || rgba[2] > 10);
+        let has_lighting = buffer
+            .chunks_exact(4)
+            .any(|rgba| rgba[0] > 10 || rgba[1] > 10 || rgba[2] > 10);
         assert!(has_lighting, "rendered sphere should have visible lighting");
-        
+
         // Buffer is now suitable for PNG export via python/forge3d/__init__.py:numpy_to_png()
         // In Python: numpy_to_png("output.png", buffer.reshape(height, width, 4))
     }

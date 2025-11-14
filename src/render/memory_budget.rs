@@ -136,8 +136,14 @@ impl GpuMemoryBudget {
         let within_budget = new_total <= self.max_budget_bytes;
 
         // Check warning threshold
-        if !within_budget || (new_total as f32 / self.max_budget_bytes as f32) > self.warning_threshold {
-            if self.warned.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+        if !within_budget
+            || (new_total as f32 / self.max_budget_bytes as f32) > self.warning_threshold
+        {
+            if self
+                .warned
+                .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
                 log::warn!(
                     "GPU memory budget: {:.1} MiB / {:.1} MiB ({:.1}%)",
                     new_total as f32 / (1024.0 * 1024.0),
@@ -205,7 +211,11 @@ impl GpuMemoryBudget {
             .iter()
             .map(|(cat, counter)| {
                 let bytes = counter.load(Ordering::SeqCst);
-                let percentage = if total > 0.0 { bytes as f32 / total } else { 0.0 };
+                let percentage = if total > 0.0 {
+                    bytes as f32 / total
+                } else {
+                    0.0
+                };
                 (cat.name().to_string(), bytes, percentage)
             })
             .filter(|(_, bytes, _)| *bytes > 0)
@@ -275,7 +285,10 @@ pub fn auto_downscale_shadow_map(
         if bytes <= available {
             log::warn!(
                 "Shadow map auto-downscaled: {}x{} → {}x{} to fit GPU budget",
-                requested_res, requested_res, current_res, current_res
+                requested_res,
+                requested_res,
+                current_res,
+                current_res
             );
             return (current_res, true);
         }
@@ -284,21 +297,20 @@ pub fn auto_downscale_shadow_map(
     // Minimum viable resolution
     log::warn!(
         "Shadow map auto-downscaled to minimum: {}x{} → 512x512 to fit GPU budget",
-        requested_res, requested_res
+        requested_res,
+        requested_res
     );
     (512, true)
 }
 
 /// Auto-downscale IBL cubemap resolution to fit budget
-pub fn auto_downscale_ibl_cubemap(
-    requested_res: u32,
-    budget: &GpuMemoryBudget,
-) -> (u32, bool) {
+pub fn auto_downscale_ibl_cubemap(requested_res: u32, budget: &GpuMemoryBudget) -> (u32, bool) {
     // Cubemap: 6 faces × res² × 8 bytes (RGBA16F) × mip levels
     // Approximate with 1.33x for mip chain
     let mip_multiplier = 1.33;
     let bytes_per_pixel = 8; // RGBA16F
-    let requested_bytes = (6 * requested_res * requested_res) as f32 * bytes_per_pixel as f32 * mip_multiplier;
+    let requested_bytes =
+        (6 * requested_res * requested_res) as f32 * bytes_per_pixel as f32 * mip_multiplier;
 
     if budget.would_fit(requested_bytes as usize) {
         return (requested_res, false);
@@ -309,11 +321,13 @@ pub fn auto_downscale_ibl_cubemap(
 
     while current_res > 32 {
         current_res /= 2;
-        let bytes = (6 * current_res * current_res) as f32 * bytes_per_pixel as f32 * mip_multiplier;
+        let bytes =
+            (6 * current_res * current_res) as f32 * bytes_per_pixel as f32 * mip_multiplier;
         if bytes <= available as f32 {
             log::warn!(
                 "IBL cubemap auto-downscaled: {} → {} to fit GPU budget",
-                requested_res, current_res
+                requested_res,
+                current_res
             );
             return (current_res, true);
         }
@@ -349,7 +363,12 @@ pub fn auto_downscale_froxel_grid(
         if bytes <= available {
             log::warn!(
                 "Froxel grid auto-downscaled: {}×{}×{} → {}×{}×{} to fit GPU budget",
-                x, y, z, x, y, current_z
+                x,
+                y,
+                z,
+                x,
+                y,
+                current_z
             );
             return ((x, y, current_z), true);
         }
@@ -359,7 +378,12 @@ pub fn auto_downscale_froxel_grid(
     let minimal = (8, 8, 16);
     log::warn!(
         "Froxel grid auto-downscaled to minimum: {}×{}×{} → {}×{}×{} to fit GPU budget",
-        x, y, z, minimal.0, minimal.1, minimal.2
+        x,
+        y,
+        z,
+        minimal.0,
+        minimal.1,
+        minimal.2
     );
     (minimal, true)
 }
@@ -374,7 +398,10 @@ mod tests {
 
         // Allocate some memory
         assert!(budget.allocate(MemoryCategory::ShadowMaps, 16 * 1024 * 1024)); // 16 MiB
-        assert_eq!(budget.get_category_bytes(MemoryCategory::ShadowMaps), 16 * 1024 * 1024);
+        assert_eq!(
+            budget.get_category_bytes(MemoryCategory::ShadowMaps),
+            16 * 1024 * 1024
+        );
         assert_eq!(budget.get_total_bytes(), 16 * 1024 * 1024);
 
         // Deallocate

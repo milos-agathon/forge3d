@@ -73,7 +73,9 @@ impl IblResourceCache {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rg16Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
 
@@ -100,7 +102,9 @@ impl IblResourceCache {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
 
@@ -131,7 +135,9 @@ impl IblResourceCache {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
 
@@ -188,9 +194,7 @@ impl IblResourceCache {
 
     /// Check if all resources are initialized
     pub fn is_ready(&self) -> bool {
-        self.brdf_lut.is_some()
-            && self.irradiance_map.is_some()
-            && self.specular_map.is_some()
+        self.brdf_lut.is_some() && self.irradiance_map.is_some() && self.specular_map.is_some()
     }
 }
 
@@ -219,9 +223,21 @@ mod tests {
         let total = brdf_lut + irradiance + specular;
         let total_mib = total as f64 / (1024.0 * 1024.0);
 
-        println!("BRDF LUT: {} bytes ({:.2} MiB)", brdf_lut, brdf_lut as f64 / (1024.0 * 1024.0));
-        println!("Irradiance: {} bytes ({:.2} MiB)", irradiance, irradiance as f64 / (1024.0 * 1024.0));
-        println!("Specular: {} bytes ({:.2} MiB)", specular, specular as f64 / (1024.0 * 1024.0));
+        println!(
+            "BRDF LUT: {} bytes ({:.2} MiB)",
+            brdf_lut,
+            brdf_lut as f64 / (1024.0 * 1024.0)
+        );
+        println!(
+            "Irradiance: {} bytes ({:.2} MiB)",
+            irradiance,
+            irradiance as f64 / (1024.0 * 1024.0)
+        );
+        println!(
+            "Specular: {} bytes ({:.2} MiB)",
+            specular,
+            specular as f64 / (1024.0 * 1024.0)
+        );
         println!("Total: {} bytes ({:.2} MiB)", total, total_mib);
 
         assert!(total_mib < 64.0, "IBL cache exceeds 64 MiB budget");

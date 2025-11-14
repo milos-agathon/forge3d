@@ -142,8 +142,8 @@ mod golden_image_tests {
         },
     ];
 
+    use image::{imageops, GenericImageView};
     use std::process::Command;
-    use image::{GenericImageView, imageops};
 
     fn golden_image_path(name: &str) -> PathBuf {
         PathBuf::from(format!("tests/golden/{}.png", name))
@@ -160,8 +160,12 @@ mod golden_image_tests {
     /// Compute SSIM between two images on downscaled grayscale for speed
     /// Returns a value in [0, 1] where 1 = identical
     fn compute_ssim(img1_path: &PathBuf, img2_path: &PathBuf) -> Result<f64, String> {
-        if !img1_path.exists() { return Err(format!("Image 1 not found: {:?}", img1_path)); }
-        if !img2_path.exists() { return Err(format!("Image 2 not found: {:?}", img2_path)); }
+        if !img1_path.exists() {
+            return Err(format!("Image 1 not found: {:?}", img1_path));
+        }
+        if !img2_path.exists() {
+            return Err(format!("Image 2 not found: {:?}", img2_path));
+        }
 
         let im1 = image::open(img1_path).map_err(|e| format!("open img1: {}", e))?;
         let im2 = image::open(img2_path).map_err(|e| format!("open img2: {}", e))?;
@@ -169,8 +173,18 @@ mod golden_image_tests {
         // Resize both to a standard small size to reduce computation
         let target_w = 320u32;
         let target_h = 180u32;
-        let im1r = imageops::resize(&im1.to_luma8(), target_w, target_h, imageops::FilterType::Triangle);
-        let im2r = imageops::resize(&im2.to_luma8(), target_w, target_h, imageops::FilterType::Triangle);
+        let im1r = imageops::resize(
+            &im1.to_luma8(),
+            target_w,
+            target_h,
+            imageops::FilterType::Triangle,
+        );
+        let im2r = imageops::resize(
+            &im2.to_luma8(),
+            target_w,
+            target_h,
+            imageops::FilterType::Triangle,
+        );
 
         let w = im1r.width() as usize;
         let h = im1r.height() as usize;
@@ -179,10 +193,13 @@ mod golden_image_tests {
         let buf2: Vec<f64> = im2r.into_raw().into_iter().map(|v| v as f64).collect();
 
         // Gaussian parameters
-        let k1 = 0.01f64; let k2 = 0.03f64; let data_range = 255.0f64;
+        let k1 = 0.01f64;
+        let k2 = 0.03f64;
+        let data_range = 255.0f64;
         let c1 = (k1 * data_range).powi(2);
         let c2 = (k2 * data_range).powi(2);
-        let win_size: usize = 11; let sigma: f64 = 1.5;
+        let win_size: usize = 11;
+        let sigma: f64 = 1.5;
 
         // Build 1D Gaussian kernel
         let mut g = vec![0.0f64; win_size];
@@ -194,7 +211,9 @@ mod golden_image_tests {
             g[i] = (-x * x / sigma2).exp();
             sum += g[i];
         }
-        for i in 0..win_size { g[i] /= sum; }
+        for i in 0..win_size {
+            g[i] /= sum;
+        }
 
         // Helper: separable convolution
         let convolve = |src: &Vec<f64>| -> Vec<f64> {
@@ -234,11 +253,11 @@ mod golden_image_tests {
         // compute squares and products
         let buf1_sq: Vec<f64> = buf1.iter().map(|v| v * v).collect();
         let buf2_sq: Vec<f64> = buf2.iter().map(|v| v * v).collect();
-        let buf12: Vec<f64> = buf1.iter().zip(buf2.iter()).map(|(a,b)| a * b).collect();
+        let buf12: Vec<f64> = buf1.iter().zip(buf2.iter()).map(|(a, b)| a * b).collect();
 
         let mu1_sq: Vec<f64> = mu1.iter().map(|v| v * v).collect();
         let mu2_sq: Vec<f64> = mu2.iter().map(|v| v * v).collect();
-        let mu12: Vec<f64> = mu1.iter().zip(mu2.iter()).map(|(a,b)| a * b).collect();
+        let mu12: Vec<f64> = mu1.iter().zip(mu2.iter()).map(|(a, b)| a * b).collect();
 
         let sigma1_sq: Vec<f64> = {
             let tmp = convolve(&buf1_sq);
@@ -256,7 +275,7 @@ mod golden_image_tests {
         // SSIM map and mean
         let mut ssim_sum = 0.0f64;
         let mut count = 0usize;
-        for i in 0..(w*h) {
+        for i in 0..(w * h) {
             let num = (2.0 * mu12[i] + c1) * (2.0 * sigma12[i] + c2);
             let den = (mu1_sq[i] + mu2_sq[i] + c1) * (sigma1_sq[i] + sigma2_sq[i] + c2);
             let v = if den != 0.0 { num / den } else { 0.0 };
@@ -278,10 +297,13 @@ mod golden_image_tests {
         // Call the Python generator filtered by name, writing into rendered directory
         let status = Command::new("python3")
             .arg("scripts/generate_golden_images.py")
-            .arg("--output-dir").arg(rendered_dir)
+            .arg("--output-dir")
+            .arg(rendered_dir)
             .arg("--overwrite")
-            .arg("--filter").arg(config.name)
-            .arg("--obj").arg("assets/cornell_box.obj")
+            .arg("--filter")
+            .arg(config.name)
+            .arg("--obj")
+            .arg("assets/cornell_box.obj")
             .status()
             .map_err(|e| format!("spawn python: {}", e))?;
         if !status.success() {
@@ -306,9 +328,11 @@ mod golden_image_tests {
         // Use Python generator to write into tests/golden
         let status = Command::new("python3")
             .arg("scripts/generate_golden_images.py")
-            .arg("--output-dir").arg("tests/golden")
+            .arg("--output-dir")
+            .arg("tests/golden")
             .arg("--overwrite")
-            .arg("--obj").arg("assets/cornell_box.obj")
+            .arg("--obj")
+            .arg("assets/cornell_box.obj")
             .status()
             .expect("failed to run generator");
         assert!(status.success(), "generator failed");

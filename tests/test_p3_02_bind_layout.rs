@@ -1,6 +1,6 @@
 // tests/test_p3_02_bind_layout.rs
 // P3-02: Shadow bind group layout alignment tests
-// Exit criteria: Runtime layout matches WGSL; pipelines compile; 
+// Exit criteria: Runtime layout matches WGSL; pipelines compile;
 // non-moment techniques don't require moment bindings; moment techniques bind fallback if needed.
 
 use forge3d::lighting::types::ShadowTechnique;
@@ -15,10 +15,10 @@ fn test_bind_group_layout_creation_pcf() {
         technique: ShadowTechnique::PCF,
         ..Default::default()
     };
-    
+
     let manager = ShadowManager::new(&device, config);
     let layout = manager.create_bind_group_layout(&device);
-    
+
     // Layout should be created successfully (has valid ID)
     let _id = layout.global_id();
 }
@@ -31,10 +31,10 @@ fn test_bind_group_layout_creation_vsm() {
         technique: ShadowTechnique::VSM,
         ..Default::default()
     };
-    
+
     let manager = ShadowManager::new(&device, config);
     let layout = manager.create_bind_group_layout(&device);
-    
+
     // Layout should be created successfully (has valid ID)
     let _id = layout.global_id();
     assert!(manager.uses_moments());
@@ -51,7 +51,7 @@ fn test_bind_group_creation_all_techniques() {
         ShadowTechnique::EVSM,
         ShadowTechnique::MSM,
     ];
-    
+
     for technique in techniques {
         let device = forge3d::gpu::create_device_for_test();
         let config = ShadowManagerConfig {
@@ -63,14 +63,14 @@ fn test_bind_group_creation_all_techniques() {
             technique,
             ..Default::default()
         };
-        
+
         let manager = ShadowManager::new(&device, config.clone());
         let layout = manager.create_bind_group_layout(&device);
-        
+
         // Create views (must outlive bind group entries)
         let shadow_view = manager.shadow_view();
         let moment_view = manager.moment_view();
-        
+
         // Create bind group entries
         let entries = vec![
             BindGroupEntry {
@@ -98,7 +98,7 @@ fn test_bind_group_creation_all_techniques() {
                 resource: BindingResource::Sampler(manager.moment_sampler()),
             },
         ];
-        
+
         // Bind group creation should succeed
         let _bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some(&format!("test_shadow_bind_group_{:?}", technique)),
@@ -116,12 +116,12 @@ fn test_fallback_moment_texture_pcf() {
         technique: ShadowTechnique::PCF,
         ..Default::default()
     };
-    
+
     let manager = ShadowManager::new(&device, config);
-    
+
     // Should have fallback moment texture
     assert!(!manager.uses_moments());
-    
+
     // moment_view() should return a valid view (fallback)
     let _moment_view = manager.moment_view();
 }
@@ -138,12 +138,12 @@ fn test_moment_texture_vsm() {
         technique: ShadowTechnique::VSM,
         ..Default::default()
     };
-    
+
     let manager = ShadowManager::new(&device, config);
-    
+
     // Should use moments
     assert!(manager.uses_moments());
-    
+
     // moment_view() should return actual moment texture view
     let _moment_view = manager.moment_view();
 }
@@ -154,13 +154,13 @@ fn test_binding_count_consistency() {
     let device = forge3d::gpu::create_device_for_test();
     let config = ShadowManagerConfig::default();
     let manager = ShadowManager::new(&device, config);
-    
+
     let layout = manager.create_bind_group_layout(&device);
-    
+
     // Create views (must outlive bind group entries)
     let shadow_view = manager.shadow_view();
     let moment_view = manager.moment_view();
-    
+
     // Layout should have 5 bindings (0-4)
     // We can't directly inspect the layout entries, but we can verify
     // that bind group creation succeeds with all 5 bindings
@@ -190,7 +190,7 @@ fn test_binding_count_consistency() {
             resource: BindingResource::Sampler(manager.moment_sampler()),
         },
     ];
-    
+
     let _bind_group = device.create_bind_group(&BindGroupDescriptor {
         label: Some("test_all_bindings"),
         layout: &layout,
@@ -206,9 +206,9 @@ fn test_shader_compilation_with_shadow_bindings() {
     let device = forge3d::gpu::create_device_for_test();
     let config = ShadowManagerConfig::default();
     let _manager = ShadowManager::new(&device, config);
-    
+
     let shader_source = forge3d::shadows::CsmRenderer::shader_source();
-    
+
     // Create shader module (compilation test)
     let _shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("test_shadows_shader"),
@@ -241,14 +241,14 @@ fn test_cascade_count_variations() {
             technique: ShadowTechnique::EVSM,
             ..Default::default()
         };
-        
+
         let manager = ShadowManager::new(&device, config.clone());
         let layout = manager.create_bind_group_layout(&device);
-        
+
         // Create views (must outlive bind group entries)
         let shadow_view = manager.shadow_view();
         let moment_view = manager.moment_view();
-        
+
         // Create bind group
         let entries = vec![
             BindGroupEntry {
@@ -276,7 +276,7 @@ fn test_cascade_count_variations() {
                 resource: BindingResource::Sampler(manager.moment_sampler()),
             },
         ];
-        
+
         let _bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some(&format!("test_cascade_{}", cascade_count)),
             layout: &layout,

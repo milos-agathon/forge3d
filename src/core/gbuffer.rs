@@ -2,8 +2,8 @@
 //!
 //! Provides depth, normals, and material data for screen-space techniques
 
-use crate::error::RenderResult;
 use crate::core::mipmap::calculate_mip_levels;
+use crate::error::RenderResult;
 use wgpu::*;
 
 /// GBuffer configuration
@@ -43,19 +43,19 @@ pub struct GBuffer {
     /// Depth texture (view-space depth or world-space depth)
     pub depth_texture: Texture,
     pub depth_view: TextureView,
-    
+
     /// Normal texture (view-space normals, encoded)
     pub normal_texture: Texture,
     pub normal_view: TextureView,
-    
+
     /// Material/albedo texture
     pub material_texture: Texture,
     pub material_view: TextureView,
-    
+
     /// Optional position reconstruction texture (if not reconstructing from depth)
     pub position_texture: Option<Texture>,
     pub position_view: Option<TextureView>,
-    
+
     /// Configuration
     config: GBufferConfig,
 }
@@ -76,8 +76,7 @@ impl GBuffer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: config.depth_format,
-            usage: TextureUsages::TEXTURE_BINDING
-                | TextureUsages::RENDER_ATTACHMENT,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
         // Render attachments must have exactly one mip level
@@ -91,7 +90,7 @@ impl GBuffer {
             base_array_layer: 0,
             array_layer_count: Some(1),
         });
-        
+
         // Create normal texture
         let normal_texture = device.create_texture(&TextureDescriptor {
             label: Some("gbuffer_normal"),
@@ -104,13 +103,13 @@ impl GBuffer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: config.normal_format,
-            usage: TextureUsages::TEXTURE_BINDING 
+            usage: TextureUsages::TEXTURE_BINDING
                 | TextureUsages::RENDER_ATTACHMENT
                 | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let normal_view = normal_texture.create_view(&TextureViewDescriptor::default());
-        
+
         // Create material texture
         let material_texture = device.create_texture(&TextureDescriptor {
             label: Some("gbuffer_material"),
@@ -123,13 +122,13 @@ impl GBuffer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: config.material_format,
-            usage: TextureUsages::TEXTURE_BINDING 
+            usage: TextureUsages::TEXTURE_BINDING
                 | TextureUsages::RENDER_ATTACHMENT
                 | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let material_view = material_texture.create_view(&TextureViewDescriptor::default());
-        
+
         Ok(Self {
             depth_texture,
             depth_view,
@@ -142,24 +141,24 @@ impl GBuffer {
             config,
         })
     }
-    
+
     /// Resize GBuffer
     pub fn resize(&mut self, device: &Device, width: u32, height: u32) -> RenderResult<()> {
         self.config.width = width;
         self.config.height = height;
-        
+
         // Recreate textures
         let new_gbuffer = Self::new(device, self.config.clone())?;
         *self = new_gbuffer;
-        
+
         Ok(())
     }
-    
+
     /// Get configuration
     pub fn config(&self) -> &GBufferConfig {
         &self.config
     }
-    
+
     /// Get dimensions
     pub fn dimensions(&self) -> (u32, u32) {
         (self.config.width, self.config.height)

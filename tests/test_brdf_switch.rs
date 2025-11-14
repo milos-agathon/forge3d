@@ -52,7 +52,8 @@ fn pbr_runtime_brdf_switch_executes() {
 
     // Create pass and prepare once
     let material = PbrMaterial::default();
-    let mut render_pass = PbrRenderPass::new(&device, &queue, material, /*enable_shadows=*/ true);
+    let mut render_pass =
+        PbrRenderPass::new(&device, &queue, material, /*enable_shadows=*/ true);
 
     let scene_uniforms = PbrSceneUniforms::default();
     let lighting = PbrLighting::default();
@@ -68,7 +69,11 @@ fn pbr_runtime_brdf_switch_executes() {
     // Render target setup
     let color_texture = device.create_texture(&TextureDescriptor {
         label: Some("pbr_pass_color"),
-        size: wgpu::Extent3d { width: 4, height: 4, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: 4,
+            height: 4,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: TextureDimension::D2,
@@ -80,7 +85,11 @@ fn pbr_runtime_brdf_switch_executes() {
 
     let depth_texture = device.create_texture(&TextureDescriptor {
         label: Some("pbr_pass_depth"),
-        size: wgpu::Extent3d { width: 4, height: 4, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: 4,
+            height: 4,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: TextureDimension::D2,
@@ -91,7 +100,11 @@ fn pbr_runtime_brdf_switch_executes() {
     let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
     // Try several BRDFs sequentially; just ensure we can begin the pass without errors
-    for model in [BrdfModel::Lambert, BrdfModel::CookTorranceGGX, BrdfModel::DisneyPrincipled] {
+    for model in [
+        BrdfModel::Lambert,
+        BrdfModel::CookTorranceGGX,
+        BrdfModel::DisneyPrincipled,
+    ] {
         render_pass.set_brdf_model(&queue, model);
 
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
@@ -103,11 +116,17 @@ fn pbr_runtime_brdf_switch_executes() {
                 color_attachments: &[Some(RenderPassColorAttachment {
                     view: &color_view,
                     resolve_target: None,
-                    ops: Operations { load: LoadOp::Clear(Color::BLACK), store: wgpu::StoreOp::Store },
+                    ops: Operations {
+                        load: LoadOp::Clear(Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                     view: &depth_view,
-                    depth_ops: Some(Operations { load: LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
+                    depth_ops: Some(Operations {
+                        load: LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
                     stencil_ops: None,
                 }),
                 timestamp_writes: None,

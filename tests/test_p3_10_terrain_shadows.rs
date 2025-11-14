@@ -8,16 +8,16 @@ use forge3d::gpu;
 fn test_terrain_shader_compiles_without_shadows() {
     // Test that terrain shader compiles with TERRAIN_USE_SHADOWS = false (default)
     // This ensures no regressions in the default terrain path
-    
+
     // We can't actually compile shaders in unit tests without a GPU context,
     // but we verify the shader structure is sound by checking it exists
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
     assert!(shader_path.exists(), "Terrain PBR shader must exist");
-    
+
     // Read shader and verify key flags
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     // Verify TERRAIN_USE_SHADOWS flag exists and defaults to false
     assert!(
         shader_content.contains("const TERRAIN_USE_SHADOWS: bool = false;"),
@@ -29,9 +29,9 @@ fn test_terrain_shader_compiles_without_shadows() {
 fn test_terrain_shader_has_shadow_flag() {
     // Verify shadow flag exists in shader
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
         shader_content.contains("TERRAIN_USE_SHADOWS"),
         "Terrain shader must have TERRAIN_USE_SHADOWS flag"
@@ -42,9 +42,9 @@ fn test_terrain_shader_has_shadow_flag() {
 fn test_terrain_shader_has_shadow_bindings() {
     // Verify shadow bindings exist at group(3)
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
         shader_content.contains("@group(3) @binding(0)"),
         "Terrain shader must have shadow bindings at group(3)"
@@ -63,9 +63,9 @@ fn test_terrain_shader_has_shadow_bindings() {
 fn test_terrain_shader_has_shadow_functions() {
     // Verify shadow sampling functions exist
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
         shader_content.contains("fn select_cascade_terrain"),
         "Terrain shader must have cascade selection function"
@@ -84,9 +84,9 @@ fn test_terrain_shader_has_shadow_functions() {
 fn test_terrain_shader_applies_shadows_conditionally() {
     // Verify shadows are applied conditionally based on flag
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
         shader_content.contains("if (TERRAIN_USE_SHADOWS)"),
         "Shadow application must be gated behind TERRAIN_USE_SHADOWS flag"
@@ -101,9 +101,9 @@ fn test_terrain_shader_applies_shadows_conditionally() {
 fn test_terrain_shader_preserves_legacy_shadows() {
     // Verify legacy POM-based shadows are preserved when flag is false
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
         shader_content.contains("// Legacy POM-based shadow factor"),
         "Legacy shadow path must be preserved"
@@ -118,9 +118,9 @@ fn test_terrain_shader_preserves_legacy_shadows() {
 fn test_terrain_shader_has_csm_structs() {
     // Verify CSM data structures are defined
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
         shader_content.contains("struct ShadowCascade"),
         "Must define ShadowCascade struct"
@@ -135,11 +135,12 @@ fn test_terrain_shader_has_csm_structs() {
 fn test_terrain_shader_uses_view_depth() {
     // Verify view-space depth is calculated for cascade selection
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
-        shader_content.contains("let view_pos = u_terrain.view * vec4<f32>(input.world_position, 1.0);"),
+        shader_content
+            .contains("let view_pos = u_terrain.view * vec4<f32>(input.world_position, 1.0);"),
         "Must calculate view-space position"
     );
     assert!(
@@ -152,9 +153,9 @@ fn test_terrain_shader_uses_view_depth() {
 fn test_terrain_shader_applies_to_direct_lighting_only() {
     // Verify shadows only affect direct lighting
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
         shader_content.contains("// Apply shadow to direct lighting only"),
         "Must document shadow application to direct lighting"
@@ -169,13 +170,13 @@ fn test_terrain_shader_applies_to_direct_lighting_only() {
 fn test_terrain_shader_preserves_ibl() {
     // Verify IBL remains separate from shadow application
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     // Shadow application should come before IBL calculation
     let shadow_pos = shader_content.find("shadow_visibility").unwrap_or(0);
     let ibl_pos = shader_content.find("ibl_contrib").unwrap_or(usize::MAX);
-    
+
     assert!(
         shadow_pos < ibl_pos,
         "Shadow application must come before IBL calculation"
@@ -186,9 +187,9 @@ fn test_terrain_shader_preserves_ibl() {
 fn test_terrain_shader_has_brdf_dispatch_flag() {
     // Verify BRDF dispatch flag still exists (P2-05)
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
         shader_content.contains("const TERRAIN_USE_BRDF_DISPATCH: bool = false;"),
         "TERRAIN_USE_BRDF_DISPATCH must remain for P2-05 compatibility"
@@ -199,9 +200,9 @@ fn test_terrain_shader_has_brdf_dispatch_flag() {
 fn test_terrain_shader_preserves_pom() {
     // Verify POM functionality is preserved
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
         shader_content.contains("pom_enabled"),
         "POM enabled flag must be preserved"
@@ -216,9 +217,9 @@ fn test_terrain_shader_preserves_pom() {
 fn test_terrain_shader_preserves_triplanar() {
     // Verify triplanar mapping is preserved
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
         shader_content.contains("fn sample_triplanar"),
         "Triplanar sampling must be preserved"
@@ -233,9 +234,9 @@ fn test_terrain_shader_preserves_triplanar() {
 fn test_terrain_shader_preserves_overlay() {
     // Verify overlay/colormap functionality is preserved
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
         shader_content.contains("colormap_tex"),
         "Colormap texture must be preserved"
@@ -250,15 +251,15 @@ fn test_terrain_shader_preserves_overlay() {
 fn test_terrain_shader_shadow_group_no_conflict() {
     // Verify shadow bindings at group(3) don't conflict with IBL at group(2)
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     // IBL should be at group(2)
     assert!(
         shader_content.contains("@group(2) @binding(0)\nvar ibl_specular_tex"),
         "IBL must be at group(2)"
     );
-    
+
     // Shadows should be at group(3)
     assert!(
         shader_content.contains("@group(3) @binding(0)\nvar<uniform> csm_uniforms"),
@@ -270,9 +271,9 @@ fn test_terrain_shader_shadow_group_no_conflict() {
 fn test_terrain_shader_documentation() {
     // Verify P3-10 is documented in shader
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     assert!(
         shader_content.contains("P3-10"),
         "P3-10 milestone must be documented in shader"
@@ -283,15 +284,15 @@ fn test_terrain_shader_documentation() {
 fn test_default_behavior_unchanged() {
     // Critical test: verify default behavior is identical to before P3-10
     let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
-    let shader_content = std::fs::read_to_string(shader_path)
-        .expect("Failed to read terrain shader");
-    
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
+
     // With TERRAIN_USE_SHADOWS = false (default), legacy path must be used
     assert!(
         shader_content.contains("const TERRAIN_USE_SHADOWS: bool = false;"),
         "Default must be false"
     );
-    
+
     assert!(
         shader_content.contains("} else {\n        // Legacy POM-based shadow factor"),
         "Legacy path must be in else branch"

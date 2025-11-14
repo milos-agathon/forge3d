@@ -58,7 +58,7 @@ impl TbnVertex {
 pub fn generate_uv_sphere(sectors: u32, stacks: u32, radius: f32) -> (Vec<TbnVertex>, Vec<u32>) {
     let sectors = sectors.max(3);
     let stacks = stacks.max(2);
-    
+
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
@@ -69,7 +69,7 @@ pub fn generate_uv_sphere(sectors: u32, stacks: u32, radius: f32) -> (Vec<TbnVer
     for i in 0..=stacks {
         let stack_angle = std::f32::consts::PI / 2.0 - i as f32 * stack_step; // From π/2 to -π/2
         let xz = radius * stack_angle.cos(); // Horizontal radius at this latitude
-        let y = radius * stack_angle.sin();   // Y (height)
+        let y = radius * stack_angle.sin(); // Y (height)
 
         for j in 0..=sectors {
             let sector_angle = j as f32 * sector_step; // From 0 to 2π
@@ -161,51 +161,60 @@ mod tests {
     #[test]
     fn test_uv_sphere_generation() {
         let (vertices, indices) = generate_uv_sphere(64, 32, 1.0);
-        
+
         // Verify vertex count: (stacks+1) * (sectors+1)
         assert_eq!(vertices.len(), 33 * 65);
-        
+
         // Verify we have indices (triangles)
         assert!(!indices.is_empty());
         assert_eq!(indices.len() % 3, 0, "indices must be divisible by 3");
-        
+
         // Verify all normals are roughly unit length
         for v in &vertices {
-            let len = (v.normal[0] * v.normal[0] 
-                     + v.normal[1] * v.normal[1] 
-                     + v.normal[2] * v.normal[2]).sqrt();
-            assert!((len - 1.0).abs() < 0.01, "normal must be unit length, got {}", len);
+            let len =
+                (v.normal[0] * v.normal[0] + v.normal[1] * v.normal[1] + v.normal[2] * v.normal[2])
+                    .sqrt();
+            assert!(
+                (len - 1.0).abs() < 0.01,
+                "normal must be unit length, got {}",
+                len
+            );
         }
-        
+
         // Verify UV coordinates are in [0, 1]
         for v in &vertices {
             assert!(v.uv[0] >= 0.0 && v.uv[0] <= 1.0, "U must be in [0,1]");
             assert!(v.uv[1] >= 0.0 && v.uv[1] <= 1.0, "V must be in [0,1]");
         }
-        
+
         // Verify indices are valid
         let max_index = vertices.len() as u32;
         for &idx in &indices {
-            assert!(idx < max_index, "index {} out of bounds (max {})", idx, max_index);
+            assert!(
+                idx < max_index,
+                "index {} out of bounds (max {})",
+                idx,
+                max_index
+            );
         }
     }
 
     #[test]
     fn test_sphere_topology() {
         let (vertices, indices) = generate_uv_sphere(8, 4, 1.0);
-        
+
         // Basic sanity checks for closed mesh topology
         let v = vertices.len();
         let f = indices.len() / 3;
-        
+
         // UV-sphere with s sectors and t stacks has:
         // V = (s+1)*(t+1) vertices
         // F = 2*s*t triangles (after handling poles)
         assert_eq!(v, 9 * 5, "vertex count should be (sectors+1)*(stacks+1)");
-        
+
         // Triangle count should be reasonable for 8x4 sphere
         assert!(f > 0 && f <= 2 * 8 * 4, "face count should be reasonable");
-        
+
         // All indices should be valid
         for &idx in &indices {
             assert!((idx as usize) < v, "index out of bounds");
@@ -215,36 +224,39 @@ mod tests {
     #[test]
     fn test_sphere_ccw_winding() {
         let (vertices, indices) = generate_uv_sphere(8, 4, 1.0);
-        
+
         // Check first non-degenerate triangle has CCW winding
         // For Y-up, CCW means when viewing from outside, vertices go counter-clockwise
         if indices.len() >= 3 {
             let i0 = indices[0] as usize;
             let i1 = indices[1] as usize;
             let i2 = indices[2] as usize;
-            
+
             let v0 = vertices[i0].position;
             let v1 = vertices[i1].position;
             let v2 = vertices[i2].position;
-            
+
             // Compute face normal via cross product
             let edge1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
             let edge2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
             let face_normal = cross(edge1, edge2);
-            
+
             // Face center (approximate)
             let center = [
                 (v0[0] + v1[0] + v2[0]) / 3.0,
                 (v0[1] + v1[1] + v2[1]) / 3.0,
                 (v0[2] + v1[2] + v2[2]) / 3.0,
             ];
-            
+
             // For CCW winding on a sphere, face normal should point outward (same direction as center)
-            let dot = face_normal[0] * center[0] 
-                    + face_normal[1] * center[1] 
-                    + face_normal[2] * center[2];
-            
-            assert!(dot > 0.0, "CCW winding should have outward-pointing normals");
+            let dot = face_normal[0] * center[0]
+                + face_normal[1] * center[1]
+                + face_normal[2] * center[2];
+
+            assert!(
+                dot > 0.0,
+                "CCW winding should have outward-pointing normals"
+            );
         }
     }
 }

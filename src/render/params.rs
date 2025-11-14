@@ -505,14 +505,14 @@ impl ShadowParams {
 
     /// Convert ShadowParams from RendererConfig to ShadowManagerConfig (P3-11)
     pub fn to_shadow_manager_config(&self) -> crate::shadows::ShadowManagerConfig {
-        use crate::shadows::{ShadowManagerConfig, CsmConfig};
-        
+        use crate::shadows::{CsmConfig, ShadowManagerConfig};
+
         let csm = CsmConfig {
             cascade_count: self.cascades,
             shadow_map_size: self.map_size,
             max_shadow_distance: 1000.0, // Will be overridden by camera far plane
-            cascade_splits: vec![], // Empty = auto-calculate splits
-            pcf_kernel_size: 3, // Default 3x3 PCF
+            cascade_splits: vec![],      // Empty = auto-calculate splits
+            pcf_kernel_size: 3,          // Default 3x3 PCF
             depth_bias: 0.0005,
             slope_bias: 0.001,
             peter_panning_offset: 0.002,
@@ -525,7 +525,7 @@ impl ShadowParams {
             stabilize_cascades: true,
             cascade_blend_range: 0.1,
         };
-        
+
         // Convert ShadowTechnique from params to lighting::types::ShadowTechnique
         let technique = match self.technique {
             ShadowTechnique::Hard => crate::lighting::types::ShadowTechnique::Hard,
@@ -536,7 +536,7 @@ impl ShadowParams {
             ShadowTechnique::Msm => crate::lighting::types::ShadowTechnique::MSM,
             ShadowTechnique::Csm => crate::lighting::types::ShadowTechnique::PCF, // CSM is a layout, use PCF
         };
-        
+
         ShadowManagerConfig {
             csm,
             technique,
@@ -571,33 +571,52 @@ pub struct GiParams {
     pub modes: Vec<GiMode>,
     #[serde(default = "GiParams::default_ao_strength")]
     pub ambient_occlusion_strength: f32,
-    
+
     // P5.1: SSAO/GTAO parameters
     #[serde(default = "GiParams::default_ssao_radius")]
     pub ssao_radius: f32,
     #[serde(default = "GiParams::default_ssao_intensity")]
     pub ssao_intensity: f32,
     #[serde(default = "GiParams::default_ssao_technique")]
-    pub ssao_technique: String,  // "ssao" or "gtao"
+    pub ssao_technique: String, // "ssao" or "gtao"
     #[serde(default = "GiParams::default_ssao_temporal_enabled")]
     pub ssao_temporal_enabled: bool,
-    #[serde(default = "GiParams::default_ssao_composite_enabled", alias = "ssao_composite")]
+    #[serde(
+        default = "GiParams::default_ssao_composite_enabled",
+        alias = "ssao_composite"
+    )]
     pub ssao_composite_enabled: bool,
     #[serde(default = "GiParams::default_ssao_mul")]
     pub ssao_mul: f32,
 }
 
 impl GiParams {
-    fn default_modes() -> Vec<GiMode> { vec![GiMode::None] }
-    const fn default_ao_strength() -> f32 { 1.0 }
-    
+    fn default_modes() -> Vec<GiMode> {
+        vec![GiMode::None]
+    }
+    const fn default_ao_strength() -> f32 {
+        1.0
+    }
+
     // P5.1 defaults
-    const fn default_ssao_radius() -> f32 { 0.5 }
-    const fn default_ssao_intensity() -> f32 { 1.0 }
-    fn default_ssao_technique() -> String { "ssao".to_string() }
-    const fn default_ssao_temporal_enabled() -> bool { false }
-    const fn default_ssao_composite_enabled() -> bool { true }
-    const fn default_ssao_mul() -> f32 { 1.0 }
+    const fn default_ssao_radius() -> f32 {
+        0.5
+    }
+    const fn default_ssao_intensity() -> f32 {
+        1.0
+    }
+    fn default_ssao_technique() -> String {
+        "ssao".to_string()
+    }
+    const fn default_ssao_temporal_enabled() -> bool {
+        false
+    }
+    const fn default_ssao_composite_enabled() -> bool {
+        true
+    }
+    const fn default_ssao_mul() -> f32 {
+        1.0
+    }
 }
 
 impl Default for GiParams {
@@ -611,6 +630,48 @@ impl Default for GiParams {
             ssao_temporal_enabled: Self::default_ssao_temporal_enabled(),
             ssao_composite_enabled: Self::default_ssao_composite_enabled(),
             ssao_mul: Self::default_ssao_mul(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct SsrParams {
+    #[serde(default)]
+    pub ssr_enable: bool,
+    #[serde(default = "SsrParams::default_max_steps")]
+    pub ssr_max_steps: u32,
+    #[serde(default = "SsrParams::default_thickness")]
+    pub ssr_thickness: f32,
+}
+
+impl SsrParams {
+    const fn default_max_steps() -> u32 {
+        64
+    }
+    const fn default_thickness() -> f32 {
+        0.05
+    }
+
+    pub fn set_enabled(&mut self, enable: bool) {
+        self.ssr_enable = enable;
+    }
+
+    pub fn set_max_steps(&mut self, steps: u32) {
+        let clamped = steps.clamp(1, 512);
+        self.ssr_max_steps = clamped;
+    }
+
+    pub fn set_thickness(&mut self, thickness: f32) {
+        self.ssr_thickness = thickness.clamp(0.0, 1.0);
+    }
+}
+
+impl Default for SsrParams {
+    fn default() -> Self {
+        Self {
+            ssr_enable: false,
+            ssr_max_steps: Self::default_max_steps(),
+            ssr_thickness: Self::default_thickness(),
         }
     }
 }
@@ -660,18 +721,40 @@ impl VolumetricParams {
         0.0
     }
 
-    fn default_mode() -> VolumetricMode { VolumetricMode::Raymarch }
+    fn default_mode() -> VolumetricMode {
+        VolumetricMode::Raymarch
+    }
 
-    const fn default_height_falloff() -> f32 { 0.0 }
-    const fn default_max_steps() -> u32 { 64 }
-    const fn default_start_distance() -> f32 { 0.0 }
-    const fn default_max_distance() -> f32 { 1000.0 }
-    const fn default_absorption() -> f32 { 0.0 }
-    const fn default_scattering_color() -> [f32; 3] { [1.0, 1.0, 1.0] }
-    const fn default_ambient_color() -> [f32; 3] { [0.0, 0.0, 0.0] }
-    const fn default_temporal_alpha() -> f32 { 0.2 }
-    const fn default_use_shadows() -> bool { false }
-    const fn default_jitter_strength() -> f32 { 0.25 }
+    const fn default_height_falloff() -> f32 {
+        0.0
+    }
+    const fn default_max_steps() -> u32 {
+        64
+    }
+    const fn default_start_distance() -> f32 {
+        0.0
+    }
+    const fn default_max_distance() -> f32 {
+        1000.0
+    }
+    const fn default_absorption() -> f32 {
+        0.0
+    }
+    const fn default_scattering_color() -> [f32; 3] {
+        [1.0, 1.0, 1.0]
+    }
+    const fn default_ambient_color() -> [f32; 3] {
+        [0.0, 0.0, 0.0]
+    }
+    const fn default_temporal_alpha() -> f32 {
+        0.2
+    }
+    const fn default_use_shadows() -> bool {
+        false
+    }
+    const fn default_jitter_strength() -> f32 {
+        0.25
+    }
 }
 
 impl Default for VolumetricParams {
@@ -822,9 +905,7 @@ impl RendererConfig {
                 ));
             }
             if self.shadows.cascades == 0 || self.shadows.cascades > 4 {
-                return Err(ConfigError::new(
-                    "shadows.cascades must be within [1, 4]",
-                ));
+                return Err(ConfigError::new("shadows.cascades must be within [1, 4]"));
             }
             if matches!(self.shadows.technique, ShadowTechnique::Csm) && self.shadows.cascades < 2 {
                 return Err(ConfigError::new(
@@ -863,11 +944,9 @@ impl RendererConfig {
 
         if self.atmosphere.enabled && matches!(self.atmosphere.sky, SkyModel::Hdri) {
             if self.atmosphere.hdr_path.is_none()
-                && !self
-                    .lighting
-                    .lights
-                    .iter()
-                    .any(|light| light.light_type == LightType::Environment && light.hdr_path.is_some())
+                && !self.lighting.lights.iter().any(|light| {
+                    light.light_type == LightType::Environment && light.hdr_path.is_some()
+                })
             {
                 return Err(ConfigError::new(
                     "atmosphere.sky=hdri requires atmosphere.hdr_path or an environment light with hdr_path",
@@ -882,7 +961,7 @@ impl RendererConfig {
                 ));
             }
             if matches!(vol.phase, VolumetricPhase::HenyeyGreenstein)
-                && !( -0.999..=0.999).contains(&vol.anisotropy)
+                && !(-0.999..=0.999).contains(&vol.anisotropy)
             {
                 return Err(ConfigError::new(
                     "atmosphere.volumetric.anisotropy must be within [-0.999, 0.999] for Henyey-Greenstein",
@@ -960,19 +1039,33 @@ mod tests {
     fn default_config_serializes_and_validates() {
         let cfg = RendererConfig::default();
         let json = serde_json::to_string(&cfg).expect("serialize default config");
-        let de: RendererConfig =
-            serde_json::from_str(&json).expect("deserialize default config");
+        let de: RendererConfig = serde_json::from_str(&json).expect("deserialize default config");
         de.validate().expect("default config should validate");
     }
 
     #[test]
     fn parse_enums_from_strings() {
-        assert_eq!("directional".parse::<LightType>().unwrap(), LightType::Directional);
-        assert_eq!("cooktorrance-ggx".parse::<BrdfModel>().unwrap(), BrdfModel::CookTorranceGGX);
-        assert_eq!("pcf".parse::<ShadowTechnique>().unwrap(), ShadowTechnique::Pcf);
+        assert_eq!(
+            "directional".parse::<LightType>().unwrap(),
+            LightType::Directional
+        );
+        assert_eq!(
+            "cooktorrance-ggx".parse::<BrdfModel>().unwrap(),
+            BrdfModel::CookTorranceGGX
+        );
+        assert_eq!(
+            "pcf".parse::<ShadowTechnique>().unwrap(),
+            ShadowTechnique::Pcf
+        );
         assert_eq!("ssao".parse::<GiMode>().unwrap(), GiMode::Ssao);
-        assert_eq!("hosek-wilkie".parse::<SkyModel>().unwrap(), SkyModel::HosekWilkie);
-        assert_eq!("hg".parse::<VolumetricPhase>().unwrap(), VolumetricPhase::HenyeyGreenstein);
+        assert_eq!(
+            "hosek-wilkie".parse::<SkyModel>().unwrap(),
+            SkyModel::HosekWilkie
+        );
+        assert_eq!(
+            "hg".parse::<VolumetricPhase>().unwrap(),
+            VolumetricPhase::HenyeyGreenstein
+        );
     }
 
     // P0-01: Comprehensive enum coverage and round-trip tests
@@ -1006,7 +1099,10 @@ mod tests {
         assert_eq!("spotlight".parse::<LightType>().unwrap(), LightType::Spot);
         assert_eq!("rect".parse::<LightType>().unwrap(), LightType::AreaRect);
         assert_eq!("disk".parse::<LightType>().unwrap(), LightType::AreaDisk);
-        assert_eq!("sphere".parse::<LightType>().unwrap(), LightType::AreaSphere);
+        assert_eq!(
+            "sphere".parse::<LightType>().unwrap(),
+            LightType::AreaSphere
+        );
         assert_eq!("env".parse::<LightType>().unwrap(), LightType::Environment);
         assert_eq!("hdri".parse::<LightType>().unwrap(), LightType::Environment);
     }
@@ -1038,12 +1134,30 @@ mod tests {
 
     #[test]
     fn brdf_model_aliases_parse_correctly() {
-        assert_eq!("blinnphong".parse::<BrdfModel>().unwrap(), BrdfModel::BlinnPhong);
-        assert_eq!("orennayar".parse::<BrdfModel>().unwrap(), BrdfModel::OrenNayar);
-        assert_eq!("ggx".parse::<BrdfModel>().unwrap(), BrdfModel::CookTorranceGGX);
-        assert_eq!("beckmann".parse::<BrdfModel>().unwrap(), BrdfModel::CookTorranceBeckmann);
-        assert_eq!("disney".parse::<BrdfModel>().unwrap(), BrdfModel::DisneyPrincipled);
-        assert_eq!("ashikhminshirley".parse::<BrdfModel>().unwrap(), BrdfModel::AshikhminShirley);
+        assert_eq!(
+            "blinnphong".parse::<BrdfModel>().unwrap(),
+            BrdfModel::BlinnPhong
+        );
+        assert_eq!(
+            "orennayar".parse::<BrdfModel>().unwrap(),
+            BrdfModel::OrenNayar
+        );
+        assert_eq!(
+            "ggx".parse::<BrdfModel>().unwrap(),
+            BrdfModel::CookTorranceGGX
+        );
+        assert_eq!(
+            "beckmann".parse::<BrdfModel>().unwrap(),
+            BrdfModel::CookTorranceBeckmann
+        );
+        assert_eq!(
+            "disney".parse::<BrdfModel>().unwrap(),
+            BrdfModel::DisneyPrincipled
+        );
+        assert_eq!(
+            "ashikhminshirley".parse::<BrdfModel>().unwrap(),
+            BrdfModel::AshikhminShirley
+        );
         assert_eq!("sss".parse::<BrdfModel>().unwrap(), BrdfModel::Subsurface);
         assert_eq!("kajiyakay".parse::<BrdfModel>().unwrap(), BrdfModel::Hair);
         assert_eq!("kajiya-kay".parse::<BrdfModel>().unwrap(), BrdfModel::Hair);
@@ -1091,9 +1205,18 @@ mod tests {
 
     #[test]
     fn gi_mode_aliases_parse_correctly() {
-        assert_eq!("irradianceprobes".parse::<GiMode>().unwrap(), GiMode::IrradianceProbes);
-        assert_eq!("probes".parse::<GiMode>().unwrap(), GiMode::IrradianceProbes);
-        assert_eq!("voxelconetracing".parse::<GiMode>().unwrap(), GiMode::VoxelConeTracing);
+        assert_eq!(
+            "irradianceprobes".parse::<GiMode>().unwrap(),
+            GiMode::IrradianceProbes
+        );
+        assert_eq!(
+            "probes".parse::<GiMode>().unwrap(),
+            GiMode::IrradianceProbes
+        );
+        assert_eq!(
+            "voxelconetracing".parse::<GiMode>().unwrap(),
+            GiMode::VoxelConeTracing
+        );
         assert_eq!("vct".parse::<GiMode>().unwrap(), GiMode::VoxelConeTracing);
     }
 
@@ -1114,7 +1237,10 @@ mod tests {
 
     #[test]
     fn sky_model_aliases_parse_correctly() {
-        assert_eq!("hosekwilkie".parse::<SkyModel>().unwrap(), SkyModel::HosekWilkie);
+        assert_eq!(
+            "hosekwilkie".parse::<SkyModel>().unwrap(),
+            SkyModel::HosekWilkie
+        );
         assert_eq!("environment".parse::<SkyModel>().unwrap(), SkyModel::Hdri);
         assert_eq!("envmap".parse::<SkyModel>().unwrap(), SkyModel::Hdri);
     }
@@ -1135,8 +1261,14 @@ mod tests {
 
     #[test]
     fn volumetric_phase_aliases_parse_correctly() {
-        assert_eq!("henyeygreenstein".parse::<VolumetricPhase>().unwrap(), VolumetricPhase::HenyeyGreenstein);
-        assert_eq!("hg".parse::<VolumetricPhase>().unwrap(), VolumetricPhase::HenyeyGreenstein);
+        assert_eq!(
+            "henyeygreenstein".parse::<VolumetricPhase>().unwrap(),
+            VolumetricPhase::HenyeyGreenstein
+        );
+        assert_eq!(
+            "hg".parse::<VolumetricPhase>().unwrap(),
+            VolumetricPhase::HenyeyGreenstein
+        );
     }
 
     #[test]
@@ -1152,10 +1284,22 @@ mod tests {
 
     #[test]
     fn volumetric_mode_aliases_parse_correctly() {
-        assert_eq!("rm".parse::<VolumetricMode>().unwrap(), VolumetricMode::Raymarch);
-        assert_eq!("0".parse::<VolumetricMode>().unwrap(), VolumetricMode::Raymarch);
-        assert_eq!("fx".parse::<VolumetricMode>().unwrap(), VolumetricMode::Froxels);
-        assert_eq!("1".parse::<VolumetricMode>().unwrap(), VolumetricMode::Froxels);
+        assert_eq!(
+            "rm".parse::<VolumetricMode>().unwrap(),
+            VolumetricMode::Raymarch
+        );
+        assert_eq!(
+            "0".parse::<VolumetricMode>().unwrap(),
+            VolumetricMode::Raymarch
+        );
+        assert_eq!(
+            "fx".parse::<VolumetricMode>().unwrap(),
+            VolumetricMode::Froxels
+        );
+        assert_eq!(
+            "1".parse::<VolumetricMode>().unwrap(),
+            VolumetricMode::Froxels
+        );
     }
 
     #[test]
@@ -1176,9 +1320,7 @@ mod tests {
             light.direction = None;
         }
         let err = cfg.validate().unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("lights[0].direction required"));
+        assert!(err.to_string().contains("lights[0].direction required"));
     }
 
     #[test]
@@ -1217,7 +1359,11 @@ mod tests {
 
     #[test]
     fn validation_area_lights_require_position() {
-        for light_type in [LightType::AreaRect, LightType::AreaDisk, LightType::AreaSphere] {
+        for light_type in [
+            LightType::AreaRect,
+            LightType::AreaDisk,
+            LightType::AreaSphere,
+        ] {
             let mut cfg = RendererConfig::default();
             cfg.lighting.lights = vec![LightConfig {
                 light_type,
@@ -1370,7 +1516,11 @@ mod tests {
 
     #[test]
     fn shadows_moment_techniques_require_positive_bias() {
-        for technique in [ShadowTechnique::Vsm, ShadowTechnique::Evsm, ShadowTechnique::Msm] {
+        for technique in [
+            ShadowTechnique::Vsm,
+            ShadowTechnique::Evsm,
+            ShadowTechnique::Msm,
+        ] {
             let mut cfg = RendererConfig::default();
             cfg.shadows.technique = technique;
             cfg.shadows.moment_bias = 0.0;

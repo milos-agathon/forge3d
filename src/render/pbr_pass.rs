@@ -7,7 +7,7 @@
 
 use crate::core::material::{PbrLighting, PbrMaterial};
 use crate::pipeline::pbr::{create_pbr_sampler, PbrPipelineWithShadows, PbrSceneUniforms};
-use crate::render::params::{RendererConfig, BrdfModel as CfgBrdfModel};
+use crate::render::params::{BrdfModel as CfgBrdfModel, RendererConfig};
 use wgpu::{Device, Queue, RenderPass, Sampler, TextureFormat};
 
 /// Helper that owns a PBR pipeline and records bind groups for render passes.
@@ -70,26 +70,19 @@ impl PbrRenderPass {
         scene_uniforms: &PbrSceneUniforms,
         lighting: &PbrLighting,
     ) {
-        self.pipeline
-            .update_scene_uniforms(queue, scene_uniforms);
-        self.pipeline
-            .update_lighting_uniforms(queue, lighting);
+        self.pipeline.update_scene_uniforms(queue, scene_uniforms);
+        self.pipeline.update_lighting_uniforms(queue, lighting);
         self.pipeline.ensure_pipeline(device, surface_format);
         self.surface_format = Some(surface_format);
         self.ensure_material_bind_group(device, queue);
     }
 
     /// Bind the pipeline and all dependent bind groups for a render pass.
-    pub fn begin<'a>(
-        &'a mut self,
-        device: &Device,
-        pass: &mut RenderPass<'a>,
-    ) {
+    pub fn begin<'a>(&'a mut self, device: &Device, pass: &mut RenderPass<'a>) {
         let surface_format = self
             .surface_format
             .expect("prepare must be called before begin");
-        self.pipeline
-            .begin_render(device, surface_format, pass);
+        self.pipeline.begin_render(device, surface_format, pass);
     }
 
     /// Apply renderer configuration to the PBR pipeline (M2-03)

@@ -1,10 +1,10 @@
 // src/passes/ssgi.rs
 // P5.2: SSGI pass wrapper that delegates to core::screen_space_effects::SsgiRenderer
 
-use wgpu::{Device, Queue, CommandEncoder, TextureView, TextureFormat};
-use crate::error::RenderResult;
 use crate::core::gbuffer::GBuffer;
-use crate::core::screen_space_effects::{SsgiRenderer, SsgiSettings, CameraParams};
+use crate::core::screen_space_effects::{CameraParams, SsgiRenderer, SsgiSettings};
+use crate::error::RenderResult;
+use wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
 
 pub struct SsgiPass {
     renderer: SsgiRenderer,
@@ -30,7 +30,13 @@ impl SsgiPass {
         self.renderer.set_half_res(device, queue, on)
     }
 
-    pub fn execute(&mut self, device: &Device, encoder: &mut CommandEncoder, gbuffer: &GBuffer, hzb_view: &TextureView) -> RenderResult<()> {
+    pub fn execute(
+        &mut self,
+        device: &Device,
+        encoder: &mut CommandEncoder,
+        gbuffer: &GBuffer,
+        hzb_view: &TextureView,
+    ) -> RenderResult<()> {
         self.renderer.execute(device, encoder, gbuffer, hzb_view)
     }
 

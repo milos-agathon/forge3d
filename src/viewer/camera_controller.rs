@@ -232,7 +232,10 @@ impl CameraController {
         self.orbit.target = target;
         self.orbit.distance = distance.max(0.01);
         // Clamp pitch to avoid gimbal lock
-        let p = pitch.clamp(-std::f32::consts::FRAC_PI_2 + 0.01, std::f32::consts::FRAC_PI_2 - 0.01);
+        let p = pitch.clamp(
+            -std::f32::consts::FRAC_PI_2 + 0.01,
+            std::f32::consts::FRAC_PI_2 - 0.01,
+        );
         self.orbit.pitch = p;
         self.orbit.yaw = yaw;
     }
@@ -250,7 +253,11 @@ impl CameraController {
         self.orbit.distance = distance;
         self.orbit.yaw = yaw;
         self.orbit.pitch = pitch;
-        self.orbit.up = if up.length_squared() > 0.0 { up.normalize() } else { Vec3::Y };
+        self.orbit.up = if up.length_squared() > 0.0 {
+            up.normalize()
+        } else {
+            Vec3::Y
+        };
 
         // Keep FPS roughly in sync too
         self.fps.position = eye;

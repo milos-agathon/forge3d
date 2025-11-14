@@ -5875,9 +5875,14 @@ impl Scene {
         let grid_verts = (self.grid * self.grid * 4 * 4) as usize; // 4 floats per vert, 4 bytes per float
         let grid_indices = ((self.grid - 1) * (self.grid - 1) * 6 * 4) as usize; // 6 indices per quad, 4 bytes per index
 
-        let total_bytes = color_bytes + normal_bytes + depth_bytes +
-                         msaa_color_bytes + msaa_normal_bytes +
-                         ssao_bytes + grid_verts + grid_indices;
+        let total_bytes = color_bytes
+            + normal_bytes
+            + depth_bytes
+            + msaa_color_bytes
+            + msaa_normal_bytes
+            + ssao_bytes
+            + grid_verts
+            + grid_indices;
 
         let total_mb = total_bytes as f64 / (1024.0 * 1024.0);
         let budget_mb = 512.0; // Default budget from P8

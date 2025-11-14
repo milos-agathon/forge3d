@@ -31,8 +31,8 @@ use std::num::NonZeroU64;
 use wgpu::{
     AddressMode, BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType,
     BufferBindingType, Device, Extent3d, FilterMode, Queue, Sampler, SamplerBindingType,
-    SamplerDescriptor, ShaderStages, Texture, TextureDescriptor, TextureDimension, TextureFormat,
-    TextureAspect, TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension,
+    SamplerDescriptor, ShaderStages, Texture, TextureAspect, TextureDescriptor, TextureDimension,
+    TextureFormat, TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension,
 };
 
 use crate::lighting::types::ShadowTechnique;
@@ -216,7 +216,7 @@ impl ShadowManager {
     pub fn cascade_debug_info(&self) -> String {
         let uniforms = &self.renderer.uniforms;
         let mut info = String::from("Cascade Details:\n");
-        
+
         for i in 0..uniforms.cascade_count as usize {
             if i < 4 {
                 let cascade = &uniforms.cascades[i];
@@ -226,7 +226,7 @@ impl ShadowManager {
                 ));
             }
         }
-        
+
         info
     }
 
@@ -369,10 +369,8 @@ impl ShadowManager {
             None => return,
         };
 
-        let moment_view = super::create_moment_storage_view(
-            moment_texture,
-            self.config.csm.cascade_count,
-        );
+        let moment_view =
+            super::create_moment_storage_view(moment_texture, self.config.csm.cascade_count);
 
         // Prepare bind group
         moment_pass.prepare_bind_group(device, &depth_view, &moment_view);
@@ -400,8 +398,7 @@ impl ShadowManager {
     }
 
     fn apply_uniform_overrides(&mut self) {
-        self.renderer
-            .set_debug_mode(self.config.csm.debug_mode);
+        self.renderer.set_debug_mode(self.config.csm.debug_mode);
         self.renderer.uniforms.technique = self.config.technique.as_u32();
         self.renderer.uniforms.technique_flags =
             Self::compute_flags(self.config.technique, self.requires_moments);
@@ -472,7 +469,7 @@ impl ShadowManager {
     fn enforce_memory_budget(config: &mut ShadowManagerConfig) {
         let initial_resolution = config.csm.shadow_map_size;
         let budget_mib = config.max_memory_bytes as f64 / (1024.0 * 1024.0);
-        
+
         loop {
             let usage = Self::estimate_memory_bytes(
                 config.csm.shadow_map_size,
@@ -532,11 +529,11 @@ impl ShadowManager {
     }
 
     /// Estimate GPU memory usage for shadow atlas and moment textures.
-    /// 
+    ///
     /// Memory breakdown:
     /// - Depth atlas: Depth32Float = 4 bytes/pixel × resolution² × cascades
     /// - Moment textures (VSM/EVSM/MSM): Rgba32Float = 16 bytes/pixel × resolution² × cascades
-    /// 
+    ///
     /// Note: VSM technically only needs 2 channels (mean, variance), but we use Rgba32Float
     /// for all moment techniques to simplify the implementation and allow future extensions.
     /// Does not account for texture padding/alignment; actual GPU usage may be slightly higher.
@@ -547,7 +544,7 @@ impl ShadowManager {
     ) -> u64 {
         let res = map_resolution as u64;
         let casc = cascades as u64;
-        
+
         // Depth32Float: 4 bytes per pixel
         let depth_bytes = res * res * casc * 4;
 

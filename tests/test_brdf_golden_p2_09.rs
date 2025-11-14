@@ -170,7 +170,13 @@ mod p2_09_brdf_golden_tests {
             gamma: 2.2,
         };
 
-        render_pass.prepare(device, queue, TextureFormat::Rgba8Unorm, &scene_uniforms, &lighting);
+        render_pass.prepare(
+            device,
+            queue,
+            TextureFormat::Rgba8Unorm,
+            &scene_uniforms,
+            &lighting,
+        );
 
         // Create render targets
         let color_texture = device.create_texture(&TextureDescriptor {
@@ -293,7 +299,7 @@ mod p2_09_brdf_golden_tests {
         for y in 0..height {
             let padded_offset = (y * padded_bytes_per_row) as usize;
             let row_data = &data[padded_offset..padded_offset + unpadded_bytes_per_row as usize];
-            
+
             for x in 0..width {
                 let pixel_offset = (x * 4) as usize;
                 img.put_pixel(
@@ -314,7 +320,6 @@ mod p2_09_brdf_golden_tests {
 
         img
     }
-
 
     /// Compute RMSE (Root Mean Square Error) between two images
     fn compute_rmse(img1: &RgbaImage, img2: &RgbaImage) -> f64 {
@@ -343,12 +348,16 @@ mod p2_09_brdf_golden_tests {
         std::fs::create_dir_all("tests/golden/p2").expect("Failed to create golden/p2 directory");
 
         for config in GOLDEN_CONFIGS {
-            println!("Rendering: {} ({})", config.name, match config.brdf {
-                BrdfModel::Lambert => "Lambert - diffuse only",
-                BrdfModel::CookTorranceGGX => "Cook-Torrance GGX - microfacet PBR",
-                BrdfModel::DisneyPrincipled => "Disney Principled - extended PBR",
-                _ => "Other BRDF",
-            });
+            println!(
+                "Rendering: {} ({})",
+                config.name,
+                match config.brdf {
+                    BrdfModel::Lambert => "Lambert - diffuse only",
+                    BrdfModel::CookTorranceGGX => "Cook-Torrance GGX - microfacet PBR",
+                    BrdfModel::DisneyPrincipled => "Disney Principled - extended PBR",
+                    _ => "Other BRDF",
+                }
+            );
 
             // Render with actual PBR pipeline (P2-09 complete)
             let Some((ref device, ref queue)) = try_create_device_and_queue() else {
@@ -371,12 +380,16 @@ mod p2_09_brdf_golden_tests {
                         let dist = (dx * dx + dy * dy).sqrt();
                         if dist < radius {
                             let factor = (1.0 - dist / radius).powf(0.5);
-                            img.put_pixel(x, y, Rgba([
-                                (color[0] as f32 * factor) as u8,
-                                (color[1] as f32 * factor) as u8,
-                                (color[2] as f32 * factor) as u8,
-                                255,
-                            ]));
+                            img.put_pixel(
+                                x,
+                                y,
+                                Rgba([
+                                    (color[0] as f32 * factor) as u8,
+                                    (color[1] as f32 * factor) as u8,
+                                    (color[2] as f32 * factor) as u8,
+                                    255,
+                                ]),
+                            );
                         } else {
                             img.put_pixel(x, y, Rgba([25, 25, 25, 255]));
                         }
@@ -397,7 +410,10 @@ mod p2_09_brdf_golden_tests {
         }
 
         println!("\n=== Golden Image Generation Complete ===");
-        println!("\nGenerated {} golden images in tests/golden/p2/", GOLDEN_CONFIGS.len());
+        println!(
+            "\nGenerated {} golden images in tests/golden/p2/",
+            GOLDEN_CONFIGS.len()
+        );
         println!("\nBRDF models rendered:");
         println!("  - Lambert: Diffuse-only shading");
         println!("  - Cook-Torrance GGX: Microfacet PBR with specular highlights");
@@ -412,7 +428,8 @@ mod p2_09_brdf_golden_tests {
         // At 256x256 RGBA, this is approximately 2% pixel difference
         const MAX_RMSE: f64 = 5.0;
 
-        std::fs::create_dir_all("tests/golden/p2/rendered").expect("Failed to create rendered directory");
+        std::fs::create_dir_all("tests/golden/p2/rendered")
+            .expect("Failed to create rendered directory");
 
         let mut passed = 0;
         let mut failed = 0;
@@ -427,7 +444,8 @@ mod p2_09_brdf_golden_tests {
                 continue;
             };
 
-            let rendered = render_brdf_sphere(device, queue, config.brdf, config.width, config.height);
+            let rendered =
+                render_brdf_sphere(device, queue, config.brdf, config.width, config.height);
 
             // Save rendered image for inspection
             let rendered_path = rendered_image_path(config.name);
@@ -493,5 +511,4 @@ mod p2_09_brdf_golden_tests {
             "P2-09 specifies 3 BRDF models: Lambert, GGX, Disney"
         );
     }
-
 }

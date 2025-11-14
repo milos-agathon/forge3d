@@ -98,33 +98,43 @@ impl PyScreenSpaceGI {
             height,
         )
         .map_err(|e| PyRuntimeError::new_err(format!("failed to create GI manager: {e}")))?;
-        Ok(Self { manager, width, height })
+        Ok(Self {
+            manager,
+            width,
+            height,
+        })
     }
 
     /// Enable SSAO
     pub fn enable_ssao(&mut self) -> PyResult<()> {
         let g = crate::gpu::ctx();
-        self
-            .manager
-            .enable_effect(g.device.as_ref(), crate::core::screen_space_effects::ScreenSpaceEffect::SSAO)
+        self.manager
+            .enable_effect(
+                g.device.as_ref(),
+                crate::core::screen_space_effects::ScreenSpaceEffect::SSAO,
+            )
             .map_err(|e| PyRuntimeError::new_err(format!("enable_ssao failed: {e}")))
     }
 
     /// Enable SSGI
     pub fn enable_ssgi(&mut self) -> PyResult<()> {
         let g = crate::gpu::ctx();
-        self
-            .manager
-            .enable_effect(g.device.as_ref(), crate::core::screen_space_effects::ScreenSpaceEffect::SSGI)
+        self.manager
+            .enable_effect(
+                g.device.as_ref(),
+                crate::core::screen_space_effects::ScreenSpaceEffect::SSGI,
+            )
             .map_err(|e| PyRuntimeError::new_err(format!("enable_ssgi failed: {e}")))
     }
 
     /// Enable SSR
     pub fn enable_ssr(&mut self) -> PyResult<()> {
         let g = crate::gpu::ctx();
-        self
-            .manager
-            .enable_effect(g.device.as_ref(), crate::core::screen_space_effects::ScreenSpaceEffect::SSR)
+        self.manager
+            .enable_effect(
+                g.device.as_ref(),
+                crate::core::screen_space_effects::ScreenSpaceEffect::SSR,
+            )
             .map_err(|e| PyRuntimeError::new_err(format!("enable_ssr failed: {e}")))
     }
 
@@ -144,8 +154,7 @@ impl PyScreenSpaceGI {
     /// Resize underlying GBuffer to a new size
     pub fn resize(&mut self, width: u32, height: u32) -> PyResult<()> {
         let g = crate::gpu::ctx();
-        self
-            .manager
+        self.manager
             .gbuffer_mut()
             .resize(g.device.as_ref(), width, height)
             .map_err(|e| PyRuntimeError::new_err(format!("resize failed: {e}")))?;
@@ -162,8 +171,7 @@ impl PyScreenSpaceGI {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("PyScreenSpaceGI.execute"),
             });
-        self
-            .manager
+        self.manager
             .execute(g.device.as_ref(), &mut encoder)
             .map_err(|e| PyRuntimeError::new_err(format!("execute failed: {e}")))?;
         g.queue.submit(Some(encoder.finish()));
@@ -359,9 +367,9 @@ pub mod geometry;
 pub mod gpu;
 pub mod grid;
 mod ibl_wrapper;
-pub mod lighting; // P0: Production-ready lighting stack (lights, BRDFs, shadows, IBL)
 pub mod import; // Importers: OSM buildings, etc.
 pub mod io; // IO: OBJ/PLY/glTF readers/writers
+pub mod lighting; // P0: Production-ready lighting stack (lights, BRDFs, shadows, IBL)
 pub mod loaders;
 mod material_set;
 pub mod mesh;
@@ -384,11 +392,12 @@ mod terrain_renderer;
 pub mod terrain_stats;
 pub mod uv; // UV unwrap helpers (planar, spherical)
 pub mod textures {}
+pub mod p5;
+pub mod passes;
 pub mod transforms;
 pub mod util;
 pub mod vector;
-pub mod viewer; // Interactive windowed viewer (Workstream I1)
-pub mod passes; // P5.2: render passes wrappers
+pub mod viewer; // Interactive windowed viewer (Workstream I1) // P5.2: render passes wrappers
 
 // Re-export commonly used types
 pub use core::cloud_shadows::{
@@ -419,25 +428,18 @@ pub use core::soft_light_radius::{
 pub use core::water_surface::{
     WaterSurfaceMode, WaterSurfaceParams, WaterSurfaceRenderer, WaterSurfaceUniforms,
 };
-pub use lighting::LightBuffer;
-pub use render::params::{
-    AtmosphereParams as RendererAtmosphereParams,
-    BrdfModel as RendererBrdfModel,
-    ConfigError as RendererConfigError,
-    GiMode as RendererGiMode,
-    GiParams as RendererGiParams,
-    LightConfig as RendererLightConfig,
-    LightingParams as RendererLightingParams,
-    RendererConfig,
-    ShadowParams as RendererShadowParams,
-    ShadowTechnique as RendererShadowTechnique,
-    SkyModel as RendererSkyModel,
-    VolumetricParams as RendererVolumetricParams,
-    VolumetricPhase as RendererVolumetricPhase,
-    LightType as RendererLightType,
-};
 pub use error::RenderError;
+pub use lighting::LightBuffer;
 pub use path_tracing::{TracerEngine, TracerParams};
+pub use render::params::{
+    AtmosphereParams as RendererAtmosphereParams, BrdfModel as RendererBrdfModel,
+    ConfigError as RendererConfigError, GiMode as RendererGiMode, GiParams as RendererGiParams,
+    LightConfig as RendererLightConfig, LightType as RendererLightType,
+    LightingParams as RendererLightingParams, RendererConfig, ShadowParams as RendererShadowParams,
+    ShadowTechnique as RendererShadowTechnique, SkyModel as RendererSkyModel,
+    SsrParams as RendererSsrParams, VolumetricParams as RendererVolumetricParams,
+    VolumetricPhase as RendererVolumetricPhase,
+};
 pub use sdf::{
     CsgOperation, HybridHitResult, HybridScene, SdfPrimitive, SdfPrimitiveType, SdfScene,
     SdfSceneBuilder,
@@ -2407,7 +2409,9 @@ fn _pt_render_gpu_mesh(
     ];
 
     // Normalize light direction
-    let len = (light_dir[0] * light_dir[0] + light_dir[1] * light_dir[1] + light_dir[2] * light_dir[2]).sqrt();
+    let len =
+        (light_dir[0] * light_dir[0] + light_dir[1] * light_dir[1] + light_dir[2] * light_dir[2])
+            .sqrt();
     let light_dir_normalized = if len > 1e-6 {
         [light_dir[0] / len, light_dir[1] / len, light_dir[2] / len]
     } else {
@@ -2418,7 +2422,11 @@ fn _pt_render_gpu_mesh(
     let lighting_uniforms = crate::path_tracing::hybrid_compute::LightingUniforms {
         light_dir: light_dir_normalized,
         lighting_type: lighting_type_id,
-        light_color: [lighting_intensity, lighting_intensity * 0.95, lighting_intensity * 0.8], // Warm white
+        light_color: [
+            lighting_intensity,
+            lighting_intensity * 0.95,
+            lighting_intensity * 0.8,
+        ], // Warm white
         shadows_enabled: if shadows { 1 } else { 0 },
         ambient_color: [0.1, 0.12, 0.15], // Cool ambient
         shadow_intensity,
@@ -3065,10 +3073,10 @@ fn open_viewer(
 }
 
 /// P7-05: Render a BRDF tile offscreen and return as numpy array
-/// 
+///
 /// Maps model names to BRDF indices and renders a UV-sphere with the specified parameters.
 /// Returns a tight numpy array of shape (height, width, 4) with dtype uint8.
-/// 
+///
 /// # Arguments
 /// * `model` - BRDF model name: "lambert", "phong", "ggx", or "disney"
 /// * `roughness` - Material roughness in [0, 1], clamped automatically
@@ -3077,7 +3085,7 @@ fn open_viewer(
 /// * `ndf_only` - Debug mode: if true, outputs NDF values as grayscale
 /// * `debug_dot_products` - Debug mode: if true, outputs dot products as color
 /// * `mode` - Optional mode selector to override debug toggles (default: None)
-/// 
+///
 /// # Returns
 /// NumPy array of shape (height, width, 4) with dtype uint8 (RGBA)
 #[cfg(feature = "extension-module")]
@@ -3143,45 +3151,120 @@ fn render_brdf_tile_impl<'py>(
     let debug_kind = debug_kind.min(3);
 
     // Map optional mode to toggles (M4)
-    let (mut ndf_only, mut g_only, mut dfg_only, mut spec_only, mut roughness_visualize,
-        mut debug_lambert_only, mut debug_diffuse_only, mut debug_d, mut debug_spec_no_nl, mut debug_energy, mut debug_angle_sweep,
-        mut debug_angle_component, mut debug_no_srgb, mut output_mode) =
-        (ndf_only, g_only, dfg_only, spec_only, roughness_visualize,
-         debug_lambert_only, debug_diffuse_only, debug_d, debug_spec_no_nl, debug_energy, debug_angle_sweep,
-         debug_angle_component, debug_no_srgb, output_mode);
+    let (
+        mut ndf_only,
+        mut g_only,
+        mut dfg_only,
+        mut spec_only,
+        mut roughness_visualize,
+        mut debug_lambert_only,
+        mut debug_diffuse_only,
+        mut debug_d,
+        mut debug_spec_no_nl,
+        mut debug_energy,
+        mut debug_angle_sweep,
+        mut debug_angle_component,
+        mut debug_no_srgb,
+        mut output_mode,
+    ) = (
+        ndf_only,
+        g_only,
+        dfg_only,
+        spec_only,
+        roughness_visualize,
+        debug_lambert_only,
+        debug_diffuse_only,
+        debug_d,
+        debug_spec_no_nl,
+        debug_energy,
+        debug_angle_sweep,
+        debug_angle_component,
+        debug_no_srgb,
+        output_mode,
+    );
 
     if let Some(mode_str) = mode {
         let m = mode_str.to_lowercase();
         match m.as_str() {
             "full" => {
-                ndf_only = false; g_only = false; dfg_only = false; spec_only = false; roughness_visualize = false;
+                ndf_only = false;
+                g_only = false;
+                dfg_only = false;
+                spec_only = false;
+                roughness_visualize = false;
             }
             "ndf" => {
-                ndf_only = true; g_only = false; dfg_only = false; spec_only = false; roughness_visualize = false;
+                ndf_only = true;
+                g_only = false;
+                dfg_only = false;
+                spec_only = false;
+                roughness_visualize = false;
             }
             "g" => {
-                ndf_only = false; g_only = true; dfg_only = false; spec_only = false; roughness_visualize = false;
+                ndf_only = false;
+                g_only = true;
+                dfg_only = false;
+                spec_only = false;
+                roughness_visualize = false;
             }
             "dfg" => {
-                ndf_only = false; g_only = false; dfg_only = true; spec_only = false; roughness_visualize = false;
+                ndf_only = false;
+                g_only = false;
+                dfg_only = true;
+                spec_only = false;
+                roughness_visualize = false;
             }
             "spec" => {
-                ndf_only = false; g_only = false; dfg_only = false; spec_only = true; roughness_visualize = false;
+                ndf_only = false;
+                g_only = false;
+                dfg_only = false;
+                spec_only = true;
+                roughness_visualize = false;
             }
             "roughness" => {
-                ndf_only = false; g_only = false; dfg_only = false; spec_only = false; roughness_visualize = true;
+                ndf_only = false;
+                g_only = false;
+                dfg_only = false;
+                spec_only = false;
+                roughness_visualize = true;
             }
             // M2 extended modes
-            "lambert" | "flatness" => { debug_lambert_only = true; }
-            "diffuse" | "diffuse_only" => { debug_diffuse_only = true; }
-            "d" | "ndf_only" | "debug_d" => { debug_d = true; }
-            "spec_no_nl" => { spec_only = true; debug_spec_no_nl = true; }
-            "energy" | "kskd" => { debug_energy = true; }
-            "angle_spec" => { debug_angle_sweep = true; debug_angle_component = 0; }
-            "angle_diffuse" => { debug_angle_sweep = true; debug_angle_component = 1; }
-            "angle_combined" | "angle" => { debug_angle_sweep = true; debug_angle_component = 2; }
-            "linear" => { output_mode = 0; debug_no_srgb = true; }
-            "srgb" => { output_mode = 1; debug_no_srgb = false; }
+            "lambert" | "flatness" => {
+                debug_lambert_only = true;
+            }
+            "diffuse" | "diffuse_only" => {
+                debug_diffuse_only = true;
+            }
+            "d" | "ndf_only" | "debug_d" => {
+                debug_d = true;
+            }
+            "spec_no_nl" => {
+                spec_only = true;
+                debug_spec_no_nl = true;
+            }
+            "energy" | "kskd" => {
+                debug_energy = true;
+            }
+            "angle_spec" => {
+                debug_angle_sweep = true;
+                debug_angle_component = 0;
+            }
+            "angle_diffuse" => {
+                debug_angle_sweep = true;
+                debug_angle_component = 1;
+            }
+            "angle_combined" | "angle" => {
+                debug_angle_sweep = true;
+                debug_angle_component = 2;
+            }
+            "linear" => {
+                output_mode = 0;
+                debug_no_srgb = true;
+            }
+            "srgb" => {
+                output_mode = 1;
+                debug_no_srgb = false;
+            }
             _ => {
                 return Err(PyValueError::new_err(format!(
                     "Invalid mode '{}'. Expected one of: full, ndf, g, dfg, spec, roughness, lambert, d, spec_no_nl, energy, angle_spec, angle_diffuse, angle_combined, linear, srgb",
@@ -3264,11 +3347,10 @@ fn render_brdf_tile_impl<'py>(
 
     // Convert to numpy array with shape (height, width, 4)
     // Buffer is row-major RGBA8, so we can reshape directly via ndarray
-    let array = ndarray::Array3::from_shape_vec(
-        (height as usize, width as usize, 4),
-        buffer,
-    )
-    .map_err(|e| PyRuntimeError::new_err(format!("Failed to reshape buffer to array: {}", e)))?;
+    let array = ndarray::Array3::from_shape_vec((height as usize, width as usize, 4), buffer)
+        .map_err(|e| {
+            PyRuntimeError::new_err(format!("Failed to reshape buffer to array: {}", e))
+        })?;
 
     Ok(array.into_pyarray_bound(py))
 }
@@ -3505,10 +3587,7 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         crate::geometry::geometry_validate_mesh_py,
         m
     )?)?;
-    m.add_function(wrap_pyfunction!(
-        crate::geometry::geometry_weld_mesh_py,
-        m
-    )?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::geometry_weld_mesh_py, m)?)?;
     m.add_function(wrap_pyfunction!(
         crate::geometry::geometry_transform_center_py,
         m

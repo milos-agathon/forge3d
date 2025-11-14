@@ -187,12 +187,7 @@ fn pad_image_rows(data: &[u8], width: u32, height: u32, bytes_per_pixel: usize) 
     (padded, padded_bpr as u32)
 }
 
-fn strip_image_padding(
-    padded: &[u8],
-    width: u32,
-    height: u32,
-    bytes_per_pixel: usize,
-) -> Vec<u8> {
+fn strip_image_padding(padded: &[u8], width: u32, height: u32, bytes_per_pixel: usize) -> Vec<u8> {
     let tight_bpr = bytes_per_pixel * width as usize;
     let padded_bpr = align_to(tight_bpr, COPY_ALIGNMENT);
     if padded_bpr == tight_bpr {
@@ -251,106 +246,100 @@ impl IBLRenderer {
     pub fn new(device: &wgpu::Device, quality: IBLQuality) -> Self {
         let shader_equirect = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ibl.precompute.shader.equirect"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../shaders/ibl_equirect.wgsl").into(),
-            ),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/ibl_equirect.wgsl").into()),
         });
         let shader_prefilter = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ibl.precompute.shader.prefilter"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../shaders/ibl_prefilter.wgsl").into(),
-            ),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/ibl_prefilter.wgsl").into()),
         });
         let shader_brdf = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ibl.precompute.shader.brdf"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/ibl_brdf.wgsl").into()),
         });
 
-        let equirect_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("ibl.precompute.equirect.layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+        let equirect_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ibl.precompute.equirect.layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::StorageTexture {
-                            access: wgpu::StorageTextureAccess::WriteOnly,
-                            format: wgpu::TextureFormat::Rgba16Float,
-                            view_dimension: wgpu::TextureViewDimension::D2Array,
-                        },
-                        count: None,
-                    },
-                ],
-            });
+                    count: None,
+                },
+            ],
+        });
 
-        let convolve_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("ibl.precompute.convolve.layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+        let convolve_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ibl.precompute.convolve.layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::Cube,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::Cube,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::StorageTexture {
-                            access: wgpu::StorageTextureAccess::WriteOnly,
-                            format: wgpu::TextureFormat::Rgba16Float,
-                            view_dimension: wgpu::TextureViewDimension::D2Array,
-                        },
-                        count: None,
-                    },
-                ],
-            });
+                    count: None,
+                },
+            ],
+        });
 
         let brdf_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ibl.precompute.brdf.layout"),
@@ -420,57 +409,55 @@ impl IBLRenderer {
             ],
         });
 
-        let equirect_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("ibl.precompute.pipeline.equirect"),
-                layout: Some(&device.create_pipeline_layout(
-                    &wgpu::PipelineLayoutDescriptor {
-                        label: Some("ibl.precompute.layout.equirect"),
-                        bind_group_layouts: &[&equirect_layout],
-                        push_constant_ranges: &[],
-                    },
-                )),
-                module: &shader_equirect,
-                entry_point: "cs_equirect_to_cubemap",
-            });
+        let equirect_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("ibl.precompute.pipeline.equirect"),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("ibl.precompute.layout.equirect"),
+                    bind_group_layouts: &[&equirect_layout],
+                    push_constant_ranges: &[],
+                }),
+            ),
+            module: &shader_equirect,
+            entry_point: "cs_equirect_to_cubemap",
+        });
 
         let irradiance_pipeline =
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("ibl.precompute.pipeline.irradiance"),
-                layout: Some(&device.create_pipeline_layout(
-                    &wgpu::PipelineLayoutDescriptor {
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                         label: Some("ibl.precompute.layout.irradiance"),
                         bind_group_layouts: &[&convolve_layout],
                         push_constant_ranges: &[],
-                    },
-                )),
+                    }),
+                ),
                 module: &shader_prefilter,
                 entry_point: "cs_irradiance_convolve",
             });
 
-        let specular_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("ibl.precompute.pipeline.specular"),
-                layout: Some(&device.create_pipeline_layout(
-                    &wgpu::PipelineLayoutDescriptor {
-                        label: Some("ibl.precompute.layout.specular"),
-                        bind_group_layouts: &[&convolve_layout],
-                        push_constant_ranges: &[],
-                    },
-                )),
-                module: &shader_prefilter,
-                entry_point: "cs_specular_prefilter",
-            });
+        let specular_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("ibl.precompute.pipeline.specular"),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("ibl.precompute.layout.specular"),
+                    bind_group_layouts: &[&convolve_layout],
+                    push_constant_ranges: &[],
+                }),
+            ),
+            module: &shader_prefilter,
+            entry_point: "cs_specular_prefilter",
+        });
 
         let brdf_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("ibl.precompute.pipeline.brdf"),
-            layout: Some(&device.create_pipeline_layout(
-                &wgpu::PipelineLayoutDescriptor {
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("ibl.precompute.layout.brdf"),
                     bind_group_layouts: &[&brdf_layout],
                     push_constant_ranges: &[],
-                },
-            )),
+                }),
+            ),
             module: &shader_brdf,
             entry_point: "cs_brdf_lut",
         });
@@ -609,19 +596,30 @@ impl IBLRenderer {
                 );
             }
             // Ensure both dimensions are within limits
-            (new_width.max(1).min(max_dim), new_height.max(1).min(max_dim))
+            (
+                new_width.max(1).min(max_dim),
+                new_height.max(1).min(max_dim),
+            )
         } else {
             // Even if original dimensions are within limits, ensure they don't exceed
             (width.min(max_dim), height.min(max_dim))
         };
 
         // Resize HDR data if needed
-        let (resized_data, resized_width, resized_height) = if target_width != width || target_height != height {
-            let resized = resize_hdr_data(hdr_data, width, height, target_width, target_height, channel_count);
-            (resized, target_width, target_height)
-        } else {
-            (hdr_data.to_vec(), width, height)
-        };
+        let (resized_data, resized_width, resized_height) =
+            if target_width != width || target_height != height {
+                let resized = resize_hdr_data(
+                    hdr_data,
+                    width,
+                    height,
+                    target_width,
+                    target_height,
+                    channel_count,
+                );
+                (resized, target_width, target_height)
+            } else {
+                (hdr_data.to_vec(), width, height)
+            };
 
         let resized_pixel_count = (resized_width as usize) * (resized_height as usize);
         let mut texels = Vec::with_capacity(resized_pixel_count * 4);
@@ -643,7 +641,7 @@ impl IBLRenderer {
         let max_dim_final = device.limits().max_texture_dimension_2d;
         let final_width = resized_width.min(max_dim_final).max(1);
         let final_height = resized_height.min(max_dim_final).max(1);
-        
+
         // If we need to clamp further, we need to resize the data again
         let (padded, bpr) = if final_width != resized_width || final_height != resized_height {
             warn!(
@@ -651,7 +649,14 @@ impl IBLRenderer {
                 resized_width, resized_height, max_dim_final, final_width, final_height
             );
             // Resize the data to the final clamped dimensions
-            let clamped_data = resize_hdr_data(&resized_data, resized_width, resized_height, final_width, final_height, 4);
+            let clamped_data = resize_hdr_data(
+                &resized_data,
+                resized_width,
+                resized_height,
+                final_width,
+                final_height,
+                4,
+            );
             // Convert to f16 and pad
             let clamped_pixel_count = (final_width as usize) * (final_height as usize);
             let mut clamped_texels = Vec::with_capacity(clamped_pixel_count * 4);
@@ -811,11 +816,7 @@ impl IBLRenderer {
         self.is_initialized = false;
         Ok(())
     }
-    pub fn initialize(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Result<(), String> {
+    pub fn initialize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<(), String> {
         if self.environment_cubemap.is_none() {
             self.create_default_environment(device, queue)?;
         }
@@ -1265,20 +1266,14 @@ impl IBLRenderer {
             let v = y as f32 / (height - 1) as f32;
             for x in 0..width {
                 let u = x as f32 / (width - 1) as f32;
-                let color = [
-                    0.1 + 0.9 * u,
-                    0.1 + 0.5 * (1.0 - v),
-                    0.3 + 0.7 * v,
-                ];
+                let color = [0.1 + 0.9 * u, 0.1 + 0.5 * (1.0 - v), 0.3 + 0.7 * v];
                 data.extend_from_slice(&color);
             }
         }
         self.load_environment_map(device, queue, &data, width, height)
     }
     fn cache_key(&self) -> Option<String> {
-        self.cache
-            .as_ref()
-            .and_then(|cfg| cfg.cache_key.clone())
+        self.cache.as_ref().and_then(|cfg| cfg.cache_key.clone())
     }
 
     fn invalidate_cache_key(&mut self) {
@@ -1326,19 +1321,17 @@ impl IBLRenderer {
             return Ok(false);
         }
 
-        let mut reader = BufReader::new(File::open(&path).map_err(|e| {
-            format!("Failed to open IBL cache '{}': {e}", path.display())
-        })?);
+        let mut reader = BufReader::new(
+            File::open(&path)
+                .map_err(|e| format!("Failed to open IBL cache '{}': {e}", path.display()))?,
+        );
 
         let mut magic = [0u8; 8];
         reader
             .read_exact(&mut magic)
             .map_err(|e| format!("Failed to read IBL cache magic: {e}"))?;
         if &magic != CACHE_MAGIC {
-            return Err(format!(
-                "Invalid IBL cache magic in '{}'",
-                path.display()
-            ));
+            return Err(format!("Invalid IBL cache magic in '{}'", path.display()));
         }
 
         let mut version_bytes = [0u8; 4];
@@ -1416,7 +1409,8 @@ impl IBLRenderer {
         self.brdf_lut = Some(brdf_tex);
         self.brdf_view = Some(brdf_view);
 
-        let cache_size_mib = (irradiance_bytes.len() + specular_bytes.len() + brdf_bytes.len()) as f32
+        let cache_size_mib = (irradiance_bytes.len() + specular_bytes.len() + brdf_bytes.len())
+            as f32
             / (1024.0 * 1024.0);
         info!(
             "IBL cache hit: '{}' ({:.2} MiB) - irradiance_{}.cube, prefilter_mips.cube, brdf_{}.png",
@@ -1485,12 +1479,18 @@ impl IBLRenderer {
             self.quality.specular_size(),
             self.quality.specular_mip_levels(),
         )?;
-        let brdf_bytes =
-            self.download_2d(device, queue, brdf_tex, self.quality.brdf_size(), self.quality.brdf_size())?;
+        let brdf_bytes = self.download_2d(
+            device,
+            queue,
+            brdf_tex,
+            self.quality.brdf_size(),
+            self.quality.brdf_size(),
+        )?;
 
-        let mut writer = BufWriter::new(File::create(&path).map_err(|e| {
-            format!("Failed to create IBL cache '{}': {e}", path.display())
-        })?);
+        let mut writer = BufWriter::new(
+            File::create(&path)
+                .map_err(|e| format!("Failed to create IBL cache '{}': {e}", path.display()))?,
+        );
 
         writer
             .write_all(CACHE_MAGIC)
@@ -1499,8 +1499,8 @@ impl IBLRenderer {
             .write_all(&CACHE_VERSION.to_le_bytes())
             .map_err(|e| format!("Failed to write IBL cache version: {e}"))?;
 
-        let meta_json =
-            serde_json::to_vec(&metadata).map_err(|e| format!("Failed to serialise metadata: {e}"))?;
+        let meta_json = serde_json::to_vec(&metadata)
+            .map_err(|e| format!("Failed to serialise metadata: {e}"))?;
         writer
             .write_all(&(meta_json.len() as u32).to_le_bytes())
             .map_err(|e| format!("Failed to write metadata length: {e}"))?;
@@ -1511,7 +1511,9 @@ impl IBLRenderer {
         write_blob(&mut writer, &irradiance_bytes)?;
         write_blob(&mut writer, &specular_bytes)?;
         write_blob(&mut writer, &brdf_bytes)?;
-        writer.flush().map_err(|e| format!("Failed to flush cache: {e}"))?;
+        writer
+            .flush()
+            .map_err(|e| format!("Failed to flush cache: {e}"))?;
 
         info!(
             "Wrote IBL cache '{}' ({:.2} MiB)",
@@ -1722,7 +1724,8 @@ impl IBLRenderer {
             let data = buffer.slice(..).get_mapped_range();
             for face in 0..CUBE_FACE_COUNT as usize {
                 let face_offset = face * (*padded_row as usize * *mip_size as usize);
-                let face_slice = &data[face_offset..face_offset + (*padded_row as usize * *mip_size as usize)];
+                let face_slice =
+                    &data[face_offset..face_offset + (*padded_row as usize * *mip_size as usize)];
                 let tight = strip_image_padding(face_slice, *mip_size, *mip_size, 8);
                 result.extend_from_slice(&tight);
             }
