@@ -174,7 +174,7 @@ SSGI:
 
 * ``:ssgi-steps <u32>``  ``:ssgi-radius <float>``  ``:ssgi-half on|off``
 * ``:ssgi-temporal-alpha <0..1>``
-* ``:ssgi-edges on|off``  ``:ssgi-upsigma <float>``  ``:ssgi-normexp <float>``
+* ``:ssgi-edges on|off``  ``:ssgi-upsample-sigma-depth <float>``  ``:ssgi-upsample-sigma-normal <float>``
 
 SSR:
 

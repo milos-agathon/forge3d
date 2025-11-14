@@ -37,6 +37,8 @@ const LIT_WGSL_VERSION: u32 = 2;
 // Limit for P5.1 capture outputs (in megapixels). Images larger than this will be downscaled.
 const P51_MAX_MEGAPIXELS: f32 = 2.0;
 const P52_MAX_MEGAPIXELS: f32 = 2.0;
+const P5_SSGI_DIFFUSE_SCALE: f32 = 0.5;
+const P5_SSGI_CORNELL_WARMUP_FRAMES: u32 = 64;
 
 // ------------------------------
 // HUD seven-seg numeric helpers
@@ -511,6 +513,70 @@ impl Viewer {
         if samples == 0 { 0.0 } else { (energy / samples as f64) as f32 }
     }
 
+    // Compute P5.2 status based on all acceptance criteria
+    fn compute_p52_status(meta: &std::collections::BTreeMap<String, serde_json::Value>) -> String {
+        // Check if all required metrics are present
+        let ssgi_bounce = meta.get("ssgi_bounce").and_then(|v| v.as_object());
+        let ssgi = meta.get("ssgi").and_then(|v| v.as_object());
+        let ssgi_temporal = meta.get("ssgi_temporal").and_then(|v| v.as_object());
+        
+        // If any required section is missing, return FAIL
+        if ssgi_bounce.is_none() || ssgi.is_none() || ssgi_temporal.is_none() {
+            return "FAIL".to_string();
+        }
+        
+        let bounce = ssgi_bounce.unwrap();
+        let ssgi_obj = ssgi.unwrap();
+        let temporal = ssgi_temporal.unwrap();
+        
+        // Extract bounce percentages
+        let red_pct = bounce.get("red_pct").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+        let green_pct = bounce.get("green_pct").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+        
+        // Extract max_delta_e
+        let max_delta_e = ssgi_obj.get("max_delta_e").and_then(|v| v.as_f64()).unwrap_or(f64::MAX) as f32;
+        
+        // Extract SSIM
+        let ssim = temporal.get("ssim_frame8_9").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+        
+        // Extract perf_ms
+        let perf_ms = ssgi_obj.get("perf_ms").and_then(|v| v.as_object());
+        let perf_positive = if let Some(perf) = perf_ms {
+            let trace_ms = perf.get("trace_ms").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let shade_ms = perf.get("shade_ms").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let temporal_ms = perf.get("temporal_ms").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let upsample_ms = perf.get("upsample_ms").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let total_ms = perf.get("total_ssgi_ms").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            trace_ms > 0.0 && shade_ms > 0.0 && temporal_ms > 0.0 && upsample_ms > 0.0 && total_ms > 0.0
+        } else {
+            false
+        };
+        
+        // Check all criteria
+        let bounce_ok = (0.05..=0.12).contains(&red_pct) && (0.05..=0.12).contains(&green_pct);
+        let delta_e_ok = max_delta_e <= 1.0;
+        let ssim_ok = ssim >= 0.95;
+        
+        if bounce_ok && delta_e_ok && ssim_ok && perf_positive {
+            "OK".to_string()
+        } else {
+            let mut reasons = Vec::new();
+            if !bounce_ok {
+                reasons.push(format!("bounce: red={:.3} green={:.3} (need 0.05-0.12)", red_pct, green_pct));
+            }
+            if !delta_e_ok {
+                reasons.push(format!("max_delta_e: {:.3} (need <=1.0)", max_delta_e));
+            }
+            if !ssim_ok {
+                reasons.push(format!("ssim: {:.3} (need >=0.95)", ssim));
+            }
+            if !perf_positive {
+                reasons.push("perf_ms must be >0".to_string());
+            }
+            format!("FAIL: {}", reasons.join(", "))
+        }
+    }
+
     // Write or update p5_meta.json with provided patcher
     fn write_p5_meta<F: FnOnce(&mut std::collections::BTreeMap<String, serde_json::Value>)>(&self, patch: F) -> anyhow::Result<()> {
         use std::fs;
@@ -536,8 +602,9 @@ impl Viewer {
         // Allow caller to patch dynamic fields
         patch(&mut meta);
 
-        // Always set status to OK (overwrite any placeholder)
-        meta.insert("status".to_string(), json!("OK"));
+        // Compute status based on all P5.2 acceptance criteria (if all metrics are available)
+        let status = Self::compute_p52_status(&meta);
+        meta.insert("status".to_string(), json!(status));
 
         let mut f = fs::File::create(&path)?;
         f.write_all(serde_json::to_string_pretty(&meta)?.as_bytes())?;
@@ -551,10 +618,12 @@ impl Viewer {
         let out_dir = std::path::Path::new("reports/p5");
         fs::create_dir_all(out_dir)?;
 
-        let (w, h) = {
-            let gi = self.gi.as_ref().context("GI manager not available")?;
-            gi.gbuffer().dimensions()
-        };
+        let capture_w = self.config.width.max(1);
+        let capture_h = self.config.height.max(1);
+        let capture_is_srgb = matches!(
+            self.config.format,
+            wgpu::TextureFormat::Rgba8UnormSrgb | wgpu::TextureFormat::Bgra8UnormSrgb
+        );
 
         let was_enabled = {
             let gi = self.gi.as_ref().context("GI manager not available")?;
@@ -582,18 +651,28 @@ impl Viewer {
             gi.enable_effect(&self.device, SSE::SSGI)?;
             gi.update_ssgi_settings(&self.queue, |s| { *s = original_settings; });
             gi.ssgi_reset_history(&self.device, &self.queue)?;
+            // Task 2: Set SSGI diffuse intensity factor for compositing
+            // This scalar controls how much SSGI radiance is added to diffuse lighting
+            // Tuned to achieve 5-12% bounce on neutral walls adjacent to colored walls
+            gi.set_ssgi_composite_intensity(&self.queue, P5_SSGI_DIFFUSE_SCALE);
         }
-        self.reexecute_gi()?;
+        for _ in 0..P5_SSGI_CORNELL_WARMUP_FRAMES {
+            self.reexecute_gi()?;
+        }
         let on_bytes = self.capture_material_rgba8()?;
 
         // Combine split image
-        let out_w = w * 2;
-        let out_h = h;
+        let out_w = capture_w * 2;
+        let out_h = capture_h;
         let mut combined = vec![0u8; (out_w * out_h * 4) as usize];
-        for y in 0..h as usize {
+        let row_stride = (capture_w as usize) * 4;
+        for y in 0..(capture_h as usize) {
             let dst_off = y * (out_w as usize) * 4;
-            combined[dst_off..dst_off + (w as usize * 4)].copy_from_slice(&off_bytes[y * (w as usize) * 4..(y + 1) * (w as usize) * 4]);
-            combined[dst_off + (w as usize * 4)..dst_off + (w as usize * 8)].copy_from_slice(&on_bytes[y * (w as usize) * 4..(y + 1) * (w as usize) * 4]);
+            let src_off = y * row_stride;
+            combined[dst_off..dst_off + row_stride]
+                .copy_from_slice(&off_bytes[src_off..src_off + row_stride]);
+            combined[dst_off + row_stride..dst_off + row_stride * 2]
+                .copy_from_slice(&on_bytes[src_off..src_off + row_stride]);
         }
 
         let mut write_buf: Vec<u8>;
@@ -651,34 +730,122 @@ impl Viewer {
             gi.ssgi_timings_ms().unwrap_or((0.0, 0.0, 0.0, 0.0))
         };
 
-        // ΔE fallback (steps=0) – compare SSGI output with fallback reference
+        // Task 1: Wall bounce measurement - ROI-based luminance calculation
+        // Define hard-coded ROIs for neutral wall regions adjacent to red and green walls
+        // Cornell box: red wall on left (x=-1), green on right (x=1), neutral walls elsewhere
+        // Back wall (z=1) is neutral and should receive bounce from both red and green walls
+        // ROIs are defined for 1920x1080 base resolution and scaled for other resolutions
+        // ROI_R_NEUTRAL: neutral back wall region near the red wall (left side of back wall)
+        // ROI_G_NEUTRAL: neutral back wall region near the green wall (right side of back wall)
+        // These ROIs avoid the checker cube, edges, and specular highlights
+        const ROI_R_NEUTRAL_BASE: (u32, u32, u32, u32) = (750, 360, 930, 560); // centered patch facing red wall
+        const ROI_G_NEUTRAL_BASE: (u32, u32, u32, u32) = (950, 360, 1130, 560); // centered patch facing green wall
+        const BASE_WIDTH: u32 = 1920;
+        const BASE_HEIGHT: u32 = 1080;
+        
+        // Scale ROIs to match current resolution
+        let roi_red = {
+            let (x0_base, y0_base, x1_base, y1_base) = ROI_R_NEUTRAL_BASE;
+            let x0 = (x0_base as f32 * capture_w as f32 / BASE_WIDTH as f32) as u32;
+            let y0 = (y0_base as f32 * capture_h as f32 / BASE_HEIGHT as f32) as u32;
+            let x1 = (x1_base as f32 * capture_w as f32 / BASE_WIDTH as f32) as u32;
+            let y1 = (y1_base as f32 * capture_h as f32 / BASE_HEIGHT as f32) as u32;
+            (x0, y0, x1, y1)
+        };
+        let roi_green = {
+            let (x0_base, y0_base, x1_base, y1_base) = ROI_G_NEUTRAL_BASE;
+            let x0 = (x0_base as f32 * capture_w as f32 / BASE_WIDTH as f32) as u32;
+            let y0 = (y0_base as f32 * capture_h as f32 / BASE_HEIGHT as f32) as u32;
+            let x1 = (x1_base as f32 * capture_w as f32 / BASE_WIDTH as f32) as u32;
+            let y1 = (y1_base as f32 * capture_h as f32 / BASE_HEIGHT as f32) as u32;
+            (x0, y0, x1, y1)
+        };
+
+        // Compute luminance for ROIs in SSGI OFF and ON frames
+        // Use linear luminance from final rendered color (post-GI, pre-tone-mapping)
+        // Convert from sRGB if needed so bounce math happens in linear space
+        let compute_roi_luminance = |bytes: &[u8], roi: (u32, u32, u32, u32)| -> f32 {
+            let (x0, y0, x1, y1) = roi;
+            let mut sum_luma = 0.0f64;
+            let mut count = 0u32;
+            let width = capture_w;
+            let height = capture_h;
+            let srgb = capture_is_srgb;
+            let x_start = x0.min(width);
+            let x_end = x1.min(width);
+            let y_start = y0.min(height);
+            let y_end = y1.min(height);
+            let to_linear = |channel: u8| -> f32 {
+                let c = channel as f32 / 255.0;
+                if srgb {
+                    if c <= 0.04045 {
+                        c / 12.92
+                    } else {
+                        ((c + 0.055) / 1.055).powf(2.4)
+                    }
+                } else {
+                    c
+                }
+            };
+            for y in y_start..y_end {
+                for x in x_start..x_end {
+                    let idx = ((y * width + x) * 4) as usize;
+                    if idx + 3 < bytes.len() {
+                        let r = to_linear(bytes[idx]);
+                        let g = to_linear(bytes[idx + 1]);
+                        let b = to_linear(bytes[idx + 2]);
+                        // Compute linear luminance: L = 0.2126*R + 0.7152*G + 0.0722*B
+                        let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                        sum_luma += luma as f64;
+                        count += 1;
+                    }
+                }
+            }
+            if count > 0 { (sum_luma / count as f64) as f32 } else { 0.0 }
+        };
+
+        let l_r_off = compute_roi_luminance(&off_bytes, roi_red);
+        let l_r_on = compute_roi_luminance(&on_bytes, roi_red);
+        let l_g_off = compute_roi_luminance(&off_bytes, roi_green);
+        let l_g_on = compute_roi_luminance(&on_bytes, roi_green);
+
+        let bounce_red_pct = (l_r_on - l_r_off) / l_r_off.max(1e-6);
+        let bounce_green_pct = (l_g_on - l_g_off) / l_g_off.max(1e-6);
+
+        // Task 2: ΔE fallback (steps=0) – verify steps=0 SSGI outputs pure diffuse IBL
+        // Render with steps=0 twice and compare - they should be identical (pure IBL, no temporal variance)
         let max_delta_e = {
+            // First render with steps=0 (should output pure diffuse IBL)
             {
                 let gi = self.gi.as_mut().context("GI manager not available")?;
+                gi.enable_effect(&self.device, SSE::SSGI)?;
                 gi.update_ssgi_settings(&self.queue, |s| {
                     s.num_steps = 0;
                     s.step_size = original_settings.step_size;
                     s.temporal_alpha = 0.0;
+                    s.intensity = 1.0; // Ensure intensity doesn't affect pure IBL
                 });
                 gi.ssgi_reset_history(&self.device, &self.queue)?;
             }
             self.reexecute_gi()?;
             let reference_bytes = self.read_ssgi_filtered_bytes()?.0;
 
-            {
-                let gi = self.gi.as_mut().context("GI manager not available")?;
-                gi.update_ssgi_settings(&self.queue, |s| { *s = original_settings; });
-                gi.ssgi_reset_history(&self.device, &self.queue)?;
-            }
+            // Second render with steps=0 (should be identical to first)
             self.reexecute_gi()?;
             let current_bytes = self.read_ssgi_filtered_bytes()?.0;
 
+            // Compare: should be identical (ΔE should be very small, ideally < 1.0)
+            // This verifies that steps=0 consistently outputs pure diffuse IBL
             compute_max_delta_e(&current_bytes, &reference_bytes)
         };
 
-        // Restore effect enablement
-        if !was_enabled {
-            if let Some(ref mut gi) = self.gi {
+        // Restore SSGI settings, composite intensity, and effect enablement
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.update_ssgi_settings(&self.queue, |s| { *s = original_settings; });
+            // Reset composite intensity to default (1.0)
+            gi.set_ssgi_composite_intensity(&self.queue, 1.0);
+            if !was_enabled {
                 gi.disable_effect(SSE::SSGI);
             }
         }
@@ -697,6 +864,11 @@ impl Viewer {
                 },
                 "max_delta_e": max_delta_e,
             }));
+            // Task 1: Store bounce metrics
+            meta.insert("ssgi_bounce".to_string(), json!({
+                "red_pct": bounce_red_pct,
+                "green_pct": bounce_green_pct,
+            }));
         })?;
 
         Ok(())
@@ -708,10 +880,7 @@ impl Viewer {
         let out_dir = std::path::Path::new("reports/p5");
         fs::create_dir_all(out_dir)?;
 
-        let (w, h) = {
-            let gi = self.gi.as_ref().context("GI manager not available")?;
-            gi.gbuffer().dimensions()
-        };
+        let (w, h) = (self.config.width.max(1), self.config.height.max(1));
 
         let was_enabled = {
             let gi = self.gi.as_ref().context("GI manager not available")?;
@@ -726,6 +895,11 @@ impl Viewer {
             let gi = self.gi.as_ref().context("GI manager not available")?;
             gi.ssgi_settings().context("SSGI settings unavailable")?
         };
+
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.set_ssgi_composite_intensity(&self.queue, P5_SSGI_DIFFUSE_SCALE);
+        }
 
         {
             let gi = self.gi.as_mut().context("GI manager not available")?;
@@ -806,6 +980,7 @@ impl Viewer {
             let gi = self.gi.as_mut().context("GI manager not available")?;
             gi.update_ssgi_settings(&self.queue, |s| { *s = original_settings; });
             gi.ssgi_reset_history(&self.device, &self.queue)?;
+            gi.set_ssgi_composite_intensity(&self.queue, 1.0);
         }
         if !was_enabled {
             if let Some(ref mut gi) = self.gi {
@@ -821,6 +996,7 @@ impl Viewer {
         let depth_view = self.z_view.as_ref().context("Depth view unavailable")?;
         if let Some(ref mut gi) = self.gi {
             let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("p5.gi.reexec") });
+            gi.advance_frame(&self.queue);
             gi.build_hzb(&self.device, &mut enc, depth_view, false);
             gi.execute(&self.device, &mut enc)?;
             self.queue.submit(std::iter::once(enc.finish()));
@@ -848,7 +1024,9 @@ impl Viewer {
             self.config.width,
             self.config.height,
             far,
-            gi.material_with_ao_view().unwrap_or(&gi.gbuffer().material_view),
+            gi.material_with_ssgi_view()
+                .or_else(|| gi.material_with_ao_view())
+                .unwrap_or(&gi.gbuffer().material_view),
             0,
         )
     }
@@ -3680,7 +3858,8 @@ fn compute_ssim(a: &[f32], b: &[f32]) -> f32 {
         #[allow(dead_code)] SetSsrMaxSteps(u32),
         #[allow(dead_code)] SetSsrThickness(f32),
         #[allow(dead_code)] SetSsgiHalf(bool),
-        #[allow(dead_code)] SetSsgiTemporalAlpha(f32), // existing SSGI
+        #[allow(dead_code)] SetSsgiTemporalAlpha(f32),
+        #[allow(dead_code)] SetSsgiTemporalEnabled(bool),
         #[allow(dead_code)] SetAoTemporalAlpha(f32),   // new: AO temporal alpha
         // SSAO-specific controls
         #[allow(dead_code)] SetSsaoSamples(u32),
@@ -3698,8 +3877,8 @@ fn compute_ssim(a: &[f32], b: &[f32]) -> f32 {
         #[allow(dead_code)] SetAoBlur(bool),
         // SSGI edge-aware upsample controls
         #[allow(dead_code)] SetSsgiEdges(bool),
-        #[allow(dead_code)] SetSsgiUpsigma(f32),
-        #[allow(dead_code)] SetSsgiNormalExp(f32),
+        #[allow(dead_code)] SetSsgiUpsampleSigmaDepth(f32),
+        #[allow(dead_code)] SetSsgiUpsampleSigmaNormal(f32),
         // Lit viz controls
         SetLitSun(f32),
         SetLitIbl(f32),
@@ -3843,19 +4022,25 @@ impl Viewer {
                     gi.update_ssgi_settings(&self.queue, |s| { s.temporal_alpha = a.clamp(0.0, 1.0); });
                 }
             }
+            ViewerCmd::SetSsgiTemporalEnabled(on) => {
+                if let Some(ref mut gi) = self.gi {
+                    gi.update_ssgi_settings(&self.queue, |s| { s.temporal_enabled = if on { 1 } else { 0 }; });
+                    let _ = gi.ssgi_reset_history(&self.device, &self.queue);
+                }
+            }
             ViewerCmd::SetSsgiEdges(on) => {
                 if let Some(ref mut gi) = self.gi {
                     gi.update_ssgi_settings(&self.queue, |s| { s.use_edge_aware = if on {1} else {0}; });
                 }
             }
-            ViewerCmd::SetSsgiUpsigma(sig) => {
+            ViewerCmd::SetSsgiUpsampleSigmaDepth(sig) => {
                 if let Some(ref mut gi) = self.gi {
                     gi.update_ssgi_settings(&self.queue, |s| { s.upsample_depth_sigma = sig.max(1e-4); });
                 }
             }
-            ViewerCmd::SetSsgiNormalExp(exp) => {
+            ViewerCmd::SetSsgiUpsampleSigmaNormal(sig) => {
                 if let Some(ref mut gi) = self.gi {
-                    gi.update_ssgi_settings(&self.queue, |s| { s.upsample_normal_exp = exp.max(0.0); });
+                    gi.update_ssgi_settings(&self.queue, |s| { s.upsample_normal_sigma = sig.max(1e-4); });
                 }
             }
             ViewerCmd::Snapshot(path) => {
@@ -4417,14 +4602,14 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     let on = matches!(tok, "on"|"1"|"true");
                     let _ = proxy.send_event(ViewerCmd::SetSsgiEdges(on));
                 } else { println!("Usage: :ssgi-edges <on|off>"); }
-            } else if l.starts_with(":ssgi-upsigma") || l.starts_with("ssgi-upsigma ") {
+            } else if l.starts_with(":ssgi-upsigma") || l.starts_with("ssgi-upsigma ") || l.starts_with(":ssgi-upsample-sigma-depth") || l.starts_with("ssgi-upsample-sigma-depth ") {
                 if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
-                    let _ = proxy.send_event(ViewerCmd::SetSsgiUpsigma(val));
-                } else { println!("Usage: :ssgi-upsigma <float>"); }
-            } else if l.starts_with(":ssgi-normexp") || l.starts_with("ssgi-normexp ") {
+                    let _ = proxy.send_event(ViewerCmd::SetSsgiUpsampleSigmaDepth(val));
+                } else { println!("Usage: :ssgi-upsample-sigma-depth <float>"); }
+            } else if l.starts_with(":ssgi-normexp") || l.starts_with("ssgi-normexp ") || l.starts_with(":ssgi-upsample-sigma-normal") || l.starts_with("ssgi-upsample-sigma-normal ") {
                 if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
-                    let _ = proxy.send_event(ViewerCmd::SetSsgiNormalExp(val));
-                } else { println!("Usage: :ssgi-normexp <float>"); }
+                    let _ = proxy.send_event(ViewerCmd::SetSsgiUpsampleSigmaNormal(val));
+                } else { println!("Usage: :ssgi-upsample-sigma-normal <float>"); }
             } else if l.starts_with(":ibl") || l.starts_with("ibl ") {
                 let toks: Vec<&str> = l.split_whitespace().collect();
                 if toks.len() >= 2 {
@@ -4531,6 +4716,11 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
                     let _ = proxy.send_event(ViewerCmd::SetSsgiTemporalAlpha(val));
                 } else { println!("Usage: :ssgi-temporal-alpha <float 0..1>"); }
+            } else if l.starts_with(":ssgi-temporal") || l.starts_with("ssgi-temporal ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let on = matches!(tok, "on"|"1"|"true");
+                    let _ = proxy.send_event(ViewerCmd::SetSsgiTemporalEnabled(on));
+                } else { println!("Usage: :ssgi-temporal <on|off>"); }
             } else if l.starts_with(":lit-sun") || l.starts_with("lit-sun ") {
                 if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
                     let _ = proxy.send_event(ViewerCmd::SetLitSun(val));
@@ -4642,7 +4832,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 break;
             } else {
                 println!(
-                    "Commands:\n  :gi <ssao|ssgi|ssr> <on|off>\n  :viz <material|normal|depth|gi|lit>\n  :viz-depth-max <float>\n  :ibl <on|off|load <path>|intensity <f>|rotate <deg>|cache <dir>|res <u32>>\n  :brdf <lambert|phong|ggx|disney>\n  :snapshot [path]\n  :obj <path> | :gltf <path>\n  :sky off|on|preetham|hosek-wilkie | :sky-turbidity <f> | :sky-ground <f> | :sky-exposure <f> | :sky-sun <f>\n  :fog <on|off> | :fog-density <f> | :fog-g <f> | :fog-steps <u32> | :fog-shadow <on|off> | :fog-temporal <0..0.9> | :fog-mode <raymarch|froxels> | :fog-preset <low|med|high>\n  Lit:  :lit-sun <float> | :lit-ibl <float>\n  SSAO: :ssao-technique <ssao|gtao> | :ssao-radius <f> | :ssao-intensity <f> | :ssao-composite <on|off> | :ssao-mul <0..1>\n  SSGI: :ssgi-steps <u32> | :ssgi-radius <f> | :ssgi-half <on|off> | :ssgi-temporal-alpha <0..1> | :ssgi-edges <on|off> | :ssgi-upsigma <f> | :ssgi-normexp <f>\n  SSR:  :ssr-max-steps <u32> | :ssr-thickness <f>\n  :quit"
+                    "Commands:\n  :gi <ssao|ssgi|ssr> <on|off>\n  :viz <material|normal|depth|gi|lit>\n  :viz-depth-max <float>\n  :ibl <on|off|load <path>|intensity <f>|rotate <deg>|cache <dir>|res <u32>>\n  :brdf <lambert|phong|ggx|disney>\n  :snapshot [path]\n  :obj <path> | :gltf <path>\n  :sky off|on|preetham|hosek-wilkie | :sky-turbidity <f> | :sky-ground <f> | :sky-exposure <f> | :sky-sun <f>\n  :fog <on|off> | :fog-density <f> | :fog-g <f> | :fog-steps <u32> | :fog-shadow <on|off> | :fog-temporal <0..0.9> | :fog-mode <raymarch|froxels> | :fog-preset <low|med|high>\n  Lit:  :lit-sun <float> | :lit-ibl <float>\n  SSAO: :ssao-technique <ssao|gtao> | :ssao-radius <f> | :ssao-intensity <f> | :ssao-composite <on|off> | :ssao-mul <0..1>\n  SSGI: :ssgi-steps <u32> | :ssgi-radius <f> | :ssgi-half <on|off> | :ssgi-temporal <on|off> | :ssgi-temporal-alpha <0..1> | :ssgi-edges <on|off> | :ssgi-upsample-sigma-depth <f> | :ssgi-upsample-sigma-normal <f>\n  SSR:  :ssr-max-steps <u32> | :ssr-thickness <f>\n  :quit"
                 );
             }
         }

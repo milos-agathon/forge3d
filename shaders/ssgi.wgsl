@@ -12,7 +12,7 @@ struct SsgiSettings {
     use_half_res: u32,
     // Upsample controls
     upsample_depth_sigma: f32,
-    upsample_normal_exp: f32,
+    upsample_normal_sigma: f32,
     use_edge_aware: u32,
     _pad1: u32,
 };
@@ -240,7 +240,7 @@ fn cs_ssgi_upsample(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let dz = abs(depth_tap - depth_center);
             let sigma = max(upsample_settings.upsample_depth_sigma, 1e-6);
             let w_depth = exp(-dz / sigma);
-            let w_normal = pow(max(dot(n_center, n_tap), 0.0), upsample_settings.upsample_normal_exp);
+            let w_normal = pow(max(dot(n_center, n_tap), 0.0), upsample_settings.upsample_normal_sigma);
             let w = w_bilinear * w_depth * w_normal;
             sum += c * w;
             wsum += w;

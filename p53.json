@@ -1,0 +1,192 @@
+TOON {
+ROLE: "senior_real_time_graphics_engineer_for_forge3d",
+ENGINE: "Codex",
+GOAL: "Implement P5.3 Screen-Space Reflections (SSR) with HZB/thickness-assisted tracing, Fresnel+roughness weighting, and env reflection fallback, fully integrated in the P5 harness with metrics and PNG outputs.",
+STACK: {
+RENDERER: "Rust + WebGPU/WGSL (Vulkan-friendly)",
+SHADER_LANG: "WGSL",
+RUST_PASS_FILE: "src/passes/ssr.rs",
+SHADER_FILES: [
+"src/shaders/ssr/trace.wgsl",
+"src/shaders/ssr/shade.wgsl",
+"src/shaders/ssr/fallback_env.wgsl"
+],
+REPORT_META_FILE: "reports/p5/p5_meta.json",
+REPORT_IMAGES: [
+"reports/p5/p5_ssr_glossy_spheres.png",
+"reports/p5/p5_ssr_thickness_ablation.png"
+]
+},
+GLOBAL_ACCEPTANCE: [
+"Reflectivity scales with roughness: mean reflected stripe contrast on the glossy-spheres test drops monotonically as roughness r increases from 0.1 to 0.9.",
+"Fallback: pixels tagged miss in SSR visually match pure IBL reflection (max ΔE <= 2.0 in CIE space) and have no black holes (min RGB >= 2/255 in linear 0..1).",
+"Edges: after all SSR resolves, there are no bright specular streaks longer than 1 pixel aligned with depth discontinuities."
+],
+MILESTONES: [
+{
+ID: "M0",
+TITLE: "Scene preset, meta structure, and CLI stubs",
+OBJECTIVE: "Provide a reproducible P5.3 test scene plus base SSR fields in p5_meta.json and stub parameters.",
+TASKS: [
+"Create a P5.3 test scene preset (e.g. function p5::run_ssr_glossy_spheres()) with: (a) flat floor and background, (b) a row of 9 spheres centered horizontally, with roughness r_i = 0.1 + 0.1 * (i-1) for i in 1..9, (c) a bright horizontal emissive stripe behind or above the spheres that produces strong specular reflections, (d) a sky/IBL environment compatible with the renderer's existing env reflection path, (e) a fixed camera, resolution, exposure, and tonemapper (ACES or current default).",
+"Extend reports/p5/p5_meta.json writing code to include a top-level 'ssr' object and related structures with default values if they do not exist. The JSON layout MUST be:",
+"  ssr: { hit_rate: 0.0, avg_steps: 0.0, miss_ibl_ratio: 0.0, perf_ms: { trace_ms: 0.0, shade_ms: 0.0, fallback_ms: 0.0, total_ssr_ms: 0.0 }, max_delta_e_miss: 0.0, min_rgb_miss: 0.0 },",
+"  ssr_stripe_contrast: [],",
+"  ssr_edge_streaks: { num_streaks_gt1px: 0 },",
+"  ssr_status: 'UNINITIALIZED'.",
+"Add CLI / viewer parameters and a struct SsrParams (or equivalent) with fields: ssr_enable: bool, ssr_max_steps: u32, ssr_thickness: f32. Wire CLI flags: --ssr-enable on|off, --ssr-max-steps <int>, --ssr-thickness <float> so they populate SsrParams but do not need to affect rendering yet."
+],
+DELIVERABLES: [
+"Compilable scene preset code and hook in the P5 harness to render the glossy-spheres scene without SSR.",
+"Updated p5_meta.json produced by a P5 run, containing an 'ssr' object, 'ssr_stripe_contrast' array, 'ssr_edge_streaks' object, and 'ssr_status', even if values are still defaults.",
+"CLI / viewer parsing paths for --ssr-enable, --ssr-max-steps, --ssr-thickness confirmed in SsrParams."
+],
+ACCEPTANCE: [
+"Running the P5 harness for the SSR glossy-spheres scene produces an image (even without reflections) and writes p5_meta.json with the 'ssr' section and related fields without errors.",
+"Toggling --ssr-enable, --ssr-max-steps, and --ssr-thickness changes the values in SsrParams visible in the debugger/logs."
+]
+},
+{
+ID: "M1",
+TITLE: "SSR trace pass (HZB/thickness) and basic metrics",
+OBJECTIVE: "Implement screen-space reflection ray marching using HZB or thickness tests to produce hit UVs, hit masks, and step counts, and record hit_rate and avg_steps.",
+TASKS: [
+"Implement WGSL shader src/shaders/ssr/trace.wgsl with a full-resolution compute/fragment entry point (match your compute style) that, per pixel, does the following:",
+"  - Reconstruct view-space position P and normal N from the G-buffer (depth + normal).",
+"  - Compute view vector V (from camera to P) and reflection direction R = reflect(-V, N).",
+"  - Perform screen-space ray marching along R using either (a) a hierarchical Z buffer (depth pyramid) or (b) depth + ssr_thickness to detect intersections:",
+"      * For each step up to ssr_max_steps: project P_hit = P + t * R into clip space, then NDC, then UV; if UV is outside [0,1], mark miss and break; sample depth/HZB at that UV and compare vs P_hit.z with a tolerance based on ssr_thickness; if within this tolerance, mark hit and break.",
+"  - Write out for each pixel: hit_uv (vec2<f32> in normalized screen space), hit_mask (u32: 1 = hit, 0 = miss), steps_taken (u32: number of march steps processed).",
+"In src/passes/ssr.rs, create the SSR trace pipeline and its output targets (e.g. a single texture storing hit_uv.xy and hit_mask/steps in the remaining channels, or separate textures if simpler).",
+"Wire SsrParams.ssr_enable, SsrParams.ssr_max_steps, and SsrParams.ssr_thickness into a uniform buffer passed to trace.wgsl.",
+"In the SSR pass, when ssr_enable == true, dispatch the trace pipeline over the full screen, then read back (or GPU-reduce) hit statistics:",
+"  - total_pixels = width * height;",
+"  - hit_pixels   = count of pixels with hit_mask == 1;",
+"  - miss_pixels  = total_pixels - hit_pixels;",
+"  - sum_steps    = sum(steps_taken for pixels where hit_mask == 1);",
+"  - hit_rate     = hit_pixels / total_pixels;",
+"  - avg_steps    = sum_steps / max(hit_pixels, 1).",
+"Write hit_rate and avg_steps into p5_meta['ssr']['hit_rate'] and p5_meta['ssr']['avg_steps'].",
+"Wrap the trace dispatch with GPU timing queries and store the measured time in milliseconds in p5_meta['ssr']['perf_ms']['trace_ms']."
+],
+DELIVERABLES: [
+"src/shaders/ssr/trace.wgsl with full implementation of reflection-direction-based ray marching and HZB/thickness intersection.",
+"src/passes/ssr.rs creating and dispatching the trace pipeline, including uniforms from SsrParams.",
+"A P5 harness run that outputs updated p5_meta.json with non-zero 'hit_rate', non-zero 'avg_steps', and non-zero 'perf_ms.trace_ms'.",
+"An internal debug image or mode that visualizes hit_mask (e.g. white = hit, black = miss) to validate behaviour on the glossy spheres scene."
+],
+ACCEPTANCE: [
+"On the glossy spheres scene with SSR enabled, hit_rate is between 0 and 1 and not trivially equal to 0 or 1.",
+"avg_steps is greater than 0 and less than or equal to ssr_max_steps.",
+"perf_ms.trace_ms > 0.0 ms and p5_meta.json writes without errors."
+]
+},
+{
+ID: "M2",
+TITLE: "SSR shading with Fresnel + roughness weighting and composition before tonemap",
+OBJECTIVE: "Convert trace hits into specular reflection contributions using Fresnel Schlick and roughness-based weighting, add env fallback for misses, and composite the result before tonemapping after direct specular.",
+TASKS: [
+"Implement WGSL shader src/shaders/ssr/shade.wgsl that reads the SSR trace output and a reflection source texture and outputs an intermediate ssr_spec buffer:",
+"  - Inputs: trace buffer (hit_uv, hit_mask, steps), G-buffer normals and roughness, F0/specular color, and either (a) current HDR color buffer or (b) a pre-tonemap specular buffer that contains the scene to be reflected.",
+"  - For each pixel with hit_mask == 1: sample ref_color from the reflection source at hit_uv. Compute Fresnel Schlick term F based on F0 and view/half vectors. Compute a roughness-based cone_weight, e.g. cone_weight = max(0.0, 1.0 - roughness) or a slightly smoother mapping. Set ssr_spec = ref_color * F * cone_weight.",
+"  - For each pixel with hit_mask == 0: set ssr_spec = vec3(0.0) and leave hit_mask unchanged. Miss pixels will be filled by env fallback.",
+"  - Output ssr_spec (RGB) in a dedicated floating-point texture (e.g. RGBA16F where alpha can be 1.0).",
+"Implement WGSL shader src/shaders/ssr/fallback_env.wgsl:",
+"  - Inputs: ssr_spec buffer from shade.wgsl, hit_mask, per-pixel view vector and reflection vector (reconstructed from G-buffer or a small uniform buffer), and the environment/IBL sampler used by the renderer's specular IBL path.",
+"  - For hit pixels (hit_mask == 1): final_spec = ssr_spec (optionally plus a very small env tail if desired).",
+"  - For miss pixels (hit_mask == 0): compute env_spec using the engine's existing specular IBL BRDF and set final_spec = env_spec.",
+"  - Output final_spec into a 'final_ssr_spec' buffer (linear HDR).",
+"In src/passes/ssr.rs, define the SSR composition order within a frame as:",
+"  1) Direct specular lighting pass (existing, unmodified).",
+"  2) SSR trace (trace.wgsl).",
+"  3) SSR shade (shade.wgsl).",
+"  4) SSR env fallback (fallback_env.wgsl).",
+"  5) Composite final_ssr_spec additively into the main lighting buffer BEFORE tonemapping and AFTER direct specular.",
+"Add GPU timing around shade and fallback passes and store results in:",
+"  p5_meta['ssr']['perf_ms']['shade_ms'],",
+"  p5_meta['ssr']['perf_ms']['fallback_ms'],",
+"  p5_meta['ssr']['perf_ms']['total_ssr_ms'] = trace_ms + shade_ms + fallback_ms.",
+"Generate the glossy-spheres image with SSR ON and save it as reports/p5/p5_ssr_glossy_spheres.png.",
+"Implement a stripe-contrast metric in the P5 harness:",
+"  - For each sphere i (i=1..9 with roughness r_i), define a small ROI on that sphere where the bright stripe reflection appears.",
+"  - Within each ROI, compute a contrast measure c_i, for example: c_i = (max_L - min_L) where L is linear luminance or use (max_L - min_L) / (max_L + min_L + epsilon).",
+"  - Store an array ssr_stripe_contrast[0..8] in p5_meta.json under the key 'ssr_stripe_contrast'. Indices must correspond in order to r = 0.1, 0.2, ..., 0.9."
+],
+DELIVERABLES: [
+"src/shaders/ssr/shade.wgsl and src/shaders/ssr/fallback_env.wgsl fully implemented and compiled.",
+"Updated src/passes/ssr.rs invoking shade and fallback passes and compositing final_ssr_spec before tonemap.",
+"reports/p5/p5_ssr_glossy_spheres.png showing a row of spheres where low-roughness spheres clearly reflect the stripe and sky more strongly than high-roughness spheres.",
+"p5_meta.json containing populated perf_ms.shade_ms, perf_ms.fallback_ms, perf_ms.total_ssr_ms, and an ssr_stripe_contrast array of 9 numeric entries."
+],
+ACCEPTANCE: [
+"On visual inspection of p5_ssr_glossy_spheres.png, the intensity of the reflected stripe visibly decreases as roughness increases from leftmost to rightmost sphere.",
+"The values in ssr_stripe_contrast are strictly decreasing or at least non-increasing with a very small tolerance (e.g., c_i >= c_{i+1} - 1e-3). A precise monotonicity check will be enforced in Milestone M4.",
+"perf_ms.total_ssr_ms equals the sum of trace_ms + shade_ms + fallback_ms (within small float rounding)."
+]
+},
+{
+ID: "M3",
+TITLE: "Thickness ablation test and IBL fallback correctness",
+OBJECTIVE: "Demonstrate that thickness/HZB fixes undershoot artifacts and verify that miss pixels use IBL correctly (ΔE and black-hole constraints).",
+TASKS: [
+"Add a P5 harness mode for a thickness ablation scene (can reuse the glossy spheres scene with a specific camera) that is prone to SSR undershoot (grazing reflections near geometry edges).",
+"Implement logic to render two variants in a single frame or two-frame sequence:",
+"  - Variant A: ssr_thickness = 0.0 (or thickness test disabled at shader level).",
+"  - Variant B: ssr_thickness = a positive default (e.g., 0.05 in view-space units or tuned to scene scale).",
+"Compose an image reports/p5/p5_ssr_thickness_ablation.png that shows Variant A on the left and Variant B on the right, clearly exposing undershoot artifacts on the left and their reduction or removal on the right.",
+"In src/passes/ssr.rs, during fallback_env.wgsl usage, count how many pixels actually use env fallback vs SSR hit, and write miss_ibl_ratio = miss_pixels / total_pixels into p5_meta['ssr']['miss_ibl_ratio'].",
+"Implement a miss-vs-IBL comparison test in the P5 harness:",
+"  - Render Frame SSR: full SSR path active for the glossy spheres scene.",
+"  - Render Frame IBL_REF: pure specular IBL reflection only (no SSR trace/shade), using the same environment BRDF used inside fallback_env.wgsl.",
+"  - Using the SSR trace buffer, find all pixels with hit_mask == 0 (miss pixels). For each such pixel, compare the final SSR-composited color versus the IBL_REF color.",
+"  - Compute color difference in CIE space (preferably CIEDE2000). Let max_delta_e_miss be the maximum ΔE over all miss pixels, and let min_rgb_miss be the minimum RGB component across miss pixels in the SSR image (in linear 0..1).",
+"  - Write p5_meta['ssr']['max_delta_e_miss'] = max_delta_e_miss and p5_meta['ssr']['min_rgb_miss'] = min_rgb_miss."
+],
+DELIVERABLES: [
+"reports/p5/p5_ssr_thickness_ablation.png with side-by-side no-thickness vs thickness images.",
+"Updated p5_meta.json containing 'miss_ibl_ratio', 'max_delta_e_miss', and 'min_rgb_miss'."
+],
+ACCEPTANCE: [
+"Visual: in p5_ssr_thickness_ablation.png, the left side (no thickness) shows obvious undershoot or floating reflections; the right side (thickness enabled) significantly reduces these artifacts.",
+"Numeric: max_delta_e_miss <= 2.0, and min_rgb_miss >= 2.0 / 255.0.",
+"miss_ibl_ratio is within a reasonable range (between 0.05 and 0.95 for the glossy spheres scene), indicating a mix of hits and misses."
+]
+},
+{
+ID: "M4",
+TITLE: "Edge cleanup and final acceptance enforcement",
+OBJECTIVE: "Eliminate bright streaks at depth discontinuities and enforce all SSR acceptance criteria via metrics and meta status.",
+TASKS: [
+"Implement an edge-streak analysis pass (CPU side in the P5 harness) for a frame rendered with SSR enabled:",
+"  - Given the final tonemapped image or linear pre-tonemap buffer, detect depth or normal discontinuities (e.g., from the G-buffer).",
+"  - Along these edges, run a simple 1D scan (horizontal and vertical) and detect contiguous runs of specular pixels whose brightness exceeds a high threshold relative to local neighborhood (streak candidates).",
+"  - Count streaks where run length > 1 pixel. Store this count as p5_meta['ssr_edge_streaks']['num_streaks_gt1px'].",
+"If necessary, add a small resolve step (in shade.wgsl or a new ssr/resolve_edges.wgsl) that clamps or smooths isolated specular outliers near depth discontinuities without destroying legitimate reflections:",
+"  - For example, for each pixel, compare its specular value to the median of a 3x3 neighborhood; if it is a large outlier only at depth edges, clamp it toward the neighborhood median.",
+"  - Re-run the edge-streak analysis after this resolve and ensure the count satisfies the acceptance threshold.",
+"Enforce monotonic reflectivity vs roughness using the ssr_stripe_contrast array:",
+"  - After computing ssr_stripe_contrast[0..8], verify that contrast[i] >= contrast[i+1] - epsilon for all i in 0..7 (epsilon small, e.g., 1e-3).",
+"  - If this check fails, annotate p5_meta['ssr_status'] = 'FAIL: stripe_contrast_not_monotonic'.",
+"Combine all SSR acceptance checks into a final p5_meta['ssr_status'] value:",
+"  - 'OK' only if ALL of the following hold:",
+"      * max_delta_e_miss <= 2.0",
+"      * min_rgb_miss >= 2.0/255.0",
+"      * ssr_edge_streaks.num_streaks_gt1px == 0 (or within a very small tolerance you encode explicitly, e.g., <= 2).",
+"      * ssr_stripe_contrast is monotonic non-increasing with respect to roughness.",
+"  - Otherwise, set ssr_status to a specific failure string describing the first failed condition."
+],
+DELIVERABLES: [
+"Edge-streak analysis code in the P5 harness and, if required, a small SSR resolve step in WGSL.",
+"Final p5_meta.json with a populated 'ssr_edge_streaks' object, a non-empty 'ssr_stripe_contrast' array, and an 'ssr_status' string.",
+"Updated p5_ssr_glossy_spheres.png and p5_ssr_thickness_ablation.png after any resolve tweaks."
+],
+ACCEPTANCE: [
+"ssr_stripe_contrast entries are monotonic non-increasing as roughness increases from 0.1 to 0.9.",
+"p5_meta['ssr']['max_delta_e_miss'] <= 2.0.",
+"p5_meta['ssr']['min_rgb_miss'] >= 2.0 / 255.0.",
+"p5_meta['ssr_edge_streaks']['num_streaks_gt1px'] == 0 or does not exceed the explicitly coded small tolerance.",
+"p5_meta['ssr_status'] == 'OK'."
+]
+}
+]
+}

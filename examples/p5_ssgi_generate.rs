@@ -22,10 +22,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ":ssgi-steps 24".to_string(),
         ":ssgi-radius 1.0".to_string(),
         ":ssgi-temporal-alpha 0.15".to_string(),
+        ":ssgi-temporal on".to_string(),
         ":ssgi-half off".to_string(),
         ":ssgi-edges on".to_string(),
-        ":ssgi-upsigma 0.02".to_string(),
-        ":ssgi-normexp 8.0".to_string(),
+        ":ssgi-upsample-sigma-depth 0.02".to_string(),
+        ":ssgi-upsample-sigma-normal 0.25".to_string(),
         // Generate the SSGI deliverables
         ":p5 ssgi-cornell".to_string(),
         ":p5 ssgi-temporal".to_string(),
