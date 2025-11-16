@@ -67,37 +67,98 @@ fn insert_shader_hashes(meta: &mut BTreeMap<String, Value>) {
 }
 
 fn ensure_ssr_defaults(meta: &mut BTreeMap<String, Value>) {
+    fn default_ssr_value() -> Value {
+        json!({
+            "hit_rate": 0.0,
+            "avg_steps": 0.0,
+            "miss_ibl_ratio": 0.0,
+            "perf_ms": {
+                "trace_ms": 0.0,
+                "shade_ms": 0.0,
+                "fallback_ms": 0.0,
+                "total_ssr_ms": 0.0
+            },
+            "max_delta_e_miss": 0.0,
+            "min_rgb_miss": 0.0,
+            "stripe_contrast": [],
+            "edge_streaks": {
+                "num_streaks_gt1px": 0
+            },
+            "status": "UNINITIALIZED"
+        })
+    }
+
     if !meta.contains_key("ssr") {
-        meta.insert(
-            "ssr".to_string(),
-            json!({
-                "hit_rate": 0.0,
-                "avg_steps": 0.0,
-                "miss_ibl_ratio": 0.0,
-                "perf_ms": {
+        meta.insert("ssr".to_string(), default_ssr_value());
+    }
+
+    // If legacy top-level fields exist, migrate them into the ssr object.
+    let legacy_contrast = meta.remove("ssr_stripe_contrast");
+    let legacy_streaks = meta.remove("ssr_edge_streaks");
+    let legacy_status = meta.remove("ssr_status");
+
+    let ssr_entry = meta.entry("ssr".to_string()).or_insert_with(default_ssr_value);
+    if !ssr_entry.is_object() {
+        *ssr_entry = default_ssr_value();
+    }
+
+    if let Some(ssr) = ssr_entry.as_object_mut() {
+        if !ssr.contains_key("hit_rate") {
+            ssr.insert("hit_rate".to_string(), json!(0.0));
+        }
+        if !ssr.contains_key("avg_steps") {
+            ssr.insert("avg_steps".to_string(), json!(0.0));
+        }
+        if !ssr.contains_key("miss_ibl_ratio") {
+            ssr.insert("miss_ibl_ratio".to_string(), json!(0.0));
+        }
+        if !ssr.contains_key("perf_ms") {
+            ssr.insert(
+                "perf_ms".to_string(),
+                json!({
                     "trace_ms": 0.0,
                     "shade_ms": 0.0,
                     "fallback_ms": 0.0,
                     "total_ssr_ms": 0.0
-                },
-                "max_delta_e_miss": 0.0,
-                "min_rgb_miss": 0.0
-            }),
-        );
-    }
-    if !meta.contains_key("ssr_stripe_contrast") {
-        meta.insert("ssr_stripe_contrast".to_string(), json!([]));
-    }
-    if !meta.contains_key("ssr_edge_streaks") {
-        meta.insert(
-            "ssr_edge_streaks".to_string(),
-            json!({
-                "num_streaks_gt1px": 0
-            }),
-        );
-    }
-    if !meta.contains_key("ssr_status") {
-        meta.insert("ssr_status".to_string(), json!("UNINITIALIZED"));
+                }),
+            );
+        }
+        if !ssr.contains_key("max_delta_e_miss") {
+            ssr.insert("max_delta_e_miss".to_string(), json!(0.0));
+        }
+        if !ssr.contains_key("min_rgb_miss") {
+            ssr.insert("min_rgb_miss".to_string(), json!(0.0));
+        }
+        match legacy_contrast {
+            Some(val) => {
+                ssr.insert("stripe_contrast".to_string(), val);
+            }
+            None => {
+                ssr.entry("stripe_contrast".to_string())
+                    .or_insert_with(|| json!([]));
+            }
+        }
+        match legacy_streaks {
+            Some(val) => {
+                ssr.insert("edge_streaks".to_string(), val);
+            }
+            None => {
+                ssr.entry("edge_streaks".to_string()).or_insert_with(|| {
+                    json!({
+                        "num_streaks_gt1px": 0
+                    })
+                });
+            }
+        }
+        match legacy_status {
+            Some(val) => {
+                ssr.insert("status".to_string(), val);
+            }
+            None => {
+                ssr.entry("status".to_string())
+                    .or_insert_with(|| json!("UNINITIALIZED"));
+            }
+        }
     }
 }
 

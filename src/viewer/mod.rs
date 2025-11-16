@@ -16,6 +16,7 @@ use crate::util::image_write;
 use anyhow::bail;
 use camera_controller::{CameraController, CameraMode};
 use glam::{Mat4, Vec3};
+use image::GenericImageView;
 use half::f16;
 use serde_json::json;
 use std::collections::VecDeque;
@@ -1117,31 +1118,50 @@ impl Viewer {
     fn capture_material_rgba8(&self) -> anyhow::Result<Vec<u8>> {
         use anyhow::Context;
         let gi = self.gi.as_ref().context("GI manager not available")?;
-        let comp_pl = self.comp_pipeline.as_ref().context("comp pipeline")?;
-        let comp_bgl = self.comp_bind_group_layout.as_ref().context("comp bgl")?;
-        let fog_view = if self.fog_enabled {
-            &self.fog_output_view
-        } else {
-            &self.fog_zero_view
-        };
         let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
-        Self::render_view_to_rgba8_ex(
-            &self.device,
-            &self.queue,
-            comp_pl,
-            comp_bgl,
-            &self.sky_output_view,
-            &gi.gbuffer().depth_view,
-            fog_view,
-            self.config.format,
-            self.config.width,
-            self.config.height,
-            far,
-            gi.material_with_ssgi_view()
-                .or_else(|| gi.material_with_ao_view())
-                .unwrap_or(&gi.gbuffer().material_view),
-            0,
-        )
+        self.with_comp_pipeline(|comp_pl, comp_bgl| {
+            let fog_view = if self.fog_enabled {
+                &self.fog_output_view
+            } else {
+                &self.fog_zero_view
+            };
+            Self::render_view_to_rgba8_ex(
+                &self.device,
+                &self.queue,
+                comp_pl,
+                comp_bgl,
+                &self.sky_output_view,
+                &gi.gbuffer().depth_view,
+                fog_view,
+                self.config.format,
+                self.config.width,
+                self.config.height,
+                far,
+                gi.material_with_ssr_view()
+                    .or_else(|| gi.material_with_ssgi_view())
+                    .or_else(|| gi.material_with_ao_view())
+                    .unwrap_or(&gi.gbuffer().material_view),
+                0,
+            )
+        })
+    }
+
+    fn with_comp_pipeline<T>(
+        &self,
+        f: impl FnOnce(&wgpu::RenderPipeline, &wgpu::BindGroupLayout) -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        use anyhow::Context;
+        let comp_pl = self
+            .comp_pipeline
+            .as_ref()
+            .context("comp pipeline")?
+            as &wgpu::RenderPipeline;
+        let comp_bgl = self
+            .comp_bind_group_layout
+            .as_ref()
+            .context("comp bgl")?
+            as &wgpu::BindGroupLayout;
+        f(comp_pl, comp_bgl)
     }
 
     fn read_ssgi_filtered_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
@@ -1181,6 +1201,24 @@ impl Viewer {
             wgpu::TextureFormat::Rgba16Float,
         )
         .context("read SSGI hit texture")?;
+        Ok((bytes, dims))
+    }
+
+    fn read_ssr_hit_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
+        use anyhow::Context;
+        let gi = self.gi.as_ref().context("GI manager not available")?;
+        let tex = gi
+            .ssr_hit_texture()
+            .context("SSR hit texture unavailable")?;
+        let dims = gi.gbuffer().dimensions();
+        let bytes = read_texture_tight(
+            &self.device,
+            &self.queue,
+            tex,
+            dims,
+            wgpu::TextureFormat::Rgba16Float,
+        )
+        .context("read SSR hit texture")?;
         Ok((bytes, dims))
     }
 
@@ -3923,7 +3961,9 @@ impl Viewer {
                 }
                 let (mode_u32, src_view) = match self.viz_mode {
                     VizMode::Material => {
-                        if self.use_ssao_composite {
+                        if let Some(v) = gi.material_with_ssr_view() {
+                            (0u32, v)
+                        } else if self.use_ssao_composite {
                             if let Some(v) = gi.material_with_ao_view() {
                                 (0u32, v)
                             } else {
@@ -4378,6 +4418,11 @@ impl Viewer {
                         eprintln!("[P5.3] SSR glossy spheres capture failed: {}", e);
                     }
                 }
+                CaptureKind::P53SsrThickness => {
+                    if let Err(e) = self.capture_p53_ssr_thickness_ablation() {
+                        eprintln!("[P5.3] SSR thickness ablation capture failed: {}", e);
+                    }
+                }
             }
         }
 
@@ -4796,50 +4841,54 @@ impl Viewer {
         let (off_bytes, on_bytes, w, h) = {
             let gi = self.gi.as_ref().context("GI manager not available")?;
             let (w, h) = gi.gbuffer().dimensions();
-            let comp_pl = self.comp_pipeline.as_ref().context("comp pipeline")?;
-            let comp_bgl = self.comp_bind_group_layout.as_ref().context("comp bgl")?;
             let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
-            let off_bytes = Self::render_view_to_rgba8_ex(
-                &self.device,
-                &self.queue,
-                comp_pl,
-                comp_bgl,
-                &self.sky_output_view,
-                &gi.gbuffer().depth_view,
-                if self.fog_enabled {
+            let off_bytes = self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                let fog_view = if self.fog_enabled {
                     &self.fog_output_view
                 } else {
                     &self.fog_zero_view
-                },
-                self.config.format,
-                self.config.width,
-                self.config.height,
-                far,
-                &gi.gbuffer().material_view,
-                0,
-            )?;
+                };
+                Self::render_view_to_rgba8_ex(
+                    &self.device,
+                    &self.queue,
+                    comp_pl,
+                    comp_bgl,
+                    &self.sky_output_view,
+                    &gi.gbuffer().depth_view,
+                    fog_view,
+                    self.config.format,
+                    self.config.width,
+                    self.config.height,
+                    far,
+                    &gi.gbuffer().material_view,
+                    0,
+                )
+            })?;
             let on_view = gi
                 .material_with_ao_view()
                 .unwrap_or(&gi.gbuffer().material_view);
-            let on_bytes = Self::render_view_to_rgba8_ex(
-                &self.device,
-                &self.queue,
-                comp_pl,
-                comp_bgl,
-                &self.sky_output_view,
-                &gi.gbuffer().depth_view,
-                if self.fog_enabled {
+            let on_bytes = self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                let fog_view = if self.fog_enabled {
                     &self.fog_output_view
                 } else {
                     &self.fog_zero_view
-                },
-                self.config.format,
-                self.config.width,
-                self.config.height,
-                far,
-                on_view,
-                0,
-            )?;
+                };
+                Self::render_view_to_rgba8_ex(
+                    &self.device,
+                    &self.queue,
+                    comp_pl,
+                    comp_bgl,
+                    &self.sky_output_view,
+                    &gi.gbuffer().depth_view,
+                    fog_view,
+                    self.config.format,
+                    self.config.width,
+                    self.config.height,
+                    far,
+                    on_view,
+                    0,
+                )
+            })?;
             (off_bytes, on_bytes, w, h)
         };
         // Assemble side-by-side
@@ -4969,8 +5018,6 @@ impl Viewer {
             self.reexecute_ssao_with(*tech)?;
             let (raw_bytes, blur_bytes, resolved_bytes) = {
                 let gi = self.gi.as_ref().unwrap();
-                let comp_pl = self.comp_pipeline.as_ref().context("comp pipeline")?;
-                let comp_bgl = self.comp_bind_group_layout.as_ref().context("comp bgl")?;
                 let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
                 let raw = gi.ao_raw_view().context("raw AO view missing")?;
                 let blur_v = gi
@@ -4982,51 +5029,57 @@ impl Viewer {
                 } else {
                     &self.fog_zero_view
                 };
-                let raw_b = Self::render_view_to_rgba8_ex(
-                    &self.device,
-                    &self.queue,
-                    comp_pl,
-                    comp_bgl,
-                    &self.sky_output_view,
-                    &gi.gbuffer().depth_view,
-                    fog_v,
-                    self.config.format,
-                    self.config.width,
-                    self.config.height,
-                    far,
-                    raw,
-                    3,
-                )?;
-                let blur_v_b = Self::render_view_to_rgba8_ex(
-                    &self.device,
-                    &self.queue,
-                    comp_pl,
-                    comp_bgl,
-                    &self.sky_output_view,
-                    &gi.gbuffer().depth_view,
-                    fog_v,
-                    self.config.format,
-                    self.config.width,
-                    self.config.height,
-                    far,
-                    blur_v,
-                    3,
-                )?;
-                let temporal_b = Self::render_view_to_rgba8_ex(
-                    &self.device,
-                    &self.queue,
-                    comp_pl,
-                    comp_bgl,
-                    &self.sky_output_view,
-                    &gi.gbuffer().depth_view,
-                    fog_v,
-                    self.config.format,
-                    self.config.width,
-                    self.config.height,
-                    far,
-                    temporal,
-                    3,
-                )?;
+                let raw_b = self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                    Self::render_view_to_rgba8_ex(
+                        &self.device,
+                        &self.queue,
+                        comp_pl,
+                        comp_bgl,
+                        &self.sky_output_view,
+                        &gi.gbuffer().depth_view,
+                        fog_v,
+                        self.config.format,
+                        self.config.width,
+                        self.config.height,
+                        far,
+                        raw,
+                        3,
+                    )
+                })?;
+                let blur_v_b = self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                    Self::render_view_to_rgba8_ex(
+                        &self.device,
+                        &self.queue,
+                        comp_pl,
+                        comp_bgl,
+                        &self.sky_output_view,
+                        &gi.gbuffer().depth_view,
+                        fog_v,
+                        self.config.format,
+                        self.config.width,
+                        self.config.height,
+                        far,
+                        blur_v,
+                        3,
+                    )
+                })?;
+                let temporal_b = self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                    Self::render_view_to_rgba8_ex(
+                        &self.device,
+                        &self.queue,
+                        comp_pl,
+                        comp_bgl,
+                        &self.sky_output_view,
+                        &gi.gbuffer().depth_view,
+                        fog_v,
+                        self.config.format,
+                        self.config.width,
+                        self.config.height,
+                        far,
+                        temporal,
+                        3,
+                    )
+                })?;
                 (raw_b, blur_v_b, temporal_b)
             };
             tiles.push(raw_bytes);
@@ -5179,36 +5232,38 @@ impl Viewer {
                     gim.build_hzb(&self.device, &mut enc, self.z_view.as_ref().unwrap(), false);
                     let _ = gim.execute(&self.device, &mut enc);
                     self.queue.submit(std::iter::once(enc.finish()));
-                    let (tile_bytes) = {
-                        let comp_pl = self.comp_pipeline.as_ref().context("comp pipeline")?;
-                        let comp_bgl = self.comp_bind_group_layout.as_ref().context("comp bgl")?;
-                        let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
-                        let view = gim
-                            .material_with_ao_view()
-                            .unwrap_or(&gim.gbuffer().material_view);
-                        let fog_v = if self.fog_enabled {
-                            &self.fog_output_view
-                        } else {
-                            &self.fog_zero_view
-                        };
-                        Self::render_view_to_rgba8_ex(
-                            &self.device,
-                            &self.queue,
-                            comp_pl,
-                            comp_bgl,
-                            &self.sky_output_view,
-                            &gim.gbuffer().depth_view,
-                            fog_v,
-                            self.config.format,
-                            self.config.width,
-                            self.config.height,
-                            far,
-                            view,
-                            0,
-                        )?
-                    };
-                    tiles.push(tile_bytes);
+                } else {
+                    continue;
                 }
+                let gi = self.gi.as_ref().context("GI manager not available")?;
+                let tile_view = gi
+                    .material_with_ao_view()
+                    .unwrap_or(&gi.gbuffer().material_view);
+                let depth_view = &gi.gbuffer().depth_view;
+                let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
+                let tile_bytes = self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                    let fog_view = if self.fog_enabled {
+                        &self.fog_output_view
+                    } else {
+                        &self.fog_zero_view
+                    };
+                    Self::render_view_to_rgba8_ex(
+                        &self.device,
+                        &self.queue,
+                        comp_pl,
+                        comp_bgl,
+                        &self.sky_output_view,
+                        depth_view,
+                        fog_view,
+                        self.config.format,
+                        self.config.width,
+                        self.config.height,
+                        far,
+                        tile_view,
+                        0,
+                    )
+                })?;
+                tiles.push(tile_bytes);
             }
         }
         // Assemble 3x3 grid (rows=radii, cols=intens)
@@ -5266,27 +5321,345 @@ impl Viewer {
     }
 
     fn capture_p53_ssr_glossy(&mut self) -> anyhow::Result<()> {
-        use anyhow::Context;
+        use anyhow::{bail, Context};
         use std::fs;
+
+        const SSR_REF_NAME: &str = "p5_ssr_glossy_reference.png";
 
         let out_dir = Path::new("reports/p5");
         fs::create_dir_all(out_dir)?;
 
+        {
+            if let Some(ref mut gi_mgr) = self.gi {
+                if !gi_mgr.is_enabled(SSE::SSR) {
+                    gi_mgr.enable_effect(&self.device, SSE::SSR)?;
+                }
+            } else {
+                bail!("GI manager not available");
+            }
+            self.sync_ssr_params_to_gi();
+        }
+
+        let capture_w = self.config.width.max(1);
+        let capture_h = self.config.height.max(1);
+        let original_ssr_enable = self.ssr_params.ssr_enable;
+        let (reference_bytes, ssr_bytes) = {
+            let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
+
+            self.ssr_params.set_enabled(false);
+            self.sync_ssr_params_to_gi();
+            self.reexecute_gi()?;
+            let reference_bytes = {
+                let gi = self.gi.as_ref().context("GI manager not available")?;
+                self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                    let fog_view = if self.fog_enabled {
+                        &self.fog_output_view
+                    } else {
+                        &self.fog_zero_view
+                    };
+                    Self::render_view_to_rgba8_ex(
+                        &self.device,
+                        &self.queue,
+                        comp_pl,
+                        comp_bgl,
+                        &self.sky_output_view,
+                        &gi.gbuffer().depth_view,
+                        fog_view,
+                        self.config.format,
+                        capture_w,
+                        capture_h,
+                        far,
+                        &gi.gbuffer().material_view,
+                        0,
+                    )
+                })?
+            };
+
+            self.ssr_params.set_enabled(true);
+            self.sync_ssr_params_to_gi();
+            self.reexecute_gi()?;
+            let ssr_bytes = {
+                let gi = self.gi.as_ref().context("GI manager not available")?;
+                let ssr_view = gi
+                    .material_with_ssr_view()
+                    .unwrap_or(&gi.gbuffer().material_view);
+                self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                    let fog_view = if self.fog_enabled {
+                        &self.fog_output_view
+                    } else {
+                        &self.fog_zero_view
+                    };
+                    Self::render_view_to_rgba8_ex(
+                        &self.device,
+                        &self.queue,
+                        comp_pl,
+                        comp_bgl,
+                        &self.sky_output_view,
+                        &gi.gbuffer().depth_view,
+                        fog_view,
+                        self.config.format,
+                        capture_w,
+                        capture_h,
+                        far,
+                        ssr_view,
+                        0,
+                    )
+                })?
+            };
+
+            (reference_bytes, ssr_bytes)
+        };
+
+        if original_ssr_enable != self.ssr_params.ssr_enable {
+            self.ssr_params.set_enabled(original_ssr_enable);
+            self.sync_ssr_params_to_gi();
+            self.reexecute_gi()?;
+        }
+
+        let (hit_rate, avg_steps, miss_ratio) = {
+            let (hit_bytes, dims) = self.read_ssr_hit_bytes()?;
+            let total_px = (dims.0 as u64) * (dims.1 as u64);
+            if total_px == 0 {
+                (0.0, 0.0, 0.0)
+            } else {
+                let max_steps = self.ssr_params.ssr_max_steps.max(1) as f32;
+                let mut hit_px = 0u64;
+                let mut step_acc = 0.0f64;
+                for chunk in hit_bytes.chunks_exact(8) {
+                    let mask = f16::from_le_bytes([chunk[6], chunk[7]]).to_f32();
+                    if mask >= 0.5 {
+                        hit_px += 1;
+                        let steps_norm = f16::from_le_bytes([chunk[4], chunk[5]]).to_f32();
+                        let steps = (steps_norm * max_steps).clamp(0.0, max_steps);
+                        step_acc += steps as f64;
+                    }
+                }
+                let hit_rate = hit_px as f32 / total_px as f32;
+                let miss_ratio = 1.0 - hit_rate;
+                let avg_steps = if hit_px > 0 {
+                    (step_acc / hit_px as f64) as f32
+                } else {
+                    0.0
+                };
+                (hit_rate, avg_steps, miss_ratio)
+            }
+        };
+
         let preset = ssr::SsrScenePreset::load_or_default(ssr::default_scene_path())
             .context("load p5_ssr_scene.json")?;
-        let png_path = out_dir.join(ssr::DEFAULT_OUTPUT_NAME);
-        ssr::write_glossy_png(&preset, &png_path)?;
-        println!("[P5] Wrote {}", png_path.display());
+        let contrast_values =
+            ssr::stripe_contrast(&preset, ssr_bytes.as_slice(), capture_w, capture_h);
+
+        let ssr_path = out_dir.join(ssr::DEFAULT_OUTPUT_NAME);
+        image_write::write_png_rgba8_small(&ssr_path, &ssr_bytes, capture_w, capture_h)?;
+        println!("[P5] Wrote {}", ssr_path.display());
+
+        let ref_path = out_dir.join(SSR_REF_NAME);
+        image_write::write_png_rgba8_small(&ref_path, &reference_bytes, capture_w, capture_h)?;
+        println!("[P5] Wrote {}", ref_path.display());
+
+        let mean_diff = mean_abs_diff(&reference_bytes, &ssr_bytes);
+
         println!(
             "[P5.3] SSR params -> enable: {}, max_steps: {}, thickness: {:.3}",
-            self.ssr_params.ssr_enable,
+            true,
             self.ssr_params.ssr_max_steps,
             self.ssr_params.ssr_thickness
         );
+        println!(
+            "[P5.3] SSR metrics -> hit_rate {:.3}, avg_steps {:.2}, diff {:.4}",
+            hit_rate, avg_steps, mean_diff
+        );
+
+        let mut fail_reasons = Vec::new();
+        if contrast_values.len() != 9 {
+            fail_reasons.push(format!(
+                "stripe_contrast_len={}",
+                contrast_values.len()
+            ));
+        }
+        if !contrast_values
+            .windows(2)
+            .all(|w| w[0] + 1e-3 >= w[1])
+        {
+            fail_reasons.push("stripe_contrast_not_monotonic".to_string());
+        }
+        let head_tail_delta = contrast_values
+            .first()
+            .zip(contrast_values.last())
+            .map(|(a, b)| a - b)
+            .unwrap_or(0.0);
+        if head_tail_delta < 0.2 {
+            fail_reasons.push(format!("stripe_contrast_delta={:.3}", head_tail_delta));
+        }
+        const MIN_DIFF: f32 = 1e-3;
+        if mean_diff < MIN_DIFF {
+            fail_reasons.push(format!("reference_diff={:.4}", mean_diff));
+        }
+        let status = if fail_reasons.is_empty() {
+            "SHADE_READY".to_string()
+        } else {
+            format!("FAIL: {}", fail_reasons.join(", "))
+        };
+
+        let (trace_ms, shade_ms, fallback_ms) = self
+            .gi
+            .as_ref()
+            .and_then(|gi| gi.ssr_timings_ms())
+            .unwrap_or((0.0, 0.0, 0.0));
 
         p5_meta::write_p5_meta(out_dir, |meta| {
-            meta.insert("ssr_status".to_string(), json!("UNINITIALIZED"));
+            if let Some(obj) = meta.get_mut("ssr").and_then(|v| v.as_object_mut()) {
+                obj.insert("hit_rate".to_string(), json!(hit_rate));
+                obj.insert("avg_steps".to_string(), json!(avg_steps));
+                obj.insert("miss_ibl_ratio".to_string(), json!(miss_ratio));
+                obj.insert(
+                    "perf_ms".to_string(),
+                    json!({
+                        "trace_ms": trace_ms,
+                        "shade_ms": shade_ms,
+                        "fallback_ms": fallback_ms,
+                        "total_ssr_ms": trace_ms + shade_ms + fallback_ms
+                    }),
+                );
+                obj.insert(
+                    "stripe_contrast".to_string(),
+                    json!(contrast_values),
+                );
+                obj.insert("status".to_string(), json!(status));
+                obj.insert(
+                    "ref_vs_ssr_mean_abs_diff".to_string(),
+                    json!(mean_diff),
+                );
+            }
         })?;
+
+        Ok(())
+    }
+
+    fn capture_p53_ssr_thickness_ablation(&mut self) -> anyhow::Result<()> {
+        use anyhow::{bail, Context};
+        use std::fs;
+
+        const OUTPUT_NAME: &str = "p5_ssr_thickness_ablation.png";
+
+        let out_dir = Path::new("reports/p5");
+        fs::create_dir_all(out_dir)?;
+
+        {
+            if let Some(ref mut gi_mgr) = self.gi {
+                if !gi_mgr.is_enabled(SSE::SSR) {
+                    gi_mgr.enable_effect(&self.device, SSE::SSR)?;
+                }
+            } else {
+                bail!("GI manager not available");
+            }
+            self.sync_ssr_params_to_gi();
+        }
+
+        let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
+        let capture_w = self.config.width.max(1);
+        let capture_h = self.config.height.max(1);
+        let original_thickness = self.ssr_params.ssr_thickness;
+        let original_enable = self.ssr_params.ssr_enable;
+
+        self.ssr_params.set_enabled(true);
+
+        self.ssr_params.set_thickness(0.0);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi()?;
+        let off_bytes = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            let ssr_view = gi
+                .material_with_ssr_view()
+                .unwrap_or(&gi.gbuffer().material_view);
+            self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                let fog_view = if self.fog_enabled {
+                    &self.fog_output_view
+                } else {
+                    &self.fog_zero_view
+                };
+                Self::render_view_to_rgba8_ex(
+                    &self.device,
+                    &self.queue,
+                    comp_pl,
+                    comp_bgl,
+                    &self.sky_output_view,
+                    &gi.gbuffer().depth_view,
+                    fog_view,
+                    self.config.format,
+                    capture_w,
+                    capture_h,
+                    far,
+                    ssr_view,
+                    0,
+                )
+            })?
+        };
+
+        let restored_thickness = if original_thickness <= 0.0 {
+            0.08
+        } else {
+            original_thickness
+        };
+        self.ssr_params.set_thickness(restored_thickness);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi()?;
+        let on_bytes = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            let ssr_view = gi
+                .material_with_ssr_view()
+                .unwrap_or(&gi.gbuffer().material_view);
+            self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                let fog_view = if self.fog_enabled {
+                    &self.fog_output_view
+                } else {
+                    &self.fog_zero_view
+                };
+                Self::render_view_to_rgba8_ex(
+                    &self.device,
+                    &self.queue,
+                    comp_pl,
+                    comp_bgl,
+                    &self.sky_output_view,
+                    &gi.gbuffer().depth_view,
+                    fog_view,
+                    self.config.format,
+                    capture_w,
+                    capture_h,
+                    far,
+                    ssr_view,
+                    0,
+                )
+            })?
+        };
+
+        self.ssr_params.set_thickness(original_thickness);
+        self.ssr_params.set_enabled(original_enable);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi()?;
+
+        let out_w = capture_w * 2;
+        let out_h = capture_h;
+        let mut composed = vec![0u8; (out_w * out_h * 4) as usize];
+        let row_bytes = (capture_w as usize) * 4;
+        for y in 0..(capture_h as usize) {
+            let dst_off = y * row_bytes * 2;
+            let src_off = y * row_bytes;
+            composed[dst_off..dst_off + row_bytes]
+                .copy_from_slice(&off_bytes[src_off..src_off + row_bytes]);
+            composed[dst_off + row_bytes..dst_off + row_bytes * 2]
+                .copy_from_slice(&on_bytes[src_off..src_off + row_bytes]);
+        }
+
+        let out_path = out_dir.join(OUTPUT_NAME);
+        image_write::write_png_rgba8_small(&out_path, &composed, out_w, out_h)?;
+        println!(
+            "[P5] Wrote {} (thickness off {:.3} | on {:.3})",
+            out_path.display(),
+            0.0,
+            restored_thickness
+        );
 
         Ok(())
     }
@@ -5326,6 +5699,19 @@ fn compute_max_delta_e(a: &[u8], b: &[u8]) -> f32 {
         }
     }
     max_de
+}
+
+fn mean_abs_diff(a: &[u8], b: &[u8]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let mut sum = 0.0f32;
+    for (&xa, &xb) in a.iter().zip(b.iter()) {
+        let da = xa as f32 / 255.0;
+        let db = xb as f32 / 255.0;
+        sum += (da - db).abs();
+    }
+    sum / (a.len() as f32)
 }
 
 fn rgb_to_lab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
@@ -5500,6 +5886,7 @@ enum ViewerCmd {
     CaptureP52SsgiCornell,
     CaptureP52SsgiTemporal,
     CaptureP53SsrGlossy,
+    CaptureP53SsrThickness,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5525,6 +5912,7 @@ enum CaptureKind {
     P52SsgiCornell,
     P52SsgiTemporal,
     P53SsrGlossy,
+    P53SsrThickness,
 }
 
 impl Viewer {
@@ -5803,6 +6191,11 @@ impl Viewer {
             ViewerCmd::CaptureP53SsrGlossy => {
                 self.pending_captures.push_back(CaptureKind::P53SsrGlossy);
                 println!("[P5.3] capture: SSR glossy spheres queued");
+            }
+            ViewerCmd::CaptureP53SsrThickness => {
+                self.pending_captures
+                    .push_back(CaptureKind::P53SsrThickness);
+                println!("[P5.3] capture: SSR thickness ablation queued");
             }
             // Sky controls
             ViewerCmd::SkyToggle(on) => {
@@ -6121,8 +6514,9 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     "ssgi-cornell" => pending_cmds.push(ViewerCmd::CaptureP52SsgiCornell),
                     "ssgi-temporal" => pending_cmds.push(ViewerCmd::CaptureP52SsgiTemporal),
                     "ssr-glossy" => pending_cmds.push(ViewerCmd::CaptureP53SsrGlossy),
+                    "ssr-thickness" => pending_cmds.push(ViewerCmd::CaptureP53SsrThickness),
                     _ => println!(
-                        "Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy>"
+                        "Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy|ssr-thickness>"
                     ),
                 }
             } else if l.starts_with(":obj") || l.starts_with("obj ") {
@@ -6567,8 +6961,11 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                         "ssr-glossy" => {
                             let _ = proxy.send_event(ViewerCmd::CaptureP53SsrGlossy);
                         }
+                        "ssr-thickness" => {
+                            let _ = proxy.send_event(ViewerCmd::CaptureP53SsrThickness);
+                        }
                         _ => println!(
-                            "Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy>"
+                            "Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy|ssr-thickness>"
                         ),
                     }
                 } else {
@@ -7107,7 +7504,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 break;
             } else {
                 println!(
-                    "Commands:\n  :gi <ssao|ssgi|ssr> <on|off>\n  :viz <material|normal|depth|gi|lit>\n  :viz-depth-max <float>\n  :ibl <on|off|load <path>|intensity <f>|rotate <deg>|cache <dir>|res <u32>>\n  :brdf <lambert|phong|ggx|disney>\n  :snapshot [path]\n  :obj <path> | :gltf <path>\n  :sky off|on|preetham|hosek-wilkie | :sky-turbidity <f> | :sky-ground <f> | :sky-exposure <f> | :sky-sun <f>\n  :fog <on|off> | :fog-density <f> | :fog-g <f> | :fog-steps <u32> | :fog-shadow <on|off> | :fog-temporal <0..0.9> | :fog-mode <raymarch|froxels> | :fog-preset <low|med|high>\n  Lit:  :lit-sun <float> | :lit-ibl <float>\n  SSAO: :ssao-technique <ssao|gtao> | :ssao-radius <f> | :ssao-intensity <f> | :ssao-composite <on|off> | :ssao-mul <0..1>\n  SSGI: :ssgi-steps <u32> | :ssgi-radius <f> | :ssgi-half <on|off> | :ssgi-temporal <on|off> | :ssgi-temporal-alpha <0..1> | :ssgi-edges <on|off> | :ssgi-upsample-sigma-depth <f> | :ssgi-upsample-sigma-normal <f>\n  SSR:  :ssr-max-steps <u32> | :ssr-thickness <f>\n  P5:   :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy>\n  :quit"
+                    "Commands:\n  :gi <ssao|ssgi|ssr> <on|off>\n  :viz <material|normal|depth|gi|lit>\n  :viz-depth-max <float>\n  :ibl <on|off|load <path>|intensity <f>|rotate <deg>|cache <dir>|res <u32>>\n  :brdf <lambert|phong|ggx|disney>\n  :snapshot [path]\n  :obj <path> | :gltf <path>\n  :sky off|on|preetham|hosek-wilkie | :sky-turbidity <f> | :sky-ground <f> | :sky-exposure <f> | :sky-sun <f>\n  :fog <on|off> | :fog-density <f> | :fog-g <f> | :fog-steps <u32> | :fog-shadow <on|off> | :fog-temporal <0..0.9> | :fog-mode <raymarch|froxels> | :fog-preset <low|med|high>\n  Lit:  :lit-sun <float> | :lit-ibl <float>\n  SSAO: :ssao-technique <ssao|gtao> | :ssao-radius <f> | :ssao-intensity <f> | :ssao-composite <on|off> | :ssao-mul <0..1>\n  SSGI: :ssgi-steps <u32> | :ssgi-radius <f> | :ssgi-half <on|off> | :ssgi-temporal <on|off> | :ssgi-temporal-alpha <0..1> | :ssgi-edges <on|off> | :ssgi-upsample-sigma-depth <f> | :ssgi-upsample-sigma-normal <f>\n  SSR:  :ssr-max-steps <u32> | :ssr-thickness <f>\n  P5:   :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy|ssr-thickness>\n  :quit"
                 );
             }
         }

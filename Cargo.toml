@@ -115,6 +115,10 @@ path = "examples/p5_ssr_generate.rs"
 name = "p5_ssr_glossy"
 path = "examples/p5_ssr_glossy.rs"
 
+[[example]]
+name = "p5_ssr_thickness_ablation"
+path = "examples/p5_ssr_thickness_ablation.rs"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"
