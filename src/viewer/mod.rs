@@ -9,7 +9,7 @@ pub mod camera_controller;
 
 use crate::core::ibl::{IBLQuality, IBLRenderer};
 use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
-use crate::p5::{meta as p5_meta, ssr};
+use crate::p5::{meta as p5_meta, ssr, ssr_analysis};
 use crate::render::params::SsrParams;
 use crate::renderer::readback::read_texture_tight;
 use crate::util::image_write;
@@ -5447,8 +5447,14 @@ impl Viewer {
 
         let preset = ssr::SsrScenePreset::load_or_default(ssr::default_scene_path())
             .context("load p5_ssr_scene.json")?;
-        let contrast_values =
-            ssr::stripe_contrast(&preset, ssr_bytes.as_slice(), capture_w, capture_h);
+        let contrast_values = ssr_analysis::analyze_stripe_contrast(
+            &preset,
+            &reference_bytes,
+            &ssr_bytes,
+            capture_w,
+            capture_h,
+        );
+        let edge_streaks = ssr_analysis::count_edge_streaks(&ssr_bytes, capture_w, capture_h);
 
         let ssr_path = out_dir.join(ssr::DEFAULT_OUTPUT_NAME);
         image_write::write_png_rgba8_small(&ssr_path, &ssr_bytes, capture_w, capture_h)?;
@@ -5470,6 +5476,13 @@ impl Viewer {
             "[P5.3] SSR metrics -> hit_rate {:.3}, avg_steps {:.2}, diff {:.4}",
             hit_rate, avg_steps, mean_diff
         );
+
+        let (trace_ms, shade_ms, fallback_ms) = self
+            .gi
+            .as_ref()
+            .and_then(|gi| gi.ssr_timings_ms())
+            .unwrap_or((0.0, 0.0, 0.0));
+        let total_ssr_ms = trace_ms + shade_ms + fallback_ms;
 
         let mut fail_reasons = Vec::new();
         if contrast_values.len() != 9 {
@@ -5496,17 +5509,18 @@ impl Viewer {
         if mean_diff < MIN_DIFF {
             fail_reasons.push(format!("reference_diff={:.4}", mean_diff));
         }
-        let status = if fail_reasons.is_empty() {
-            "SHADE_READY".to_string()
-        } else {
+        let mut status = if !fail_reasons.is_empty() {
             format!("FAIL: {}", fail_reasons.join(", "))
+        } else {
+            "SHADE_READY".to_string()
         };
-
-        let (trace_ms, shade_ms, fallback_ms) = self
-            .gi
-            .as_ref()
-            .and_then(|gi| gi.ssr_timings_ms())
-            .unwrap_or((0.0, 0.0, 0.0));
+        if total_ssr_ms <= 0.0
+            || contrast_values
+                .iter()
+                .all(|v| v.abs() <= 1e-3)
+        {
+            status = "UNINITIALIZED".to_string();
+        }
 
         p5_meta::write_p5_meta(out_dir, |meta| {
             if let Some(obj) = meta.get_mut("ssr").and_then(|v| v.as_object_mut()) {
@@ -5519,13 +5533,21 @@ impl Viewer {
                         "trace_ms": trace_ms,
                         "shade_ms": shade_ms,
                         "fallback_ms": fallback_ms,
-                        "total_ssr_ms": trace_ms + shade_ms + fallback_ms
+                        "total_ssr_ms": total_ssr_ms
                     }),
                 );
                 obj.insert(
                     "stripe_contrast".to_string(),
                     json!(contrast_values),
                 );
+                obj.insert(
+                    "edge_streaks".to_string(),
+                    json!({
+                        "num_streaks_gt1px": edge_streaks
+                    }),
+                );
+                obj.insert("max_delta_e_miss".to_string(), json!(0.0));
+                obj.insert("min_rgb_miss".to_string(), json!(0.0));
                 obj.insert("status".to_string(), json!(status));
                 obj.insert(
                     "ref_vs_ssr_mean_abs_diff".to_string(),
@@ -5654,11 +5676,17 @@ impl Viewer {
 
         let out_path = out_dir.join(OUTPUT_NAME);
         image_write::write_png_rgba8_small(&out_path, &composed, out_w, out_h)?;
+        let streaks_off = ssr_analysis::count_edge_streaks(&off_bytes, capture_w, capture_h);
+        let streaks_on = ssr_analysis::count_edge_streaks(&on_bytes, capture_w, capture_h);
         println!(
             "[P5] Wrote {} (thickness off {:.3} | on {:.3})",
             out_path.display(),
             0.0,
             restored_thickness
+        );
+        println!(
+            "[P5.3] Edge streak counts -> off: {} | on: {}",
+            streaks_off, streaks_on
         );
 
         Ok(())

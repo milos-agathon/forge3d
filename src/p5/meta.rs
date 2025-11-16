@@ -169,80 +169,27 @@ fn sha256_hex(source: &str) -> String {
 }
 
 fn compute_p52_status(meta: &BTreeMap<String, Value>) -> String {
-    let ssgi = meta.get("ssgi").and_then(|v| v.as_object());
-    let bounce = meta.get("ssgi_bounce").and_then(|v| v.as_object());
-    let perf_ok = ssgi
-        .and_then(|ssgi| ssgi.get("perf_ms"))
-        .and_then(|perf| perf.as_object())
-        .map(|perf| {
-            perf.get("total_ssgi_ms")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0)
-                > 0.0
-        })
-        .unwrap_or(false);
-
-    let bounce_ok = bounce.map_or(false, |obj| {
-        let red = obj
-            .get("red_pct")
-            .and_then(|v| v.as_f64())
-            .unwrap_or_default();
-        let green = obj
-            .get("green_pct")
-            .and_then(|v| v.as_f64())
-            .unwrap_or_default();
-        (0.05..=0.12).contains(&red) && (0.05..=0.12).contains(&green)
-    });
-    let delta_e_ok = ssgi
-        .and_then(|obj| obj.get("max_delta_e"))
-        .and_then(|v| v.as_f64())
-        .map(|v| v <= 1.0)
-        .unwrap_or(false);
-    let ssim_ok = meta
-        .get("ssgi_temporal")
+    let ssr = match meta.get("ssr").and_then(|v| v.as_object()) {
+        Some(obj) => obj,
+        None => return "SSR_UNINITIALIZED".to_string(),
+    };
+    let perf_total = ssr
+        .get("perf_ms")
         .and_then(|v| v.as_object())
-        .and_then(|obj| obj.get("ssim_frame8_9"))
+        .and_then(|perf| perf.get("total_ssr_ms"))
         .and_then(|v| v.as_f64())
-        .map(|ssim| ssim >= 0.95)
-        .unwrap_or(false);
-
-    if bounce_ok && delta_e_ok && ssim_ok && perf_ok {
-        "OK".to_string()
+        .unwrap_or(0.0);
+    if perf_total <= 0.0 {
+        return "SSR_UNINITIALIZED".to_string();
+    }
+    let raw_status = ssr
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("UNINITIALIZED");
+    if raw_status.starts_with("SSR_") {
+        raw_status.to_string()
     } else {
-        let mut reasons = Vec::new();
-        if !bounce_ok {
-            let red = bounce
-                .and_then(|obj| obj.get("red_pct"))
-                .and_then(|v| v.as_f64())
-                .unwrap_or_default();
-            let green = bounce
-                .and_then(|obj| obj.get("green_pct"))
-                .and_then(|v| v.as_f64())
-                .unwrap_or_default();
-            reasons.push(format!(
-                "bounce: red={:.3} green={:.3} (need 0.05-0.12)",
-                red, green
-            ));
-        }
-        if !delta_e_ok {
-            let delta_e = ssgi
-                .and_then(|obj| obj.get("max_delta_e"))
-                .and_then(|v| v.as_f64())
-                .unwrap_or_default();
-            reasons.push(format!("max_delta_e: {:.3} (need <=1.0)", delta_e));
-        }
-        if !ssim_ok {
-            let ssim = meta
-                .get("ssgi_temporal")
-                .and_then(|obj| obj.get("ssim_frame8_9"))
-                .and_then(|v| v.as_f64())
-                .unwrap_or_default();
-            reasons.push(format!("ssim: {:.3} (need >=0.95)", ssim));
-        }
-        if !perf_ok {
-            reasons.push("perf_ms must be >0".to_string());
-        }
-        format!("FAIL: {}", reasons.join(", "))
+        format!("SSR_{raw_status}")
     }
 }
 

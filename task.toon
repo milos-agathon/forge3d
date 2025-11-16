@@ -1,0 +1,191 @@
+<GOAL id="P5.M2">
+  Implement fully working Screen-Space Reflections (SSR) shading, stripe-contrast analysis, and thickness ablation for the P5 glossy-spheres harness so that:
+  • SSR is actually executed and visible in p5_ssr_glossy_spheres.png.
+  • p5_meta.json contains a populated ssr block (hit-rate, steps, perf, stripe_contrast[9], edge_streaks, status).
+  • The thickness ablation image is generated and clearly shows undershoot vs fixed-with-thickness behavior.
+</GOAL>
+
+<CONTEXT>
+  • Repo already has:
+    – examples/p5_ssr_glossy.rs (M0 harness).
+    – examples/p5_ssr_thickness_ablation.rs (partial M2 harness).
+    – src/viewer/mod.rs::capture_p53_ssr_glossy().
+    – src/passes/ssr.rs with SsrParams and a stubbed SSR pipeline.
+    – WGSL shaders under src/shaders/ssr/: trace.wgsl, shade.wgsl, fallback_env.wgsl.
+    – src/p5/meta.rs::write_p5_meta() that writes an "ssr" JSON block with zeros and status "UNINITIALIZED".
+  • Current problems (from latest artifacts):
+    – p5_ssr_glossy_reference.png and p5_ssr_glossy_spheres.png look identical (no specular stripe, no roughness variation).
+    – p5_meta.json.ssr.* fields are all 0, stripe_contrast is [], status = "UNINITIALIZED".
+    – Top-level "status" string still refers to SSGI (bounce / ssim), not SSR M2 checks.
+</CONTEXT>
+
+<TASK id="M2.1" label="Wire SSR pipeline so it actually runs for P5 glossy spheres">
+  <STEPS>
+    1. In src/passes/ssr.rs, implement a function with a clear signature, e.g.:
+
+       pub fn run_ssr_pipeline(ctx: &mut RenderContext, targets: &mut SsrTargets, params: &SsrParams)
+
+       that performs:
+       • SSR trace pass using ssr/trace.wgsl.
+       • SSR shade pass using ssr/shade.wgsl (sampling the pre-tonemap lighting buffer).
+       • SSR env fallback pass using ssr/fallback_env.wgsl, writing the final specular contribution into a compositing buffer.
+
+    2. Ensure the SSR passes use the current frame's:
+       • depth (for ray marching + HZB, if present),
+       • normals,
+       • view-space position or reconstructed position,
+       • pre-tonemap color/lighting buffer as input for specular sampling.
+
+    3. Composition order:
+       • Forward/clustered direct lighting → pre-tonemap color buffer.
+       • run_ssr_pipeline() adds/lerps the SSR contribution into that same pre-tonemap color buffer.
+       • Then the usual tonemap pass runs.
+       • Do NOT run SSR when params.enabled == false.
+
+    4. Call run_ssr_pipeline() from:
+       • examples/p5_ssr_glossy.rs harness.
+       • src/viewer/mod.rs::capture_p53_ssr_glossy().
+       Both must share the same renderer state and SsrParams source.
+  </STEPS>
+
+  <ACCEPT>
+    • With SSR disabled in SsrParams, p5_ssr_glossy_reference.png and p5_ssr_glossy_spheres.png are identical.
+    • With SSR enabled, p5_ssr_glossy_spheres.png shows a bright horizontal stripe reflected on the spheres and the floor, visibly different from the reference.
+    • p5_meta.json.ssr.hit_rate > 0 and p5_meta.json.ssr.avg_steps > 0 (SSR actually marched rays).
+  </ACCEPT>
+</TASK>
+
+<TASK id="M2.2" label="Instrument SSR perf and hit/miss metrics">
+  <STEPS>
+    1. In src/passes/ssr.rs, around each SSR sub-pass, record timings:
+       • trace_ms: time for ssr/trace.wgsl dispatch.
+       • shade_ms: time for ssr/shade.wgsl dispatch.
+       • fallback_ms: time for ssr/fallback_env.wgsl dispatch.
+       • total_ssr_ms: sum of all SSR work for the frame.
+
+       Use existing GPU timestamp/query support if available; otherwise, use CPU-side timers but keep the API clean.
+
+    2. Compute:
+       • hit_rate = num_hit_pixels / num_traced_pixels.
+       • avg_steps = total_steps / num_traced_pixels.
+       • miss_ibl_ratio = num_miss_pixels / num_traced_pixels.
+       • max_delta_e_miss, min_rgb_miss are placeholders for now: fill them with 0.0 but wire in the fields so they can be updated in a later milestone.
+
+    3. Expose these metrics in a struct (e.g. SsrStats) returned from run_ssr_pipeline().
+
+    4. In src/p5/meta.rs::write_p5_meta(), consume SsrStats and write:
+
+       "ssr": {
+         "hit_rate": <f32>,
+         "avg_steps": <f32>,
+         "miss_ibl_ratio": <f32>,
+         "perf_ms": {
+           "trace_ms": <f32>,
+           "shade_ms": <f32>,
+           "fallback_ms": <f32>,
+           "total_ssr_ms": <f32>
+         },
+         "max_delta_e_miss": <f32>,
+         "min_rgb_miss": <f32>,
+         "edge_streaks": { "num_streaks_gt1px": <u32> },
+         "stripe_contrast": [...],
+         "status": "UNINITIALIZED" | "SHADE_READY" | "FAIL: ..."
+       }
+
+  </STEPS>
+
+  <ACCEPT>
+    • After running cargo run --release --example p5_ssr_glossy:
+      – p5_meta.json.ssr.perf_ms.total_ssr_ms > 0.0.
+      – p5_meta.json.ssr.hit_rate ∈ (0.1, 0.99).
+      – p5_meta.json.ssr.miss_ibl_ratio ∈ (0.0, 0.9).
+  </ACCEPT>
+</TASK>
+
+<TASK id="M2.3" label="Stripe-contrast analysis across roughness ramp">
+  <STEPS>
+    1. Ensure the glossy-sphere scene places 9 spheres with increasing roughness r = [0.1, 0.2, ..., 0.9] left → right and a bright horizontal stripe in the background (as per original P5 spec).
+
+    2. Implement a helper, e.g. src/p5/ssr_analysis.rs:
+
+       pub fn analyze_stripe_contrast(ref_img: &ImageRGBA8, ssr_img: &ImageRGBA8) -> [f32; 9]
+
+       Steps:
+       • Define 9 normalized screen-space ROIs (one per sphere), roughly centered on each highlight/reflection region.
+       • For each sphere i:
+         – Extract a narrow horizontal band around the stripe reflection in ssr_img within that ROI.
+         – Compute mean luminance L_ssr_i over that band.
+         – Option A (simpler): also compute mean luminance L_ref_i from ref_img and define contrast_i = L_ssr_i - L_ref_i.
+         – Option B: compute local contrast within ssr_img only. Choose one and document it in a comment.
+
+    3. Return [contrast_0, ..., contrast_8] and write these to p5_meta.json.ssr.stripe_contrast as a JSON array.
+
+    4. In write_p5_meta(), derive an SSR-specific status:
+
+       • If total_ssr_ms == 0 or all contrasts are near zero → status = "UNINITIALIZED".
+
+       • Else:
+         – Check monotonicity: contrast_0 ≥ contrast_1 ≥ ... ≥ contrast_8 (within a small epsilon, e.g. 1e-3).
+         – Check that the overall drop is meaningful: contrast_0 - contrast_8 ≥ MIN_DROP (e.g. 0.05).
+         – If both pass → status = "SHADE_READY".
+         – Otherwise → status = "FAIL: stripe_contrast monotonicity or range violation".
+
+       • Also update the top-level "status" field to mirror the SSR verdict, e.g. "SSR_SHADE_READY" or "SSR_FAIL: ...", **not** the old SSGI bounce string.
+
+  </STEPS>
+
+  <ACCEPT>
+    • After cargo run --release --example p5_ssr_glossy:
+      – p5_meta.json.ssr.stripe_contrast has length 9.
+      – Values are strictly non-increasing (contrast[i] ≥ contrast[i+1] - 1e-3).
+      – contrast[0] - contrast[8] ≥ 0.05.
+      – p5_meta.json.ssr.status == "SHADE_READY" when SSR is visually correct.
+      – Top-level p5_meta.json.status begins with "SSR_" and no longer mentions "bounce" or SSGI.
+  </ACCEPT>
+</TASK>
+
+<TASK id="M2.4" label="Thickness ablation capture and edge streak metric">
+  <STEPS>
+    1. In examples/p5_ssr_thickness_ablation.rs:
+       • Ensure it renders exactly two frames of the same scene:
+         – Left: SSR with --ssr-thickness = 0.0.
+         – Right: SSR with --ssr-thickness = some positive value (e.g. 0.1–0.2).
+       • Composite the two halves into a single image:
+         reports/p5/p5_ssr_thickness_ablation.png
+         Layout: [no-thickness | with-thickness].
+
+    2. Implement a simple edge-streak detector, e.g. in src/p5/ssr_analysis.rs:
+
+       pub fn count_edge_streaks(ssr_img: &ImageRGBA8) -> u32
+
+       • Focus on a band around the geometry intersection edges (use normalized Y-ranges tuned for the existing scene).
+       • Convert to luminance and detect horizontal runs of pixels above a threshold that:
+         – cross depth discontinuities (using depth buffer if available, or an approximated screen region).
+         – have length > 1 pixel.
+       • Return the count of such streaks.
+
+    3. Write the result into p5_meta.json.ssr.edge_streaks.num_streaks_gt1px.
+
+  </STEPS>
+
+  <ACCEPT>
+    • Running cargo run --release --example p5_ssr_thickness_ablation produces reports/p5/p5_ssr_thickness_ablation.png.
+    • Visual check: left half shows obvious undershoot / black gaps; right half is visibly more stable.
+    • p5_meta.json.ssr.edge_streaks.num_streaks_gt1px is:
+      – > 0 for the "no thickness" configuration (when evaluated).
+      – Significantly reduced when thickness is enabled.
+  </ACCEPT>
+</TASK>
+
+<FINAL_ACCEPT id="P5.M2">
+  M2 is complete when:
+  • p5_ssr_glossy_reference.png (SSR off) and p5_ssr_glossy_spheres.png (SSR on) are both generated by the harness.
+  • p5_ssr_thickness_ablation.png exists and shows no-thickness vs thickness side by side.
+  • p5_meta.json.ssr fields are all populated:
+    – hit_rate, avg_steps, miss_ibl_ratio > 0 (and within sane bounds).
+    – perf_ms.total_ssr_ms > 0.
+    – stripe_contrast has 9 entries and satisfies the monotonic + min-drop checks.
+    – edge_streaks.num_streaks_gt1px wired.
+    – ssr.status == "SHADE_READY" for a correct run.
+  • Top-level p5_meta.json.status reflects the SSR verdict and does not mention SSGI bounce/ssim.
+</FINAL_ACCEPT>
