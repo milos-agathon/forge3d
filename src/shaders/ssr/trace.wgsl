@@ -39,10 +39,11 @@ fn decode_normal(encoded: vec4<f32>) -> vec3<f32> {
 }
 
 fn reconstruct_view_position(uv: vec2<f32>, linear_depth: f32) -> vec3<f32> {
-    let ndc = vec4<f32>(uv * 2.0 - 1.0, linear_depth, 1.0);
-    let view = camera.inv_proj_matrix * ndc;
-    let v = view.xyz / view.w;
-    return vec3<f32>(v.xy, -linear_depth);
+    let ndc_xy = vec2<f32>(uv.x * 2.0 - 1.0, (1.0 - uv.y) * 2.0 - 1.0);
+    let focal = vec2<f32>(camera.inv_proj_matrix[0][0], camera.inv_proj_matrix[1][1]);
+    let center = vec2<f32>(camera.inv_proj_matrix[2][0], camera.inv_proj_matrix[2][1]);
+    let view_xy = (ndc_xy - center) / focal;
+    return vec3<f32>(view_xy * linear_depth, -linear_depth);
 }
 
 fn project_to_screen(view_pos: vec3<f32>) -> vec3<f32> {
@@ -72,17 +73,30 @@ fn cs_trace(@builtin(global_invocation_id) gid: vec3<u32>) {
     let uv = (vec2<f32>(pixel) + vec2<f32>(0.5)) * settings.inv_resolution;
     let normal_sample = textureLoad(normal_texture, pixel, 0);
     let normal_vs = decode_normal(normal_sample);
+    let roughness = clamp(normal_sample.w, 0.0, 1.0);
     let view_pos = reconstruct_view_position(uv, depth);
-    let view_dir = normalize(-view_pos);
+    let normal_bias = (settings.thickness * 0.35 + 0.0015)
+        + (0.25 * settings.inv_resolution.x + 0.25 * settings.inv_resolution.y);
+    let origin_vs = view_pos + normal_vs * normal_bias;
+    let view_dir = normalize(-origin_vs);
     let reflect_dir = normalize(reflect(-view_dir, normal_vs));
+    if (reflect_dir.z >= -0.05) {
+        textureStore(hit_output, pixel, vec4<f32>(0.0, 0.0, 0.0, 0.0));
+        atomicAdd(&counters.misses, 1u);
+        atomicAdd(&counters.total_steps, 1u);
+        return;
+    }
 
     let max_steps = max(settings.max_steps, 1u);
     let cos_nr = clamp(abs(dot(normal_vs, reflect_dir)), 0.0, 1.0);
-    let range_scale = mix(1.35, 1.0, cos_nr);
+    let range_scale = mix(1.4, 1.0, cos_nr);
     let effective_max_distance = settings.max_distance * range_scale;
     let base_step_len = effective_max_distance / f32(max_steps);
-    let step_scale = mix(0.55, 1.4, cos_nr);
-    let adaptive_step = base_step_len * step_scale;
+    let step_scale = mix(0.35, 1.15, cos_nr);
+    let adaptive_step = max(base_step_len * step_scale, 0.01);
+    let ray_thickness = (settings.thickness + 0.0025)
+        * mix(1.0, 2.25, 1.0 - cos_nr)
+        * mix(0.9, 1.6, roughness);
 
     var hit_uv = uv;
     var hit_mask = 0.0;
@@ -91,16 +105,16 @@ fn cs_trace(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Base marching parameters with a small start offset to avoid self-intersections
     let start_offset = min(
         effective_max_distance,
-        max(settings.thickness * 0.5, base_step_len * 0.5) + 0.002,
+        max(ray_thickness * 0.35, base_step_len * 0.35) + 0.001,
     );
     var traveled = start_offset;
-    var prev_traveled = traveled;
+    var prev_traveled = 0.0;
     var prev_diff = 0.0;
     var has_prev_sample = false;
 
     for (var i: u32 = 0u; i < max_steps; i = i + 1u) {
-        let sample_vs = view_pos + reflect_dir * traveled;
-        if (sample_vs.z >= -settings.thickness) {
+        let sample_vs = origin_vs + reflect_dir * traveled;
+        if (sample_vs.z >= -0.001) {
             steps_taken = i + 1u;
             break;
         }
@@ -122,7 +136,8 @@ fn cs_trace(@builtin(global_invocation_id) gid: vec3<u32>) {
 
         let ray_depth = -sample_vs.z;
         // Depth tolerance grows slightly with depth to account for quantization and discretization
-        let depth_tol = settings.thickness + 0.02 * ray_depth + 0.002 * effective_max_distance;
+        let depth_bias = 0.015 * ray_depth + 0.001 * effective_max_distance;
+        let depth_tol = ray_thickness + depth_bias;
         let diff = scene_depth - ray_depth;
         let abs_diff = abs(diff);
 
@@ -132,18 +147,28 @@ fn cs_trace(@builtin(global_invocation_id) gid: vec3<u32>) {
 
         if (abs_diff <= depth_tol) {
             hit_found = true;
-        } else if (diff < 0.0 && has_prev_sample && prev_diff > 0.0) {
-            var low = prev_traveled;
-            var high = traveled;
+        } else if (has_prev_sample && diff * prev_diff < 0.0) {
+            var near_t = prev_traveled;
+            var far_t = traveled;
+            var near_diff = prev_diff;
+            var far_diff = diff;
+            if (near_diff < 0.0) {
+                let tmp_t = near_t;
+                near_t = far_t;
+                far_t = tmp_t;
+                let tmp_d = near_diff;
+                near_diff = far_diff;
+                far_diff = tmp_d;
+            }
             var refined_uv = projected.xy;
             var refined_depth = ray_depth;
             var refined = false;
             for (var r: u32 = 0u; r < 5u; r = r + 1u) {
-                let mid = 0.5 * (low + high);
-                let mid_vs = view_pos + reflect_dir * mid;
+                let mid = 0.5 * (near_t + far_t);
+                let mid_vs = origin_vs + reflect_dir * mid;
                 let mid_proj = project_to_screen(mid_vs);
                 if (mid_proj.x < 0.0 || mid_proj.x > 1.0 || mid_proj.y < 0.0 || mid_proj.y > 1.0) {
-                    high = mid;
+                    far_t = mid;
                     continue;
                 }
                 let mid_coord = clamp(mid_proj.xy, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0))
@@ -151,7 +176,7 @@ fn cs_trace(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let mid_texel = vec2<u32>(u32(mid_coord.x), u32(mid_coord.y));
                 let mid_scene_depth = textureLoad(depth_texture, mid_texel, 0).r;
                 if (mid_scene_depth <= 0.0) {
-                    high = mid;
+                    far_t = mid;
                     continue;
                 }
                 let mid_ray_depth = -mid_vs.z;
@@ -163,9 +188,11 @@ fn cs_trace(@builtin(global_invocation_id) gid: vec3<u32>) {
                     break;
                 }
                 if (mid_diff > 0.0) {
-                    low = mid;
+                    near_t = mid;
+                    near_diff = mid_diff;
                 } else {
-                    high = mid;
+                    far_t = mid;
+                    far_diff = mid_diff;
                 }
             }
             if (refined) {
@@ -189,7 +216,9 @@ fn cs_trace(@builtin(global_invocation_id) gid: vec3<u32>) {
         prev_diff = diff;
         has_prev_sample = true;
 
-        traveled = traveled + adaptive_step;
+        let dist_ratio = clamp(ray_depth / max(effective_max_distance, 1e-3), 0.0, 1.0);
+        let dynamic_step = adaptive_step * mix(0.85, 1.15, dist_ratio);
+        traveled = traveled + dynamic_step;
         if (traveled > effective_max_distance) {
             steps_taken = i + 1u;
             break;
@@ -200,7 +229,7 @@ fn cs_trace(@builtin(global_invocation_id) gid: vec3<u32>) {
         let grazing = 1.0 - cos_nr;
         if (grazing > 0.75) {
             let fallback_dir = normalize(reflect_dir + normal_vs * 0.35);
-            let fallback_vs = view_pos + fallback_dir * (effective_max_distance * 0.3);
+            let fallback_vs = origin_vs + fallback_dir * (effective_max_distance * 0.3);
             let fallback_proj = project_to_screen(fallback_vs);
             if (
                 fallback_proj.x >= 0.0 && fallback_proj.x <= 1.0

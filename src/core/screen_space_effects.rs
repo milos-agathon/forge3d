@@ -422,7 +422,7 @@ impl Default for SsrSettings {
         Self {
             max_steps: 96,
             thickness: 0.1,
-            max_distance: 20.0,
+            max_distance: 32.0,
             intensity: 3.5,
             inv_resolution: [1.0 / 1920.0, 1.0 / 1080.0],
             _pad0: [0.0; 2],
@@ -1685,6 +1685,15 @@ impl ScreenSpaceEffectsManager {
             hzb,
             ssr_params: SsrParams::default(),
         })
+    }
+
+    pub fn set_environment_texture(&mut self, device: &Device, env_texture: &Texture) {
+        if let Some(ref mut ssgi) = self.ssgi_renderer {
+            ssgi.set_environment_texture(device, env_texture);
+        }
+        if let Some(ref mut ssr) = self.ssr_renderer {
+            ssr.set_environment_texture(device, env_texture);
+        }
     }
 
     /// Enable an effect
@@ -4001,7 +4010,9 @@ impl SsrRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
+            usage: TextureUsages::STORAGE_BINDING
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let ssr_spec_view = ssr_spec_texture.create_view(&TextureViewDescriptor::default());
@@ -4017,7 +4028,9 @@ impl SsrRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
+            usage: TextureUsages::STORAGE_BINDING
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let ssr_final_view = ssr_final_texture.create_view(&TextureViewDescriptor::default());
@@ -4049,7 +4062,9 @@ impl SsrRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
+            usage: TextureUsages::STORAGE_BINDING
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let ssr_filtered_view = ssr_filtered_texture.create_view(&TextureViewDescriptor::default());
@@ -4065,7 +4080,9 @@ impl SsrRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
+            usage: TextureUsages::STORAGE_BINDING
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let ssr_hit_view = ssr_hit_texture.create_view(&TextureViewDescriptor::default());
@@ -4081,10 +4098,13 @@ impl SsrRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
+            usage: TextureUsages::STORAGE_BINDING
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        let ssr_composited_view = ssr_composited_texture.create_view(&TextureViewDescriptor::default());
+        let ssr_composited_view =
+            ssr_composited_texture.create_view(&TextureViewDescriptor::default());
 
         let env_texture = device.create_texture(&TextureDescriptor {
             label: Some("p5.ssr.env.placeholder"),
@@ -4423,10 +4443,8 @@ impl SsrRenderer {
 
         // Preserve filtered result for next frame's temporal accumulation
         encoder.copy_texture_to_texture(
-            self.ssr_filtered_texture
-                .as_image_copy(),
-            self.ssr_history_texture
-                .as_image_copy(),
+            self.ssr_filtered_texture.as_image_copy(),
+            self.ssr_history_texture.as_image_copy(),
             Extent3d {
                 width: self.width,
                 height: self.height,
@@ -4574,8 +4592,9 @@ impl SsrRenderer {
     }
 
     pub fn set_environment_texture(&mut self, device: &Device, env_texture: &Texture) {
+        println!("[SSR] Updating environment texture");
         let view = env_texture.create_view(&TextureViewDescriptor {
-            label: Some("gi.env.cube.view"),
+            label: Some("p5.ssr.env.view"),
             format: None,
             dimension: Some(TextureViewDimension::Cube),
             aspect: TextureAspect::All,

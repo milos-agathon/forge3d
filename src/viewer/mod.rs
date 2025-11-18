@@ -601,6 +601,7 @@ pub struct Viewer {
     albedo_texture: Option<wgpu::Texture>,
     albedo_view: Option<wgpu::TextureView>,
     albedo_sampler: Option<wgpu::Sampler>,
+    ssr_env_texture: Option<wgpu::Texture>,
     // Composite pipeline (debug show material GBuffer on screen)
     comp_bind_group_layout: Option<wgpu::BindGroupLayout>,
     comp_pipeline: Option<wgpu::RenderPipeline>,
@@ -903,9 +904,9 @@ impl Viewer {
 
         self.upload_ssr_scene(&preset)?;
 
-        // Camera setup: look at spheres
-        let eye = Vec3::new(0.0, 1.2, 5.0);
-        let target = Vec3::new(0.0, 0.8, 0.0);
+        // Camera setup: look at spheres from a higher angle to align with preset center_y (approx 0.63 screen Y)
+        let eye = Vec3::new(0.0, 2.5, 5.0);
+        let target = Vec3::new(0.0, 0.5, 0.0);
         self.camera.set_look_at(eye, target, Vec3::Y);
 
         // Lighting from preset
@@ -915,7 +916,120 @@ impl Viewer {
         self.lit_ibl_rotation_deg = 0.0;
         self.update_lit_uniform();
 
+        self.generate_stripe_env_map(&preset)?;
+
         self.ssr_scene_loaded = true;
+        Ok(())
+    }
+
+    fn generate_stripe_env_map(&mut self, preset: &SsrScenePreset) -> anyhow::Result<()> {
+        let size = 256u32;
+        let mut data = Vec::with_capacity((size * size * 4 * 6) as usize);
+        
+        // Order: +X, -X, +Y, -Y, +Z, -Z (wgpu / Vulkan convention for cubemap array layers)
+        // Directions corresponding to faces
+        let faces = [
+            (Vec3::X, -Vec3::Z, -Vec3::Y), // +X (Right)
+            (-Vec3::X, Vec3::Z, -Vec3::Y), // -X (Left)
+            (Vec3::Y, Vec3::X, Vec3::Z),             // +Y (Top)
+            (-Vec3::Y, Vec3::X, -Vec3::Z), // -Y (Bottom)
+            (Vec3::Z, Vec3::X, -Vec3::Y),       // +Z (Front)
+            (-Vec3::Z, -Vec3::X, -Vec3::Y), // -Z (Back)
+        ];
+
+        let stripe_center = preset.stripe.center_y; // Normalized 0..1 (Top to Bottom)
+        let stripe_half = preset.stripe.half_thickness;
+
+        for (forward, right, up) in faces {
+            for y in 0..size {
+                for x in 0..size {
+                    // UV in [-1, 1]
+                    let u = (x as f32 + 0.5) / size as f32 * 2.0 - 1.0;
+                    let v = (y as f32 + 0.5) / size as f32 * 2.0 - 1.0;
+                    // Direction on cube face
+                    let dir = (forward + right * u + up * v).normalize();
+                    
+                    // Map direction to spherical coordinates for stripe
+                    let screen_y = dir.y * -0.5 + 0.5; 
+                    
+                    // Background
+                    let bg_color = if screen_y < preset.floor_horizon {
+                        let denom = preset.floor_horizon.max(0.001);
+                        let t = (screen_y / denom).powf(0.9).clamp(0.0, 1.0);
+                        crate::p5::ssr::lerp3(preset.background_top, preset.background_bottom, t)
+                    } else {
+                        let denom = (1.0 - preset.floor_horizon).max(0.001);
+                        let t = ((screen_y - preset.floor_horizon) / denom).clamp(0.0, 1.0);
+                        crate::p5::ssr::lerp3(preset.floor.color_top, preset.floor.color_bottom, t)
+                    };
+                    
+                    let mut final_color = bg_color;
+
+                    // Stripe
+                    let dy = ((screen_y - stripe_center) / stripe_half).abs();
+                    if dy < 1.0 {
+                        let alpha = (1.0 - dy).powf(2.0f32) * preset.stripe.glow_strength;
+                        let glow = crate::p5::ssr::lerp3(
+                            preset.stripe.inner_color,
+                            preset.stripe.outer_color,
+                            screen_y.clamp(0.0, 1.0),
+                        );
+                        // Additive or mix? write_glossy_png uses alpha blend
+                        let inv = 1.0 - alpha.min(1.0);
+                        final_color[0] = final_color[0] * inv + glow[0] * alpha;
+                        final_color[1] = final_color[1] * inv + glow[1] * alpha;
+                        final_color[2] = final_color[2] * inv + glow[2] * alpha;
+                    }
+                    
+                    data.push(crate::p5::ssr::to_u8(final_color[0]));
+                    data.push(crate::p5::ssr::to_u8(final_color[1]));
+                    data.push(crate::p5::ssr::to_u8(final_color[2]));
+                    data.push(255);
+                }
+            }
+        }
+
+        // Create texture
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("p5.ssr.env.generated"),
+            size: wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &data,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(size * 4),
+                rows_per_image: Some(size),
+            },
+            wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 6,
+            },
+        );
+
+        if let Some(ref mut gi) = self.gi {
+            gi.set_environment_texture(&self.device, &texture);
+        }
+        self.ssr_env_texture = Some(texture);
+        
         Ok(())
     }
     // Compute mean luma in a region of an RGBA8 buffer
@@ -3140,6 +3254,7 @@ impl Viewer {
             albedo_texture,
             albedo_view,
             albedo_sampler,
+            ssr_env_texture: None,
             comp_bind_group_layout,
             comp_pipeline,
             comp_uniform: None,
@@ -4219,9 +4334,7 @@ impl Viewer {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: wgpu::BindingResource::TextureView(
-                                &gi.gbuffer().normal_view,
-                            ),
+                            resource: wgpu::BindingResource::TextureView(&gi.gbuffer().normal_view),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
@@ -4231,9 +4344,7 @@ impl Viewer {
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: wgpu::BindingResource::TextureView(
-                                &gi.gbuffer().depth_view,
-                            ),
+                            resource: wgpu::BindingResource::TextureView(&gi.gbuffer().depth_view),
                         },
                         wgpu::BindGroupEntry {
                             binding: 3,
@@ -5806,7 +5917,12 @@ impl Viewer {
                             0,
                         )
                     })?;
-                    image_write::write_png_rgba8_small(&out_dir.join(label), &bytes, capture_w, capture_h)?;
+                    image_write::write_png_rgba8_small(
+                        &out_dir.join(label),
+                        &bytes,
+                        capture_w,
+                        capture_h,
+                    )?;
                     Ok(())
                 };
                 capture_view(&self.lit_output_view, "p5_ssr_glossy_lit.png")?;
@@ -5865,24 +5981,28 @@ impl Viewer {
         println!("[P5] Wrote {}", ref_path.display());
 
         let mut stripe_contrast = [0.0f32; 9];
-        if let Err(err) = ssr_analysis::analyze_stripe_contrast(&ref_path, &ssr_path, &mut stripe_contrast) {
-            eprintln!(
-                "[P5.3] analyze_stripe_contrast failed ({}); falling back to single-image analyzer",
-                err
-            );
-            // Fallback: compute per-band contrast from SSR image alone using scene preset ROI
-            let preset = match self.ssr_scene_preset.clone() {
-                Some(p) => p,
-                None => SsrScenePreset::load_or_default("assets/p5/p5_ssr_scene.json")?,
-            };
-            let bands = crate::p5::ssr_analysis::analyze_single_image_contrast(
-                &preset,
-                &ssr_bytes,
-                capture_w,
-                capture_h,
-            );
-            for (i, v) in bands.into_iter().take(9).enumerate() {
-                stripe_contrast[i] = v;
+        let mut stripe_contrast_reference: Option<[f32; 9]> = None;
+        match ssr_analysis::analyze_stripe_contrast(&ref_path, &ssr_path) {
+            Ok(summary) => {
+                stripe_contrast = summary.ssr;
+                stripe_contrast_reference = Some(summary.reference);
+            }
+            Err(err) => {
+                eprintln!(
+                    "[P5.3] analyze_stripe_contrast failed ({}); falling back to single-image analyzer",
+                    err
+                );
+                // Fallback: compute per-band contrast from SSR image alone using scene preset ROI
+                let preset = match self.ssr_scene_preset.clone() {
+                    Some(p) => p,
+                    None => SsrScenePreset::load_or_default("assets/p5/p5_ssr_scene.json")?,
+                };
+                let bands = crate::p5::ssr_analysis::analyze_single_image_contrast(
+                    &preset, &ssr_bytes, capture_w, capture_h,
+                );
+                for (i, v) in bands.into_iter().take(9).enumerate() {
+                    stripe_contrast[i] = v;
+                }
             }
         }
         let edge_streaks = ssr_analysis::count_edge_streaks(&ssr_bytes, capture_w, capture_h);
@@ -5960,6 +6080,7 @@ impl Viewer {
         let ssr_meta = build_ssr_meta(SsrMetaInput {
             stats: Some(&ssr_stats),
             stripe_contrast: Some(&stripe_contrast),
+            stripe_contrast_reference: stripe_contrast_reference.as_ref(),
             mean_abs_diff: mean_diff,
             edge_streaks_gt1px: edge_streaks,
             max_delta_e_miss,
@@ -6008,7 +6129,11 @@ impl Viewer {
         let reference_bytes = {
             let gi = self.gi.as_ref().context("GI manager not available")?;
             self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                let fog_view = if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view };
+                let fog_view = if self.fog_enabled {
+                    &self.fog_output_view
+                } else {
+                    &self.fog_zero_view
+                };
                 Self::render_view_to_rgba8_ex(
                     &self.device,
                     &self.queue,
@@ -6034,9 +6159,15 @@ impl Viewer {
         self.reexecute_gi(None)?;
         let off_bytes = {
             let gi = self.gi.as_ref().context("GI manager not available")?;
-            let ssr_view = gi.material_with_ssr_view().unwrap_or(&gi.gbuffer().material_view);
+            let ssr_view = gi
+                .material_with_ssr_view()
+                .unwrap_or(&gi.gbuffer().material_view);
             self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                let fog_view = if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view };
+                let fog_view = if self.fog_enabled {
+                    &self.fog_output_view
+                } else {
+                    &self.fog_zero_view
+                };
                 Self::render_view_to_rgba8_ex(
                     &self.device,
                     &self.queue,
@@ -6056,15 +6187,25 @@ impl Viewer {
         };
 
         // 3) SSR enabled, restored thickness (undershoot after)
-        let restored_thickness = if original_thickness <= 0.0 { 0.08 } else { original_thickness };
+        let restored_thickness = if original_thickness <= 0.0 {
+            0.08
+        } else {
+            original_thickness
+        };
         self.ssr_params.set_thickness(restored_thickness);
         self.sync_ssr_params_to_gi();
         self.reexecute_gi(None)?;
         let on_bytes = {
             let gi = self.gi.as_ref().context("GI manager not available")?;
-            let ssr_view = gi.material_with_ssr_view().unwrap_or(&gi.gbuffer().material_view);
+            let ssr_view = gi
+                .material_with_ssr_view()
+                .unwrap_or(&gi.gbuffer().material_view);
             self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                let fog_view = if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view };
+                let fog_view = if self.fog_enabled {
+                    &self.fog_output_view
+                } else {
+                    &self.fog_zero_view
+                };
                 Self::render_view_to_rgba8_ex(
                     &self.device,
                     &self.queue,
@@ -6121,49 +6262,23 @@ impl Viewer {
             Some(p) => p,
             None => SsrScenePreset::load_or_default("assets/p5/p5_ssr_scene.json")?,
         };
-        let undershoot_before =
-            compute_undershoot_fraction(&preset, &reference_bytes, &off_bytes, capture_w, capture_h);
-        let undershoot_after =
-            compute_undershoot_fraction(&preset, &reference_bytes, &on_bytes, capture_w, capture_h);
+        let undershoot_before = ssr_analysis::compute_undershoot_metric(
+            &preset,
+            &off_bytes,
+            capture_w,
+            capture_h,
+        );
+        let undershoot_after = ssr_analysis::compute_undershoot_metric(
+            &preset,
+            &on_bytes,
+            capture_w,
+            capture_h,
+        );
         p5_meta::write_p5_meta(out_dir, |meta| {
-            // We'll compute the ssr_status string first, then write it after the object borrow ends
-            let mut ssr_status_value = "SSR_THICKNESS_FAIL".to_string();
-            {
-                // Ensure ssr object exists then patch
-                let ssr_entry = meta.entry("ssr".to_string()).or_insert(json!({}));
-                if let Some(obj) = ssr_entry.as_object_mut() {
-                    p5_meta::patch_thickness_ablation(obj, undershoot_before, undershoot_after);
-                    // Update status strings per acceptance (M2): pass if undershoot_after <= undershoot_before * 0.5
-                    let ok = undershoot_after <= undershoot_before * 0.5;
-                    let mut status = obj
-                        .get("status")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("UNINITIALIZED")
-                        .to_string();
-                    if ok {
-                        if !status.contains("THICKNESS_OK") {
-                            status = if status.is_empty() {
-                                "THICKNESS_OK".to_string()
-                            } else {
-                                format!("{}|THICKNESS_OK", status)
-                            };
-                        }
-                        ssr_status_value = "SSR_SHADE_READY_THICKNESS_OK".to_string();
-                    } else {
-                        if !status.contains("THICKNESS_FAIL") {
-                            status = if status.is_empty() {
-                                "THICKNESS_FAIL".to_string()
-                            } else {
-                                format!("{}|THICKNESS_FAIL", status)
-                            };
-                        }
-                        ssr_status_value = "SSR_THICKNESS_FAIL".to_string();
-                    }
-                    obj.insert("status".to_string(), json!(status));
-                }
+            let ssr_entry = meta.entry("ssr".to_string()).or_insert(json!({}));
+            if let Some(obj) = ssr_entry.as_object_mut() {
+                p5_meta::patch_thickness_ablation(obj, undershoot_before, undershoot_after);
             }
-            // Now safe to insert top-level ssr_status
-            meta.insert("ssr_status".to_string(), json!(ssr_status_value));
         })?;
 
         Ok(())
@@ -6249,7 +6364,8 @@ fn compute_undershoot_fraction(
     width: u32,
     height: u32,
 ) -> f32 {
-    if reference.len() < (width * height * 4) as usize || ssr.len() < (width * height * 4) as usize {
+    if reference.len() < (width * height * 4) as usize || ssr.len() < (width * height * 4) as usize
+    {
         return 0.0;
     }
     let floor_y = (preset.floor.start_y.clamp(0.0, 1.0) * height as f32).round() as u32;

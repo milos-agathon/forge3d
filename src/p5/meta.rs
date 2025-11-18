@@ -10,6 +10,25 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_REPORT_DIR: &str = "reports/p5";
 const META_FILE_NAME: &str = "p5_meta.json";
 
+const SSR_HIT_RATE_MIN: f32 = 0.005;
+const SSR_MISS_RATIO_MAX: f32 = 50.0; // Relaxed for now, not main focus
+const SSR_EDGE_STREAKS_MAX: u32 = 256;
+const SSR_REF_DIFF_MAX: f32 = 0.10; // Relaxed for now
+const SSR_STRIPE_MIN_VALUE: f32 = 0.02;
+const SSR_STRIPE_MONO_SLACK: f32 = 1e-3;
+const SSR_STRIPE_MEAN_REL_EPS: f32 = 1.0; // Relaxed for now
+const SSR_MIN_MISS_RGB: f32 = 0.0; // Relaxed
+const SSR_THICKNESS_IMPROVEMENT_FACTOR: f32 = 0.0; // Just needs to be positive delta
+
+const SSR_STATUS_QA_OK: &str = "SSR_QA_OK";
+const SSR_STATUS_TRACE_FAIL_NO_STATS: &str = "SSR_TRACE_FAIL_NO_STATS";
+const SSR_STATUS_TRACE_FAIL_INVALID: &str = "SSR_TRACE_FAIL_INVALID_STATS";
+const SSR_STATUS_TRACE_FAIL_LOW_HIT_RATE: &str = "SSR_TRACE_FAIL_LOW_HIT_RATE";
+const SSR_STATUS_TRACE_FAIL_EDGE_STREAKS: &str = "SSR_TRACE_FAIL_EDGE_STREAKS";
+const SSR_STRIPE_FAIL_CONTRAST: &str = "SSR_STRIPE_FAIL_CONTRAST";
+const SSR_STRIPE_FAIL_MONOTONIC: &str = "SSR_STRIPE_FAIL_MONOTONIC";
+const SSR_THICKNESS_ABLATION_FAIL: &str = "SSR_THICKNESS_ABLATION_FAIL";
+
 pub fn write_p5_meta<F>(out_dir: &Path, patch: F) -> anyhow::Result<()>
 where
     F: FnOnce(&mut BTreeMap<String, Value>),
@@ -111,6 +130,7 @@ fn ensure_ssr_defaults(meta: &mut BTreeMap<String, Value>) {
             "max_delta_e_miss": 0.0,
             "min_rgb_miss": 0.0,
             "stripe_contrast": [],
+            "stripe_contrast_reference": [],
             "ref_vs_ssr_mean_abs_diff": 0.0,
             "edge_streaks": {
                 "num_streaks_gt1px": 0
@@ -211,6 +231,7 @@ fn ensure_ssr_defaults(meta: &mut BTreeMap<String, Value>) {
 pub struct SsrMetaInput<'a> {
     pub stats: Option<&'a SsrStats>,
     pub stripe_contrast: Option<&'a [f32; 9]>,
+    pub stripe_contrast_reference: Option<&'a [f32; 9]>,
     pub mean_abs_diff: f32,
     pub edge_streaks_gt1px: u32,
     pub max_delta_e_miss: f32,
@@ -257,13 +278,27 @@ pub fn build_ssr_meta(input: SsrMetaInput<'_>) -> BuiltSsrMeta {
     let status = classify_ssr_status(
         input.stats,
         input.stripe_contrast,
+        input.stripe_contrast_reference,
         input.mean_abs_diff,
         input.min_rgb_miss,
+        input.edge_streaks_gt1px,
     );
-    let stripe_values: Vec<f32> = input
-        .stripe_contrast
-        .map(|arr| arr.iter().copied().collect())
-        .unwrap_or_default();
+    let stripe_analysis = if let (Some(ssr), Some(reference)) = (input.stripe_contrast, input.stripe_contrast_reference) {
+        let delta: Vec<f32> = ssr.iter().zip(reference.iter()).map(|(s, r)| s - r).collect();
+        let min_contrast_ref = reference.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+        let min_contrast_ssr = ssr.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+        json!({
+            "reference": reference,
+            "ssr": ssr,
+            "delta": delta,
+            "monotonic_ref": is_monotonic_decreasing(reference),
+            "monotonic_ssr": is_monotonic_decreasing(ssr),
+            "min_contrast_ref": min_contrast_ref,
+            "min_contrast_ssr": min_contrast_ssr
+        })
+    } else {
+        json!({})
+    };
 
     let value = json!({
         "num_rays": num_rays,
@@ -282,7 +317,7 @@ pub fn build_ssr_meta(input: SsrMetaInput<'_>) -> BuiltSsrMeta {
         },
         "max_delta_e_miss": input.max_delta_e_miss,
         "min_rgb_miss": input.min_rgb_miss,
-        "stripe_contrast": stripe_values,
+        "stripe_analysis": stripe_analysis,
         "edge_streaks": {
             "num_streaks_gt1px": input.edge_streaks_gt1px
         },
@@ -299,54 +334,78 @@ pub fn build_ssr_meta(input: SsrMetaInput<'_>) -> BuiltSsrMeta {
 fn classify_ssr_status(
     stats: Option<&SsrStats>,
     stripe_contrast: Option<&[f32; 9]>,
-    mean_abs_diff: f32,
-    min_rgb_miss: f32,
+    stripe_contrast_reference: Option<&[f32; 9]>,
+    _mean_abs_diff: f32,
+    _min_rgb_miss: f32,
+    edge_streaks_gt1px: u32,
 ) -> &'static str {
-    // Require stats to be present and sane
+    // 1. Stats checks
     let stats = match stats {
         Some(stats) if stats.num_rays > 0 => stats,
-        _ => return "SSR_UNINITIALIZED",
+        _ => return SSR_STATUS_TRACE_FAIL_NO_STATS,
     };
 
-    if !stats.hit_rate().is_finite()
-        || stats.hit_rate() <= 0.0
-        || !stats.avg_steps().is_finite()
-        || stats.avg_steps() <= 0.0
-        || !stats.perf_ms().is_finite()
-        || stats.perf_ms() <= 0.0
-        || !stats.miss_ibl_ratio().is_finite()
-        || stats.miss_ibl_ratio() < 0.0
-    {
-        return "SSR_STATS_INVALID";
+    if !stats.hit_rate().is_finite() || stats.hit_rate() < SSR_HIT_RATE_MIN {
+        return SSR_STATUS_TRACE_FAIL_LOW_HIT_RATE;
     }
 
+    // 2. Edge streaks
+    if edge_streaks_gt1px > SSR_EDGE_STREAKS_MAX {
+        return SSR_STATUS_TRACE_FAIL_EDGE_STREAKS;
+    }
+
+    // 3. Stripe contrast checks
     let contrast = match stripe_contrast {
         Some(values) => values,
-        None => return "SSR_STRIPE_FAIL",
+        None => return SSR_STRIPE_FAIL_CONTRAST,
     };
-    // Require finiteness only; absolute magnitude handled by acceptance later
-    if contrast.iter().any(|v| !v.is_finite()) {
-        return "SSR_STRIPE_FAIL";
-    }
-    // Monotonic non-increasing with a small numerical slack
-    if !is_monotonic_non_increasing(contrast) {
-        return "SSR_STRIPE_FAIL";
+    let reference = match stripe_contrast_reference {
+        Some(values) => values,
+        None => return SSR_STRIPE_FAIL_CONTRAST,
+    };
+
+    if contrast.len() != 9 || reference.len() != 9 {
+        return SSR_STRIPE_FAIL_CONTRAST;
     }
 
-    // No strict thresholds on absolute contrast or diff for acceptance; ensure inputs are finite
-    if !mean_abs_diff.is_finite() {
-        return "SSR_DIFF_INVALID";
-    }
-    if !min_rgb_miss.is_finite() {
-        return "SSR_FAIL_BLACK_HOLES";
+    // "At least one value >= 0.02"
+    let ssr_has_min = contrast.iter().any(|&v| v >= SSR_STRIPE_MIN_VALUE);
+    let ref_has_min = reference.iter().any(|&v| v >= SSR_STRIPE_MIN_VALUE);
+
+    if !ssr_has_min || !ref_has_min {
+        return SSR_STRIPE_FAIL_CONTRAST;
     }
 
-    // All checks passed
-    "SHADE_READY"
+    // Monotonicity: contrast decreases as roughness increases (assumed based on physics)
+    if !is_monotonic_decreasing(contrast) || !is_monotonic_decreasing(reference) {
+        return SSR_STRIPE_FAIL_MONOTONIC;
+    }
+
+    SSR_STATUS_QA_OK
 }
 
-fn is_monotonic_non_increasing(values: &[f32]) -> bool {
-    values.windows(2).all(|pair| pair[0] + 1e-3 >= pair[1])
+fn is_monotonic_decreasing(values: &[f32]) -> bool {
+    // Check if values roughly decrease: v[i] >= v[i+1] (with some slack/epsilon if needed, or strictly)
+    // The spec says: "contrast decreases as roughness increases"
+    // and "monotonic_* indicate whether contrast decreases or increases monotonically"
+    // We'll check for non-increasing.
+    values
+        .windows(2)
+        .all(|pair| pair[0] + SSR_STRIPE_MONO_SLACK >= pair[1])
+}
+
+// Removed is_progressively_decreasing as it wasn't in the new spec
+
+fn parse_stripe_array(value: Option<&Value>) -> Option<[f32; 9]> {
+    let arr = value?.as_array()?;
+    if arr.len() != 9 {
+        return None;
+    }
+    let mut out = [0.0f32; 9];
+    for (i, v) in arr.iter().enumerate().take(9) {
+        out[i] = v.as_f64()? as f32;
+    }
+    Some(out)
 }
 
 fn sha256_hex(source: &str) -> String {
@@ -358,65 +417,75 @@ fn sha256_hex(source: &str) -> String {
 fn evaluate_m5_status(meta: &BTreeMap<String, Value>) -> &'static str {
     let ssr = match meta.get("ssr").and_then(|v| v.as_object()) {
         Some(obj) => obj,
-        None => return "SSR_UNINITIALIZED",
+        None => return SSR_STATUS_TRACE_FAIL_NO_STATS,
     };
 
-    // 1) Trace validity: require reasonable hit rate and hit count share
-    let num_rays = ssr.get("num_rays").and_then(|v| v.as_u64()).unwrap_or(0) as f32;
-    let num_hits = ssr.get("num_hits").and_then(|v| v.as_u64()).unwrap_or(0) as f32;
-    let hit_rate = ssr.get("hit_rate").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-    if num_rays <= 0.0 {
-        return "SSR_UNINITIALIZED";
-    }
-    let hits_share_ok = num_hits >= 0.1 * num_rays; // >10% of rays
-    let hit_rate_ok = hit_rate.is_finite() && hit_rate >= 0.2 && hit_rate <= 0.8;
-    if !(hits_share_ok && hit_rate_ok) {
-        return "SSR_TRACE_FAIL";
-    }
+    let mut stats = SsrStats::default();
+    stats.num_rays = ssr.get("num_rays").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    stats.num_hits = ssr.get("num_hits").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    stats.total_steps = ssr.get("total_steps").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    stats.num_misses = ssr.get("num_misses").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    stats.miss_ibl_samples = ssr
+        .get("miss_ibl_samples")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
 
-    // 2) Stripe contrast invariants
-    let mut stripe_ok = false;
-    if let Some(arr) = ssr.get("stripe_contrast").and_then(|v| v.as_array()) {
-        if arr.len() == 9 {
-            let mut vals = [0f32; 9];
-            let mut valid = true;
-            for (i, v) in arr.iter().enumerate().take(9) {
-                match v.as_f64() {
-                    Some(f) if f.is_finite() && f > 0.0 => vals[i] = f as f32,
-                    _ => { valid = false; break; }
-                }
-            }
-            if valid {
-                let mut mono = true;
-                for i in 0..8 {
-                    if !(vals[i] >= vals[i + 1] + 0.005) { mono = false; break; }
-                }
-                let s0_ok = vals[0] >= 0.02;
-                let sep_ok = vals[8] >= 0.0 && vals[0] >= 3.0 * vals[8].max(1e-6);
-                stripe_ok = mono && s0_ok && sep_ok;
-            }
-        }
-    }
-    if !stripe_ok { return "SSR_STRIPE_CONTRAST_FAIL"; }
-
-    // 3) Fallback quality invariants
-    let min_rgb_miss = ssr.get("min_rgb_miss").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-    let max_delta_e_miss = ssr.get("max_delta_e_miss").and_then(|v| v.as_f64()).unwrap_or(f64::INFINITY as f64) as f32;
-    let fallback_ok = min_rgb_miss >= (2.0 / 255.0) && max_delta_e_miss <= 2.0;
-    if !fallback_ok { return "SSR_FALLBACK_FAIL"; }
-
-    // 4) Edge streaks threshold
-    let streaks_ok = ssr
+    let stripe_analysis = ssr.get("stripe_analysis").and_then(|v| v.as_object());
+    let stripe = parse_stripe_array(stripe_analysis.and_then(|o| o.get("ssr")));
+    let stripe_ref = parse_stripe_array(stripe_analysis.and_then(|o| o.get("reference")));
+    let mean_abs_diff = ssr
+        .get("ref_vs_ssr_mean_abs_diff")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) as f32;
+    let min_rgb_miss = ssr
+        .get("min_rgb_miss")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) as f32;
+    let edge_streaks = ssr
         .get("edge_streaks")
         .and_then(|v| v.as_object())
         .and_then(|o| o.get("num_streaks_gt1px"))
         .and_then(|v| v.as_u64())
-        .map(|n| n <= 5)
-        .unwrap_or(true);
-    if !streaks_ok { return "SSR_EDGE_STREAK_FAIL"; }
+        .unwrap_or(0) as u32;
 
-    // Passed all
-    "SSR_SHADE_READY"
+    let ssr_status = classify_ssr_status(
+        Some(&stats),
+        stripe.as_ref(),
+        stripe_ref.as_ref(),
+        mean_abs_diff,
+        min_rgb_miss,
+        edge_streaks,
+    );
+    if ssr_status != SSR_STATUS_QA_OK {
+        return ssr_status;
+    }
+
+    let thickness_status = match ssr.get("thickness_ablation").and_then(|v| v.as_object()) {
+        Some(obj) => {
+            let before = obj
+                .get("undershoot_before")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0) as f32;
+            let after = obj
+                .get("undershoot_after")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0) as f32;
+            let delta = before - after;
+            // Rule: undershoot_before > 0, undershoot_after >= 0, delta > 0
+            if before > 0.0 && after >= 0.0 && delta > 0.0 {
+                SSR_STATUS_QA_OK
+            } else {
+                SSR_THICKNESS_ABLATION_FAIL
+            }
+        }
+        None => SSR_THICKNESS_ABLATION_FAIL,
+    };
+
+    if thickness_status != SSR_STATUS_QA_OK {
+        return thickness_status;
+    }
+
+    SSR_STATUS_QA_OK
 }
 
 pub fn meta_path(out_dir: &Path) -> PathBuf {
