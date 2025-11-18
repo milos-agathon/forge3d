@@ -19,6 +19,14 @@ struct CameraParams {
     _pad: f32,
 }
 
+struct SsrCounters {
+    rays: atomic<u32>,
+    hits: atomic<u32>,
+    total_steps: atomic<u32>,
+    misses: atomic<u32>,
+    miss_ibl_samples: atomic<u32>,
+}
+
 @group(0) @binding(0) var ssr_spec: texture_2d<f32>;
 @group(0) @binding(1) var hit_texture: texture_2d<f32>;
 @group(0) @binding(2) var depth_texture: texture_2d<f32>;
@@ -28,6 +36,7 @@ struct CameraParams {
 @group(0) @binding(6) var final_ssr: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(7) var<uniform> settings: SsrSettings;
 @group(0) @binding(8) var<uniform> camera: CameraParams;
+@group(0) @binding(9) var<storage, read_write> counters: SsrCounters;
 
 fn decode_normal(encoded: vec4<f32>) -> vec3<f32> {
     return normalize(encoded.xyz * 2.0 - 1.0);
@@ -65,6 +74,7 @@ fn cs_fallback(@builtin(global_invocation_id) gid: vec3<u32>) {
     let depth = textureLoad(depth_texture, pixel, 0).r;
     if (depth <= 0.0) {
         textureStore(final_ssr, pixel, vec4<f32>(0.0, 0.0, 0.0, 0.0));
+        atomicAdd(&counters.miss_ibl_samples, 1u);
         return;
     }
 
@@ -79,5 +89,9 @@ fn cs_fallback(@builtin(global_invocation_id) gid: vec3<u32>) {
     let max_mips = max(f32(textureNumLevels(env_cube)) - 1.0, 0.0);
     let mip = roughness * max_mips;
     let env_color = textureSampleLevel(env_cube, env_sampler, reflect_ws, mip).rgb;
-    textureStore(final_ssr, pixel, vec4<f32>(env_color * settings.intensity, 1.0));
+    let shaded = env_color * settings.intensity;
+    let min_floor = vec3<f32>(2.0 / 255.0);
+    let safe_color = max(shaded, min_floor);
+    textureStore(final_ssr, pixel, vec4<f32>(safe_color, 1.0));
+    atomicAdd(&counters.miss_ibl_samples, 1u);
 }

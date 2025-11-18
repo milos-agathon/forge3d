@@ -6,6 +6,7 @@ use crate::core::screen_space_effects::{CameraParams, SsrRenderer, SsrSettings};
 use crate::error::RenderResult;
 use wgpu::{CommandEncoder, Device, Queue, TextureView};
 
+pub use crate::core::screen_space_effects::SsrStats;
 pub use crate::render::params::SsrParams;
 
 pub struct SsrPass {
@@ -34,11 +35,21 @@ impl SsrPass {
         device: &Device,
         encoder: &mut CommandEncoder,
         gbuffer: &GBuffer,
+        stats: Option<&mut SsrStats>,
     ) -> RenderResult<()> {
-        self.renderer.execute(device, encoder, gbuffer)
+        self.renderer.execute(device, encoder, gbuffer, stats)
     }
 
     pub fn composite_view(&self) -> &TextureView {
         self.renderer.composite_view()
+    }
+
+    pub fn collect_stats(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        stats: &mut SsrStats,
+    ) -> RenderResult<()> {
+        self.renderer.collect_stats_into(device, queue, stats)
     }
 }

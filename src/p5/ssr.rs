@@ -116,11 +116,11 @@ impl SsrScenePreset {
 
     fn default_stripe() -> StripePreset {
         StripePreset {
-            center_y: 0.32,
-            half_thickness: 0.025,
-            inner_color: [1.0, 0.94, 0.78],
-            outer_color: [0.95, 0.6, 0.35],
-            glow_strength: 0.85,
+            center_y: 0.68,
+            half_thickness: 0.02,
+            inner_color: [1.0, 1.0, 0.95],
+            outer_color: [1.0, 0.8, 0.25],
+            glow_strength: 1.5,
         }
     }
 

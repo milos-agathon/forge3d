@@ -9,14 +9,16 @@ pub mod camera_controller;
 
 use crate::core::ibl::{IBLQuality, IBLRenderer};
 use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
-use crate::p5::{meta as p5_meta, ssr, ssr_analysis};
+use crate::geometry::{generate_plane, generate_sphere, MeshBuffers};
+use crate::p5::meta::{self as p5_meta, build_ssr_meta, SsrMetaInput};
+use crate::p5::{ssr, ssr::SsrScenePreset, ssr_analysis};
+use crate::passes::ssr::SsrStats;
 use crate::render::params::SsrParams;
 use crate::renderer::readback::read_texture_tight;
 use crate::util::image_write;
-use anyhow::bail;
+use anyhow::{bail, Context};
 use camera_controller::{CameraController, CameraMode};
-use glam::{Mat4, Vec3};
-use image::GenericImageView;
+use glam::{Mat3, Mat4, Vec2, Vec3};
 use half::f16;
 use serde_json::json;
 use std::collections::VecDeque;
@@ -61,6 +63,77 @@ fn hud_push_rect(
         uv_max: [1.0, 1.0],
         color,
     });
+}
+
+fn build_ssr_albedo_texture(preset: &SsrScenePreset, size: u32) -> Vec<u8> {
+    let dim = size.max(1);
+    let mut pixels = vec![0u8; (dim * dim * 4) as usize];
+
+    let lerp3 = |a: [f32; 3], b: [f32; 3], t: f32| -> [f32; 3] {
+        [
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+        ]
+    };
+
+    let to_u8 = |v: f32| -> u8 { (v.clamp(0.0, 1.0) * 255.0).round() as u8 };
+
+    let horizon = (preset.floor_horizon.clamp(0.0, 1.0) * dim as f32)
+        .round()
+        .clamp(0.0, (dim - 1) as f32) as u32;
+
+    for y in 0..dim {
+        let color = if y < horizon {
+            let denom = horizon.max(1);
+            let t = (y as f32 / denom as f32).powf(0.9).clamp(0.0, 1.0);
+            lerp3(preset.background_top, preset.background_bottom, t)
+        } else {
+            let denom = (dim - horizon).max(1);
+            let t = ((y - horizon) as f32 / denom as f32).clamp(0.0, 1.0);
+            lerp3(preset.floor.color_top, preset.floor.color_bottom, t)
+        };
+        for x in 0..dim {
+            let idx = ((y * dim + x) * 4) as usize;
+            pixels[idx] = to_u8(color[0]);
+            pixels[idx + 1] = to_u8(color[1]);
+            pixels[idx + 2] = to_u8(color[2]);
+            pixels[idx + 3] = 255;
+        }
+    }
+
+    let stripe_center = preset.stripe.center_y * dim as f32;
+    let stripe_half = (preset.stripe.half_thickness * dim as f32).max(1.0);
+    for y in 0..dim {
+        let dy = ((y as f32 - stripe_center) / stripe_half).abs();
+        if dy < 1.0 {
+            let alpha = (1.0 - dy).powf(2.0) * preset.stripe.glow_strength;
+            let glow = lerp3(
+                preset.stripe.inner_color,
+                preset.stripe.outer_color,
+                (y as f32 / dim as f32).clamp(0.0, 1.0),
+            );
+            for x in 0..dim {
+                let idx = ((y * dim + x) * 4) as usize;
+                let dst = [
+                    pixels[idx] as f32 / 255.0,
+                    pixels[idx + 1] as f32 / 255.0,
+                    pixels[idx + 2] as f32 / 255.0,
+                ];
+                let inv = 1.0 - alpha;
+                let mixed = [
+                    dst[0] * inv + glow[0] * alpha,
+                    dst[1] * inv + glow[1] * alpha,
+                    dst[2] * inv + glow[2] * alpha,
+                ];
+                pixels[idx] = to_u8(mixed[0]);
+                pixels[idx + 1] = to_u8(mixed[1]);
+                pixels[idx + 2] = to_u8(mixed[2]);
+            }
+        }
+    }
+
+    pixels
 }
 
 // ------------------------------
@@ -356,6 +429,111 @@ struct FogUpsampleParamsStd140 {
     _pad: [f32; 2],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct PackedVertex {
+    position: [f32; 3],
+    normal: [f32; 3],
+    uv: [f32; 2],
+    rough_metal: [f32; 2],
+}
+
+#[derive(Default)]
+struct SceneMesh {
+    vertices: Vec<PackedVertex>,
+    indices: Vec<u32>,
+}
+
+impl SceneMesh {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn push_vertex(
+        &mut self,
+        position: Vec3,
+        normal: Vec3,
+        uv: Vec2,
+        roughness: f32,
+        metallic: f32,
+    ) -> u32 {
+        let idx = self.vertices.len() as u32;
+        self.vertices.push(PackedVertex {
+            position: position.to_array(),
+            normal: normal.normalize_or_zero().to_array(),
+            uv: uv.to_array(),
+            rough_metal: [roughness, metallic],
+        });
+        idx
+    }
+
+    fn extend_with_mesh(
+        &mut self,
+        mesh: &MeshBuffers,
+        transform: Mat4,
+        roughness: f32,
+        metallic: f32,
+    ) {
+        let base = self.vertices.len() as u32;
+        let normal_matrix = Mat3::from_mat4(transform).inverse().transpose();
+        for i in 0..mesh.positions.len() {
+            let pos = Vec3::from_array(mesh.positions[i]);
+            let pos_w = (transform * pos.extend(1.0)).truncate();
+            let normal_src = if mesh.normals.len() == mesh.positions.len() {
+                Vec3::from_array(mesh.normals[i])
+            } else {
+                Vec3::Y
+            };
+            let normal_w = (normal_matrix * normal_src).normalize_or_zero();
+            let uv = if mesh.uvs.len() == mesh.positions.len() {
+                Vec2::from_array(mesh.uvs[i])
+            } else {
+                Vec2::ZERO
+            };
+            self.vertices.push(PackedVertex {
+                position: pos_w.to_array(),
+                normal: normal_w.to_array(),
+                uv: uv.to_array(),
+                rough_metal: [roughness, metallic],
+            });
+        }
+        for &idx in &mesh.indices {
+            self.indices.push(base + idx);
+        }
+    }
+}
+
+fn build_ssr_scene_mesh(preset: &SsrScenePreset) -> SceneMesh {
+    let mut scene = SceneMesh::new();
+
+    // Floor plane
+    const FLOOR_WIDTH: f32 = 8.0;
+    const FLOOR_DEPTH: f32 = 6.0;
+    const FLOOR_Y: f32 = -1.0;
+    let floor_mesh = generate_plane(32, 32);
+    let floor_transform = Mat4::from_translation(Vec3::new(0.0, FLOOR_Y, 0.0))
+        * Mat4::from_scale(Vec3::new(FLOOR_WIDTH * 0.5, 1.0, FLOOR_DEPTH * 0.5));
+    scene.extend_with_mesh(&floor_mesh, floor_transform, 0.35, 0.0);
+
+    // No extra back wall geometry; only floor + spheres per M2 visual acceptance
+
+    // Glossy spheres
+    const SPHERE_RINGS: u32 = 48;
+    const SPHERE_SEGMENTS: u32 = 64;
+    for (i, sphere) in preset.spheres.iter().enumerate() {
+        let mesh = generate_sphere(SPHERE_RINGS, SPHERE_SEGMENTS, 1.0);
+        let x = (sphere.offset_x - 0.5) * 6.0;
+        let y = sphere.center_y * 3.0;
+        let z = 0.5 + (i as f32) * 0.01;
+        let radius = (sphere.radius * 3.0).max(0.05);
+        let transform =
+            Mat4::from_translation(Vec3::new(x, y, z)) * Mat4::from_scale(Vec3::splat(radius));
+        scene.extend_with_mesh(&mesh, transform, sphere.roughness, 0.0);
+    }
+
+    scene
+}
+
 #[derive(Clone)]
 pub struct ViewerConfig {
     pub width: u32,
@@ -539,6 +717,8 @@ pub struct Viewer {
     // HUD overlay renderer
     hud_enabled: bool,
     hud: crate::core::text_overlay::TextOverlayRenderer,
+    ssr_scene_loaded: bool,
+    ssr_scene_preset: Option<SsrScenePreset>,
 }
 
 struct FpsCounter {
@@ -575,6 +755,169 @@ impl FpsCounter {
 }
 
 impl Viewer {
+    fn ensure_geom_bind_group(&mut self) -> anyhow::Result<()> {
+        if self.geom_bind_group.is_some() {
+            return Ok(());
+        }
+        let cam_buf = match self.geom_camera_buffer.as_ref() {
+            Some(buf) => buf,
+            None => return Ok(()),
+        };
+        let sampler = self.albedo_sampler.get_or_insert_with(|| {
+            self.device
+                .create_sampler(&wgpu::SamplerDescriptor::default())
+        });
+        let tex = self.albedo_texture.get_or_insert_with(|| {
+            self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.geom.albedo.empty"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            })
+        });
+        let view = self
+            .albedo_view
+            .get_or_insert_with(|| tex.create_view(&wgpu::TextureViewDescriptor::default()));
+        if let Some(ref layout) = self.geom_bind_group_layout {
+            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("viewer.gbuf.geom.bg.runtime"),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: cam_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                ],
+            });
+            self.geom_bind_group = Some(bg);
+        }
+        Ok(())
+    }
+
+    fn upload_ssr_scene(&mut self, preset: &SsrScenePreset) -> anyhow::Result<()> {
+        let mesh = build_ssr_scene_mesh(preset);
+        if mesh.vertices.is_empty() || mesh.indices.is_empty() {
+            anyhow::bail!("SSR scene mesh is empty");
+        }
+
+        let vertex_data = bytemuck::cast_slice(&mesh.vertices);
+        let vb = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("viewer.ssr.scene.vb"),
+                contents: vertex_data,
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        let ib = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("viewer.ssr.scene.ib"),
+                contents: bytemuck::cast_slice(&mesh.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+        self.geom_vb = Some(vb);
+        self.geom_ib = Some(ib);
+        self.geom_index_count = mesh.indices.len() as u32;
+        self.geom_bind_group = None;
+
+        let tex_size = 1024u32;
+        let pixels = build_ssr_albedo_texture(preset, tex_size);
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.ssr.scene.albedo"),
+            size: wgpu::Extent3d {
+                width: tex_size,
+                height: tex_size,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &pixels,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(tex_size * 4),
+                rows_per_image: Some(tex_size),
+            },
+            wgpu::Extent3d {
+                width: tex_size,
+                height: tex_size,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.albedo_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        self.albedo_texture = Some(texture);
+        self.albedo_sampler.get_or_insert_with(|| {
+            self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("viewer.ssr.scene.albedo.sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            })
+        });
+
+        self.ensure_geom_bind_group()?;
+
+        Ok(())
+    }
+
+    fn apply_ssr_scene_preset(&mut self) -> anyhow::Result<()> {
+        let preset = match self.ssr_scene_preset.clone() {
+            Some(p) => p,
+            None => {
+                let preset = SsrScenePreset::load_or_default("assets/p5/p5_ssr_scene.json")?;
+                self.ssr_scene_preset = Some(preset.clone());
+                preset
+            }
+        };
+
+        self.upload_ssr_scene(&preset)?;
+
+        // Camera setup: look at spheres
+        let eye = Vec3::new(0.0, 1.2, 5.0);
+        let target = Vec3::new(0.0, 0.8, 0.0);
+        self.camera.set_look_at(eye, target, Vec3::Y);
+
+        // Lighting from preset
+        self.lit_sun_intensity = preset.light_intensity.max(0.0);
+        self.lit_use_ibl = true;
+        self.lit_ibl_intensity = 1.0;
+        self.lit_ibl_rotation_deg = 0.0;
+        self.update_lit_uniform();
+
+        self.ssr_scene_loaded = true;
+        Ok(())
+    }
     // Compute mean luma in a region of an RGBA8 buffer
     fn mean_luma_region(buf: &Vec<u8>, w: u32, h: u32, x0: u32, y0: u32, rw: u32, rh: u32) -> f32 {
         let (w, h) = (w as usize, h as usize);
@@ -695,7 +1038,7 @@ impl Viewer {
             let gi = self.gi.as_mut().context("GI manager not available")?;
             gi.disable_effect(SSE::SSGI);
         }
-        self.reexecute_gi()?;
+        self.reexecute_gi(None)?;
         let off_bytes = self.capture_material_rgba8()?;
 
         {
@@ -711,7 +1054,7 @@ impl Viewer {
             gi.set_ssgi_composite_intensity(&self.queue, P5_SSGI_DIFFUSE_SCALE);
         }
         for _ in 0..P5_SSGI_CORNELL_WARMUP_FRAMES {
-            self.reexecute_gi()?;
+            self.reexecute_gi(None)?;
         }
         let on_bytes = self.capture_material_rgba8()?;
 
@@ -901,16 +1244,14 @@ impl Viewer {
                 });
                 gi.ssgi_reset_history(&self.device, &self.queue)?;
             }
-            self.reexecute_gi()?;
-            let reference_bytes = self.read_ssgi_filtered_bytes()?.0;
+            self.reexecute_gi(None)?;
+            let first_bytes = self.read_ssgi_filtered_bytes()?.0;
 
-            // Second render with steps=0 (should be identical to first)
-            self.reexecute_gi()?;
-            let current_bytes = self.read_ssgi_filtered_bytes()?.0;
+            // Second render with steps=0 (should be identical)
+            self.reexecute_gi(None)?;
+            let second_bytes = self.read_ssgi_filtered_bytes()?.0;
 
-            // Compare: should be identical (ΔE should be very small, ideally < 1.0)
-            // This verifies that steps=0 consistently outputs pure diffuse IBL
-            compute_max_delta_e(&current_bytes, &reference_bytes)
+            compute_max_delta_e(&second_bytes, &first_bytes)
         };
 
         // Restore SSGI settings, composite intensity, and effect enablement
@@ -990,7 +1331,7 @@ impl Viewer {
             });
             gi.ssgi_reset_history(&self.device, &self.queue)?;
         }
-        self.reexecute_gi()?;
+        self.reexecute_gi(None)?;
         let single_bytes = self.capture_material_rgba8()?;
 
         {
@@ -1005,7 +1346,7 @@ impl Viewer {
         let mut frame9_luma = Vec::new();
 
         for frame in 0..16 {
-            self.reexecute_gi()?;
+            self.reexecute_gi(None)?;
             if frame == 7 || frame == 8 {
                 let (bytes, _) = self.read_ssgi_filtered_bytes()?;
                 let luma = rgba16_to_luma(&bytes);
@@ -1091,7 +1432,7 @@ impl Viewer {
         Ok(())
     }
 
-    fn reexecute_gi(&mut self) -> anyhow::Result<()> {
+    fn reexecute_gi(&mut self, ssr_stats: Option<&mut SsrStats>) -> anyhow::Result<()> {
         use anyhow::Context;
         let depth_view = self.z_view.as_ref().context("Depth view unavailable")?;
         if let Some(ref mut gi) = self.gi {
@@ -1102,7 +1443,7 @@ impl Viewer {
                 });
             gi.advance_frame(&self.queue);
             gi.build_hzb(&self.device, &mut enc, depth_view, false);
-            gi.execute(&self.device, &mut enc)?;
+            gi.execute(&self.device, &mut enc, ssr_stats)?;
             self.queue.submit(std::iter::once(enc.finish()));
             self.device.poll(wgpu::Maintain::Wait);
         }
@@ -1151,16 +1492,10 @@ impl Viewer {
         f: impl FnOnce(&wgpu::RenderPipeline, &wgpu::BindGroupLayout) -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
         use anyhow::Context;
-        let comp_pl = self
-            .comp_pipeline
-            .as_ref()
-            .context("comp pipeline")?
-            as &wgpu::RenderPipeline;
-        let comp_bgl = self
-            .comp_bind_group_layout
-            .as_ref()
-            .context("comp bgl")?
-            as &wgpu::BindGroupLayout;
+        let comp_pl =
+            self.comp_pipeline.as_ref().context("comp pipeline")? as &wgpu::RenderPipeline;
+        let comp_bgl =
+            self.comp_bind_group_layout.as_ref().context("comp bgl")? as &wgpu::BindGroupLayout;
         f(comp_pl, comp_bgl)
     }
 
@@ -1495,12 +1830,14 @@ impl Viewer {
                         @location(0) pos : vec3<f32>,
                         @location(1) nrm : vec3<f32>,
                         @location(2) uv  : vec2<f32>,
+                        @location(3) rough_metal : vec2<f32>,
                     };
                     struct VSOut {
                         @builtin(position) pos : vec4<f32>,
                         @location(0) v_nrm_vs : vec3<f32>,
                         @location(1) v_depth_vs : f32,
                         @location(2) v_uv : vec2<f32>,
+                        @location(3) v_rough_metal : vec2<f32>,
                     };
 
                     @vertex
@@ -1513,6 +1850,7 @@ impl Viewer {
                         out.v_nrm_vs = normalize(nrm_vs);
                         out.v_depth_vs = -pos_vs.z; // positive view-space depth
                         out.v_uv = inp.uv;
+                        out.v_rough_metal = inp.rough_metal;
                         return out;
                     }
 
@@ -1525,50 +1863,17 @@ impl Viewer {
                     @fragment
                     fn fs_main(inp: VSOut) -> FSOut {
                         var out: FSOut;
-                        out.normal_rgba = vec4<f32>(normalize(inp.v_nrm_vs), 1.0);
+                        let n = normalize(inp.v_nrm_vs);
+                        let enc = n * 0.5 + vec3<f32>(0.5);
+                        out.normal_rgba = vec4<f32>(enc, clamp(inp.v_rough_metal.x, 0.0, 1.0));
                         let color = textureSample(tAlbedo, sAlbedo, inp.v_uv);
-                        out.albedo_rgba = vec4<f32>(color.rgb, 1.0);
+                        out.albedo_rgba = vec4<f32>(color.rgb, clamp(inp.v_rough_metal.y, 0.0, 1.0));
                         out.depth_r = inp.v_depth_vs;
                         return out;
                     }
                 "#
                     .into(),
                 ),
-            });
-
-            // Vertex buffer (textured cube, 36 vertices: pos, nrm, uv)
-            let verts: [f32; 36 * 8] = [
-                // A simple cube centered at origin with normals and UVs per face
-                // +Z face
-                -1.0, -1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0,
-                1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0,
-                1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0,
-                // -Z face
-                -1.0, -1.0, -1.0, 0.0, 0.0, -1.0, 1.0, 0.0, 1.0, 1.0, -1.0, 0.0, 0.0, -1.0, 0.0,
-                1.0, 1.0, -1.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, -1.0, -1.0, 0.0, 0.0, -1.0,
-                1.0, 0.0, -1.0, 1.0, -1.0, 0.0, 0.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 0.0, 0.0,
-                -1.0, 0.0, 1.0, // +X face
-                1.0, -1.0, -1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0,
-                1.0, -1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, -1.0, -1.0, 1.0, 0.0, 0.0, 0.0, 0.0,
-                1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0,
-                // -X face
-                -1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0, -1.0, 1.0, -1.0, 0.0, 0.0, 0.0,
-                0.0, -1.0, 1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 1.0, -1.0, -1.0, -1.0, -1.0, 0.0, 0.0,
-                1.0, 0.0, -1.0, 1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 1.0, -1.0, 1.0, -1.0, -1.0, 0.0,
-                0.0, 1.0, 1.0, // +Y face
-                -1.0, 1.0, -1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
-                1.0, 1.0, -1.0, 0.0, 1.0, 0.0, 1.0, 1.0, -1.0, 1.0, -1.0, 0.0, 1.0, 0.0, 0.0, 1.0,
-                -1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
-                // -Y face
-                -1.0, -1.0, -1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, -1.0, -1.0, 0.0, -1.0, 0.0, 1.0,
-                0.0, 1.0, -1.0, 1.0, 0.0, -1.0, 0.0, 1.0, 1.0, -1.0, -1.0, -1.0, 0.0, -1.0, 0.0,
-                0.0, 0.0, 1.0, -1.0, 1.0, 0.0, -1.0, 0.0, 1.0, 1.0, -1.0, -1.0, 1.0, 0.0, -1.0,
-                0.0, 0.0, 1.0,
-            ];
-            let geom_vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("viewer.gbuf.geom.vb"),
-                contents: bytemuck::cast_slice(&verts),
-                usage: wgpu::BufferUsages::VERTEX,
             });
 
             // Pipeline
@@ -1587,7 +1892,7 @@ impl Viewer {
                     module: &shader,
                     entry_point: "vs_main",
                     buffers: &[wgpu::VertexBufferLayout {
-                        array_stride: (8 * std::mem::size_of::<f32>()) as u64,
+                        array_stride: std::mem::size_of::<PackedVertex>() as u64,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &[
                             wgpu::VertexAttribute {
@@ -1597,12 +1902,17 @@ impl Viewer {
                             },
                             wgpu::VertexAttribute {
                                 shader_location: 1,
-                                offset: (3 * 4) as u64,
+                                offset: (3 * std::mem::size_of::<f32>()) as u64,
                                 format: wgpu::VertexFormat::Float32x3,
                             },
                             wgpu::VertexAttribute {
                                 shader_location: 2,
-                                offset: (6 * 4) as u64,
+                                offset: (6 * std::mem::size_of::<f32>()) as u64,
+                                format: wgpu::VertexFormat::Float32x2,
+                            },
+                            wgpu::VertexAttribute {
+                                shader_location: 3,
+                                offset: (8 * std::mem::size_of::<f32>()) as u64,
                                 format: wgpu::VertexFormat::Float32x2,
                             },
                         ],
@@ -1859,7 +2169,7 @@ impl Viewer {
                 Some(pipeline),
                 Some(geom_camera_buffer),
                 Some(geom_bg),
-                Some(geom_vb),
+                None,
                 Some(z_texture),
                 Some(z_view),
                 Some(albedo_texture),
@@ -2922,6 +3232,8 @@ impl Viewer {
             // HUD overlay renderer
             hud_enabled: true,
             hud,
+            ssr_scene_loaded: false,
+            ssr_scene_preset: None,
         };
 
         viewer.sync_ssr_params_to_gi();
@@ -3361,6 +3673,12 @@ impl Viewer {
                 self.debug_logged_render_gate = true;
             }
         }
+
+        if self.geom_bind_group.is_none() {
+            if let Err(err) = self.ensure_geom_bind_group() {
+                eprintln!("[viewer] failed to build geometry bind group: {err}");
+            }
+        }
         if let (Some(gi), Some(pipe), Some(cam_buf), Some(vb), Some(zv), Some(_bgl)) = (
             self.gi.as_mut(),
             self.geom_pipeline.as_ref(),
@@ -3456,10 +3774,9 @@ impl Viewer {
                     self.geom_bind_group.as_ref().unwrap()
                 }
             };
-
-            // Rasterize quad into GBuffer attachments with a depth buffer
+            let layout = self.geom_bind_group_layout.as_ref().unwrap();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("viewer.gbuf.geom.pass"),
+                label: Some("viewer.geom"),
                 color_attachments: &[
                     Some(wgpu::RenderPassColorAttachment {
                         view: &gi.gbuffer().normal_view,
@@ -3883,11 +4200,82 @@ impl Viewer {
                 self.fog_frame_index = self.fog_frame_index.wrapping_add(1);
             }
 
+            // If SSR is enabled, compute the pre-tonemap lighting now so SSR can sample it
+            if gi.is_enabled(crate::core::screen_space_effects::ScreenSpaceEffect::SSR) {
+                // Build lighting into lit_output_view
+                let env_view = if let Some(ref v) = self.ibl_env_view {
+                    v
+                } else {
+                    &self.ibl_env_view.as_ref().unwrap()
+                };
+                let env_samp = if let Some(ref s) = self.ibl_sampler {
+                    s
+                } else {
+                    &self.ibl_sampler.as_ref().unwrap()
+                };
+                let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("viewer.lit.bg.pre_ssr"),
+                    layout: &self.lit_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(
+                                &gi.gbuffer().normal_view,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(
+                                &gi.gbuffer().material_view,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(
+                                &gi.gbuffer().depth_view,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::TextureView(&self.lit_output_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::TextureView(env_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: wgpu::BindingResource::Sampler(env_samp),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: self.lit_uniform.as_entire_binding(),
+                        },
+                    ],
+                });
+                let gx = (self.config.width + 7) / 8;
+                let gy = (self.config.height + 7) / 8;
+                {
+                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("viewer.lit.compute.pre_ssr"),
+                        timestamp_writes: None,
+                    });
+                    cpass.set_pipeline(&self.lit_pipeline);
+                    cpass.set_bind_group(0, &bg, &[]);
+                    cpass.dispatch_workgroups(gx, gy, 1);
+                }
+                // Provide SSR with the lit buffer as scene color
+                let lit_view_for_ssr = self
+                    .lit_output
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+                gi.set_ssr_scene_color_view(lit_view_for_ssr);
+            }
+
             // Build Hierarchical Z (HZB) pyramid from the real depth buffer (Depth32Float)
             // Use regular-Z convention (reversed_z=false) for viewer
             gi.build_hzb(&self.device, &mut encoder, zv, false);
             // Execute effects
-            let _ = gi.execute(&self.device, &mut encoder);
+            let _ = gi.execute(&self.device, &mut encoder, None);
 
             // Composite the material GBuffer to the swapchain
             if let (Some(comp_pl), Some(comp_bgl)) = (
@@ -4997,7 +5385,7 @@ impl Viewer {
                     label: Some("p51.ssao.reexec"),
                 });
             gi.build_hzb(&self.device, &mut enc, self.z_view.as_ref().unwrap(), false);
-            let _ = gi.execute(&self.device, &mut enc);
+            let _ = gi.execute(&self.device, &mut enc, None);
             self.queue.submit(std::iter::once(enc.finish()));
         }
         Ok(())
@@ -5230,7 +5618,7 @@ impl Viewer {
                                 label: Some("p51.sweep.exec"),
                             });
                     gim.build_hzb(&self.device, &mut enc, self.z_view.as_ref().unwrap(), false);
-                    let _ = gim.execute(&self.device, &mut enc);
+                    let _ = gim.execute(&self.device, &mut enc, None);
                     self.queue.submit(std::iter::once(enc.finish()));
                 } else {
                     continue;
@@ -5329,6 +5717,12 @@ impl Viewer {
         let out_dir = Path::new("reports/p5");
         fs::create_dir_all(out_dir)?;
 
+        if !self.ssr_scene_loaded {
+            self.apply_ssr_scene_preset()?;
+        }
+
+        let mut ssr_stats = SsrStats::new();
+
         {
             if let Some(ref mut gi_mgr) = self.gi {
                 if !gi_mgr.is_enabled(SSE::SSR) {
@@ -5348,7 +5742,7 @@ impl Viewer {
 
             self.ssr_params.set_enabled(false);
             self.sync_ssr_params_to_gi();
-            self.reexecute_gi()?;
+            self.reexecute_gi(None)?;
             let reference_bytes = {
                 let gi = self.gi.as_ref().context("GI manager not available")?;
                 self.with_comp_pipeline(|comp_pl, comp_bgl| {
@@ -5377,7 +5771,53 @@ impl Viewer {
 
             self.ssr_params.set_enabled(true);
             self.sync_ssr_params_to_gi();
-            self.reexecute_gi()?;
+            self.reexecute_gi(Some(&mut ssr_stats))?;
+            if let Some(ref mut gi_mgr) = self.gi {
+                gi_mgr
+                    .collect_ssr_stats(&self.device, &self.queue, &mut ssr_stats)
+                    .context("collect SSR stats")?;
+            } else {
+                bail!("GI manager not available");
+            }
+
+            // Capture lit buffer for debugging stripe intensity
+            {
+                let gi = self.gi.as_ref().context("GI manager not available")?;
+                let capture_view = |view: &wgpu::TextureView, label: &str| -> anyhow::Result<()> {
+                    let bytes = self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                        let fog_view = if self.fog_enabled {
+                            &self.fog_output_view
+                        } else {
+                            &self.fog_zero_view
+                        };
+                        Self::render_view_to_rgba8_ex(
+                            &self.device,
+                            &self.queue,
+                            comp_pl,
+                            comp_bgl,
+                            &self.sky_output_view,
+                            &gi.gbuffer().depth_view,
+                            fog_view,
+                            self.config.format,
+                            capture_w,
+                            capture_h,
+                            far,
+                            view,
+                            0,
+                        )
+                    })?;
+                    image_write::write_png_rgba8_small(&out_dir.join(label), &bytes, capture_w, capture_h)?;
+                    Ok(())
+                };
+                capture_view(&self.lit_output_view, "p5_ssr_glossy_lit.png")?;
+                if let Some(view) = gi.ssr_spec_view() {
+                    capture_view(view, "p5_ssr_glossy_spec.png")?;
+                }
+                if let Some(view) = gi.ssr_final_view() {
+                    capture_view(view, "p5_ssr_glossy_final.png")?;
+                }
+            }
+
             let ssr_bytes = {
                 let gi = self.gi.as_ref().context("GI manager not available")?;
                 let ssr_view = gi
@@ -5413,48 +5853,8 @@ impl Viewer {
         if original_ssr_enable != self.ssr_params.ssr_enable {
             self.ssr_params.set_enabled(original_ssr_enable);
             self.sync_ssr_params_to_gi();
-            self.reexecute_gi()?;
+            self.reexecute_gi(None)?;
         }
-
-        let (hit_rate, avg_steps, miss_ratio) = {
-            let (hit_bytes, dims) = self.read_ssr_hit_bytes()?;
-            let total_px = (dims.0 as u64) * (dims.1 as u64);
-            if total_px == 0 {
-                (0.0, 0.0, 0.0)
-            } else {
-                let max_steps = self.ssr_params.ssr_max_steps.max(1) as f32;
-                let mut hit_px = 0u64;
-                let mut step_acc = 0.0f64;
-                for chunk in hit_bytes.chunks_exact(8) {
-                    let mask = f16::from_le_bytes([chunk[6], chunk[7]]).to_f32();
-                    if mask >= 0.5 {
-                        hit_px += 1;
-                        let steps_norm = f16::from_le_bytes([chunk[4], chunk[5]]).to_f32();
-                        let steps = (steps_norm * max_steps).clamp(0.0, max_steps);
-                        step_acc += steps as f64;
-                    }
-                }
-                let hit_rate = hit_px as f32 / total_px as f32;
-                let miss_ratio = 1.0 - hit_rate;
-                let avg_steps = if hit_px > 0 {
-                    (step_acc / hit_px as f64) as f32
-                } else {
-                    0.0
-                };
-                (hit_rate, avg_steps, miss_ratio)
-            }
-        };
-
-        let preset = ssr::SsrScenePreset::load_or_default(ssr::default_scene_path())
-            .context("load p5_ssr_scene.json")?;
-        let contrast_values = ssr_analysis::analyze_stripe_contrast(
-            &preset,
-            &reference_bytes,
-            &ssr_bytes,
-            capture_w,
-            capture_h,
-        );
-        let edge_streaks = ssr_analysis::count_edge_streaks(&ssr_bytes, capture_w, capture_h);
 
         let ssr_path = out_dir.join(ssr::DEFAULT_OUTPUT_NAME);
         image_write::write_png_rgba8_small(&ssr_path, &ssr_bytes, capture_w, capture_h)?;
@@ -5464,96 +5864,112 @@ impl Viewer {
         image_write::write_png_rgba8_small(&ref_path, &reference_bytes, capture_w, capture_h)?;
         println!("[P5] Wrote {}", ref_path.display());
 
+        let mut stripe_contrast = [0.0f32; 9];
+        if let Err(err) = ssr_analysis::analyze_stripe_contrast(&ref_path, &ssr_path, &mut stripe_contrast) {
+            eprintln!(
+                "[P5.3] analyze_stripe_contrast failed ({}); falling back to single-image analyzer",
+                err
+            );
+            // Fallback: compute per-band contrast from SSR image alone using scene preset ROI
+            let preset = match self.ssr_scene_preset.clone() {
+                Some(p) => p,
+                None => SsrScenePreset::load_or_default("assets/p5/p5_ssr_scene.json")?,
+            };
+            let bands = crate::p5::ssr_analysis::analyze_single_image_contrast(
+                &preset,
+                &ssr_bytes,
+                capture_w,
+                capture_h,
+            );
+            for (i, v) in bands.into_iter().take(9).enumerate() {
+                stripe_contrast[i] = v;
+            }
+        }
+        let edge_streaks = ssr_analysis::count_edge_streaks(&ssr_bytes, capture_w, capture_h);
+
         let mean_diff = mean_abs_diff(&reference_bytes, &ssr_bytes);
+
+        // Additional metrics: min_rgb_miss from SSR filtered texture using hit mask,
+        // and max_delta_e_miss vs reference (restricted to miss pixels)
+        let (mut min_rgb_miss, mut max_delta_e_miss) = (f32::INFINITY, 0.0f32);
+        if let Some(ref gi) = self.gi {
+            if let (Some(hit_tex), Some(ssr_tex)) = (gi.ssr_hit_texture(), gi.ssr_output_texture())
+            {
+                let hit_bytes = read_texture_tight(
+                    &self.device,
+                    &self.queue,
+                    hit_tex,
+                    (capture_w, capture_h),
+                    wgpu::TextureFormat::Rgba16Float,
+                )
+                .context("read SSR hit texture")?;
+                let ssr_lin_bytes = read_texture_tight(
+                    &self.device,
+                    &self.queue,
+                    ssr_tex,
+                    (capture_w, capture_h),
+                    wgpu::TextureFormat::Rgba16Float,
+                )
+                .context("read SSR filtered texture")?;
+
+                let pixel_count = (capture_w as usize) * (capture_h as usize);
+                for i in 0..pixel_count {
+                    // Hit mask from hit_bytes alpha
+                    let hb = &hit_bytes[i * 8..i * 8 + 8];
+                    let hit_mask = f16::from_le_bytes([hb[6], hb[7]]).to_f32();
+                    if hit_mask < 0.5 {
+                        // Min RGB among miss pixels (linear)
+                        let sb = &ssr_lin_bytes[i * 8..i * 8 + 8];
+                        let r = f16::from_le_bytes([sb[0], sb[1]]).to_f32();
+                        let g = f16::from_le_bytes([sb[2], sb[3]]).to_f32();
+                        let b = f16::from_le_bytes([sb[4], sb[5]]).to_f32();
+                        let local_min = r.min(g).min(b);
+                        if local_min < min_rgb_miss {
+                            min_rgb_miss = local_min;
+                        }
+
+                        // ΔE in Lab using PNG outputs (assumed display RGB in 0..1)
+                        let idx8 = i * 4;
+                        if idx8 + 3 < ssr_bytes.len() && idx8 + 3 < reference_bytes.len() {
+                            let ssr_rgb = srgb_triplet_to_linear(&ssr_bytes[idx8..idx8 + 3]);
+                            let ref_rgb = srgb_triplet_to_linear(&reference_bytes[idx8..idx8 + 3]);
+                            let de = delta_e_lab(ssr_rgb, ref_rgb);
+                            if de > max_delta_e_miss {
+                                max_delta_e_miss = de;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !min_rgb_miss.is_finite() {
+            min_rgb_miss = 0.0;
+        }
 
         println!(
             "[P5.3] SSR params -> enable: {}, max_steps: {}, thickness: {:.3}",
-            true,
-            self.ssr_params.ssr_max_steps,
-            self.ssr_params.ssr_thickness
+            true, self.ssr_params.ssr_max_steps, self.ssr_params.ssr_thickness
         );
         println!(
             "[P5.3] SSR metrics -> hit_rate {:.3}, avg_steps {:.2}, diff {:.4}",
-            hit_rate, avg_steps, mean_diff
+            ssr_stats.hit_rate(),
+            ssr_stats.avg_steps(),
+            mean_diff
         );
 
-        let (trace_ms, shade_ms, fallback_ms) = self
-            .gi
-            .as_ref()
-            .and_then(|gi| gi.ssr_timings_ms())
-            .unwrap_or((0.0, 0.0, 0.0));
-        let total_ssr_ms = trace_ms + shade_ms + fallback_ms;
+        let ssr_meta = build_ssr_meta(SsrMetaInput {
+            stats: Some(&ssr_stats),
+            stripe_contrast: Some(&stripe_contrast),
+            mean_abs_diff: mean_diff,
+            edge_streaks_gt1px: edge_streaks,
+            max_delta_e_miss,
+            min_rgb_miss,
+        });
 
-        let mut fail_reasons = Vec::new();
-        if contrast_values.len() != 9 {
-            fail_reasons.push(format!(
-                "stripe_contrast_len={}",
-                contrast_values.len()
-            ));
-        }
-        if !contrast_values
-            .windows(2)
-            .all(|w| w[0] + 1e-3 >= w[1])
-        {
-            fail_reasons.push("stripe_contrast_not_monotonic".to_string());
-        }
-        let head_tail_delta = contrast_values
-            .first()
-            .zip(contrast_values.last())
-            .map(|(a, b)| a - b)
-            .unwrap_or(0.0);
-        if head_tail_delta < 0.2 {
-            fail_reasons.push(format!("stripe_contrast_delta={:.3}", head_tail_delta));
-        }
-        const MIN_DIFF: f32 = 1e-3;
-        if mean_diff < MIN_DIFF {
-            fail_reasons.push(format!("reference_diff={:.4}", mean_diff));
-        }
-        let mut status = if !fail_reasons.is_empty() {
-            format!("FAIL: {}", fail_reasons.join(", "))
-        } else {
-            "SHADE_READY".to_string()
-        };
-        if total_ssr_ms <= 0.0
-            || contrast_values
-                .iter()
-                .all(|v| v.abs() <= 1e-3)
-        {
-            status = "UNINITIALIZED".to_string();
-        }
+        println!("[P5.3] SSR status -> {}", ssr_meta.status);
 
         p5_meta::write_p5_meta(out_dir, |meta| {
-            if let Some(obj) = meta.get_mut("ssr").and_then(|v| v.as_object_mut()) {
-                obj.insert("hit_rate".to_string(), json!(hit_rate));
-                obj.insert("avg_steps".to_string(), json!(avg_steps));
-                obj.insert("miss_ibl_ratio".to_string(), json!(miss_ratio));
-                obj.insert(
-                    "perf_ms".to_string(),
-                    json!({
-                        "trace_ms": trace_ms,
-                        "shade_ms": shade_ms,
-                        "fallback_ms": fallback_ms,
-                        "total_ssr_ms": total_ssr_ms
-                    }),
-                );
-                obj.insert(
-                    "stripe_contrast".to_string(),
-                    json!(contrast_values),
-                );
-                obj.insert(
-                    "edge_streaks".to_string(),
-                    json!({
-                        "num_streaks_gt1px": edge_streaks
-                    }),
-                );
-                obj.insert("max_delta_e_miss".to_string(), json!(0.0));
-                obj.insert("min_rgb_miss".to_string(), json!(0.0));
-                obj.insert("status".to_string(), json!(status));
-                obj.insert(
-                    "ref_vs_ssr_mean_abs_diff".to_string(),
-                    json!(mean_diff),
-                );
-            }
+            meta.insert("ssr".to_string(), ssr_meta.value.clone());
         })?;
 
         Ok(())
@@ -5585,22 +6001,42 @@ impl Viewer {
         let original_thickness = self.ssr_params.ssr_thickness;
         let original_enable = self.ssr_params.ssr_enable;
 
-        self.ssr_params.set_enabled(true);
+        // 1) Reference (SSR disabled)
+        self.ssr_params.set_enabled(false);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi(None)?;
+        let reference_bytes = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                let fog_view = if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view };
+                Self::render_view_to_rgba8_ex(
+                    &self.device,
+                    &self.queue,
+                    comp_pl,
+                    comp_bgl,
+                    &self.sky_output_view,
+                    &gi.gbuffer().depth_view,
+                    fog_view,
+                    self.config.format,
+                    capture_w,
+                    capture_h,
+                    far,
+                    &gi.gbuffer().material_view,
+                    0,
+                )
+            })?
+        };
 
+        // 2) SSR enabled, thickness = 0 (undershoot before)
+        self.ssr_params.set_enabled(true);
         self.ssr_params.set_thickness(0.0);
         self.sync_ssr_params_to_gi();
-        self.reexecute_gi()?;
+        self.reexecute_gi(None)?;
         let off_bytes = {
             let gi = self.gi.as_ref().context("GI manager not available")?;
-            let ssr_view = gi
-                .material_with_ssr_view()
-                .unwrap_or(&gi.gbuffer().material_view);
+            let ssr_view = gi.material_with_ssr_view().unwrap_or(&gi.gbuffer().material_view);
             self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                let fog_view = if self.fog_enabled {
-                    &self.fog_output_view
-                } else {
-                    &self.fog_zero_view
-                };
+                let fog_view = if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view };
                 Self::render_view_to_rgba8_ex(
                     &self.device,
                     &self.queue,
@@ -5619,25 +6055,16 @@ impl Viewer {
             })?
         };
 
-        let restored_thickness = if original_thickness <= 0.0 {
-            0.08
-        } else {
-            original_thickness
-        };
+        // 3) SSR enabled, restored thickness (undershoot after)
+        let restored_thickness = if original_thickness <= 0.0 { 0.08 } else { original_thickness };
         self.ssr_params.set_thickness(restored_thickness);
         self.sync_ssr_params_to_gi();
-        self.reexecute_gi()?;
+        self.reexecute_gi(None)?;
         let on_bytes = {
             let gi = self.gi.as_ref().context("GI manager not available")?;
-            let ssr_view = gi
-                .material_with_ssr_view()
-                .unwrap_or(&gi.gbuffer().material_view);
+            let ssr_view = gi.material_with_ssr_view().unwrap_or(&gi.gbuffer().material_view);
             self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                let fog_view = if self.fog_enabled {
-                    &self.fog_output_view
-                } else {
-                    &self.fog_zero_view
-                };
+                let fog_view = if self.fog_enabled { &self.fog_output_view } else { &self.fog_zero_view };
                 Self::render_view_to_rgba8_ex(
                     &self.device,
                     &self.queue,
@@ -5659,7 +6086,7 @@ impl Viewer {
         self.ssr_params.set_thickness(original_thickness);
         self.ssr_params.set_enabled(original_enable);
         self.sync_ssr_params_to_gi();
-        self.reexecute_gi()?;
+        self.reexecute_gi(None)?;
 
         let out_w = capture_w * 2;
         let out_h = capture_h;
@@ -5688,6 +6115,56 @@ impl Viewer {
             "[P5.3] Edge streak counts -> off: {} | on: {}",
             streaks_off, streaks_on
         );
+
+        // Compute undershoot metrics and write into meta
+        let preset = match self.ssr_scene_preset.clone() {
+            Some(p) => p,
+            None => SsrScenePreset::load_or_default("assets/p5/p5_ssr_scene.json")?,
+        };
+        let undershoot_before =
+            compute_undershoot_fraction(&preset, &reference_bytes, &off_bytes, capture_w, capture_h);
+        let undershoot_after =
+            compute_undershoot_fraction(&preset, &reference_bytes, &on_bytes, capture_w, capture_h);
+        p5_meta::write_p5_meta(out_dir, |meta| {
+            // We'll compute the ssr_status string first, then write it after the object borrow ends
+            let mut ssr_status_value = "SSR_THICKNESS_FAIL".to_string();
+            {
+                // Ensure ssr object exists then patch
+                let ssr_entry = meta.entry("ssr".to_string()).or_insert(json!({}));
+                if let Some(obj) = ssr_entry.as_object_mut() {
+                    p5_meta::patch_thickness_ablation(obj, undershoot_before, undershoot_after);
+                    // Update status strings per acceptance (M2): pass if undershoot_after <= undershoot_before * 0.5
+                    let ok = undershoot_after <= undershoot_before * 0.5;
+                    let mut status = obj
+                        .get("status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("UNINITIALIZED")
+                        .to_string();
+                    if ok {
+                        if !status.contains("THICKNESS_OK") {
+                            status = if status.is_empty() {
+                                "THICKNESS_OK".to_string()
+                            } else {
+                                format!("{}|THICKNESS_OK", status)
+                            };
+                        }
+                        ssr_status_value = "SSR_SHADE_READY_THICKNESS_OK".to_string();
+                    } else {
+                        if !status.contains("THICKNESS_FAIL") {
+                            status = if status.is_empty() {
+                                "THICKNESS_FAIL".to_string()
+                            } else {
+                                format!("{}|THICKNESS_FAIL", status)
+                            };
+                        }
+                        ssr_status_value = "SSR_THICKNESS_FAIL".to_string();
+                    }
+                    obj.insert("status".to_string(), json!(status));
+                }
+            }
+            // Now safe to insert top-level ssr_status
+            meta.insert("ssr_status".to_string(), json!(ssr_status_value));
+        })?;
 
         Ok(())
     }
@@ -5740,6 +6217,91 @@ fn mean_abs_diff(a: &[u8], b: &[u8]) -> f32 {
         sum += (da - db).abs();
     }
     sum / (a.len() as f32)
+}
+
+fn srgb_u8_to_linear(channel: u8) -> f32 {
+    let c = channel as f32 / 255.0;
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn srgb_triplet_to_linear(px: &[u8]) -> [f32; 3] {
+    [
+        srgb_u8_to_linear(px[0]),
+        srgb_u8_to_linear(px[1]),
+        srgb_u8_to_linear(px[2]),
+    ]
+}
+
+fn delta_e_lab(rgb_a: [f32; 3], rgb_b: [f32; 3]) -> f32 {
+    let (l1, a1, b1) = rgb_to_lab(rgb_a[0], rgb_a[1], rgb_a[2]);
+    let (l2, a2, b2) = rgb_to_lab(rgb_b[0], rgb_b[1], rgb_b[2]);
+    ((l1 - l2).powi(2) + (a1 - a2).powi(2) + (b1 - b2).powi(2)).sqrt()
+}
+
+fn compute_undershoot_fraction(
+    preset: &SsrScenePreset,
+    reference: &[u8],
+    ssr: &[u8],
+    width: u32,
+    height: u32,
+) -> f32 {
+    if reference.len() < (width * height * 4) as usize || ssr.len() < (width * height * 4) as usize {
+        return 0.0;
+    }
+    let floor_y = (preset.floor.start_y.clamp(0.0, 1.0) * height as f32).round() as u32;
+    let roi_y0 = floor_y.min(height.saturating_sub(1));
+    let roi_y1 = ((floor_y as f32 + 0.15 * height as f32).round() as u32).min(height);
+    let roi_x0 = {
+        let x0f = (preset
+            .spheres
+            .first()
+            .map(|s| s.offset_x)
+            .unwrap_or(0.1)
+            .clamp(0.0, 1.0)
+            * width as f32)
+            .round();
+        x0f.max(0.0).min((width.saturating_sub(1)) as f32) as u32
+    };
+    let roi_x1 = {
+        let x1f = (preset
+            .spheres
+            .last()
+            .map(|s| s.offset_x)
+            .unwrap_or(0.85)
+            .clamp(0.0, 1.0)
+            * width as f32)
+            .round();
+        x1f.max(0.0).min(width as f32) as u32
+    };
+
+    let w = width as usize;
+    let mut count = 0u32;
+    let mut undershoot = 0u32;
+    let eps = 0.01f32;
+    for y in roi_y0..roi_y1 {
+        for x in roi_x0..roi_x1 {
+            let idx = ((y as usize * w + x as usize) * 4) as usize;
+            let rl = srgb_u8_to_linear(reference[idx]) * 0.2126
+                + srgb_u8_to_linear(reference[idx + 1]) * 0.7152
+                + srgb_u8_to_linear(reference[idx + 2]) * 0.0722;
+            let sl = srgb_u8_to_linear(ssr[idx]) * 0.2126
+                + srgb_u8_to_linear(ssr[idx + 1]) * 0.7152
+                + srgb_u8_to_linear(ssr[idx + 2]) * 0.0722;
+            if sl > rl + eps {
+                undershoot += 1;
+            }
+            count += 1;
+        }
+    }
+    if count == 0 {
+        0.0
+    } else {
+        (undershoot as f32 / count as f32).clamp(0.0, 1.0)
+    }
 }
 
 fn rgb_to_lab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
@@ -5817,6 +6379,7 @@ enum ViewerCmd {
     LoadObj(String),
     LoadGltf(String),
     SetViz(String),
+    LoadSsrPreset,
     LoadIbl(String),
     IblToggle(bool),
     IblIntensity(f32),
@@ -6149,8 +6712,6 @@ impl Viewer {
                 Ok(mesh) => {
                     if let Err(e) = self.upload_mesh(&mesh) {
                         eprintln!("Failed to upload glTF mesh: {}", e);
-                    } else {
-                        println!("Loaded glTF geometry: {}", path);
                     }
                 }
                 Err(e) => eprintln!("glTF import failed: {}", e),
@@ -6169,6 +6730,10 @@ impl Viewer {
                 };
                 self.viz_mode = m;
             }
+            ViewerCmd::LoadSsrPreset => match self.apply_ssr_scene_preset() {
+                Ok(_) => println!("[SSR] Loaded scene preset"),
+                Err(e) => eprintln!("[SSR] Failed to load preset: {}", e),
+            },
             ViewerCmd::SetLitSun(v) => {
                 self.lit_sun_intensity = v.max(0.0);
                 self.update_lit_uniform();
@@ -6533,6 +7098,8 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 if let Some(tok) = l.split_whitespace().nth(1) {
                     pending_cmds.push(ViewerCmd::SetAoBlur(matches!(tok, "on" | "1" | "true")));
                 }
+            } else if l == ":load-ssr-preset" || l == "load-ssr-preset" {
+                pending_cmds.push(ViewerCmd::LoadSsrPreset);
             } else if l.starts_with(":p5") || l.starts_with("p5 ") {
                 let sub = l.split_whitespace().nth(1).unwrap_or("");
                 match sub {
@@ -6968,8 +7535,12 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 } else {
                     println!("Usage: :ao-blur <on|off>");
                 }
+            } else if l == ":load-ssr-preset" || l == "load-ssr-preset" {
+                let _ = proxy.send_event(ViewerCmd::LoadSsrPreset);
             } else if l.starts_with(":p5") || l.starts_with("p5 ") {
-                if let Some(sub) = l.split_whitespace().nth(1) {
+                let mut toks = l.split_whitespace();
+                let _ = toks.next();
+                if let Some(sub) = toks.next() {
                     match sub {
                         "cornell" => {
                             let _ = proxy.send_event(ViewerCmd::CaptureP51Cornell);
@@ -6998,7 +7569,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     }
                 } else {
                     println!(
-                        "Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy>"
+                        "Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy|ssr-thickness>"
                     );
                 }
             } else if l.starts_with(":obj") || l.starts_with("obj ") {

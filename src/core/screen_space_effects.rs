@@ -4,8 +4,11 @@
 //! global illumination, and reflections.
 
 use crate::core::gbuffer::{GBuffer, GBufferConfig};
-use crate::error::RenderResult;
+use crate::error::{RenderError, RenderResult};
 use crate::render::params::SsrParams;
+use futures_intrusive::channel::shared::oneshot_channel;
+use pollster::block_on;
+use std::mem::size_of;
 use std::time::Instant;
 use wgpu::util::DeviceExt;
 use wgpu::*;
@@ -340,6 +343,13 @@ impl Default for SsaoSettings {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct SsaoTemporalParamsUniform {
+    temporal_alpha: f32,
+    _pad: [f32; 3],
+}
+
 /// SSGI settings
 /// Note: Size must be 80 bytes to match WGSL std140 layout where vec3<u32> is aligned to 16 bytes
 #[repr(C)]
@@ -410,13 +420,64 @@ pub struct SsrSettings {
 impl Default for SsrSettings {
     fn default() -> Self {
         Self {
-            max_steps: 32,
+            max_steps: 96,
             thickness: 0.1,
-            max_distance: 10.0,
-            intensity: 1.0,
+            max_distance: 20.0,
+            intensity: 3.5,
             inv_resolution: [1.0 / 1920.0, 1.0 / 1080.0],
             _pad0: [0.0; 2],
         }
+    }
+}
+
+/// Aggregated statistics emitted by the SSR pipeline.
+#[derive(Debug, Clone, Default)]
+pub struct SsrStats {
+    pub num_rays: u32,
+    pub num_hits: u32,
+    pub total_steps: u32,
+    pub num_misses: u32,
+    pub miss_ibl_samples: u32,
+    pub trace_ms: f32,
+    pub shade_ms: f32,
+    pub fallback_ms: f32,
+}
+
+impl SsrStats {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn hit_rate(&self) -> f32 {
+        if self.num_rays == 0 {
+            0.0
+        } else {
+            self.num_hits as f32 / self.num_rays as f32
+        }
+    }
+
+    pub fn avg_steps(&self) -> f32 {
+        if self.num_rays == 0 {
+            0.0
+        } else {
+            self.total_steps as f32 / self.num_rays as f32
+        }
+    }
+
+    pub fn miss_ibl_ratio(&self) -> f32 {
+        if self.num_misses == 0 {
+            0.0
+        } else {
+            self.miss_ibl_samples as f32 / self.num_misses as f32
+        }
+    }
+
+    pub fn perf_ms(&self) -> f32 {
+        self.trace_ms + self.shade_ms + self.fallback_ms
     }
 }
 
@@ -470,7 +531,7 @@ pub struct SsaoRenderer {
     // Temporal resolve pipeline and layout
     temporal_pipeline: ComputePipeline,
     temporal_bind_group_layout: BindGroupLayout,
-    temporal_params: Buffer,
+    temporal_params_buffer: Buffer,
 
     // Composite pipeline
     composite_pipeline: ComputePipeline,
@@ -886,19 +947,25 @@ impl SsaoRenderer {
             entry_point: "cs_resolve_temporal",
         });
         // Temporal params buffer: alpha (32 bytes for uniform buffer alignment)
-        #[repr(C)]
-        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-        struct TemporalParams {
-            temporal_alpha: f32,
-            _pad: [f32; 7],
-        }
-        let temporal_params = TemporalParams {
+        let temporal_params = SsaoTemporalParamsUniform {
             temporal_alpha: 0.2,
-            _pad: [0.0; 7],
+            _pad: [0.0; 3],
         };
-        let temporal_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let temporal_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ssao.temporal.params"),
             contents: bytemuck::bytes_of(&temporal_params),
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+
+        let _composite_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("p5.ssr.composite.params"),
+            contents: bytemuck::cast_slice(&[1.0, 0.0, 0.0, 0.0]),
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+
+        let composite_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ssao.comp.uniform"),
+            contents: bytemuck::cast_slice(&[1.0, 0.0, 0.0, 0.0]),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
 
@@ -1074,7 +1141,7 @@ impl SsaoRenderer {
             blur_settings,
             temporal_pipeline,
             temporal_bind_group_layout,
-            temporal_params: temporal_params_buf,
+            temporal_params_buffer,
             composite_pipeline,
             composite_bind_group_layout,
             comp_uniform,
@@ -1387,7 +1454,7 @@ impl SsaoRenderer {
                     },
                     BindGroupEntry {
                         binding: 3,
-                        resource: self.temporal_params.as_entire_binding(),
+                        resource: self.temporal_params_buffer.as_entire_binding(),
                     },
                 ],
             });
@@ -1719,7 +1786,13 @@ impl ScreenSpaceEffectsManager {
     }
 
     /// Execute all enabled effects
-    pub fn execute(&mut self, device: &Device, encoder: &mut CommandEncoder) -> RenderResult<()> {
+    pub fn execute(
+        &mut self,
+        device: &Device,
+        encoder: &mut CommandEncoder,
+        ssr_stats: Option<&mut SsrStats>,
+    ) -> RenderResult<()> {
+        let mut ssr_stats_opt = ssr_stats;
         for effect in &self.enabled_effects {
             match effect {
                 ScreenSpaceEffect::SSAO => {
@@ -1744,7 +1817,12 @@ impl ScreenSpaceEffectsManager {
                 ScreenSpaceEffect::SSR => {
                     if self.ssr_params.ssr_enable {
                         if let Some(ref mut ssr) = self.ssr_renderer {
-                            ssr.execute(device, encoder, &self.gbuffer)?;
+                            ssr.execute(
+                                device,
+                                encoder,
+                                &self.gbuffer,
+                                ssr_stats_opt.as_deref_mut(),
+                            )?;
                         }
                     }
                 }
@@ -1808,6 +1886,34 @@ impl ScreenSpaceEffectsManager {
             }
         }
         None
+    }
+
+    pub fn ssr_spec_view(&self) -> Option<&TextureView> {
+        self.ssr_renderer.as_ref().map(|ssr| ssr.spec_view())
+    }
+
+    pub fn ssr_final_view(&self) -> Option<&TextureView> {
+        self.ssr_renderer.as_ref().map(|ssr| ssr.final_view())
+    }
+
+    pub fn set_ssr_scene_color_view(&mut self, view: TextureView) {
+        if let Some(ref mut ssr) = self.ssr_renderer {
+            ssr.set_scene_color_view(view);
+        }
+    }
+
+    pub fn collect_ssr_stats(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        stats: &mut SsrStats,
+    ) -> RenderResult<()> {
+        if let Some(ref mut ssr) = self.ssr_renderer {
+            ssr.collect_stats_into(device, queue, stats)
+        } else {
+            stats.clear();
+            Ok(())
+        }
     }
 
     /// Return the material composited with SSGI if available
@@ -1883,17 +1989,11 @@ impl ScreenSpaceEffectsManager {
     pub fn set_ssao_temporal_alpha(&mut self, queue: &Queue, alpha: f32) {
         if let Some(ref mut r) = self.ssao_renderer {
             r.temporal_alpha = alpha.clamp(0.0, 1.0);
-            #[repr(C)]
-            #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-            struct TemporalParams {
-                temporal_alpha: f32,
-                _pad: [f32; 7],
-            }
-            let params = TemporalParams {
+            let params = SsaoTemporalParamsUniform {
                 temporal_alpha: r.temporal_alpha,
-                _pad: [0.0; 7],
+                _pad: [0.0; 3],
             };
-            queue.write_buffer(&r.temporal_params, 0, bytemuck::bytes_of(&params));
+            queue.write_buffer(&r.temporal_params_buffer, 0, bytemuck::bytes_of(&params));
         }
     }
 
@@ -3331,12 +3431,10 @@ impl SsgiRenderer {
     }
 }
 
-/// SSR renderer
 pub struct SsrRenderer {
     settings: SsrSettings,
     settings_buffer: Buffer,
     camera_buffer: Buffer,
-
     trace_pipeline: ComputePipeline,
     trace_bind_group_layout: BindGroupLayout,
     shade_pipeline: ComputePipeline,
@@ -3347,31 +3445,37 @@ pub struct SsrRenderer {
     temporal_bind_group_layout: BindGroupLayout,
     composite_pipeline: ComputePipeline,
     composite_bind_group_layout: BindGroupLayout,
+    composite_params: Buffer,
 
     ssr_spec_texture: Texture,
     ssr_spec_view: TextureView,
     ssr_final_texture: Texture,
     ssr_final_view: TextureView,
-    ssr_history: Texture,
+    ssr_history_texture: Texture,
     ssr_history_view: TextureView,
-    ssr_filtered: Texture,
+    ssr_filtered_texture: Texture,
     ssr_filtered_view: TextureView,
     ssr_hit_texture: Texture,
     ssr_hit_view: TextureView,
-    ssr_composited: Texture,
+    ssr_composited_texture: Texture,
     ssr_composited_view: TextureView,
+    scene_color_override: Option<TextureView>,
 
     env_texture: Texture,
     env_view: TextureView,
     env_sampler: Sampler,
     linear_sampler: Sampler,
-
     width: u32,
     height: u32,
+
+    counters_buffer: Buffer,
+    counters_readback: Buffer,
+    temporal_params: Buffer,
 
     last_trace_ms: f32,
     last_shade_ms: f32,
     last_fallback_ms: f32,
+    stats_readback_pending: bool,
 }
 
 impl SsrRenderer {
@@ -3392,6 +3496,18 @@ impl SsrRenderer {
             mapped_at_creation: false,
         });
 
+        let counters_buffer = device.create_buffer(&BufferDescriptor {
+            label: Some("p5.ssr.counters"),
+            size: std::mem::size_of::<[u32; 5]>() as u64,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let counters_readback = device.create_buffer(&BufferDescriptor {
+            label: Some("p5.ssr.counters.readback"),
+            size: std::mem::size_of::<[u32; 5]>() as u64,
+            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let trace_shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("p5.ssr.trace"),
             source: ShaderSource::Wgsl(include_str!("../shaders/ssr/trace.wgsl").into()),
@@ -3413,155 +3529,173 @@ impl SsrRenderer {
             source: ShaderSource::Wgsl(include_str!("../shaders/ssr/composite.wgsl").into()),
         });
 
-        let trace_bind_group_layout =
-            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("p5.ssr.trace.bgl"),
-                entries: &[
-                    BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Float { filterable: false },
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+        let trace_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("p5.ssr.trace.bgl"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Float { filterable: false },
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::StorageTexture {
-                            access: StorageTextureAccess::WriteOnly,
-                            format: TextureFormat::Rgba16Float,
-                            view_dimension: TextureViewDimension::D2,
-                        },
-                        count: None,
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::WriteOnly,
+                        format: TextureFormat::Rgba16Float,
+                        view_dimension: TextureViewDimension::D2,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                ],
-            });
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
 
-        let shade_bind_group_layout =
-            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("p5.ssr.shade.bgl"),
-                entries: &[
-                    BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Float { filterable: true },
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+        let shade_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("p5.ssr.shade.bgl"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                        count: None,
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Float { filterable: false },
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Float { filterable: false },
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Float { filterable: true },
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Float { filterable: false },
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::WriteOnly,
+                        format: TextureFormat::Rgba16Float,
+                        view_dimension: TextureViewDimension::D2,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 6,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::StorageTexture {
-                            access: StorageTextureAccess::WriteOnly,
-                            format: TextureFormat::Rgba16Float,
-                            view_dimension: TextureViewDimension::D2,
-                        },
-                        count: None,
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 7,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 8,
-                        visibility: ShaderStages::COMPUTE,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                ],
-            });
+                    count: None,
+                },
+            ],
+        });
 
         let fallback_bind_group_layout =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -3653,6 +3787,16 @@ impl SsrRenderer {
                         },
                         count: None,
                     },
+                    BindGroupLayoutEntry {
+                        binding: 9,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             });
 
@@ -3690,6 +3834,16 @@ impl SsrRenderer {
                         },
                         count: None,
                     },
+                    BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             });
 
@@ -3719,6 +3873,16 @@ impl SsrRenderer {
                     },
                     BindGroupLayoutEntry {
                         binding: 2,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 3,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::WriteOnly,
@@ -3770,6 +3934,7 @@ impl SsrRenderer {
             module: &temporal_shader,
             entry_point: "cs_temporal",
         });
+
         let composite_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("p5.ssr.composite.pipeline"),
             layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor {
@@ -3781,9 +3946,52 @@ impl SsrRenderer {
             entry_point: "cs_ssr_composite",
         });
 
-        // Textures
+        #[repr(C)]
+        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+        struct SsrCompositeParamsStd140 {
+            boost: f32,
+            exposure: f32,
+            gamma: f32,
+            weight_floor: f32,
+            tone_white: f32,
+            tone_bias: f32,
+            reinhard_k: f32,
+            _pad0: f32,
+        }
+        let composite_params_data = SsrCompositeParamsStd140 {
+            boost: 1.6,
+            exposure: 1.1,
+            gamma: 1.0,
+            weight_floor: 0.2,
+            tone_white: 1.0,
+            tone_bias: 0.0,
+            reinhard_k: 1.0,
+            _pad0: 0.0,
+        };
+        let composite_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("p5.ssr.composite.params"),
+            contents: bytemuck::bytes_of(&composite_params_data),
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+
+        #[repr(C)]
+        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+        struct SsrTemporalParamsStd140 {
+            temporal_alpha: f32,
+            pad: [f32; 3],
+        }
+        let temporal_params_data = SsrTemporalParamsStd140 {
+            temporal_alpha: 0.85,
+            pad: [0.0; 3],
+        };
+        let temporal_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("p5.ssr.temporal.params"),
+            contents: bytemuck::bytes_of(&temporal_params_data),
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+
         let ssr_spec_texture = device.create_texture(&TextureDescriptor {
-            label: Some("ssr_spec_texture"),
+            label: Some("p5.ssr.spec"),
             size: Extent3d {
                 width,
                 height,
@@ -3793,13 +4001,13 @@ impl SsrRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let ssr_spec_view = ssr_spec_texture.create_view(&TextureViewDescriptor::default());
 
         let ssr_final_texture = device.create_texture(&TextureDescriptor {
-            label: Some("ssr_final_texture"),
+            label: Some("p5.ssr.final"),
             size: Extent3d {
                 width,
                 height,
@@ -3809,13 +4017,13 @@ impl SsrRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let ssr_final_view = ssr_final_texture.create_view(&TextureViewDescriptor::default());
 
-        let ssr_history = device.create_texture(&TextureDescriptor {
-            label: Some("ssr_history"),
+        let ssr_history_texture = device.create_texture(&TextureDescriptor {
+            label: Some("p5.ssr.history"),
             size: Extent3d {
                 width,
                 height,
@@ -3828,10 +4036,10 @@ impl SsrRenderer {
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let ssr_history_view = ssr_history.create_view(&TextureViewDescriptor::default());
+        let ssr_history_view = ssr_history_texture.create_view(&TextureViewDescriptor::default());
 
-        let ssr_filtered = device.create_texture(&TextureDescriptor {
-            label: Some("ssr_filtered"),
+        let ssr_filtered_texture = device.create_texture(&TextureDescriptor {
+            label: Some("p5.ssr.filtered"),
             size: Extent3d {
                 width,
                 height,
@@ -3841,15 +4049,13 @@ impl SsrRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_SRC,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        let ssr_filtered_view = ssr_filtered.create_view(&TextureViewDescriptor::default());
+        let ssr_filtered_view = ssr_filtered_texture.create_view(&TextureViewDescriptor::default());
 
         let ssr_hit_texture = device.create_texture(&TextureDescriptor {
-            label: Some("ssr_hit_data"),
+            label: Some("p5.ssr.hit"),
             size: Extent3d {
                 width,
                 height,
@@ -3859,15 +4065,13 @@ impl SsrRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_SRC,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let ssr_hit_view = ssr_hit_texture.create_view(&TextureViewDescriptor::default());
 
-        let ssr_composited = device.create_texture(&TextureDescriptor {
-            label: Some("ssr_composited"),
+        let ssr_composited_texture = device.create_texture(&TextureDescriptor {
+            label: Some("p5.ssr.composited"),
             size: Extent3d {
                 width,
                 height,
@@ -3877,16 +4081,13 @@ impl SsrRenderer {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::STORAGE_BINDING
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_SRC,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        let ssr_composited_view = ssr_composited.create_view(&TextureViewDescriptor::default());
+        let ssr_composited_view = ssr_composited_texture.create_view(&TextureViewDescriptor::default());
 
-        // Env cube
         let env_texture = device.create_texture(&TextureDescriptor {
-            label: Some("ssr_env_cube"),
+            label: Some("p5.ssr.env.placeholder"),
             size: Extent3d {
                 width: 1,
                 height: 1,
@@ -3900,8 +4101,8 @@ impl SsrRenderer {
             view_formats: &[],
         });
         let env_view = env_texture.create_view(&TextureViewDescriptor {
-            label: Some("ssr_env_cube_view"),
-            format: Some(TextureFormat::Rgba8Unorm),
+            label: Some("p5.ssr.env.view"),
+            format: None,
             dimension: Some(TextureViewDimension::Cube),
             aspect: TextureAspect::All,
             base_mip_level: 0,
@@ -3909,9 +4110,21 @@ impl SsrRenderer {
             base_array_layer: 0,
             array_layer_count: None,
         });
-        let env_sampler = device.create_sampler(&SamplerDescriptor::default());
+        let env_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("p5.ssr.env.sampler"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Linear,
+            ..Default::default()
+        });
         let linear_sampler = device.create_sampler(&SamplerDescriptor {
-            label: Some("p5.ssr.linear_sampler"),
+            label: Some("p5.ssr.linear"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
             mag_filter: FilterMode::Linear,
             min_filter: FilterMode::Linear,
             mipmap_filter: FilterMode::Linear,
@@ -3932,17 +4145,18 @@ impl SsrRenderer {
             temporal_bind_group_layout,
             composite_pipeline,
             composite_bind_group_layout,
+            composite_params,
             ssr_spec_texture,
             ssr_spec_view,
             ssr_final_texture,
             ssr_final_view,
-            ssr_history,
+            ssr_history_texture,
             ssr_history_view,
-            ssr_filtered,
+            ssr_filtered_texture,
             ssr_filtered_view,
             ssr_hit_texture,
             ssr_hit_view,
-            ssr_composited,
+            ssr_composited_texture,
             ssr_composited_view,
             env_texture,
             env_view,
@@ -3950,19 +4164,15 @@ impl SsrRenderer {
             linear_sampler,
             width,
             height,
+            counters_buffer,
+            counters_readback,
+            temporal_params,
             last_trace_ms: 0.0,
             last_shade_ms: 0.0,
             last_fallback_ms: 0.0,
+            stats_readback_pending: false,
+            scene_color_override: None,
         })
-    }
-
-    pub fn update_settings(&mut self, queue: &Queue, settings: SsrSettings) {
-        self.settings = settings;
-        queue.write_buffer(&self.settings_buffer, 0, bytemuck::bytes_of(&self.settings));
-    }
-
-    pub fn update_camera(&mut self, queue: &Queue, camera: &CameraParams) {
-        queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(camera));
     }
 
     pub fn execute(
@@ -3970,12 +4180,20 @@ impl SsrRenderer {
         device: &Device,
         encoder: &mut CommandEncoder,
         gbuffer: &GBuffer,
+        mut stats: Option<&mut SsrStats>,
     ) -> RenderResult<()> {
+        let stats_requested = stats.is_some();
+        if stats_requested {
+            encoder.clear_buffer(&self.counters_buffer, 0, None);
+        }
+
         let (w, h) = (self.width, self.height);
         let gx = (w + 7) / 8;
         let gy = (h + 7) / 8;
-        let t0 = Instant::now();
 
+        let trace_start = Instant::now();
+
+        // Trace rays against the hierarchical depth
         let trace_bg = device.create_bind_group(&BindGroupDescriptor {
             label: Some("p5.ssr.trace.bg"),
             layout: &self.trace_bind_group_layout,
@@ -4000,6 +4218,10 @@ impl SsrRenderer {
                     binding: 4,
                     resource: self.camera_buffer.as_entire_binding(),
                 },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: self.counters_buffer.as_entire_binding(),
+                },
             ],
         });
         {
@@ -4011,15 +4233,20 @@ impl SsrRenderer {
             pass.set_bind_group(0, &trace_bg, &[]);
             pass.dispatch_workgroups(gx, gy, 1);
         }
-        let shade_start = Instant::now();
 
+        // Shade pass converts hit data into specular contributions
+        let shade_start = Instant::now();
+        let scene_color_view = self
+            .scene_color_override
+            .as_ref()
+            .unwrap_or(&gbuffer.material_view);
         let shade_bg = device.create_bind_group(&BindGroupDescriptor {
             label: Some("p5.ssr.shade.bg"),
             layout: &self.shade_bind_group_layout,
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&gbuffer.material_view),
+                    resource: BindingResource::TextureView(scene_color_view),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -4053,6 +4280,10 @@ impl SsrRenderer {
                     binding: 8,
                     resource: self.camera_buffer.as_entire_binding(),
                 },
+                BindGroupEntry {
+                    binding: 9,
+                    resource: self.counters_buffer.as_entire_binding(),
+                },
             ],
         });
         {
@@ -4064,8 +4295,9 @@ impl SsrRenderer {
             pass.set_bind_group(0, &shade_bg, &[]);
             pass.dispatch_workgroups(gx, gy, 1);
         }
-        let fallback_start = Instant::now();
 
+        // Environment fallback for misses
+        let fallback_start = Instant::now();
         let fallback_bg = device.create_bind_group(&BindGroupDescriptor {
             label: Some("p5.ssr.fallback.bg"),
             layout: &self.fallback_bind_group_layout,
@@ -4106,6 +4338,10 @@ impl SsrRenderer {
                     binding: 8,
                     resource: self.camera_buffer.as_entire_binding(),
                 },
+                BindGroupEntry {
+                    binding: 9,
+                    resource: self.counters_buffer.as_entire_binding(),
+                },
             ],
         });
         {
@@ -4117,8 +4353,9 @@ impl SsrRenderer {
             pass.set_bind_group(0, &fallback_bg, &[]);
             pass.dispatch_workgroups(gx, gy, 1);
         }
-        let fallback_end = Instant::now();
 
+        // Temporal accumulation smooths the reflection
+        let fallback_end = Instant::now();
         let temporal_bg = device.create_bind_group(&BindGroupDescriptor {
             label: Some("p5.ssr.temporal.bg"),
             layout: &self.temporal_bind_group_layout,
@@ -4135,6 +4372,10 @@ impl SsrRenderer {
                     binding: 2,
                     resource: BindingResource::TextureView(&self.ssr_filtered_view),
                 },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: self.temporal_params.as_entire_binding(),
+                },
             ],
         });
         {
@@ -4147,27 +4388,7 @@ impl SsrRenderer {
             pass.dispatch_workgroups(gx, gy, 1);
         }
 
-        // Copy temporal filtered output to history for next frame
-        encoder.copy_texture_to_texture(
-            ImageCopyTexture {
-                texture: &self.ssr_filtered,
-                mip_level: 0,
-                origin: Origin3d::ZERO,
-                aspect: TextureAspect::All,
-            },
-            ImageCopyTexture {
-                texture: &self.ssr_history,
-                mip_level: 0,
-                origin: Origin3d::ZERO,
-                aspect: TextureAspect::All,
-            },
-            Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-        );
-
+        // Composite SSR into the lit buffer with tone mapping/boost parameters
         let composite_bg = device.create_bind_group(&BindGroupDescriptor {
             label: Some("p5.ssr.composite.bg"),
             layout: &self.composite_bind_group_layout,
@@ -4182,6 +4403,10 @@ impl SsrRenderer {
                 },
                 BindGroupEntry {
                     binding: 2,
+                    resource: self.composite_params.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 3,
                     resource: BindingResource::TextureView(&self.ssr_composited_view),
                 },
             ],
@@ -4196,20 +4421,128 @@ impl SsrRenderer {
             pass.dispatch_workgroups(gx, gy, 1);
         }
 
-        self.last_trace_ms = (shade_start - t0).as_secs_f32() * 1000.0;
+        // Preserve filtered result for next frame's temporal accumulation
+        encoder.copy_texture_to_texture(
+            self.ssr_filtered_texture
+                .as_image_copy(),
+            self.ssr_history_texture
+                .as_image_copy(),
+            Extent3d {
+                width: self.width,
+                height: self.height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        self.clear_scene_color_override();
+
+        self.last_trace_ms = (shade_start - trace_start).as_secs_f32() * 1000.0;
         self.last_shade_ms = (fallback_start - shade_start).as_secs_f32() * 1000.0;
         self.last_fallback_ms = (fallback_end - fallback_start).as_secs_f32() * 1000.0;
+
+        self.stats_readback_pending = stats_requested;
+        if stats_requested {
+            let counter_bytes = size_of::<[u32; 5]>() as BufferAddress;
+            encoder.copy_buffer_to_buffer(
+                &self.counters_buffer,
+                0,
+                &self.counters_readback,
+                0,
+                counter_bytes,
+            );
+        }
+
+        if let Some(stats) = stats.as_deref_mut() {
+            stats.trace_ms = self.last_trace_ms;
+            stats.shade_ms = self.last_shade_ms;
+            stats.fallback_ms = self.last_fallback_ms;
+        }
 
         Ok(())
     }
 
-    #[allow(dead_code)]
+    pub fn collect_stats_into(
+        &mut self,
+        device: &Device,
+        _queue: &Queue,
+        stats: &mut SsrStats,
+    ) -> RenderResult<()> {
+        if !self.stats_readback_pending {
+            // No stats were requested during execute; just keep timings.
+            stats.trace_ms = self.last_trace_ms;
+            stats.shade_ms = self.last_shade_ms;
+            stats.fallback_ms = self.last_fallback_ms;
+            return Ok(());
+        }
+
+        let slice = self.counters_readback.slice(..);
+        let (sender, receiver) = oneshot_channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        device.poll(wgpu::Maintain::Wait);
+
+        let map_result = block_on(receiver.receive()).ok_or_else(|| {
+            RenderError::Readback("failed to receive SSR stats map signal".to_string())
+        })?;
+        map_result.map_err(|e| RenderError::Readback(format!("SSR stats map failed: {e:?}")))?;
+
+        let data = slice.get_mapped_range();
+        let words: &[u32] = bytemuck::cast_slice(&data);
+        if words.len() < 5 {
+            return Err(RenderError::Readback(
+                "SSR stats buffer size was smaller than expected".to_string(),
+            ));
+        }
+
+        stats.num_rays = words[0];
+        stats.num_hits = words[1];
+        stats.total_steps = words[2];
+        stats.num_misses = words[3];
+        stats.miss_ibl_samples = words[4];
+        stats.trace_ms = self.last_trace_ms;
+        stats.shade_ms = self.last_shade_ms;
+        stats.fallback_ms = self.last_fallback_ms;
+
+        drop(data);
+        self.counters_readback.unmap();
+
+        self.stats_readback_pending = false;
+
+        Ok(())
+    }
+
     pub fn get_output(&self) -> &TextureView {
         &self.ssr_filtered_view
     }
 
     pub fn output_texture(&self) -> &Texture {
-        &self.ssr_filtered
+        &self.ssr_filtered_texture
+    }
+
+    pub fn set_scene_color_view(&mut self, view: TextureView) {
+        self.scene_color_override = Some(view);
+    }
+
+    fn clear_scene_color_override(&mut self) {
+        self.scene_color_override = None;
+    }
+
+    pub fn update_settings(&mut self, queue: &Queue, settings: SsrSettings) {
+        self.settings = settings;
+        queue.write_buffer(&self.settings_buffer, 0, bytemuck::bytes_of(&self.settings));
+    }
+
+    pub fn update_camera(&mut self, queue: &Queue, camera: &CameraParams) {
+        queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(camera));
+    }
+
+    pub fn spec_view(&self) -> &TextureView {
+        &self.ssr_spec_view
+    }
+
+    pub fn final_view(&self) -> &TextureView {
+        &self.ssr_final_view
     }
 
     pub fn hit_data_view(&self) -> &TextureView {
@@ -4225,7 +4558,11 @@ impl SsrRenderer {
     }
 
     pub fn timings_ms(&self) -> (f32, f32, f32) {
-        (self.last_trace_ms, self.last_shade_ms, self.last_fallback_ms)
+        (
+            self.last_trace_ms,
+            self.last_shade_ms,
+            self.last_fallback_ms,
+        )
     }
 
     pub fn get_settings(&self) -> SsrSettings {

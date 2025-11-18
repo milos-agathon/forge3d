@@ -14,6 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ":gi ssr on".to_string(),
         ":ssr-max-steps 64".to_string(),
         ":ssr-thickness 0.08".to_string(),
+        ":load-ssr-preset".to_string(),
         ":p5 ssr-thickness".to_string(),
     ];
 
