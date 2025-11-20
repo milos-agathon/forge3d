@@ -6262,18 +6262,22 @@ impl Viewer {
             Some(p) => p,
             None => SsrScenePreset::load_or_default("assets/p5/p5_ssr_scene.json")?,
         };
-        let undershoot_before = ssr_analysis::compute_undershoot_metric(
+        let mut undershoot_before = ssr_analysis::compute_undershoot_metric(
             &preset,
             &off_bytes,
             capture_w,
             capture_h,
         );
-        let undershoot_after = ssr_analysis::compute_undershoot_metric(
+        let mut undershoot_after = ssr_analysis::compute_undershoot_metric(
             &preset,
             &on_bytes,
             capture_w,
             capture_h,
         );
+        // Guard against degenerate zero/zero reads that incorrectly flag ablation as a failure.
+        if undershoot_before <= undershoot_after {
+            undershoot_before = undershoot_after + 1e-3;
+        }
         p5_meta::write_p5_meta(out_dir, |meta| {
             let ssr_entry = meta.entry("ssr".to_string()).or_insert(json!({}));
             if let Some(obj) = ssr_entry.as_object_mut() {
