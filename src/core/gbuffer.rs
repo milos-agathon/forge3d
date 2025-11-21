@@ -1,6 +1,12 @@
 //! GBuffer system for deferred rendering and screen-space effects
 //!
 //! Provides depth, normals, and material data for screen-space techniques
+//! such as SSAO/GTAO, SSGI, and SSR. The default configuration encodes:
+//!   - `depth_texture`   : `R32Float` linear view-space depth (>0 for geometry)
+//!   - `normal_texture`  : `Rgba16Float` with view-space normal in `xyz` and
+//!                         perceptual roughness in `w` (both mapped to [0,1])
+//!   - `material_texture`: `Rgba8Unorm` with diffuse/base color in `rgb` and
+//!                         metallic factor in `a` (both in [0,1])
 
 use crate::core::mipmap::calculate_mip_levels;
 use crate::error::RenderResult;
@@ -40,15 +46,15 @@ impl Default for GBufferConfig {
 
 /// GBuffer textures for deferred rendering
 pub struct GBuffer {
-    /// Depth texture (view-space depth or world-space depth)
+    /// Depth texture (linear view-space depth; cleared to 0.0 for background)
     pub depth_texture: Texture,
     pub depth_view: TextureView,
 
-    /// Normal texture (view-space normals, encoded)
+    /// Normal texture (view-space normals encoded into [0,1], plus roughness in alpha)
     pub normal_texture: Texture,
     pub normal_view: TextureView,
 
-    /// Material/albedo texture
+    /// Material/albedo texture (diffuse/base color in RGB, metallic in alpha)
     pub material_texture: Texture,
     pub material_view: TextureView,
 

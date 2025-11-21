@@ -1,5 +1,9 @@
 // src/shaders/ssgi/trace.wgsl
-// P5.2: Half-resolution SSGI view-space tracing using HZB sphere tracing
+// P5.2: Half-resolution SSGI view-space tracing using HZB sphere tracing.
+// Writes outHit as Rgba16Float where:
+//   xy = hit UV in [0,1],
+//   z  = travelled distance along the ray in view units,
+//   w  = hit mask in {0,1}.
 
 struct SsgiSettings {
     radius: f32,

@@ -264,25 +264,33 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     
     // INDIRECT LIGHTING (IBL) - using unified eval_ibl from lighting_ibl.wgsl
+    // Conceptual split used later by GI composition:
+    //   L_diffuse_base = direct diffuse (from eval_brdf) + diffuse IBL
+    //   L_spec_base    = direct specular   (from eval_brdf) + specular IBL
+    // Here both lobes are already combined into a single RGB `indirect_lighting` term.
     var indirect_lighting = vec3<f32>(0.0);
     
     // Check if we have IBL enabled
     let has_ibl = lighting.ibl_intensity > 0.0;
     
     if has_ibl {
-        // Use unified IBL evaluator (split-sum approximation with cubemaps + LUT)
+        // eval_ibl returns diffuse + specular IBL in linear HDR units
         indirect_lighting = eval_ibl(world_normal, view_dir, base_color.rgb, metallic, roughness, f0);
         indirect_lighting = indirect_lighting * lighting.ibl_intensity;
     } else {
-        // Simple ambient lighting fallback
+        // Simple ambient lighting fallback (treated as part of L_diffuse_base)
         let ambient = vec3<f32>(0.03) * base_color.rgb;
         indirect_lighting = ambient;
     }
     
-    // Apply ambient occlusion
+    // Apply ambient occlusion to indirect (diffuse) term. Specular is unaffected here; any
+    // future GI composition pass must ensure AO only modulates the diffuse component.
     indirect_lighting = indirect_lighting * occlusion;
     
-    // Combine direct and indirect lighting
+    // At this stage the fragment output color can be viewed as:
+    //   color = L_diffuse_base + L_spec_base + emissive
+    // where direct_lighting contains the BRDF-evaluated direct diffuse+spec, and
+    // indirect_lighting contains the diffuse+spec IBL contribution.
     var color = direct_lighting + indirect_lighting + emissive;
     
     // Tone mapping and gamma correction

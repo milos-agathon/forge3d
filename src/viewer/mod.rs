@@ -2583,7 +2583,10 @@ impl Viewer {
             ..Default::default()
         });
 
-        // Lit output target
+        // Lit output target: acts as the current lighting buffer for the viewer.
+        // `lit_output` stores the pre-tonemap combination of direct + IBL lighting
+        // (diffuse and specular) in Rgba8Unorm; SSR shading samples from this buffer
+        // and `ssr/composite.wgsl` adds the reflection contribution on top.
         let lit_output = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("viewer.lit.output"),
             size: wgpu::Extent3d {

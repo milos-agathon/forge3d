@@ -1,4 +1,7 @@
-// AO composite kernel: multiplies material buffer by resolved AO
+// AO composite kernel: multiplies material buffer by resolved AO.
+// color_input      : material buffer (RGBA8) promoted to float.
+// ao_input         : R32Float AO scalar in [0,1], where 1 = no occlusion.
+// composite_output : Rgba8Unorm material * AO (diffuse-only darkening used for P5).
 
 @group(0) @binding(0) var color_input: texture_2d<f32>;
 @group(0) @binding(1) var composite_output: texture_storage_2d<rgba8unorm, write>;

@@ -1,5 +1,9 @@
 // src/shaders/ssr/trace.wgsl
-// Screen-space reflection tracing: outputs hit UV + metadata per pixel
+// Screen-space reflection tracing: outputs hit UV + metadata per pixel.
+// hit_output is Rgba16Float with layout:
+//   xy = hit UV in [0,1] (scene color sample location),
+//   z  = normalized step count in [0,1],
+//   w  = hit mask in {0,1}.
 
 struct SsrSettings {
     max_steps: u32,

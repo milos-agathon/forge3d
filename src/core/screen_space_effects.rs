@@ -544,19 +544,25 @@ pub struct SsaoRenderer {
     noise_sampler: Sampler,
 
     // Output textures
+    // ssao_texture   : R32Float raw AO in [ao_min, 1], where 1 = no occlusion.
     ssao_texture: Texture,
     ssao_view: TextureView,
+    // ssao_blurred   : R32Float spatially filtered AO (same range as ssao_texture).
     ssao_blurred: Texture,
     ssao_blurred_view: TextureView,
     // Temporal history and resolved outputs
+    // ssao_history   : R32Float previous-frame AO used by temporal resolve.
     ssao_history: Texture,
     ssao_history_view: TextureView,
+    // ssao_resolved  : R32Float temporally resolved AO, sampled by composite.
     ssao_resolved: Texture,
     ssao_resolved_view: TextureView,
     // Intermediate blur target
     ssao_tmp: Texture,
     ssao_tmp_view: TextureView,
     // Color composited with AO for display
+    // ssao_composited: Rgba8Unorm material buffer modulated by resolved AO; used only
+    // for visualization in the viewer (lit shading uses its own path).
     ssao_composited: Texture,
     ssao_composited_view: TextureView,
 
@@ -2183,19 +2189,28 @@ pub struct SsgiRenderer {
     composite_bind_group_layout: BindGroupLayout,
 
     // Output and temporal textures
-    // Half-res hit buffer (uv.xy, dist, mask)
+    // ssgi_hit       : Rgba16Float half-res hit buffer (xy = hit UV in [0,1], z = travelled
+    //                   distance in view units, w = hit mask in {0,1}).
     ssgi_hit: Texture,
     ssgi_hit_view: TextureView,
+    // ssgi_texture   : Rgba16Float half-res GI radiance (rgb = diffuse bounce light in
+    //                   linear HDR units, a unused/1.0).
     ssgi_texture: Texture,
     ssgi_view: TextureView,
+    // ssgi_history   : Rgba16Float previous-frame GI radiance used for temporal resolve.
     ssgi_history: Texture,
     ssgi_history_view: TextureView,
+    // ssgi_filtered  : Rgba16Float temporally filtered GI radiance (same layout as
+    //                   ssgi_texture).
     ssgi_filtered: Texture,
     ssgi_filtered_view: TextureView,
     // Full-resolution upscaled output for half-res mode
+    // ssgi_upscaled  : Rgba16Float full-res GI radiance after edge-aware upsample.
     ssgi_upscaled: Texture,
     ssgi_upscaled_view: TextureView,
     // Composited material (material + SSGI)
+    // ssgi_composited: Rgba8Unorm material buffer + SSGI diffuse contribution, used for
+    //                   P5 visualization and metrics (not the main HDR lighting buffer).
     ssgi_composited: Texture,
     ssgi_composited_view: TextureView,
     composite_uniform: Buffer,
@@ -3456,16 +3471,27 @@ pub struct SsrRenderer {
     composite_bind_group_layout: BindGroupLayout,
     composite_params: Buffer,
 
+    // ssr_spec_texture   : Rgba16Float raw SSR specular from cs_shade
+    //                      (rgb = spec radiance, a = reflection weight in [0,1]).
     ssr_spec_texture: Texture,
     ssr_spec_view: TextureView,
+    // ssr_final_texture  : Rgba16Float SSR after environment fallback
+    //                      (rgb = spec radiance, a > 0 for surface hits, a = 0 for
+    //                      env-only misses; see fallback_env.wgsl).
     ssr_final_texture: Texture,
     ssr_final_view: TextureView,
+    // ssr_history_texture: Rgba16Float previous-frame SSR used for temporal filtering.
     ssr_history_texture: Texture,
     ssr_history_view: TextureView,
+    // ssr_filtered_texture: Rgba16Float temporally filtered SSR (input to composite).
     ssr_filtered_texture: Texture,
     ssr_filtered_view: TextureView,
+    // ssr_hit_texture    : Rgba16Float hit buffer from cs_trace (xy = hit UV in [0,1],
+    //                      z = normalized step count, w = hit mask in {0,1}).
     ssr_hit_texture: Texture,
     ssr_hit_view: TextureView,
+    // ssr_composited_texture: Rgba8Unorm view of base lighting + SSR specular after
+    //                         tone mapping; used by the viewer for SSR previews.
     ssr_composited_texture: Texture,
     ssr_composited_view: TextureView,
     scene_color_override: Option<TextureView>,

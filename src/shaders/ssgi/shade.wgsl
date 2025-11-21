@@ -1,5 +1,8 @@
 // src/shaders/ssgi/shade.wgsl
-// P5.2: Shade half-res SSGI using previous-frame color with IBL fallback
+// P5.2: Shade half-res SSGI using previous-frame color with IBL fallback.
+// Produces `outRadiance` as Rgba16Float where rgb = diffuse GI radiance in linear HDR
+// units and a = 1.0. This is a purely diffuse term intended to be added onto
+// L_diffuse_base (never the specular component).
 
 struct SsgiSettings {
     radius: f32,

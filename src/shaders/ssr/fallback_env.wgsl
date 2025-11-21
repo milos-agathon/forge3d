@@ -1,5 +1,9 @@
 // src/shaders/ssr/fallback_env.wgsl
-// Fill SSR misses with environment reflections and output final specular buffer
+// Fill SSR misses with environment reflections and output final specular buffer.
+// final_ssr is Rgba16Float where:
+//   rgb = specular reflection (SSR where available, otherwise env-only),
+//   a   = >0 for SSR surface hits, 0.0 for pure environment misses. The composite
+//         pass uses alpha to avoid double-counting IBL when SSR falls back to env.
 
 struct SsrSettings {
     max_steps: u32,

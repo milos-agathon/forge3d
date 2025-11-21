@@ -1,5 +1,8 @@
 // src/shaders/ssr/shade.wgsl
-// Convert SSR hits into specular contributions using Fresnel weighting
+// Convert SSR hits into specular contributions using Fresnel weighting.
+// ssr_spec_out is Rgba16Float with:
+//   rgb = view-space specular reflection color in linear HDR units,
+//   a   = reflection weight in [0,1] used by the composite stage.
 
 struct SsrSettings {
     max_steps: u32,

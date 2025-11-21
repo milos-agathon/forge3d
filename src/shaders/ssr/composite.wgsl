@@ -1,5 +1,10 @@
 // src/shaders/ssr/composite.wgsl
-// Add SSR contribution into the main color buffer prior to tonemapping
+// Add SSR contribution into the main color buffer prior to tonemapping.
+// base_color   : pre-tonemap lit buffer (direct + IBL diffuse/spec) sampled from viewer's
+//                `lit_output_view`.
+// ssr_final    : Rgba16Float specular buffer after fallback/temporal resolve
+//                (rgb = SSR+env spec, a encodes reflection weight/miss info).
+// composite_out: Rgba8Unorm LDR view used by the P5 SSR harness for visualization.
 
 struct CompositeParams {
     boost: f32,

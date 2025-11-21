@@ -1,10 +1,15 @@
 // GBuffer pass for screen-space effects (P5)
-// Outputs: depth, normals, material properties for SSAO/GTAO, SSGI, SSR
+// Outputs per-fragment data consumed by SSAO/GTAO, SSGI, and SSR:
+//   - depth         : linear view-space depth (>0 for geometry, 0.0 for background)
+//   - normal.xyz    : view-space normal encoded into [0,1]
+//   - normal.w      : perceptual roughness in [0,1]
+//   - albedo_metal.rgb : diffuse/base color in linear space (texture * material)
+//   - albedo_metal.a   : metallic factor in [0,1]
 
 struct GBufferOutput {
     @location(0) depth: f32,
-    @location(1) normal: vec4<f32>,      // xyz = normal, w = roughness
-    @location(2) albedo_metal: vec4<f32>, // rgb = albedo, a = metallic
+    @location(1) normal: vec4<f32>,      // xyz = view-space normal in [0,1], w = roughness [0,1]
+    @location(2) albedo_metal: vec4<f32>, // rgb = diffuse/base color, a = metallic [0,1]
 }
 
 struct VertexInput {

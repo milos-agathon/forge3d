@@ -1,4 +1,7 @@
-// SSGI composite kernel: adds SSGI radiance to material buffer
+// SSGI composite kernel: adds SSGI diffuse radiance to the material/color buffer.
+// material_input   : viewer material buffer (RGBA8) promoted to float; rgb = base color.
+// ssgi_input       : Rgba16Float GI radiance (rgb) from SSGI, alpha unused.
+// composite_output : Rgba8Unorm material+GI buffer used by P5 harness for visualization.
 
 @group(0) @binding(0) var material_input: texture_2d<f32>;
 @group(0) @binding(1) var composite_output: texture_storage_2d<rgba8unorm, write>;
