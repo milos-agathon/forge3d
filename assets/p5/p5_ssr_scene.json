@@ -6,22 +6,22 @@
   "background_top": [0.045, 0.07, 0.11],
   "background_bottom": [0.22, 0.38, 0.56],
   "floor_horizon": 0.6,
-  "env_tint": [0.28, 0.37, 0.52],
+  "env_tint": [0.06, 0.08, 0.10],
   "light_dir": [-0.32, 0.58, 0.74],
-  "light_intensity": 1.2,
+  "light_intensity": 0.6,
   "stripe": {
     "center_y": 0.32,
-    "half_thickness": 0.028,
+    "half_thickness": 0.020,
     "inner_color": [1.0, 0.95, 0.8],
     "outer_color": [0.96, 0.62, 0.36],
-    "glow_strength": 0.85
+    "glow_strength": 0.65
   },
   "floor": {
     "start_y": 0.63,
     "color_top": [0.16, 0.15, 0.13],
     "color_bottom": [0.08, 0.08, 0.07],
-    "reflection_strength": 0.22,
-    "reflection_power": 3.2
+    "reflection_strength": 0.18,
+    "reflection_power": 2.8
   },
   "spheres": [
     {

@@ -6005,7 +6005,12 @@ impl Viewer {
                 }
             }
         }
-        let edge_streaks = ssr_analysis::count_edge_streaks(&ssr_bytes, capture_w, capture_h);
+        let edge_streaks = ssr_analysis::count_edge_streaks(
+            &reference_bytes,
+            &ssr_bytes,
+            capture_w,
+            capture_h,
+        );
 
         let mean_diff = mean_abs_diff(&reference_bytes, &ssr_bytes);
 
@@ -6152,8 +6157,13 @@ impl Viewer {
             })?
         };
 
-        // 2) SSR enabled, thickness = 0 (undershoot before)
+        // 2) SSR enabled, thin thickness variant shown on the left half of the
+        //    ablation PNG. We pick a small positive thickness relative to the
+        //    baseline so undershoot artifacts are visible but still physical.
         self.ssr_params.set_enabled(true);
+        // Thin thickness is derived from the eventual baseline value below.
+        // We temporarily use the current ssr_thickness; it will be overwritten
+        // once we know the restored baseline.
         self.ssr_params.set_thickness(0.0);
         self.sync_ssr_params_to_gi();
         self.reexecute_gi(None)?;
@@ -6186,12 +6196,53 @@ impl Viewer {
             })?
         };
 
-        // 3) SSR enabled, restored thickness (undershoot after)
+        // 3) SSR enabled, restored thickness (baseline production value shown
+        //    on the right half of the ablation PNG).
         let restored_thickness = if original_thickness <= 0.0 {
             0.08
         } else {
             original_thickness
         };
+        // Thin thickness: a fraction of the baseline, clamped to a small
+        // positive value so that insufficient thickness produces visible
+        // undershoot while remaining in a plausible range.
+        let thin_thickness = (restored_thickness * 0.15).max(0.005);
+
+        // Re-render the thin variant with the actual thin_thickness so the
+        // left half of the PNG matches the metric semantics.
+        self.ssr_params.set_thickness(thin_thickness);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi(None)?;
+        let off_bytes = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            let ssr_view = gi
+                .material_with_ssr_view()
+                .unwrap_or(&gi.gbuffer().material_view);
+            self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                let fog_view = if self.fog_enabled {
+                    &self.fog_output_view
+                } else {
+                    &self.fog_zero_view
+                };
+                Self::render_view_to_rgba8_ex(
+                    &self.device,
+                    &self.queue,
+                    comp_pl,
+                    comp_bgl,
+                    &self.sky_output_view,
+                    &gi.gbuffer().depth_view,
+                    fog_view,
+                    self.config.format,
+                    capture_w,
+                    capture_h,
+                    far,
+                    ssr_view,
+                    0,
+                )
+            })?
+        };
+
+        // Now render the baseline (thicker) variant for the right half.
         self.ssr_params.set_thickness(restored_thickness);
         self.sync_ssr_params_to_gi();
         self.reexecute_gi(None)?;
@@ -6244,12 +6295,22 @@ impl Viewer {
 
         let out_path = out_dir.join(OUTPUT_NAME);
         image_write::write_png_rgba8_small(&out_path, &composed, out_w, out_h)?;
-        let streaks_off = ssr_analysis::count_edge_streaks(&off_bytes, capture_w, capture_h);
-        let streaks_on = ssr_analysis::count_edge_streaks(&on_bytes, capture_w, capture_h);
+        let streaks_off = ssr_analysis::count_edge_streaks(
+            &reference_bytes,
+            &off_bytes,
+            capture_w,
+            capture_h,
+        );
+        let streaks_on = ssr_analysis::count_edge_streaks(
+            &reference_bytes,
+            &on_bytes,
+            capture_w,
+            capture_h,
+        );
         println!(
-            "[P5] Wrote {} (thickness off {:.3} | on {:.3})",
+            "[P5] Wrote {} (thickness thin {:.3} | baseline {:.3})",
             out_path.display(),
-            0.0,
+            thin_thickness,
             restored_thickness
         );
         println!(
@@ -6257,27 +6318,28 @@ impl Viewer {
             streaks_off, streaks_on
         );
 
-        // Compute undershoot metrics and write into meta
+        // Compute undershoot metrics and write into meta. The metric is driven
+        // purely by image data from the three captures above:
+        //   - reference_bytes: SSR disabled (ground-truth reflection).
+        //   - on_bytes:       SSR enabled with baseline thickness.
+        //   - off_bytes:      SSR enabled with too-small thickness.
+        // See `compute_undershoot_metric` in `p5::ssr_analysis` for details.
         let preset = match self.ssr_scene_preset.clone() {
             Some(p) => p,
             None => SsrScenePreset::load_or_default("assets/p5/p5_ssr_scene.json")?,
         };
-        let mut undershoot_before = ssr_analysis::compute_undershoot_metric(
+        let (undershoot_before, undershoot_after) = ssr_analysis::compute_undershoot_metric(
             &preset,
+            &reference_bytes,
+            &on_bytes,
             &off_bytes,
             capture_w,
             capture_h,
         );
-        let mut undershoot_after = ssr_analysis::compute_undershoot_metric(
-            &preset,
-            &on_bytes,
-            capture_w,
-            capture_h,
+        println!(
+            "[P5.3] Thickness undershoot metrics -> before: {:.6}, after: {:.6}",
+            undershoot_before, undershoot_after
         );
-        // Guard against degenerate zero/zero reads that incorrectly flag ablation as a failure.
-        if undershoot_before <= undershoot_after {
-            undershoot_before = undershoot_after + 1e-3;
-        }
         p5_meta::write_p5_meta(out_dir, |meta| {
             let ssr_entry = meta.entry("ssr".to_string()).or_insert(json!({}));
             if let Some(obj) = ssr_entry.as_object_mut() {

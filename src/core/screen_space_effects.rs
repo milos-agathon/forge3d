@@ -423,7 +423,7 @@ impl Default for SsrSettings {
             max_steps: 96,
             thickness: 0.1,
             max_distance: 32.0,
-            intensity: 3.5,
+            intensity: 5.0,
             inv_resolution: [1.0 / 1920.0, 1.0 / 1080.0],
             _pad0: [0.0; 2],
         }

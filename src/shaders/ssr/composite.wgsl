@@ -35,12 +35,29 @@ fn cs_ssr_composite(@builtin(global_invocation_id) gid: vec3<u32>) {
     let base = textureLoad(base_color, pixel, 0).rgb;
     let spec_sample = textureLoad(ssr_final, pixel, 0);
     let spec_rgb = spec_sample.rgb;
-    let weight = max(spec_sample.a, params.weight_floor);
+    let raw_alpha = spec_sample.a;
+    // Pixels with alpha <= 0.0 are treated as env-only misses and should not
+    // add extra specular on top of the base lighting. For hits, we use the
+    // stored alpha with a small floor as before.
+    let is_miss = raw_alpha <= 0.0;
+    if (is_miss) {
+        textureStore(
+            composite_out,
+            pixel,
+            vec4<f32>(clamp(base, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0),
+        );
+        return;
+    }
+    let weight = max(raw_alpha, params.weight_floor);
     let boosted = spec_rgb * (params.boost * weight);
 
     let combined = base + boosted;
     let tone = tone_map(combined, params.exposure, params.tone_white, params.reinhard_k);
     let gamma = max(params.gamma, 0.001);
     let corrected = pow(tone, vec3<f32>(1.0 / gamma));
-    textureStore(composite_out, pixel, vec4<f32>(clamp(corrected, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0));
+    textureStore(
+        composite_out,
+        pixel,
+        vec4<f32>(clamp(corrected, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0),
+    );
 }

@@ -95,7 +95,9 @@ fn cs_shade(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let f0 = mix(vec3<f32>(0.04, 0.04, 0.04), albedo, vec3<f32>(metallic));
     let fresnel = fresnel_schlick(max(dot(normal_vs, view_dir), 0.0), f0);
-    let cone_weight = max(pow(max(1.0 - roughness, 0.0), 1.2), 0.25);
+    // Roughness-based cone weight: strongly favor glossy surfaces while
+    // allowing very rough materials to contribute only weak reflections.
+    let cone_weight = pow(max(1.0 - roughness, 0.0), 2.0);
     let fade = pow(edge_fade(uv), 0.5);
 
     // Edge fade: reduce streaks at SSR edges using local hit-mask neighborhood

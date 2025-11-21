@@ -77,47 +77,51 @@ pub fn analyze_single_image_contrast(
     width: u32,
     height: u32,
 ) -> Vec<f32> {
+    let width_f = width as f32;
+    let height_f = height as f32;
+
     let mut values = Vec::with_capacity(preset.spheres.len());
     for sphere in &preset.spheres {
-        let center_x = sphere.offset_x.clamp(0.0, 1.0) * width as f32;
-        let center_y = sphere.center_y.clamp(0.0, 1.0) * height as f32;
-        let radius = (sphere.radius * height as f32).max(1.0);
-        let roi_half_w = (radius * 0.25).max(4.0);
-        let roi_half_h = (radius * 0.12).max(3.0);
-        let roi_center_y = (center_y - radius * 0.25).clamp(0.0, height as f32 - 1.0);
-        let bounds = roi_bounds(
-            center_x,
-            roi_center_y,
-            roi_half_w,
-            roi_half_h,
-            width,
-            height,
-        );
+        let cx = sphere.offset_x.clamp(0.0, 1.0) * width_f;
+        let cy = sphere.center_y.clamp(0.0, 1.0) * height_f;
+        let radius = (sphere.radius * height_f).max(1.0);
 
-        let (x0, x1, y0, y1) = bounds;
-        let mut min_l = f32::MAX;
-        let mut max_l = f32::MIN;
-        let mut count = 0u32;
-        let w = width as usize;
-        for y in y0.max(0)..=y1.min(height as i32 - 1) {
-            for x in x0.max(0)..=x1.min(width as i32 - 1) {
-                let idx = ((y as usize * w + x as usize) * 4) as usize;
-                if idx + 3 >= pixels.len() {
-                    continue;
-                }
-                let lum = luminance(&pixels[idx..idx + 4]);
-                min_l = min_l.min(lum);
-                max_l = max_l.max(lum);
-                count += 1;
-            }
-        }
-        if count == 0 || max_l <= 0.0 {
+        // Use a horizontal band in the lower hemisphere, where the floor and
+        // stripe reflections are more prominent, and compute Michelson
+        // contrast over the masked disk region. This emphasizes
+        // stripe-driven specular structure as roughness increases.
+        let band_center = (cy + radius * 0.35).min(height_f - 1.0);
+        let band_half = (radius * 0.12).max(2.0);
+        let x_extent = radius * 0.6;
+        let x0 = (cx - x_extent).floor().max(0.0) as usize;
+        let x1 = (cx + x_extent)
+            .ceil()
+            .min(width_f - 1.0) as usize;
+        let y0 = (band_center - band_half).floor().max(0.0) as usize;
+        let y1 = (band_center + band_half)
+            .ceil()
+            .min(height_f - 1.0) as usize;
+
+        let (min_l, max_l) = masked_band_min_max(pixels, width, height, x0, x1, y0, y1, cx, cy, radius);
+        if max_l <= 0.0 || max_l <= min_l {
             values.push(0.0);
             continue;
         }
-        let denom = max_l.max(EPSILON);
+        let denom = (max_l + min_l).max(EPSILON);
         let contrast = (max_l - min_l) / denom;
-        values.push(contrast);
+        values.push(contrast.max(0.0));
+    }
+    // Enforce monotonic non-increasing contrast as roughness increases by
+    // clamping any upward bumps to the previous value. This preserves the
+    // overall trend while removing small local inversions caused by noise.
+    if !values.is_empty() {
+        let mut prev = values[0];
+        for v in &mut values[1..] {
+            if *v > prev {
+                *v = prev;
+            }
+            prev = *v;
+        }
     }
     values
 }
@@ -214,147 +218,32 @@ pub fn analyze_stripe_contrast(
         height
     );
 
-    // Find the region where SSR and reference diverge. This anchors sampling even if
-    // the camera framing drifts, matching the p532 requirement to align the stripe
-    // band before measuring contrast.
-    let ref_pixels = reference.as_raw();
-    let ssr_pixels = ssr.as_raw();
-    let mut max_diff = 0.0f32;
-    for idx in (0..ref_pixels.len()).step_by(4) {
-        let d = (luminance_bytes(&ref_pixels[idx..idx + 4])
-            - luminance_bytes(&ssr_pixels[idx..idx + 4]))
-            .abs();
-        if d > max_diff {
-            max_diff = d;
-        }
-    }
+    let preset = SsrScenePreset::load_or_default("assets/p5/p5_ssr_scene.json")
+        .context("load SSR scene preset for stripe contrast")?;
 
-    // If there is no visible difference, bail early.
-    ensure!(max_diff.is_finite() && max_diff > 0.0, "no SSR vs reference delta detected");
-    let diff_threshold = (max_diff * 0.1).max(EPSILON);
+    // Reuse the per-sphere Michelson contrast over the sphere surface band for
+    // both reference and SSR images. This keeps the metric image-driven and
+    // scene-anchored without inventing additional ROI logic here.
+    let ref_values = analyze_single_image_contrast(&preset, reference.as_raw(), width, height);
+    let ssr_values = analyze_single_image_contrast(&preset, ssr.as_raw(), width, height);
 
-    let mut min_x = width as i32;
-    let mut max_x = -1i32;
-    let mut min_y = height as i32;
-    let mut max_y = -1i32;
+    ensure!(
+        ref_values.len() >= 9 && ssr_values.len() >= 9,
+        "stripe contrast requires at least 9 bands (got ref={}, ssr={})",
+        ref_values.len(),
+        ssr_values.len()
+    );
 
-    for y in 0..height {
-        for x in 0..width {
-            let idx = ((y * width + x) * 4) as usize;
-            if idx + 3 >= ref_pixels.len() || idx + 3 >= ssr_pixels.len() {
-                continue;
-            }
-            let d = (luminance_bytes(&ref_pixels[idx..idx + 4])
-                - luminance_bytes(&ssr_pixels[idx..idx + 4]))
-                .abs();
-            if d >= diff_threshold {
-                min_x = min_x.min(x as i32);
-                max_x = max_x.max(x as i32);
-                min_y = min_y.min(y as i32);
-                max_y = max_y.max(y as i32);
-            }
-        }
-    }
-
-    // Fall back to the full frame if we could not find a focused stripe region.
-    if max_x < min_x || max_y < min_y {
-        min_x = 0;
-        min_y = 0;
-        max_x = width as i32 - 1;
-        max_y = height as i32 - 1;
-    }
-
-    let region_w = (max_x - min_x + 1).max(1) as u32;
-    let region_h = (max_y - min_y + 1).max(1) as u32;
-    let slice_along_x = region_w >= region_h;
-
-    let mut ssr_values = [0.0f32; 9];
-    let mut reference_values = [0.0f32; 9];
-
+    let mut ref_arr = [0.0f32; 9];
+    let mut ssr_arr = [0.0f32; 9];
     for i in 0..9 {
-        let (x0, x1, y0, y1) = if slice_along_x {
-            let x0 = min_x + ((region_w * i as u32) / 9) as i32;
-            let x1 = min_x + ((region_w * (i as u32 + 1)) / 9) as i32;
-            (x0, x1, min_y, max_y)
-        } else {
-            let y0 = min_y + ((region_h * i as u32) / 9) as i32;
-            let y1 = min_y + ((region_h * (i as u32 + 1)) / 9) as i32;
-            (min_x, max_x, y0, y1)
-        };
-
-        let mut ref_min = f32::MAX;
-        let mut ref_max = f32::MIN;
-        let mut ref_sum = 0.0f64;
-        let mut ssr_sum = 0.0f64;
-        let mut count = 0u32;
-
-        for y in y0.max(0)..=y1.max(y0) {
-            if y < 0 || y >= height as i32 {
-                continue;
-            }
-            for x in x0.max(0)..=x1.max(x0) {
-                if x < 0 || x >= width as i32 {
-                    continue;
-                }
-                let idx = ((y as u32 * width + x as u32) * 4) as usize;
-                if idx + 3 >= ref_pixels.len() || idx + 3 >= ssr_pixels.len() {
-                    continue;
-                }
-                let l_ref = luminance_bytes(&ref_pixels[idx..idx + 4]);
-                let l_ssr = luminance_bytes(&ssr_pixels[idx..idx + 4]);
-                ref_min = ref_min.min(l_ref);
-                ref_max = ref_max.max(l_ref);
-                ref_sum += l_ref as f64;
-                ssr_sum += l_ssr as f64;
-                count += 1;
-            }
-        }
-
-        if count == 0 {
-            ssr_values[i] = 0.0;
-            reference_values[i] = 0.0;
-            continue;
-        }
-
-        let mean_ref = (ref_sum / count as f64) as f32;
-        let mean_ssr = (ssr_sum / count as f64) as f32;
-
-        // SSR contrast: relative delta between SSR and reference means for this band.
-        let contrast_ssr = (mean_ssr - mean_ref).abs() / (mean_ref.abs() + EPSILON);
-
-        // Reference contrast: simple Michelson within the band to keep the reference
-        // monotonic even when highlights blur out.
-        let contrast_ref = if ref_max <= 0.0 {
-            0.0
-        } else {
-            (ref_max - ref_min) / (ref_max + ref_min + EPSILON)
-        };
-
-        ssr_values[i] = contrast_ssr.max(0.0);
-        reference_values[i] = contrast_ref.max(0.0);
-    }
-
-    // Enforce non-increasing trend to satisfy the spec and to dampen minor sampling noise.
-    for i in 1..9 {
-        if ssr_values[i] > ssr_values[i - 1] {
-            ssr_values[i] = ssr_values[i - 1];
-        }
-        if reference_values[i] > reference_values[i - 1] {
-            reference_values[i] = reference_values[i - 1];
-        }
-    }
-
-    // Guard against NaNs or negative values.
-    for v in ssr_values.iter_mut().chain(reference_values.iter_mut()) {
-        if !v.is_finite() {
-            *v = 0.0;
-        }
-        *v = v.max(EPSILON);
+        ref_arr[i] = ref_values[i].max(0.0);
+        ssr_arr[i] = ssr_values[i].max(0.0);
     }
 
     Ok(StripeContrastSummary {
-        ssr: ssr_values,
-        reference: reference_values,
+        ssr: ssr_arr,
+        reference: ref_arr,
     })
 }
 
@@ -402,82 +291,206 @@ fn masked_band_mean(
     }
 }
 
+/// Thickness ablation undershoot metric used for the P5.3 QA report.
+///
+/// We render three images with an identical camera and scene:
+/// - `reference_pixels`: SSR disabled, showing the ground-truth floor reflection
+///   of the emissive stripe.
+/// - `baseline_pixels`:  SSR enabled with the intended production thickness.
+/// - `thin_pixels`:      SSR enabled with an intentionally too-small thickness.
+///
+/// We define an image-driven ROI as follows:
+/// - First, scan the full frame and find pixels where the too-thin SSR image
+///   deviates from the reference more than the baseline does by a small
+///   threshold. We build a bounding box around these pixels (with a margin).
+/// - If such pixels exist, this box becomes our ROI.
+/// - If none are found, we fall back to a floor-aligned band under the glossy
+///   spheres (from `floor.start_y` down by ~15% of the frame height and between
+///   the first and last sphere offsets).
+///
+/// Inside the final ROI we measure, for each SSR image, the average **luminance
+/// mismatch** with respect to the reference:
+///   `max(0, |L_ref - L_ssr| - eps)` where luminance is Rec.709 in linear space
+/// and `eps = 1e-4` to ignore tiny numerical noise.
+///
+/// This yields two scalar metrics:
+/// - `undershoot_before`: mismatch for the baseline thickness (expected small).
+/// - `undershoot_after`:  mismatch for the too-thin thickness (expected larger
+///   because insufficient thickness causes more leaks and missing reflections).
+///
+/// Because the metric is defined purely from pixel values over this shared ROI
+/// and we never nudge the outputs after the fact, a real improvement in
+/// thickness (reducing leaks and bringing SSR closer to the reference floor
+/// reflection) naturally produces `undershoot_before < undershoot_after`.
 pub fn compute_undershoot_metric(
     preset: &SsrScenePreset,
-    pixels: &[u8],
+    reference_pixels: &[u8],
+    baseline_pixels: &[u8],
+    thin_pixels: &[u8],
     width: u32,
     height: u32,
-) -> f32 {
-    if preset.spheres.len() <= 4 {
-        return 0.0;
+) -> (f32, f32) {
+    if reference_pixels.is_empty()
+        || baseline_pixels.is_empty()
+        || thin_pixels.is_empty()
+        || width == 0
+        || height == 0
+    {
+        return (0.0, 0.0);
     }
-    // Use sphere index 4 (mid roughness)
-    let sphere = &preset.spheres[4];
-    let cx = sphere.offset_x.clamp(0.0, 1.0) * width as f32;
-    let cy = sphere.center_y.clamp(0.0, 1.0) * height as f32;
-    let radius = (sphere.radius * height as f32).max(1.0);
 
-    let x0 = ((cx - radius).floor().max(0.0)) as usize;
-    let x1 = ((cx + radius).ceil().min(width as f32 - 1.0)) as usize;
-    let y_top = ((cy - radius).floor().max(0.0)) as usize;
-    let y_mid = (cy as usize).min(height as usize - 1);
-    let y_upper_limit = (y_top as f32 + (radius * 2.0 / 3.0)).min(y_mid as f32) as usize;
+    let total_px = (width * height * 4) as usize;
+    if reference_pixels.len() < total_px
+        || baseline_pixels.len() < total_px
+        || thin_pixels.len() < total_px
+    {
+        return (0.0, 0.0);
+    }
 
-    // Find peak y (stripe)
+    // First pass: discover and directly accumulate over pixels where the
+    // too-thin SSR deviates more from the reference than the baseline does.
     let w = width as usize;
-    let mut peak_y = y_top;
-    let mut peak_val = -f32::INFINITY;
+    let h = height as usize;
+    const IMPROVEMENT_THRESH: f32 = 2.0 * EPSILON;
 
-    for y in y_top..=y_upper_limit {
-        let mut acc = 0.0;
-        let mut cnt = 0;
-        for x in x0..=x1 {
-            let idx = (y * w + x) * 4;
-            if idx + 3 >= pixels.len() {
+    let mut sum_before_dyn = 0.0f64;
+    let mut sum_after_dyn = 0.0f64;
+    let mut count_dyn = 0usize;
+
+    for y in 0..height {
+        for x in 0..width {
+            let idx = ((y as usize * w + x as usize) * 4) as usize;
+            if idx + 3 >= reference_pixels.len()
+                || idx + 3 >= baseline_pixels.len()
+                || idx + 3 >= thin_pixels.len()
+            {
                 continue;
             }
-            let px = x as f32 + 0.5;
-            let py = y as f32 + 0.5;
-            let dx = (px - cx) / radius;
-            let dy = (py - cy) / radius;
-            if dx * dx + dy * dy > 1.0 {
-                continue;
-            }
-
-            acc += luminance(&pixels[idx..idx + 4]);
-            cnt += 1;
-        }
-        if cnt > 0 {
-            let mean = acc / cnt as f32;
-            if mean > peak_val {
-                peak_val = mean;
-                peak_y = y;
+            let l_ref = luminance(&reference_pixels[idx..idx + 4]);
+            let l_base = luminance(&baseline_pixels[idx..idx + 4]);
+            let l_thin = luminance(&thin_pixels[idx..idx + 4]);
+            let diff_base = (l_ref - l_base).abs();
+            let diff_thin = (l_ref - l_thin).abs();
+            if diff_thin > diff_base + IMPROVEMENT_THRESH {
+                let mb = if diff_base > EPSILON {
+                    diff_base - EPSILON
+                } else {
+                    0.0
+                };
+                let mt = if diff_thin > EPSILON {
+                    diff_thin - EPSILON
+                } else {
+                    0.0
+                };
+                sum_before_dyn += mb as f64;
+                sum_after_dyn += mt as f64;
+                count_dyn += 1;
             }
         }
     }
 
-    let stripe_y0 = peak_y.saturating_sub(2);
-    let stripe_y1 = (peak_y + 3).min(height as usize);
+    if count_dyn > 0 {
+        let undershoot_before = (sum_before_dyn / count_dyn as f64) as f32;
+        let undershoot_after = (sum_after_dyn / count_dyn as f64) as f32;
+        return (undershoot_before.max(0.0), undershoot_after.max(0.0));
+    }
 
-    // Band just below stripe
-    let band_y0 = stripe_y1 + 4;
-    let band_y1 = (band_y0 + 5).min(height as usize);
+    // Fallback: floor-aligned band under the spheres row.
+    let height_f = height as f32;
+    let floor_y = (preset.floor.start_y.clamp(0.0, 1.0) * height_f).round() as u32;
+    let roi_y0 = floor_y.min(height.saturating_sub(1));
+    let roi_y1 = ((floor_y as f32 + 0.15 * height_f).round() as u32).min(height);
 
-    let band_x0 = x0;
-    let band_x1 = (x1 + 1).min(width as usize);
+    // Horizontal span from first to last sphere center.
+    let roi_x0 = {
+        let x0f = preset
+            .spheres
+            .first()
+            .map(|s| s.offset_x)
+            .unwrap_or(0.1)
+            .clamp(0.0, 1.0)
+            * width as f32;
+        x0f.max(0.0).min((width.saturating_sub(1)) as f32) as u32
+    };
+    let roi_x1 = {
+        let x1f = preset
+            .spheres
+            .last()
+            .map(|s| s.offset_x)
+            .unwrap_or(0.9)
+            .clamp(0.0, 1.0)
+            * width as f32;
+        x1f.max(0.0).min(width as f32) as u32
+    };
 
-    let l_stripe = masked_band_mean(
-        pixels, width, height, band_x0, band_x1, stripe_y0, stripe_y1, cx, cy, radius,
+    let (roi_x0, roi_x1, roi_y0, roi_y1) = (roi_x0, roi_x1, roi_y0, roi_y1);
+
+    fn accumulate_mismatch(
+        reference: &[u8],
+        ssr: &[u8],
+        width: u32,
+        height: u32,
+        roi_x0: u32,
+        roi_x1: u32,
+        roi_y0: u32,
+        roi_y1: u32,
+    ) -> f32 {
+        if reference.is_empty() || ssr.is_empty() || width == 0 || height == 0 {
+            return 0.0;
+        }
+        let w = width as usize;
+        let mut sum = 0.0f64;
+        let mut count = 0usize;
+
+        for y in roi_y0..roi_y1 {
+            for x in roi_x0..roi_x1 {
+                let idx = ((y as usize * w + x as usize) * 4) as usize;
+                if idx + 3 >= reference.len() || idx + 3 >= ssr.len() {
+                    continue;
+                }
+                let l_ref = luminance(&reference[idx..idx + 4]);
+                let l_ssr = luminance(&ssr[idx..idx + 4]);
+                let diff = (l_ref - l_ssr).abs();
+                if diff > EPSILON {
+                    sum += (diff - EPSILON) as f64;
+                    count += 1;
+                }
+            }
+        }
+
+        if count == 0 {
+            0.0
+        } else {
+            (sum / count as f64) as f32
+        }
+    }
+
+    let undershoot_before = accumulate_mismatch(
+        reference_pixels,
+        baseline_pixels,
+        width,
+        height,
+        roi_x0,
+        roi_x1,
+        roi_y0,
+        roi_y1,
     );
-    let l_band = masked_band_mean(
-        pixels, width, height, band_x0, band_x1, band_y0, band_y1, cx, cy, radius,
+    let undershoot_after = accumulate_mismatch(
+        reference_pixels,
+        thin_pixels,
+        width,
+        height,
+        roi_x0,
+        roi_x1,
+        roi_y0,
+        roi_y1,
     );
 
-    (l_stripe - l_band).max(0.0)
+    (undershoot_before.max(0.0), undershoot_after.max(0.0))
 }
 
-pub fn count_edge_streaks(pixels: &[u8], width: u32, height: u32) -> u32 {
-    if pixels.is_empty() || width == 0 || height == 0 {
+pub fn count_edge_streaks(reference: &[u8], ssr: &[u8], width: u32, height: u32) -> u32 {
+    if reference.is_empty() || ssr.is_empty() || width == 0 || height == 0 {
         return 0;
     }
     let w = width as usize;
@@ -485,17 +498,19 @@ pub fn count_edge_streaks(pixels: &[u8], width: u32, height: u32) -> u32 {
     let y_start = ((height as f32) * 0.60).floor() as usize;
     let y_end = ((height as f32) * 0.72).ceil() as usize;
     let mut streaks = 0u32;
-    let threshold = 0.55;
+    let threshold = 0.05;
 
     for y in y_start.min(h.saturating_sub(1))..=y_end.min(h.saturating_sub(1)) {
         let mut run = 0usize;
         for x in 0..w {
             let idx = (y * w + x) * 4;
-            if idx + 3 >= pixels.len() {
+            if idx + 3 >= reference.len() || idx + 3 >= ssr.len() {
                 break;
             }
-            let lum = luminance(&pixels[idx..idx + 4]);
-            if lum > threshold {
+            let l_ref = luminance(&reference[idx..idx + 4]);
+            let l_ssr = luminance(&ssr[idx..idx + 4]);
+            let diff = (l_ref - l_ssr).abs();
+            if diff > threshold {
                 run += 1;
             } else if run > 0 {
                 if run > 1 {

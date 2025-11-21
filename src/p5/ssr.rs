@@ -336,10 +336,12 @@ fn draw_sphere(
                 .clamp(0.0, 1.0)
                 .powf(32.0 * (1.0 - roughness) + 4.0);
             let projected_y = py - dy * radius;
-            let dist_to_stripe =
-                ((projected_y - stripe_center).abs() / (stripe_scale * 0.8)).clamp(0.0, 4.0);
+            let roughness_blur = 1.0 + roughness * 4.0;
+            let dist_to_stripe = (((projected_y - stripe_center).abs() * roughness_blur)
+                / (stripe_scale * 0.8))
+                .clamp(0.0, 4.0);
             let stripe_reflection = ((1.0 - dist_to_stripe).max(0.0)).powf(3.0);
-            let reflection = reflectivity * stripe_reflection;
+            let reflection = reflectivity.powf(1.65) * stripe_reflection;
             let base = Vec3::splat(0.08) + Vec3::splat(diffuse * 0.6);
             let spec = Vec3::splat(highlight_power * 0.7);
             let stripe_color = Vec3::new(1.0, 0.94, 0.78) * reflection;
