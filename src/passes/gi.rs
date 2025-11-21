@@ -77,3 +77,298 @@
 // Later milestones will turn this design into an actual `GiPass` implementation
 // that owns the compute pipeline, uploads `GiCompositeParams` each frame, and
 // wires the AO/SSGI/SSR textures into the composite dispatch.
+//
+// Below is the first concrete `GiPass` implementation. It owns a compute
+// pipeline for `gi/composite.wgsl` and a uniform buffer for `GiCompositeParams`.
+// High-level orchestration (deciding when to run AO/SSGI/SSR and which textures
+// to pass in) will be wired up by the P5 harness and viewer code.
+
+use crate::error::RenderResult;
+use wgpu::{
+    util::DeviceExt,
+    BindGroupDescriptor,
+    BindGroupEntry,
+    BindGroupLayout,
+    BindGroupLayoutDescriptor,
+    BindGroupLayoutEntry,
+    BindingResource,
+    BindingType,
+    Buffer,
+    BufferBindingType,
+    BufferUsages,
+    CommandEncoder,
+    ComputePassDescriptor,
+    ComputePipeline,
+    ComputePipelineDescriptor,
+    Device,
+    ShaderModuleDescriptor,
+    ShaderSource,
+    ShaderStages,
+    StorageTextureAccess,
+    TextureSampleType,
+    TextureFormat,
+    TextureView,
+    TextureViewDimension,
+};
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GiCompositeParamsStd140 {
+    ao_enable: u32,
+    ssgi_enable: u32,
+    ssr_enable: u32,
+    _pad0: u32,
+    ao_weight: f32,
+    ssgi_weight: f32,
+    ssr_weight: f32,
+    energy_cap: f32,
+}
+
+/// CPU-side representation of GI composite controls.
+#[derive(Clone, Copy)]
+pub struct GiCompositeParams {
+    pub ao_enable: bool,
+    pub ssgi_enable: bool,
+    pub ssr_enable: bool,
+    pub ao_weight: f32,
+    pub ssgi_weight: f32,
+    pub ssr_weight: f32,
+    pub energy_cap: f32,
+}
+
+impl From<GiCompositeParams> for GiCompositeParamsStd140 {
+    fn from(p: GiCompositeParams) -> Self {
+        Self {
+            ao_enable: if p.ao_enable { 1 } else { 0 },
+            ssgi_enable: if p.ssgi_enable { 1 } else { 0 },
+            ssr_enable: if p.ssr_enable { 1 } else { 0 },
+            _pad0: 0,
+            ao_weight: p.ao_weight,
+            ssgi_weight: p.ssgi_weight,
+            ssr_weight: p.ssr_weight,
+            energy_cap: p.energy_cap,
+        }
+    }
+}
+
+pub struct GiPass {
+    pipeline: ComputePipeline,
+    bind_group_layout: BindGroupLayout,
+    params_buffer: Buffer,
+    width: u32,
+    height: u32,
+    params: GiCompositeParams,
+}
+
+impl GiPass {
+    pub fn new(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
+        let shader = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("p5.gi.composite"),
+            source: ShaderSource::Wgsl(include_str!("../shaders/gi/composite.wgsl").into()),
+        });
+
+        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("p5.gi.composite.bgl"),
+            entries: &[
+                // baseline_lighting
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // ao_texture
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // ssgi_texture
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // ssr_texture
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // normal_texture
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // material_texture
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // output_lighting (storage)
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::WriteOnly,
+                        format: TextureFormat::Rgba16Float,
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                // gi_params uniform
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("p5.gi.composite.pipeline"),
+            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("p5.gi.composite.layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            })),
+            module: &shader,
+            entry_point: "cs_gi_composite",
+        });
+
+        let params = GiCompositeParams {
+            ao_enable: true,
+            ssgi_enable: true,
+            ssr_enable: true,
+            ao_weight: 1.0,
+            ssgi_weight: 1.0,
+            ssr_weight: 1.0,
+            energy_cap: 1.05,
+        };
+        let params_std: GiCompositeParamsStd140 = params.into();
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("p5.gi.composite.params"),
+            contents: bytemuck::bytes_of(&params_std),
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+            params_buffer,
+            width,
+            height,
+            params,
+        })
+    }
+
+    pub fn params(&self) -> &GiCompositeParams {
+        &self.params
+    }
+
+    pub fn update_params(&mut self, queue: &wgpu::Queue, f: impl FnOnce(&mut GiCompositeParams)) {
+        f(&mut self.params);
+        let std: GiCompositeParamsStd140 = self.params.into();
+        queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&std));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute(
+        &self,
+        device: &Device,
+        encoder: &mut CommandEncoder,
+        baseline_lighting: &TextureView,
+        ao_view: &TextureView,
+        ssgi_view: &TextureView,
+        ssr_view: &TextureView,
+        normal_view: &TextureView,
+        material_view: &TextureView,
+        output_view: &TextureView,
+    ) -> RenderResult<()> {
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("p5.gi.composite.bg"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(baseline_lighting),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(ao_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(ssgi_view),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::TextureView(ssr_view),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::TextureView(normal_view),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: BindingResource::TextureView(material_view),
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: BindingResource::TextureView(output_view),
+                },
+                BindGroupEntry {
+                    binding: 7,
+                    resource: self.params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("p5.gi.composite.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        let gx = (self.width + 7) / 8;
+        let gy = (self.height + 7) / 8;
+        pass.dispatch_workgroups(gx, gy, 1);
+        Ok(())
+    }
+}

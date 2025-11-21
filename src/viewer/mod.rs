@@ -12,11 +12,12 @@ use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
 use crate::geometry::{generate_plane, generate_sphere, MeshBuffers};
 use crate::p5::meta::{self as p5_meta, build_ssr_meta, SsrMetaInput};
 use crate::p5::{ssr, ssr::SsrScenePreset, ssr_analysis};
+use crate::passes::gi::{GiCompositeParams, GiPass};
 use crate::passes::ssr::SsrStats;
 use crate::render::params::SsrParams;
 use crate::renderer::readback::read_texture_tight;
 use crate::util::image_write;
-use anyhow::{bail, Context};
+use anyhow::{anyhow, bail, Context};
 use camera_controller::{CameraController, CameraMode};
 use glam::{Mat3, Mat4, Vec2, Vec3};
 use half::f16;
@@ -580,6 +581,7 @@ pub struct Viewer {
     shift_pressed: bool,
     // GI manager and toggles
     gi: Option<crate::core::screen_space_effects::ScreenSpaceEffectsManager>,
+    gi_pass: Option<GiPass>,
     ssr_params: SsrParams,
     // Snapshot request path (processed on next frame before present)
     snapshot_request: Option<String>,
@@ -612,6 +614,15 @@ pub struct Viewer {
     lit_uniform: wgpu::Buffer,
     lit_output: wgpu::Texture,
     lit_output_view: wgpu::TextureView,
+    gi_baseline_hdr: wgpu::Texture,
+    gi_baseline_hdr_view: wgpu::TextureView,
+    gi_output_hdr: wgpu::Texture,
+    gi_output_hdr_view: wgpu::TextureView,
+    gi_baseline_bgl: wgpu::BindGroupLayout,
+    gi_baseline_pipeline: wgpu::ComputePipeline,
+    gi_ao_weight: f32,
+    gi_ssgi_weight: f32,
+    gi_ssr_weight: f32,
     // Lit params (exposed via :lit-* commands)
     lit_sun_intensity: f32,
     lit_ibl_intensity: f32,
@@ -1558,6 +1569,147 @@ impl Viewer {
             gi.advance_frame(&self.queue);
             gi.build_hzb(&self.device, &mut enc, depth_view, false);
             gi.execute(&self.device, &mut enc, ssr_stats)?;
+
+            // Build lit_output baseline (direct + IBL) into Rgba8Unorm
+            let env_view = if let Some(ref v) = self.ibl_env_view {
+                v
+            } else {
+                self.ibl_env_view
+                    .as_ref()
+                    .context("IBL env view unavailable")?
+            };
+            let env_samp = if let Some(ref s) = self.ibl_sampler {
+                s
+            } else {
+                self.ibl_sampler
+                    .as_ref()
+                    .context("IBL sampler unavailable")?
+            };
+            let lit_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("viewer.lit.bg.gi_baseline"),
+                layout: &self.lit_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&gi.gbuffer().normal_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&gi.gbuffer().material_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&gi.gbuffer().depth_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&self.lit_output_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(env_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Sampler(env_samp),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: self.lit_uniform.as_entire_binding(),
+                    },
+                ],
+            });
+            let gx = (self.config.width + 7) / 8;
+            let gy = (self.config.height + 7) / 8;
+            {
+                let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("viewer.lit.compute.gi_baseline"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&self.lit_pipeline);
+                cpass.set_bind_group(0, &lit_bg, &[]);
+                cpass.dispatch_workgroups(gx, gy, 1);
+            }
+
+            // Copy lit_output into HDR baseline buffer
+            let baseline_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("viewer.gi.baseline.bg"),
+                layout: &self.gi_baseline_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&self.lit_output_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&self.gi_baseline_hdr_view),
+                    },
+                ],
+            });
+            {
+                let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("viewer.gi.baseline.copy"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&self.gi_baseline_pipeline);
+                cpass.set_bind_group(0, &baseline_bg, &[]);
+                cpass.dispatch_workgroups(gx, gy, 1);
+            }
+
+            // Ensure GiPass exists with current dimensions
+            let (w, h) = (self.config.width, self.config.height);
+            if self.gi_pass.is_none() {
+                match GiPass::new(&self.device, w, h) {
+                    Ok(pass) => {
+                        self.gi_pass = Some(pass);
+                    }
+                    Err(e) => {
+                        return Err(anyhow!("Failed to create GiPass: {}", e));
+                    }
+                }
+            }
+
+            if let Some(ref mut gi_pass) = self.gi_pass {
+                let ao_view = gi
+                    .ao_resolved_view()
+                    .unwrap_or(&gi.gbuffer().material_view);
+
+                let ssgi_view = gi
+                    .ssgi_output_for_display_view()
+                    .unwrap_or(&gi.gbuffer().material_view);
+
+                let ssr_view = gi
+                    .ssr_final_view()
+                    .unwrap_or(&self.lit_output_view);
+
+                let params = GiCompositeParams {
+                    ao_enable: gi.is_enabled(SSE::SSAO),
+                    ssgi_enable: gi.is_enabled(SSE::SSGI),
+                    ssr_enable: gi.is_enabled(SSE::SSR) && self.ssr_params.ssr_enable,
+                    ao_weight: self.gi_ao_weight,
+                    ssgi_weight: self.gi_ssgi_weight,
+                    ssr_weight: self.gi_ssr_weight,
+                    energy_cap: 1.05,
+                };
+
+                // Future: derive AO/SSGI weights from existing viewer knobs
+                gi_pass.update_params(&self.queue, |p| {
+                    *p = params;
+                });
+
+                gi_pass.execute(
+                    &self.device,
+                    &mut enc,
+                    &self.gi_baseline_hdr_view,
+                    ao_view,
+                    ssgi_view,
+                    ssr_view,
+                    &gi.gbuffer().normal_view,
+                    &gi.gbuffer().material_view,
+                    &self.gi_output_hdr_view,
+                )?;
+            }
+
             self.queue.submit(std::iter::once(enc.finish()));
             self.device.poll(wgpu::Maintain::Wait);
         }
@@ -1651,6 +1803,10 @@ impl Viewer {
         )
         .context("read SSGI hit texture")?;
         Ok((bytes, dims))
+    }
+
+    pub fn gi_output_hdr_view(&self) -> &wgpu::TextureView {
+        &self.gi_output_hdr_view
     }
 
     fn read_ssr_hit_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
@@ -2603,6 +2759,96 @@ impl Viewer {
         });
         let lit_output_view = lit_output.create_view(&wgpu::TextureViewDescriptor::default());
 
+        let gi_baseline_hdr = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.gi.baseline.hdr"),
+            size: wgpu::Extent3d {
+                width: surface_config.width,
+                height: surface_config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let gi_baseline_hdr_view =
+            gi_baseline_hdr.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let gi_output_hdr = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.gi.output.hdr"),
+            size: wgpu::Extent3d {
+                width: surface_config.width,
+                height: surface_config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let gi_output_hdr_view =
+            gi_output_hdr.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let gi_baseline_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewer.gi.baseline.bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let gi_baseline_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("viewer.gi.baseline.pl"),
+            bind_group_layouts: &[&gi_baseline_bgl],
+            push_constant_ranges: &[],
+        });
+        let gi_baseline_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewer.gi.baseline.shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                r#"
+                @group(0) @binding(0) var src_tex : texture_2d<f32>;
+                @group(0) @binding(1) var dst_tex : texture_storage_2d<rgba16float, write>;
+
+                @compute @workgroup_size(8,8,1)
+                fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
+                    let dims = textureDimensions(src_tex);
+                    if (gid.x >= dims.x || gid.y >= dims.y) { return; }
+                    let coord = vec2<i32>(gid.xy);
+                    let c = textureLoad(src_tex, coord, 0);
+                    textureStore(dst_tex, coord, c);
+                }
+                "#
+                .into(),
+            ),
+        });
+        let gi_baseline_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("viewer.gi.baseline.pipeline"),
+            layout: Some(&gi_baseline_pl),
+            module: &gi_baseline_shader,
+            entry_point: "cs_main",
+        });
+
         // Sky: resources and pipeline
         let sky_output = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("viewer.sky.output"),
@@ -3241,6 +3487,7 @@ impl Viewer {
             keys_pressed: std::collections::HashSet::new(),
             shift_pressed: false,
             gi,
+            gi_pass: None,
             ssr_params: SsrParams::default(),
             snapshot_request: None,
             pending_snapshot_tex: None,
@@ -3266,6 +3513,15 @@ impl Viewer {
             lit_uniform,
             lit_output,
             lit_output_view,
+            gi_baseline_hdr,
+            gi_baseline_hdr_view,
+            gi_output_hdr,
+            gi_output_hdr_view,
+            gi_baseline_bgl,
+            gi_baseline_pipeline,
+            gi_ao_weight: 1.0,
+            gi_ssgi_weight: 1.0,
+            gi_ssr_weight: 1.0,
             // Lit params defaults must match the initial lit_params above
             lit_sun_intensity: 1.0,
             lit_ibl_intensity: 0.6,
@@ -3416,6 +3672,56 @@ impl Viewer {
             self.lit_output_view = self
                 .lit_output
                 .create_view(&wgpu::TextureViewDescriptor::default());
+            // Recreate GI HDR baseline and output targets
+            self.gi_baseline_hdr = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.gi.baseline.hdr"),
+                size: wgpu::Extent3d {
+                    width: new_size.width,
+                    height: new_size.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            self.gi_baseline_hdr_view = self
+                .gi_baseline_hdr
+                .create_view(&wgpu::TextureViewDescriptor::default());
+
+            self.gi_output_hdr = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.gi.output.hdr"),
+                size: wgpu::Extent3d {
+                    width: new_size.width,
+                    height: new_size.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            self.gi_output_hdr_view = self
+                .gi_output_hdr
+                .create_view(&wgpu::TextureViewDescriptor::default());
+
+            if self.gi_pass.is_some() {
+                match GiPass::new(&self.device, new_size.width, new_size.height) {
+                    Ok(pass) => {
+                        self.gi_pass = Some(pass);
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to recreate GiPass after resize: {}", e);
+                        self.gi_pass = None;
+                    }
+                }
+            }
             // Recreate sky output
             self.sky_output = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("viewer.sky.output"),
@@ -6629,6 +6935,9 @@ enum ViewerCmd {
     #[allow(dead_code)]
     SetSsgiUpsampleSigmaNormal(f32),
     // Lit viz controls
+    SetGiAoWeight(f32),
+    SetGiSsgiWeight(f32),
+    SetGiSsrWeight(f32),
     SetLitSun(f32),
     SetLitIbl(f32),
     SetLitBrdf(u32),
@@ -7608,6 +7917,36 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     }
                 } else {
                     println!("Usage: :gi <ssao|ssgi|ssr> <on|off>");
+                }
+            } else if l.starts_with(":ao-weight") || l.starts_with("ao-weight ") {
+                if let Some(val) = l
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|s| s.parse::<f32>().ok())
+                {
+                    let _ = proxy.send_event(ViewerCmd::SetGiAoWeight(val));
+                } else {
+                    println!("Usage: :ao-weight <float 0..1>");
+                }
+            } else if l.starts_with(":ssgi-weight") || l.starts_with("ssgi-weight ") {
+                if let Some(val) = l
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|s| s.parse::<f32>().ok())
+                {
+                    let _ = proxy.send_event(ViewerCmd::SetGiSsgiWeight(val));
+                } else {
+                    println!("Usage: :ssgi-weight <float 0..1>");
+                }
+            } else if l.starts_with(":ssr-weight") || l.starts_with("ssr-weight ") {
+                if let Some(val) = l
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|s| s.parse::<f32>().ok())
+                {
+                    let _ = proxy.send_event(ViewerCmd::SetGiSsrWeight(val));
+                } else {
+                    println!("Usage: :ssr-weight <float 0..1>");
                 }
             } else if l.starts_with(":snapshot") || l.starts_with("snapshot") {
                 let path = l.split_whitespace().nth(1).map(|s| s.to_string());

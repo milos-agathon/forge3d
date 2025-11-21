@@ -2161,6 +2161,12 @@ impl ScreenSpaceEffectsManager {
         self.ssgi_renderer.as_ref().map(|r| r.upscaled_texture())
     }
 
+    pub fn ssgi_output_for_display_view(&self) -> Option<&TextureView> {
+        self.ssgi_renderer
+            .as_ref()
+            .map(|r| r.get_output_for_display())
+    }
+
     pub fn ssgi_reset_history(&mut self, device: &Device, queue: &Queue) -> RenderResult<()> {
         if let Some(ref mut ssgi) = self.ssgi_renderer {
             ssgi.reset_history(device, queue)?;

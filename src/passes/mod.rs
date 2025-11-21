@@ -3,3 +3,4 @@
 
 pub mod ssgi;
 pub mod ssr;
+pub mod gi;
