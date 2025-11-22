@@ -347,7 +347,7 @@ impl Default for SsaoSettings {
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct SsaoTemporalParamsUniform {
     temporal_alpha: f32,
-    _pad: [f32; 3],
+    _pad: [f32; 7],
 }
 
 /// SSGI settings
@@ -955,7 +955,7 @@ impl SsaoRenderer {
         // Temporal params buffer: alpha (32 bytes for uniform buffer alignment)
         let temporal_params = SsaoTemporalParamsUniform {
             temporal_alpha: 0.2,
-            _pad: [0.0; 3],
+            _pad: [0.0; 7],
         };
         let temporal_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ssao.temporal.params"),
@@ -2006,7 +2006,7 @@ impl ScreenSpaceEffectsManager {
             r.temporal_alpha = alpha.clamp(0.0, 1.0);
             let params = SsaoTemporalParamsUniform {
                 temporal_alpha: r.temporal_alpha,
-                _pad: [0.0; 3],
+                _pad: [0.0; 7],
             };
             queue.write_buffer(&r.temporal_params_buffer, 0, bytemuck::bytes_of(&params));
         }

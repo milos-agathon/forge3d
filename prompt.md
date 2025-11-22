@@ -403,7 +403,3 @@ At the end, output a clear summary (in the chat) with:
    cargo run --release --example p5_gi_stack_ablation
    # and any additional commands you added
    ```
-
-Only when all milestones are satisfied and the acceptance conditions are met without hacks, consider P5.4 complete.
-
----

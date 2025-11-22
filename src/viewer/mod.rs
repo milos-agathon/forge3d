@@ -7,6 +7,7 @@
 
 pub mod camera_controller;
 
+use crate::core::hdr::{apply_cpu_tone_mapping, ToneMappingOperator};
 use crate::core::ibl::{IBLQuality, IBLRenderer};
 use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
 use crate::geometry::{generate_plane, generate_sphere, MeshBuffers};
@@ -2787,7 +2788,9 @@ impl Viewer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let gi_output_hdr_view =
@@ -3704,7 +3707,8 @@ impl Viewer {
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba16Float,
                 usage: wgpu::TextureUsages::STORAGE_BINDING
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
             self.gi_output_hdr_view = self
@@ -5231,6 +5235,11 @@ impl Viewer {
                         eprintln!("[P5.3] SSR thickness ablation capture failed: {}", e);
                     }
                 }
+                CaptureKind::P54GiStack => {
+                    if let Err(e) = self.capture_p54_gi_stack_ablation() {
+                        eprintln!("[P5.4] GI stack ablation capture failed: {}", e);
+                    }
+                }
             }
         }
 
@@ -5635,6 +5644,41 @@ impl Viewer {
             }
         }
         out
+    }
+
+    fn capture_gi_output_tonemapped_rgba8(&self) -> anyhow::Result<Vec<u8>> {
+        use anyhow::Context;
+        let width = self.config.width.max(1);
+        let height = self.config.height.max(1);
+
+        // Composite the GI output through the same comp pipeline that the
+        // viewer uses for on-screen rendering so that sky and fog are
+        // included behind geometry instead of leaving the background black.
+        let gi = self.gi.as_ref().context("GI manager not available")?;
+        let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
+
+        self.with_comp_pipeline(|comp_pl, comp_bgl| {
+            let fog_view = if self.fog_enabled {
+                &self.fog_output_view
+            } else {
+                &self.fog_zero_view
+            };
+            Self::render_view_to_rgba8_ex(
+                &self.device,
+                &self.queue,
+                comp_pl,
+                comp_bgl,
+                &self.sky_output_view,
+                &gi.gbuffer().depth_view,
+                fog_view,
+                self.config.format,
+                width,
+                height,
+                far,
+                &self.gi_output_hdr_view,
+                0,
+            )
+        })
     }
 
     fn capture_p51_cornell_split(&mut self) -> anyhow::Result<()> {
@@ -6440,31 +6484,7 @@ impl Viewer {
         self.ssr_params.set_enabled(false);
         self.sync_ssr_params_to_gi();
         self.reexecute_gi(None)?;
-        let reference_bytes = {
-            let gi = self.gi.as_ref().context("GI manager not available")?;
-            self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                let fog_view = if self.fog_enabled {
-                    &self.fog_output_view
-                } else {
-                    &self.fog_zero_view
-                };
-                Self::render_view_to_rgba8_ex(
-                    &self.device,
-                    &self.queue,
-                    comp_pl,
-                    comp_bgl,
-                    &self.sky_output_view,
-                    &gi.gbuffer().depth_view,
-                    fog_view,
-                    self.config.format,
-                    capture_w,
-                    capture_h,
-                    far,
-                    &gi.gbuffer().material_view,
-                    0,
-                )
-            })?
-        };
+        let reference_bytes = self.capture_gi_output_tonemapped_rgba8()?;
 
         // 2) SSR enabled, thin thickness variant shown on the left half of the
         //    ablation PNG. We pick a small positive thickness relative to the
@@ -6476,34 +6496,7 @@ impl Viewer {
         self.ssr_params.set_thickness(0.0);
         self.sync_ssr_params_to_gi();
         self.reexecute_gi(None)?;
-        let off_bytes = {
-            let gi = self.gi.as_ref().context("GI manager not available")?;
-            let ssr_view = gi
-                .material_with_ssr_view()
-                .unwrap_or(&gi.gbuffer().material_view);
-            self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                let fog_view = if self.fog_enabled {
-                    &self.fog_output_view
-                } else {
-                    &self.fog_zero_view
-                };
-                Self::render_view_to_rgba8_ex(
-                    &self.device,
-                    &self.queue,
-                    comp_pl,
-                    comp_bgl,
-                    &self.sky_output_view,
-                    &gi.gbuffer().depth_view,
-                    fog_view,
-                    self.config.format,
-                    capture_w,
-                    capture_h,
-                    far,
-                    ssr_view,
-                    0,
-                )
-            })?
-        };
+        let _unused_off_bytes = self.capture_gi_output_tonemapped_rgba8()?;
 
         // 3) SSR enabled, restored thickness (baseline production value shown
         //    on the right half of the ablation PNG).
@@ -6522,67 +6515,13 @@ impl Viewer {
         self.ssr_params.set_thickness(thin_thickness);
         self.sync_ssr_params_to_gi();
         self.reexecute_gi(None)?;
-        let off_bytes = {
-            let gi = self.gi.as_ref().context("GI manager not available")?;
-            let ssr_view = gi
-                .material_with_ssr_view()
-                .unwrap_or(&gi.gbuffer().material_view);
-            self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                let fog_view = if self.fog_enabled {
-                    &self.fog_output_view
-                } else {
-                    &self.fog_zero_view
-                };
-                Self::render_view_to_rgba8_ex(
-                    &self.device,
-                    &self.queue,
-                    comp_pl,
-                    comp_bgl,
-                    &self.sky_output_view,
-                    &gi.gbuffer().depth_view,
-                    fog_view,
-                    self.config.format,
-                    capture_w,
-                    capture_h,
-                    far,
-                    ssr_view,
-                    0,
-                )
-            })?
-        };
+        let off_bytes = self.capture_gi_output_tonemapped_rgba8()?;
 
         // Now render the baseline (thicker) variant for the right half.
         self.ssr_params.set_thickness(restored_thickness);
         self.sync_ssr_params_to_gi();
         self.reexecute_gi(None)?;
-        let on_bytes = {
-            let gi = self.gi.as_ref().context("GI manager not available")?;
-            let ssr_view = gi
-                .material_with_ssr_view()
-                .unwrap_or(&gi.gbuffer().material_view);
-            self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                let fog_view = if self.fog_enabled {
-                    &self.fog_output_view
-                } else {
-                    &self.fog_zero_view
-                };
-                Self::render_view_to_rgba8_ex(
-                    &self.device,
-                    &self.queue,
-                    comp_pl,
-                    comp_bgl,
-                    &self.sky_output_view,
-                    &gi.gbuffer().depth_view,
-                    fog_view,
-                    self.config.format,
-                    capture_w,
-                    capture_h,
-                    far,
-                    ssr_view,
-                    0,
-                )
-            })?
-        };
+        let on_bytes = self.capture_gi_output_tonemapped_rgba8()?;
 
         self.ssr_params.set_thickness(original_thickness);
         self.ssr_params.set_enabled(original_enable);
@@ -6655,6 +6594,181 @@ impl Viewer {
                 p5_meta::patch_thickness_ablation(obj, undershoot_before, undershoot_after);
             }
         })?;
+
+        Ok(())
+    }
+
+    fn capture_p54_gi_stack_ablation(&mut self) -> anyhow::Result<()> {
+        use anyhow::Context;
+        use std::fs;
+
+        let out_dir = Path::new("reports/p5");
+        fs::create_dir_all(out_dir)?;
+
+        let capture_w = self.config.width.max(1);
+        let capture_h = self.config.height.max(1);
+
+        let (ao_orig, ssgi_orig, ssr_orig) = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            (
+                gi.is_enabled(SSE::SSAO),
+                gi.is_enabled(SSE::SSGI),
+                gi.is_enabled(SSE::SSR),
+            )
+        };
+        let ao_weight_orig = self.gi_ao_weight;
+        let ssgi_weight_orig = self.gi_ssgi_weight;
+        let ssr_weight_orig = self.gi_ssr_weight;
+        let ssr_enable_orig = self.ssr_params.ssr_enable;
+
+        // 1) Baseline: all GI effects off
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.disable_effect(SSE::SSAO);
+            gi.disable_effect(SSE::SSGI);
+            gi.disable_effect(SSE::SSR);
+        }
+        self.ssr_params.set_enabled(false);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi(None)?;
+        let baseline_bytes = self.capture_gi_output_tonemapped_rgba8()?;
+
+        // 2) AO only
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.enable_effect(&self.device, SSE::SSAO)?;
+            gi.disable_effect(SSE::SSGI);
+            gi.disable_effect(SSE::SSR);
+        }
+        self.ssr_params.set_enabled(false);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi(None)?;
+        let ao_bytes = self.capture_gi_output_tonemapped_rgba8()?;
+
+        // 3) AO + SSGI
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.enable_effect(&self.device, SSE::SSAO)?;
+            gi.enable_effect(&self.device, SSE::SSGI)?;
+            gi.disable_effect(SSE::SSR);
+        }
+        self.ssr_params.set_enabled(false);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi(None)?;
+        let ao_ssgi_bytes = self.capture_gi_output_tonemapped_rgba8()?;
+
+        // 4) AO + SSGI + SSR
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.enable_effect(&self.device, SSE::SSAO)?;
+            gi.enable_effect(&self.device, SSE::SSGI)?;
+            gi.enable_effect(&self.device, SSE::SSR)?;
+        }
+        self.ssr_params.set_enabled(true);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi(None)?;
+        let ao_ssgi_ssr_bytes = self.capture_gi_output_tonemapped_rgba8()?;
+
+        // Assemble 4-column ablation image
+        let out_w = capture_w * 4;
+        let out_h = capture_h;
+        let mut combined = vec![0u8; (out_w * out_h * 4) as usize];
+        let row_stride = (capture_w as usize) * 4;
+        for y in 0..(capture_h as usize) {
+            let dst_off = y * (out_w as usize) * 4;
+            let src_off = y * row_stride;
+            combined[dst_off..dst_off + row_stride]
+                .copy_from_slice(&baseline_bytes[src_off..src_off + row_stride]);
+            combined[dst_off + row_stride..dst_off + row_stride * 2]
+                .copy_from_slice(&ao_bytes[src_off..src_off + row_stride]);
+            combined[dst_off + row_stride * 2..dst_off + row_stride * 3]
+                .copy_from_slice(&ao_ssgi_bytes[src_off..src_off + row_stride]);
+            combined[dst_off + row_stride * 3..dst_off + row_stride * 4]
+                .copy_from_slice(&ao_ssgi_ssr_bytes[src_off..src_off + row_stride]);
+        }
+
+        let out_path = out_dir.join("p5_gi_stack_ablation.png");
+        image_write::write_png_rgba8_small(&out_path, &combined, out_w, out_h)?;
+        println!("[P5] Wrote {}", out_path.display());
+
+        // Record GI composition parameters and timings into p5_meta.json
+        {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+
+            let ao_enable = gi.is_enabled(SSE::SSAO);
+            let ssgi_enable = gi.is_enabled(SSE::SSGI);
+            let ssr_enable = gi.is_enabled(SSE::SSR) && self.ssr_params.ssr_enable;
+
+            let (ao_kernel_ms, ao_blur_ms, ao_temporal_ms) =
+                gi.ssao_timings_ms().unwrap_or((0.0, 0.0, 0.0));
+            let ao_total_ms = ao_kernel_ms + ao_blur_ms + ao_temporal_ms;
+
+            let (ssgi_trace_ms, ssgi_shade_ms, ssgi_temporal_ms, ssgi_upsample_ms) =
+                gi.ssgi_timings_ms().unwrap_or((0.0, 0.0, 0.0, 0.0));
+            let ssgi_total_ms =
+                ssgi_trace_ms + ssgi_shade_ms + ssgi_temporal_ms + ssgi_upsample_ms;
+
+            let (ssr_trace_ms, ssr_shade_ms, ssr_fallback_ms) =
+                gi.ssr_timings_ms().unwrap_or((0.0, 0.0, 0.0));
+            let ssr_total_ms = ssr_trace_ms + ssr_shade_ms + ssr_fallback_ms;
+
+            let composite_ms = self
+                .gi_pass
+                .as_ref()
+                .map(|p| p.composite_ms())
+                .unwrap_or(0.0);
+
+            self.write_p5_meta(|meta| {
+                meta.insert(
+                    "gi_composition".to_string(),
+                    json!({
+                        "order": ["baseline", "ao", "ssgi", "ssr"],
+                        "weights": {
+                            "ao_weight": self.gi_ao_weight,
+                            "ssgi_weight": self.gi_ssgi_weight,
+                            "ssr_weight": self.gi_ssr_weight,
+                        },
+                        "toggles": {
+                            "ao_enable": ao_enable,
+                            "ssgi_enable": ssgi_enable,
+                            "ssr_enable": ssr_enable,
+                        },
+                        "timings_ms": {
+                            "ao": ao_total_ms,
+                            "ssgi": ssgi_total_ms,
+                            "ssr": ssr_total_ms,
+                            "composite": composite_ms,
+                        },
+                    }),
+                );
+            })?;
+        }
+
+        // Restore original GI state and re-render
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            if ao_orig {
+                gi.enable_effect(&self.device, SSE::SSAO)?;
+            } else {
+                gi.disable_effect(SSE::SSAO);
+            }
+            if ssgi_orig {
+                gi.enable_effect(&self.device, SSE::SSGI)?;
+            } else {
+                gi.disable_effect(SSE::SSGI);
+            }
+            if ssr_orig {
+                gi.enable_effect(&self.device, SSE::SSR)?;
+            } else {
+                gi.disable_effect(SSE::SSR);
+            }
+        }
+        self.gi_ao_weight = ao_weight_orig;
+        self.gi_ssgi_weight = ssgi_weight_orig;
+        self.gi_ssr_weight = ssr_weight_orig;
+        self.ssr_params.set_enabled(ssr_enable_orig);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi(None)?;
 
         Ok(())
     }
@@ -6972,6 +7086,7 @@ enum ViewerCmd {
     CaptureP52SsgiTemporal,
     CaptureP53SsrGlossy,
     CaptureP53SsrThickness,
+    CaptureP54GiStack,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6998,6 +7113,7 @@ enum CaptureKind {
     P52SsgiTemporal,
     P53SsrGlossy,
     P53SsrThickness,
+    P54GiStack,
 }
 
 impl Viewer {
@@ -7283,6 +7399,11 @@ impl Viewer {
                 self.pending_captures
                     .push_back(CaptureKind::P53SsrThickness);
                 println!("[P5.3] capture: SSR thickness ablation queued");
+            }
+            ViewerCmd::CaptureP54GiStack => {
+                self.pending_captures
+                    .push_back(CaptureKind::P54GiStack);
+                println!("[P5.4] capture: GI stack ablation queued");
             }
             // Sky controls
             ViewerCmd::SkyToggle(on) => {
@@ -7604,8 +7725,9 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     "ssgi-temporal" => pending_cmds.push(ViewerCmd::CaptureP52SsgiTemporal),
                     "ssr-glossy" => pending_cmds.push(ViewerCmd::CaptureP53SsrGlossy),
                     "ssr-thickness" => pending_cmds.push(ViewerCmd::CaptureP53SsrThickness),
+                    "gi-stack" => pending_cmds.push(ViewerCmd::CaptureP54GiStack),
                     _ => println!(
-                        "Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy|ssr-thickness>"
+                        "Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy|ssr-thickness|gi-stack>"
                     ),
                 }
             } else if l.starts_with(":obj") || l.starts_with("obj ") {
@@ -8087,13 +8209,16 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                         "ssr-thickness" => {
                             let _ = proxy.send_event(ViewerCmd::CaptureP53SsrThickness);
                         }
+                        "gi-stack" => {
+                            let _ = proxy.send_event(ViewerCmd::CaptureP54GiStack);
+                        }
                         _ => println!(
-                            "Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy|ssr-thickness>"
+                            "Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy|ssr-thickness|gi-stack>"
                         ),
                     }
                 } else {
                     println!(
-                        "Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy|ssr-thickness>"
+                        "Usage: :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy|ssr-thickness|gi-stack>"
                     );
                 }
             } else if l.starts_with(":obj") || l.starts_with("obj ") {

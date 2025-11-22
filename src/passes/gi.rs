@@ -158,6 +158,7 @@ pub struct GiPass {
     width: u32,
     height: u32,
     params: GiCompositeParams,
+    last_composite_ms: f32,
 }
 
 impl GiPass {
@@ -295,6 +296,7 @@ impl GiPass {
             width,
             height,
             params,
+            last_composite_ms: 0.0,
         })
     }
 
@@ -302,15 +304,19 @@ impl GiPass {
         &self.params
     }
 
-    pub fn update_params(&mut self, queue: &wgpu::Queue, f: impl FnOnce(&mut GiCompositeParams)) {
+    pub fn composite_ms(&self) -> f32 {
+        self.last_composite_ms
+    }
+
+    pub fn update_params<F: FnOnce(&mut GiCompositeParams)>(&mut self, queue: &wgpu::Queue, f: F) {
         f(&mut self.params);
-        let std: GiCompositeParamsStd140 = self.params.into();
-        queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&std));
+        let std140: GiCompositeParamsStd140 = self.params.into();
+        queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&std140));
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn execute(
-        &self,
+        &mut self,
         device: &Device,
         encoder: &mut CommandEncoder,
         baseline_lighting: &TextureView,
@@ -360,6 +366,7 @@ impl GiPass {
             ],
         });
 
+        let t0 = std::time::Instant::now();
         let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("p5.gi.composite.pass"),
             timestamp_writes: None,
@@ -369,6 +376,8 @@ impl GiPass {
         let gx = (self.width + 7) / 8;
         let gy = (self.height + 7) / 8;
         pass.dispatch_workgroups(gx, gy, 1);
+        drop(pass);
+        self.last_composite_ms = t0.elapsed().as_secs_f32() * 1000.0;
         Ok(())
     }
 }

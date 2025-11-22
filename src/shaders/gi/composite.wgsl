@@ -183,15 +183,14 @@
 // refinement when the pipeline provides separated components.
 
 struct GiCompositeParams {
-    ao_enable:   u32;
-    ssgi_enable: u32;
-    ssr_enable:  u32;
-    _pad0:       u32;
-
-    ao_weight:   f32;
-    ssgi_weight: f32;
-    ssr_weight:  f32;
-    energy_cap:  f32;
+    ao_enable:   u32,
+    ssgi_enable: u32,
+    ssr_enable:  u32,
+    _pad0:       u32,
+    ao_weight:   f32,
+    ssgi_weight: f32,
+    ssr_weight:  f32,
+    energy_cap:  f32,
 };
 
 @group(0) @binding(0) var baseline_lighting: texture_2d<f32>;
