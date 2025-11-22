@@ -171,7 +171,6 @@ impl GiPass {
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("p5.gi.composite.bgl"),
             entries: &[
-                // baseline_lighting
                 BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
@@ -182,7 +181,6 @@ impl GiPass {
                     },
                     count: None,
                 },
-                // ao_texture
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::COMPUTE,
@@ -193,7 +191,6 @@ impl GiPass {
                     },
                     count: None,
                 },
-                // ssgi_texture
                 BindGroupLayoutEntry {
                     binding: 2,
                     visibility: ShaderStages::COMPUTE,
@@ -204,7 +201,6 @@ impl GiPass {
                     },
                     count: None,
                 },
-                // ssr_texture
                 BindGroupLayoutEntry {
                     binding: 3,
                     visibility: ShaderStages::COMPUTE,
@@ -215,7 +211,6 @@ impl GiPass {
                     },
                     count: None,
                 },
-                // normal_texture
                 BindGroupLayoutEntry {
                     binding: 4,
                     visibility: ShaderStages::COMPUTE,
@@ -226,7 +221,6 @@ impl GiPass {
                     },
                     count: None,
                 },
-                // material_texture
                 BindGroupLayoutEntry {
                     binding: 5,
                     visibility: ShaderStages::COMPUTE,
@@ -237,9 +231,28 @@ impl GiPass {
                     },
                     count: None,
                 },
-                // output_lighting (storage)
                 BindGroupLayoutEntry {
                     binding: 6,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 8,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
@@ -248,9 +261,8 @@ impl GiPass {
                     },
                     count: None,
                 },
-                // gi_params uniform
                 BindGroupLayoutEntry {
-                    binding: 7,
+                    binding: 9,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
@@ -320,6 +332,8 @@ impl GiPass {
         device: &Device,
         encoder: &mut CommandEncoder,
         baseline_lighting: &TextureView,
+        diffuse_view: &TextureView,
+        spec_view: &TextureView,
         ao_view: &TextureView,
         ssgi_view: &TextureView,
         ssr_view: &TextureView,
@@ -337,30 +351,38 @@ impl GiPass {
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(ao_view),
+                    resource: BindingResource::TextureView(diffuse_view),
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::TextureView(ssgi_view),
+                    resource: BindingResource::TextureView(spec_view),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::TextureView(ssr_view),
+                    resource: BindingResource::TextureView(ao_view),
                 },
                 BindGroupEntry {
                     binding: 4,
-                    resource: BindingResource::TextureView(normal_view),
+                    resource: BindingResource::TextureView(ssgi_view),
                 },
                 BindGroupEntry {
                     binding: 5,
-                    resource: BindingResource::TextureView(material_view),
+                    resource: BindingResource::TextureView(ssr_view),
                 },
                 BindGroupEntry {
                     binding: 6,
-                    resource: BindingResource::TextureView(output_view),
+                    resource: BindingResource::TextureView(normal_view),
                 },
                 BindGroupEntry {
                     binding: 7,
+                    resource: BindingResource::TextureView(material_view),
+                },
+                BindGroupEntry {
+                    binding: 8,
+                    resource: BindingResource::TextureView(output_view),
+                },
+                BindGroupEntry {
+                    binding: 9,
                     resource: self.params_buffer.as_entire_binding(),
                 },
             ],

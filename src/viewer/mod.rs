@@ -617,10 +617,16 @@ pub struct Viewer {
     lit_output_view: wgpu::TextureView,
     gi_baseline_hdr: wgpu::Texture,
     gi_baseline_hdr_view: wgpu::TextureView,
+    gi_baseline_diffuse_hdr: wgpu::Texture,
+    gi_baseline_diffuse_hdr_view: wgpu::TextureView,
+    gi_baseline_spec_hdr: wgpu::Texture,
+    gi_baseline_spec_hdr_view: wgpu::TextureView,
     gi_output_hdr: wgpu::Texture,
     gi_output_hdr_view: wgpu::TextureView,
     gi_baseline_bgl: wgpu::BindGroupLayout,
     gi_baseline_pipeline: wgpu::ComputePipeline,
+    gi_split_bgl: wgpu::BindGroupLayout,
+    gi_split_pipeline: wgpu::ComputePipeline,
     gi_ao_weight: f32,
     gi_ssgi_weight: f32,
     gi_ssr_weight: f32,
@@ -1657,6 +1663,45 @@ impl Viewer {
                 cpass.dispatch_workgroups(gx, gy, 1);
             }
 
+            // Split lit_output into approximate diffuse and specular baselines
+            let split_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("viewer.gi.baseline.split.bg"),
+                layout: &self.gi_split_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&self.lit_output_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&gi.gbuffer().normal_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&gi.gbuffer().material_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource:
+                            wgpu::BindingResource::TextureView(&self.gi_baseline_diffuse_hdr_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource:
+                            wgpu::BindingResource::TextureView(&self.gi_baseline_spec_hdr_view),
+                    },
+                ],
+            });
+            {
+                let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("viewer.gi.baseline.split"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&self.gi_split_pipeline);
+                cpass.set_bind_group(0, &split_bg, &[]);
+                cpass.dispatch_workgroups(gx, gy, 1);
+            }
+
             // Ensure GiPass exists with current dimensions
             let (w, h) = (self.config.width, self.config.height);
             if self.gi_pass.is_none() {
@@ -1702,6 +1747,8 @@ impl Viewer {
                     &self.device,
                     &mut enc,
                     &self.gi_baseline_hdr_view,
+                    &self.gi_baseline_diffuse_hdr_view,
+                    &self.gi_baseline_spec_hdr_view,
                     ao_view,
                     ssgi_view,
                     ssr_view,
@@ -1808,6 +1855,22 @@ impl Viewer {
 
     pub fn gi_output_hdr_view(&self) -> &wgpu::TextureView {
         &self.gi_output_hdr_view
+    }
+
+    fn read_gi_output_hdr_rgb(&self) -> anyhow::Result<(Vec<[f32; 3]>, (u32, u32))> {
+        use anyhow::Context;
+        let gi = self.gi.as_ref().context("GI manager not available")?;
+        let dims = gi.gbuffer().dimensions();
+        let data = read_texture_rgba16_to_rgb_f32(&self.device, &self.queue, &self.gi_output_hdr, dims)?;
+        Ok((data, dims))
+    }
+
+    fn read_gi_baseline_hdr_rgb(&self) -> anyhow::Result<(Vec<[f32; 3]>, (u32, u32))> {
+        use anyhow::Context;
+        let gi = self.gi.as_ref().context("GI manager not available")?;
+        let dims = gi.gbuffer().dimensions();
+        let data = read_texture_rgba16_to_rgb_f32(&self.device, &self.queue, &self.gi_baseline_hdr, dims)?;
+        Ok((data, dims))
     }
 
     fn read_ssr_hit_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
@@ -2771,11 +2834,51 @@ impl Viewer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let gi_baseline_hdr_view =
             gi_baseline_hdr.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let gi_baseline_diffuse_hdr = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.gi.baseline.diffuse.hdr"),
+            size: wgpu::Extent3d {
+                width: surface_config.width,
+                height: surface_config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let gi_baseline_diffuse_hdr_view =
+            gi_baseline_diffuse_hdr.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let gi_baseline_spec_hdr = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.gi.baseline.spec.hdr"),
+            size: wgpu::Extent3d {
+                width: surface_config.width,
+                height: surface_config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let gi_baseline_spec_hdr_view =
+            gi_baseline_spec_hdr.create_view(&wgpu::TextureViewDescriptor::default());
 
         let gi_output_hdr = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("viewer.gi.output.hdr"),
@@ -2850,6 +2953,105 @@ impl Viewer {
             layout: Some(&gi_baseline_pl),
             module: &gi_baseline_shader,
             entry_point: "cs_main",
+        });
+
+        let gi_split_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewer.gi.baseline.split.bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let gi_split_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("viewer.gi.baseline.split.pl"),
+            bind_group_layouts: &[&gi_split_bgl],
+            push_constant_ranges: &[],
+        });
+        let gi_split_shader =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("viewer.gi.baseline.split.shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    r#"
+                    @group(0) @binding(0) var src_lit : texture_2d<f32>;
+                    @group(0) @binding(1) var normal_tex : texture_2d<f32>;
+                    @group(0) @binding(2) var material_tex : texture_2d<f32>;
+                    @group(0) @binding(3) var dst_diffuse : texture_storage_2d<rgba16float, write>;
+                    @group(0) @binding(4) var dst_spec : texture_storage_2d<rgba16float, write>;
+
+                    @compute @workgroup_size(8,8,1)
+                    fn cs_split(@builtin(global_invocation_id) gid: vec3<u32>) {
+                        let dims = textureDimensions(src_lit);
+                        if (gid.x >= dims.x || gid.y >= dims.y) { return; }
+                        let coord = vec2<i32>(gid.xy);
+                        let base = textureLoad(src_lit, coord, 0);
+                        let mat = textureLoad(material_tex, coord, 0);
+                        let normal = textureLoad(normal_tex, coord, 0);
+                        let metallic = clamp(mat.a, 0.0, 1.0);
+                        let roughness = clamp(normal.w, 0.0, 1.0);
+                        let spec_fraction = clamp(0.04 + metallic * (1.0 - roughness), 0.0, 0.95);
+                        let L = base.rgb;
+                        let L_spec = L * spec_fraction;
+                        let L_diff = L - L_spec;
+                        textureStore(dst_diffuse, coord, vec4<f32>(L_diff, base.a));
+                        textureStore(dst_spec, coord, vec4<f32>(L_spec, base.a));
+                    }
+                    "#
+                        .into(),
+                ),
+            });
+        let gi_split_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("viewer.gi.baseline.split.pipeline"),
+            layout: Some(&gi_split_pl),
+            module: &gi_split_shader,
+            entry_point: "cs_split",
         });
 
         // Sky: resources and pipeline
@@ -3518,10 +3720,16 @@ impl Viewer {
             lit_output_view,
             gi_baseline_hdr,
             gi_baseline_hdr_view,
+            gi_baseline_diffuse_hdr,
+            gi_baseline_diffuse_hdr_view,
+            gi_baseline_spec_hdr,
+            gi_baseline_spec_hdr_view,
             gi_output_hdr,
             gi_output_hdr_view,
             gi_baseline_bgl,
             gi_baseline_pipeline,
+            gi_split_bgl,
+            gi_split_pipeline,
             gi_ao_weight: 1.0,
             gi_ssgi_weight: 1.0,
             gi_ssr_weight: 1.0,
@@ -3688,11 +3896,52 @@ impl Viewer {
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba16Float,
                 usage: wgpu::TextureUsages::STORAGE_BINDING
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
             self.gi_baseline_hdr_view = self
                 .gi_baseline_hdr
+                .create_view(&wgpu::TextureViewDescriptor::default());
+
+            self.gi_baseline_diffuse_hdr =
+                self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("viewer.gi.baseline.diffuse.hdr"),
+                    size: wgpu::Extent3d {
+                        width: new_size.width,
+                        height: new_size.height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING
+                        | wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+            self.gi_baseline_diffuse_hdr_view = self
+                .gi_baseline_diffuse_hdr
+                .create_view(&wgpu::TextureViewDescriptor::default());
+
+            self.gi_baseline_spec_hdr = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.gi.baseline.spec.hdr"),
+                size: wgpu::Extent3d {
+                    width: new_size.width,
+                    height: new_size.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            self.gi_baseline_spec_hdr_view = self
+                .gi_baseline_spec_hdr
                 .create_view(&wgpu::TextureViewDescriptor::default());
 
             self.gi_output_hdr = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -6770,6 +7019,283 @@ impl Viewer {
         self.sync_ssr_params_to_gi();
         self.reexecute_gi(None)?;
 
+        self.compute_p54_gi_verification()?;
+
+        Ok(())
+    }
+
+    fn compute_p54_gi_verification(&mut self) -> anyhow::Result<()> {
+        use anyhow::Context;
+
+        let (ao_orig, ssgi_orig, ssr_orig) = {
+            let gi = self.gi.as_ref().context("GI manager not available")?;
+            (
+                gi.is_enabled(SSE::SSAO),
+                gi.is_enabled(SSE::SSGI),
+                gi.is_enabled(SSE::SSR),
+            )
+        };
+        let ao_weight_orig = self.gi_ao_weight;
+        let ssgi_weight_orig = self.gi_ssgi_weight;
+        let ssr_weight_orig = self.gi_ssr_weight;
+        let ssr_enable_orig = self.ssr_params.ssr_enable;
+        let dims = (self.config.width.max(1), self.config.height.max(1));
+
+        // Baseline: all GI effects disabled
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.disable_effect(SSE::SSAO);
+            gi.disable_effect(SSE::SSGI);
+            gi.disable_effect(SSE::SSR);
+        }
+        self.ssr_params.set_enabled(false);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi(None)?;
+        let baseline_hdr =
+            read_texture_rgba16_to_rgb_f32(&self.device, &self.queue, &self.gi_output_hdr, dims)?;
+        let baseline_diffuse = read_texture_rgba16_to_rgb_f32(
+            &self.device,
+            &self.queue,
+            &self.gi_baseline_diffuse_hdr,
+            dims,
+        )?;
+        let baseline_spec = read_texture_rgba16_to_rgb_f32(
+            &self.device,
+            &self.queue,
+            &self.gi_baseline_spec_hdr,
+            dims,
+        )?;
+
+        // AO only
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.enable_effect(&self.device, SSE::SSAO)?;
+            gi.disable_effect(SSE::SSGI);
+            gi.disable_effect(SSE::SSR);
+        }
+        self.ssr_params.set_enabled(false);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi(None)?;
+        let ao_hdr =
+            read_texture_rgba16_to_rgb_f32(&self.device, &self.queue, &self.gi_output_hdr, dims)?;
+
+        // AO + SSGI
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.enable_effect(&self.device, SSE::SSAO)?;
+            gi.enable_effect(&self.device, SSE::SSGI)?;
+            gi.disable_effect(SSE::SSR);
+        }
+        self.ssr_params.set_enabled(false);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi(None)?;
+        let ao_ssgi_hdr = read_texture_rgba16_to_rgb_f32(
+            &self.device,
+            &self.queue,
+            &self.gi_output_hdr,
+            dims,
+        )?;
+
+        // AO + SSGI + SSR
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            gi.enable_effect(&self.device, SSE::SSAO)?;
+            gi.enable_effect(&self.device, SSE::SSGI)?;
+            gi.enable_effect(&self.device, SSE::SSR)?;
+        }
+        self.ssr_params.set_enabled(true);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi(None)?;
+        let ao_ssgi_ssr_hdr = read_texture_rgba16_to_rgb_f32(
+            &self.device,
+            &self.queue,
+            &self.gi_output_hdr,
+            dims,
+        )?;
+
+        // Restore original GI state
+        {
+            let gi = self.gi.as_mut().context("GI manager not available")?;
+            if ao_orig {
+                gi.enable_effect(&self.device, SSE::SSAO)?;
+            } else {
+                gi.disable_effect(SSE::SSAO);
+            }
+            if ssgi_orig {
+                gi.enable_effect(&self.device, SSE::SSGI)?;
+            } else {
+                gi.disable_effect(SSE::SSGI);
+            }
+            if ssr_orig {
+                gi.enable_effect(&self.device, SSE::SSR)?;
+            } else {
+                gi.disable_effect(SSE::SSR);
+            }
+        }
+        self.gi_ao_weight = ao_weight_orig;
+        self.gi_ssgi_weight = ssgi_weight_orig;
+        self.gi_ssr_weight = ssr_weight_orig;
+        self.ssr_params.set_enabled(ssr_enable_orig);
+        self.sync_ssr_params_to_gi();
+        self.reexecute_gi(None)?;
+
+        let count = (dims.0 as usize) * (dims.1 as usize);
+
+        // Energy check in HDR
+        let mut max_luminance_ratio = 0.0f32;
+        let mut luminance_violations = 0u64;
+        let mut luminance_samples = 0u64;
+        let eps_base = 1e-6f32;
+
+        for i in 0..count {
+            let [br, bg, bb] = baseline_hdr[i];
+            let [gr, gg, gb] = ao_ssgi_ssr_hdr[i];
+            let yb = 0.2126 * br + 0.7152 * bg + 0.0722 * bb;
+            let ya = 0.2126 * gr + 0.7152 * gg + 0.0722 * gb;
+            if yb > eps_base {
+                let ratio = ya / yb.max(eps_base);
+                if ratio.is_finite() {
+                    luminance_samples += 1;
+                    if ratio > max_luminance_ratio {
+                        max_luminance_ratio = ratio;
+                    }
+                    if ratio > 1.05 + 1e-4 {
+                        luminance_violations += 1;
+                    }
+                }
+            }
+        }
+
+        let violation_fraction = if luminance_samples > 0 {
+            luminance_violations as f32 / luminance_samples as f32
+        } else {
+            0.0
+        };
+
+        // Component isolation metrics in HDR
+        let mut max_diffuse_delta_ao = 0.0f32;
+        let mut max_diffuse_delta_ssgi = 0.0f32;
+        let mut max_spec_delta_ssr = 0.0f32;
+        let mut max_unintended_diffuse_delta_ssr = 0.0f32;
+        let mut max_unintended_spec_delta_ao = 0.0f32;
+        let mut max_unintended_spec_delta_ssgi = 0.0f32;
+
+        for i in 0..count {
+            let [bd_r, bd_g, bd_b] = baseline_diffuse[i];
+            let [bs_r, bs_g, bs_b] = baseline_spec[i];
+            let [ar, ag, ab] = ao_hdr[i];
+            let [sgi_r, sgi_g, sgi_b] = ao_ssgi_hdr[i];
+            let [sr, sg, sb] = ao_ssgi_ssr_hdr[i];
+
+            // AO: compare baseline vs AO using separated diffuse/spec
+            let diffuse_base_r = bd_r;
+            let diffuse_base_g = bd_g;
+            let diffuse_base_b = bd_b;
+            let diffuse_ao_r = ar - bs_r;
+            let diffuse_ao_g = ag - bs_g;
+            let diffuse_ao_b = ab - bs_b;
+            let d_ao_r = (diffuse_ao_r - diffuse_base_r).abs();
+            let d_ao_g = (diffuse_ao_g - diffuse_base_g).abs();
+            let d_ao_b = (diffuse_ao_b - diffuse_base_b).abs();
+            let d_ao_max = d_ao_r.max(d_ao_g.max(d_ao_b));
+            if d_ao_max > max_diffuse_delta_ao {
+                max_diffuse_delta_ao = d_ao_max;
+            }
+
+            let spec_base_r = bs_r;
+            let spec_base_g = bs_g;
+            let spec_base_b = bs_b;
+            let spec_ao_r = ar - diffuse_ao_r;
+            let spec_ao_g = ag - diffuse_ao_g;
+            let spec_ao_b = ab - diffuse_ao_b;
+            let d_spec_ao_r = (spec_ao_r - spec_base_r).abs();
+            let d_spec_ao_g = (spec_ao_g - spec_base_g).abs();
+            let d_spec_ao_b = (spec_ao_b - spec_base_b).abs();
+            let d_spec_ao_max = d_spec_ao_r.max(d_spec_ao_g.max(d_spec_ao_b));
+            if d_spec_ao_max > max_unintended_spec_delta_ao {
+                max_unintended_spec_delta_ao = d_spec_ao_max;
+            }
+
+            // SSGI: compare AO vs AO+SSGI
+            let diffuse_ssgi_r = sgi_r - bs_r;
+            let diffuse_ssgi_g = sgi_g - bs_g;
+            let diffuse_ssgi_b = sgi_b - bs_b;
+            let d_ssgi_r = (diffuse_ssgi_r - diffuse_ao_r).abs();
+            let d_ssgi_g = (diffuse_ssgi_g - diffuse_ao_g).abs();
+            let d_ssgi_b = (diffuse_ssgi_b - diffuse_ao_b).abs();
+            let d_ssgi_max = d_ssgi_r.max(d_ssgi_g.max(d_ssgi_b));
+            if d_ssgi_max > max_diffuse_delta_ssgi {
+                max_diffuse_delta_ssgi = d_ssgi_max;
+            }
+
+            let spec_ssgi_r = sgi_r - diffuse_ssgi_r;
+            let spec_ssgi_g = sgi_g - diffuse_ssgi_g;
+            let spec_ssgi_b = sgi_b - diffuse_ssgi_b;
+            let d_spec_ssgi_r = (spec_ssgi_r - spec_ao_r).abs();
+            let d_spec_ssgi_g = (spec_ssgi_g - spec_ao_g).abs();
+            let d_spec_ssgi_b = (spec_ssgi_b - spec_ao_b).abs();
+            let d_spec_ssgi_max = d_spec_ssgi_r.max(d_spec_ssgi_g.max(d_spec_ssgi_b));
+            if d_spec_ssgi_max > max_unintended_spec_delta_ssgi {
+                max_unintended_spec_delta_ssgi = d_spec_ssgi_max;
+            }
+
+            // SSR: compare AO+SSGI vs AO+SSGI+SSR
+            let spec_ssr_r = sr - diffuse_ssgi_r;
+            let spec_ssr_g = sg - diffuse_ssgi_g;
+            let spec_ssr_b = sb - diffuse_ssgi_b;
+            let spec_delta_r = (spec_ssr_r - spec_base_r).abs();
+            let spec_delta_g = (spec_ssr_g - spec_base_g).abs();
+            let spec_delta_b = (spec_ssr_b - spec_base_b).abs();
+            let spec_mag = spec_delta_r.max(spec_delta_g.max(spec_delta_b));
+            if spec_mag > max_spec_delta_ssr {
+                max_spec_delta_ssr = spec_mag;
+            }
+
+            let diffuse_with_ssr_r = sr - spec_ssr_r;
+            let diffuse_with_ssr_g = sg - spec_ssr_g;
+            let diffuse_with_ssr_b = sb - spec_ssr_b;
+            let diff_r = (diffuse_with_ssr_r - diffuse_ssgi_r).abs();
+            let diff_g = (diffuse_with_ssr_g - diffuse_ssgi_g).abs();
+            let diff_b = (diffuse_with_ssr_b - diffuse_ssgi_b).abs();
+            let diff_max = diff_r.max(diff_g.max(diff_b));
+            if diff_max > max_unintended_diffuse_delta_ssr {
+                max_unintended_diffuse_delta_ssr = diff_max;
+            }
+        }
+
+        let max_unintended_component_delta = max_unintended_diffuse_delta_ssr
+            .max(max_unintended_spec_delta_ao.max(max_unintended_spec_delta_ssgi));
+        let tolerance = 1.0f32 / 255.0f32;
+
+        self.write_p5_meta(|meta| {
+            meta.insert(
+                "gi_verification".to_string(),
+                json!({
+                    "luminance": {
+                        "max_ratio": max_luminance_ratio,
+                        "violation_count": luminance_violations,
+                        "violation_fraction": violation_fraction,
+                    },
+                    "component_isolation": {
+                        "ao": {
+                            "max_diffuse_delta": max_diffuse_delta_ao,
+                            "max_unintended_spec_delta": max_unintended_spec_delta_ao,
+                        },
+                        "ssgi": {
+                            "max_diffuse_delta": max_diffuse_delta_ssgi,
+                            "max_unintended_spec_delta": max_unintended_spec_delta_ssgi,
+                        },
+                        "ssr": {
+                            "max_spec_delta": max_spec_delta_ssr,
+                            "max_unintended_diffuse_delta": max_unintended_diffuse_delta_ssr,
+                        },
+                    },
+                    "max_unintended_component_delta": max_unintended_component_delta,
+                    "tolerance_1_over_255": tolerance,
+                }),
+            );
+        })?;
+
         Ok(())
     }
 }
@@ -6784,6 +7310,29 @@ fn rgba16_to_luma(bytes: &[u8]) -> Vec<f32> {
         out.push(luma);
     }
     out
+}
+
+fn read_texture_rgba16_to_rgb_f32(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    tex: &wgpu::Texture,
+    dims: (u32, u32),
+) -> anyhow::Result<Vec<[f32; 3]>> {
+    use anyhow::Context;
+    let (w, h) = dims;
+    let bytes = read_texture_tight(device, queue, tex, (w, h), wgpu::TextureFormat::Rgba16Float)
+        .context("read RGBA16F texture")?;
+    let mut out = vec![[0.0f32; 3]; (w as usize) * (h as usize)];
+    for (i, rgb) in out.iter_mut().enumerate() {
+        let off = i * 8;
+        let r = f16::from_le_bytes([bytes[off], bytes[off + 1]]).to_f32();
+        let g = f16::from_le_bytes([bytes[off + 2], bytes[off + 3]]).to_f32();
+        let b = f16::from_le_bytes([bytes[off + 4], bytes[off + 5]]).to_f32();
+        rgb[0] = r;
+        rgb[1] = g;
+        rgb[2] = b;
+    }
+    Ok(out)
 }
 
 fn compute_max_delta_e(a: &[u8], b: &[u8]) -> f32 {

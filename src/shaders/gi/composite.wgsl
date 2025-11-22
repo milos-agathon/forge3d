@@ -194,13 +194,15 @@ struct GiCompositeParams {
 };
 
 @group(0) @binding(0) var baseline_lighting: texture_2d<f32>;
-@group(0) @binding(1) var ao_texture: texture_2d<f32>;
-@group(0) @binding(2) var ssgi_texture: texture_2d<f32>;
-@group(0) @binding(3) var ssr_texture: texture_2d<f32>;
-@group(0) @binding(4) var normal_texture: texture_2d<f32>;
-@group(0) @binding(5) var material_texture: texture_2d<f32>;
-@group(0) @binding(6) var output_lighting: texture_storage_2d<rgba16float, write>;
-@group(0) @binding(7) var<uniform> gi_params: GiCompositeParams;
+@group(0) @binding(1) var diffuse_base_texture: texture_2d<f32>;
+@group(0) @binding(2) var spec_base_texture: texture_2d<f32>;
+@group(0) @binding(3) var ao_texture: texture_2d<f32>;
+@group(0) @binding(4) var ssgi_texture: texture_2d<f32>;
+@group(0) @binding(5) var ssr_texture: texture_2d<f32>;
+@group(0) @binding(6) var normal_texture: texture_2d<f32>;
+@group(0) @binding(7) var material_texture: texture_2d<f32>;
+@group(0) @binding(8) var output_lighting: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(9) var<uniform> gi_params: GiCompositeParams;
 
 fn luminance(c: vec3<f32>) -> f32 {
     return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
@@ -219,17 +221,15 @@ fn cs_gi_composite(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    // Load baseline lighting (currently treated as L_diffuse_base only).
+    // Load baseline lighting and separated diffuse/spec components.
     let base_sample = textureLoad(baseline_lighting, pixel, 0);
-    var L_baseline = base_sample.rgb;
-
-    // In this initial implementation we do not yet receive separated diffuse,
-    // specular, and emissive components. Treat the baseline as diffuse and keep
-    // specular/emissive at zero so that the composition math is in place; the
-    // pipeline will be refined in later milestones.
+    let L_baseline = base_sample.rgb;
+    let diffuse_sample = textureLoad(diffuse_base_texture, pixel, 0);
+    let spec_sample = textureLoad(spec_base_texture, pixel, 0);
+    var L_diffuse_base = diffuse_sample.rgb;
+    var L_spec_base = spec_sample.rgb;
+    // Emissive is reserved for future pipelines that provide a separate term.
     var L_emissive = vec3<f32>(0.0);
-    var L_diffuse_base = L_baseline;
-    var L_spec_base = vec3<f32>(0.0);
 
     // --- AO (diffuse only) ---
     var ao = textureLoad(ao_texture, pixel, 0).r;
@@ -255,7 +255,8 @@ fn cs_gi_composite(@builtin(global_invocation_id) gid: vec3<u32>) {
     let energy_cap = max(gi_params.energy_cap, 1.0);
     let L_after_ao = L_diffuse_ao + L_spec_base + L_emissive;
     let Y_after_ao = luminance(L_after_ao);
-    let Y_baseline = luminance(L_baseline + L_emissive);
+    let L_baseline_total = L_diffuse_base + L_spec_base + L_emissive;
+    let Y_baseline = luminance(L_baseline_total);
     let Y_cap_total = energy_cap * Y_baseline;
     let Y_budget_gi = max(Y_cap_total - Y_after_ao, 0.0);
 

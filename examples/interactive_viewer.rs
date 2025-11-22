@@ -4,6 +4,7 @@
 // Workstream I1: Interactive Viewer demonstration
 // Simple example showing the windowed viewer with orbit and FPS camera modes
 
+use forge3d::cli::args::GiCliConfig;
 use forge3d::viewer::{run_viewer, set_initial_commands, ViewerConfig};
 use std::env;
 
@@ -49,7 +50,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //   --size <WxH>
     //   --fov <degrees>
     //   --cam-lookat ex,ey,ez,tx,ty,tz[,ux,uy,uz]
-    let mut args = env::args().skip(1);
+
+    // Collect all CLI arguments (excluding argv[0]) so we can validate
+    // GI-related flags using the central schema in src/cli/args.rs.
+    let all_args: Vec<String> = env::args().skip(1).collect();
+
+    if let Err(e) = GiCliConfig::parse(&all_args) {
+        eprintln!("[forge3d CLI] error parsing GI flags: {e}");
+        std::process::exit(1);
+    }
+
+    let mut args = all_args.into_iter();
     let mut cmds: Vec<String> = Vec::new();
     while let Some(arg) = args.next() {
         match arg.as_str() {

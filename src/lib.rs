@@ -354,6 +354,7 @@ pub mod math {
 // Rendering modules
 pub mod accel;
 pub mod camera;
+pub mod cli;
 pub mod colormap;
 mod colormap1d;
 pub mod context;
