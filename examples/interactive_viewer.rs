@@ -3,10 +3,14 @@
 // examples/interactive_viewer.rs
 // Workstream I1: Interactive Viewer demonstration
 // Simple example showing the windowed viewer with orbit and FPS camera modes
-
+//
 use forge3d::cli::args::GiCliConfig;
 use forge3d::viewer::{run_viewer, set_initial_commands, ViewerConfig};
 use std::env;
+
+fn gi_cli_config_to_commands(cfg: &GiCliConfig) -> Vec<String> {
+    cfg.to_commands()
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Map simple CLI flags to viewer commands
@@ -55,13 +59,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // GI-related flags using the central schema in src/cli/args.rs.
     let all_args: Vec<String> = env::args().skip(1).collect();
 
-    if let Err(e) = GiCliConfig::parse(&all_args) {
-        eprintln!("[forge3d CLI] error parsing GI flags: {e}");
-        std::process::exit(1);
-    }
+    let gi_cfg = match GiCliConfig::parse(&all_args) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("[forge3d CLI] error parsing GI flags: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Seed initial commands with GI configuration derived from GiCliConfig.
+    let mut cmds: Vec<String> = gi_cli_config_to_commands(&gi_cfg);
 
     let mut args = all_args.into_iter();
-    let mut cmds: Vec<String> = Vec::new();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--size" => {
@@ -106,24 +115,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "--gi" => {
-                if let Some(spec) = args.next() {
-                    if let Some((eff, state)) = spec.split_once(':') {
-                        let eff_l = eff.to_lowercase();
-                        let state_l = state.to_lowercase();
-                        if ["ssao", "ssgi", "ssr", "gtao"].contains(&eff_l.as_str())
-                            && ["on", "off"].contains(&state_l.as_str())
-                        {
-                            if eff_l == "gtao" {
-                                cmds.push(format!(":gi ssao {}", state_l));
-                                if state_l == "on" {
-                                    cmds.push(":ssao-technique gtao".to_string());
-                                }
-                            } else {
-                                cmds.push(format!(":gi {} {}", eff_l, state_l));
-                            }
-                        }
-                    }
-                }
+                // GI flags are fully handled by GiCliConfig; skip here.
+                let _ = args.next();
             }
             "--snapshot" => {
                 if let Some(path) = args.next() {
@@ -236,101 +229,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     cmds.push(format!(":fog-temporal {}", v));
                 }
             }
-            "--ssao-radius" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssao-radius {}", val));
-                }
-            }
-            "--ssao-intensity" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssao-intensity {}", val));
-                }
-            }
-            "--ssao-bias" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssao-bias {}", val));
-                }
-            }
-            "--ssao-samples" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssao-samples {}", val));
-                }
-            }
-            "--ssao-directions" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssao-directions {}", val));
-                }
-            }
-            "--ssao-composite" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssao-composite {}", val));
-                }
-            }
-            "--ssao-mul" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssao-mul {}", val));
-                }
-            }
-            "--ssgi-steps" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssgi-steps {}", val));
-                }
-            }
-            "--ssgi-radius" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssgi-radius {}", val));
-                }
-            }
-            "--ssgi-half" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssgi-half {}", val));
-                }
-            }
-            "--ssgi-temporal-alpha" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssgi-temporal-alpha {}", val));
-                }
-            }
-            "--ssr-enable" => {
-                if let Some(val) = args.next() {
-                    let norm = val.to_lowercase();
-                    let state = if matches!(norm.as_str(), "on" | "1" | "true") {
-                        "on"
-                    } else {
-                        "off"
-                    };
-                    cmds.push(format!(":gi ssr {}", state));
-                }
-            }
-            "--ao-blur" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ao-blur {}", val));
-                }
-            }
-            "--ao-temporal-alpha" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ao-temporal-alpha {}", val));
-                }
-            }
-            "--ssao-temporal-alpha" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssao-temporal-alpha {}", val));
-                }
-            }
-            "--ssr-max-steps" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssr-max-steps {}", val));
-                }
-            }
-            "--ssr-thickness" => {
-                if let Some(val) = args.next() {
-                    cmds.push(format!(":ssr-thickness {}", val));
-                }
-            }
-            "--ssao-technique" => {
-                if let Some(mode) = args.next() {
-                    cmds.push(format!(":ssao-technique {}", mode.to_lowercase()));
-                }
+            // GI parameter flags are handled via GiCliConfig; skip here.
+            "--ssao-radius"
+            | "--ssao-intensity"
+            | "--ssao-bias"
+            | "--ssao-samples"
+            | "--ssao-directions"
+            | "--ssao-composite"
+            | "--ssao-mul"
+            | "--ssgi-steps"
+            | "--ssgi-radius"
+            | "--ssgi-half"
+            | "--ssgi-temporal-alpha"
+            | "--ssgi-temporal-enable"
+            | "--ssgi-edges"
+            | "--ssgi-upsigma-depth"
+            | "--ssgi-upsample-sigma-depth"
+            | "--ssgi-upsigma-normal"
+            | "--ssgi-upsample-sigma-normal"
+            | "--ssr-enable"
+            | "--ssr-max-steps"
+            | "--ssr-thickness"
+            | "--ao-blur"
+            | "--ao-temporal-alpha"
+            | "--ssao-temporal-alpha"
+            | "--ssao-technique" => {
+                let _ = args.next();
             }
             _ => {}
         }

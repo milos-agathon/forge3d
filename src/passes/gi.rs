@@ -154,11 +154,14 @@ impl From<GiCompositeParams> for GiCompositeParamsStd140 {
 pub struct GiPass {
     pipeline: ComputePipeline,
     bind_group_layout: BindGroupLayout,
+    debug_pipeline: ComputePipeline,
+    debug_bind_group_layout: BindGroupLayout,
     params_buffer: Buffer,
     width: u32,
     height: u32,
     params: GiCompositeParams,
     last_composite_ms: f32,
+    last_debug_ms: f32,
 }
 
 impl GiPass {
@@ -166,6 +169,11 @@ impl GiPass {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("p5.gi.composite"),
             source: ShaderSource::Wgsl(include_str!("../shaders/gi/composite.wgsl").into()),
+        });
+
+        let debug_shader = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("p5.gi.debug"),
+            source: ShaderSource::Wgsl(include_str!("../shaders/gi/debug.wgsl").into()),
         });
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -285,6 +293,63 @@ impl GiPass {
             entry_point: "cs_gi_composite",
         });
 
+        let debug_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("p5.gi.debug.bgl"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::WriteOnly,
+                        format: TextureFormat::Rgba16Float,
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let debug_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("p5.gi.debug.pipeline"),
+            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("p5.gi.debug.layout"),
+                bind_group_layouts: &[&debug_bind_group_layout],
+                push_constant_ranges: &[],
+            })),
+            module: &debug_shader,
+            entry_point: "cs_gi_debug",
+        });
+
         let params = GiCompositeParams {
             ao_enable: true,
             ssgi_enable: true,
@@ -304,11 +369,14 @@ impl GiPass {
         Ok(Self {
             pipeline,
             bind_group_layout,
+            debug_pipeline,
+            debug_bind_group_layout,
             params_buffer,
             width,
             height,
             params,
             last_composite_ms: 0.0,
+            last_debug_ms: 0.0,
         })
     }
 
@@ -318,6 +386,10 @@ impl GiPass {
 
     pub fn composite_ms(&self) -> f32 {
         self.last_composite_ms
+    }
+
+    pub fn debug_ms(&self) -> f32 {
+        self.last_debug_ms
     }
 
     pub fn update_params<F: FnOnce(&mut GiCompositeParams)>(&mut self, queue: &wgpu::Queue, f: F) {
@@ -400,6 +472,54 @@ impl GiPass {
         pass.dispatch_workgroups(gx, gy, 1);
         drop(pass);
         self.last_composite_ms = t0.elapsed().as_secs_f32() * 1000.0;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_debug(
+        &mut self,
+        device: &Device,
+        encoder: &mut CommandEncoder,
+        ao_view: &TextureView,
+        ssgi_view: &TextureView,
+        ssr_view: &TextureView,
+        debug_output_view: &TextureView,
+    ) -> RenderResult<()> {
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("p5.gi.debug.bg"),
+            layout: &self.debug_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(ao_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(ssgi_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(ssr_view),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::TextureView(debug_output_view),
+                },
+            ],
+        });
+
+        let t0 = std::time::Instant::now();
+        let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("p5.gi.debug.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&self.debug_pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        let gx = (self.width + 7) / 8;
+        let gy = (self.height + 7) / 8;
+        pass.dispatch_workgroups(gx, gy, 1);
+        drop(pass);
+        self.last_debug_ms = t0.elapsed().as_secs_f32() * 1000.0;
         Ok(())
     }
 }

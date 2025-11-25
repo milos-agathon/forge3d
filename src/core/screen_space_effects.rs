@@ -1125,9 +1125,9 @@ impl SsaoRenderer {
         });
         let ssao_composited_view = ssao_composited.create_view(&TextureViewDescriptor::default());
 
-        // Composite uniform (x=multiplier, yzw reserved)
-        // Default multiplier of 1.0 applies full AO effect (matches default intensity)
-        let comp_params: [f32; 4] = [1.0, 0.0, 0.0, 0.0];
+        // Composite uniform (x=intensity scale, y=ssao_mul, z,w reserved)
+        // Default of (1.0, 1.0) applies full AO effect controlled by SSAO settings.
+        let comp_params: [f32; 4] = [1.0, 1.0, 0.0, 0.0];
         let comp_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ssao.comp.uniform"),
             contents: bytemuck::cast_slice(&comp_params),
@@ -1191,6 +1191,13 @@ impl SsaoRenderer {
 
     pub fn get_settings(&self) -> SsaoSettings {
         self.settings
+    }
+
+    pub fn set_seed(&mut self, queue: &Queue, seed: u32) {
+        self.settings.frame_index = seed;
+        self.frame_index = seed;
+        queue.write_buffer(&self.settings_buffer, 0, bytemuck::bytes_of(&self.settings));
+        self.invalidate_history();
     }
 
     /// Update camera parameters
@@ -1620,7 +1627,8 @@ impl SsaoRenderer {
 
     pub fn set_composite_multiplier(&mut self, queue: &Queue, mul: f32) {
         let m = mul.clamp(0.0, 1.0);
-        let params: [f32; 4] = [m, 0.0, 0.0, 0.0];
+        // Keep intensity scale at 1.0 and use the second slot for ssao_mul toggle.
+        let params: [f32; 4] = [1.0, m, 0.0, 0.0];
         queue.write_buffer(&self.comp_uniform, 0, bytemuck::cast_slice(&params));
     }
 
@@ -1669,6 +1677,7 @@ pub struct ScreenSpaceEffectsManager {
     enabled_effects: Vec<ScreenSpaceEffect>,
     pub hzb: Option<HzbPyramid>,
     ssr_params: SsrParams,
+    last_hzb_ms: f32,
 }
 
 impl ScreenSpaceEffectsManager {
@@ -1690,6 +1699,7 @@ impl ScreenSpaceEffectsManager {
             enabled_effects: Vec::new(),
             hzb,
             ssr_params: SsrParams::default(),
+            last_hzb_ms: 0.0,
         })
     }
 
@@ -1755,15 +1765,19 @@ impl ScreenSpaceEffectsManager {
 
     /// Build depth HZB pyramid from current GBuffer depth for this frame.
     /// Requires that GBuffer depth has been rendered for the frame.
+    /// Records an approximate CPU-side build time in milliseconds for
+    /// performance diagnostics (P5.6 budgets).
     pub fn build_hzb(
-        &self,
+        &mut self,
         device: &Device,
         encoder: &mut CommandEncoder,
         src_depth: &TextureView,
         reversed_z: bool,
     ) {
         if let Some(ref hzb) = self.hzb {
+            let t0 = Instant::now();
             hzb.build(device, encoder, src_depth, reversed_z);
+            self.last_hzb_ms = t0.elapsed().as_secs_f32() * 1000.0;
         }
     }
 
@@ -1863,6 +1877,28 @@ impl ScreenSpaceEffectsManager {
         if let Some(ref mut ssgi) = self.ssgi_renderer {
             ssgi.advance_frame(queue);
         }
+    }
+
+    /// Return the last recorded HZB build time in milliseconds. This is a
+    /// CPU-side approximation used for P5.6 performance budgets.
+    pub fn hzb_ms(&self) -> f32 {
+        self.last_hzb_ms
+    }
+
+    pub fn set_gi_seed(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        seed: u32,
+    ) -> RenderResult<()> {
+        if let Some(ref mut ssao) = self.ssao_renderer {
+            ssao.set_seed(queue, seed);
+        }
+        if let Some(ref mut ssgi) = self.ssgi_renderer {
+            ssgi.set_seed(queue, seed);
+        }
+        self.ssgi_reset_history(device, queue)?;
+        Ok(())
     }
 
     /// Return a GI debug texture view if available (SSR preferred, else SSGI)
@@ -2923,6 +2959,12 @@ impl SsgiRenderer {
             last_temporal_ms: 0.0,
             last_upsample_ms: 0.0,
         })
+    }
+
+    pub fn set_seed(&mut self, queue: &Queue, seed: u32) {
+        self.frame_index = seed;
+        self.settings.frame_index = self.frame_index;
+        queue.write_buffer(&self.settings_buffer, 0, bytemuck::bytes_of(&self.settings));
     }
 
     pub fn update_settings(&mut self, queue: &Queue, settings: SsgiSettings) {

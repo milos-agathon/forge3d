@@ -42,6 +42,15 @@ pub enum GiEntry {
     Effect(GiEffect, Toggle),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GiVizMode {
+    None,
+    Composite,
+    Ao,
+    Ssgi,
+    Ssr,
+}
+
 /// SSAO-related CLI parameters.
 #[derive(Clone, Debug, Default)]
 pub struct SsaoCliParams {
@@ -86,6 +95,11 @@ pub struct GiCliConfig {
     pub ssao: SsaoCliParams,
     pub ssgi: SsgiCliParams,
     pub ssr: SsrCliParams,
+    pub ao_weight: Option<f32>,
+    pub ssgi_weight: Option<f32>,
+    pub ssr_weight: Option<f32>,
+    pub gi_viz: Option<GiVizMode>,
+    pub gi_seed: Option<u32>,
 }
 
 /// Error raised when parsing GI CLI flags.
@@ -124,6 +138,30 @@ impl GiCliConfig {
                         .ok_or_else(|| GiCliError::new("missing value for --gi"))?;
                     let entry = parse_gi_value(value)?;
                     cfg.entries.push(entry);
+                    i += 2;
+                }
+                "--gi-seed" => {
+                    let v = parse_u32(args, i, "--gi-seed")?;
+                    cfg.gi_seed = Some(v);
+                    i += 2;
+                }
+                "--viz-gi" => {
+                    let value = args
+                        .get(i + 1)
+                        .ok_or_else(|| GiCliError::new("missing value for --viz-gi"))?;
+                    let mode = match value.to_ascii_lowercase().as_str() {
+                        "none" => GiVizMode::None,
+                        "composite" => GiVizMode::Composite,
+                        "ao" => GiVizMode::Ao,
+                        "ssgi" => GiVizMode::Ssgi,
+                        "ssr" => GiVizMode::Ssr,
+                        other => {
+                            return Err(GiCliError::new(format!(
+                                "unknown --viz-gi value '{other}'; expected one of none, composite, ao, ssgi, ssr"
+                            )));
+                        }
+                    };
+                    cfg.gi_viz = Some(mode);
                     i += 2;
                 }
                 "--ssao-radius" => {
@@ -276,12 +314,162 @@ impl GiCliConfig {
                     cfg.ssr.thickness = Some(clamped);
                     i += 2;
                 }
+                "--ao-weight" => {
+                    let v = parse_f32(args, i, "--ao-weight")?;
+                    let clamped = clamp_with_warning(v, 0.0, 1.0, "--ao-weight");
+                    cfg.ao_weight = Some(clamped);
+                    i += 2;
+                }
+                "--ssgi-weight" => {
+                    let v = parse_f32(args, i, "--ssgi-weight")?;
+                    let clamped = clamp_with_warning(v, 0.0, 1.0, "--ssgi-weight");
+                    cfg.ssgi_weight = Some(clamped);
+                    i += 2;
+                }
+                "--ssr-weight" => {
+                    let v = parse_f32(args, i, "--ssr-weight")?;
+                    let clamped = clamp_with_warning(v, 0.0, 1.0, "--ssr-weight");
+                    cfg.ssr_weight = Some(clamped);
+                    i += 2;
+                }
                 _ => {
                     i += 1;
                 }
             }
         }
         Ok(cfg)
+    }
+
+    /// Serialize this configuration into a list of canonical viewer colon
+    /// commands (e.g. ":gi ssao on", ":ssao-radius 0.500000").
+    ///
+    /// This is used by the interactive viewer example to seed its initial GI
+    /// state from CLI flags while keeping semantics in one place.
+    pub fn to_commands(&self) -> Vec<String> {
+        let mut cmds: Vec<String> = Vec::new();
+
+        // High-level GI mode toggles
+        for entry in &self.entries {
+            match entry {
+                GiEntry::Off => {
+                    // Disable all GI effects
+                    cmds.push(":gi ssao off".to_string());
+                    cmds.push(":gi ssgi off".to_string());
+                    cmds.push(":gi ssr off".to_string());
+                }
+                GiEntry::Effect(effect, toggle) => {
+                    let state = toggle.as_str();
+                    match effect {
+                        GiEffect::Ssao => cmds.push(format!(":gi ssao {}", state)),
+                        GiEffect::Ssgi => cmds.push(format!(":gi ssgi {}", state)),
+                        GiEffect::Ssr => cmds.push(format!(":gi ssr {}", state)),
+                        GiEffect::Gtao => cmds.push(format!(":gi gtao {}", state)),
+                    }
+                }
+            }
+        }
+
+        // SSAO-related parameters
+        if let Some(v) = self.ssao.radius {
+            cmds.push(format!(":ssao-radius {}", format_float(v)));
+        }
+        if let Some(v) = self.ssao.intensity {
+            cmds.push(format!(":ssao-intensity {}", format_float(v)));
+        }
+        if let Some(ref t) = self.ssao.technique {
+            cmds.push(format!(":ssao-technique {}", t));
+        }
+        if let Some(b) = self.ssao.composite_enabled {
+            cmds.push(format!(":ssao-composite {}", format_bool_word(b)));
+        }
+        if let Some(v) = self.ssao.composite_mul {
+            cmds.push(format!(":ssao-mul {}", format_float(v)));
+        }
+        if let Some(v) = self.ssao.bias {
+            cmds.push(format!(":ssao-bias {}", format_float(v)));
+        }
+        if let Some(v) = self.ssao.samples {
+            cmds.push(format!(":ssao-samples {}", v));
+        }
+        if let Some(v) = self.ssao.directions {
+            cmds.push(format!(":ssao-directions {}", v));
+        }
+        if let Some(v) = self.ssao.temporal_alpha {
+            let val = format_float(v);
+            // Expose both SSAO-specific and AO-agnostic aliases.
+            cmds.push(format!(":ssao-temporal-alpha {}", val));
+            cmds.push(format!(":ao-temporal-alpha {}", val));
+        }
+        if let Some(b) = self.ssao.temporal_enabled {
+            cmds.push(format!(":ssao-temporal {}", format_bool_word(b)));
+        }
+        if let Some(b) = self.ssao.blur_enabled {
+            cmds.push(format!(":ao-blur {}", format_bool_word(b)));
+        }
+
+        // SSGI-related parameters
+        if let Some(v) = self.ssgi.steps {
+            cmds.push(format!(":ssgi-steps {}", v));
+        }
+        if let Some(v) = self.ssgi.radius {
+            cmds.push(format!(":ssgi-radius {}", format_float(v)));
+        }
+        if let Some(b) = self.ssgi.half_res {
+            cmds.push(format!(":ssgi-half {}", format_bool_word(b)));
+        }
+        if let Some(v) = self.ssgi.temporal_alpha {
+            cmds.push(format!(":ssgi-temporal-alpha {}", format_float(v)));
+        }
+        if let Some(b) = self.ssgi.temporal_enabled {
+            cmds.push(format!(":ssgi-temporal {}", format_bool_word(b)));
+        }
+        if let Some(b) = self.ssgi.edges {
+            cmds.push(format!(":ssgi-edges {}", format_bool_word(b)));
+        }
+        if let Some(v) = self.ssgi.upsample_sigma_depth {
+            cmds.push(format!(":ssgi-upsample-sigma-depth {}", format_float(v)));
+        }
+        if let Some(v) = self.ssgi.upsample_sigma_normal {
+            cmds.push(format!(":ssgi-upsample-sigma-normal {}", format_float(v)));
+        }
+
+        // SSR-related parameters
+        if let Some(b) = self.ssr.enable {
+            cmds.push(format!(":gi ssr {}", format_bool_word(b)));
+        }
+        if let Some(v) = self.ssr.max_steps {
+            cmds.push(format!(":ssr-max-steps {}", v));
+        }
+        if let Some(v) = self.ssr.thickness {
+            cmds.push(format!(":ssr-thickness {}", format_float(v)));
+        }
+
+        if let Some(v) = self.ao_weight {
+            cmds.push(format!(":ao-weight {}", format_float(v)));
+        }
+        if let Some(v) = self.ssgi_weight {
+            cmds.push(format!(":ssgi-weight {}", format_float(v)));
+        }
+        if let Some(v) = self.ssr_weight {
+            cmds.push(format!(":ssr-weight {}", format_float(v)));
+        }
+
+        if let Some(seed) = self.gi_seed {
+            cmds.push(format!(":gi-seed {}", seed));
+        }
+
+        if let Some(mode) = self.gi_viz {
+            let name = match mode {
+                GiVizMode::None => "none",
+                GiVizMode::Composite => "composite",
+                GiVizMode::Ao => "ao",
+                GiVizMode::Ssgi => "ssgi",
+                GiVizMode::Ssr => "ssr",
+            };
+            cmds.push(format!(":viz gi {}", name));
+        }
+
+        cmds
     }
 
     /// Serialize this configuration into a canonical CLI flag string.
@@ -386,6 +574,33 @@ impl GiCliConfig {
         if let Some(v) = self.ssr.thickness {
             parts.push("--ssr-thickness".to_string());
             parts.push(format_float(v));
+        }
+        if let Some(v) = self.ao_weight {
+            parts.push("--ao-weight".to_string());
+            parts.push(format_float(v));
+        }
+        if let Some(v) = self.ssgi_weight {
+            parts.push("--ssgi-weight".to_string());
+            parts.push(format_float(v));
+        }
+        if let Some(v) = self.ssr_weight {
+            parts.push("--ssr-weight".to_string());
+            parts.push(format_float(v));
+        }
+        if let Some(mode) = self.gi_viz {
+            let name = match mode {
+                GiVizMode::None => "none",
+                GiVizMode::Composite => "composite",
+                GiVizMode::Ao => "ao",
+                GiVizMode::Ssgi => "ssgi",
+                GiVizMode::Ssr => "ssr",
+            };
+            parts.push("--viz-gi".to_string());
+            parts.push(name.to_string());
+        }
+        if let Some(seed) = self.gi_seed {
+            parts.push("--gi-seed".to_string());
+            parts.push(seed.to_string());
         }
         parts.join(" ")
     }
@@ -540,5 +755,54 @@ mod tests {
         assert_eq!(cfg2.ssr.max_steps, cfg.ssr.max_steps);
         assert_eq!(cfg2.ssr.thickness, cfg.ssr.thickness);
         assert_eq!(cfg2.entries, cfg.entries);
+    }
+
+    #[test]
+    fn parse_viz_gi_valid() {
+        let args = vec![
+            "--viz-gi".to_string(),
+            "ao".to_string(),
+        ];
+        let cfg = GiCliConfig::parse(&args).unwrap();
+        assert_eq!(cfg.gi_viz, Some(GiVizMode::Ao));
+    }
+
+    #[test]
+    fn round_trip_viz_gi_cli_string() {
+        let args = vec![
+            "--viz-gi".to_string(),
+            "composite".to_string(),
+        ];
+        let cfg = GiCliConfig::parse(&args).unwrap();
+        let s = cfg.to_cli_string();
+        let reparsed_args: Vec<String> = s.split_whitespace().map(|s| s.to_string()).collect();
+        let cfg2 = GiCliConfig::parse(&reparsed_args).unwrap();
+        assert_eq!(cfg2.gi_viz, cfg.gi_viz);
+    }
+
+    #[test]
+    fn viz_gi_to_cli_and_commands() {
+        let mut cfg = GiCliConfig::default();
+        cfg.gi_viz = Some(GiVizMode::Ao);
+
+        let cli = cfg.to_cli_string();
+        assert!(cli.split_whitespace().collect::<Vec<_>>().windows(2).any(|w| {
+            w[0] == "--viz-gi" && w[1] == "ao"
+        }));
+
+        let cmds = cfg.to_commands();
+        assert!(cmds.iter().any(|c| c == ":viz gi ao"));
+    }
+
+    #[test]
+    fn reject_invalid_viz_gi_mode() {
+        let args = vec![
+            "--viz-gi".to_string(),
+            "foo".to_string(),
+        ];
+        let err = GiCliConfig::parse(&args).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("unknown --viz-gi value"));
+        assert!(msg.contains("none, composite, ao, ssgi, ssr"));
     }
 }

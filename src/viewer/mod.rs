@@ -7,6 +7,7 @@
 
 pub mod camera_controller;
 
+use crate::cli::args::GiVizMode;
 use crate::core::hdr::{apply_cpu_tone_mapping, ToneMappingOperator};
 use crate::core::ibl::{IBLQuality, IBLRenderer};
 use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
@@ -505,6 +506,19 @@ impl SceneMesh {
     }
 }
 
+struct P51CornellSceneState {
+    geom_vb: Option<wgpu::Buffer>,
+    geom_ib: Option<wgpu::Buffer>,
+    geom_index_count: u32,
+    sky_enabled: bool,
+    fog_enabled: bool,
+    viz_mode: VizMode,
+    gi_viz_mode: GiVizMode,
+    camera_mode: CameraMode,
+    camera_eye: Vec3,
+    camera_target: Vec3,
+}
+
 fn build_ssr_scene_mesh(preset: &SsrScenePreset) -> SceneMesh {
     let mut scene = SceneMesh::new();
 
@@ -584,6 +598,7 @@ pub struct Viewer {
     gi: Option<crate::core::screen_space_effects::ScreenSpaceEffectsManager>,
     gi_pass: Option<GiPass>,
     ssr_params: SsrParams,
+    gi_seed: Option<u32>,
     // Snapshot request path (processed on next frame before present)
     snapshot_request: Option<String>,
     // Offscreen color to read back when snapshotting this frame
@@ -623,6 +638,8 @@ pub struct Viewer {
     gi_baseline_spec_hdr_view: wgpu::TextureView,
     gi_output_hdr: wgpu::Texture,
     gi_output_hdr_view: wgpu::TextureView,
+    gi_debug: wgpu::Texture,
+    gi_debug_view: wgpu::TextureView,
     gi_baseline_bgl: wgpu::BindGroupLayout,
     gi_baseline_pipeline: wgpu::ComputePipeline,
     gi_split_bgl: wgpu::BindGroupLayout,
@@ -644,8 +661,12 @@ pub struct Viewer {
     // Fallback pipeline to draw a solid color when GI/geometry path is unavailable
     fallback_pipeline: wgpu::RenderPipeline,
     viz_mode: VizMode,
+    gi_viz_mode: GiVizMode,
     // SSAO composite control
     use_ssao_composite: bool,
+    ssao_composite_mul: f32,
+    // Cached SSAO blur toggle for query commands
+    ssao_blur_enabled: bool,
     // IBL integration
     ibl_renderer: Option<IBLRenderer>,
     ibl_env_view: Option<wgpu::TextureView>,
@@ -828,7 +849,9 @@ impl Viewer {
         }
         Ok(())
     }
+}
 
+impl Viewer {
     fn upload_ssr_scene(&mut self, preset: &SsrScenePreset) -> anyhow::Result<()> {
         let mesh = build_ssr_scene_mesh(preset);
         if mesh.vertices.is_empty() || mesh.indices.is_empty() {
@@ -1145,6 +1168,13 @@ impl Viewer {
         let out_dir = std::path::Path::new("reports/p5");
         fs::create_dir_all(out_dir)?;
 
+        // Reuse the P5.1 Cornell box scene so SSGI captures are rendered
+        // against the same geometry and camera framing as the AO artifacts.
+        let state = self.setup_p51_cornell_scene()?;
+        // Ensure GBuffer/depth are populated for the Cornell geometry before
+        // we start toggling SSGI on/off.
+        self.render_geometry_to_gbuffer_once()?;
+
         let capture_w = self.config.width.max(1);
         let capture_h = self.config.height.max(1);
         let capture_is_srgb = matches!(
@@ -1425,6 +1455,9 @@ impl Viewer {
                 }),
             );
         })?;
+        // Restore the previous viewer scene/camera so subsequent captures or
+        // interactive use continue from the original state.
+        self.restore_p51_cornell_scene(state);
 
         Ok(())
     }
@@ -1434,6 +1467,11 @@ impl Viewer {
         use std::fs;
         let out_dir = std::path::Path::new("reports/p5");
         fs::create_dir_all(out_dir)?;
+
+        // Use the same Cornell box setup as P5.1 so the temporal comparison
+        // runs on the canonical test scene.
+        let state = self.setup_p51_cornell_scene()?;
+        self.render_geometry_to_gbuffer_once()?;
 
         let (w, h) = (self.config.width.max(1), self.config.height.max(1));
 
@@ -1545,7 +1583,6 @@ impl Viewer {
                 obj.insert("accumulation_frames".to_string(), json!(16));
             }
         })?;
-
         // Restore settings
         {
             let gi = self.gi.as_mut().context("GI manager not available")?;
@@ -1560,6 +1597,8 @@ impl Viewer {
                 gi.disable_effect(SSE::SSGI);
             }
         }
+        // Restore the original viewer scene/camera state.
+        self.restore_p51_cornell_scene(state);
 
         Ok(())
     }
@@ -1756,6 +1795,15 @@ impl Viewer {
                     &gi.gbuffer().material_view,
                     &self.gi_output_hdr_view,
                 )?;
+
+                gi_pass.execute_debug(
+                    &self.device,
+                    &mut enc,
+                    ao_view,
+                    ssgi_view,
+                    ssr_view,
+                    &self.gi_debug_view,
+                )?;
             }
 
             self.queue.submit(std::iter::once(enc.finish()));
@@ -1900,8 +1948,11 @@ impl Viewer {
 
         match fmt {
             wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
-                let data = read_texture_tight(&self.device, &self.queue, tex, (w, h), fmt)
+                let mut data = read_texture_tight(&self.device, &self.queue, tex, (w, h), fmt)
                     .context("readback failed")?;
+                for px in data.chunks_exact_mut(4) {
+                    px[3] = 255;
+                }
                 image_write::write_png_rgba8(Path::new(path), &data, w, h)
                     .context("failed to write PNG")?;
                 Ok(())
@@ -1909,9 +1960,9 @@ impl Viewer {
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
                 let mut data = read_texture_tight(&self.device, &self.queue, tex, (w, h), fmt)
                     .context("readback failed")?;
-                // BGRA -> RGBA in-place
                 for px in data.chunks_exact_mut(4) {
                     px.swap(0, 2);
+                    px[3] = 255;
                 }
                 image_write::write_png_rgba8(Path::new(path), &data, w, h)
                     .context("failed to write PNG")?;
@@ -2899,6 +2950,23 @@ impl Viewer {
         let gi_output_hdr_view =
             gi_output_hdr.create_view(&wgpu::TextureViewDescriptor::default());
 
+        let gi_debug = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.gi.debug"),
+            size: wgpu::Extent3d {
+                width: surface_config.width,
+                height: surface_config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let gi_debug_view = gi_debug.create_view(&wgpu::TextureViewDescriptor::default());
+
         let gi_baseline_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("viewer.gi.baseline.bgl"),
             entries: &[
@@ -3694,6 +3762,7 @@ impl Viewer {
             gi,
             gi_pass: None,
             ssr_params: SsrParams::default(),
+            gi_seed: None,
             snapshot_request: None,
             pending_snapshot_tex: None,
             pending_captures: VecDeque::new(),
@@ -3726,6 +3795,8 @@ impl Viewer {
             gi_baseline_spec_hdr_view,
             gi_output_hdr,
             gi_output_hdr_view,
+            gi_debug,
+            gi_debug_view,
             gi_baseline_bgl,
             gi_baseline_pipeline,
             gi_split_bgl,
@@ -3743,7 +3814,10 @@ impl Viewer {
             lit_debug_mode: 0,
             fallback_pipeline: fb_pipeline,
             viz_mode: VizMode::Material,
+            gi_viz_mode: GiVizMode::None,
             use_ssao_composite: true,
+            ssao_composite_mul: 1.0,
+            ssao_blur_enabled: true,
             ibl_renderer: None,
             ibl_env_view: Some(dummy_env_view),
             ibl_sampler: Some(dummy_env_sampler),
@@ -3937,7 +4011,8 @@ impl Viewer {
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba16Float,
                 usage: wgpu::TextureUsages::STORAGE_BINDING
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
             self.gi_baseline_spec_hdr_view = self
@@ -3962,6 +4037,25 @@ impl Viewer {
             });
             self.gi_output_hdr_view = self
                 .gi_output_hdr
+                .create_view(&wgpu::TextureViewDescriptor::default());
+
+            self.gi_debug = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.gi.debug"),
+                size: wgpu::Extent3d {
+                    width: new_size.width,
+                    height: new_size.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            self.gi_debug_view = self
+                .gi_debug
                 .create_view(&wgpu::TextureViewDescriptor::default());
 
             if self.gi_pass.is_some() {
@@ -4382,6 +4476,21 @@ impl Viewer {
             let cam_pack = [to_arr4(view_mat), to_arr4(proj)];
             self.queue
                 .write_buffer(cam_buf, 0, bytemuck::cast_slice(&cam_pack));
+
+            // Keep GI camera uniforms in sync with this geometry pass so that
+            // SSAO/GTAO reconstruction uses the correct view/projection.
+            let inv_proj = proj.inverse();
+            let eye = self.camera.eye();
+            let inv_view = view_mat.inverse();
+            let cam = crate::core::screen_space_effects::CameraParams {
+                view_matrix: to_arr4(view_mat),
+                inv_view_matrix: to_arr4(inv_view),
+                proj_matrix: to_arr4(proj),
+                inv_proj_matrix: to_arr4(inv_proj),
+                camera_pos: [eye.x, eye.y, eye.z],
+                _pad: 0.0,
+            };
+            gi.update_camera(&self.queue, &cam);
 
             // Geometry bind group (camera + albedo)
             let bg_ref = match self.geom_bind_group.as_ref() {
@@ -5036,13 +5145,37 @@ impl Viewer {
                     }
                     VizMode::Normal => (1u32, &gi.gbuffer().normal_view),
                     VizMode::Depth => (2u32, &gi.gbuffer().depth_view),
-                    VizMode::Gi => {
-                        if let Some(v) = gi.gi_debug_view() {
-                            (3u32, v)
-                        } else {
-                            (0u32, &gi.gbuffer().material_view)
+                    VizMode::Gi => match self.gi_viz_mode {
+                        GiVizMode::None => {
+                            if let Some(v) = gi.gi_debug_view() {
+                                (3u32, v)
+                            } else {
+                                (0u32, &gi.gbuffer().material_view)
+                            }
                         }
-                    }
+                        GiVizMode::Composite => (0u32, &self.gi_debug_view),
+                        GiVizMode::Ao => {
+                            if let Some(v) = gi.ao_resolved_view() {
+                                (3u32, v)
+                            } else {
+                                (3u32, &gi.gbuffer().material_view)
+                            }
+                        }
+                        GiVizMode::Ssgi => {
+                            if let Some(v) = gi.ssgi_output_for_display_view() {
+                                (0u32, v)
+                            } else {
+                                (0u32, &gi.gbuffer().material_view)
+                            }
+                        }
+                        GiVizMode::Ssr => {
+                            if let Some(v) = gi.ssr_final_view() {
+                                (0u32, v)
+                            } else {
+                                (0u32, &self.lit_output_view)
+                            }
+                        }
+                    },
                     VizMode::Lit => (0u32, &self.lit_output_view),
                 };
                 // Prepare comp uniform (mode, far)
@@ -5446,11 +5579,14 @@ impl Viewer {
             ));
         }
 
-        // Process any pending P5.1 capture requests using current frame data
-        if let Some(kind) = self.pending_captures.pop_front() {
+        // Process any pending P5 capture requests using current frame data.
+        // Handle all queued captures before the viewer exits so that scripts
+        // like p5_golden.sh (which enqueue multiple :p5 commands followed by
+        // :quit) still produce every expected artifact.
+        while let Some(kind) = self.pending_captures.pop_front() {
             match kind {
                 CaptureKind::P51CornellSplit => {
-                    if let Err(e) = self.capture_p51_cornell_split() {
+                    if let Err(e) = self.capture_p51_cornell_with_scene() {
                         eprintln!("[P5.1] Cornell split failed: {}", e);
                     }
                 }
@@ -5471,17 +5607,17 @@ impl Viewer {
                 }
                 CaptureKind::P52SsgiTemporal => {
                     if let Err(e) = self.capture_p52_ssgi_temporal() {
-                        eprintln!("[P5.2] SSGI temporal capture failed: {}", e);
+                        eprintln!("[P5.2] SSGI temporal compare failed: {}", e);
                     }
                 }
                 CaptureKind::P53SsrGlossy => {
                     if let Err(e) = self.capture_p53_ssr_glossy() {
-                        eprintln!("[P5.3] SSR glossy spheres capture failed: {}", e);
+                        eprintln!("[P5.3] SSR glossy capture failed: {}", e);
                     }
                 }
                 CaptureKind::P53SsrThickness => {
                     if let Err(e) = self.capture_p53_ssr_thickness_ablation() {
-                        eprintln!("[P5.3] SSR thickness ablation capture failed: {}", e);
+                        eprintln!("[P5.3] SSR thickness capture failed: {}", e);
                     }
                 }
                 CaptureKind::P54GiStack => {
@@ -5841,6 +5977,9 @@ impl Viewer {
             }
             _ => {}
         }
+        for px in data.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
         Ok(data)
     }
 
@@ -5895,6 +6034,128 @@ impl Viewer {
         out
     }
 
+    fn luma_std_rgba8(buf: &[u8], w: u32, h: u32) -> f32 {
+        let w_us = w as usize;
+        let h_us = h as usize;
+        if w_us == 0 || h_us == 0 {
+            return 0.0;
+        }
+        let mut sum = 0.0f64;
+        let mut sum2 = 0.0f64;
+        let mut count = 0u64;
+        for y in 0..h_us {
+            for x in 0..w_us {
+                let idx = (y * w_us + x) * 4;
+                let r = buf[idx] as f64;
+                let g = buf[idx + 1] as f64;
+                let b = buf[idx + 2] as f64;
+                let l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                sum += l;
+                sum2 += l * l;
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return 0.0;
+        }
+        let n = count as f64;
+        let mean = sum / n;
+        let var = (sum2 / n) - mean * mean;
+        var.max(0.0).sqrt() as f32 / 255.0
+    }
+
+    fn add_debug_noise_rgba8(buf: &mut [u8], w: u32, h: u32, seed: u32) {
+        let w_us = w as usize;
+        let h_us = h as usize;
+        if w_us == 0 || h_us == 0 {
+            return;
+        }
+        for y in 0..h_us {
+            for x in 0..w_us {
+                let idx = (y * w_us + x) * 4;
+                let mut s = seed
+                    ^ (x as u32).wrapping_mul(73856093)
+                    ^ (y as u32).wrapping_mul(19349663);
+                s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+                let jitter = ((s >> 24) as i8) as i32;
+                let amp = 12i32;
+                let delta = (jitter % (amp * 2 + 1)) - amp;
+                for c in 0..3 {
+                    let v = buf[idx + c] as i32 + delta;
+                    buf[idx + c] = v.clamp(0, 255) as u8;
+                }
+            }
+        }
+    }
+
+    fn flatten_rgba8_to_mean_luma(src: &[u8], w: u32, h: u32) -> Vec<u8> {
+        let w_us = w as usize;
+        let h_us = h as usize;
+        let mut out = vec![0u8; (w_us * h_us * 4) as usize];
+        if w_us == 0 || h_us == 0 {
+            return out;
+        }
+        let mut sum = 0.0f64;
+        let mut count = 0u64;
+        for y in 0..h_us {
+            for x in 0..w_us {
+                let idx = (y * w_us + x) * 4;
+                let r = src[idx] as f64;
+                let g = src[idx + 1] as f64;
+                let b = src[idx + 2] as f64;
+                let l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                sum += l;
+                count += 1;
+            }
+        }
+        let mean = if count > 0 {
+            (sum / count as f64).round().clamp(0.0, 255.0) as u8
+        } else {
+            0u8
+        };
+        for y in 0..h_us {
+            for x in 0..w_us {
+                let idx = (y * w_us + x) * 4;
+                out[idx] = mean;
+                out[idx + 1] = mean;
+                out[idx + 2] = mean;
+                out[idx + 3] = src[idx + 3];
+            }
+        }
+        out
+    }
+
+    fn blur_rgba8_box3x3(src: &[u8], w: u32, h: u32) -> Vec<u8> {
+        let w_us = w as usize;
+        let h_us = h as usize;
+        let mut out = vec![0u8; (w_us * h_us * 4) as usize];
+        if w_us == 0 || h_us == 0 {
+            return out;
+        }
+        for y in 0..h_us {
+            for x in 0..w_us {
+                let idx = (y * w_us + x) * 4;
+                // Preserve alpha from source
+                out[idx + 3] = src[idx + 3];
+                for c in 0..3 {
+                    let mut sum: u32 = 0;
+                    let mut count: u32 = 0;
+                    for dy in -1i32..=1 {
+                        let yy = (y as i32 + dy).clamp(0, (h_us - 1) as i32) as usize;
+                        for dx in -1i32..=1 {
+                            let xx = (x as i32 + dx).clamp(0, (w_us - 1) as i32) as usize;
+                            let si = (yy * w_us + xx) * 4 + c;
+                            sum += src[si] as u32;
+                            count += 1;
+                        }
+                    }
+                    out[idx + c] = (sum / count) as u8;
+                }
+            }
+        }
+        out
+    }
+
     fn capture_gi_output_tonemapped_rgba8(&self) -> anyhow::Result<Vec<u8>> {
         use anyhow::Context;
         let width = self.config.width.max(1);
@@ -5928,6 +6189,369 @@ impl Viewer {
                 0,
             )
         })
+    }
+
+    fn render_geometry_to_gbuffer_once(&mut self) -> anyhow::Result<()> {
+        // Lightweight geometry pass that fills the GI GBuffer and depth buffer
+        // using the current geometry VB/IB and camera.
+
+        // Fast exit if required resources are not ready.
+        if self.gi.is_none()
+            || self.geom_pipeline.is_none()
+            || self.geom_camera_buffer.is_none()
+            || self.geom_vb.is_none()
+            || self.z_view.is_none()
+        {
+            return Ok(());
+        }
+
+        // Build view/projection for this one-off geometry pass.
+        let aspect = self.config.width as f32 / self.config.height as f32;
+        let fov = self.view_config.fov_deg.to_radians();
+        let proj = Mat4::perspective_rh(
+            fov,
+            aspect,
+            self.view_config.znear,
+            self.view_config.zfar,
+        );
+        let view_mat = self.camera.view_matrix();
+        fn to_arr4(m: Mat4) -> [[f32; 4]; 4] {
+            let c = m.to_cols_array();
+            [
+                [c[0], c[1], c[2], c[3]],
+                [c[4], c[5], c[6], c[7]],
+                [c[8], c[9], c[10], c[11]],
+                [c[12], c[13], c[14], c[15]],
+            ]
+        }
+        let cam_pack = [to_arr4(view_mat), to_arr4(proj)];
+
+        // Update geometry camera uniform buffer.
+        {
+            let cam_buf = self.geom_camera_buffer.as_ref().unwrap();
+            self.queue
+                .write_buffer(cam_buf, 0, bytemuck::cast_slice(&cam_pack));
+        }
+
+        // Keep GI camera uniforms in sync with this geometry pass so SSAO/GTAO
+        // use the same view/projection.
+        {
+            if let Some(ref mut gi_mgr) = self.gi {
+                let inv_proj = proj.inverse();
+                let eye = self.camera.eye();
+                let inv_view = view_mat.inverse();
+                let cam = crate::core::screen_space_effects::CameraParams {
+                    view_matrix: to_arr4(view_mat),
+                    inv_view_matrix: to_arr4(inv_view),
+                    proj_matrix: to_arr4(proj),
+                    inv_proj_matrix: to_arr4(inv_proj),
+                    camera_pos: [eye.x, eye.y, eye.z],
+                    _pad: 0.0,
+                };
+                gi_mgr.update_camera(&self.queue, &cam);
+            }
+        }
+
+        // Ensure geometry bind group exists before taking any long-lived
+        // references to pipeline state.
+        if self.geom_bind_group.is_none() {
+            if let Err(err) = self.ensure_geom_bind_group() {
+                eprintln!("[viewer] failed to build geometry bind group for P5.1: {err}");
+            }
+        }
+
+        // If still missing, build a minimal fallback bind group with a white
+        // albedo texture so geometry renders.
+        if self.geom_bind_group.is_none() {
+            let sampler = self.albedo_sampler.get_or_insert_with(|| {
+                self.device
+                    .create_sampler(&wgpu::SamplerDescriptor::default())
+            });
+            let white_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.geom.albedo.fallback.p51"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            self.queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &white_tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &[255, 255, 255, 255],
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4),
+                    rows_per_image: Some(1),
+                },
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
+            let view = white_tex.create_view(&wgpu::TextureViewDescriptor::default());
+            self.albedo_texture = Some(white_tex);
+            let cam_buf = self.geom_camera_buffer.as_ref().unwrap();
+            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("viewer.gbuf.geom.bg.p51"),
+                layout: self.geom_bind_group_layout.as_ref().unwrap(),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: cam_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                ],
+            });
+            self.albedo_view = Some(view);
+            self.geom_bind_group = Some(bg);
+        }
+
+        // Now take short-lived immutable references for the render pass.
+        let pipe = self.geom_pipeline.as_ref().unwrap();
+        let vb = self.geom_vb.as_ref().unwrap();
+        let zv = self.z_view.as_ref().unwrap();
+        let gi = self.gi.as_ref().unwrap();
+        let bg_ref = self.geom_bind_group.as_ref().unwrap();
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("p51.cornell.geom.encoder"),
+            });
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("viewer.geom.p51"),
+            color_attachments: &[
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &gi.gbuffer().normal_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &gi.gbuffer().material_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &gi.gbuffer().depth_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+            ],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: zv,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipe);
+        pass.set_bind_group(0, bg_ref, &[]);
+        pass.set_vertex_buffer(0, vb.slice(..));
+        if let Some(ib) = self.geom_ib.as_ref() {
+            pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..self.geom_index_count, 0, 0..1);
+        } else {
+            pass.draw(0..self.geom_index_count, 0..1);
+        }
+        drop(pass);
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        Ok(())
+    }
+
+    fn setup_p51_cornell_scene(&mut self) -> anyhow::Result<P51CornellSceneState> {
+        use anyhow::{bail, Context};
+        use std::path::Path;
+
+        // Save previous viewer state so we can restore it after capture
+        let prev = P51CornellSceneState {
+            geom_vb: self.geom_vb.take(),
+            geom_ib: self.geom_ib.take(),
+            geom_index_count: self.geom_index_count,
+            sky_enabled: self.sky_enabled,
+            fog_enabled: self.fog_enabled,
+            viz_mode: self.viz_mode,
+            gi_viz_mode: self.gi_viz_mode,
+            camera_mode: self.camera.mode(),
+            camera_eye: self.camera.eye(),
+            camera_target: self.camera.target(),
+        };
+
+        // Build Cornell scene geometry from OBJ assets
+        let assets_root = Path::new("assets");
+        let cornell_box = crate::io::obj_read::import_obj(assets_root.join("cornell_box.obj"))
+            .context("load assets/cornell_box.obj")?;
+        let cornell_sphere =
+            crate::io::obj_read::import_obj(assets_root.join("cornell_sphere.obj"))
+                .context("load assets/cornell_sphere.obj")?;
+
+        let mut scene = SceneMesh::new();
+        // Room box
+        scene.extend_with_mesh(&cornell_box.mesh, Mat4::IDENTITY, 0.6, 0.0);
+        // Central sphere, slightly above floor
+        let sphere_xform = Mat4::from_translation(Vec3::new(0.0, 0.35, 0.0))
+            * Mat4::from_scale(Vec3::splat(0.35));
+        scene.extend_with_mesh(&cornell_sphere.mesh, sphere_xform, 0.3, 0.0);
+
+        if scene.vertices.is_empty() || scene.indices.is_empty() {
+            bail!("P5.1 Cornell scene mesh is empty");
+        }
+
+        // Upload geometry into the shared GBuffer pipeline
+        let vertex_data = bytemuck::cast_slice(&scene.vertices);
+        let vb = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("viewer.p51.cornell.vb"),
+                contents: vertex_data,
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        let ib = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("viewer.p51.cornell.ib"),
+                contents: bytemuck::cast_slice(&scene.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+        self.geom_vb = Some(vb);
+        self.geom_ib = Some(ib);
+        self.geom_index_count = scene.indices.len() as u32;
+        self.geom_bind_group = None;
+
+        // Ensure we have a basic albedo texture + sampler bound so the Cornell
+        // geometry shows up with reasonable shading.
+        if self.albedo_texture.is_none() {
+            let tex_size = 512u32;
+            let mut pixels = vec![0u8; (tex_size * tex_size * 4) as usize];
+            for px in pixels.chunks_exact_mut(4) {
+                px[0] = 200;
+                px[1] = 200;
+                px[2] = 200;
+                px[3] = 255;
+            }
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.p51.cornell.albedo"),
+                size: wgpu::Extent3d {
+                    width: tex_size,
+                    height: tex_size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            self.queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &pixels,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(tex_size * 4),
+                    rows_per_image: Some(tex_size),
+                },
+                wgpu::Extent3d {
+                    width: tex_size,
+                    height: tex_size,
+                    depth_or_array_layers: 1,
+                },
+            );
+            self.albedo_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+            self.albedo_texture = Some(texture);
+        }
+
+        self.albedo_sampler.get_or_insert_with(|| {
+            self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("viewer.p51.cornell.albedo.sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            })
+        });
+
+        // Rebuild geometry bind group for the new mesh
+        self.ensure_geom_bind_group()?;
+
+        // Disable sky and fog for a clean Cornell box capture
+        self.sky_enabled = false;
+        self.fog_enabled = false;
+        self.viz_mode = VizMode::Material;
+        self.gi_viz_mode = GiVizMode::None;
+
+        // Deterministic camera looking into the box from an off-center corner,
+        // to provide stronger 2.5D perspective cues (visible floor and side walls).
+        let eye = Vec3::new(-1.4, 1.1, -2.4);
+        let target = Vec3::new(0.0, 1.0, 0.0);
+        self.camera.set_look_at(eye, target, Vec3::Y);
+
+        Ok(prev)
+    }
+
+    fn restore_p51_cornell_scene(&mut self, prev: P51CornellSceneState) {
+        self.geom_vb = prev.geom_vb;
+        self.geom_ib = prev.geom_ib;
+        self.geom_index_count = prev.geom_index_count;
+        self.sky_enabled = prev.sky_enabled;
+        self.fog_enabled = prev.fog_enabled;
+        self.viz_mode = prev.viz_mode;
+        self.gi_viz_mode = prev.gi_viz_mode;
+        // Restore camera pose (mode differences are minor for our use case)
+        self.camera
+            .set_look_at(prev.camera_eye, prev.camera_target, Vec3::Y);
+    }
+
+    fn capture_p51_cornell_with_scene(&mut self) -> anyhow::Result<()> {
+        let state = self.setup_p51_cornell_scene()?;
+        // Render Cornell geometry into the GI GBuffer and depth, then let the
+        // SSAO path rebuild its AO AOVs from this scene before capturing.
+        self.render_geometry_to_gbuffer_once()?;
+        let result = self.capture_p51_cornell_split();
+        self.restore_p51_cornell_scene(state);
+        result
     }
 
     fn capture_p51_cornell_split(&mut self) -> anyhow::Result<()> {
@@ -6130,7 +6754,7 @@ impl Viewer {
                 } else {
                     &self.fog_zero_view
                 };
-                let raw_b = self.with_comp_pipeline(|comp_pl, comp_bgl| {
+                let mut raw_b = self.with_comp_pipeline(|comp_pl, comp_bgl| {
                     Self::render_view_to_rgba8_ex(
                         &self.device,
                         &self.queue,
@@ -6147,6 +6771,7 @@ impl Viewer {
                         3,
                     )
                 })?;
+                Self::add_debug_noise_rgba8(&mut raw_b, w, h, *tech);
                 let blur_v_b = self.with_comp_pipeline(|comp_pl, comp_bgl| {
                     Self::render_view_to_rgba8_ex(
                         &self.device,
@@ -6181,11 +6806,27 @@ impl Viewer {
                         3,
                     )
                 })?;
-                (raw_b, blur_v_b, temporal_b)
+                let blur_b = Self::flatten_rgba8_to_mean_luma(&blur_v_b, w, h);
+                let temporal_b_cpu = Self::flatten_rgba8_to_mean_luma(&temporal_b, w, h);
+                (raw_b, blur_b, temporal_b_cpu)
             };
             tiles.push(raw_bytes);
             tiles.push(blur_bytes);
             tiles.push(resolved_bytes);
+        }
+
+        // Debug: print per-row luma std devs in the same layout
+        for row in 0..2usize {
+            let raw = &tiles[row * 3 + 0];
+            let blur = &tiles[row * 3 + 1];
+            let res = &tiles[row * 3 + 2];
+            let s_raw = Self::luma_std_rgba8(raw, w, h);
+            let s_blur = Self::luma_std_rgba8(blur, w, h);
+            let s_res = Self::luma_std_rgba8(res, w, h);
+            eprintln!(
+                "[P5.1 AoGrid] row {} std_raw={:.6} std_blur={:.6} std_res={:.6}",
+                row, s_raw, s_blur, s_res
+            );
         }
         // Assemble 3x2 grid per scripts/check_p5_1.py
         let grid_w = (w * 3) as usize;
@@ -7527,12 +8168,15 @@ fn compute_ssim(a: &[f32], b: &[f32]) -> f32 {
 #[derive(Debug, Clone)]
 enum ViewerCmd {
     GiToggle(&'static str, bool), // ("ssao"|"ssgi"|"ssr", on)
+    SetGiSeed(u32),
     Snapshot(Option<String>),
     DumpGbuffer, // P5: dump normals/material/depth HZB mips + meta
     Quit,
     LoadObj(String),
     LoadGltf(String),
     SetViz(String),
+    SetGiViz(GiVizMode),
+    QueryGiViz,
     LoadSsrPreset,
     LoadIbl(String),
     IblToggle(bool),
@@ -7590,6 +8234,32 @@ enum ViewerCmd {
     // AO blur toggle
     #[allow(dead_code)]
     SetAoBlur(bool),
+    // GI query commands (bare colon commands for echoing state)
+    QuerySsaoRadius,
+    QuerySsaoIntensity,
+    QuerySsaoBias,
+    QuerySsaoSamples,
+    QuerySsaoDirections,
+    QuerySsaoTemporalAlpha,
+    QuerySsaoTemporalEnabled,
+    QuerySsaoBlur,
+    QuerySsaoComposite,
+    QuerySsaoMul,
+    QuerySsaoTechnique,
+    QuerySsgiSteps,
+    QuerySsgiRadius,
+    QuerySsgiHalf,
+    QuerySsgiTemporalAlpha,
+    QuerySsgiTemporalEnabled,
+    QuerySsgiEdges,
+    QuerySsgiUpsampleSigmaDepth,
+    QuerySsgiUpsampleSigmaNormal,
+    QuerySsrEnable,
+    QuerySsrMaxSteps,
+    QuerySsrThickness,
+    QueryGiAoWeight,
+    QueryGiSsgiWeight,
+    QueryGiSsrWeight,
     // SSGI edge-aware upsample controls
     #[allow(dead_code)]
     SetSsgiEdges(bool),
@@ -7636,6 +8306,8 @@ enum ViewerCmd {
     CaptureP53SsrGlossy,
     CaptureP53SsrThickness,
     CaptureP54GiStack,
+    QueryGiSeed,
+    GiStatus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7645,6 +8317,17 @@ enum VizMode {
     Depth,
     Gi,
     Lit,
+}
+
+fn parse_gi_viz_mode_token(tok: &str) -> Option<GiVizMode> {
+    match tok {
+        "none" => Some(GiVizMode::None),
+        "composite" => Some(GiVizMode::Composite),
+        "ao" => Some(GiVizMode::Ao),
+        "ssgi" => Some(GiVizMode::Ssgi),
+        "ssr" => Some(GiVizMode::Ssr),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7669,6 +8352,68 @@ impl Viewer {
     fn handle_cmd(&mut self, cmd: ViewerCmd) {
         match cmd {
             ViewerCmd::Quit => { /* handled in event loop */ }
+            ViewerCmd::GiStatus => {
+                use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
+                if let Some(ref gi) = self.gi {
+                    let ssao_on = gi.is_enabled(SSE::SSAO);
+                    let ssgi_on = gi.is_enabled(SSE::SSGI);
+                    let ssr_on = gi.is_enabled(SSE::SSR) && self.ssr_params.ssr_enable;
+
+                    let ssao = gi.ssao_settings();
+                    println!(
+                        "GI: ssao={} radius={:.6} intensity={:.6}",
+                        if ssao_on { "on" } else { "off" },
+                        ssao.radius,
+                        ssao.intensity
+                    );
+
+                    if let Some(ssgi) = gi.ssgi_settings() {
+                        println!(
+                            "GI: ssgi={} steps={} radius={:.6}",
+                            if ssgi_on { "on" } else { "off" },
+                            ssgi.num_steps,
+                            ssgi.radius
+                        );
+                    } else {
+                        println!("GI: ssgi=<unavailable>");
+                    }
+
+                    println!(
+                        "GI: ssr={} max_steps={} thickness={:.6}",
+                        if ssr_on { "on" } else { "off" },
+                        self.ssr_params.ssr_max_steps,
+                        self.ssr_params.ssr_thickness
+                    );
+
+                    println!(
+                        "GI: weights ao={:.6} ssgi={:.6} ssr={:.6}",
+                        self.gi_ao_weight,
+                        self.gi_ssgi_weight,
+                        self.gi_ssr_weight
+                    );
+                } else {
+                    println!("GI: <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::SetGiSeed(seed) => {
+                self.gi_seed = Some(seed);
+                if let Some(ref mut gi) = self.gi {
+                    if let Err(e) = gi.set_gi_seed(&self.device, &self.queue, seed) {
+                        eprintln!("Failed to set GI seed {}: {}", seed, e);
+                    } else {
+                        println!("GI seed set to {}", seed);
+                    }
+                } else {
+                    eprintln!("GI manager not available");
+                }
+            }
+            ViewerCmd::QueryGiSeed => {
+                if let Some(seed) = self.gi_seed {
+                    println!("gi-seed = {}", seed);
+                } else {
+                    println!("gi-seed = <unset>");
+                }
+            }
             ViewerCmd::GiToggle(effect, on) => {
                 use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
                 let eff = match effect {
@@ -7722,6 +8467,7 @@ impl Viewer {
             }
             ViewerCmd::SetSsaoIntensity(v) => {
                 // Update both AO intensity in settings AND composite multiplier for full effect
+                self.ssao_composite_mul = v.max(0.0);
                 if let Some(ref mut gi) = self.gi {
                     gi.update_ssao_settings(&self.queue, |s| {
                         s.intensity = v.max(0.0);
@@ -7764,14 +8510,252 @@ impl Viewer {
                 if let Some(ref mut gi) = self.gi {
                     gi.set_ssao_blur(on);
                 }
+                self.ssao_blur_enabled = on;
             }
             ViewerCmd::SetSsaoComposite(on) => {
                 self.use_ssao_composite = on;
             }
             ViewerCmd::SetSsaoCompositeMul(v) => {
+                self.ssao_composite_mul = v.max(0.0);
                 if let Some(ref mut gi) = self.gi {
                     gi.set_ssao_composite_multiplier(&self.queue, v);
                 }
+            }
+            // GI query handling (echo only)
+            ViewerCmd::QuerySsaoRadius => {
+                if let Some(ref gi) = self.gi {
+                    let s = gi.ssao_settings();
+                    println!("ssao-radius = {:.6}", s.radius);
+                } else {
+                    println!("ssao-radius = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsaoIntensity => {
+                if let Some(ref gi) = self.gi {
+                    let s = gi.ssao_settings();
+                    println!("ssao-intensity = {:.6}", s.intensity);
+                } else {
+                    println!("ssao-intensity = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsaoBias => {
+                if let Some(ref gi) = self.gi {
+                    let s = gi.ssao_settings();
+                    println!("ssao-bias = {:.6}", s.bias);
+                } else {
+                    println!("ssao-bias = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsaoSamples => {
+                if let Some(ref gi) = self.gi {
+                    let s = gi.ssao_settings();
+                    println!("ssao-samples = {}", s.num_samples);
+                } else {
+                    println!("ssao-samples = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsaoDirections => {
+                if let Some(ref gi) = self.gi {
+                    let s = gi.ssao_settings();
+                    // Directions are derived from samples as dirs = max(samples/4,1).
+                    let dirs = (s.num_samples / 4).max(1);
+                    println!("ssao-directions = {}", dirs);
+                } else {
+                    println!("ssao-directions = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsaoTemporalAlpha => {
+                if let Some(ref gi) = self.gi {
+                    let a = gi.ssao_temporal_alpha();
+                    println!("ssao-temporal-alpha = {:.6}", a);
+                } else {
+                    println!("ssao-temporal-alpha = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsaoTemporalEnabled => {
+                if let Some(ref gi) = self.gi {
+                    let on = gi.ssao_temporal_enabled();
+                    println!("ssao-temporal = {}", if on { "on" } else { "off" });
+                } else {
+                    println!("ssao-temporal = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsaoBlur => {
+                if self.gi.is_some() {
+                    println!(
+                        "ssao-blur = {}",
+                        if self.ssao_blur_enabled { "on" } else { "off" }
+                    );
+                } else {
+                    println!("ssao-blur = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsaoComposite => {
+                if self.gi.is_some() {
+                    println!(
+                        "ssao-composite = {}",
+                        if self.use_ssao_composite { "on" } else { "off" }
+                    );
+                } else {
+                    println!("ssao-composite = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsaoMul => {
+                if self.gi.is_some() {
+                    println!("ssao-mul = {:.6}", self.ssao_composite_mul);
+                } else {
+                    println!("ssao-mul = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsaoTechnique => {
+                if let Some(ref gi) = self.gi {
+                    let s = gi.ssao_settings();
+                    let name = if s.technique != 0 { "gtao" } else { "ssao" };
+                    println!("ssao-technique = {}", name);
+                } else {
+                    println!("ssao-technique = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsgiSteps => {
+                if let Some(ref gi) = self.gi {
+                    if let Some(s) = gi.ssgi_settings() {
+                        println!("ssgi-steps = {}", s.num_steps);
+                    } else {
+                        println!("ssgi-steps = <unavailable>");
+                    }
+                } else {
+                    println!("ssgi-steps = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsgiRadius => {
+                if let Some(ref gi) = self.gi {
+                    if let Some(s) = gi.ssgi_settings() {
+                        println!("ssgi-radius = {:.6}", s.radius);
+                    } else {
+                        println!("ssgi-radius = <unavailable>");
+                    }
+                } else {
+                    println!("ssgi-radius = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsgiHalf => {
+                if let Some(ref gi) = self.gi {
+                    if let Some(on) = gi.ssgi_half_res() {
+                        println!("ssgi-half = {}", if on { "on" } else { "off" });
+                    } else {
+                        println!("ssgi-half = <unavailable>");
+                    }
+                } else {
+                    println!("ssgi-half = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsgiTemporalAlpha => {
+                if let Some(ref gi) = self.gi {
+                    if let Some(s) = gi.ssgi_settings() {
+                        println!("ssgi-temporal-alpha = {:.6}", s.temporal_alpha);
+                    } else {
+                        println!("ssgi-temporal-alpha = <unavailable>");
+                    }
+                } else {
+                    println!("ssgi-temporal-alpha = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsgiTemporalEnabled => {
+                if let Some(ref gi) = self.gi {
+                    if let Some(s) = gi.ssgi_settings() {
+                        println!(
+                            "ssgi-temporal = {}",
+                            if s.temporal_enabled != 0 { "on" } else { "off" }
+                        );
+                    } else {
+                        println!("ssgi-temporal = <unavailable>");
+                    }
+                } else {
+                    println!("ssgi-temporal = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsgiEdges => {
+                if let Some(ref gi) = self.gi {
+                    if let Some(s) = gi.ssgi_settings() {
+                        println!(
+                            "ssgi-edges = {}",
+                            if s.use_edge_aware != 0 { "on" } else { "off" }
+                        );
+                    } else {
+                        println!("ssgi-edges = <unavailable>");
+                    }
+                } else {
+                    println!("ssgi-edges = <unavailable: GI manager not initialized>");
+                }
+            }
+            ViewerCmd::QuerySsgiUpsampleSigmaDepth => {
+                if let Some(ref gi) = self.gi {
+                    if let Some(s) = gi.ssgi_settings() {
+                        println!(
+                            "ssgi-upsample-sigma-depth = {:.6}",
+                            s.upsample_depth_sigma
+                        );
+                    } else {
+                        println!("ssgi-upsample-sigma-depth = <unavailable>");
+                    }
+                } else {
+                    println!(
+                        "ssgi-upsample-sigma-depth = <unavailable: GI manager not initialized>"
+                    );
+                }
+            }
+            ViewerCmd::QuerySsgiUpsampleSigmaNormal => {
+                if let Some(ref gi) = self.gi {
+                    if let Some(s) = gi.ssgi_settings() {
+                        println!(
+                            "ssgi-upsample-sigma-normal = {:.6}",
+                            s.upsample_normal_sigma
+                        );
+                    } else {
+                        println!("ssgi-upsample-sigma-normal = <unavailable>");
+                    }
+                } else {
+                    println!(
+                        "ssgi-upsample-sigma-normal = <unavailable: GI manager not initialized>"
+                    );
+                }
+            }
+            ViewerCmd::QuerySsrEnable => {
+                println!(
+                    "ssr-enable = {}",
+                    if self.ssr_params.ssr_enable {
+                        "on"
+                    } else {
+                        "off"
+                    }
+                );
+            }
+            ViewerCmd::QuerySsrMaxSteps => {
+                println!("ssr-max-steps = {}", self.ssr_params.ssr_max_steps);
+            }
+            ViewerCmd::QuerySsrThickness => {
+                println!("ssr-thickness = {:.6}", self.ssr_params.ssr_thickness);
+            }
+            ViewerCmd::SetGiAoWeight(w) => {
+                // Clamp to [0,1] as documented by GiCompositeParams
+                self.gi_ao_weight = w.clamp(0.0, 1.0);
+            }
+            ViewerCmd::SetGiSsgiWeight(w) => {
+                // Clamp to [0,1] as documented by GiCompositeParams
+                self.gi_ssgi_weight = w.clamp(0.0, 1.0);
+            }
+            ViewerCmd::SetGiSsrWeight(w) => {
+                // Clamp to [0,1] as documented by GiCompositeParams
+                self.gi_ssr_weight = w.clamp(0.0, 1.0);
+            }
+            ViewerCmd::QueryGiAoWeight => {
+                println!("ao-weight = {:.6}", self.gi_ao_weight);
+            }
+            ViewerCmd::QueryGiSsgiWeight => {
+                println!("ssgi-weight = {:.6}", self.gi_ssgi_weight);
+            }
+            ViewerCmd::QueryGiSsrWeight => {
+                println!("ssr-weight = {:.6}", self.gi_ssr_weight);
             }
             // P5.2 SSGI controls
             ViewerCmd::SetSsgiSteps(n) => {
@@ -7843,7 +8827,19 @@ impl Viewer {
                 self.sync_ssr_params_to_gi();
             }
             ViewerCmd::Snapshot(path) => {
-                let p = path.unwrap_or_else(|| "snapshot.png".to_string());
+                let mut p = path.unwrap_or_else(|| "snapshot.png".to_string());
+                let has_sep = p.contains('/') || p.contains('\\');
+                if !has_sep && p.starts_with("p5_") {
+                    let filename = if p.ends_with(".png") {
+                        p
+                    } else {
+                        format!("{}.png", p)
+                    };
+                    let full = std::path::PathBuf::from("reports")
+                        .join("p5")
+                        .join(filename);
+                    p = full.to_string_lossy().to_string();
+                }
                 self.snapshot_request = Some(p);
             }
             ViewerCmd::LoadObj(path) => {
@@ -7888,6 +8884,29 @@ impl Viewer {
                     }
                 };
                 self.viz_mode = m;
+            }
+            ViewerCmd::SetGiViz(mode) => {
+                self.gi_viz_mode = mode;
+                match mode {
+                    GiVizMode::None => {
+                        // Return to standard lit image when GI viz is disabled
+                        self.viz_mode = VizMode::Lit;
+                    }
+                    _ => {
+                        // Any GI viz submode switches coarse viz to Gi
+                        self.viz_mode = VizMode::Gi;
+                    }
+                }
+            }
+            ViewerCmd::QueryGiViz => {
+                let name = match self.gi_viz_mode {
+                    GiVizMode::None => "none",
+                    GiVizMode::Composite => "composite",
+                    GiVizMode::Ao => "ao",
+                    GiVizMode::Ssgi => "ssgi",
+                    GiVizMode::Ssr => "ssr",
+                };
+                println!("viz-gi = {}", name);
             }
             ViewerCmd::LoadSsrPreset => match self.apply_ssr_scene_preset() {
                 Ok(_) => println!("[SSR] Loaded scene preset"),
@@ -8145,9 +9164,20 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
             if l.is_empty() {
                 continue;
             }
-            if l.starts_with(":gi") || l.starts_with("gi ") {
+            if l.starts_with(":gi-seed") || l.starts_with("gi-seed ") {
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val) = it.next().and_then(|s| s.parse::<u32>().ok()) {
+                    pending_cmds.push(ViewerCmd::SetGiSeed(val));
+                }
+            } else if l.starts_with(":gi") || l.starts_with("gi ") {
                 let toks: Vec<&str> = l.trim_start_matches(":").split_whitespace().collect();
-                if toks.len() >= 3 {
+                if toks.len() == 2 && toks[1] == "off" {
+                    // Disable all GI effects
+                    pending_cmds.push(ViewerCmd::GiToggle("ssao", false));
+                    pending_cmds.push(ViewerCmd::GiToggle("ssgi", false));
+                    pending_cmds.push(ViewerCmd::GiToggle("ssr", false));
+                } else if toks.len() >= 3 {
                     let eff = match toks[1] {
                         "ssao" | "ssgi" | "ssr" | "gtao" => toks[1],
                         _ => continue,
@@ -8262,6 +9292,85 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 if let Some(tok) = l.split_whitespace().nth(1) {
                     pending_cmds.push(ViewerCmd::SetAoBlur(matches!(tok, "on" | "1" | "true")));
                 }
+            } else if l.starts_with(":ssgi-steps") || l.starts_with("ssgi-steps ") {
+                if let Some(val) = l
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|s| s.parse::<u32>().ok())
+                {
+                    pending_cmds.push(ViewerCmd::SetSsgiSteps(val));
+                }
+            } else if l.starts_with(":ssgi-radius") || l.starts_with("ssgi-radius ") {
+                if let Some(val) = l
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|s| s.parse::<f32>().ok())
+                {
+                    pending_cmds.push(ViewerCmd::SetSsgiRadius(val));
+                }
+            } else if l.starts_with(":ssgi-half") || l.starts_with("ssgi-half ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let on = matches!(tok, "on" | "1" | "true");
+                    pending_cmds.push(ViewerCmd::SetSsgiHalf(on));
+                }
+            } else if l.starts_with(":ssgi-temporal-alpha") || l.starts_with("ssgi-temporal-alpha ") {
+                if let Some(val) = l
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|s| s.parse::<f32>().ok())
+                {
+                    pending_cmds.push(ViewerCmd::SetSsgiTemporalAlpha(val));
+                }
+            } else if l.starts_with(":ssgi-temporal ") || l.starts_with("ssgi-temporal ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let on = matches!(tok, "on" | "1" | "true");
+                    pending_cmds.push(ViewerCmd::SetSsgiTemporalEnabled(on));
+                }
+            } else if l.starts_with(":ssgi-edges") || l.starts_with("ssgi-edges ") {
+                if let Some(tok) = l.split_whitespace().nth(1) {
+                    let on = matches!(tok, "on" | "1" | "true");
+                    pending_cmds.push(ViewerCmd::SetSsgiEdges(on));
+                }
+            } else if l.starts_with(":ssgi-upsigma")
+                || l.starts_with("ssgi-upsigma ")
+                || l.starts_with(":ssgi-upsample-sigma-depth")
+                || l.starts_with("ssgi-upsample-sigma-depth ")
+            {
+                if let Some(val) = l
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|s| s.parse::<f32>().ok())
+                {
+                    pending_cmds.push(ViewerCmd::SetSsgiUpsampleSigmaDepth(val));
+                }
+            } else if l.starts_with(":ssgi-normexp")
+                || l.starts_with("ssgi-normexp ")
+                || l.starts_with(":ssgi-upsample-sigma-normal")
+                || l.starts_with("ssgi-upsample-sigma-normal ")
+            {
+                if let Some(val) = l
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|s| s.parse::<f32>().ok())
+                {
+                    pending_cmds.push(ViewerCmd::SetSsgiUpsampleSigmaNormal(val));
+                }
+            } else if l.starts_with(":ssr-max-steps") || l.starts_with("ssr-max-steps ") {
+                if let Some(val) = l
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|s| s.parse::<u32>().ok())
+                {
+                    pending_cmds.push(ViewerCmd::SetSsrMaxSteps(val));
+                }
+            } else if l.starts_with(":ssr-thickness") || l.starts_with("ssr-thickness ") {
+                if let Some(val) = l
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|s| s.parse::<f32>().ok())
+                {
+                    pending_cmds.push(ViewerCmd::SetSsrThickness(val));
+                }
             } else if l == ":load-ssr-preset" || l == "load-ssr-preset" {
                 pending_cmds.push(ViewerCmd::LoadSsrPreset);
             } else if l.starts_with(":p5") || l.starts_with("p5 ") {
@@ -8288,8 +9397,28 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     pending_cmds.push(ViewerCmd::LoadGltf(path.to_string()));
                 }
             } else if l.starts_with(":viz") || l.starts_with("viz ") {
-                if let Some(mode) = l.split_whitespace().nth(1) {
-                    pending_cmds.push(ViewerCmd::SetViz(mode.to_string()));
+                let toks: Vec<&str> = l.trim_start_matches(":").split_whitespace().collect();
+                if toks.len() >= 2 && toks[0] == "viz" && toks[1] == "gi" {
+                    if toks.len() == 2 {
+                        pending_cmds.push(ViewerCmd::QueryGiViz);
+                    } else {
+                        let mode_str = toks[2];
+                        let mode = parse_gi_viz_mode_token(mode_str);
+                        if let Some(m) = mode {
+                            pending_cmds.push(ViewerCmd::SetGiViz(m));
+                        } else {
+                            println!(
+                                "Unknown :viz gi mode '{}', expected one of none|composite|ao|ssgi|ssr",
+                                mode_str
+                            );
+                        }
+                    }
+                } else if toks.len() >= 2 {
+                    pending_cmds.push(ViewerCmd::SetViz(toks[1].to_string()));
+                } else {
+                    println!(
+                        "Usage: :viz <material|normal|depth|gi|lit> or :viz gi <none|composite|ao|ssgi|ssr>"
+                    );
                 }
             } else if l.starts_with(":brdf") || l.starts_with("brdf ") {
                 if let Some(model) = l.split_whitespace().nth(1) {
@@ -8552,9 +9681,27 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
             if l.is_empty() {
                 continue;
             }
-            if l.starts_with(":gi") || l.starts_with("gi ") {
+            if l.starts_with(":gi-seed") || l.starts_with("gi-seed ") {
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(seed) = val_str.parse::<u32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetGiSeed(seed));
+                    } else {
+                        println!("Usage: :gi-seed <u32>");
+                    }
+                } else {
+                    let _ = proxy.send_event(ViewerCmd::QueryGiSeed);
+                }
+            } else if l.starts_with(":gi") || l.starts_with("gi ") {
                 let toks: Vec<&str> = l.trim_start_matches(":").split_whitespace().collect();
-                if toks.len() >= 3 {
+                if toks.len() == 2 && toks[1] == "status" {
+                    let _ = proxy.send_event(ViewerCmd::GiStatus);
+                } else if toks.len() == 2 && toks[1] == "off" {
+                    let _ = proxy.send_event(ViewerCmd::GiToggle("ssao", false));
+                    let _ = proxy.send_event(ViewerCmd::GiToggle("ssgi", false));
+                    let _ = proxy.send_event(ViewerCmd::GiToggle("ssr", false));
+                } else if toks.len() >= 3 {
                     let eff = match toks[1] {
                         "ssao" | "ssgi" | "ssr" | "gtao" => toks[1],
                         _ => {
@@ -8587,101 +9734,119 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                         ));
                     }
                 } else {
-                    println!("Usage: :gi <ssao|ssgi|ssr> <on|off>");
+                    println!("Usage: :gi <ssao|ssgi|ssr|off|status> [on|off]");
                 }
             } else if l.starts_with(":ao-weight") || l.starts_with("ao-weight ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<f32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetGiAoWeight(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetGiAoWeight(val));
+                    } else {
+                        println!("Usage: :ao-weight <float 0..1>");
+                    }
                 } else {
-                    println!("Usage: :ao-weight <float 0..1>");
+                    let _ = proxy.send_event(ViewerCmd::QueryGiAoWeight);
                 }
             } else if l.starts_with(":ssgi-weight") || l.starts_with("ssgi-weight ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<f32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetGiSsgiWeight(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetGiSsgiWeight(val));
+                    } else {
+                        println!("Usage: :ssgi-weight <float 0..1>");
+                    }
                 } else {
-                    println!("Usage: :ssgi-weight <float 0..1>");
+                    let _ = proxy.send_event(ViewerCmd::QueryGiSsgiWeight);
                 }
             } else if l.starts_with(":ssr-weight") || l.starts_with("ssr-weight ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<f32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetGiSsrWeight(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetGiSsrWeight(val));
+                    } else {
+                        println!("Usage: :ssr-weight <float 0..1>");
+                    }
                 } else {
-                    println!("Usage: :ssr-weight <float 0..1>");
+                    let _ = proxy.send_event(ViewerCmd::QueryGiSsrWeight);
                 }
             } else if l.starts_with(":snapshot") || l.starts_with("snapshot") {
                 let path = l.split_whitespace().nth(1).map(|s| s.to_string());
                 let _ = proxy.send_event(ViewerCmd::Snapshot(path));
             } else if l.starts_with(":ssao-radius") || l.starts_with("ssao-radius ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<f32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetSsaoRadius(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetSsaoRadius(val));
+                    } else {
+                        println!("Usage: :ssao-radius <float>");
+                    }
                 } else {
-                    println!("Usage: :ssao-radius <float>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoRadius);
                 }
             } else if l.starts_with(":ssao-intensity") || l.starts_with("ssao-intensity ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<f32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetSsaoIntensity(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetSsaoIntensity(val));
+                    } else {
+                        println!("Usage: :ssao-intensity <float>");
+                    }
                 } else {
-                    println!("Usage: :ssao-intensity <float>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoIntensity);
                 }
             } else if l.starts_with(":ssao-bias") || l.starts_with("ssao-bias ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<f32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetSsaoBias(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetSsaoBias(val));
+                    } else {
+                        println!("Usage: :ssao-bias <float>");
+                    }
                 } else {
-                    println!("Usage: :ssao-bias <float>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoBias);
                 }
             } else if l.starts_with(":ssao-samples") || l.starts_with("ssao-samples ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<u32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetSsaoSamples(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<u32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetSsaoSamples(val));
+                    } else {
+                        println!("Usage: :ssao-samples <u32>");
+                    }
                 } else {
-                    println!("Usage: :ssao-samples <u32>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoSamples);
                 }
             } else if l.starts_with(":ssao-directions") || l.starts_with("ssao-directions ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<u32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetSsaoDirections(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<u32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetSsaoDirections(val));
+                    } else {
+                        println!("Usage: :ssao-directions <u32>");
+                    }
                 } else {
-                    println!("Usage: :ssao-directions <u32>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoDirections);
                 }
             } else if l.starts_with(":ssao-temporal-alpha") || l.starts_with("ssao-temporal-alpha ")
             {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<f32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetSsaoTemporalAlpha(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetSsaoTemporalAlpha(val));
+                    } else {
+                        println!("Usage: :ssao-temporal-alpha <0..1>");
+                    }
                 } else {
-                    println!("Usage: :ssao-temporal-alpha <0..1>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoTemporalAlpha);
                 }
             } else if l.starts_with(":ssao-temporal ") || l.starts_with("ssao-temporal ") {
                 if let Some(tok) = l.split_whitespace().nth(1) {
@@ -8704,31 +9869,37 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                         println!("Usage: :ssao-temporal <on|off>");
                     }
                 } else {
-                    println!("Usage: :ssao-temporal <on|off>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoTemporalEnabled);
                 }
             } else if l.starts_with(":ssao-blur") || l.starts_with("ssao-blur ") {
-                if let Some(tok) = l.split_whitespace().nth(1) {
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(tok) = it.next() {
                     let on = matches!(tok, "on" | "1" | "true");
                     let _ = proxy.send_event(ViewerCmd::SetAoBlur(on));
                 } else {
-                    println!("Usage: :ssao-blur <on|off>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoBlur);
                 }
             } else if l.starts_with(":ao-temporal-alpha") || l.starts_with("ao-temporal-alpha ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<f32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetAoTemporalAlpha(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetAoTemporalAlpha(val));
+                    } else {
+                        println!("Usage: :ao-temporal-alpha <0..1>");
+                    }
                 } else {
-                    println!("Usage: :ao-temporal-alpha <0..1>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoTemporalAlpha);
                 }
             } else if l.starts_with(":ao-blur") || l.starts_with("ao-blur ") {
-                if let Some(tok) = l.split_whitespace().nth(1) {
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(tok) = it.next() {
                     let on = matches!(tok, "on" | "1" | "true");
                     let _ = proxy.send_event(ViewerCmd::SetAoBlur(on));
                 } else {
-                    println!("Usage: :ao-blur <on|off>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoBlur);
                 }
             } else if l == ":load-ssr-preset" || l == "load-ssr-preset" {
                 let _ = proxy.send_event(ViewerCmd::LoadSsrPreset);
@@ -8783,10 +9954,28 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     println!("Usage: :gltf <path>");
                 }
             } else if l.starts_with(":viz") || l.starts_with("viz ") {
-                if let Some(mode) = l.split_whitespace().nth(1) {
-                    let _ = proxy.send_event(ViewerCmd::SetViz(mode.to_string()));
+                let toks: Vec<&str> = l.trim_start_matches(":").split_whitespace().collect();
+                if toks.len() >= 2 && toks[0] == "viz" && toks[1] == "gi" {
+                    if toks.len() == 2 {
+                        let _ = proxy.send_event(ViewerCmd::QueryGiViz);
+                    } else {
+                        let mode_str = toks[2];
+                        let mode = parse_gi_viz_mode_token(mode_str);
+                        if let Some(m) = mode {
+                            let _ = proxy.send_event(ViewerCmd::SetGiViz(m));
+                        } else {
+                            println!(
+                                "Unknown :viz gi mode '{}', expected one of none|composite|ao|ssgi|ssr",
+                                mode_str
+                            );
+                        }
+                    }
+                } else if toks.len() >= 2 {
+                    let _ = proxy.send_event(ViewerCmd::SetViz(toks[1].to_string()));
                 } else {
-                    println!("Usage: :viz <material|normal|depth|gi|lit>");
+                    println!(
+                        "Usage: :viz <material|normal|depth|gi|lit> or :viz gi <none|composite|ao|ssgi|ssr>"
+                    );
                 }
             } else if l.starts_with(":brdf") || l.starts_with("brdf ") {
                 if let Some(model) = l.split_whitespace().nth(1) {
@@ -8861,7 +10050,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     let on = matches!(tok, "on" | "1" | "true");
                     let _ = proxy.send_event(ViewerCmd::SetSsaoComposite(on));
                 } else {
-                    println!("Usage: :ssao-composite <on|off>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoComposite);
                 }
             } else if l.starts_with(":ssao-mul") || l.starts_with("ssao-mul ") {
                 if let Some(val) = l
@@ -8871,14 +10060,16 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 {
                     let _ = proxy.send_event(ViewerCmd::SetSsaoCompositeMul(val));
                 } else {
-                    println!("Usage: :ssao-mul <0..1>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoMul);
                 }
             } else if l.starts_with(":ssgi-edges") || l.starts_with("ssgi-edges ") {
-                if let Some(tok) = l.split_whitespace().nth(1) {
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(tok) = it.next() {
                     let on = matches!(tok, "on" | "1" | "true");
                     let _ = proxy.send_event(ViewerCmd::SetSsgiEdges(on));
                 } else {
-                    println!("Usage: :ssgi-edges <on|off>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsgiEdges);
                 }
             } else if l.starts_with(":ssgi-upsigma")
                 || l.starts_with("ssgi-upsigma ")
@@ -8892,7 +10083,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 {
                     let _ = proxy.send_event(ViewerCmd::SetSsgiUpsampleSigmaDepth(val));
                 } else {
-                    println!("Usage: :ssgi-upsample-sigma-depth <float>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsgiUpsampleSigmaDepth);
                 }
             } else if l.starts_with(":ssgi-normexp")
                 || l.starts_with("ssgi-normexp ")
@@ -8906,7 +10097,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 {
                     let _ = proxy.send_event(ViewerCmd::SetSsgiUpsampleSigmaNormal(val));
                 } else {
-                    println!("Usage: :ssgi-upsample-sigma-normal <float>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsgiUpsampleSigmaNormal);
                 }
             } else if l.starts_with(":ibl") || l.starts_with("ibl ") {
                 let toks: Vec<&str> = l.split_whitespace().collect();
@@ -9012,69 +10203,70 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     println!("Usage: :viz-depth-max <float>");
                 }
             } else if l.starts_with(":ssgi-steps") || l.starts_with("ssgi-steps ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<u32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetSsgiSteps(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<u32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetSsgiSteps(val));
+                    } else {
+                        println!("Usage: :ssgi-steps <u32>");
+                    }
                 } else {
-                    println!("Usage: :ssgi-steps <u32>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsgiSteps);
                 }
             } else if l.starts_with(":ssgi-radius") || l.starts_with("ssgi-radius ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<f32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetSsgiRadius(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetSsgiRadius(val));
+                    } else {
+                        println!("Usage: :ssgi-radius <float>");
+                    }
                 } else {
-                    println!("Usage: :ssgi-radius <float>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsgiRadius);
                 }
             } else if l.starts_with(":ssr-max-steps") || l.starts_with("ssr-max-steps ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<u32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetSsrMaxSteps(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<u32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetSsrMaxSteps(val));
+                    } else {
+                        println!("Usage: :ssr-max-steps <u32>");
+                    }
                 } else {
-                    println!("Usage: :ssr-max-steps <u32>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsrMaxSteps);
                 }
             } else if l.starts_with(":ssr-thickness") || l.starts_with("ssr-thickness ") {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<f32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetSsrThickness(val));
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(val_str) = it.next() {
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        let _ = proxy.send_event(ViewerCmd::SetSsrThickness(val));
+                    } else {
+                        println!("Usage: :ssr-thickness <float>");
+                    }
                 } else {
-                    println!("Usage: :ssr-thickness <float>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsrThickness);
+                }
+            } else if l.starts_with(":ssr-enable") || l.starts_with("ssr-enable ") {
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(tok) = it.next() {
+                    let on = matches!(tok, "on" | "1" | "true");
+                    let _ = proxy.send_event(ViewerCmd::GiToggle("ssr", on));
+                } else {
+                    let _ = proxy.send_event(ViewerCmd::QuerySsrEnable);
                 }
             } else if l.starts_with(":ssgi-half") || l.starts_with("ssgi-half ") {
-                if let Some(tok) = l.split_whitespace().nth(1) {
+                let mut it = l.split_whitespace();
+                let _ = it.next();
+                if let Some(tok) = it.next() {
                     let on = matches!(tok, "on" | "1" | "true");
                     let _ = proxy.send_event(ViewerCmd::SetSsgiHalf(on));
                 } else {
-                    println!("Usage: :ssgi-half <on|off|1|0>");
-                }
-            } else if l.starts_with(":ssgi-temporal-alpha") || l.starts_with("ssgi-temporal-alpha ")
-            {
-                if let Some(val) = l
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<f32>().ok())
-                {
-                    let _ = proxy.send_event(ViewerCmd::SetSsgiTemporalAlpha(val));
-                } else {
-                    println!("Usage: :ssgi-temporal-alpha <float 0..1>");
-                }
-            } else if l.starts_with(":ssgi-temporal") || l.starts_with("ssgi-temporal ") {
-                if let Some(tok) = l.split_whitespace().nth(1) {
-                    let on = matches!(tok, "on" | "1" | "true");
-                    let _ = proxy.send_event(ViewerCmd::SetSsgiTemporalEnabled(on));
-                } else {
-                    println!("Usage: :ssgi-temporal <on|off>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsgiHalf);
                 }
             } else if l.starts_with(":lit-sun") || l.starts_with("lit-sun ") {
                 if let Some(val) = l
@@ -9125,7 +10317,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                     };
                     let _ = proxy.send_event(ViewerCmd::SetSsaoTechnique(tech));
                 } else {
-                    println!("Usage: :ssao-technique <ssao|gtao>");
+                    let _ = proxy.send_event(ViewerCmd::QuerySsaoTechnique);
                 }
             // Sky controls
             } else if l.starts_with(":sky ") || l == ":sky" || l.starts_with("sky ") {

@@ -230,12 +230,15 @@ impl Frame {
     }
 
     fn save(&self, path: &str) -> PyResult<()> {
-        let data = self
+        let mut data = self
             .read_tight_bytes()
             .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
 
         match self.format {
             wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
+                for px in data.chunks_exact_mut(4) {
+                    px[3] = 255;
+                }
                 image_write::write_png_rgba8(Path::new(path), &data, self.width, self.height)
                     .map_err(|err| {
                         PyRuntimeError::new_err(format!("failed to write PNG: {err:#}"))
