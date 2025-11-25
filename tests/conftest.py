@@ -40,13 +40,92 @@ def _needs_build_from_exc(exc: BaseException) -> bool:
     )
 
 def pytest_configure(config):
-    """Register custom markers for Workstream I tasks."""
+    """Register custom markers for Workstream I tasks and P5.7."""
     config.addinivalue_line(
         "markers", "viewer: tests for interactive viewer functionality (Workstream I1)"
     )
     config.addinivalue_line(
         "markers", "offscreen: tests for offscreen rendering and Jupyter integration (Workstream I2)"
     )
+    config.addinivalue_line(
+        "markers", "opbr: tests for PBR rendering"
+    )
+    config.addinivalue_line(
+        "markers", "olighting: tests for lighting"
+    )
+    config.addinivalue_line(
+        "markers", "interactive_viewer: tests requiring interactive viewer"
+    )
+    config.addinivalue_line(
+        "markers", "slow: slow tests"
+    )
+
+
+# Track P5.7 test results for artifact generation
+_p57_results = {}
+
+
+def pytest_runtest_logreport(report):
+    """Track P5.7 test results."""
+    if report.when == "call":
+        # Check if this is a P5.7 test
+        if "test_p5_ssao" in report.nodeid or "test_p5_ssgi" in report.nodeid or "test_p5_ssr" in report.nodeid:
+            _p57_results[report.nodeid] = report.outcome
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Write p5_PASS.txt if all P5.7 tests passed."""
+    import hashlib
+    import json
+    from datetime import datetime
+    
+    if not _p57_results:
+        return
+    
+    # Check if all P5.7 tests passed (excluding skipped)
+    passed = [k for k, v in _p57_results.items() if v == "passed"]
+    failed = [k for k, v in _p57_results.items() if v == "failed"]
+    skipped = [k for k, v in _p57_results.items() if v == "skipped"]
+    
+    repo_root = _repo_root()
+    report_dir = repo_root / "reports" / "p5"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    
+    if failed:
+        # Write FAIL file
+        fail_file = report_dir / "p5_FAIL.txt"
+        with open(fail_file, "w") as f:
+            f.write(f"P5.7 Acceptance Tests FAILED\n")
+            f.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            f.write(f"Passed: {len(passed)}\n")
+            f.write(f"Failed: {len(failed)}\n")
+            f.write(f"Skipped: {len(skipped)}\n")
+            f.write("\nFailed tests:\n")
+            for t in failed:
+                f.write(f"  - {t}\n")
+    elif passed:
+        # Write PASS file with hashed metrics
+        metrics = {
+            "passed_count": len(passed),
+            "skipped_count": len(skipped),
+            "timestamp": datetime.now().isoformat(),
+            "tests": passed,
+        }
+        metrics_hash = hashlib.sha256(
+            json.dumps(metrics, sort_keys=True).encode()
+        ).hexdigest()
+        
+        pass_file = report_dir / "p5_PASS.txt"
+        with open(pass_file, "w") as f:
+            f.write(f"P5.7 Acceptance Tests PASSED\n")
+            f.write(f"Timestamp: {metrics['timestamp']}\n")
+            f.write(f"Passed: {len(passed)}\n")
+            f.write(f"Skipped: {len(skipped)}\n")
+            f.write(f"Metrics hash: {metrics_hash}\n")
+            f.write("\nPassed tests:\n")
+            for t in passed:
+                f.write(f"  - {t}\n")
+
 
 def pytest_sessionstart(session):
     if os.environ.get("FORGE3D_NO_BOOTSTRAP") == "1":

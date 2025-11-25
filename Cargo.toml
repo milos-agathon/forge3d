@@ -123,6 +123,10 @@ path = "examples/p5_ssr_thickness_ablation.rs"
 name = "p5_gi_stack_ablation"
 path = "examples/p5_gi_stack_ablation.rs"
 
+[[example]]
+name = "gi_showcase"
+path = "examples/gi_showcase.rs"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

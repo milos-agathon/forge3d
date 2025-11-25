@@ -272,4 +272,6 @@ Definition of Done (P5 overall)
 
 you must read fully @AGENTS.md to get familiar with my codebase. Next, you must carefully read @prompt.md as a whole. Then you must fully implement Milestone 6. Test after every change. Do not stop until you meet all the requirements for Milestone 6
 
-Assess the current level of implementation of Milestone 5 from @prompt.md. If the requirements are met, do nothing. If the requirements are not met, think very hard to turn these into an extremely surgically precise and strict prompt for ChatGPT 5.1 (high reasoning) to accomplish the missing requirements
+Assess the current level of implementation of P5.8 from @prompt.md. If the requirements are met, do nothing. If the requirements are not met, think very hard to turn these into an extremely surgically precise and strict prompt for ChatGPT 5.1 (high reasoning) to accomplish the missing requirements
+
+you must read fully @AGENTS.md to get familiar with my codebase. Next, you must carefully read @todo-5.md as a whole. Then you must fully implement P5.8. Test after every change. Do not stop until you meet all the requirements for P5.8

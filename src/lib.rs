@@ -172,7 +172,7 @@ impl PyScreenSpaceGI {
                 label: Some("PyScreenSpaceGI.execute"),
             });
         self.manager
-            .execute(g.device.as_ref(), &mut encoder, None)
+            .execute(g.device.as_ref(), &mut encoder, None, None)
             .map_err(|e| PyRuntimeError::new_err(format!("execute failed: {e}")))?;
         g.queue.submit(Some(encoder.finish()));
         Ok(())

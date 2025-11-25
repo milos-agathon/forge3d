@@ -83,6 +83,7 @@
 // High-level orchestration (deciding when to run AO/SSGI/SSR and which textures
 // to pass in) will be wired up by the P5 harness and viewer code.
 
+use crate::core::gpu_timing::GpuTimingManager;
 use crate::error::RenderResult;
 use wgpu::{
     util::DeviceExt,
@@ -412,6 +413,7 @@ impl GiPass {
         normal_view: &TextureView,
         material_view: &TextureView,
         output_view: &TextureView,
+        mut timing: Option<&mut GpuTimingManager>,
     ) -> RenderResult<()> {
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("p5.gi.composite.bg"),
@@ -461,6 +463,13 @@ impl GiPass {
         });
 
         let t0 = std::time::Instant::now();
+
+        let timing_scope = if let Some(timer) = timing.as_deref_mut() {
+            Some(timer.begin_scope(encoder, "p5.composite"))
+        } else {
+            None
+        };
+
         let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("p5.gi.composite.pass"),
             timestamp_writes: None,
@@ -471,6 +480,13 @@ impl GiPass {
         let gy = (self.height + 7) / 8;
         pass.dispatch_workgroups(gx, gy, 1);
         drop(pass);
+
+        if let Some(scope_id) = timing_scope {
+            if let Some(timer) = timing.as_deref_mut() {
+                timer.end_scope(encoder, scope_id);
+            }
+        }
+
         self.last_composite_ms = t0.elapsed().as_secs_f32() * 1000.0;
         Ok(())
     }

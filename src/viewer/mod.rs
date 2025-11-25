@@ -8,6 +8,7 @@
 pub mod camera_controller;
 
 use crate::cli::args::GiVizMode;
+use crate::core::gpu_timing::{create_default_config as create_gpu_timing_config, GpuTimingManager};
 use crate::core::hdr::{apply_cpu_tone_mapping, ToneMappingOperator};
 use crate::core::ibl::{IBLQuality, IBLRenderer};
 use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
@@ -584,8 +585,8 @@ impl Default for ViewerConfig {
 pub struct Viewer {
     window: Arc<Window>,
     surface: Surface<'static>,
-    device: Device,
-    queue: Queue,
+    device: Arc<Device>,
+    queue: Arc<Queue>,
     config: SurfaceConfiguration,
     camera: CameraController,
     view_config: ViewerConfig,
@@ -599,6 +600,12 @@ pub struct Viewer {
     gi_pass: Option<GiPass>,
     ssr_params: SsrParams,
     gi_seed: Option<u32>,
+    gi_timing: Option<GpuTimingManager>,
+    gi_gpu_hzb_ms: f32,
+    gi_gpu_ssao_ms: f32,
+    gi_gpu_ssgi_ms: f32,
+    gi_gpu_ssr_ms: f32,
+    gi_gpu_composite_ms: f32,
     // Snapshot request path (processed on next frame before present)
     snapshot_request: Option<String>,
     // Offscreen color to read back when snapshotting this frame
@@ -1613,8 +1620,24 @@ impl Viewer {
                     label: Some("p5.gi.reexec"),
                 });
             gi.advance_frame(&self.queue);
-            gi.build_hzb(&self.device, &mut enc, depth_view, false);
-            gi.execute(&self.device, &mut enc, ssr_stats)?;
+
+            // Optional GPU timing for HZB + GI passes
+            let mut timing_opt = self
+                .gi_timing
+                .as_mut()
+                .filter(|t| t.is_supported());
+
+            // HZB build scope
+            if let Some(timer) = timing_opt.as_deref_mut() {
+                let scope_id = timer.begin_scope(&mut enc, "p5.hzb");
+                gi.build_hzb(&self.device, &mut enc, depth_view, false);
+                timer.end_scope(&mut enc, scope_id);
+            } else {
+                gi.build_hzb(&self.device, &mut enc, depth_view, false);
+            }
+
+            // GI effects (SSAO/SSGI/SSR) with per-effect GPU scopes inside
+            gi.execute(&self.device, &mut enc, ssr_stats, timing_opt.as_deref_mut())?;
 
             // Build lit_output baseline (direct + IBL) into Rgba8Unorm
             let env_view = if let Some(ref v) = self.ibl_env_view {
@@ -1669,7 +1692,7 @@ impl Viewer {
             let gy = (self.config.height + 7) / 8;
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("viewer.lit.compute.gi_baseline"),
+                    label: Some("viewer.lit.compute.pre_ssr"),
                     timestamp_writes: None,
                 });
                 cpass.set_pipeline(&self.lit_pipeline);
@@ -1794,6 +1817,7 @@ impl Viewer {
                     &gi.gbuffer().normal_view,
                     &gi.gbuffer().material_view,
                     &self.gi_output_hdr_view,
+                    timing_opt.as_deref_mut(),
                 )?;
 
                 gi_pass.execute_debug(
@@ -1806,8 +1830,45 @@ impl Viewer {
                 )?;
             }
 
+            if let Some(timer) = timing_opt.as_deref_mut() {
+                timer.resolve_queries(&mut enc);
+            }
+
             self.queue.submit(std::iter::once(enc.finish()));
             self.device.poll(wgpu::Maintain::Wait);
+
+            // Read back GPU timing results for P5.6 budgets
+            if let Some(timer) = self.gi_timing.as_mut() {
+                if timer.is_supported() {
+                    match pollster::block_on(timer.get_results()) {
+                        Ok(results) => {
+                            self.gi_gpu_hzb_ms = 0.0;
+                            self.gi_gpu_ssao_ms = 0.0;
+                            self.gi_gpu_ssgi_ms = 0.0;
+                            self.gi_gpu_ssr_ms = 0.0;
+                            self.gi_gpu_composite_ms = 0.0;
+                            for r in results {
+                                if !r.timestamp_valid {
+                                    continue;
+                                }
+                                match r.name.as_str() {
+                                    "p5.hzb" => self.gi_gpu_hzb_ms = r.gpu_time_ms,
+                                    "p5.ssao" => self.gi_gpu_ssao_ms = r.gpu_time_ms,
+                                    "p5.ssgi" => self.gi_gpu_ssgi_ms = r.gpu_time_ms,
+                                    "p5.ssr" => self.gi_gpu_ssr_ms = r.gpu_time_ms,
+                                    "p5.composite" => {
+                                        self.gi_gpu_composite_ms = r.gpu_time_ms
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[P5.6] GPU timing readback failed: {e}");
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -2083,6 +2144,8 @@ impl Viewer {
                 None,
             )
             .await?;
+        let device = Arc::new(device);
+        let queue = Arc::new(queue);
         let adapter_name = adapter.get_info().name;
 
         // Configure surface
@@ -2110,6 +2173,20 @@ impl Viewer {
         };
 
         surface.configure(&device, &surface_config);
+
+        // Optional GPU timing manager for GI profiling (P5.6)
+        let gi_timing = match GpuTimingManager::new(
+            device.clone(),
+            queue.clone(),
+            create_gpu_timing_config(&device),
+        ) {
+            Ok(mgr) if mgr.is_supported() => Some(mgr),
+            Ok(_) => None,
+            Err(e) => {
+                eprintln!("[viewer] GPU timing manager unavailable: {e}");
+                None
+            }
+        };
 
         // Initialize P5 Screen-space effects manager (optional)
         let gi = match crate::core::screen_space_effects::ScreenSpaceEffectsManager::new(
@@ -3763,6 +3840,12 @@ impl Viewer {
             gi_pass: None,
             ssr_params: SsrParams::default(),
             gi_seed: None,
+            gi_timing,
+            gi_gpu_hzb_ms: 0.0,
+            gi_gpu_ssao_ms: 0.0,
+            gi_gpu_ssgi_ms: 0.0,
+            gi_gpu_ssr_ms: 0.0,
+            gi_gpu_composite_ms: 0.0,
             snapshot_request: None,
             pending_snapshot_tex: None,
             pending_captures: VecDeque::new(),
@@ -5057,7 +5140,7 @@ impl Viewer {
             // Use regular-Z convention (reversed_z=false) for viewer
             gi.build_hzb(&self.device, &mut encoder, zv, false);
             // Execute effects
-            let _ = gi.execute(&self.device, &mut encoder, None);
+            let _ = gi.execute(&self.device, &mut encoder, None, None);
 
             // Composite the material GBuffer to the swapchain
             if let (Some(comp_pl), Some(comp_bgl)) = (
@@ -6722,7 +6805,7 @@ impl Viewer {
                     label: Some("p51.ssao.reexec"),
                 });
             gi.build_hzb(&self.device, &mut enc, self.z_view.as_ref().unwrap(), false);
-            let _ = gi.execute(&self.device, &mut enc, None);
+            let _ = gi.execute(&self.device, &mut enc, None, None);
             self.queue.submit(std::iter::once(enc.finish()));
         }
         Ok(())
@@ -6972,7 +7055,7 @@ impl Viewer {
                                 label: Some("p51.sweep.exec"),
                             });
                     gim.build_hzb(&self.device, &mut enc, self.z_view.as_ref().unwrap(), false);
-                    let _ = gim.execute(&self.device, &mut enc, None);
+                    let _ = gim.execute(&self.device, &mut enc, None, None);
                     self.queue.submit(std::iter::once(enc.finish()));
                 } else {
                     continue;
@@ -7608,6 +7691,53 @@ impl Viewer {
                 .map(|p| p.composite_ms())
                 .unwrap_or(0.0);
 
+            let hzb_ms = gi.hzb_ms();
+
+            let gpu_hzb_ms = self.gi_gpu_hzb_ms;
+            let gpu_ssao_ms = self.gi_gpu_ssao_ms;
+            let gpu_ssgi_ms = self.gi_gpu_ssgi_ms;
+            let gpu_ssr_ms = self.gi_gpu_ssr_ms;
+            let gpu_composite_ms = self.gi_gpu_composite_ms;
+
+            let hzb_measured_ms = if gpu_hzb_ms > 0.0 { gpu_hzb_ms } else { hzb_ms };
+            let ssao_measured_ms = if gpu_ssao_ms > 0.0 { gpu_ssao_ms } else { ao_total_ms };
+            let ssgi_measured_ms = if gpu_ssgi_ms > 0.0 { gpu_ssgi_ms } else { ssgi_total_ms };
+            let ssr_measured_ms = if gpu_ssr_ms > 0.0 { gpu_ssr_ms } else { ssr_total_ms };
+            let composite_measured_ms =
+                if gpu_composite_ms > 0.0 { gpu_composite_ms } else { composite_ms };
+
+            // P5.6 performance budgets (RTX 3060 / 1080p)
+            let ssao_budget_ms: f32 = 1.6;
+            let ssgi_budget_ms: f32 = 2.8;
+            let ssr_budget_ms: f32 = 2.2;
+            let hzb_budget_ms: f32 = 0.5;
+            let btc_budget_ms: f32 = 1.2; // Bilateral + temporal + composite combined
+
+            let ssao_delta_ms = ssao_measured_ms - ssao_budget_ms;
+            let ssgi_delta_ms = ssgi_measured_ms - ssgi_budget_ms;
+            let ssr_delta_ms = ssr_measured_ms - ssr_budget_ms;
+            let hzb_delta_ms = hzb_measured_ms - hzb_budget_ms;
+
+            let btc_measured_ms = ao_blur_ms + ao_temporal_ms + composite_measured_ms;
+            let btc_delta_ms = btc_measured_ms - btc_budget_ms;
+
+            let p56_status = if hzb_measured_ms <= hzb_budget_ms
+                && ssao_measured_ms <= ssao_budget_ms
+                && ssgi_measured_ms <= ssgi_budget_ms
+                && ssr_measured_ms <= ssr_budget_ms
+                && btc_measured_ms <= btc_budget_ms
+            {
+                "OK"
+            } else {
+                "REGRESSION"
+            };
+
+            let gpu_timing_supported = self
+                .gi_timing
+                .as_ref()
+                .map(|t| t.is_supported())
+                .unwrap_or(false);
+
             self.write_p5_meta(|meta| {
                 meta.insert(
                     "gi_composition".to_string(),
@@ -7628,9 +7758,53 @@ impl Viewer {
                             "ssgi": ssgi_total_ms,
                             "ssr": ssr_total_ms,
                             "composite": composite_ms,
+                            "hzb": hzb_ms,
+                        },
+                        "gpu_ms": {
+                            "hzb": gpu_hzb_ms,
+                            "ssao": gpu_ssao_ms,
+                            "ssgi": gpu_ssgi_ms,
+                            "ssr": gpu_ssr_ms,
+                            "composite": gpu_composite_ms,
+                        },
+                        "gpu_timing": {
+                            "supported": gpu_timing_supported,
+                        },
+                        "perf_budgets": {
+                            "hzb": {
+                                "budget_ms": hzb_budget_ms,
+                                "measured_ms": hzb_measured_ms,
+                                "delta_ms": hzb_delta_ms,
+                                "within_budget": hzb_measured_ms <= hzb_budget_ms,
+                            },
+                            "ssao": {
+                                "budget_ms": ssao_budget_ms,
+                                "measured_ms": ssao_measured_ms,
+                                "delta_ms": ssao_delta_ms,
+                                "within_budget": ssao_measured_ms <= ssao_budget_ms,
+                            },
+                            "ssgi": {
+                                "budget_ms": ssgi_budget_ms,
+                                "measured_ms": ssgi_measured_ms,
+                                "delta_ms": ssgi_delta_ms,
+                                "within_budget": ssgi_measured_ms <= ssgi_budget_ms,
+                            },
+                            "ssr": {
+                                "budget_ms": ssr_budget_ms,
+                                "measured_ms": ssr_measured_ms,
+                                "delta_ms": ssr_delta_ms,
+                                "within_budget": ssr_measured_ms <= ssr_budget_ms,
+                            },
+                            "bilateral_temporal_composite": {
+                                "budget_ms": btc_budget_ms,
+                                "measured_ms": btc_measured_ms,
+                                "delta_ms": btc_delta_ms,
+                                "within_budget": btc_measured_ms <= btc_budget_ms,
+                            },
                         },
                     }),
                 );
+                meta.insert("p56_status".to_string(), json!(p56_status));
             })?;
         }
 

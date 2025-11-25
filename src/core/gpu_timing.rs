@@ -109,6 +109,7 @@ pub struct GpuTimingManager {
     query_index: u32,
     #[allow(dead_code)]
     results: Arc<Mutex<Vec<TimingResult>>>,
+    scope_labels: Vec<String>,
 
     // Feature support
     supports_timestamps: bool,
@@ -152,6 +153,7 @@ impl GpuTimingManager {
             active_scopes: HashMap::new(),
             query_index: 0,
             results: Arc::new(Mutex::new(Vec::new())),
+            scope_labels: Vec::new(),
             supports_timestamps,
             supports_pipeline_stats,
             timestamp_period,
@@ -238,7 +240,8 @@ impl GpuTimingManager {
         encoder: &'a mut CommandEncoder,
         label: &str,
     ) -> TimingScopeId {
-        let scope_id = TimingScopeId(self.active_scopes.len());
+        let scope_id = TimingScopeId(self.scope_labels.len());
+        self.scope_labels.push(label.to_string());
         self.active_scopes.insert(scope_id, label.to_string());
 
         self.begin_scope_internal(encoder, scope_id, label);
@@ -343,6 +346,8 @@ impl GpuTimingManager {
         let mut results = Vec::new();
 
         if self.query_index < 2 {
+            self.scope_labels.clear();
+            self.query_index = 0;
             return Ok(results); // Need at least begin/end pair
         }
 
@@ -354,13 +359,22 @@ impl GpuTimingManager {
         };
 
         // Process timestamp pairs into timing results
-        for i in (0..timestamps.len().saturating_sub(1)).step_by(2) {
-            let begin_ns = timestamps[i] as f64 * self.timestamp_period;
-            let end_ns = timestamps[i + 1] as f64 * self.timestamp_period;
+        let scope_count = timestamps.len().saturating_sub(1) / 2;
+        for scope_index in 0..scope_count {
+            let begin_idx = scope_index * 2;
+            let end_idx = begin_idx + 1;
+            let begin_ns = timestamps[begin_idx] as f64 * self.timestamp_period;
+            let end_ns = timestamps[end_idx] as f64 * self.timestamp_period;
             let duration_ms = (end_ns - begin_ns) / 1_000_000.0; // Convert ns to ms
 
+            let name = self
+                .scope_labels
+                .get(scope_index)
+                .cloned()
+                .unwrap_or_else(|| format!("scope_{}", scope_index));
+
             results.push(TimingResult {
-                name: format!("scope_{}", i / 2),
+                name,
                 gpu_time_ms: duration_ms as f32,
                 timestamp_valid: true,
                 pipeline_stats: None, // TODO: Read pipeline stats
@@ -369,6 +383,7 @@ impl GpuTimingManager {
 
         // Reset for next frame
         self.query_index = 0;
+        self.scope_labels.clear();
 
         Ok(results)
     }
