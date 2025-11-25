@@ -65,7 +65,7 @@ def test_terrain_demo_build_renderer_config() -> None:
         shadow_moment_bias=None,
         gi="ibl,ssao",
         sky="hosek-wilkie",
-        hdr=None,
+        hdr=str(Path("assets/snow_field_4k.hdr")),
         volumetric=None,
         preset=None,
     )

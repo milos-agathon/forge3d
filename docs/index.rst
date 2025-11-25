@@ -22,6 +22,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    api/subdivision
    api/displacement
    api/curves
+   api/atmospherics_p6
    color_management
    interop_zero_copy
    memory_budget

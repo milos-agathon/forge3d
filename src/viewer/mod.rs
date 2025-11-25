@@ -12,6 +12,7 @@ use crate::core::gpu_timing::{create_default_config as create_gpu_timing_config,
 use crate::core::hdr::{apply_cpu_tone_mapping, ToneMappingOperator};
 use crate::core::ibl::{IBLQuality, IBLRenderer};
 use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
+use crate::core::shadows::{CameraFrustum, CsmConfig, CsmShadowMap};
 use crate::geometry::{generate_plane, generate_sphere, MeshBuffers};
 use crate::p5::meta::{self as p5_meta, build_ssr_meta, SsrMetaInput};
 use crate::p5::{ssr, ssr::SsrScenePreset, ssr_analysis};
@@ -138,6 +139,42 @@ fn build_ssr_albedo_texture(preset: &SsrScenePreset, size: u32) -> Vec<u8> {
     }
 
     pixels
+}
+
+impl Viewer {
+    /// Override fog shadow map with a constant depth value.
+    /// This is primarily intended for tests and debug paths until a
+    /// full directional shadow pass is wired into the viewer.
+    pub fn set_fog_shadow_constant_depth(&mut self, depth: f32) {
+        let depth_bytes = depth.to_ne_bytes();
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &self.fog_shadow_map,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::DepthOnly,
+            },
+            &depth_bytes,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    /// Override the fog shadow matrix used by the volumetric shader.
+    /// This allows tests or higher-level systems to provide a
+    /// light-space transform without changing the default identity.
+    pub fn set_fog_shadow_matrix(&mut self, mat: [[f32; 4]; 4]) {
+        self.queue
+            .write_buffer(&self.fog_shadow_matrix, 0, bytemuck::bytes_of(&mat));
+    }
 }
 
 // ------------------------------
@@ -754,6 +791,11 @@ pub struct Viewer {
     fog_temporal_alpha: f32,
     fog_use_shadows: bool,
     fog_mode: FogMode,
+    // Cascaded shadow maps for directional sun shadows (future fog + lighting)
+    csm: Option<CsmShadowMap>,
+    csm_config: CsmConfig,
+    csm_depth_pipeline: Option<wgpu::RenderPipeline>,
+    csm_depth_camera: Option<wgpu::Buffer>,
     // Sky exposed controls (runtime adjustable)
     sky_model_id: u32, // 0=Preetham,1=Hosek-Wilkie
     sky_turbidity: f32,
@@ -2202,6 +2244,8 @@ impl Viewer {
         };
 
         // Build geometry pipeline only if GI is available (needs GBuffer formats)
+        let mut csm_depth_pipeline: Option<wgpu::RenderPipeline> = None;
+        let mut csm_depth_camera: Option<wgpu::Buffer> = None;
         let (
             geom_bind_group_layout,
             geom_pipeline,
@@ -2412,6 +2456,113 @@ impl Viewer {
                 }),
                 multiview: None,
             });
+
+            let csm_depth_shader =
+                device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("viewer.csm.depth.shader"),
+                    source: wgpu::ShaderSource::Wgsl(
+                        r#"
+                        struct CsmCamera {
+                            light_view_proj : mat4x4<f32>,
+                        };
+                        @group(0) @binding(0) var<uniform> uCam : CsmCamera;
+
+                        struct VSIn {
+                            @location(0) pos : vec3<f32>,
+                            @location(1) nrm : vec3<f32>,
+                            @location(2) uv  : vec2<f32>,
+                            @location(3) rough_metal : vec2<f32>,
+                        };
+
+                        @vertex
+                        fn vs_main(inp: VSIn) -> @builtin(position) vec4<f32> {
+                            let pos_ws = vec4<f32>(inp.pos, 1.0);
+                            return uCam.light_view_proj * pos_ws;
+                        }
+
+                        @fragment
+                        fn fs_main() { }
+                        "#
+                            .into(),
+                    ),
+                });
+            let csm_depth_bgl =
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("viewer.csm.depth.bgl"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                });
+            let csm_depth_pl =
+                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("viewer.csm.depth.pl"),
+                    bind_group_layouts: &[&csm_depth_bgl],
+                    push_constant_ranges: &[],
+                });
+            csm_depth_pipeline = Some(device.create_render_pipeline(
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("viewer.csm.depth.pipeline"),
+                    layout: Some(&csm_depth_pl),
+                    vertex: wgpu::VertexState {
+                        module: &csm_depth_shader,
+                        entry_point: "vs_main",
+                        buffers: &[wgpu::VertexBufferLayout {
+                            array_stride:
+                                std::mem::size_of::<PackedVertex>() as u64,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &[
+                                wgpu::VertexAttribute {
+                                    shader_location: 0,
+                                    offset: 0,
+                                    format: wgpu::VertexFormat::Float32x3,
+                                },
+                                wgpu::VertexAttribute {
+                                    shader_location: 1,
+                                    offset:
+                                        (3 * std::mem::size_of::<f32>()) as u64,
+                                    format: wgpu::VertexFormat::Float32x3,
+                                },
+                                wgpu::VertexAttribute {
+                                    shader_location: 2,
+                                    offset:
+                                        (6 * std::mem::size_of::<f32>()) as u64,
+                                    format: wgpu::VertexFormat::Float32x2,
+                                },
+                                wgpu::VertexAttribute {
+                                    shader_location: 3,
+                                    offset:
+                                        (8 * std::mem::size_of::<f32>()) as u64,
+                                    format: wgpu::VertexFormat::Float32x2,
+                                },
+                            ],
+                        }],
+                    },
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: wgpu::TextureFormat::Depth32Float,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::LessEqual,
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState::default(),
+                    fragment: None,
+                    multiview: None,
+                },
+            ));
+            csm_depth_camera = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("viewer.csm.depth.camera"),
+                size: std::mem::size_of::<[f32; 16]>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
 
             // Create an albedo texture (procedural checkerboard)
             let tex_size = 256u32;
@@ -3401,7 +3552,7 @@ impl Viewer {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
                     count: None,
@@ -3640,10 +3791,39 @@ impl Viewer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let fog_shadow_view = fog_shadow_map.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_one = 1.0f32.to_ne_bytes();
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &fog_shadow_map,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::DepthOnly,
+            },
+            &depth_one,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let fog_shadow_view = fog_shadow_map.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("viewer.fog.shadow.view"),
+            format: Some(wgpu::TextureFormat::Depth32Float),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            aspect: wgpu::TextureAspect::DepthOnly,
+            base_mip_level: 0,
+            mip_level_count: Some(1),
+            base_array_layer: 0,
+            array_layer_count: Some(1),
+        });
         let fog_shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("viewer.fog.shadow.sampler"),
             compare: Some(wgpu::CompareFunction::LessEqual),
@@ -3824,6 +4004,14 @@ impl Viewer {
         hud.set_enabled(true);
         hud.set_resolution(surface_config.width, surface_config.height);
 
+        // Configure cascaded shadow maps for directional sun shadows. At this
+        // stage we only use the light-space matrices for fog; the depth atlas
+        // render pass will be added in a later milestone.
+        let mut csm_config = CsmConfig::default();
+        csm_config.camera_near = config.znear;
+        csm_config.camera_far = config.zfar;
+        let csm = Some(CsmShadowMap::new(device.as_ref(), csm_config.clone()));
+
         let mut viewer = Self {
             window,
             surface,
@@ -3965,6 +4153,10 @@ impl Viewer {
             fog_temporal_alpha: 0.2,
             fog_use_shadows: false,
             fog_mode: FogMode::Raymarch,
+            csm,
+            csm_config,
+            csm_depth_pipeline,
+            csm_depth_camera,
             // Sky controls
             sky_model_id: 1,
             sky_turbidity: 2.5,
@@ -4706,6 +4898,84 @@ impl Viewer {
                     self.view_config.zfar,
                 );
                 let view_mat = self.camera.view_matrix();
+
+                // Update CSM cascade transforms for current camera. The actual
+                // shadow depth rendering into the CSM atlas is a separate
+                // milestone; here we only keep the light-space matrices in sync
+                // so fog can reuse them.
+                if let Some(ref mut csm) = self.csm {
+                    let frustum = CameraFrustum::from_matrices(&view_mat, &proj);
+                    csm.update_cascades(&self.queue, &frustum);
+                }
+
+                if self.fog_use_shadows {
+                    if let (Some(ref csm), Some(ref csm_pipe), Some(ref csm_cam_buf)) = (
+                        self.csm.as_ref(),
+                        self.csm_depth_pipeline.as_ref(),
+                        self.csm_depth_camera.as_ref(),
+                    ) {
+                        let cascade_count = csm.cascade_count() as usize;
+                        let bgl = csm_pipe.get_bind_group_layout(0);
+                        for cascade_idx in 0..cascade_count {
+                            if let (Some(depth_view), Some(light_vp)) = (
+                                csm.cascade_depth_view(cascade_idx),
+                                csm.cascade_projection(cascade_idx),
+                            ) {
+                                let light_vp_arr = light_vp.to_cols_array();
+                                self.queue.write_buffer(
+                                    csm_cam_buf,
+                                    0,
+                                    bytemuck::cast_slice(&light_vp_arr),
+                                );
+                                let csm_bg = self
+                                    .device
+                                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("viewer.csm.depth.bg"),
+                                        layout: &bgl,
+                                        entries: &[wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: csm_cam_buf.as_entire_binding(),
+                                        }],
+                                    });
+                                let mut shadow_pass = encoder.begin_render_pass(
+                                    &wgpu::RenderPassDescriptor {
+                                        label: Some("viewer.csm.depth"),
+                                        color_attachments: &[],
+                                        depth_stencil_attachment: Some(
+                                            wgpu::RenderPassDepthStencilAttachment {
+                                                view: depth_view,
+                                                depth_ops: Some(wgpu::Operations {
+                                                    load: wgpu::LoadOp::Clear(1.0),
+                                                    store: wgpu::StoreOp::Store,
+                                                }),
+                                                stencil_ops: None,
+                                            },
+                                        ),
+                                        occlusion_query_set: None,
+                                        timestamp_writes: None,
+                                    },
+                                );
+                                shadow_pass.set_pipeline(csm_pipe);
+                                shadow_pass.set_bind_group(0, &csm_bg, &[]);
+                                shadow_pass.set_vertex_buffer(0, vb.slice(..));
+                                if let Some(ib) = self.geom_ib.as_ref() {
+                                    shadow_pass.set_index_buffer(
+                                        ib.slice(..),
+                                        wgpu::IndexFormat::Uint32,
+                                    );
+                                    shadow_pass.draw_indexed(
+                                        0..self.geom_index_count,
+                                        0,
+                                        0..1,
+                                    );
+                                } else {
+                                    shadow_pass.draw(0..self.geom_index_count, 0..1);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let inv_view = view_mat.inverse();
                 let inv_proj = proj.inverse();
                 let eye = self.camera.eye();
@@ -4765,12 +5035,25 @@ impl Viewer {
                     0,
                     bytemuck::bytes_of(&fog_params_packed),
                 );
-                // Shadow matrix identity
-                let ident = Mat4::IDENTITY;
+
+                // Select a light-space matrix for fog shadows. For now, use the
+                // first CSM cascade's light_projection if available; otherwise
+                // fall back to identity. Depth still comes from fog_shadow_map,
+                // which is initialized to depth=1.0 until a real shadow pass
+                // is wired in.
+                let mut fog_shadow_mat = Mat4::IDENTITY;
+                if self.fog_use_shadows {
+                    if let Some(ref csm) = self.csm {
+                        let cascades = csm.cascades();
+                        if let Some(c0) = cascades.get(0) {
+                            fog_shadow_mat = Mat4::from_cols_array_2d(&c0.light_projection);
+                        }
+                    }
+                }
                 self.queue.write_buffer(
                     &self.fog_shadow_matrix,
                     0,
-                    bytemuck::bytes_of(&to_arr(ident)),
+                    bytemuck::bytes_of(&to_arr(fog_shadow_mat)),
                 );
 
                 // Bind groups (shared among both modes)
@@ -4796,13 +5079,18 @@ impl Viewer {
                         },
                     ],
                 });
+                let (shadow_tex_view, shadow_uniform_buf) = if let Some(ref csm) = self.csm {
+                    (csm.shadow_array_view(), csm.uniform_buffer())
+                } else {
+                    (&self.fog_shadow_view, &self.fog_shadow_matrix)
+                };
                 let bg1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("viewer.fog.bg1"),
                     layout: &self.fog_bgl1,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&self.fog_shadow_view),
+                            resource: wgpu::BindingResource::TextureView(shadow_tex_view),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
@@ -4810,7 +5098,7 @@ impl Viewer {
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: self.fog_shadow_matrix.as_entire_binding(),
+                            resource: shadow_uniform_buf.as_entire_binding(),
                         },
                     ],
                 });

@@ -215,6 +215,51 @@ Post-processing integrates seamlessly with the forge3d rendering pipeline::
     total_postfx_time = sum(stats.values())
     print(f"Post-processing took {total_postfx_time:.2f} ms")
 
+Atmospherics, GI, and PostFX
+----------------------------
+
+The post-processing chain runs **after** the main renderer has composed:
+
+* Analytic or HDRI sky selected via ``RendererConfig.atmosphere.sky`` or the
+  terrain demo's ``--sky`` / ``--hdr`` flags.
+* Volumetric fog configured via ``RendererConfig.atmosphere.volumetric`` or the
+  terrain demo's ``--volumetric`` flag.
+* Direct lighting and shadows.
+* Global illumination modes from ``RendererConfig.gi.modes`` or the
+  terrain demo's ``--gi`` flag.
+
+In practice this means you should:
+
+* First, shape the **HDR lighting and atmosphere** using sky, GI, and fog
+  (via ``RendererConfig`` or CLI flags like ``--sky``, ``--gi``,
+  ``--volumetric``).
+* Then, use post-processing to handle **tone mapping, bloom, and AA** on the
+  resulting HDR frame.
+
+Example combining terrain CLI configuration with postfx usage::
+
+    # Terrain demo (HDRI sky + IBL + volumetric fog)
+    python examples/terrain_demo.py \
+        --sky hdri \
+        --hdr assets/snow_field_4k.hdr \
+        --gi ibl,ssao \
+        --volumetric "density=0.05,phase=hg,g=0.7"
+
+    # Python: enable a postfx chain over the composed HDR image
+    import forge3d as f3d
+    import forge3d.postfx as postfx
+
+    renderer = f3d.Renderer(1280, 720)
+    postfx.apply_preset("quality")
+    postfx.set_parameter("tonemap", "exposure", 1.1)
+
+Notes:
+
+* GI mode ``ibl`` still requires an HDR source, either from an environment
+  light or from an HDRI sky (``sky=hdri`` + ``hdr_path`` / ``--hdr``).
+* Enabling strong fog or bright skies pushes more energy into highlights;
+  adjust tone-mapping exposure and bloom threshold to avoid clipping.
+
 API Reference
 -------------
 

@@ -209,6 +209,8 @@ class LightConfig:
             base.hdr_path = data.get("hdr")
         if "hdr_path" in data:
             base.hdr_path = None if data["hdr_path"] is None else str(data["hdr_path"])
+        if default is None and "direction" not in data and base.type == "directional":
+            base.direction = None
         return base
 
 
@@ -285,6 +287,16 @@ class VolumetricParams:
     phase: str = "isotropic"
     anisotropy: float = 0.0
     mode: str = "raymarch"  # or "froxels"
+    max_steps: int = 64
+    height_falloff: float = 0.0
+    start_distance: float = 0.0
+    max_distance: float = 1000.0
+    absorption: float = 0.0
+    scattering_color: Tuple[float, float, float] = (1.0, 1.0, 1.0)
+    ambient_color: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    temporal_alpha: float = 0.2
+    use_shadows: bool = False
+    jitter_strength: float = 0.25
     preset: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -293,6 +305,16 @@ class VolumetricParams:
             "phase": self.phase,
             "anisotropy": self.anisotropy,
             "mode": self.mode,
+            "max_steps": self.max_steps,
+            "height_falloff": self.height_falloff,
+            "start_distance": self.start_distance,
+            "max_distance": self.max_distance,
+            "absorption": self.absorption,
+            "scattering_color": list(self.scattering_color),
+            "ambient_color": list(self.ambient_color),
+            "temporal_alpha": self.temporal_alpha,
+            "use_shadows": self.use_shadows,
+            "jitter_strength": self.jitter_strength,
             "preset": self.preset,
         }
 
@@ -313,6 +335,26 @@ class VolumetricParams:
                 base.mode = "raymarch"
             elif m in {"froxels", "fx", "1"}:
                 base.mode = "froxels"
+        if "max_steps" in data:
+            base.max_steps = int(data["max_steps"])
+        if "height_falloff" in data:
+            base.height_falloff = float(data["height_falloff"])
+        if "start_distance" in data:
+            base.start_distance = float(data["start_distance"])
+        if "max_distance" in data:
+            base.max_distance = float(data["max_distance"])
+        if "absorption" in data:
+            base.absorption = float(data["absorption"])
+        if "scattering_color" in data:
+            base.scattering_color = _to_float3(data["scattering_color"], "scattering_color")
+        if "ambient_color" in data:
+            base.ambient_color = _to_float3(data["ambient_color"], "ambient_color")
+        if "temporal_alpha" in data:
+            base.temporal_alpha = float(data["temporal_alpha"])
+        if "use_shadows" in data:
+            base.use_shadows = bool(data["use_shadows"])
+        if "jitter_strength" in data:
+            base.jitter_strength = float(data["jitter_strength"])
         return base
 
 @dataclass
@@ -567,7 +609,7 @@ def _build_override_mapping(overrides: Mapping[str, Any]) -> Dict[str, Dict[str,
             out.setdefault("shadows", {})["pcss_blocker_radius"] = value
         elif key in {"pcss_filter_radius", "pcss_filter_size"}:
             out.setdefault("shadows", {})["pcss_filter_radius"] = value
-        elif key in {"pcss_light_size", "light_size"}:
+        elif key in {"pcss_light_size", "light_size", "shadow_light_size"}:
             out.setdefault("shadows", {})["light_size"] = value
         elif key in {"moment_bias", "shadow_moment_bias"}:
             out.setdefault("shadows", {})["moment_bias"] = value
@@ -580,7 +622,15 @@ def _build_override_mapping(overrides: Mapping[str, Any]) -> Dict[str, Dict[str,
         elif key in {"hdr", "hdr_path"}:
             out.setdefault("atmosphere", {})["hdr_path"] = value
         elif key == "volumetric":
-            out.setdefault("atmosphere", {})["volumetric"] = value
+            # CLI-style volumetric overrides come in two forms:
+            # - mapping: nested atmosphere.volumetric config (P6).
+            # - string: opaque spec parsed elsewhere (e.g., terrain_demo).
+            #
+            # Only the mapping form participates in AtmosphereParams.from_mapping;
+            # string forms are accepted but ignored here so they do not cause
+            # type errors during config validation.
+            if isinstance(value, Mapping):
+                out.setdefault("atmosphere", {})["volumetric"] = value
         elif key == "atmosphere":
             if isinstance(value, Mapping):
                 out.setdefault("atmosphere", {}).update(value)
@@ -634,6 +684,7 @@ def split_renderer_overrides(kwargs: MutableMapping[str, Any]) -> Tuple[Dict[str
         "pcss_filter_radius",
         "pcss_filter_size",
         "light_size",
+        "shadow_light_size",
         "pcss_light_size",
         "moment_bias",
         "shadow_moment_bias",

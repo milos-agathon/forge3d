@@ -438,6 +438,14 @@ impl CsmShadowMap {
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
     }
 
+    /// Get read-only access to the current shadow cascades.
+    /// This is useful for downstream systems (e.g., volumetric fog)
+    /// that want to reuse the light-space projection matrices without
+    /// duplicating CSM logic.
+    pub fn cascades(&self) -> &[ShadowCascade] {
+        &self.cascades
+    }
+
     /// Get shadow map texture array view for binding
     pub fn shadow_array_view(&self) -> &wgpu::TextureView {
         &self.shadow_array_view

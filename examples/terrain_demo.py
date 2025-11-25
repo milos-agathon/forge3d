@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 import os
+import math
 
 # Only use import shim if explicitly requested (to avoid breaking rasterio imports)
 if os.environ.get("USE_IMPORT_SHIM", "").lower() in ("1", "true", "yes"):
@@ -24,12 +25,14 @@ except ImportError as exc:  # pragma: no cover
     ) from exc
 
 from forge3d.config import load_renderer_config
+from forge3d.terrain_params import ShadowSettings as TerrainShadowSettings
+from forge3d.render import _detect_water_mask_via_scene, _postprocess_water_mask
 
 
 DEFAULT_DEM = Path("assets/Gore_Range_Albers_1m.tif")
 DEFAULT_HDR = Path("assets/snow_field_4k.hdr")
 DEFAULT_OUTPUT = Path("examples/out/terrain_demo.png")
-DEFAULT_SIZE = (2560, 1440)
+DEFAULT_SIZE = (2048, 1440)
 DEFAULT_DOMAIN = (200.0, 2200.0)
 DEFAULT_COLORMAP_STOPS: Sequence[tuple[float, str]] = (
     (200.0, "#00aa00"),   # Low elevation: Vibrant green (valleys)
@@ -350,6 +353,12 @@ def _build_params(
     albedo_mode: str = "mix",
     colormap_strength: float = 0.5,
     ibl_enabled: bool = True,
+    light_azimuth_deg: float = 135.0,
+    light_elevation_deg: float = 35.0,
+    ibl_intensity: float = 1.0,
+    cam_radius: float = 1200.0,
+    cam_phi_deg: float = 135.0,
+    cam_theta_deg: float = 45.0,
 ):
     config = f3d.TerrainRenderParamsConfig(
         size_px=size,
@@ -357,25 +366,25 @@ def _build_params(
         msaa_samples=msaa,
         z_scale=z_scale,
         cam_target=[0.0, 0.0, 0.0],
-        cam_radius=1200.0,
-        cam_phi_deg=135.0,
-        cam_theta_deg=45.0,
+        cam_radius=float(cam_radius),
+        cam_phi_deg=float(cam_phi_deg),
+        cam_theta_deg=float(cam_theta_deg),
         cam_gamma_deg=0.0,
         fov_y_deg=55.0,
         clip=(0.1, 6000.0),
         light=f3d.LightSettings(
             light_type="Directional",
-            azimuth_deg=135.0,
-            elevation_deg=35.0,
+            azimuth_deg=float(light_azimuth_deg),
+            elevation_deg=float(light_elevation_deg),
             intensity=3.0,
             color=[1.0, 1.0, 1.0],
         ),
         ibl=f3d.IblSettings(
             enabled=ibl_enabled,
-            intensity=1.0,
+            intensity=float(ibl_intensity),
             rotation_deg=0.0,
         ),
-        shadows=f3d.ShadowSettings(
+        shadows=TerrainShadowSettings(
             enabled=True,
             technique="PCSS",
             resolution=4096,
@@ -442,6 +451,239 @@ def _build_params(
     return f3d.TerrainRenderParams(config)
 
 
+def _sun_direction_from_angles(azimuth_deg: float, elevation_deg: float) -> tuple[float, float, float]:
+    """Convert azimuth/elevation in degrees to a unit sun direction vector."""
+
+    az = math.radians(float(azimuth_deg))
+    el = math.radians(float(elevation_deg))
+    x = math.cos(el) * math.cos(az)
+    y = math.sin(el)
+    z = math.cos(el) * math.sin(az)
+    return (float(x), float(y), float(z))
+
+
+def _save_image(img, path: Path) -> None:
+    """Save RGBA image to PNG with a .npy fallback.
+
+    Kept local to avoid adding global dependencies; mirrors gallery helpers.
+    """
+
+    try:
+        from PIL import Image  # type: ignore[import]
+
+        Image.fromarray(img, mode="RGBA").save(str(path))
+    except Exception:
+        try:
+            f3d.numpy_to_png(str(path), img)
+        except Exception:
+            import numpy as np
+
+            np.save(str(path).replace(".png", ".npy"), img)
+            print("  Warning: Saved as .npy (no PNG writer available)")
+
+
+def _detect_water_mask(
+    heightmap,
+    domain: tuple[float, float],
+    level: float,
+    slope_threshold: float,
+    spacing: tuple[float, float] | None = None,
+):
+    import numpy as np
+
+    h = np.asarray(heightmap, dtype=np.float32)
+    lo, hi = float(domain[0]), float(domain[1])
+    rng = max(hi - lo, 1e-6)
+
+    # Convert normalized level [0,1] into an absolute elevation threshold, so we
+    # can delegate to the same water detector used by render_raster.
+    level_abs = lo + float(level) * rng
+
+    spacing_use = spacing if spacing is not None else (1.0, 1.0)
+    try:
+        mask = _detect_water_mask_via_scene(
+            h,
+            spacing=spacing_use,
+            level=level_abs,
+            method="flat",
+            smooth_iters=1,
+        )
+        mask = np.asarray(mask, dtype=bool)
+    except Exception:
+        # Fallback: simple height threshold when scene-based detection is unavailable.
+        mask = h <= level_abs
+
+    if not mask.size:
+        return mask
+
+    # Preserve the original slope+height heuristic using normalized heights.
+    h_norm = np.clip((h - lo) / rng, 0.0, 1.0)
+    gy, gx = np.gradient(h_norm)
+    grad = np.sqrt(gx * gx + gy * gy)
+    flat = grad <= float(slope_threshold)
+    low = h_norm <= float(level)
+    mask &= (flat & low)
+
+    # Optionally filter small components to match render_raster behaviour.
+    try:
+        total_px = h.shape[0] * h.shape[1]
+        min_area_px = int(total_px * 0.01 / 100.0)  # 0.01% of pixels
+        mask = _postprocess_water_mask(mask, keep_components=2, min_area_px=min_area_px)
+    except Exception:
+        pass
+
+    return mask
+
+
+def _save_water_mask(mask, path: Path) -> None:
+    import numpy as np
+
+    h, w = mask.shape
+    img = np.zeros((h, w, 4), dtype=np.uint8)
+    img[:, :, 3] = 255
+    img[mask, 0:3] = (0, 0, 255)
+    _save_image(img, path)
+
+
+def render_sunrise_to_noon_sequence(
+    *,
+    dem_path: Path,
+    hdr_path: Path,
+    output_dir: Path,
+    size: tuple[int, int] = (320, 180),
+    steps: int = 4,
+) -> list[Path]:
+    """Render a short sunrise-to-noon sequence using RendererConfig.
+
+    This helper:
+    - Loads a DEM via forge3d.io.load_dem
+    - Builds RendererConfig with sky + volumetric overrides per frame
+    - Uses TerrainRenderer when GPU/native terrain types are available
+      and falls back to the high-level Renderer triangle path otherwise.
+
+    The resolution and step count are intentionally small so tests can
+    exercise this path without heavy GPU requirements.
+    """
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    dem = _load_dem(dem_path)
+    heightmap_array = getattr(dem, "data", None)
+    if heightmap_array is None:
+        raise SystemExit("DEM object does not expose a .data array")
+
+    # Normalize domain and colormap similarly to main(), but at smaller size.
+    domain = _infer_domain(dem, DEFAULT_DOMAIN)
+    domain = (float(domain[0]), float(domain[1]))
+    colormap = _build_colormap(domain, colormap_name="viridis")
+
+    # RendererConfig-driven sky + volumetric overrides shared across frames.
+    base_overrides: dict[str, Any] = {
+        "sky": "hosek-wilkie",
+        "hdr": str(hdr_path),
+        "gi": ["ibl"],
+        "volumetric": {
+            "density": 0.03,
+            "phase": "hg",  # normalized to "henyey-greenstein"
+            "g": 0.7,
+            "mode": "raymarch",
+            "max_steps": 48,
+        },
+    }
+
+    # Detect whether the native terrain stack is available.
+    use_native = bool(f3d.has_gpu()) and all(
+        hasattr(f3d, name)
+        for name in (
+            "Session",
+            "TerrainRenderer",
+            "MaterialSet",
+            "IBL",
+            "TerrainRenderParams",
+        )
+    )
+
+    sess = None
+    renderer_native = None
+    materials = None
+    ibl = None
+
+    if use_native:
+        sess = f3d.Session(window=False)
+        renderer_native = f3d.TerrainRenderer(sess)
+        materials = f3d.MaterialSet.terrain_default(
+            triplanar_scale=6.0,
+            normal_strength=1.0,
+            blend_sharpness=4.0,
+        )
+        ibl = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
+        ibl.set_base_resolution(256)
+
+    # Sun elevation sweep from near-horizon to higher noon position.
+    if steps <= 1:
+        sun_elevations: list[float] = [30.0]
+    else:
+        import numpy as np
+
+        sun_elevations = np.linspace(5.0, 60.0, int(steps), dtype=float).tolist()
+
+    azimuth_deg = 135.0
+    width, height = int(size[0]), int(size[1])
+    outputs: list[Path] = []
+
+    for idx, elev in enumerate(sun_elevations):
+        sun_dir = _sun_direction_from_angles(azimuth_deg, float(elev))
+
+        # Build per-frame RendererConfig using CLI-style overrides.
+        overrides = dict(base_overrides)
+        overrides["light"] = [
+            {
+                "type": "directional",
+                "direction": list(sun_dir),
+                "intensity": 5.0,
+                "color": [1.0, 0.97, 0.94],
+            }
+        ]
+
+        cfg = load_renderer_config(None, overrides)
+
+        if use_native and sess is not None and renderer_native is not None and materials is not None and ibl is not None:
+            ibl_enabled = "ibl" in cfg.gi.modes
+            params = _build_params(
+                size=(width, height),
+                render_scale=1.0,
+                msaa=1,
+                z_scale=1.0,
+                exposure=float(cfg.lighting.exposure),
+                domain=domain,
+                colormap=colormap,
+                albedo_mode="mix",
+                colormap_strength=0.5,
+                ibl_enabled=ibl_enabled,
+                light_azimuth_deg=azimuth_deg,
+                light_elevation_deg=elev,
+            )
+
+            frame = renderer_native.render_terrain_pbr_pom(
+                material_set=materials,
+                env_maps=ibl if ibl_enabled else None,
+                params=params,
+                heightmap=heightmap_array,
+                target=None,
+            )
+            rgba = frame.to_numpy()
+        else:
+            # CPU-friendly fallback using the high-level Renderer.
+            renderer_fallback = f3d.Renderer(width, height, config=cfg)
+            rgba = renderer_fallback.render_triangle_rgba()
+
+        out_path = output_dir / f"terrain_sunrise_{idx:02d}.png"
+        _save_image(rgba, out_path)
+        outputs.append(out_path)
+
+    return outputs
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Render a forge3d PBR terrain from a GeoTIFF DEM."
@@ -470,6 +712,12 @@ def _parse_args() -> argparse.Namespace:
         help="Directory used to persist precomputed IBL results (.iblcache files).",
     )
     parser.add_argument(
+        "--ibl-intensity",
+        type=float,
+        default=1.0,
+        help="IBL intensity multiplier for environment lighting (default: 1.0).",
+    )
+    parser.add_argument(
         "--size",
         type=int,
         nargs=2,
@@ -495,6 +743,24 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=1.5,
         help="Vertical exaggeration factor.",
+    )
+    parser.add_argument(
+        "--cam-radius",
+        type=float,
+        default=1200.0,
+        help="Camera radius from target point (default: 1200.0).",
+    )
+    parser.add_argument(
+        "--cam-phi",
+        type=float,
+        default=135.0,
+        help="Camera azimuth angle in degrees (default: 135.0).",
+    )
+    parser.add_argument(
+        "--cam-theta",
+        type=float,
+        default=45.0,
+        help="Camera elevation angle in degrees (default: 45.0).",
     )
     parser.add_argument(
         "--exposure",
@@ -628,6 +894,28 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print light buffer debug info after setting lights (P1-09).",
     )
+    parser.add_argument(
+        "--water-detect",
+        action="store_true",
+        help="Detect water from DEM using a simple slope+height heuristic and write a mask PNG.",
+    )
+    parser.add_argument(
+        "--water-level",
+        type=float,
+        default=0.35,
+        help="Normalized water height in [0,1] relative to inferred DEM domain (default: 0.35).",
+    )
+    parser.add_argument(
+        "--water-slope",
+        type=float,
+        default=0.02,
+        help="Slope threshold in normalized units; flatter and below water-level is considered water.",
+    )
+    parser.add_argument(
+        "--water-mask-output",
+        type=Path,
+        help="Optional output path for water mask PNG (defaults to <output> with _water suffix).",
+    )
     return parser.parse_args()
 
 
@@ -685,6 +973,20 @@ def main() -> int:
 
     colormap = _build_colormap(domain, colormap_name=args.colormap)
 
+    water_mask = None
+    if getattr(args, "water_detect", False):
+        water_mask = _detect_water_mask(
+            heightmap_array,
+            domain,
+            level=float(args.water_level),
+            slope_threshold=float(args.water_slope),
+            spacing=getattr(dem, "resolution", (1.0, 1.0)),
+        )
+        mask_path = args.water_mask_output
+        if mask_path is None:
+            mask_path = args.output.with_name(args.output.stem + "_water.png")
+        _save_water_mask(water_mask, mask_path)
+
     materials = f3d.MaterialSet.terrain_default(
         triplanar_scale=6.0,
         normal_strength=1.0,
@@ -706,25 +1008,20 @@ def main() -> int:
         if env_hdr is not None:
             hdr_path_value = Path(env_hdr)
 
-    # Check if IBL should be enabled based on --gi flag
-    gi_modes = []
-    if args.gi:
-        gi_modes = [item.strip() for item in args.gi.split(",") if item.strip()]
-    ibl_enabled = "ibl" in gi_modes
+    # Always create IBL from the resolved HDR; terrain demo relies on it for
+    # environment lighting regardless of GI modes used by the path tracer.
+    ibl = f3d.IBL.from_hdr(
+        str(hdr_path_value),
+        intensity=float(args.ibl_intensity),
+        rotate_deg=0.0,
+    )
+    if args.ibl_res <= 0:
+        raise SystemExit("Error: --ibl-res must be greater than zero.")
+    ibl.set_base_resolution(int(args.ibl_res))
+    if args.ibl_cache is not None:
+        ibl.set_cache_dir(str(args.ibl_cache))
 
-    # Only create IBL if it's enabled via --gi ibl
-    ibl = None
-    if ibl_enabled:
-        ibl = f3d.IBL.from_hdr(
-            str(hdr_path_value),
-            intensity=1.0,
-            rotate_deg=0.0,
-        )
-        if args.ibl_res <= 0:
-            raise SystemExit("Error: --ibl-res must be greater than zero.")
-        ibl.set_base_resolution(int(args.ibl_res))
-        if args.ibl_cache is not None:
-            ibl.set_cache_dir(str(args.ibl_cache))
+    ibl_enabled = True
 
     params = _build_params(
         size=(int(args.size[0]), int(args.size[1])),
@@ -737,6 +1034,10 @@ def main() -> int:
         albedo_mode=args.albedo_mode,
         colormap_strength=float(args.colormap_strength),
         ibl_enabled=ibl_enabled,
+        ibl_intensity=float(args.ibl_intensity),
+        cam_radius=float(args.cam_radius),
+        cam_phi_deg=float(args.cam_phi),
+        cam_theta_deg=float(args.cam_theta),
     )
 
     renderer = f3d.TerrainRenderer(sess)
@@ -758,7 +1059,11 @@ def main() -> int:
             if hasattr(light, "intensity") and light.intensity is not None:
                 light_dict["intensity"] = light.intensity
             if hasattr(light, "color") and light.color is not None:
-                light_dict["color"] = light.color
+                # Normalize to list for TerrainRenderer LightSettings expectations
+                try:
+                    light_dict["color"] = list(light.color)
+                except TypeError:
+                    light_dict["color"] = light.color
             if hasattr(light, "range") and light.range is not None:
                 light_dict["range"] = light.range
             if hasattr(light, "cone_angle") and light.cone_angle is not None:

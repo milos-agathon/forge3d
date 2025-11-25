@@ -191,10 +191,12 @@ def test_flat_override_merge() -> None:
 def test_mixed_nested_and_flat_overrides() -> None:
     """Test that flat kwargs override nested config."""
     renderer = f3d.Renderer(
-        32, 32,
+        32,
+        32,
         config={"shading": {"brdf": "lambert"}},
         cascades=4,  # Flat override
         gi=["ibl"],  # Flat override
+        hdr="env.hdr",  # Satisfy IBL requirement for validation
     )
     config = renderer.get_config()
     assert config["shading"]["brdf"] == "lambert"  # From nested
@@ -525,11 +527,13 @@ def test_config_to_dict_roundtrip() -> None:
 def test_config_json_roundtrip(tmp_path: Path) -> None:
     """Test that config can be saved to JSON and loaded back."""
     renderer1 = f3d.Renderer(
-        32, 32,
+        32,
+        32,
         brdf="disney",
         shadows="pcss",
         shadow_map_res=1024,
         gi=["ibl", "ssao"],
+        hdr="env.hdr",  # Provide HDR so IBL validation passes
     )
     config1 = renderer1.get_config()
     

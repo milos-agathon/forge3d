@@ -35,6 +35,27 @@ struct CameraUniforms {
     _pad: vec3<f32>,
 }
 
+struct FogShadowCascade {
+    light_projection: mat4x4<f32>,  // Light-space projection matrix
+    far_distance: f32,              // Far plane distance
+    near_distance: f32,             // Near plane distance
+    texel_size: f32,                // Texel size in world space
+    _padding: f32,
+}
+
+struct FogCsmUniforms {
+    light_direction: vec4<f32>,     // Light direction in world space
+    light_view: mat4x4<f32>,        // Light view matrix
+    cascades: array<FogShadowCascade, 4>, // Shadow cascades (4 total)
+    cascade_count: u32,             // Number of active cascades
+    pcf_kernel_size: u32,           // Unused in fog (reserved for future PCF)
+    depth_bias: f32,                // Depth bias (matches CPU layout)
+    slope_bias: f32,                // Slope bias (matches CPU layout)
+    shadow_map_size: f32,           // Shadow map resolution
+    debug_mode: u32,                // Debug mode (unused in fog)
+    _padding: vec2<f32>,            // Padding for alignment
+}
+
 const PI: f32 = 3.14159265359;
 
 @group(0) @binding(0) var<uniform> params: VolumetricParams;
@@ -42,10 +63,10 @@ const PI: f32 = 3.14159265359;
 @group(0) @binding(2) var depth_texture: texture_2d<f32>;
 @group(0) @binding(3) var depth_sampler: sampler;
 
-// Shadow map for god-rays
-@group(1) @binding(0) var shadow_map: texture_depth_2d;
+// Shadow map for god-rays (cascaded shadow map atlas)
+@group(1) @binding(0) var shadow_maps: texture_depth_2d_array;
 @group(1) @binding(1) var shadow_sampler: sampler_comparison;
-@group(1) @binding(2) var<uniform> shadow_matrix: mat4x4<f32>;
+@group(1) @binding(2) var<uniform> fog_csm: FogCsmUniforms;
 
 // Output and history
 @group(2) @binding(0) var output_fog: texture_storage_2d<rgba16float, write>;
@@ -97,12 +118,97 @@ fn fog_density_at_height(world_pos: vec3<f32>) -> f32 {
 // Shadow sampling for god-rays
 // ============================================================================
 
+fn fog_select_cascade(view_depth: f32) -> u32 {
+    var cascade_idx = fog_csm.cascade_count - 1u;
+
+    for (var i: u32 = 0u; i < fog_csm.cascade_count; i = i + 1u) {
+        if (view_depth <= fog_csm.cascades[i].far_distance) {
+            cascade_idx = i;
+            break;
+        }
+    }
+
+    return cascade_idx;
+}
+
 fn sample_shadow(world_pos: vec3<f32>) -> f32 {
     // TODO P6: textureSampleCompare requires derivatives and is forbidden in compute shaders.
     // Implement compute-compatible shadow sampling using textureLoad with manual depth comparison,
     // or render volumetric shadows in a fragment shader pass.
     // For now, disable shadows to unblock viewer launch.
-    return 1.0;
+
+    // If shadows are disabled via params, treat all samples as fully lit.
+    if (params.use_shadows == 0u) {
+        return 1.0;
+    }
+
+    // Compute view-space depth for cascade selection.
+    let view_pos = camera.view * vec4<f32>(world_pos, 1.0);
+    let view_depth = -view_pos.z;
+
+    if (view_depth <= 0.0) {
+        return 1.0;
+    }
+
+    let cascade_idx = fog_select_cascade(view_depth);
+
+    // Transform world position into light clip space and NDC for the selected cascade.
+    let light_clip = fog_csm.cascades[cascade_idx].light_projection * vec4<f32>(world_pos, 1.0);
+    let light_ndc = light_clip.xyz / light_clip.w;
+
+    // Map NDC [-1, 1] to UV [0, 1] and depth [0, 1].
+    let uv = light_ndc.xy * 0.5 + vec2<f32>(0.5, 0.5);
+    let depth = light_ndc.z * 0.5 + 0.5;
+
+    // Outside the shadow frustum: treat as lit.
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+        return 1.0;
+    }
+
+    let dims_u = textureDimensions(shadow_maps);
+    let dims_i = vec2<i32>(i32(dims_u.x), i32(dims_u.y));
+    let dims_f = vec2<f32>(f32(dims_u.x), f32(dims_u.y));
+    let texel = uv * dims_f;
+    let base_coord = vec2<i32>(
+        i32(clamp(texel.x, 0.0, dims_f.x - 1.0)),
+        i32(clamp(texel.y, 0.0, dims_f.y - 1.0)),
+    );
+
+    // Depth bias scaled per-cascade to reduce peter panning.
+    let cascade = fog_csm.cascades[cascade_idx];
+    let cascade_texel_size = cascade.texel_size;
+    let max_bias = cascade_texel_size * 3.0;
+    let bias = min(fog_csm.depth_bias, max_bias);
+    let receiver_depth = clamp(depth - bias, 0.0, 1.0);
+
+    // Kernel size for PCF. When <=1, fall back to single-sample hard shadow.
+    let kernel_size_u = max(fog_csm.pcf_kernel_size, 1u);
+    let kernel_size = i32(kernel_size_u);
+
+    if (kernel_size <= 1) {
+        let shadow_depth = textureLoad(shadow_maps, base_coord, i32(cascade_idx)).r;
+        let lit = receiver_depth <= shadow_depth;
+        return select(0.0, 1.0, lit);
+    }
+
+    let half_kernel = kernel_size / 2;
+    var shadow_sum = 0.0;
+    var sample_count = 0.0;
+
+    for (var dx = -half_kernel; dx <= half_kernel; dx = dx + 1) {
+        for (var dy = -half_kernel; dy <= half_kernel; dy = dy + 1) {
+            let sx = clamp(base_coord.x + dx, 0, dims_i.x - 1);
+            let sy = clamp(base_coord.y + dy, 0, dims_i.y - 1);
+            let sample_coord = vec2<i32>(sx, sy);
+            let sample_depth = textureLoad(shadow_maps, sample_coord, i32(cascade_idx)).r;
+            let lit = receiver_depth <= sample_depth;
+            shadow_sum = shadow_sum + select(0.0, 1.0, lit);
+            sample_count = sample_count + 1.0;
+        }
+    }
+
+    // 1.0 = fully lit, 0.0 = fully occluded.
+    return shadow_sum / sample_count;
 }
 
 // ============================================================================
