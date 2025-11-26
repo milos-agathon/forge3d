@@ -5,9 +5,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Sequence
 
 import numpy as np
+from pathlib import Path
 
 
 @dataclass
@@ -315,6 +316,177 @@ class TerrainRenderParams:
 
             # Store normalized LUT back on the instance for downstream consumption
             self.height_curve_lut = lut
+
+
+def load_height_curve_lut(path: str | Path) -> np.ndarray:
+    p = Path(path)
+    if not p.exists():
+        raise ValueError(f"Height curve LUT not found: {p}")
+
+    try:
+        data = np.load(p)
+    except Exception:
+        try:
+            data = np.loadtxt(p)
+        except Exception as exc:
+            raise ValueError(f"Failed to load height curve LUT from {p}: {exc}")
+
+    data = np.asarray(data, dtype=np.float32).reshape(-1)
+    if data.shape[0] != 256:
+        raise ValueError(f"height_curve_lut must contain 256 entries, found {data.shape[0]} in {p}")
+    if not np.isfinite(data).all():
+        raise ValueError("height_curve_lut must contain finite values")
+    if np.any(data < 0.0) or np.any(data > 1.0):
+        raise ValueError("height_curve_lut values must lie within [0, 1]")
+    return data
+
+
+def make_terrain_params_config(
+    *,
+    size_px: Tuple[int, int],
+    render_scale: float,
+    msaa_samples: int,
+    z_scale: float,
+    exposure: float,
+    domain: Tuple[float, float],
+    albedo_mode: str = "mix",
+    colormap_strength: float = 0.5,
+    ibl_enabled: bool = True,
+    light_azimuth_deg: float = 135.0,
+    light_elevation_deg: float = 35.0,
+    sun_intensity: float = 3.0,
+    sun_color: Optional[Sequence[float]] = None,
+    ibl_intensity: float = 1.0,
+    cam_radius: float = 1200.0,
+    cam_phi_deg: float = 135.0,
+    cam_theta_deg: float = 45.0,
+    height_curve_mode: str = "linear",
+    height_curve_strength: float = 0.0,
+    height_curve_power: float = 1.0,
+    height_curve_lut: Optional[np.ndarray] = None,
+    shadows: Optional[ShadowSettings] = None,
+    triplanar: Optional[TriplanarSettings] = None,
+    pom: Optional[PomSettings] = None,
+    lod: Optional[LodSettings] = None,
+    sampling: Optional[SamplingSettings] = None,
+    clamp: Optional[ClampSettings] = None,
+    overlays: Optional[list] = None,
+) -> TerrainRenderParams:
+    light_color = [1.0, 1.0, 1.0]
+    if sun_color is not None:
+        try:
+            light_color = [
+                float(sun_color[0]),
+                float(sun_color[1]),
+                float(sun_color[2]),
+            ]
+        except (TypeError, IndexError, ValueError):
+            light_color = [1.0, 1.0, 1.0]
+    light_intensity = float(sun_intensity)
+
+    if shadows is None:
+        shadows = ShadowSettings(
+            enabled=True,
+            technique="PCSS",
+            resolution=4096,
+            cascades=3,
+            max_distance=4000.0,
+            softness=1.5,
+            intensity=0.8,
+            slope_scale_bias=0.5,
+            depth_bias=0.002,
+            normal_bias=0.5,
+            min_variance=1e-4,
+            light_bleed_reduction=0.5,
+            evsm_exponent=40.0,
+            fade_start=1.0,
+        )
+
+    if triplanar is None:
+        triplanar = TriplanarSettings(
+            scale=6.0,
+            blend_sharpness=4.0,
+            normal_strength=1.0,
+        )
+
+    if pom is None:
+        pom = PomSettings(
+            enabled=True,
+            mode="Occlusion",
+            scale=0.04,
+            min_steps=12,
+            max_steps=40,
+            refine_steps=4,
+            shadow=True,
+            occlusion=True,
+        )
+
+    if lod is None:
+        lod = LodSettings(level=0, bias=0.0, lod0_bias=-0.5)
+
+    if sampling is None:
+        sampling = SamplingSettings(
+            mag_filter="Linear",
+            min_filter="Linear",
+            mip_filter="Linear",
+            anisotropy=8,
+            address_u="Repeat",
+            address_v="Repeat",
+            address_w="Repeat",
+        )
+
+    if clamp is None:
+        clamp = ClampSettings(
+            height_range=(float(domain[0]), float(domain[1])),
+            slope_range=(0.04, 1.0),
+            ambient_range=(0.0, 1.0),
+            shadow_range=(0.0, 1.0),
+            occlusion_range=(0.0, 1.0),
+        )
+
+    if overlays is None:
+        overlays = []
+
+    return TerrainRenderParams(
+        size_px=size_px,
+        render_scale=render_scale,
+        msaa_samples=msaa_samples,
+        z_scale=z_scale,
+        cam_target=[0.0, 0.0, 0.0],
+        cam_radius=float(cam_radius),
+        cam_phi_deg=float(cam_phi_deg),
+        cam_theta_deg=float(cam_theta_deg),
+        cam_gamma_deg=0.0,
+        fov_y_deg=55.0,
+        clip=(0.1, 6000.0),
+        light=LightSettings(
+            light_type="Directional",
+            azimuth_deg=float(light_azimuth_deg),
+            elevation_deg=float(light_elevation_deg),
+            intensity=light_intensity,
+            color=light_color,
+        ),
+        ibl=IblSettings(
+            enabled=ibl_enabled,
+            intensity=float(ibl_intensity),
+            rotation_deg=0.0,
+        ),
+        shadows=shadows,
+        triplanar=triplanar,
+        pom=pom,
+        lod=lod,
+        sampling=sampling,
+        clamp=clamp,
+        overlays=overlays,
+        exposure=exposure,
+        gamma=2.2,
+        albedo_mode=albedo_mode,
+        colormap_strength=colormap_strength,
+        height_curve_mode=height_curve_mode,
+        height_curve_strength=height_curve_strength,
+        height_curve_power=height_curve_power,
+        height_curve_lut=height_curve_lut,
+    )
 
 
 __all__ = [

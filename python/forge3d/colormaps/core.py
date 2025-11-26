@@ -50,3 +50,73 @@ class Colormap:
 
 def from_stops(name: str, stops, n: int = 256) -> Colormap:
     return Colormap(name=name, rgba=_interp_stops(stops, n=n))
+
+
+def interpolate_hex_colors(colors, size: int):
+    """Interpolate a list of hex colors to a target length using linear RGB."""
+
+    if size <= 0 or len(colors) < 2:
+        return list(colors)
+
+    rgb_colors = []
+    for hex_color in colors:
+        h = str(hex_color).lstrip("#")
+        if len(h) != 6:
+            continue
+        try:
+            r = int(h[0:2], 16) / 255.0
+            g = int(h[2:4], 16) / 255.0
+            b = int(h[4:6], 16) / 255.0
+        except ValueError:
+            continue
+        rgb_colors.append((float(r), float(g), float(b)))
+
+    if len(rgb_colors) < 2:
+        return list(colors)
+
+    indices = np.linspace(0, len(rgb_colors) - 1, int(size))
+    interpolated = []
+    for idx in indices:
+        i0 = int(np.floor(idx))
+        i1 = min(i0 + 1, len(rgb_colors) - 1)
+        t = float(idx - i0)
+
+        r = rgb_colors[i0][0] * (1.0 - t) + rgb_colors[i1][0] * t
+        g = rgb_colors[i0][1] * (1.0 - t) + rgb_colors[i1][1] * t
+        b = rgb_colors[i0][2] * (1.0 - t) + rgb_colors[i1][2] * t
+
+        interpolated.append(f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}")
+
+    return interpolated
+
+
+def elevation_stops_from_hex_colors(domain, colors, *, heightmap=None, q_lo: float = 0.0, q_hi: float = 1.0):
+    """Map a sequence of hex colors across a DEM elevation domain."""
+
+    colors = [str(c) for c in colors]
+    if not colors:
+        return []
+
+    # Optional quantile placement when a heightmap is available.
+    if heightmap is not None:
+        data = np.asarray(heightmap, dtype=np.float32).reshape(-1)
+        finite = data[np.isfinite(data)]
+        if finite.size > 0:
+            qs = np.linspace(q_lo, q_hi, len(colors))
+            elevs = np.quantile(finite, qs)
+            return [(float(e), c) for e, c in zip(elevs, colors)]
+
+    # Fallback: evenly spread colors across the numeric domain.
+    domain_min, domain_max = float(domain[0]), float(domain[1])
+    domain_range = domain_max - domain_min
+    n = len(colors)
+    if n == 1 or domain_range <= 0.0:
+        return [(domain_min, colors[0])]
+
+    stops = []
+    for i, c in enumerate(colors):
+        t = i / (n - 1)
+        elevation = domain_min + t * domain_range
+        stops.append((elevation, c))
+
+    return stops

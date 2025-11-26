@@ -700,6 +700,108 @@ Catching Validation Errors
 
     renderer = f3d.Renderer(1920, 1080, config=config)
 
+Terrain & DEM Helpers
+---------------------
+
+The following helpers make it easier to go from a raster DEM to a terrain render
+using the same building blocks as :mod:`examples/terrain_demo.py`:
+
+* **Domain inference and robust ranges** (:mod:`forge3d.io`)::
+
+      import forge3d as f3d
+      from forge3d import io
+
+      dem = io.load_dem("assets/Gore_Range_Albers_1m.tif")
+
+      # Prefer metadata when available, otherwise fall back to a safe default
+      domain_meta = io.infer_dem_domain(dem, fallback=(200.0, 2200.0))
+
+      # Clamp to robust percentiles to ignore extreme outliers
+      domain = io.robust_dem_domain(
+          dem.data,
+          q_lo=0.02,
+          q_hi=0.98,
+          fallback=domain_meta,
+      )
+
+* **DEM-aware colormap stops** (:mod:`forge3d.colormaps.core`)::
+
+      from forge3d.colormaps.core import (
+          interpolate_hex_colors,
+          elevation_stops_from_hex_colors,
+      )
+
+      # Custom terrain palette in hex, optionally interpolated to many stops
+      hex_colors = ["#e7d8a2", "#c5a06e", "#995f57", "#4a3c37"]
+      hex_dense = interpolate_hex_colors(hex_colors, size=1024)
+
+      # Place colors across the DEM elevation range (optionally quantile-based)
+      stops = elevation_stops_from_hex_colors(
+          domain,
+          hex_dense,
+          heightmap=dem.data,
+          q_lo=0.02,
+          q_hi=0.98,
+      )
+
+      # Convert to a Colormap1D used by the terrain renderer
+      cm1d = f3d.Colormap1D.from_stops(stops=stops, domain=domain)
+
+* **Terrain parameter config and height-curve LUT** (:mod:`forge3d.terrain_params`)::
+
+      from forge3d.terrain_params import load_height_curve_lut, make_terrain_params_config
+
+      lut = load_height_curve_lut("assets/height_curve.npy")  # 256 values in [0, 1]
+
+      params_cfg = make_terrain_params_config(
+          size_px=(1920, 1080),
+          render_scale=1.0,
+          msaa_samples=4,
+          z_scale=2.0,
+          exposure=1.0,
+          domain=domain,
+          albedo_mode="mix",
+          colormap_strength=0.5,
+          ibl_enabled=True,
+          light_azimuth_deg=135.0,
+          light_elevation_deg=35.0,
+          sun_intensity=3.0,
+          ibl_intensity=1.0,
+          cam_radius=1000.0,
+          cam_phi_deg=135.0,
+          cam_theta_deg=45.0,
+          height_curve_mode="smoothstep",
+          height_curve_strength=0.6,
+          height_curve_power=1.0,
+          height_curve_lut=lut,
+          overlays=[
+              f3d.OverlayLayer.from_colormap1d(
+                  cm1d,
+                  strength=1.0,
+                  offset=0.0,
+                  blend_mode="Alpha",
+                  domain=domain,
+              )
+          ],
+      )
+
+* **DEM water mask and sun direction** (:mod:`forge3d.render`, :mod:`forge3d.lighting`)::
+
+      from forge3d.render import detect_dem_water_mask
+      from forge3d.lighting import sun_direction_from_angles
+
+      # Water detection in DEM space (normalized height + slope heuristic)
+      water_mask = detect_dem_water_mask(
+          dem.data,
+          domain,
+          level_normalized=0.35,
+          slope_threshold=0.02,
+          spacing=dem.resolution,
+      )
+
+      # Convert sun azimuth/elevation to a unit direction vector
+      sun_dir = sun_direction_from_angles(azimuth_deg=135.0, elevation_deg=35.0)
+
 See Also
 --------
 

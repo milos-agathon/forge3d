@@ -39,6 +39,15 @@ def _to_float_array(x: Union[float, np.ndarray]) -> np.ndarray:
     return arr
 
 
+def sun_direction_from_angles(azimuth_deg: float, elevation_deg: float) -> Tuple[float, float, float]:
+    az = math.radians(float(azimuth_deg))
+    el = math.radians(float(elevation_deg))
+    x = math.cos(el) * math.cos(az)
+    y = math.sin(el)
+    z = math.cos(el) * math.sin(az)
+    return (float(x), float(y), float(z))
+
+
 def set_exposure_stops(stops: float) -> float:
     """Set exposure in stops and return the linear scale (2**stops)."""
     global _EXPOSURE_STOPS, _EXPOSURE_SCALE

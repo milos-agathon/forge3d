@@ -113,6 +113,102 @@ def calculate_dem_stats(data: np.ndarray, nodata: Optional[float] = None) -> Dic
     return stats
 
 
+def robust_dem_domain(
+    heightmap: np.ndarray,
+    *,
+    q_lo: float = 0.0,
+    q_hi: float = 1.0,
+    fallback: Optional[Tuple[float, float]] = None,
+) -> Tuple[float, float]:
+    """Compute a percentile-clamped domain from finite DEM samples.
+
+    This mirrors the terrain demo's robust domain computation but is exposed as a
+    reusable helper for any DEM-like heightmap array.
+    """
+
+    data = np.asarray(heightmap, dtype=np.float32).reshape(-1)
+    finite = data[np.isfinite(data)]
+    if finite.size == 0:
+        if fallback is not None:
+            return fallback
+        return (0.0, 1.0)
+
+    lo = float(np.quantile(finite, q_lo))
+    hi = float(np.quantile(finite, q_hi))
+    if not hi > lo:
+        if fallback is not None:
+            return fallback
+        return (0.0, 1.0)
+
+    return (lo, hi)
+
+
+def infer_dem_domain(
+    dem: Any,
+    *,
+    fallback: Tuple[float, float] = (0.0, 1.0),
+) -> Tuple[float, float]:
+    """Infer DEM domain from common metadata fields on DEM-like objects.
+
+    Tries attributes like ``domain``, ``elevation_range``, ``height_range``, or a
+    callable ``stats()`` that returns a mapping with ``min``/``max`` keys.
+    """
+
+    candidates = (
+        "domain",
+        "elevation_range",
+        "height_range",
+        "bounds",
+        "range",
+    )
+    for name in candidates:
+        value = getattr(dem, name, None)
+        if isinstance(value, (tuple, list)) and len(value) == 2:
+            try:
+                lo = float(value[0])
+                hi = float(value[1])
+            except Exception:
+                continue
+            if hi > lo:
+                return (lo, hi)
+
+    min_keys = ("min_elevation", "min_height", "minimum")
+    max_keys = ("max_elevation", "max_height", "maximum")
+    for min_name in min_keys:
+        for max_name in max_keys:
+            lo_val = getattr(dem, min_name, None)
+            hi_val = getattr(dem, max_name, None)
+            if lo_val is None or hi_val is None:
+                continue
+            try:
+                lo = float(lo_val)
+                hi = float(hi_val)
+            except Exception:
+                continue
+            if hi > lo:
+                return (lo, hi)
+
+    stats_fn = getattr(dem, "stats", None)
+    if callable(stats_fn):
+        try:
+            result = stats_fn()
+        except Exception:
+            result = None
+        if isinstance(result, dict):
+            lo_val = result.get("min")
+            hi_val = result.get("max")
+            try:
+                lo = float(lo_val)
+                hi = float(hi_val)
+            except Exception:
+                lo = None  # type: ignore[assignment]
+                hi = None  # type: ignore[assignment]
+            if lo is not None and hi is not None and hi > lo:
+                return (lo, hi)
+
+    return fallback
+
+
 def fill_nodata(data: np.ndarray, nodata: float, method: str = "nearest") -> np.ndarray:
     """Fill nodata values in DEM using interpolation.
 

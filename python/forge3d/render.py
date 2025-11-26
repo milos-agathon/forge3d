@@ -1437,6 +1437,55 @@ def _compute_slope_deg(hm: np.ndarray, spacing: tuple[float, float]) -> np.ndarr
     return (np.degrees(np.arctan(slope))).astype(np.float32)
 
 
+def detect_dem_water_mask(
+    heightmap: np.ndarray,
+    domain: tuple[float, float],
+    *,
+    level_normalized: float = 0.35,
+    slope_threshold: float = 0.02,
+    spacing: tuple[float, float] | None = None,
+    base_min_area_pct: float = 0.01,
+    keep_components: int = 2,
+) -> np.ndarray:
+    h = np.asarray(heightmap, dtype=np.float32)
+    lo, hi = float(domain[0]), float(domain[1])
+    rng = max(hi - lo, 1e-6)
+
+    level_abs = lo + float(level_normalized) * rng
+
+    spacing_use = spacing if spacing is not None else (1.0, 1.0)
+    try:
+        mask = _detect_water_mask_via_scene(
+            h,
+            spacing=spacing_use,
+            level=level_abs,
+            method="flat",
+            smooth_iters=1,
+        )
+        mask = np.asarray(mask, dtype=bool)
+    except Exception:
+        mask = h <= level_abs
+
+    if not mask.size:
+        return mask
+
+    h_norm = np.clip((h - lo) / rng, 0.0, 1.0)
+    gy, gx = np.gradient(h_norm)
+    grad = np.sqrt(gx * gx + gy * gy)
+    flat = grad <= float(slope_threshold)
+    low = h_norm <= float(level_normalized)
+    mask &= (flat & low)
+
+    try:
+        total_px = h.shape[0] * h.shape[1]
+        min_area_px = int(total_px * float(base_min_area_pct) / 100.0)
+        mask = _postprocess_water_mask(mask, keep_components=int(max(1, keep_components)), min_area_px=min_area_px)
+    except Exception:
+        pass
+
+    return mask
+
+
 def _apply_water_overlay(
     hm: np.ndarray,
     out_rgb: np.ndarray,
