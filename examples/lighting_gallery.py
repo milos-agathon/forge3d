@@ -197,7 +197,7 @@ def main():
     parser.add_argument(
         "--zoom",
         type=float,
-        default=0.75,
+        default=0.085,
         help="Camera zoom factor (<1 closer, >1 farther; default: 0.75)",
     )
     parser.add_argument("--save-tiles", action="store_true", help="Also save individual tile PNGs")

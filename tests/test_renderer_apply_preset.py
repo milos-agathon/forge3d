@@ -54,7 +54,46 @@ def test_apply_preset_merge_and_overrides(preset_name, flat_overrides, nested_ov
         assert _get(cfg, dotted) == val
 
 
-def test_apply_preset_invalid_name_raises():
+def test_apply_preset_invalid_name_does_not_mutate_config():
     r = f3d.Renderer(64, 32)
-    with pytest.raises(Exception):
+    before = r.get_config()
+    with pytest.raises(ValueError):
         r.apply_preset("not_a_preset")
+    after = r.get_config()
+    assert after == before
+
+
+def test_apply_preset_merge_order_baseline_preset_overrides():
+    r = f3d.Renderer(
+        64,
+        64,
+        config={
+            "lighting": {"exposure": 0.5},
+            "gi": {"modes": ["ssao"], "ambient_occlusion_strength": 0.7},
+        },
+    )
+    r.apply_preset(
+        "studio_pbr",
+        shading={"brdf": "toon"},
+        cascades=2,
+    )
+    cfg = r.get_config()
+    assert cfg["lighting"]["exposure"] == 1.0
+    assert cfg["shading"]["brdf"] == "toon"
+    assert cfg["shadows"]["cascades"] == 2
+    assert cfg["gi"]["modes"] == []
+    assert cfg["gi"]["ambient_occlusion_strength"] == 0.7
+
+
+def test_apply_preset_invalid_overrides_do_not_mutate_config():
+    r = f3d.Renderer(64, 32)
+    before = r.get_config()
+    with pytest.raises(ValueError):
+        r.apply_preset("outdoor_sun", cascades=0)
+    after_flat = r.get_config()
+    assert after_flat == before
+
+    with pytest.raises(ValueError):
+        r.apply_preset("outdoor_sun", shadows={"map_size": 1000})
+    after_nested = r.get_config()
+    assert after_nested == before

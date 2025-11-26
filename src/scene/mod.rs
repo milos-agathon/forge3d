@@ -244,7 +244,7 @@ impl SsaoResources {
         // Match ssao.wgsl shader bindings:
         // @group(0) @binding(0) var depth_tex: texture_2d<f32>;
         // @group(0) @binding(1) var normal_tex: texture_2d<f32>;
-        // @group(0) @binding(2) var ssao_output: texture_storage_2d<r16float, write>;
+        // @group(0) @binding(2) var ssao_output: texture_storage_2d<r32float, write>;
         // @group(0) @binding(3) var<uniform> settings: SsaoSettings;
         // @group(0) @binding(4) var<uniform> camera: CameraParams;
         let ssao_bind_group_layout =
@@ -279,7 +279,7 @@ impl SsaoResources {
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::StorageTexture {
                             access: wgpu::StorageTextureAccess::WriteOnly,
-                            format: wgpu::TextureFormat::R16Float,
+                            format: wgpu::TextureFormat::R32Float,
                             view_dimension: wgpu::TextureViewDimension::D2,
                         },
                         count: None,
@@ -335,7 +335,7 @@ impl SsaoResources {
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::StorageTexture {
                             access: wgpu::StorageTextureAccess::WriteOnly,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            format: wgpu::TextureFormat::R32Float,
                             view_dimension: wgpu::TextureViewDimension::D2,
                         },
                         count: None,
@@ -793,7 +793,8 @@ fn create_ssao_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
+        // AO textures are single-channel float; match ssao.wgsl's r32float storage textures.
+        format: wgpu::TextureFormat::R32Float,
         usage: wgpu::TextureUsages::STORAGE_BINDING
             | wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_SRC,

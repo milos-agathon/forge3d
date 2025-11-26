@@ -76,7 +76,7 @@ Presets are a convenient starting point for the gallery scripts:
 
 - ``examples/lighting_gallery.py`` — direct lighting and IBL variants
 - ``examples/shadow_gallery.py`` — Hard, PCF, PCSS, VSM, EVSM, MSM, CSM compared
-- ``examples/ibl_gallery.py`` — native terrain IBL rotation + mesh-tracer sweeps
+- ``examples/ibl_gallery.py`` — BRDF tile-based IBL rotation and roughness/metallic sweeps
 
 API reference
 -------------
@@ -85,8 +85,24 @@ Presets are defined in :mod:`forge3d.presets`::
 
     from forge3d import presets
 
-    presets.available()   # ["studio_pbr", "outdoor_sun", "toon_viz"]
-    presets.get("studio_pbr")  # Mapping compatible with RendererConfig.from_mapping()
+    # Canonical preset keys (no underscores) returned by presets.available()
+    presets.available()   # ["studiopbr", "outdoorsun", "toonviz"]
 
-They cooperate with :func:`forge3d.config.load_renderer_config` and
-:class:`forge3d.Renderer.apply_preset` for end-to-end configuration.
+    # Human-friendly names (with underscores) are accepted via normalization
+    mapping = presets.get("studio_pbr")
+
+    # Mapping is compatible with RendererConfig.from_mapping()
+    from forge3d.config import RendererConfig
+    cfg = RendererConfig.from_mapping(mapping)
+    cfg.validate()
+
+Presets cooperate with :func:`forge3d.config.load_renderer_config` and
+:meth:`forge3d.Renderer.apply_preset` for end-to-end configuration. The
+``Renderer.apply_preset`` helper uses the merge order:
+
+* current renderer config → preset mapping → overrides
+
+Nested overrides (``lighting``, ``shading``, ``shadows``, ``gi``, ``atmosphere``,
+``brdf_override``) are applied as schema dictionaries, while flat override keys
+(``brdf``, ``shadows``, ``cascades``, ``hdr``, etc.) are normalized through
+``load_renderer_config``.

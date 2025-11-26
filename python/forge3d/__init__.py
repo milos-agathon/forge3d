@@ -502,7 +502,7 @@ class Renderer:
         nested: dict[str, Any] = {}
         flat: dict[str, Any] = {}
         for k, v in list(overrides.items()):
-            if k in nested_keys:
+            if k in nested_keys and isinstance(v, Mapping):
                 nested[k] = v
             else:
                 flat[k] = v

@@ -7,17 +7,30 @@ from __future__ import annotations
 import types
 from pathlib import Path
 import importlib.util
+import sys
 
 import numpy as np
 import pytest
 
 
 def _load_module_by_path(path: Path) -> types.ModuleType:
-    spec = importlib.util.spec_from_file_location(path.stem, str(path))
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
-    return mod
+    examples_dir = str(path.parent)
+    added = False
+    if examples_dir not in sys.path:
+        sys.path.insert(0, examples_dir)
+        added = True
+    try:
+        spec = importlib.util.spec_from_file_location(path.stem, str(path))
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+        return mod
+    finally:
+        if added:
+            try:
+                sys.path.remove(examples_dir)
+            except ValueError:
+                pass
 
 
 def _maybe_image_size(path: Path) -> tuple[int, int] | None:
@@ -86,26 +99,46 @@ def test_shadow_gallery_smoke(tmp_path: Path, techniques, tile_size: int, map_re
 @pytest.mark.parametrize("tile_size", [64])
 def test_ibl_gallery_smoke(tmp_path: Path, tile_size: int) -> None:
     repo = Path(__file__).resolve().parents[1]
-    mod = _load_module_by_path(repo / "examples" / "ibl_gallery.py")
+    ibl_path = repo / "examples" / "ibl_gallery.py"
+    try:
+        mod = _load_module_by_path(ibl_path)
+    except SystemExit as exc:
+        msg = str(exc)
+        # IBL gallery is allowed to fail early if M4 helpers are missing; treat as skip.
+        if "m4_generate.py" in msg or "M4 IBL functions" in msg:
+            pytest.skip("m4_generate.py missing; skipping IBL gallery smoke test")
+        raise
+
+    import forge3d as f3d
+
+    # IBL gallery requires the BRDF tile renderer; skip when unavailable.
+    if not f3d.has_gpu() or not hasattr(f3d, "render_brdf_tile_full"):
+        pytest.skip("BRDF tile renderer unavailable; skipping IBL gallery smoke test")
 
     hdr = repo / "assets" / "snow_field_4k.hdr"
+    if not hdr.exists():
+        pytest.skip("HDR asset missing; skipping IBL gallery smoke test")
+
     outdir = tmp_path / "out"
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # Rotation sweep (native or fallback)
+    # Rotation sweep (BRDF tile renderer)
     out_rot = tmp_path / "ibl_rotation.png"
-    mod.render_rotation_sweep_native_or_fallback(
+    mod.render_rotation_sweep_brdf(
         hdr_path=hdr,
         output_path=out_rot,
         tile_size=int(tile_size),
         rotation_steps=4,
         outdir=outdir,
+        ibl_config=None,
+        rotate_speed=None,
+        frames=None,
     )
     assert out_rot.exists() or out_rot.with_suffix(".npy").exists()
 
-    # Roughness sweep (mesh tracer)
+    # Roughness sweep (BRDF tile renderer)
     out_rough = tmp_path / "ibl_roughness.png"
-    mod.render_roughness_sweep_mesh(
+    mod.render_roughness_sweep_brdf(
         hdr_path=hdr,
         output_path=out_rough,
         tile_size=int(tile_size),
@@ -114,9 +147,9 @@ def test_ibl_gallery_smoke(tmp_path: Path, tile_size: int) -> None:
     )
     assert out_rough.exists() or out_rough.with_suffix(".npy").exists()
 
-    # Metallic comparison (mesh tracer)
+    # Metallic comparison (BRDF tile renderer)
     out_metal = tmp_path / "ibl_metallic.png"
-    mod.render_metallic_comparison_mesh(
+    mod.render_metallic_comparison_brdf(
         hdr_path=hdr,
         output_path=out_metal,
         tile_size=int(tile_size),
