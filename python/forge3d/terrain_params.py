@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
+
+import numpy as np
 
 
 @dataclass
@@ -245,6 +247,10 @@ class TerrainRenderParams:
     gamma: float
     albedo_mode: str
     colormap_strength: float
+    height_curve_mode: str = "linear"
+    height_curve_strength: float = 0.0
+    height_curve_power: float = 1.0
+    height_curve_lut: Optional[np.ndarray] = None
 
     def __post_init__(self) -> None:
         width, height = self.size_px
@@ -281,6 +287,34 @@ class TerrainRenderParams:
 
         if not 0.0 <= self.colormap_strength <= 1.0:
             raise ValueError("colormap_strength must be 0-1")
+
+        valid_curve_modes = {"linear", "pow", "smoothstep", "lut"}
+        if self.height_curve_mode not in valid_curve_modes:
+            raise ValueError(
+                f"height_curve_mode must be one of {sorted(valid_curve_modes)}, "
+                f"got {self.height_curve_mode}"
+            )
+
+        if not 0.0 <= self.height_curve_strength <= 1.0:
+            raise ValueError("height_curve_strength must be in [0, 1]")
+
+        if self.height_curve_power <= 0.0:
+            raise ValueError("height_curve_power must be > 0")
+
+        if self.height_curve_mode == "lut":
+            if self.height_curve_lut is None:
+                raise ValueError("height_curve_lut is required when height_curve_mode='lut'")
+
+            lut = np.asarray(self.height_curve_lut, dtype=np.float32)
+            if lut.ndim != 1 or lut.shape[0] != 256:
+                raise ValueError("height_curve_lut must be a 1D float32 array of length 256")
+            if not np.isfinite(lut).all():
+                raise ValueError("height_curve_lut must contain finite values")
+            if np.any(lut < 0.0) or np.any(lut > 1.0):
+                raise ValueError("height_curve_lut values must be within [0, 1]")
+
+            # Store normalized LUT back on the instance for downstream consumption
+            self.height_curve_lut = lut
 
 
 __all__ = [

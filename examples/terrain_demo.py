@@ -32,7 +32,7 @@ from forge3d.render import _detect_water_mask_via_scene, _postprocess_water_mask
 DEFAULT_DEM = Path("assets/Gore_Range_Albers_1m.tif")
 DEFAULT_HDR = Path("assets/snow_field_4k.hdr")
 DEFAULT_OUTPUT = Path("examples/out/terrain_demo.png")
-DEFAULT_SIZE = (2048, 1440)
+DEFAULT_SIZE = (1920, 1080)
 DEFAULT_DOMAIN = (200.0, 2200.0)
 DEFAULT_COLORMAP_STOPS: Sequence[tuple[float, str]] = (
     (200.0, "#00aa00"),   # Low elevation: Vibrant green (valleys)
@@ -42,6 +42,9 @@ DEFAULT_COLORMAP_STOPS: Sequence[tuple[float, str]] = (
     (2000.0, "#ff0000"),  # High: Pure red (peaks)
     (2200.0, "#800000"),  # Highest: Dark red (summits)
 )
+
+QUANTILE_DEFAULT_LO = 0.01
+QUANTILE_DEFAULT_HI = 0.99
 
 
 def _require_attributes(attr_names: Iterable[str]) -> None:
@@ -72,7 +75,7 @@ def _load_dem(path: Path):
     # The _import_shim adds python/ to sys.path which breaks rasterio.fill import
     dem = load_dem_fn(
         str(path),
-        fill_nodata_values=False,
+        fill_nodata_values=True,
     )
 
     return dem
@@ -132,6 +135,27 @@ def _infer_domain(dem, fallback: tuple[float, float]) -> tuple[float, float]:
                 return (lo_f, hi_f)
 
     return fallback
+
+
+def _robust_domain_from_heightmap(
+    heightmap_array,
+    *,
+    q_lo: float = QUANTILE_DEFAULT_LO,
+    q_hi: float = QUANTILE_DEFAULT_HI,
+    fallback: tuple[float, float],
+) -> tuple[float, float]:
+    """Compute a percentile-clamped domain from finite height samples."""
+    import numpy as np
+
+    data = np.asarray(heightmap_array, dtype=np.float32).reshape(-1)
+    finite = data[np.isfinite(data)]
+    if finite.size == 0:
+        return fallback
+    lo = float(np.quantile(finite, q_lo))
+    hi = float(np.quantile(finite, q_hi))
+    if hi <= lo:
+        return fallback
+    return (lo, hi)
 
 
 def _split_key_value_string(spec: str) -> dict[str, str]:
@@ -238,7 +262,14 @@ def _build_renderer_config(args: argparse.Namespace):
     return load_renderer_config(None, overrides)
 
 
-def _build_colormap(domain: tuple[float, float], colormap_name: str = "viridis"):
+def _build_colormap(
+    domain: tuple[float, float],
+    colormap_name: str = "viridis",
+    *,
+    heightmap=None,
+    q_lo: float = QUANTILE_DEFAULT_LO,
+    q_hi: float = QUANTILE_DEFAULT_HI,
+):
     """
     Build colormap for the DEM domain.
 
@@ -247,6 +278,20 @@ def _build_colormap(domain: tuple[float, float], colormap_name: str = "viridis")
         colormap_name: Name of colormap to use ("viridis", "magma", "terrain")
                       OR comma-separated hex colors (e.g., "#ff0000,#00ff00,#0000ff")
     """
+    # Optional quantile-aware stop placement for better spread across elevation histogram.
+    import numpy as np
+
+    def quantile_stops(colors: list[str]):
+        if heightmap is None:
+            return None
+        h = np.asarray(heightmap, dtype=np.float32).reshape(-1)
+        h = h[np.isfinite(h)]
+        if h.size == 0:
+            return None
+        qs = np.linspace(q_lo, q_hi, len(colors))
+        elevs = np.quantile(h, qs)
+        return list(zip([float(e) for e in elevs], colors))
+
     # Check if colormap_name is a custom hex color palette (contains commas)
     if colormap_name and "," in colormap_name:
         # Parse comma-separated hex colors
@@ -265,14 +310,19 @@ def _build_colormap(domain: tuple[float, float], colormap_name: str = "viridis")
         else:
             # Create evenly-spaced stops across the domain
             domain_min, domain_max = domain
-            domain_range = domain_max - domain_min
-            n_colors = len(hex_colors)
+            q_stops = quantile_stops(hex_colors)
+            if q_stops is not None:
+                stops = q_stops
+            else:
+                domain_min, domain_max = domain
+                domain_range = domain_max - domain_min
+                n_colors = len(hex_colors)
 
-            stops = []
-            for i, hex_color in enumerate(hex_colors):
-                t = i / (n_colors - 1) if n_colors > 1 else 0.0
-                elevation = domain_min + t * domain_range
-                stops.append((elevation, hex_color))
+                stops = []
+                for i, hex_color in enumerate(hex_colors):
+                    t = i / (n_colors - 1) if n_colors > 1 else 0.0
+                    elevation = domain_min + t * domain_range
+                    stops.append((elevation, hex_color))
 
             print(f"Custom colormap created with {n_colors} colors")
             return f3d.Colormap1D.from_stops(stops=stops, domain=domain)
@@ -288,25 +338,26 @@ def _build_colormap(domain: tuple[float, float], colormap_name: str = "viridis")
             # Convert colormap RGBA array to stops
             # Sample ~16 evenly spaced colors from the 256-color palette
             rgba_array = cmap.rgba  # Shape: (256, 4), dtype: float32, range: [0, 1]
-            n_samples = 16
+            n_samples = 128
             indices = np.linspace(0, len(rgba_array) - 1, n_samples, dtype=int)
 
-            # Create elevation stops evenly spaced across the domain
-            domain_min, domain_max = domain
-            domain_range = domain_max - domain_min
-
-            stops = []
-            for i, idx in enumerate(indices):
-                # Calculate elevation for this stop
-                t = i / (n_samples - 1)  # Normalized position [0, 1]
-                elevation = domain_min + t * domain_range
-
-                # Get RGBA color and convert to hex
+            colors_hex: list[str] = []
+            for idx in indices:
                 rgba = rgba_array[idx]
                 r, g, b = int(rgba[0] * 255), int(rgba[1] * 255), int(rgba[2] * 255)
-                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                colors_hex.append(f"#{r:02x}{g:02x}{b:02x}")
 
-                stops.append((elevation, hex_color))
+            q_stops = quantile_stops(colors_hex)
+            if q_stops is not None:
+                stops = q_stops
+            else:
+                domain_min, domain_max = domain
+                domain_range = domain_max - domain_min
+                stops = []
+                for i, hex_color in enumerate(colors_hex):
+                    t = i / (len(colors_hex) - 1) if len(colors_hex) > 1 else 0.0
+                    elevation = domain_min + t * domain_range
+                    stops.append((elevation, hex_color))
 
             return f3d.Colormap1D.from_stops(stops=stops, domain=domain)
 
@@ -342,6 +393,31 @@ def _build_colormap(domain: tuple[float, float], colormap_name: str = "viridis")
     )
 
 
+def _load_height_curve_lut(path: Path):
+    """Load and validate a 256-entry height curve LUT."""
+    import numpy as np
+
+    if not path.exists():
+        raise SystemExit(f"Height curve LUT not found: {path}")
+
+    try:
+        data = np.load(path)
+    except Exception:
+        try:
+            data = np.loadtxt(path)
+        except Exception as exc:
+            raise SystemExit(f"Failed to load height curve LUT from {path}: {exc}")
+
+    data = np.asarray(data, dtype=np.float32).reshape(-1)
+    if data.shape[0] != 256:
+        raise SystemExit(f"height_curve_lut must contain 256 entries, found {data.shape[0]} in {path}")
+    if not np.isfinite(data).all():
+        raise SystemExit("height_curve_lut must contain finite values")
+    if np.any(data < 0.0) or np.any(data > 1.0):
+        raise SystemExit("height_curve_lut values must lie within [0, 1]")
+    return data
+
+
 def _build_params(
     size: tuple[int, int],
     render_scale: float,
@@ -359,6 +435,10 @@ def _build_params(
     cam_radius: float = 1200.0,
     cam_phi_deg: float = 135.0,
     cam_theta_deg: float = 45.0,
+    height_curve_mode: str = "linear",
+    height_curve_strength: float = 0.0,
+    height_curve_power: float = 1.0,
+    height_curve_lut=None,
 ):
     config = f3d.TerrainRenderParamsConfig(
         size_px=size,
@@ -445,6 +525,10 @@ def _build_params(
         gamma=2.2,
         albedo_mode=albedo_mode,
         colormap_strength=colormap_strength,
+        height_curve_mode=height_curve_mode,
+        height_curve_strength=height_curve_strength,
+        height_curve_power=height_curve_power,
+        height_curve_lut=height_curve_lut,
     )
 
     # Wrap the config in the native TerrainRenderParams
@@ -573,9 +657,13 @@ def render_sunrise_to_noon_sequence(
         raise SystemExit("DEM object does not expose a .data array")
 
     # Normalize domain and colormap similarly to main(), but at smaller size.
-    domain = _infer_domain(dem, DEFAULT_DOMAIN)
+    domain_inferred = _infer_domain(dem, DEFAULT_DOMAIN)
+    domain = _robust_domain_from_heightmap(
+        heightmap_array,
+        fallback=(float(domain_inferred[0]), float(domain_inferred[1])),
+    )
     domain = (float(domain[0]), float(domain[1]))
-    colormap = _build_colormap(domain, colormap_name="viridis")
+    colormap = _build_colormap(domain, colormap_name="viridis", heightmap=heightmap_array)
 
     # RendererConfig-driven sky + volumetric overrides shared across frames.
     base_overrides: dict[str, Any] = {
@@ -817,6 +905,30 @@ def _parse_args() -> argparse.Namespace:
         help="Colormap blend strength [0.0-1.0]. Only used with --albedo-mode=mix. Default: 0.5",
     )
     parser.add_argument(
+        "--height-curve-mode",
+        type=str,
+        choices=["linear", "pow", "smoothstep", "lut"],
+        default="linear",
+        help="Height curve mode for vertical remapping (linear, pow, smoothstep, lut). Default: linear.",
+    )
+    parser.add_argument(
+        "--height-curve-strength",
+        type=float,
+        default=0.0,
+        help="Blend between raw height (0) and curved height (1). Default: 0.0.",
+    )
+    parser.add_argument(
+        "--height-curve-power",
+        type=float,
+        default=1.0,
+        help="Exponent used when --height-curve-mode=pow. Default: 1.0.",
+    )
+    parser.add_argument(
+        "--height-curve-lut",
+        type=Path,
+        help="Path to a 256-value LUT (npy/txt) used when --height-curve-mode=lut.",
+    )
+    parser.add_argument(
         "--light",
         dest="light",
         action="append",
@@ -918,7 +1030,6 @@ def _parse_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
-
 def main() -> int:
     args = _parse_args()
 
@@ -927,6 +1038,21 @@ def main() -> int:
         raise SystemExit(
             f"Error: --colormap-strength must be in range [0.0, 1.0], got {args.colormap_strength}"
         )
+    if not 0.0 <= args.height_curve_strength <= 1.0:
+        raise SystemExit(
+            f"Error: --height-curve-strength must be in range [0.0, 1.0], got {args.height_curve_strength}"
+        )
+    if args.height_curve_power <= 0.0:
+        raise SystemExit(
+            f"Error: --height-curve-power must be greater than zero, got {args.height_curve_power}"
+        )
+    height_curve_lut = None
+    if args.height_curve_mode == "lut":
+        if args.height_curve_lut is None:
+            raise SystemExit(
+                "Error: --height-curve-lut is required when --height-curve-mode=lut"
+            )
+        height_curve_lut = _load_height_curve_lut(args.height_curve_lut)
 
     _require_attributes(
         (
@@ -964,14 +1090,22 @@ def main() -> int:
     # The renderer expects a numpy array to upload to GPU, not a pre-uploaded texture
     heightmap_array = dem.data
 
-    domain = (
+    domain_from_meta = (
         tuple(args.colormap_domain)  # type: ignore[arg-type]
         if args.colormap_domain is not None
         else _infer_domain(dem, DEFAULT_DOMAIN)
     )
+    domain = _robust_domain_from_heightmap(
+        heightmap_array,
+        fallback=(float(domain_from_meta[0]), float(domain_from_meta[1])),
+    )
     domain = (float(domain[0]), float(domain[1]))
 
-    colormap = _build_colormap(domain, colormap_name=args.colormap)
+    colormap = _build_colormap(
+        domain,
+        colormap_name=args.colormap,
+        heightmap=heightmap_array,
+    )
 
     water_mask = None
     if getattr(args, "water_detect", False):
@@ -1038,6 +1172,10 @@ def main() -> int:
         cam_radius=float(args.cam_radius),
         cam_phi_deg=float(args.cam_phi),
         cam_theta_deg=float(args.cam_theta),
+        height_curve_mode=str(args.height_curve_mode),
+        height_curve_strength=float(args.height_curve_strength),
+        height_curve_power=float(args.height_curve_power),
+        height_curve_lut=height_curve_lut,
     )
 
     renderer = f3d.TerrainRenderer(sess)

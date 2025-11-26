@@ -219,8 +219,15 @@ def load_dem(
     except ImportError:
         raise ImportError(
             "rasterio is required for DEM loading. "
-            "Install with: pip install rasterio"
+            "Install with: pip install rasterio (or pip install 'forge3d[raster]')"
         )
+    except Exception as exc:
+        # Some environments raise KeyError or other loader errors when rasterio is missing;
+        # normalize to a clear dependency message.
+        raise ImportError(
+            "Failed to import rasterio (required for DEM loading). "
+            "Install with: pip install rasterio (or pip install 'forge3d[raster]')."
+        ) from exc
 
     # Open GeoTIFF
     with rasterio.open(path) as src:

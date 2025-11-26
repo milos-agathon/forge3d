@@ -3,6 +3,7 @@
 # Exists to ensure Python dataclasses bridge correctly into native configuration
 # RELEVANT FILES: src/terrain_render_params.rs, python/forge3d/terrain_params.py, src/overlay_layer.rs, tests/test_overlay_layer.py
 import pytest
+import numpy as np
 
 import forge3d as f3d
 from forge3d.terrain_params import (
@@ -79,9 +80,50 @@ def test_native_params_creation():
     assert native.msaa_samples == 4
     assert len(native.overlays) == 1
     assert native.albedo_mode == "mix"
+    assert native.height_curve_mode == "linear"
+    assert native.height_curve_strength == pytest.approx(0.0)
+    assert native.height_curve_power == pytest.approx(1.0)
 
 
 def test_native_params_invalid_overlays():
     config = _build_config(overlays=["invalid"])
     with pytest.raises(ValueError):
         f3d.TerrainRenderParams(config)
+
+
+def test_height_curve_bridge():
+    cmap = f3d.Colormap1D.from_stops(
+        stops=[(0.0, "#000000"), (1.0, "#ffffff")],
+        domain=(0.0, 1.0),
+    )
+    overlay = f3d.OverlayLayer.from_colormap1d(cmap, strength=0.5)
+    config = _build_config([overlay])
+    config.height_curve_mode = "pow"
+    config.height_curve_strength = 0.5
+    config.height_curve_power = 2.0
+
+    native = f3d.TerrainRenderParams(config)
+    assert native.height_curve_mode == "pow"
+    assert native.height_curve_strength == pytest.approx(0.5)
+    assert native.height_curve_power == pytest.approx(2.0)
+
+
+def test_height_curve_lut_bridge():
+    cmap = f3d.Colormap1D.from_stops(
+        stops=[(0.0, "#000000"), (1.0, "#ffffff")],
+        domain=(0.0, 1.0),
+    )
+    overlay = f3d.OverlayLayer.from_colormap1d(cmap, strength=0.5)
+    config = _build_config([overlay])
+    config.height_curve_mode = "lut"
+    config.height_curve_strength = 1.0
+    lut = np.linspace(0.0, 1.0, 256, dtype=np.float32)
+    config.height_curve_lut = lut
+
+    native = f3d.TerrainRenderParams(config)
+    assert native.height_curve_mode == "lut"
+    assert native.height_curve_strength == pytest.approx(1.0)
+    assert native.height_curve_power == pytest.approx(1.0)  # default
+    lut_back = native.height_curve_lut
+    assert lut_back is not None
+    assert len(lut_back) == 256

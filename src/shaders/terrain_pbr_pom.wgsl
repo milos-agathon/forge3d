@@ -64,6 +64,7 @@ struct TerrainShadingUniforms {
     clamp0 : vec4<f32>,           // height_min, height_max, slope_min, slope_max
     clamp1 : vec4<f32>,           // ambient_min, ambient_max, shadow_min, shadow_max
     clamp2 : vec4<f32>,           // occlusion_min, occlusion_max, lod_level, anisotropy
+    height_curve : vec4<f32>,     // x=mode, y=strength, z=power, w=reserved
 };
 
 struct OverlayUniforms {
@@ -105,6 +106,12 @@ var colormap_samp : sampler;
 
 @group(0) @binding(8)
 var<uniform> u_overlay : OverlayUniforms;
+
+@group(0) @binding(9)
+var height_curve_lut_tex : texture_2d<f32>;
+
+@group(0) @binding(10)
+var height_curve_lut_samp : sampler;
 
 // P1-06: Light buffer bindings (@group(1))
 struct Light {
@@ -286,6 +293,50 @@ fn sample_height(uv : vec2<f32>) -> f32 {
     return textureSample(height_tex, height_samp, uv_clamped).r;
 }
 
+fn get_height_geom_t(h_raw: f32) -> f32 {
+    let h_min = u_shading.clamp0.x;
+    let h_max = u_shading.clamp0.y;
+    let range = max(h_max - h_min, 1e-6);
+    return clamp((h_raw - h_min) / range, 0.0, 1.0);
+}
+
+fn apply_height_curve01(t: f32) -> f32 {
+    let mode = u32(u_shading.height_curve.x + 0.5);
+    let strength = clamp(u_shading.height_curve.y, 0.0, 1.0);
+    if (strength <= 0.0) {
+        return t;
+    }
+
+    var curved = t;
+    if (mode == 1u) { // pow
+        let p = max(u_shading.height_curve.z, 0.01);
+        curved = pow(t, p);
+    } else if (mode == 2u) { // smoothstep
+        curved = t * t * (3.0 - 2.0 * t);
+    } else if (mode == 3u) { // lut
+        curved = height_curve_lut_sample(t);
+    }
+
+    return mix(t, curved, strength);
+}
+
+fn sample_height_geom(uv : vec2<f32>) -> f32 {
+    let uv_clamped = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    let h_raw = textureSample(height_tex, height_samp, uv_clamped).r;
+    let t = get_height_geom_t(h_raw);
+    let h_min = u_shading.clamp0.x;
+    let h_max = u_shading.clamp0.y;
+    return h_min + apply_height_curve01(t) * (h_max - h_min);
+}
+
+fn height_curve_lut_sample(t: f32) -> f32 {
+    let dims = textureDimensions(height_curve_lut_tex, 0);
+    let max_x = max(i32(dims.x) - 1, 0);
+    let u = clamp(t, 0.0, 1.0);
+    let x = i32(round(u * f32(max_x)));
+    return textureLoad(height_curve_lut_tex, vec2<i32>(x, 0), 0).r;
+}
+
 fn calculate_texel_size() -> vec2<f32> {
     let dims = vec2<f32>(textureDimensions(height_tex, 0));
     return vec2<f32>(
@@ -320,8 +371,12 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
     let world_xy = (uv - vec2<f32>(0.5, 0.5)) * spacing;
 
     // Sample height from heightmap (use textureSampleLevel for vertex shader)
-    let height = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
-    let world_z = height * h_exag;
+    let h_raw = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let t_geom = get_height_geom_t(h_raw);
+    let h_min = u_shading.clamp0.x;
+    let h_max = u_shading.clamp0.y;
+    let h_disp = h_min + apply_height_curve01(t_geom) * (h_max - h_min);
+    let world_z = h_disp * h_exag;
 
     out.world_position = vec3<f32>(world_xy.x, world_xy.y, world_z);
     out.world_normal = vec3<f32>(0.0, 1.0, 0.0); // Default up, will be recalculated in fragment shader
@@ -334,14 +389,14 @@ fn calculate_normal(uv : vec2<f32>, texel_size : vec2<f32>) -> vec3<f32> {
     let offset_x = vec2<f32>(texel_size.x, 0.0);
     let offset_y = vec2<f32>(0.0, texel_size.y);
 
-    let tl = sample_height(uv - offset_x - offset_y);
-    let t = sample_height(uv - offset_y);
-    let tr = sample_height(uv + offset_x - offset_y);
-    let l = sample_height(uv - offset_x);
-    let r = sample_height(uv + offset_x);
-    let bl = sample_height(uv - offset_x + offset_y);
-    let b = sample_height(uv + offset_y);
-    let br = sample_height(uv + offset_x + offset_y);
+    let tl = sample_height_geom(uv - offset_x - offset_y);
+    let t = sample_height_geom(uv - offset_y);
+    let tr = sample_height_geom(uv + offset_x - offset_y);
+    let l = sample_height_geom(uv - offset_x);
+    let r = sample_height_geom(uv + offset_x);
+    let bl = sample_height_geom(uv - offset_x + offset_y);
+    let b = sample_height_geom(uv + offset_y);
+    let br = sample_height_geom(uv + offset_x + offset_y);
 
     let dx = (tr + 2.0 * r + br) - (tl + 2.0 * l + bl);
     let dy = (bl + 2.0 * b + br) - (tl + 2.0 * t + tr);

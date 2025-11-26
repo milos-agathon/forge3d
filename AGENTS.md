@@ -39,37 +39,6 @@ You don’t write clean code in one shot. You first get it working, then you **s
 
 ### Must do
 
-* Follow the two-phase loop:
-
-  * **Phase 1:** Get it working (even if a bit messy).
-  * **Phase 2:** Refactor systematically into clean code while tests are green.
-* Make the **cleaning process explicit**:
-
-  * Plan time to simplify functions, clarify names, remove duplication.
-* Work in **small refactoring steps** with tests between steps:
-
-  * Rename → run tests.
-  * Extract function → run tests.
-  * Simplify logic → run tests.
-* Use AI (as in the Grok3 postscript) as a **helper**:
-
-  * Let it suggest refactors, but you decide structure, naming, and boundaries.
-
-### Must don’t
-
-* Don’t skip the cleaning phase once “it works.”
-* Don’t refactor without safety nets:
-
-  * No large restructuring without tests.
-* Don’t treat AI’s refactored output as authoritative:
-
-  * Never merge AI code that you haven’t checked for clarity, correctness, and design.
-* Don’t bundle huge logical changes and refactors into a single opaque diff.
-
----
-
-### Must do
-
 * Strive for **small, well-named, well-organized units**:
 
   * Modules, classes, and functions should be tiny and focused.

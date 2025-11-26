@@ -58,9 +58,9 @@ pub fn ctx() -> &'static GpuContext {
         }))
         .expect("No suitable GPU adapter");
 
+        // Respect the adapter's native limits instead of clamping to downlevel defaults
+        // (which cap 2D textures at 2048 and break high-res renders).
         let mut limits = adapter.limits();
-        let baseline = wgpu::Limits::downlevel_defaults();
-        limits = limits.using_resolution(baseline);
         let desired_storage_buffers = 8;
         limits.max_storage_buffers_per_shader_stage = limits
             .max_storage_buffers_per_shader_stage
@@ -104,9 +104,8 @@ pub fn create_device_for_test() -> wgpu::Device {
         force_fallback_adapter: false,
     }))
     .expect("No suitable GPU adapter for tests");
+    // Keep native limits to allow larger render targets in tests as well.
     let mut limits = adapter.limits();
-    let baseline = wgpu::Limits::downlevel_defaults();
-    limits = limits.using_resolution(baseline);
     let desired_storage_buffers = 8;
     limits.max_storage_buffers_per_shader_stage = limits
         .max_storage_buffers_per_shader_stage
@@ -137,8 +136,6 @@ pub fn create_device_and_queue_for_test() -> (wgpu::Device, wgpu::Queue) {
     }))
     .expect("No suitable GPU adapter for tests");
     let mut limits = adapter.limits();
-    let baseline = wgpu::Limits::downlevel_defaults();
-    limits = limits.using_resolution(baseline);
     let desired_storage_buffers = 8;
     limits.max_storage_buffers_per_shader_stage = limits
         .max_storage_buffers_per_shader_stage

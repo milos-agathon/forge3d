@@ -7,6 +7,8 @@ use pyo3::exceptions::PyValueError;
 #[cfg(feature = "extension-module")]
 use pyo3::prelude::*;
 #[cfg(feature = "extension-module")]
+use std::sync::Arc;
+#[cfg(feature = "extension-module")]
 fn tuple_to_u32_pair(value: &PyAny, name: &str) -> PyResult<(u32, u32)> {
     let pair: (i64, i64) = value.extract().map_err(|_| {
         PyValueError::new_err(format!(
@@ -226,6 +228,10 @@ pub struct TerrainRenderParams {
     pub gamma: f32,
     pub albedo_mode: String,
     pub colormap_strength: f32,
+    pub height_curve_mode: String,
+    pub height_curve_strength: f32,
+    pub height_curve_power: f32,
+    pub height_curve_lut: Option<Arc<Vec<f32>>>,
     pub overlays: Vec<Py<crate::overlay_layer::OverlayLayer>>,
     light: Py<PyAny>,
     ibl: Py<PyAny>,
@@ -318,6 +324,52 @@ impl TerrainRenderParams {
                 "colormap_strength must be between 0 and 1",
             ));
         }
+
+        let height_curve_mode: String = params
+            .getattr("height_curve_mode")?
+            .extract()
+            .map_err(|_| PyValueError::new_err("height_curve_mode must be a string"))?;
+        let valid_modes = ["linear", "pow", "smoothstep", "lut"];
+        if !valid_modes.contains(&height_curve_mode.as_str()) {
+            return Err(PyValueError::new_err(format!(
+                "height_curve_mode must be one of {:?}, got {}",
+                valid_modes, height_curve_mode
+            )));
+        }
+        let height_curve_strength = to_finite_f32(
+            params.getattr("height_curve_strength")?.as_gil_ref(),
+            "height_curve_strength",
+        )?
+        .clamp(0.0, 1.0);
+        let height_curve_power = to_finite_f32(
+            params.getattr("height_curve_power")?.as_gil_ref(),
+            "height_curve_power",
+        )?;
+        if !(height_curve_power > 0.0) {
+            return Err(PyValueError::new_err(
+                "height_curve_power must be greater than zero",
+            ));
+        }
+
+        let height_curve_lut: Option<Arc<Vec<f32>>> = if height_curve_mode == "lut" {
+            let raw_lut = params.getattr("height_curve_lut")?;
+            let lut_vec: Vec<f32> = raw_lut.extract().map_err(|_| {
+                PyValueError::new_err("height_curve_lut must be convertible to a 1D float array")
+            })?;
+            if lut_vec.len() != 256 {
+                return Err(PyValueError::new_err(
+                    "height_curve_lut must have length 256 when height_curve_mode='lut'",
+                ));
+            }
+            if lut_vec.iter().any(|v| !v.is_finite() || *v < 0.0 || *v > 1.0) {
+                return Err(PyValueError::new_err(
+                    "height_curve_lut values must be finite floats within [0, 1]",
+                ));
+            }
+            Some(Arc::new(lut_vec))
+        } else {
+            None
+        };
 
         let light = params.getattr("light")?;
         let ibl = params.getattr("ibl")?;
@@ -477,6 +529,10 @@ impl TerrainRenderParams {
             gamma,
             albedo_mode,
             colormap_strength,
+            height_curve_mode,
+            height_curve_strength,
+            height_curve_power,
+            height_curve_lut,
             overlays,
             light: light.unbind(),
             ibl: ibl.unbind(),
@@ -564,6 +620,26 @@ impl TerrainRenderParams {
     #[getter]
     pub fn colormap_strength(&self) -> f32 {
         self.colormap_strength
+    }
+
+    #[getter]
+    pub fn height_curve_mode(&self) -> &str {
+        &self.height_curve_mode
+    }
+
+    #[getter]
+    pub fn height_curve_strength(&self) -> f32 {
+        self.height_curve_strength
+    }
+
+    #[getter]
+    pub fn height_curve_power(&self) -> f32 {
+        self.height_curve_power
+    }
+
+    #[getter]
+    pub fn height_curve_lut(&self) -> Option<Vec<f32>> {
+        self.height_curve_lut.as_ref().map(|lut| lut.as_ref().clone())
     }
 
     #[getter]

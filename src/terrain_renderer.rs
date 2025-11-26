@@ -39,6 +39,9 @@ pub struct TerrainRenderer {
     blit_bind_group_layout: wgpu::BindGroupLayout,
     blit_pipeline: wgpu::RenderPipeline,
     sampler_linear: wgpu::Sampler,
+    height_curve_identity_texture: wgpu::Texture,
+    height_curve_identity_view: wgpu::TextureView,
+    height_curve_lut_sampler: wgpu::Sampler,
     color_format: wgpu::TextureFormat,
     // P0-03: Config plumbing (no shader/pipeline behavior changes)
     #[cfg(feature = "enable-renderer-config")]
@@ -567,7 +570,7 @@ impl TerrainRenderer {
                 // @binding(5): shading uniforms
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -602,6 +605,25 @@ impl TerrainRenderer {
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
+                    count: None,
+                },
+                // @binding(9): height curve LUT texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    // Vertex shader samples LUT to displace vertices as well as fragments.
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // @binding(10): height curve LUT sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                     count: None,
                 },
             ],
@@ -698,6 +720,21 @@ impl TerrainRenderer {
             ..Default::default()
         });
 
+        let height_curve_lut_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain.height_curve.lut_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let identity_lut_data: Vec<f32> = (0..256).map(|i| i as f32 / 255.0).collect();
+        let (height_curve_identity_texture, height_curve_identity_view) =
+            Self::upload_height_curve_lut_internal(&device, &queue, &identity_lut_data)?;
+
         // P1-08: Initialize light buffer before pipeline creation
         let light_buffer = LightBuffer::new(&device);
 
@@ -737,6 +774,9 @@ impl TerrainRenderer {
             blit_bind_group_layout,
             blit_pipeline,
             sampler_linear,
+            height_curve_identity_texture,
+            height_curve_identity_view,
+            height_curve_lut_sampler,
             color_format,
             light_buffer: Arc::new(Mutex::new(light_buffer)),
             noop_shadow,
@@ -1339,6 +1379,19 @@ impl TerrainRenderer {
             ],
         });
 
+        let lut_texture_uploaded = if params.height_curve_mode() == "lut" {
+            params
+                .height_curve_lut()
+                .map(|lut| self.upload_height_curve_lut(&lut))
+                .transpose()?
+        } else {
+            None
+        };
+        let height_curve_view = lut_texture_uploaded
+            .as_ref()
+            .map(|(_, view)| view)
+            .unwrap_or(&self.height_curve_identity_view);
+
         // Create bind group
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain_pbr_pom.bind_group"),
@@ -1379,6 +1432,14 @@ impl TerrainRenderer {
                 wgpu::BindGroupEntry {
                     binding: 8,
                     resource: overlay_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::TextureView(height_curve_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: wgpu::BindingResource::Sampler(&self.height_curve_lut_sampler),
                 },
             ],
         });
@@ -1818,6 +1879,58 @@ impl TerrainRenderer {
         Ok(texture)
     }
 
+    fn upload_height_curve_lut_internal(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        data: &[f32],
+    ) -> Result<(wgpu::Texture, wgpu::TextureView)> {
+        let width = 256u32;
+        let height = 1u32;
+        if data.len() != width as usize {
+            return Err(anyhow!("height_curve_lut must have length 256"));
+        }
+
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.height_curve_lut"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(data),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            size,
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Ok((texture, view))
+    }
+
+    fn upload_height_curve_lut(&self, data: &[f32]) -> Result<(wgpu::Texture, wgpu::TextureView)> {
+        Self::upload_height_curve_lut_internal(&self.device, &self.queue, data)
+    }
+
     /// Build uniform buffer data
     fn build_uniforms(
         &self,
@@ -1848,7 +1961,7 @@ impl TerrainRenderer {
         );
 
         // Pack into vec (16 floats view + 16 floats proj + 4 floats sun_exposure + 4 floats spacing + 4 floats pad)
-        let mut uniforms = Vec::with_capacity(44);
+        let mut uniforms = Vec::with_capacity(48);
 
         // View matrix (column-major)
         uniforms.extend_from_slice(&view.to_cols_array());
@@ -1984,12 +2097,16 @@ impl TerrainRenderer {
             decoded.sampling.anisotropy as f32,
         ]);
 
-        uniforms.extend_from_slice(&[
-            params.exposure,
-            params.gamma,
-            params.colormap_strength.clamp(0.0, 1.0),
-            0.0,
-        ]);
+        let mode_f = match params.height_curve_mode.as_str() {
+            "linear" => 0.0,
+            "pow" => 1.0,
+            "smoothstep" => 2.0,
+            "lut" => 3.0,
+            _ => 0.0,
+        };
+        let strength = params.height_curve_strength.clamp(0.0, 1.0);
+        let power = params.height_curve_power.max(0.01);
+        uniforms.extend_from_slice(&[mode_f, strength, power, 0.0]);
 
         Ok(uniforms)
     }

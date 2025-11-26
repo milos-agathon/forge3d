@@ -129,3 +129,104 @@ def test_terrain_renderer_produces_rgba_frame():
     assert arr.shape == (256, 256, 4)
     assert arr.dtype == np.uint8
     assert arr[..., :3].max() > arr[..., :3].min()
+
+
+def test_height_curve_strength_zero_identity():
+    session = f3d.Session(window=False)
+    renderer = f3d.TerrainRenderer(session)
+    material_set = f3d.MaterialSet.terrain_default()
+    cmap = f3d.Colormap1D.from_stops(
+        stops=[(0.0, "#000000"), (1.0, "#ffffff")],
+        domain=(0.0, 1.0),
+    )
+    overlay = f3d.OverlayLayer.from_colormap1d(cmap, strength=0.5)
+
+    base_config = _build_config(overlay)
+    base_config.height_curve_mode = "linear"
+    base_config.height_curve_strength = 0.0
+    base_params = f3d.TerrainRenderParams(base_config)
+
+    pow_config = _build_config(overlay)
+    pow_config.height_curve_mode = "pow"
+    pow_config.height_curve_strength = 0.0
+    pow_config.height_curve_power = 3.0
+    pow_params = f3d.TerrainRenderParams(pow_config)
+
+    heightmap = np.linspace(0.0, 1.0, 128 * 128, dtype=np.float32).reshape(128, 128)
+
+    with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
+        tmp.close()
+        _create_test_hdr(tmp.name)
+        ibl = f3d.IBL.from_hdr(tmp.name, intensity=1.0)
+    os.unlink(tmp.name)
+
+    frame_linear = renderer.render_terrain_pbr_pom(
+        material_set=material_set,
+        env_maps=ibl,
+        params=base_params,
+        heightmap=heightmap,
+        target=None,
+    )
+    frame_pow = renderer.render_terrain_pbr_pom(
+        material_set=material_set,
+        env_maps=ibl,
+        params=pow_params,
+        heightmap=heightmap,
+        target=None,
+    )
+
+    a = frame_linear.to_numpy().astype(np.int16)
+    b = frame_pow.to_numpy().astype(np.int16)
+    assert a.shape == b.shape
+    # With zero strength, curved vs linear should match (allow 1 LSB wiggle)
+    assert np.max(np.abs(a - b)) <= 1
+
+
+def test_height_curve_lut_changes_output():
+    session = f3d.Session(window=False)
+    renderer = f3d.TerrainRenderer(session)
+    material_set = f3d.MaterialSet.terrain_default()
+    cmap = f3d.Colormap1D.from_stops(
+        stops=[(0.0, "#000000"), (1.0, "#ffffff")],
+        domain=(0.0, 1.0),
+    )
+    overlay = f3d.OverlayLayer.from_colormap1d(cmap, strength=0.5)
+
+    base_config = _build_config(overlay)
+    base_config.height_curve_mode = "linear"
+    base_config.height_curve_strength = 0.0
+    base_params = f3d.TerrainRenderParams(base_config)
+
+    lut_config = _build_config(overlay)
+    lut_config.height_curve_mode = "lut"
+    lut_config.height_curve_strength = 1.0
+    lut_config.height_curve_lut = np.zeros(256, dtype=np.float32)  # collapse heights
+    lut_params = f3d.TerrainRenderParams(lut_config)
+
+    heightmap = np.linspace(0.0, 1.0, 128 * 128, dtype=np.float32).reshape(128, 128)
+
+    with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
+        tmp.close()
+        _create_test_hdr(tmp.name)
+        ibl = f3d.IBL.from_hdr(tmp.name, intensity=1.0)
+    os.unlink(tmp.name)
+
+    frame_linear = renderer.render_terrain_pbr_pom(
+        material_set=material_set,
+        env_maps=ibl,
+        params=base_params,
+        heightmap=heightmap,
+        target=None,
+    )
+    frame_lut = renderer.render_terrain_pbr_pom(
+        material_set=material_set,
+        env_maps=ibl,
+        params=lut_params,
+        heightmap=heightmap,
+        target=None,
+    )
+
+    a = frame_linear.to_numpy()
+    b = frame_lut.to_numpy()
+    # LUT should change geometry/normals enough to alter output
+    assert np.any(a != b)
