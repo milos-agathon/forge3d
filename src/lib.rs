@@ -3038,6 +3038,12 @@ fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
 ///     fov_deg: Field of view in degrees (default: 45.0)
 ///     znear: Near clipping plane (default: 0.1)
 ///     zfar: Far clipping plane (default: 1000.0)
+///     obj_path: Optional OBJ path to load on startup (mutually exclusive with gltf_path)
+///     gltf_path: Optional glTF/GLB path to load on startup (mutually exclusive with obj_path)
+///     snapshot_path: Optional path for an automatic snapshot on first frames
+///     snapshot_width: Optional width override for the automatic snapshot (must be used with snapshot_height)
+///     snapshot_height: Optional height override for the automatic snapshot (must be used with snapshot_width)
+///     initial_commands: Optional list of extra viewer commands to run at startup
 ///
 /// Controls:
 ///     Tab - Toggle between Orbit and FPS camera modes
@@ -3050,7 +3056,15 @@ fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
 ///     >>> f3d.open_viewer(width=1280, height=720, title="My Scene")
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (width=1024, height=768, title="forge3d Interactive Viewer".to_string(), vsync=true, fov_deg=45.0, znear=0.1, zfar=1000.0))]
+#[pyo3(signature = (
+    width=1024, height=768,
+    title="forge3d Interactive Viewer".to_string(),
+    vsync=true, fov_deg=45.0, znear=0.1, zfar=1000.0,
+    obj_path=None, gltf_path=None,
+    snapshot_path=None,
+    snapshot_width=None, snapshot_height=None,
+    initial_commands=None,
+))]
 fn open_viewer(
     width: u32,
     height: u32,
@@ -3059,8 +3073,37 @@ fn open_viewer(
     fov_deg: f32,
     znear: f32,
     zfar: f32,
+    obj_path: Option<String>,
+    gltf_path: Option<String>,
+    snapshot_path: Option<String>,
+    snapshot_width: Option<u32>,
+    snapshot_height: Option<u32>,
+    initial_commands: Option<Vec<String>>,
 ) -> PyResult<()> {
-    use crate::viewer::{run_viewer, ViewerConfig};
+    use crate::viewer::{run_viewer, set_initial_commands, ViewerConfig};
+
+    // Argument validation mirroring the Python wrapper
+    if obj_path.is_some() && gltf_path.is_some() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "obj_path and gltf_path are mutually exclusive; provide at most one",
+        ));
+    }
+
+    match (snapshot_width, snapshot_height) {
+        (Some(w), Some(h)) => {
+            if w == 0 || h == 0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "snapshot_width and snapshot_height, if provided, must be positive",
+                ));
+            }
+        }
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "snapshot_width and snapshot_height must be provided together",
+            ));
+        }
+        (None, None) => {}
+    }
 
     let config = ViewerConfig {
         width,
@@ -3070,7 +3113,34 @@ fn open_viewer(
         fov_deg,
         znear,
         zfar,
+        snapshot_width,
+        snapshot_height,
     };
+
+    // Map Python-level configuration into the existing INITIAL_CMDS mechanism so that
+    // object loading and snapshots are expressed as viewer commands. This preserves
+    // the single-terminal command workflow and keeps all behavior flowing through
+    // the ViewerCmd parsing logic in src/viewer/mod.rs.
+    let mut cmds: Vec<String> = Vec::new();
+
+    if let Some(path) = obj_path {
+        cmds.push(format!(":obj {}", path));
+    }
+    if let Some(path) = gltf_path {
+        cmds.push(format!(":gltf {}", path));
+    }
+    if let Some(path) = snapshot_path {
+        cmds.push(format!(":snapshot {}", path));
+    }
+    if let Some(extra) = initial_commands {
+        // Append extra commands in order, unaltered, as if the user had typed
+        // them on stdin.
+        cmds.extend(extra);
+    }
+
+    if !cmds.is_empty() {
+        set_initial_commands(cmds);
+    }
 
     run_viewer(config)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Viewer error: {}", e)))

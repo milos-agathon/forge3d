@@ -26,7 +26,7 @@ def test_interactive_viewer_sky_fog_snapshot_hosek():
         out_path = Path(td) / "sky_fog_hosek.png"
 
         proc = subprocess.Popen(
-            ["cargo", "run", "--example", "interactive_viewer", "-q"],
+            ["cargo", "run", "--bin", "interactive_viewer", "-q"],
             cwd=str(repo_root),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

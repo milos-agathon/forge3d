@@ -32,10 +32,10 @@ def test_interactive_viewer_sky_fog_snapshot():
     with tempfile.TemporaryDirectory() as td:
         out_path = Path(td) / "sky_fog_snapshot.png"
 
-        # Launch the interactive viewer example
+        # Launch the interactive viewer binary
         # Note: we use -q to keep output minimal; stdin is used for commands
         proc = subprocess.Popen(
-            ["cargo", "run", "--example", "interactive_viewer", "-q"],
+            ["cargo", "run", "--bin", "interactive_viewer", "-q"],
             cwd=str(repo_root),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

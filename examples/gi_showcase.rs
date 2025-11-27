@@ -121,6 +121,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fov_deg: 60.0,
         znear: 0.1,
         zfar: 1000.0,
+        snapshot_width: None,
+        snapshot_height: None,
     };
 
     run_viewer(config)

@@ -12,8 +12,8 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-import forge3d.terrain_demo as _impl  # type: ignore[import]
-from forge3d.terrain_demo import render_sunrise_to_noon_sequence
+import forge3d.terrain_pbr_pom as _impl  # type: ignore[import]
+from forge3d.terrain_pbr_pom import render_sunrise_to_noon_sequence
 
 
 # Re-export selected symbols for tests and external callers
@@ -37,7 +37,8 @@ def _build_renderer_config(args: argparse.Namespace):
 def _parse_args() -> argparse.Namespace:
     """Create the argparse namespace used by ``main``.
 
-    This mirrors the implementation module but stays intentionally compact.
+    This script is intended to be a readable, tweakable example, so the full
+    set of CLI flags is defined here rather than hidden inside the library.
     """
 
     parser = argparse.ArgumentParser(
@@ -148,7 +149,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--pcss-blocker-radius", dest="pcss_blocker_radius", type=float, help="PCSS blocker radius.")
     parser.add_argument("--pcss-filter-radius", dest="pcss_filter_radius", type=float, help="PCSS filter radius.")
     parser.add_argument("--shadow-light-size", dest="shadow_light_size", type=float, help="Effective light size.")
-    parser.add_argument("--shadow-moment-bias", dest="shadow_moment_bias", type=float, help="Moment bias for VSM/EVSM/MSM.")
+    parser.add_argument(
+        "--shadow-moment-bias",
+        dest="shadow_moment_bias",
+        type=float,
+        help="Moment bias for VSM/EVSM/MSM.",
+    )
     parser.add_argument("--gi", type=str, help="Comma-separated list of GI modes (e.g., ibl,ssao,ssgi).")
     parser.add_argument("--sky", type=str, help="Sky model override (hosek-wilkie, preetham, hdri).")
     parser.add_argument("--volumetric", type=str, help="Volumetric fog settings string.")
@@ -160,7 +166,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--water-detect",
         action="store_true",
-        help="Detect water from DEM using a slope+height heuristic and write a mask PNG.",
+        help="Detect water from DEM and tint water bodies in the main output.",
     )
     parser.add_argument(
         "--water-level",
@@ -177,7 +183,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--water-mask-output",
         type=Path,
-        help="Optional output path for water mask PNG (defaults to <output> with _water suffix).",
+        help="Optional debug PNG showing the detected water mask.",
     )
 
     return parser.parse_args()
@@ -187,7 +193,7 @@ def main() -> int:
     """Entry point used by ``python examples/terrain_demo.py``.
 
     This validates CLI arguments, then forwards rendering to
-    :mod:`forge3d.terrain_demo`.
+    :mod:`forge3d.terrain_pbr_pom`.
     """
 
     args = _parse_args()

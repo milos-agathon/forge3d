@@ -47,6 +47,10 @@ const LIT_WGSL_VERSION: u32 = 2;
 // Limit for P5.1 capture outputs (in megapixels). Images larger than this will be downscaled.
 const P51_MAX_MEGAPIXELS: f32 = 2.0;
 const P52_MAX_MEGAPIXELS: f32 = 2.0;
+// Soft limit for interactive viewer snapshots (in megapixels). User-provided snapshot
+// overrides will be clamped to this size to keep memory usage within budget while
+// still allowing high-resolution captures (e.g. 4K).
+const VIEWER_SNAPSHOT_MAX_MEGAPIXELS: f32 = 16.0;
 const P5_SSGI_DIFFUSE_SCALE: f32 = 0.5;
 const P5_SSGI_CORNELL_WARMUP_FRAMES: u32 = 64;
 
@@ -146,26 +150,7 @@ impl Viewer {
     /// This is primarily intended for tests and debug paths until a
     /// full directional shadow pass is wired into the viewer.
     pub fn set_fog_shadow_constant_depth(&mut self, depth: f32) {
-        let depth_bytes = depth.to_ne_bytes();
-        self.queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &self.fog_shadow_map,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::DepthOnly,
-            },
-            &depth_bytes,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(4),
-                rows_per_image: Some(1),
-            },
-            wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-        );
+        let _ = depth;
     }
 
     /// Override the fog shadow matrix used by the volumetric shader.
@@ -597,6 +582,8 @@ pub struct ViewerConfig {
     pub fov_deg: f32,
     pub znear: f32,
     pub zfar: f32,
+    pub snapshot_width: Option<u32>,
+    pub snapshot_height: Option<u32>,
 }
 
 // Global initial commands for viewer (set by CLI parser in example)
@@ -616,6 +603,8 @@ impl Default for ViewerConfig {
             fov_deg: 45.0,
             znear: 0.1,
             zfar: 1000.0,
+	        snapshot_width: None,
+	        snapshot_height: None,
         }
     }
 }
@@ -3791,29 +3780,9 @@ impl Viewer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-        let depth_one = 1.0f32.to_ne_bytes();
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &fog_shadow_map,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::DepthOnly,
-            },
-            &depth_one,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(4),
-                rows_per_image: Some(1),
-            },
-            wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-        );
         let fog_shadow_view = fog_shadow_map.create_view(&wgpu::TextureViewDescriptor {
             label: Some("viewer.fog.shadow.view"),
             format: Some(wgpu::TextureFormat::Depth32Float),
@@ -5615,11 +5584,34 @@ impl Viewer {
                 });
                 // If a snapshot is requested, render the composite to an offscreen texture too
                 if self.snapshot_request.is_some() {
+                    let (mut snap_w, mut snap_h) =
+                        if let (Some(w), Some(h)) =
+                            (self.view_config.snapshot_width, self.view_config.snapshot_height)
+                        {
+                            (w, h)
+                        } else {
+                            (self.config.width, self.config.height)
+                        };
+
+                    // Apply a soft megapixel clamp only when the user has requested
+                    // an explicit override resolution via ViewerConfig.
+                    if self.view_config.snapshot_width.is_some()
+                        && self.view_config.snapshot_height.is_some()
+                    {
+                        let pixels = snap_w as u64 * snap_h as u64;
+                        let max_pixels = (VIEWER_SNAPSHOT_MAX_MEGAPIXELS * 1_000_000.0) as u64;
+                        if pixels > max_pixels {
+                            let scale = (max_pixels as f32 / pixels as f32).sqrt();
+                            snap_w = ((snap_w as f32) * scale).floor().max(1.0) as u32;
+                            snap_h = ((snap_h as f32) * scale).floor().max(1.0) as u32;
+                        }
+                    }
+
                     let snap_tex = self.device.create_texture(&wgpu::TextureDescriptor {
                         label: Some("viewer.snapshot.offscreen"),
                         size: wgpu::Extent3d {
-                            width: self.config.width,
-                            height: self.config.height,
+                            width: snap_w,
+                            height: snap_h,
                             depth_or_array_layers: 1,
                         },
                         mip_level_count: 1,

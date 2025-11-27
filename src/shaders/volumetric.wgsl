@@ -186,7 +186,7 @@ fn sample_shadow(world_pos: vec3<f32>) -> f32 {
     let kernel_size = i32(kernel_size_u);
 
     if (kernel_size <= 1) {
-        let shadow_depth = textureLoad(shadow_maps, base_coord, i32(cascade_idx)).r;
+        let shadow_depth = textureLoad(shadow_maps, base_coord, i32(cascade_idx), 0);
         let lit = receiver_depth <= shadow_depth;
         return select(0.0, 1.0, lit);
     }
@@ -200,7 +200,7 @@ fn sample_shadow(world_pos: vec3<f32>) -> f32 {
             let sx = clamp(base_coord.x + dx, 0, dims_i.x - 1);
             let sy = clamp(base_coord.y + dy, 0, dims_i.y - 1);
             let sample_coord = vec2<i32>(sx, sy);
-            let sample_depth = textureLoad(shadow_maps, sample_coord, i32(cascade_idx)).r;
+            let sample_depth = textureLoad(shadow_maps, sample_coord, i32(cascade_idx), 0);
             let lit = receiver_depth <= sample_depth;
             shadow_sum = shadow_sum + select(0.0, 1.0, lit);
             sample_count = sample_count + 1.0;

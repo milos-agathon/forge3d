@@ -30,7 +30,7 @@ pytestmark = [
 class TestM3Acceptance:
     def _run_viewer(self, repo_root: Path, commands: list[str], out_path: Path, width: int = 640, height: int = 360):
         proc = subprocess.Popen(
-            ["cargo", "run", "--example", "interactive_viewer", "-q"],
+            ["cargo", "run", "--bin", "interactive_viewer", "-q"],
             cwd=str(repo_root),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

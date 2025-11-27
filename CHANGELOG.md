@@ -289,7 +289,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
   - FPS camera mode: WASD movement with mouse look, Q/E vertical movement, Shift speed boost
   - Tab to toggle between camera modes, 60+ FPS on simple scenes
   - DPI-aware rendering with live FPS counter in window title
-  - Rust example: `cargo run --example interactive_viewer`
+  - Rust binary: `cargo run --bin interactive_viewer`
   - Documentation: `docs/interactive_viewer.rst`
 - Renderer configuration plumbing with typed enums and validation exposed via `Renderer(config=..., **kwargs)` and `Renderer.get_config()`, including CLI overrides for lighting, BRDF, shadows, GI, and atmosphere in `examples/terrain_demo.py`.
 - Light buffer SSBO with R2 sampling seeds, WGSL sampling stubs, and Python `Renderer.set_lights()` for multi-light uploads.

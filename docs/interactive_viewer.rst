@@ -138,6 +138,29 @@ Parameters
 - **fov_deg** (float): Field of view in degrees (default: 45.0)
 - **znear** (float): Near clipping plane distance (default: 0.1)
 - **zfar** (float): Far clipping plane distance (default: 1000.0)
+- **obj_path** (str, optional): Path to an OBJ file to load when the viewer starts. When provided,
+  :func:`forge3d.open_viewer` enqueues an initial ``:obj <path>`` command so that the mesh is
+  loaded via the same code path as the interactive terminal.
+- **gltf_path** (str, optional): Path to a glTF/GLB file to load when the viewer starts. Mutually
+  exclusive with ``obj_path``. When provided, this parameter enqueues an initial
+  ``:gltf <path>`` command at startup.
+- **snapshot_path** (str, optional): Target path for an automatic snapshot captured from the
+  interactive session. When set, the viewer behaves as if a ``:snapshot <path>`` command had been
+  issued at startup via the terminal. This may **not** be combined with the
+  ``FORGE3D_AUTO_SNAPSHOT_PATH`` environment variable; attempting to use both in the same process
+  raises a :class:`ValueError` in :func:`forge3d.open_viewer`.
+- **snapshot_width** (int, optional): Optional width override for an automatic snapshot. Must be
+  provided together with ``snapshot_height``. Values must be positive. When both overrides are
+  provided, the final snapshot is rendered to an offscreen texture at
+  ``snapshot_width x snapshot_height`` pixels, subject to a soft megapixel limit (approximately
+  16 megapixels). If the requested resolution exceeds this limit, it is uniformly downscaled to
+  respect the memory budget.
+- **snapshot_height** (int, optional): Optional height override for an automatic snapshot. Must be
+  provided together with ``snapshot_width``. Values must be positive.
+- **initial_commands** (list[str], optional): Advanced hook for injecting viewer commands at
+  startup as if they were typed into the terminal (for example ``":sky preetham"`` or
+  ``":fog on"``). These commands are executed at startup via the same parser as the stdin
+  command thread.
 
 Usage (Rust)
 ------------
@@ -182,11 +205,11 @@ To run the Python interactive viewer demo:
 Rust Example
 ~~~~~~~~~~~~
 
-To run the Rust interactive viewer example:
+To run the Rust interactive viewer binary:
 
 .. code-block:: bash
 
-   cargo run --example interactive_viewer
+   cargo run --bin interactive_viewer
 
 Performance
 -----------

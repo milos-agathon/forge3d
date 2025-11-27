@@ -42,7 +42,7 @@ def test_interactive_viewer_fog_shadow_snapshot():
         out_path = Path(td) / "fog_shadow.png"
 
         proc = subprocess.Popen(
-            ["cargo", "run", "--example", "interactive_viewer", "-q"],
+            ["cargo", "run", "--bin", "interactive_viewer", "-q"],
             cwd=str(repo_root),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

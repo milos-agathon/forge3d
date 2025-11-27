@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+import argparse
 import math
 import os
 
@@ -20,7 +21,11 @@ from .colormaps.core import (
     interpolate_hex_colors as _cm_interpolate_hex_colors,
     elevation_stops_from_hex_colors as _cm_elevation_stops,
 )
-from .render import detect_dem_water_mask as _detect_dem_water_mask
+from .render import (
+    detect_dem_water_mask as _detect_dem_water_mask,
+    _load_dem as _render_load_dem,
+    _postprocess_water_mask as _postprocess_water_mask,
+)
 from .lighting import sun_direction_from_angles as _sun_direction_from_angles
 
 
@@ -356,6 +361,128 @@ def _save_water_mask(mask, path: Path) -> None:
     _save_image(img, path)
 
 
+def _resize_mask_to_frame(mask: np.ndarray, out_hw: tuple[int, int]) -> np.ndarray:
+    """Resize a boolean mask to match an output (H, W) using simple nearest-neighbor.
+
+    This keeps dependencies minimal and is sufficient for visually highlighting
+    water regions in the final terrain render.
+    """
+
+    mask_np = np.asarray(mask, dtype=bool)
+    mh, mw = mask_np.shape
+    out_h, out_w = int(out_hw[0]), int(out_hw[1])
+    if mh == out_h and mw == out_w:
+        return mask_np
+
+    if mh <= 0 or mw <= 0 or out_h <= 0 or out_w <= 0:
+        raise ValueError("Invalid mask or output shape for resize")
+
+    row_idx = (np.arange(out_h, dtype=np.float32) * (mh / float(out_h))).astype(np.int64)
+    col_idx = (np.arange(out_w, dtype=np.float32) * (mw / float(out_w))).astype(np.int64)
+    row_idx = np.clip(row_idx, 0, mh - 1)
+    col_idx = np.clip(col_idx, 0, mw - 1)
+    return mask_np[row_idx[:, None], col_idx[None, :]]
+
+
+def _remove_border_connected(mask: np.ndarray) -> np.ndarray:
+    """Clear all mask components that touch a band near the image border.
+
+    We use 4-connectivity and treat a small band around the outer rim as the
+    "border" so that large ocean-like regions that stop a few pixels short of
+    the exact edge are still removed. Complexity is O(H*W).
+    """
+
+    m = np.asarray(mask, dtype=bool)
+    if not np.any(m):
+        return m
+
+    h, w = m.shape
+    visited = np.zeros_like(m, dtype=bool)
+    out = m.copy()
+
+    from collections import deque
+
+    q: "deque[tuple[int, int]]" = deque()
+
+    def enqueue(i: int, j: int) -> None:
+        if 0 <= i < h and 0 <= j < w and not visited[i, j] and out[i, j]:
+            visited[i, j] = True
+            q.append((i, j))
+
+    # Treat a small band near the outer rim as the "border" for seeding.
+    band = max(1, min(h, w) // 128)  # ~31px for 4000x4000, 6px for 800x600
+
+    # Top / bottom bands
+    for j in range(w):
+        for di in range(band):
+            if out[di, j]:
+                enqueue(di, j)
+            if out[h - 1 - di, j]:
+                enqueue(h - 1 - di, j)
+
+    # Left / right bands
+    for i in range(h):
+        for dj in range(band):
+            if out[i, dj]:
+                enqueue(i, dj)
+            if out[i, w - 1 - dj]:
+                enqueue(i, w - 1 - dj)
+
+    # Flood-fill and clear all border-connected pixels.
+    while q:
+        i, j = q.popleft()
+        out[i, j] = False
+        if i > 0:
+            enqueue(i - 1, j)
+        if i + 1 < h:
+            enqueue(i + 1, j)
+        if j > 0:
+            enqueue(i, j - 1)
+        if j + 1 < w:
+            enqueue(i, j + 1)
+
+    return out
+
+
+def _apply_water_tint(
+    rgba: np.ndarray,
+    mask: np.ndarray,
+    *,
+    color: tuple[int, int, int] = (30, 80, 200),
+    alpha: float = 0.7,
+) -> np.ndarray:
+    """Overlay a blue-ish tint on water pixels in the RGBA image.
+
+    The tint is applied in-place on a copy of ``rgba`` using simple linear
+    interpolation between the original color and the water color.
+    """
+
+    img = np.asarray(rgba, dtype=np.uint8).copy()
+    if img.ndim != 3 or img.shape[2] != 4:
+        raise ValueError("Expected RGBA image with shape (H, W, 4)")
+
+    h, w, _ = img.shape
+    mask_np = np.asarray(mask, dtype=bool)
+    if mask_np.shape != (h, w):
+        raise ValueError("Water mask shape must match RGBA image shape")
+
+    if not np.any(mask_np):
+        return img
+
+    a = float(alpha)
+    if not (0.0 <= a <= 1.0):
+        a = 0.7
+
+    water_rgb = img[mask_np, :3].astype(np.float32)
+    tint_rgb = np.array(color, dtype=np.float32)[None, :]
+    blended = (1.0 - a) * water_rgb + a * tint_rgb
+    img[mask_np, :3] = np.clip(blended, 0.0, 255.0).astype(np.uint8)
+    # Ensure NA water regions, which may have been rendered fully transparent
+    # (alpha=0), become visible after tinting by forcing opaque alpha.
+    img[mask_np, 3] = 255
+    return img
+
+
 def render_sunrise_to_noon_sequence(
     *,
     dem_path: Path,
@@ -488,6 +615,8 @@ def run(args: Any) -> int:
             )
         height_curve_lut = load_height_curve_lut(args.height_curve_lut)
 
+    water_mask = None
+
     _require_attributes(
         (
             "Session",
@@ -544,17 +673,56 @@ def run(args: Any) -> int:
     )
 
     if getattr(args, "water_detect", False):
-        water_mask = _detect_dem_water_mask(
-            heightmap_array,
-            domain,
-            level_normalized=float(args.water_level),
-            slope_threshold=float(args.water_slope),
-            spacing=getattr(dem, "resolution", (1.0, 1.0)),
-        )
-        mask_path = args.water_mask_output or args.output.with_name(
-            args.output.stem + "_water.png"
-        )
-        _save_water_mask(water_mask, mask_path)
+        water_mask = None
+
+        # 1) Prefer the DEM's own mask (NA pixels) as water, matching the
+        # geopandas_demo / render_raster behaviour.
+        try:
+            import rasterio  # type: ignore[import]
+
+            with rasterio.open(str(args.dem)) as ds:  # type: ignore[attr-defined]
+                band1 = ds.read(1, masked=True)
+                band_mask = getattr(band1, "mask", None)
+                if band_mask is not None:
+                    m = np.asarray(band_mask, dtype=bool)
+                    if m.size:
+                        # Match the flipped orientation used for heightmap_array.
+                        water_mask = np.flipud(m)
+        except Exception:
+            water_mask = None
+
+        # 2) Fallback: heuristic DEM water mask, using the same DEM loading
+        #    semantics as forge3d.render._load_dem.
+        if water_mask is None or not np.any(water_mask):
+            try:
+                hm_water, spacing_water = _render_load_dem(Path(args.dem))
+                hm_water = np.flipud(np.asarray(hm_water, dtype=np.float32))
+                water_domain = _io.robust_dem_domain(
+                    hm_water,
+                    q_lo=QUANTILE_DEFAULT_LO,
+                    q_hi=QUANTILE_DEFAULT_HI,
+                    fallback=(float(domain_meta[0]), float(domain_meta[1])),
+                )
+                water_domain = (float(water_domain[0]), float(water_domain[1]))
+                water_mask = _detect_dem_water_mask(
+                    hm_water,
+                    water_domain,
+                    level_normalized=float(args.water_level),
+                    slope_threshold=float(args.water_slope),
+                    spacing=spacing_water,
+                    base_min_area_pct=0.0,
+                    keep_components=16,
+                )
+            except Exception:
+                water_mask = _detect_dem_water_mask(
+                    heightmap_array,
+                    domain,
+                    level_normalized=float(args.water_level),
+                    slope_threshold=float(args.water_slope),
+                    spacing=getattr(dem, "resolution", (1.0, 1.0)),
+                    base_min_area_pct=0.0,
+                    keep_components=16,
+                )
 
     materials = f3d.MaterialSet.terrain_default(
         triplanar_scale=6.0,
@@ -675,7 +843,67 @@ def run(args: Any) -> int:
         target=None,
     )
 
-    frame.save(str(args.output))
+    if water_mask is not None:
+        rgba = frame.to_numpy()
+
+        # Start from the DEM-based water mask, resized to frame resolution.
+        mask_resized = _resize_mask_to_frame(water_mask, rgba.shape[:2])
+
+        # Also treat very dark pixels in the rendered image as lake candidates.
+        # We compute a grayscale brightness image and pick the ~0.5%% darkest
+        # interior pixels (excluding a small border) so that deep inland
+        # basins like the kidney-shaped lake are captured.
+        img_u8 = np.asarray(rgba, dtype=np.uint8)
+        gray = (
+            img_u8[..., 0].astype(np.float32)
+            + img_u8[..., 1].astype(np.float32)
+            + img_u8[..., 2].astype(np.float32)
+        ) / 3.0
+
+        lake_mask = np.zeros_like(gray, dtype=bool)
+        if gray.size:
+            inner = np.ones_like(gray, dtype=bool)
+            h_i, w_i = gray.shape
+            if h_i > 6 and w_i > 6:
+                inner[:3, :] = False
+                inner[-3:, :] = False
+                inner[:, :3] = False
+                inner[:, -3:] = False
+            vals = gray[inner]
+            if vals.size:
+                try:
+                    thresh = float(np.quantile(vals, 0.005))
+                except Exception:
+                    thresh = float(np.min(vals))
+                lake_mask = gray <= thresh
+
+        combined_mask = mask_resized | lake_mask
+
+        # Remove all connected components that touch the image border so outer
+        # DEM rims are never treated as water.
+        combined_mask = _remove_border_connected(combined_mask)
+
+        # Optionally drop tiny speckles; this is a no-op when SciPy is not
+        # available because _postprocess_water_mask will simply return the mask.
+        h_m, w_m = combined_mask.shape
+        min_area_px = int(max(1, h_m * w_m * 0.0005))
+        combined_mask = _postprocess_water_mask(
+            combined_mask,
+            keep_components=16,
+            min_area_px=min_area_px,
+        )
+
+        tinted = _apply_water_tint(rgba, combined_mask)
+
+        # Optional debug: if caller supplied --water-mask-output, emit a mask PNG
+        # so it is easy to verify which pixels are classified as water.
+        water_mask_out = getattr(args, "water_mask_output", None)
+        if water_mask_out is not None:
+            _save_water_mask(combined_mask, Path(water_mask_out))
+
+        _save_image(tinted, args.output)
+    else:
+        frame.save(str(args.output))
     print(f"Wrote {args.output}")
 
     if getattr(args, "viewer", False):

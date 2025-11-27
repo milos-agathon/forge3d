@@ -1,60 +1,19 @@
-//   --lit-sun <float>
-//   --lit-ibl <float>
-// examples/interactive_viewer.rs
-// Workstream I1: Interactive Viewer demonstration
-// Simple example showing the windowed viewer with orbit and FPS camera modes
-//
-use forge3d::cli::args::GiCliConfig;
-use forge3d::viewer::{run_viewer, set_initial_commands, ViewerConfig};
 use std::env;
+
+use crate::cli::args::GiCliConfig;
+use crate::viewer::{run_viewer, set_initial_commands, ViewerConfig};
 
 fn gi_cli_config_to_commands(cfg: &GiCliConfig) -> Vec<String> {
     cfg.to_commands()
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Map simple CLI flags to viewer commands
-    // Supported:
-    //   --gi <ssao:on|ssao:off|ssgi:on|ssgi:off|ssr:on|ssr:off>  (repeatable)
-    //   --snapshot <path>
-    //   --obj <path>
-    //   --gltf <path>
-    //   --ibl <path.hdr|path.exr>
-    //   --viz <material|normal|depth|gi|lit>
-    //   --brdf <lambert|phong|ggx|disney>
-    //   --sky <off|on|preetham|hosek-wilkie>
-    //   --sky-turbidity <float>
-    //   --sky-ground <float>
-    //   --sky-exposure <float>
-    //   --sky-sun <float>
-    //   --fog <on|off>
-    //   --fog-density <float>
-    //   --fog-g <float>
-    //   --fog-steps <u32>
-    //   --fog-shadow <on|off>
-    //   --fog-temporal <float 0..0.9>
-    //   --ssao-radius <float>
-    //   --ssao-intensity <float>
-    //   --ssao-composite <on|off>
-    //   --ssao-mul <0..1>
-    //   --ssao-bias <float>
-    //   --ao-blur <on|off>
-    //   --ao-temporal-alpha <0..1>
-    //   --ssgi-steps <u32>
-    //   --ssgi-radius <float>
-    //   --ssgi-half <on|off>
-    //   --ssgi-temporal-alpha <float>
-    //   --ssr-enable <on|off>
-    //   --ssr-max-steps <u32>
-    //   --ssr-thickness <float>
-    //   --ssao-technique <ssao|gtao>
-    //   --ssao-samples <u32>
-    //   --ssao-directions <u32>
-    //   --ssao-temporal-alpha <0..1>
-    //   --size <WxH>
-    //   --fov <degrees>
-    //   --cam-lookat ex,ey,ez,tx,ty,tz[,ux,uy,uz]
-
+/// Run the interactive viewer CLI, mapping high-level flags into initial
+/// viewer commands and then launching the main viewer loop.
+///
+/// This function intentionally mirrors the behavior of the original
+/// `examples/interactive_viewer.rs` entrypoint so that existing tests and
+/// docs that rely on the CLI semantics continue to work.
+pub fn run_interactive_viewer_cli() -> Result<(), Box<dyn std::error::Error>> {
     // Collect all CLI arguments (excluding argv[0]) so we can validate
     // GI-related flags using the central schema in src/cli/args.rs.
     let all_args: Vec<String> = env::args().skip(1).collect();
@@ -264,7 +223,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         set_initial_commands(cmds);
     }
 
-    // Create viewer configuration
+    // Use a sensible default viewer configuration; size and FOV can be
+    // overridden via initial commands derived from the CLI.
     let config = ViewerConfig {
         width: 1280,
         height: 720,
@@ -277,6 +237,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         snapshot_height: None,
     };
 
-    // Run the viewer
     run_viewer(config)
 }

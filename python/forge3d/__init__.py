@@ -3,6 +3,7 @@
 # Exists to provide typed fallbacks when the native module is unavailable
 # RELEVANT FILES: python/forge3d/__init__.pyi, src/core/dof.rs, tests/test_b6_dof.py, examples/dof_demo.py
 import numpy as np
+import os
 
 from ._native import (
     NATIVE_AVAILABLE as _NATIVE_AVAILABLE,
@@ -738,6 +739,13 @@ def open_viewer(
     fov_deg: float = 45.0,
     znear: float = 0.1,
     zfar: float = 1000.0,
+    *,
+    obj_path: str | None = None,
+    gltf_path: str | None = None,
+    snapshot_path: str | None = None,
+    snapshot_width: int | None = None,
+    snapshot_height: int | None = None,
+    initial_commands: list[str] | None = None,
 ) -> None:
     """Open an interactive viewer window with orbit and FPS camera controls.
 
@@ -752,6 +760,12 @@ def open_viewer(
         fov_deg: Field of view in degrees (default: 45.0)
         znear: Near clipping plane distance (default: 0.1)
         zfar: Far clipping plane distance (default: 1000.0)
+        obj_path: Optional OBJ file path to load on startup (mutually exclusive with gltf_path).
+        gltf_path: Optional glTF/GLB file path to load on startup (mutually exclusive with obj_path).
+        snapshot_path: Optional path for an automatic snapshot shortly after startup.
+        snapshot_width: Optional width override for the automatic snapshot (must be used with snapshot_height).
+        snapshot_height: Optional height override for the automatic snapshot (must be used with snapshot_width).
+        initial_commands: Optional list of viewer commands to run at startup (advanced/experimental).
 
     Controls:
         Tab - Toggle between Orbit and FPS camera modes
@@ -776,7 +790,58 @@ def open_viewer(
     Note:
         This function requires a GPU and windowing system. For offscreen rendering,
         use Scene.render_terrain_rgba() or render_offscreen_rgba() instead.
+
+        The underlying viewer uses a global "initial commands" slot, so it is
+        intended to be called at most once per process. Multi-viewer sessions and
+        re-entrant viewer launches are out of scope for the current design.
     """
+    # Basic validation for mutually exclusive and paired parameters. Detailed
+    # behavior is implemented on the Rust side; we mirror the same invariants
+    # here so callers see consistent errors from Python or native entrypoints.
+    if obj_path is not None and gltf_path is not None:
+        raise ValueError(
+            "obj_path and gltf_path are mutually exclusive; provide at most one",
+        )
+
+    if (snapshot_width is None) ^ (snapshot_height is None):
+        raise ValueError(
+            "snapshot_width and snapshot_height must be provided together",
+        )
+    if snapshot_width is not None and snapshot_width <= 0:
+        raise ValueError(
+            "snapshot_width and snapshot_height, if provided, must be positive",
+        )
+    if snapshot_height is not None and snapshot_height <= 0:
+        raise ValueError(
+            "snapshot_width and snapshot_height, if provided, must be positive",
+        )
+
+    # FORGE3D_AUTO_SNAPSHOT_PATH drives an automatic snapshot mode used by
+    # existing CLI/P5 flows. To avoid surprising precedence rules, we treat
+    # simultaneous use with Python-level snapshot_* arguments as a
+    # configuration error.
+    env_auto = os.getenv("FORGE3D_AUTO_SNAPSHOT_PATH")
+    if env_auto is not None and (
+        snapshot_path is not None
+        or snapshot_width is not None
+        or snapshot_height is not None
+    ):
+        raise ValueError(
+            "FORGE3D_AUTO_SNAPSHOT_PATH and snapshot_* arguments cannot be used together; "
+            "configure either the environment-driven auto snapshot or the Python-level "
+            "snapshot_path/snapshot_width/snapshot_height, but not both.",
+        )
+
+    # Normalize optional parameters to types expected by the native module.
+    obj_str = None if obj_path is None else str(obj_path)
+    gltf_str = None if gltf_path is None else str(gltf_path)
+    snap_str = None if snapshot_path is None else str(snapshot_path)
+    cmds_list: list[str] | None
+    if initial_commands is None:
+        cmds_list = None
+    else:
+        cmds_list = [str(cmd) for cmd in initial_commands]
+
     try:
         from . import _forge3d as _native  # type: ignore[attr-defined]
         if hasattr(_native, "open_viewer"):
@@ -788,6 +853,12 @@ def open_viewer(
                 fov_deg=float(fov_deg),
                 znear=float(znear),
                 zfar=float(zfar),
+                obj_path=obj_str,
+                gltf_path=gltf_str,
+                snapshot_path=snap_str,
+                snapshot_width=None if snapshot_width is None else int(snapshot_width),
+                snapshot_height=None if snapshot_height is None else int(snapshot_height),
+                initial_commands=cmds_list,
             )
         else:
             raise RuntimeError(
