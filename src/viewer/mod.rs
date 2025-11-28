@@ -32,7 +32,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wgpu::util::DeviceExt;
-use wgpu::{Device, Instance, Queue, Surface, SurfaceConfiguration};
+use wgpu::{Adapter, Device, Instance, Queue, Surface, SurfaceConfiguration};
 use winit::{
     dpi::PhysicalSize,
     event::*,
@@ -593,6 +593,18 @@ pub fn set_initial_commands(cmds: Vec<String>) {
     let _ = INITIAL_CMDS.set(cmds);
 }
 
+// Optional initial terrain configuration (set by open_terrain_viewer via lib.rs).
+// We keep this behind the extension-module feature since it is only used by the
+// Python-facing entrypoint.
+#[cfg(feature = "extension-module")]
+static INITIAL_TERRAIN_CONFIG: once_cell::sync::OnceCell<crate::render::params::RendererConfig> =
+    once_cell::sync::OnceCell::new();
+
+#[cfg(feature = "extension-module")]
+pub fn set_initial_terrain_config(cfg: crate::render::params::RendererConfig) {
+    let _ = INITIAL_TERRAIN_CONFIG.set(cfg);
+}
+
 impl Default for ViewerConfig {
     fn default() -> Self {
         Self {
@@ -613,11 +625,14 @@ pub struct Viewer {
     surface: Surface<'static>,
     device: Arc<Device>,
     queue: Arc<Queue>,
+    adapter: Arc<Adapter>,
     config: SurfaceConfiguration,
     camera: CameraController,
     view_config: ViewerConfig,
     frame_count: u64,
     fps_counter: FpsCounter,
+    #[cfg(feature = "extension-module")]
+    terrain_scene: Option<crate::terrain::TerrainScene>,
     // Input state
     keys_pressed: std::collections::HashSet<KeyCode>,
     shift_pressed: bool,
@@ -833,6 +848,25 @@ impl FpsCounter {
 }
 
 impl Viewer {
+    #[cfg(feature = "extension-module")]
+    pub fn load_terrain_from_config(
+        &mut self,
+        cfg: &crate::render::params::RendererConfig,
+    ) -> anyhow::Result<()> {
+        // TerrainScene currently owns its own configuration; we accept cfg so
+        // that future milestones can thread it through without changing the
+        // Viewer API again.
+        let _ = cfg;
+
+        let scene = crate::terrain::TerrainScene::new(
+            Arc::clone(&self.device),
+            Arc::clone(&self.queue),
+            Arc::clone(&self.adapter),
+        )?;
+        self.terrain_scene = Some(scene);
+        Ok(())
+    }
+
     fn ensure_geom_bind_group(&mut self) -> anyhow::Result<()> {
         if self.geom_bind_group.is_some() {
             return Ok(());
@@ -2163,6 +2197,8 @@ impl Viewer {
             })
             .await
             .ok_or("Failed to find suitable adapter")?;
+
+        let adapter = Arc::new(adapter);
 
         // Request device and queue
         let (device, queue) = adapter
@@ -3986,11 +4022,14 @@ impl Viewer {
             surface,
             device,
             queue,
+            adapter,
             config: surface_config,
             camera: CameraController::new(),
             view_config: config,
             frame_count: 0,
             fps_counter: FpsCounter::new(),
+            #[cfg(feature = "extension-module")]
+            terrain_scene: None,
             keys_pressed: std::collections::HashSet::new(),
             shift_pressed: false,
             gi,
@@ -5862,7 +5901,41 @@ impl Viewer {
             }
         }
 
-        // If we didn't composite anything (GI path unavailable), draw fallback to swapchain now
+        // If we didn't composite anything (GI path unavailable), either let an attached
+        // TerrainScene render, or fall back to the purple debug pipeline.
+        #[cfg(feature = "extension-module")]
+        {
+            if let Some(_scene) = &mut self.terrain_scene {
+                // M3: TerrainScene is attached. A future milestone will render the terrain
+                // directly into `view` here; for now we intentionally skip the purple
+                // fallback when a scene is present.
+            } else if !(have_gi && have_pipe && have_cam && have_vb && have_z && have_bgl) {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("viewer.fallback.pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.05,
+                                g: 0.0,
+                                b: 0.15,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                pass.set_pipeline(&self.fallback_pipeline);
+                pass.draw(0..3, 0..1);
+                drop(pass);
+            }
+        }
+
+        #[cfg(not(feature = "extension-module"))]
         if !(have_gi && have_pipe && have_cam && have_vb && have_z && have_bgl) {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewer.fallback.pass"),
@@ -10953,7 +11026,10 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
         }
     });
 
-    // Create viewer in blocking manner
+    // ...
+
+    // ...
+
     let mut viewer_opt: Option<Viewer> = None;
     let mut last_frame = Instant::now();
 
@@ -10967,6 +11043,19 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                         Ok(v) => {
                             viewer_opt = Some(v);
                             last_frame = Instant::now();
+                            // If an initial terrain config was provided (via open_terrain_viewer),
+                            // attempt to attach a TerrainScene before applying CLI commands.
+                            #[cfg(feature = "extension-module")]
+                            if let Some(cfg) = INITIAL_TERRAIN_CONFIG.get() {
+                                if let Some(viewer) = viewer_opt.as_mut() {
+                                    if let Err(e) = viewer.load_terrain_from_config(cfg) {
+                                        eprintln!(
+                                            "[viewer] failed to load terrain scene from config: {}",
+                                            e
+                                        );
+                                    }
+                                }
+                            }
                             // Apply any pending commands from CLI now that viewer exists
                             for cmd in pending_cmds.drain(..) {
                                 if let Some(viewer) = viewer_opt.as_mut() {

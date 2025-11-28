@@ -399,6 +399,128 @@ ShadowParams {
 }
 ```
 
+## IBL On/Off Comparison (Terrain Demo)
+
+The easiest way to visually validate that terrain PBR is correctly picking up IBL is to render
+two frames with identical geometry, camera, and direct light, but different GI modes.
+
+Use the public CLI in `examples/terrain_demo.py`:
+
+```bash
+# IBL ON: full PBR + IBL, material albedo only (no elevation colormap)
+python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/snow_field_4k.hdr \
+  --size 1600 900 \
+  --render-scale 1.0 \
+  --msaa 4 \
+  --z-scale 2.0 \
+  --albedo-mode material \
+  --colormap-strength 0.0 \
+  --gi ibl \
+  --output examples/out/terrain_ibl_on.png
+
+# IBL OFF: same setup, but GI excludes IBL so only the directional light remains
+python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/snow_field_4k.hdr \
+  --size 1600 900 \
+  --render-scale 1.0 \
+  --msaa 4 \
+  --z-scale 2.0 \
+  --albedo-mode material \
+  --colormap-strength 0.0 \
+  --gi "" \
+  --output examples/out/terrain_ibl_off.png
+```
+
+**Expected differences:**
+
+- **terrain_ibl_on.png**
+  - Steep rock and snow faces show view-dependent specular from the HDR environment.
+  - Overall tint and fill light match the sky colors from `snow_field_4k.hdr`.
+  - The lowered snow roughness (see `MaterialSet::terrain_default`) should make high-altitude
+    regions visibly glossier under grazing angles.
+
+- **terrain_ibl_off.png**
+  - Lighting is dominated by the directional sun; shadows and contrast remain, but ambient
+    fill is flatter.
+  - Specular reflections from the environment vanish; surfaces read more "matte" overall.
+
+When tuning exposure or HDR choices, keep these two renders in sync and adjust only
+camera/light/IBL parameters from the Python side so that the uniform packing into
+`TerrainShadingUniforms` and `IblUniforms` remains consistent with this reference.
+
+## POM On/Off Grazing Debug View
+
+To verify that **Parallax Occlusion Mapping (POM)** is correctly wired and
+visibly contributing relief at grazing angles, you can render a close-up pair of
+frames that differ only by the POM enable flag. These use the public
+`examples/terrain_demo.py` CLI and the `--pom-disabled` switch.
+
+```bash
+# POM ON: low-angle close-up, material albedo only
+python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/snow_field_4k.hdr \
+  --size 1600 900 \
+  --render-scale 1.0 \
+  --msaa 4 \
+  --z-scale 2.0 \
+  --cam-radius 250 \
+  --cam-phi 135 \
+  --cam-theta 20 \
+  --albedo-mode material \
+  --colormap-strength 0.0 \
+  --gi ibl \
+  --ibl-intensity 1.0 \
+  --sun-azimuth 135 \
+  --sun-elevation 25 \
+  --sun-intensity 3.0 \
+  --output examples/out/terrain_pom_on.png --overwrite
+
+# POM OFF: same setup, but POM disabled
+python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/snow_field_4k.hdr \
+  --size 1600 900 \
+  --render-scale 1.0 \
+  --msaa 4 \
+  --z-scale 2.0 \
+  --cam-radius 250 \
+  --cam-phi 135 \
+  --cam-theta 20 \
+  --albedo-mode material \
+  --colormap-strength 0.0 \
+  --gi ibl \
+  --ibl-intensity 1.0 \
+  --sun-azimuth 135 \
+  --sun-elevation 25 \
+  --sun-intensity 3.0 \
+  --pom-disabled \
+  --output examples/out/terrain_pom_off.png --overwrite
+```
+
+**Expected differences:**
+
+- **terrain_pom_on.png**
+  - At grazing angles, small-scale height detail appears to slide relative to
+    the camera, giving a stronger sense of surface relief.
+  - Ridges and micro-features exhibit self-occlusion consistent with the
+    `PomSettings` scale and step counts.
+
+- **terrain_pom_off.png**
+  - Geometry is identical (same DEM), but fine detail looks flatter; textures
+    behave more like simple triplanar mapping without parallax.
+  - The apparent depth of cracks and ridges no longer varies with view
+    direction; silhouettes remain the same, but interior detail loses its
+    “3D” pop.
+
+These commands rely on the existing `PomSettings` defaults from
+`make_terrain_params_config`. The `--pom-disabled` flag only flips the
+`pom.enabled` bit in the Python configuration before it is bridged to Rust via
+`TerrainRenderParams`.
+
 ## Performance Tuning
 
 **High Quality (≥60 fps @ 1080p):**

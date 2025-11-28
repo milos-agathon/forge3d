@@ -113,6 +113,9 @@ var height_curve_lut_tex : texture_2d<f32>;
 @group(0) @binding(10)
 var height_curve_lut_samp : sampler;
 
+@group(0) @binding(11)
+var water_mask_tex : texture_2d<f32>;
+
 // P1-06: Light buffer bindings (@group(1))
 struct Light {
     light_type: u32,
@@ -636,6 +639,8 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         );
     }
     let parallax_uv = clamp(pom_uv, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
+    let water_mask_value = textureSampleLevel(water_mask_tex, height_samp, parallax_uv, 0.0).r;
+    let is_water = water_mask_value > 0.5;
     let height_sample = sample_height(parallax_uv);
     let height_clamped = clamp(height_sample, u_shading.clamp0.x, u_shading.clamp0.y);
     var occlusion = 1.0;
@@ -705,6 +710,16 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         }
     }
 
+    // Optional water override: when mask is active, treat surface as water material.
+    if (is_water) {
+        let water_albedo = vec3<f32>(0.02, 0.05, 0.08);
+        let water_roughness = 0.04;
+        let water_metallic = 0.0;
+        albedo = water_albedo;
+        roughness = water_roughness;
+        metallic = water_metallic;
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Colormap/Overlay System with Debug Modes
     // ──────────────────────────────────────────────────────────────────────────
@@ -760,7 +775,12 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     occlusion = clamp(occlusion, u_shading.clamp2.x, u_shading.clamp2.y);
     roughness = clamp(roughness, 0.04, 1.0);
     metallic = clamp(metallic, 0.0, 1.0);
-    let f0 = mix(vec3<f32>(0.04, 0.04, 0.04), albedo, metallic);
+    var f0 = mix(vec3<f32>(0.04, 0.04, 0.04), albedo, metallic);
+    if (is_water) {
+        let ior = 1.33;
+        let f0_scalar = pow((ior - 1.0) / (ior + 1.0), 2.0);
+        f0 = vec3<f32>(f0_scalar, f0_scalar, f0_scalar);
+    }
     let light_dir = normalize(u_terrain.sun_exposure.xyz);
     
     // P2-05: Optional BRDF dispatch (flag-controlled)

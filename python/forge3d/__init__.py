@@ -60,7 +60,6 @@ if _NATIVE_MODULE is not None:
         # P0 Lighting classes
         "Light",
         "MaterialShading",
-        "ShadowSettings",
         "GiSettings",
         "Atmosphere",
     ):

@@ -67,17 +67,19 @@ def test_terrain_render_no_horizontal_banding():
         heightmap=heights,
     )
 
+    pixels = frame.to_numpy()
+
     # Verify output shape and type
-    assert frame.shape == (512, 512, 4), f"Expected (512, 512, 4), got {frame.shape}"
-    assert frame.dtype == np.uint8, f"Expected uint8, got {frame.dtype}"
+    assert pixels.shape == (512, 512, 4), f"Expected (512, 512, 4), got {pixels.shape}"
+    assert pixels.dtype == np.uint8, f"Expected uint8, got {pixels.dtype}"
 
     # Check that the image is not too dark (mean should be > 100)
-    mean_brightness = frame[:, :, :3].mean()
+    mean_brightness = pixels[:, :, :3].mean()
     assert mean_brightness > 100, f"Image too dark: mean={mean_brightness:.1f}"
 
     # Check for horizontal banding by analyzing row consistency
     # Calculate mean brightness for each row
-    row_means = frame[:, :, :3].mean(axis=(1, 2))
+    row_means = pixels[:, :, :3].mean(axis=(1, 2))
 
     # The middle 80% of rows should have similar values (ignore edges)
     middle_start = int(512 * 0.1)
@@ -89,7 +91,7 @@ def test_terrain_render_no_horizontal_banding():
     assert row_std < 10, f"Horizontal banding detected: row std={row_std:.2f}"
 
     # Check that we have reasonable color variation (not all one color)
-    color_std = frame[:, :, :3].std()
+    color_std = pixels[:, :, :3].std()
     assert color_std > 1.0, f"No color variation: std={color_std:.2f}"
 
 
@@ -147,15 +149,17 @@ def test_terrain_render_color_space_correct():
         heightmap=heights,
     )
 
+    pixels = frame.to_numpy()
+
     # With correct color-space handling, we should get reasonably bright mid-tones
     # Linear 0.35 (rock gray) → sRGB ~0.62 → u8 ~158
     # With lighting and exposure, should be in 100-200 range
-    mean = frame[:, :, :3].mean()
+    mean = pixels[:, :, :3].mean()
     assert 100 < mean < 230, f"Color-space issue: mean={mean:.1f} (expected 100-230)"
 
     # Check that we're not clipped to white or black
-    assert frame[:, :, :3].min() > 30, "Too much black clipping"
-    assert frame[:, :, :3].max() < 250, "Too much white clipping"
+    assert pixels[:, :, :3].min() > 30, "Too much black clipping"
+    assert pixels[:, :, :3].max() < 250, "Too much white clipping"
 
 
 def test_terrain_render_non_aligned_dimensions():
@@ -212,11 +216,13 @@ def test_terrain_render_non_aligned_dimensions():
         heightmap=heights,
     )
 
+    pixels = frame.to_numpy()
+
     # Verify correct output shape
-    assert frame.shape == (251, 253, 4), f"Expected (251, 253, 4), got {frame.shape}"
+    assert pixels.shape == (251, 253, 4), f"Expected (251, 253, 4), got {pixels.shape}"
 
     # Check for horizontal artifacts from padding issues
-    row_means = frame[:, :, :3].mean(axis=(1, 2))
+    row_means = pixels[:, :, :3].mean(axis=(1, 2))
     middle_rows = row_means[50:200]
     row_std = middle_rows.std()
     assert row_std < 10, f"Padding artifacts detected: row std={row_std:.2f}"

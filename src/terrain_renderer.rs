@@ -27,9 +27,12 @@ use crate::lighting::types::{Light, LightType};
 use crate::lighting::LightBuffer;
 use crate::terrain_render_params::{AddressModeNative, FilterModeNative};
 
-/// Terrain renderer implementing PBR + POM pipeline
-#[pyclass(module = "forge3d._forge3d", name = "TerrainRenderer")]
-pub struct TerrainRenderer {
+/// Reusable GPU terrain scene (M2).
+///
+/// Owns the WGPU pipeline state for the PBR+POM terrain path and is free of
+/// any PyO3 attributes so it can be reused by the interactive viewer and
+/// other Rust callers.
+pub struct TerrainScene {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     adapter: Arc<wgpu::Adapter>,
@@ -41,15 +44,23 @@ pub struct TerrainRenderer {
     sampler_linear: wgpu::Sampler,
     height_curve_identity_texture: wgpu::Texture,
     height_curve_identity_view: wgpu::TextureView,
+    water_mask_fallback_texture: wgpu::Texture,
+    water_mask_fallback_view: wgpu::TextureView,
     height_curve_lut_sampler: wgpu::Sampler,
     color_format: wgpu::TextureFormat,
-    // P0-03: Config plumbing (no shader/pipeline behavior changes)
-    #[cfg(feature = "enable-renderer-config")]
-    config: Arc<Mutex<crate::render::params::RendererConfig>>,
     // P1-08: Light buffer for multi-light support
     light_buffer: Arc<Mutex<LightBuffer>>,
     // Noop shadow resources for bind group at index 3 (required by pipeline layout)
     noop_shadow: NoopShadow,
+    // P0-03: Config plumbing (no shader/pipeline behavior changes)
+    #[cfg(feature = "enable-renderer-config")]
+    config: Arc<Mutex<crate::render::params::RendererConfig>>,
+}
+
+/// Terrain renderer implementing PBR + POM pipeline
+#[pyclass(module = "forge3d._forge3d", name = "TerrainRenderer")]
+pub struct TerrainRenderer {
+    scene: TerrainScene,
 }
 
 /// Noop shadow resources for terrain_pbr_pom pipeline
@@ -364,12 +375,14 @@ impl TerrainRenderer {
     ///     session: GPU session object
     #[new]
     pub fn new(session: &crate::session::Session) -> PyResult<Self> {
-        Self::new_internal(
+        let scene = TerrainScene::new(
             session.device.clone(),
             session.queue.clone(),
             session.adapter.clone(),
         )
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to create TerrainRenderer: {:#}", e)))
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to create TerrainRenderer: {:#}", e)))?;
+
+        Ok(Self { scene })
     }
 
     /// P1-08: Set lights from Python dicts
@@ -415,14 +428,15 @@ impl TerrainRenderer {
             }
         }
 
-        // Update light buffer
+        // Update light buffer (shared with TerrainScene)
         let mut light_buffer = self
+            .scene
             .light_buffer
             .lock()
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock light buffer: {}", e)))?;
 
         light_buffer
-            .update(&self.device, &self.queue, &native_lights)
+            .update(&self.scene.device, &self.scene.queue, &native_lights)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to update lights: {}", e)))?;
 
         Ok(())
@@ -436,14 +450,9 @@ impl TerrainRenderer {
     /// Example:
     ///     info = renderer.light_debug_info()
     ///     print(info)
-    #[pyo3(signature = ())]
+    #[pyo3(signature = () )]
     fn light_debug_info(&self) -> PyResult<String> {
-        let light_buffer = self
-            .light_buffer
-            .lock()
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock light buffer: {}", e)))?;
-
-        Ok(light_buffer.debug_info())
+        self.scene.light_debug_info()
     }
 
     /// Render terrain using PBR + POM
@@ -454,10 +463,11 @@ impl TerrainRenderer {
     ///     params: Terrain render parameters
     ///     heightmap: 2D numpy array (H, W) of float32 heights
     ///     target: Optional render target (None for offscreen)
+    ///     water_mask: Optional 2D mask (H, W) in heightmap space, where values > 0 indicate water.
     ///
     /// Returns:
     ///     Frame object with rendered RGBA8 image
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None, water_mask=None))]
     pub fn render_terrain_pbr_pom<'py>(
         &self,
         py: Python<'py>,
@@ -466,6 +476,7 @@ impl TerrainRenderer {
         params: &crate::terrain_render_params::TerrainRenderParams,
         heightmap: PyReadonlyArray2<'py, f32>,
         target: Option<&Bound<'_, PyAny>>,
+        water_mask: Option<PyReadonlyArray2<'py, bool>>,
     ) -> PyResult<Py<crate::Frame>> {
         if target.is_some() {
             return Err(PyRuntimeError::new_err(
@@ -473,9 +484,10 @@ impl TerrainRenderer {
             ));
         }
 
-        // Render internally
+        // Render internally via TerrainScene
         let frame = self
-            .render_internal(material_set, env_maps, params, heightmap)
+            .scene
+            .render_internal(material_set, env_maps, params, heightmap, water_mask)
             .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {:#}", e)))?;
 
         // Return Frame object
@@ -486,19 +498,20 @@ impl TerrainRenderer {
     pub fn info(&self) -> String {
         format!(
             "TerrainRenderer(backend=wgpu, device={:?})",
-            self.device.features()
+            self.scene.device.features()
         )
     }
 
     /// Python repr
     fn __repr__(&self) -> String {
-        format!("TerrainRenderer(features={:?})", self.device.features())
+        format!("TerrainRenderer(features={:?})", self.scene.device.features())
     }
 
     /// Get renderer config for debugging (P0-03)
     #[cfg(feature = "enable-renderer-config")]
     pub fn get_config(&self) -> PyResult<String> {
         let config = self
+            .scene
             .config
             .lock()
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock config: {}", e)))?;
@@ -507,9 +520,9 @@ impl TerrainRenderer {
     }
 }
 
-impl TerrainRenderer {
-    /// Internal constructor
-    fn new_internal(
+impl TerrainScene {
+    /// Internal constructor used by Python and (later) the viewer.
+    pub fn new(
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         adapter: Arc<wgpu::Adapter>,
@@ -626,6 +639,17 @@ impl TerrainRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                     count: None,
                 },
+                // @binding(11): water mask texture (non-filterable)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -735,6 +759,43 @@ impl TerrainRenderer {
         let (height_curve_identity_texture, height_curve_identity_view) =
             Self::upload_height_curve_lut_internal(&device, &queue, &identity_lut_data)?;
 
+        // Fallback water mask texture (all zeros = no water)
+        let water_mask_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.water_mask_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &water_mask_fallback_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[0u8],
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(1),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let water_mask_fallback_view =
+            water_mask_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         // P1-08: Initialize light buffer before pipeline creation
         let light_buffer = LightBuffer::new(&device);
 
@@ -776,6 +837,8 @@ impl TerrainRenderer {
             sampler_linear,
             height_curve_identity_texture,
             height_curve_identity_view,
+            water_mask_fallback_texture,
+            water_mask_fallback_view,
             height_curve_lut_sampler,
             color_format,
             light_buffer: Arc::new(Mutex::new(light_buffer)),
@@ -784,6 +847,15 @@ impl TerrainRenderer {
             #[cfg(feature = "enable-renderer-config")]
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
         })
+    }
+
+    /// P1-09: Get debug info from light buffer (shared helper).
+    pub fn light_debug_info(&self) -> PyResult<String> {
+        let light_buffer = self
+            .light_buffer
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock light buffer: {}", e)))?;
+        Ok(light_buffer.debug_info())
     }
 
     /// Preprocess terrain shader by resolving #include directives
@@ -1202,12 +1274,13 @@ impl TerrainRenderer {
     }
 
     /// Internal render method
-    fn render_internal(
+    pub(crate) fn render_internal(
         &self,
         material_set: &crate::material_set::MaterialSet,
         env_maps: &crate::ibl_wrapper::IBL,
         params: &crate::terrain_render_params::TerrainRenderParams,
         heightmap: PyReadonlyArray2<f32>,
+        water_mask: Option<PyReadonlyArray2<bool>>,
     ) -> Result<crate::Frame> {
         // P1-06: Advance light buffer frame (triple-buffering)
         let mut light_buffer_guard = self
@@ -1270,6 +1343,29 @@ impl TerrainRenderer {
         let heightmap_texture =
             self.upload_heightmap_texture(width as u32, height as u32, &heightmap_data)?;
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Optional water mask upload (bool -> R8Unorm 0/255)
+        let mut water_mask_view_uploaded: Option<wgpu::TextureView> = None;
+        if let Some(mask) = water_mask {
+            let mask_array = mask.as_array();
+            if mask_array.shape() == heightmap_array.shape() {
+                let mut mask_bytes = Vec::with_capacity(width * height);
+                for value in mask_array.iter() {
+                    mask_bytes.push(if *value { 255u8 } else { 0u8 });
+                }
+                let tex =
+                    self.upload_water_mask_texture(width as u32, height as u32, &mask_bytes)?;
+                let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+                water_mask_view_uploaded = Some(view);
+            } else {
+                log::warn!(
+                    target: "terrain.water",
+                    "Water mask shape {:?} does not match heightmap shape {:?}; using fallback",
+                    mask_array.shape(),
+                    heightmap_array.shape()
+                );
+            }
+        }
 
         let gpu_materials = material_set
             .gpu(self.device.as_ref(), self.queue.as_ref())
@@ -1440,6 +1536,14 @@ impl TerrainRenderer {
                 wgpu::BindGroupEntry {
                     binding: 10,
                     resource: wgpu::BindingResource::Sampler(&self.height_curve_lut_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: wgpu::BindingResource::TextureView(
+                        water_mask_view_uploaded
+                            .as_ref()
+                            .unwrap_or(&self.water_mask_fallback_view),
+                    ),
                 },
             ],
         });
@@ -1871,6 +1975,49 @@ impl TerrainRenderer {
             wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(width * 4), // R32Float = 4 bytes
+                rows_per_image: Some(height),
+            },
+            size,
+        );
+
+        Ok(texture)
+    }
+
+    /// Upload water mask as R8Unorm texture (0 = no water, 1 = water)
+    fn upload_water_mask_texture(
+        &self,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> Result<wgpu::Texture> {
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.water_mask"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(width),
                 rows_per_image: Some(height),
             },
             size,

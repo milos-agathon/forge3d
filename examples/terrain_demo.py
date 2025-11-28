@@ -185,6 +185,22 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         help="Optional debug PNG showing the detected water mask.",
     )
+    parser.add_argument(
+        "--water-material",
+        type=str,
+        choices=["none", "overlay", "pbr"],
+        default="overlay",
+        help=(
+            "Water rendering mode when --water-detect is enabled: "
+            "'none' (no highlight), 'overlay' (2D tint, default), or 'pbr' "
+            "(GPU PBR water using the terrain shader)."
+        ),
+    )
+    parser.add_argument(
+        "--pom-disabled",
+        action="store_true",
+        help="Disable parallax occlusion mapping (POM) in the terrain PBR+POM shader.",
+    )
 
     return parser.parse_args()
 

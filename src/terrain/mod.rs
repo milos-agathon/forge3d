@@ -11,6 +11,11 @@ pub mod pipeline;
 pub use pipeline::TerrainPipeline;
 // T33-END:terrain-mod
 
+// TerrainScene: reusable GPU terrain scene (M2)
+pub mod scene;
+#[cfg(feature = "extension-module")]
+pub use scene::TerrainScene;
+
 // E1/E3: streaming mosaics
 pub mod stream;
 // E1 (scaffolding): GPU page table for tile→slot mapping

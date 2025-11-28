@@ -273,6 +273,7 @@ def _build_params(
     albedo_mode: str = "mix",
     colormap_strength: float = 0.5,
     ibl_enabled: bool = True,
+    pom_enabled: bool | None = None,
     light_azimuth_deg: float = 135.0,
     light_elevation_deg: float = 35.0,
     sun_intensity: float = 3.0,
@@ -336,6 +337,12 @@ def _build_params(
         ),
         overlays=overlays,
     )
+
+    if pom_enabled is not None:
+        try:
+            config.pom.enabled = bool(pom_enabled)
+        except AttributeError:
+            pass
 
     return f3d.TerrainRenderParams(config)
 
@@ -585,9 +592,11 @@ def render_sunrise_to_noon_sequence(
                 light_elevation_deg=elev,
             )
 
+            # Native binding currently expects a non-None IBL handle; turning IBL on/off
+            # is controlled via params (ibl_enabled/intensity), not by omitting env_maps.
             frame = renderer_native.render_terrain_pbr_pom(
                 material_set=materials,
-                env_maps=ibl if ibl_enabled else None,
+                env_maps=ibl,
                 params=params,
                 heightmap=heightmap_array,
                 target=None,
@@ -756,7 +765,10 @@ def run(args: Any) -> int:
     if getattr(args, "ibl_cache", None) is not None:
         ibl.set_cache_dir(str(args.ibl_cache))
 
-    ibl_enabled = True
+    # Respect GI configuration: enable IBL only when 'ibl' is present in gi.modes.
+    # This mirrors render_sunrise_to_noon_sequence(), where cfg.gi.modes controls
+    # whether the native TerrainRenderer receives env_maps or None.
+    ibl_enabled = "ibl" in renderer_config.gi.modes
 
     sun_azimuth_deg = float(args.sun_azimuth) if getattr(args, "sun_azimuth", None) is not None else 135.0
     sun_elevation_deg = float(args.sun_elevation) if getattr(args, "sun_elevation", None) is not None else 35.0
@@ -774,6 +786,7 @@ def run(args: Any) -> int:
         albedo_mode=args.albedo_mode,
         colormap_strength=float(args.colormap_strength),
         ibl_enabled=ibl_enabled,
+        pom_enabled=not bool(getattr(args, "pom_disabled", False)),
         light_azimuth_deg=sun_azimuth_deg,
         light_elevation_deg=sun_elevation_deg,
         sun_intensity=sun_intensity,
@@ -835,15 +848,34 @@ def run(args: Any) -> int:
         except Exception as exc:  # pragma: no cover - defensive
             print(f"Warning: Failed to upload lights: {exc}")
 
-    frame = renderer.render_terrain_pbr_pom(
-        material_set=materials,
-        env_maps=ibl if ibl_enabled else None,
-        params=params,
-        heightmap=heightmap_array,
-        target=None,
-    )
+    water_material = str(getattr(args, "water_material", "overlay")).lower()
+    water_mask_kw = None
+    if water_material == "pbr" and water_mask is not None:
+        water_mask_kw = water_mask
 
-    if water_mask is not None:
+    try:
+        frame = renderer.render_terrain_pbr_pom(
+            material_set=materials,
+            env_maps=ibl,
+            params=params,
+            heightmap=heightmap_array,
+            target=None,
+            water_mask=water_mask_kw,
+        )
+    except TypeError as exc:
+        msg = str(exc)
+        if "water_mask" in msg and "unexpected keyword" in msg:
+            frame = renderer.render_terrain_pbr_pom(
+                material_set=materials,
+                env_maps=ibl,
+                params=params,
+                heightmap=heightmap_array,
+                target=None,
+            )
+        else:
+            raise
+
+    if water_mask is not None and water_material == "overlay":
         rgba = frame.to_numpy()
 
         # Start from the DEM-based water mask, resized to frame resolution.
@@ -913,7 +945,7 @@ def run(args: Any) -> int:
         else:
             if getattr(args, "sky", None):
                 os.environ["FORGE3D_SKY_MODEL"] = str(args.sky)
-            with viewer_cls(sess, renderer, heightmap_array, materials, ibl if ibl_enabled else None, params) as view:
+            with viewer_cls(sess, renderer, heightmap_array, materials, ibl, params) as view:
                 view.run()
 
     return 0

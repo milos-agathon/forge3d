@@ -232,6 +232,7 @@ class TerrainRenderer:
         params: TerrainRenderParams,
         heightmap: np.ndarray,
         target: Optional[Any] = ...,
+        water_mask: Optional[np.ndarray] = ...,
     ) -> Frame: ...
 
 # Vector Picking & OIT helpers

@@ -327,4 +327,22 @@ you must read fully @AGENTS.md  to get familiar with my codebase. Next, you must
 
 python -m pytest tests/test_terrain_renderer.py -q is failing again. Consult logs and fix the failing tests in one go
 
-python examples/terrain_demo.py --dem assets/Gore_Range_Albers_1m.tif --hdr assets/snow_field_4k.hdr --size 4000 4000 --msaa 8 --albedo-mode colormap --height-curve-mode pow --height-curve-strength 0.9 --colormap '#e7d8a2,#c5a06e,#995f57,#4a3c37' --colormap-interpolate --colormap-size 1024 --ibl-intensity 0.001 --cam-phi 30 --cam-theta 90 --cam-radius 500 --sun-azimuth 135 --sun-elevation 5 --sun-intensity 5.0 --sun-color 1.0 0.9 0.8 --water-detect --output examples/out/terrain_beauty.png --overwrite 
+python examples/terrain_demo.py --dem assets/Gore_Range_Albers_1m.tif --hdr assets/snow_field_4k.hdr --size 3200 1800 --msaa 8 --z-scale 5.0 --albedo-mode material --colormap '#e4bc6b, #f99157, #ec5f67, #ab7967' --colormap-strength 0.0 --colormap-interpolate --colormap-size 1024 --cam-phi 135 --cam-theta 20 --cam-radius 250 --sun-azimuth 135 --sun-intensity 2.0 --water-detect --gi ibl --ibl-intensity 0.5 --output examples/out/terrain_material.png --overwrite 
+
+# POM ON
+python examples/terrain_demo.py --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/snow_field_4k.hdr --size 1600 900 --render-scale 1.0 \
+  --cam-theta 20 --cam-radius 250 --cam-phi 135 \
+  --msaa 8 --z-scale 2.0 --albedo-mode colormap --colormap-strength 1.0 \
+  --gi ibl --ibl-intensity 0.1 --sun-intensity 1.0 \
+  --colormap '#ab7967, #ec5f67, #f99157, #e4bc6b' --colormap-interpolate --colormap-size 1024 \
+  --output examples/out/terrain_pom_on.png --overwrite
+
+# POM OFF
+python examples/terrain_demo.py --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/snow_field_4k.hdr --size 1600 900 --render-scale 1.0 \
+  --cam-theta 20 --cam-radius 250 --cam-phi 135 \
+  --msaa 8 --z-scale 2.0 --albedo-mode colormap --colormap-strength 1.0 \
+  --gi "" --pom-disabled --ibl-intensity 0.1 --sun-intensity 1.0 \
+  --colormap '#ab7967, #ec5f67, #f99157, #e4bc6b' --colormap-interpolate --colormap-size 1024 \
+  --output examples/out/terrain_pom_off.png --overwrite

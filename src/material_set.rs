@@ -106,7 +106,7 @@ impl MaterialSet {
         materials.push(
             crate::core::material::PbrMaterial::dielectric(
                 glam::Vec3::new(0.92, 0.92, 0.95), // white-blue snow
-                0.3,                               // roughness
+                0.18,                              // roughness
             )
             .with_normal_scale(normal_strength * 0.5), // less pronounced normals on snow
         );
