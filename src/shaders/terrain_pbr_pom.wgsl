@@ -45,6 +45,44 @@ const TERRAIN_BRDF_MODEL: u32 = BRDF_COOK_TORRANCE_GGX;  // Used when TERRAIN_US
 // Set to true to enable CSM shadow visibility on terrain direct lighting
 const TERRAIN_USE_SHADOWS: bool = false;
 
+// ──────────────────────────────────────────────────────────────────────────
+// Debug Mode Constants — "truth serum" diagnostics for water/IBL/PBR
+// These are forensic modes, not visual improvements. Each answers ONE question.
+// ──────────────────────────────────────────────────────────────────────────
+// Water debug modes (4-6):
+const DBG_WATER_MASK_BINARY: u32 = 4u;  // CYAN = water, MAGENTA = land (uses SAME is_water as main path)
+const DBG_WATER_MASK_RAW: u32 = 5u;     // Grayscale [0,1], RED=<0, YELLOW=>1, GREEN=NaN/Inf
+const DBG_IBL_ONLY: u32 = 6u;           // IBL contribution only (same tonemap as normal frames)
+// PBR debug modes (7-12): Proof pack for microfacet BRDF correctness
+const DBG_PBR_DIFFUSE_ONLY: u32 = 7u;   // Diffuse IBL term only (no specular, no sun)
+const DBG_PBR_SPECULAR_ONLY: u32 = 8u;  // Specular IBL term only (no diffuse, no sun)
+const DBG_PBR_FRESNEL: u32 = 9u;        // Fresnel term F as grayscale (average of RGB)
+const DBG_PBR_NDOTV: u32 = 10u;         // N.V (view angle) as grayscale
+const DBG_PBR_ROUGHNESS: u32 = 11u;     // Roughness value as grayscale (after any multiplier)
+const DBG_PBR_ENERGY: u32 = 12u;        // Raw (diffuse + specular) luminance before tonemap (for energy histogram)
+// Recomposition proof modes (13-16): Prove that IBL = diffuse + specular in linear space
+const DBG_PBR_LINEAR_COMBINED: u32 = 13u;  // Linear unclamped (diff+spec), RGB encoded [0,4] -> [0,1]
+const DBG_PBR_LINEAR_DIFFUSE: u32 = 14u;   // Linear unclamped diffuse only, RGB encoded [0,4] -> [0,1]
+const DBG_PBR_LINEAR_SPECULAR: u32 = 15u;  // Linear unclamped specular only, RGB encoded [0,4] -> [0,1]
+const DBG_PBR_RECOMP_ERROR: u32 = 16u;     // abs(ibl_total - (diff+spec)) heatmap, amplified 100x
+// SpecAA stress test mode (17): High-frequency sparkle detection
+const DBG_SPECAA_SPARKLE: u32 = 17u;       // Specular with synthetic high-freq normal perturbation
+// POM debug mode (18): Parallax offset magnitude visualization
+const DBG_POM_OFFSET_MAG: u32 = 18u;       // Grayscale POM offset magnitude (0=none, white=max offset)
+// SpecAA sigma2 debug mode (19): Variance visualization for SpecAA diagnostics
+const DBG_SPECAA_SIGMA2: u32 = 19u;        // Grayscale sigma² (0=no variance, white=high variance)
+// SpecAA sparkle sigma2 debug mode (20): Variance on sparkle-perturbed normal
+const DBG_SPECAA_SPARKLE_SIGMA2: u32 = 20u; // Shows variance computed on perturbed normal
+// Triplanar debug modes (21-22): Proof pack for triplanar mapping correctness
+const DBG_TRIPLANAR_WEIGHTS: u32 = 21u;     // RGB = x/y/z blend weights (sum to 1)
+const DBG_TRIPLANAR_CHECKER: u32 = 22u;     // Procedural checker to expose UV stretching
+// Flake diagnosis modes (23-27): Milestone 1-3 proof pack
+const DBG_FLAKE_NO_SPECULAR: u32 = 23u;     // Direct lighting only (no IBL specular)
+const DBG_FLAKE_NO_HEIGHT_NORMAL: u32 = 24u; // Use base_normal instead of height_normal
+const DBG_FLAKE_DDXDDY_NORMAL: u32 = 25u;   // Use n_dd = cross(dpdx, dpdy) as shading normal
+const DBG_FLAKE_HEIGHT_LOD: u32 = 26u;      // Visualize computed height LOD
+const DBG_FLAKE_NORMAL_BLEND: u32 = 27u;    // Visualize effective normal_blend after LOD fade
+
 struct TerrainUniforms {
     view : mat4x4<f32>,
     proj : mat4x4<f32>,
@@ -70,7 +108,7 @@ struct TerrainShadingUniforms {
 struct OverlayUniforms {
     params0 : vec4<f32>, // domain_min, inv_range, overlay_strength, offset
     params1 : vec4<f32>, // blend_mode, debug_mode, albedo_mode, colormap_strength
-    params2 : vec4<f32>, // gamma, pad, pad, pad
+    params2 : vec4<f32>, // gamma, roughness_mult, spec_aa_enabled, pad
 };
 
 struct IblUniforms {
@@ -387,7 +425,80 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
     return out;
 }
 
-/// Calculate normal from height map using Sobel filter populated with parallax scale.
+/// Sample height at a specific LOD level for LOD-aware normal computation.
+fn sample_height_geom_level(uv: vec2<f32>, lod: f32) -> f32 {
+    let uv_clamped = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    let h_raw = textureSampleLevel(height_tex, height_samp, uv_clamped, lod).r;
+    let t = get_height_geom_t(h_raw);
+    let h_min = u_shading.clamp0.x;
+    let h_max = u_shading.clamp0.y;
+    return h_min + apply_height_curve01(t) * (h_max - h_min);
+}
+
+/// Compute LOD from screen-space UV footprint (for LOD-aware Sobel).
+/// Returns LOD level and texel size at that LOD.
+struct LodInfo {
+    lod: f32,
+    texel_uv: vec2<f32>,
+}
+
+fn compute_height_lod(uv: vec2<f32>) -> LodInfo {
+    var info: LodInfo;
+    let dims = vec2<f32>(textureDimensions(height_tex, 0));
+    let max_lod = f32(textureNumLevels(height_tex) - 1u);
+    
+    // Compute screen-space derivatives of UV
+    let ddx_uv = dpdx(uv);
+    let ddy_uv = dpdy(uv);
+    
+    // Footprint in texels (at mip 0)
+    let rho = max(length(ddx_uv * dims), length(ddy_uv * dims));
+    
+    // LOD = log2 of footprint, clamped to valid range
+    info.lod = clamp(log2(max(rho, 1.0)), 0.0, max_lod);
+    
+    // Texel size at this LOD (in UV space)
+    let mip_scale = exp2(info.lod);
+    info.texel_uv = mip_scale / dims;
+    
+    return info;
+}
+
+/// Calculate normal from height map using LOD-aware Sobel filter.
+/// Uses explicit LOD for all samples to avoid mip mismatch with offsets.
+fn calculate_normal_lod_aware(uv: vec2<f32>) -> vec3<f32> {
+    let lod_info = compute_height_lod(uv);
+    let lod = lod_info.lod;
+    let texel_uv = lod_info.texel_uv;
+    
+    let offset_x = vec2<f32>(texel_uv.x, 0.0);
+    let offset_y = vec2<f32>(0.0, texel_uv.y);
+    
+    // All 9 samples at the SAME LOD level
+    let tl = sample_height_geom_level(uv - offset_x - offset_y, lod);
+    let t  = sample_height_geom_level(uv - offset_y, lod);
+    let tr = sample_height_geom_level(uv + offset_x - offset_y, lod);
+    let l  = sample_height_geom_level(uv - offset_x, lod);
+    let r  = sample_height_geom_level(uv + offset_x, lod);
+    let bl = sample_height_geom_level(uv - offset_x + offset_y, lod);
+    let b  = sample_height_geom_level(uv + offset_y, lod);
+    let br = sample_height_geom_level(uv + offset_x + offset_y, lod);
+    
+    // Sobel gradients
+    let dx = (tr + 2.0 * r + br) - (tl + 2.0 * l + bl);
+    let dy = (bl + 2.0 * b + br) - (tl + 2.0 * t + tr);
+    
+    // Scale by world-space texel size for proper gradient magnitude
+    // At higher LOD, texels cover more world space, so gradients are naturally smoothed
+    let spacing = u_terrain.spacing_h_exag.x;
+    let world_texel = texel_uv * spacing; // Texel size in world units
+    
+    let vertical_scale = max(u_terrain.spacing_h_exag.z * 0.5, 1e-3);
+    return normalize(vec3<f32>(-dx / world_texel.x, vertical_scale, -dy / world_texel.y));
+}
+
+/// Calculate normal from height map using Sobel filter (LEGACY - not LOD-aware).
+/// Kept for A/B comparison during flake diagnosis.
 fn calculate_normal(uv : vec2<f32>, texel_size : vec2<f32>) -> vec3<f32> {
     let offset_x = vec2<f32>(texel_size.x, 0.0);
     let offset_y = vec2<f32>(0.0, texel_size.y);
@@ -408,28 +519,98 @@ fn calculate_normal(uv : vec2<f32>, texel_size : vec2<f32>) -> vec3<f32> {
     return normalize(vec3<f32>(-dx, vertical_scale, -dy));
 }
 
-/// Triplanar sampling blends projections along the dominant normal axes.
+/// Compute geometric normal from screen-space derivatives of world position.
+/// This is the "ground truth" normal that doesn't suffer from mip mismatch.
+fn calculate_normal_ddxddy(world_pos: vec3<f32>) -> vec3<f32> {
+    let ddx_pos = dpdx(world_pos);
+    let ddy_pos = dpdy(world_pos);
+    // Cross product gives surface normal (right-hand rule)
+    // Note: order matters for winding direction
+    let n = cross(ddx_pos, ddy_pos);
+    // Ensure normal points "up" (positive Y in our coordinate system)
+    let n_norm = normalize(n);
+    return select(n_norm, -n_norm, n_norm.y < 0.0);
+}
+
+/// Compute triplanar blend weights from surface normal.
+/// Returns normalized weights (sum to 1) for x, y, z projection axes.
+/// T1 requirement: wx + wy + wz = 1, weights change smoothly with normal.
+fn compute_triplanar_weights(normal: vec3<f32>, blend_sharpness: f32) -> vec3<f32> {
+    let abs_n = abs(normal);
+    // Use higher blend sharpness for cleaner projection transitions
+    let sharpen = pow(abs_n + vec3<f32>(1e-4), vec3<f32>(blend_sharpness * 1.5));
+    let weight_sum = sharpen.x + sharpen.y + sharpen.z;
+    return sharpen / max(weight_sum, 1e-4);
+}
+
+/// Procedural checker pattern for triplanar UV stretching test.
+/// Returns 0.0 or 1.0 based on checker grid position.
+/// T2 requirement: checker shows no stretching on steep slopes.
+fn checker_pattern(uv: vec2<f32>, checker_scale: f32) -> f32 {
+    let grid = floor(uv * checker_scale);
+    let checker = i32(grid.x + grid.y) & 1;
+    return f32(checker);
+}
+
+/// Sample triplanar checker pattern (no textures, pure procedural).
+/// Uses same blending logic as texture triplanar for A/B comparison.
+fn sample_triplanar_checker(
+    world_pos: vec3<f32>,
+    normal: vec3<f32>,
+    scale: f32,
+    blend_sharpness: f32,
+    checker_scale: f32
+) -> f32 {
+    let weights = compute_triplanar_weights(normal, blend_sharpness);
+    
+    // Project world position to each axis plane
+    let uv_x = world_pos.yz * scale;
+    let uv_y = world_pos.xz * scale;
+    let uv_z = world_pos.xy * scale;
+    
+    // Sample checker pattern for each projection
+    let check_x = checker_pattern(uv_x, checker_scale);
+    let check_y = checker_pattern(uv_y, checker_scale);
+    let check_z = checker_pattern(uv_z, checker_scale);
+    
+    // Blend using triplanar weights
+    return check_x * weights.x + check_y * weights.y + check_z * weights.z;
+}
+
+/// Triplanar sampling with textureSampleGrad for correct mip selection.
+/// Computes UV gradients from world position derivatives for each projection axis.
 fn sample_triplanar(
     world_pos : vec3<f32>,
     normal : vec3<f32>,
     scale : f32,
     blend_sharpness : f32,
     layer : f32,
-    lod_level : f32
+    _lod_bias : f32  // Unused - gradients determine LOD
 ) -> vec3<f32> {
-    let abs_n = abs(normal);
-    let sharpen = pow(abs_n + vec3<f32>(1e-4), vec3<f32>(blend_sharpness));
-    let weight_sum = sharpen.x + sharpen.y + sharpen.z;
-    let weights = sharpen / max(weight_sum, 1e-4);
+    let weights = compute_triplanar_weights(normal, blend_sharpness);
 
-    let uv_x = fract(world_pos.yz * scale);
-    let uv_y = fract(world_pos.xz * scale);
-    let uv_z = fract(world_pos.xy * scale);
+    // Compute triplanar UVs from world position
+    let uv_x = world_pos.yz * scale;
+    let uv_y = world_pos.xz * scale;
+    let uv_z = world_pos.xy * scale;
+
+    // Compute screen-space derivatives of world position for proper mip selection
+    // This ensures correct LOD even when UVs are derived from world coords
+    let dpdx_world = dpdx(world_pos) * scale;
+    let dpdy_world = dpdy(world_pos) * scale;
+
+    // Extract UV gradients for each projection axis
+    let ddx_x = dpdx_world.yz;
+    let ddy_x = dpdy_world.yz;
+    let ddx_y = dpdx_world.xz;
+    let ddy_y = dpdy_world.xz;
+    let ddx_z = dpdx_world.xy;
+    let ddy_z = dpdy_world.xy;
 
     let layer_index = i32(layer);
-    let color_x = textureSampleLevel(material_albedo_tex, material_samp, uv_x, layer_index, lod_level).rgb;
-    let color_y = textureSampleLevel(material_albedo_tex, material_samp, uv_y, layer_index, lod_level).rgb;
-    let color_z = textureSampleLevel(material_albedo_tex, material_samp, uv_z, layer_index, lod_level).rgb;
+    let color_x = textureSampleGrad(material_albedo_tex, material_samp, uv_x, layer_index, ddx_x, ddy_x).rgb;
+    let color_y = textureSampleGrad(material_albedo_tex, material_samp, uv_y, layer_index, ddx_y, ddy_y).rgb;
+    let color_z = textureSampleGrad(material_albedo_tex, material_samp, uv_z, layer_index, ddx_z, ddy_z).rgb;
 
     return color_x * weights.x + color_y * weights.y + color_z * weights.z;
 }
@@ -572,6 +753,14 @@ fn gamma_correct(color : vec3<f32>, gamma : f32) -> vec3<f32> {
     return pow(color, vec3<f32>(1.0 / gamma));
 }
 
+// Linear to sRGB conversion (piecewise exact curve)
+fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    let a = vec3<f32>(0.055);
+    let lo = c * 12.92;
+    let hi = (1.0 + a) * pow(c, vec3<f32>(1.0 / 2.4)) - a;
+    return select(hi, lo, c <= vec3<f32>(0.0031308));
+}
+
 fn tonemap_reinhard(color : vec3<f32>) -> vec3<f32> {
     return color / (vec3<f32>(1.0, 1.0, 1.0) + color);
 }
@@ -583,16 +772,186 @@ fn tonemap_aces(color : vec3<f32>) -> vec3<f32> {
     return clamp(a / b, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(1.0, 1.0, 1.0));
 }
 
+// Check for NaN/Inf (debug helper for catching bad data)
+fn is_finite_f32(x: f32) -> bool {
+    // NaN != NaN, and Inf comparisons fail
+    return !(x != x) && (x <= 3.4028235e+38) && (x >= -3.4028235e+38);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// PBR Debug Helpers - Split IBL for separate diffuse/specular visualization
+// ──────────────────────────────────────────────────────────────────────────
+
+struct IblSplit {
+    diffuse: vec3<f32>,
+    specular: vec3<f32>,
+    fresnel: vec3<f32>,
+    n_dot_v: f32,
+}
+
+/// Compute IBL with diffuse and specular separated (for debug visualization)
+fn eval_ibl_split(
+    n: vec3<f32>,
+    v: vec3<f32>,
+    base_color: vec3<f32>,
+    metallic: f32,
+    roughness: f32,
+    f0: vec3<f32>,
+) -> IblSplit {
+    var result: IblSplit;
+    
+    // Clamp inputs for numeric safety
+    let n_dot_v = saturate(dot(n, v));
+    let roughness_clamped = saturate(roughness);
+    result.n_dot_v = n_dot_v;
+    
+    // Calculate reflection direction
+    let reflection_dir = reflect(-v, n);
+    
+    // Fresnel term for IBL (roughness-aware Schlick)
+    let one_minus_cos = saturate(1.0 - n_dot_v);
+    let pow5 = one_minus_cos * one_minus_cos * one_minus_cos * one_minus_cos * one_minus_cos;
+    // Roughness-aware Fresnel: lerp toward white at grazing for rough surfaces
+    let F_ibl = f0 + (max(vec3<f32>(1.0 - roughness_clamped), f0) - f0) * pow5;
+    result.fresnel = F_ibl;
+    
+    // Diffuse IBL (Lambertian)
+    // kD = (1 - kS) * (1 - metallic)
+    let kS_ibl = F_ibl;
+    let kD_ibl = (vec3<f32>(1.0) - kS_ibl) * (1.0 - metallic);
+    
+    // Sample irradiance cubemap
+    let irradiance = textureSampleLevel(envIrradiance, envSampler, n, 0.0).rgb;
+    result.diffuse = kD_ibl * base_color * irradiance;
+    
+    // Specular IBL (split-sum approximation)
+    let mip_level = roughness_clamped * roughness_clamped * 9.0; // Assume 10 mips (0-9)
+    
+    // Sample prefiltered specular cubemap
+    let prefiltered_color = textureSampleLevel(envSpecular, envSampler, reflection_dir, mip_level).rgb;
+    
+    // Sample BRDF LUT
+    let brdf_lut_uv = vec2<f32>(n_dot_v, roughness_clamped);
+    let brdf_lut = textureSampleLevel(brdfLUT, envSampler, brdf_lut_uv, 0.0).rg;
+    
+    // Split-sum: prefiltered_color * (F0 * scale + bias)
+    result.specular = prefiltered_color * (F_ibl * brdf_lut.x + brdf_lut.y);
+    
+    return result;
+}
+
+/// Compute luminance (relative luminance for sRGB primaries)
+fn luminance(c: vec3<f32>) -> f32 {
+    return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Water Debug Helpers (unambiguous, no-tonemap, isolated modes)
+// ──────────────────────────────────────────────────────────────────────────
+
+// Falsecolor ramp: 0=blue -> 0.5=green -> 1=red (very visible)
+fn ramp_falsecolor(t: f32) -> vec3<f32> {
+    let x = clamp(t, 0.0, 1.0);
+    let r = clamp(1.5 * x - 0.5, 0.0, 1.0);
+    let g = clamp(1.5 - abs(2.0 * x - 1.0) * 1.5, 0.0, 1.0);
+    let b = clamp(1.5 * (1.0 - x) - 0.5, 0.0, 1.0);
+    return vec3<f32>(r, g, b);
+}
+
+// Simple HDR compression for debug visibility
+fn compress_hdr(x: vec3<f32>) -> vec3<f32> {
+    return x / (vec3<f32>(1.0) + x);
+}
+
+// DEBUG 100: Binary water classification - blue=water, dark gray=land
+fn debug_water_is_water(is_water_flag: bool) -> vec3<f32> {
+    let land = vec3<f32>(0.08, 0.08, 0.08);
+    let water = vec3<f32>(0.0, 0.2, 1.0); // unmistakable blue
+    return select(land, water, is_water_flag);
+}
+
+// DEBUG 101: Shore-distance scalar visualization with shoreline ring
+fn debug_water_scalar(is_water_flag: bool, water_scalar: f32) -> vec3<f32> {
+    let land = vec3<f32>(0.05, 0.05, 0.05);
+    let t = clamp(water_scalar, 0.0, 1.0);
+    var rgb_water = ramp_falsecolor(t);
+    // Add bright ring near shoreline (where t is small)
+    let shore_ring = smoothstep(0.06, 0.00, t);
+    rgb_water = clamp(rgb_water + shore_ring * vec3<f32>(1.0, 1.0, 1.0), vec3<f32>(0.0), vec3<f32>(1.0));
+    return select(land, rgb_water, is_water_flag);
+}
+
+// DEBUG 102: IBL specular on water only (land=black)
+// Diagnostic version: shows prefiltered environment (no Fresnel) to isolate the issue
+fn debug_water_ibl_spec_only(is_water_flag: bool, ibl_spec: vec3<f32>) -> vec3<f32> {
+    let land = vec3<f32>(0.0, 0.0, 0.0); // black = no cheating
+    let s = max(ibl_spec, vec3<f32>(0.0));
+    let mag = s.x + s.y + s.z;
+    // If IBL is effectively zero, show magenta diagnostic
+    if (mag < 0.001) {
+        return select(land, vec3<f32>(1.0, 0.0, 1.0), is_water_flag); // Magenta = IBL is zero
+    }
+    let rgb_dbg = compress_hdr(s);
+    return select(land, rgb_dbg, is_water_flag);
+}
+
+// DEBUG 103: Raw prefiltered environment sample (no Fresnel, no BRDF LUT)
+fn debug_water_prefilt_raw(is_water_flag: bool, prefilt_color: vec3<f32>) -> vec3<f32> {
+    let land = vec3<f32>(0.0, 0.0, 0.0);
+    let s = max(prefilt_color, vec3<f32>(0.0));
+    let mag = s.x + s.y + s.z;
+    if (mag < 0.001) {
+        return select(land, vec3<f32>(1.0, 1.0, 0.0), is_water_flag); // Yellow = prefilt zero
+    }
+    let rgb_dbg = compress_hdr(s);
+    return select(land, rgb_dbg, is_water_flag);
+}
+
 @fragment
 fn fs_main(input : VertexOutput) -> FragmentOutput {
     var out : FragmentOutput;
 
-    let texel_size = calculate_texel_size();
     let uv = input.tex_coord;
-    let height_normal = calculate_normal(uv, texel_size);
+    let debug_mode = u32(u_overlay.params1.y + 0.5);
+    
+    // Compute all normal variants for diagnostics
     let base_normal = normalize(input.world_normal);
-    let normal_blend = clamp(u_shading.triplanar_params.z, 0.0, 1.0);
-    let blended_normal = normalize(mix(base_normal, height_normal, normal_blend));
+    let lod_info = compute_height_lod(uv);
+    let height_lod = lod_info.lod;
+    
+    // LOD-aware height normal (Milestone 2: fixes flakes from mip mismatch)
+    let height_normal_lod = calculate_normal_lod_aware(uv);
+    
+    // Legacy height normal for comparison (not LOD-aware)
+    let texel_size = calculate_texel_size();
+    let height_normal_legacy = calculate_normal(uv, texel_size);
+    
+    // Derivative-based normal (Milestone 1: ground truth comparison)
+    let n_dd = calculate_normal_ddxddy(input.world_position);
+    
+    // Select which height normal to use based on debug mode
+    var height_normal = height_normal_lod; // Default: LOD-aware (the fix)
+    if (debug_mode == DBG_FLAKE_NO_HEIGHT_NORMAL) {
+        // Mode 24: use base_normal (no height detail) to isolate height-normal contribution
+        height_normal = base_normal;
+    } else if (debug_mode == DBG_FLAKE_DDXDDY_NORMAL) {
+        // Mode 25: use derivative-based normal as ground truth
+        height_normal = n_dd;
+    }
+    
+    // Milestone 3: Minification fade for height-normal contribution
+    // As LOD increases (far/grazing), reduce height-normal influence to prevent sparkles.
+    // LOD 0-1: full contribution, LOD 1-4: fade out, LOD 4+: no contribution
+    let lod_fade_start = 1.0;
+    let lod_fade_end = 4.0;
+    let lod_fade = 1.0 - saturate((height_lod - lod_fade_start) / (lod_fade_end - lod_fade_start));
+    
+    let normal_blend_base = clamp(u_shading.triplanar_params.z, 0.0, 1.0);
+    let normal_blend = normal_blend_base * lod_fade;
+    // Capture pre-normalized normal for specular AA (Toksvig)
+    let mixed_normal = mix(base_normal, height_normal, normal_blend);
+    let normal_len = length(mixed_normal);
+    let blended_normal = mixed_normal / max(normal_len, 1e-5);
 
     let tbn = build_tbn(blended_normal);
     // Extract camera position from view matrix properly
@@ -628,6 +987,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     let shadow_enabled = (pom_flags & 0x4u) != 0u;
 
     var pom_uv = uv;
+    var pom_offset_magnitude = 0.0;  // Track POM offset for debug visualization
     if (pom_enabled) {
         pom_uv = parallax_occlusion_mapping(
             uv,
@@ -637,10 +997,17 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             max_steps,
             refine_steps
         );
+        // Compute offset magnitude (length of UV displacement)
+        let pom_offset = pom_uv - uv;
+        pom_offset_magnitude = length(pom_offset);
     }
     let parallax_uv = clamp(pom_uv, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
-    let water_mask_value = textureSampleLevel(water_mask_tex, height_samp, parallax_uv, 0.0).r;
-    let is_water = water_mask_value > 0.5;
+    // Water mask needs flipped V coordinate: NumPy row 0 is at top, but UV v=0 is at bottom
+    let water_uv = vec2<f32>(parallax_uv.x, 1.0 - parallax_uv.y);
+    let water_mask_value = textureSampleLevel(water_mask_tex, height_samp, water_uv, 0.0).r;
+    // Water mask: 0.0 = not water, >0.0 = water (value is shore-distance ratio)
+    // Use small epsilon to detect any water, not just shore-distance > 0.5
+    let is_water = water_mask_value > 0.001;
     let height_sample = sample_height(parallax_uv);
     let height_clamped = clamp(height_sample, u_shading.clamp0.x, u_shading.clamp0.y);
     var occlusion = 1.0;
@@ -659,7 +1026,9 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
 
     let tri_scale = max(u_shading.triplanar_params.x, 1e-3);
     let tri_blend = max(u_shading.triplanar_params.y, 1.0);
-    let slope_raw = 1.0 - abs(blended_normal.y);
+    // Use base_normal (stable geometric normal) for slope, NOT blended_normal
+    // blended_normal has high-frequency perturbations that cause layer selection jitter → flakes
+    let slope_raw = 1.0 - abs(base_normal.y);
     let slope_factor = clamp(slope_raw, u_shading.clamp0.z, u_shading.clamp0.w);
     var layer_count = i32(u_shading.layer_control.x + 0.5);
     if (layer_count < 1) {
@@ -672,12 +1041,32 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     let anisotropy = max(u_shading.clamp2.w, 1.0);
     let lod_value = max(base_lod + lod_bias + lod0_bias * slope_factor - (anisotropy - 1.0) * 0.25, 0.0);
 
+    // Compute smooth material weights using Gaussian-like falloff
+    // Incorporates both height and slope for natural-looking transitions
     var weights = vec4<f32>(0.0);
     var weight_sum = 0.0;
+    let slope_influence = 0.3; // How much slope affects layer selection
+    
     for (var idx = 0; idx < 4; idx = idx + 1) {
         if (idx < layer_count) {
             let center = u_shading.layer_heights[idx];
-            let w = max(0.0, 1.0 - abs(height_norm - center) / blend_half);
+            let dist = abs(height_norm - center);
+            // Smooth Gaussian-like falloff instead of linear cutoff
+            let sigma = blend_half * 1.5;
+            let height_weight = exp(-dist * dist / (2.0 * sigma * sigma));
+            
+            // Modulate by slope: rock/bare materials favor steep slopes
+            // Layer 0 (rock) prefers steep, layer 1 (grass) prefers flat
+            var slope_mod = 1.0;
+            if (idx == 0) {
+                // Rock: boost on steep slopes
+                slope_mod = mix(1.0, 1.5, slope_factor);
+            } else if (idx == 1) {
+                // Grass: reduce on steep slopes
+                slope_mod = mix(1.0, 0.5, slope_factor);
+            }
+            
+            let w = height_weight * slope_mod;
             weights[idx] = w;
             weight_sum = weight_sum + w;
         }
@@ -696,9 +1085,11 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         if (idx < layer_count) {
             let weight = weights[idx];
             let layer = f32(idx);
+            // Use base_normal (smooth vertex normal) for triplanar weights, NOT blended_normal
+            // blended_normal has high-frequency height perturbations that cause weight jitter → flakes
             let sample_rgb = sample_triplanar(
                 input.world_position,
-                blended_normal,
+                base_normal,  // STABLE geometric normal for triplanar projection
                 tri_scale,
                 tri_blend,
                 layer,
@@ -711,19 +1102,92 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     }
 
     // Optional water override: when mask is active, treat surface as water material.
+    // Store terrain normal for non-water, give water proper wave normals for reflections
+    var shading_normal = blended_normal;
+    var water_scatter = vec3<f32>(0.0); // Subsurface scatter contribution for water
+    var water_depth_value = 0.0; // Water depth for attenuation (promoted to outer scope)
     if (is_water) {
-        let water_albedo = vec3<f32>(0.02, 0.05, 0.08);
-        let water_roughness = 0.04;
-        let water_metallic = 0.0;
-        albedo = water_albedo;
+        // Water material properties
+        // Use slightly higher roughness (0.02) for stable highlights without fireflies
+        // Still low enough for crisp sun glint but avoids subpixel needle highlights
+        let water_roughness = 0.02;
+        let water_metallic = 0.0; // Dielectric
         roughness = water_roughness;
         metallic = water_metallic;
+        
+        // Water depth from distance-to-shore proxy
+        // The water_mask_value now encodes normalized distance from shore:
+        // - 0.0 = at shoreline (edge of water)
+        // - 1.0 = maximum distance from any shore (lake center)
+        // This gives physically meaningful depth variation independent of DEM height.
+        // Falls back to height-based if mask is binary (old behavior).
+        let is_distance_encoded = water_mask_value > 0.01 && water_mask_value < 0.99;
+        var shore_depth: f32;
+        if (is_distance_encoded) {
+            // Use distance-to-shore directly as depth proxy
+            shore_depth = water_mask_value;
+        } else {
+            // Fallback: height-based depth (old behavior for binary masks)
+            let water_ceil = 0.20;
+            shore_depth = 1.0 - saturate(height_norm / water_ceil);
+        }
+        water_depth_value = shore_depth; // 0=shore/shallow, 1=deep center
+        
+        // Beer-Lambert absorption: deeper water = more blue, absorbs red first
+        let absorption = vec3<f32>(0.6, 0.12, 0.04); // RGB absorption per unit depth  
+        let max_depth = 4.0; // Visual depth scaling
+        let transmittance = exp(-absorption * water_depth_value * max_depth);
+        
+        // Deep water color - dark, slightly blue from Rayleigh scattering in water column
+        // These represent what you'd see looking DOWN into water, not surface reflection
+        let deep_water_color = vec3<f32>(0.01, 0.02, 0.04);
+        
+        // Shallow water near shore - very dark neutral (bottom is barely visible through water)
+        // Keep this dark so IBL reflections dominate
+        let shallow_color = vec3<f32>(0.02, 0.02, 0.02);
+        
+        // Blend based on depth - this gives visible shoreline gradient
+        let underwater_color = mix(shallow_color, deep_water_color, water_depth_value);
+        
+        // Water albedo for the tiny diffuse term (mostly for depth visualization)
+        albedo = underwater_color;
+        
+        // Scatter contribution - VERY subtle, just enough to show depth variation
+        // This should NOT dominate over IBL specular reflection
+        // water_depth_value: 0=shore (more bottom visible), 1=deep (less bottom visible)
+        water_scatter = underwater_color * (1.0 - water_depth_value * 0.9) * 0.1;
+        
+        // Directional wind-driven waves (dominant wind direction + secondary)
+        // Creates coherent wave patterns that read as water, not noise
+        let wx = input.world_position.x;
+        let wy = input.world_position.y;
+        let wind_angle = 0.7; // ~40 degrees
+        let wind_cos = cos(wind_angle);
+        let wind_sin = sin(wind_angle);
+        let wave_coord_1 = wx * wind_cos + wy * wind_sin;
+        let wave_coord_perp = -wx * wind_sin + wy * wind_cos;
+        
+        // Three octaves of directional waves - amplitude decreases near shore
+        let wave_scale = mix(0.3, 1.0, water_depth_value); // Calmer near shore
+        let wave1 = sin(wave_coord_1 * 0.05) * 0.07 * wave_scale;
+        let wave2 = sin(wave_coord_1 * 0.15 + wave_coord_perp * 0.03) * 0.035 * wave_scale;
+        let wave3 = sin(wave_coord_1 * 0.4 + 1.7) * 0.018;
+        
+        // Cross-wind component (smaller amplitude)
+        let cross_wave = sin(wave_coord_perp * 0.12 + 0.5) * 0.02 * wave_scale;
+        
+        // Combine into normal perturbation
+        let wave_dx = (wave1 + wave2 + wave3) * wind_cos + cross_wave * (-wind_sin);
+        let wave_dy = (wave1 + wave2 + wave3) * wind_sin + cross_wave * wind_cos;
+        
+        // Build perturbed normal (Y is up)
+        shading_normal = normalize(vec3<f32>(wave_dx, 1.0, wave_dy));
     }
 
     // ──────────────────────────────────────────────────────────────────────────
     // Colormap/Overlay System with Debug Modes
     // ──────────────────────────────────────────────────────────────────────────
-    let debug_mode = u32(u_overlay.params1.y + 0.5);
+    // debug_mode already declared at top of fs_main
     let albedo_mode = u32(u_overlay.params1.z + 0.5);
     let colormap_strength = clamp(u_overlay.params1.w, 0.0, 1.0);
     let overlay_strength_raw = u_overlay.params0.z;
@@ -760,20 +1224,59 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
 
     // Apply albedo_mode to determine final albedo
     // 0 = material (triplanar only)
-    // 1 = colormap (overlay only)
-    // 2 = mix (blend between material and overlay using colormap_strength)
+    // 1 = colormap (overlay only, bypasses PBR in debug section below)
+    // 2 = mix (blend between material and colormap using colormap_strength)
     var final_albedo = albedo;
     if (albedo_mode == 0u) { // material
         final_albedo = material_albedo;
     } else if (albedo_mode == 1u) { // colormap
+        // Colormap mode: use overlay_rgb directly
+        // Note: This path bypasses PBR shading in the debug section below
         final_albedo = overlay_rgb;
     } else if (albedo_mode == 2u) { // mix
-        final_albedo = mix(material_albedo, albedo, colormap_strength);
+        // Mix mode: blend between material albedo and colormap directly
+        // colormap_strength=1.0 means full colormap, 0.0 means full material
+        final_albedo = mix(material_albedo, overlay_rgb, colormap_strength);
     }
 
     albedo = clamp(final_albedo, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(1.0, 1.0, 1.0));
     occlusion = clamp(occlusion, u_shading.clamp2.x, u_shading.clamp2.y);
-    roughness = clamp(roughness, 0.04, 1.0);
+    
+    // Specular AA (Toksvig): increase roughness when normal has variance
+    // Using screen-space derivatives (dpdx/dpdy) to measure variance.
+    // This works for both:
+    //   - Procedural terrain normals (where mipmap averaging doesn't exist)
+    //   - Synthetic sparkle perturbation (stress test mode 17)
+    // The variance proxy σ² is computed from the rate of change of the normal.
+    let spec_aa_enabled = u_overlay.params2.z > 0.5;
+    var specaa_sigma2 = 0.0;  // Track for debug visualization (mode 19)
+    if (!is_water && spec_aa_enabled) {
+        // Compute normal variance from screen-space derivatives
+        let dndx = dpdx(shading_normal);
+        let dndy = dpdy(shading_normal);
+        // Variance proxy: average squared magnitude of derivatives
+        // Scale factor tunable via params2.w (default 1.0)
+        // Scale factor tunable - screen derivatives of normalized vectors are small
+        // For smooth terrain normals, use moderate 10x amplification
+        // (Sparkle test uses 100x for synthetic HF perturbation)
+        let sigma_scale = max(u_overlay.params2.w, 1.0) * 10.0;
+        specaa_sigma2 = 0.5 * (dot(dndx, dndx) + dot(dndy, dndy)) * sigma_scale;
+        specaa_sigma2 = clamp(specaa_sigma2, 0.0, 1.0);
+        
+        let r2 = roughness * roughness;
+        // Toksvig formula: r' = sqrt(r² + σ²(1 - r²))
+        roughness = sqrt(r2 + specaa_sigma2 * (1.0 - r2));
+    }
+    
+    // Apply roughness multiplier (params2.y, default 1.0 = no change)
+    // Used for roughness sweep in PBR proof pack
+    let roughness_mult = max(u_overlay.params2.y, 0.001);
+    if (roughness_mult != 1.0) {
+        roughness = roughness * roughness_mult;
+    }
+    // Roughness floor: 0.3 for terrain (reduces specular aliasing), 0.02 for water (needs reflections)
+    let roughness_floor = select(0.3, 0.02, is_water);
+    roughness = clamp(roughness, roughness_floor, 1.0);
     metallic = clamp(metallic, 0.0, 1.0);
     var f0 = mix(vec3<f32>(0.04, 0.04, 0.04), albedo, metallic);
     if (is_water) {
@@ -788,12 +1291,12 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     if (TERRAIN_USE_BRDF_DISPATCH) {
         // Use unified BRDF dispatch (allows model switching)
         let shading_params = terrain_to_shading_params(roughness, metallic, TERRAIN_BRDF_MODEL);
-        let n_dot_l = max(dot(blended_normal, light_dir), 0.0);
-        lighting = eval_brdf(blended_normal, view_dir, light_dir, albedo, shading_params) * n_dot_l;
+        let n_dot_l = max(dot(shading_normal, light_dir), 0.0);
+        lighting = eval_brdf(shading_normal, view_dir, light_dir, albedo, shading_params) * n_dot_l;
     } else {
         // Use original terrain-specific calculate_pbr_brdf (default, preserves current look)
         lighting = calculate_pbr_brdf(
-            blended_normal,
+            shading_normal,
             view_dir,
             light_dir,
             albedo,
@@ -825,12 +1328,41 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     }
 
     // Apply IBL rotation (terrain-specific feature)
-    let rotated_normal = rotate_y(blended_normal, u_ibl.sin_theta, u_ibl.cos_theta);
+    let rotated_normal = rotate_y(shading_normal, u_ibl.sin_theta, u_ibl.cos_theta);
     let rotated_view = rotate_y(view_dir, u_ibl.sin_theta, u_ibl.cos_theta);
     
+    // For water: use near-black albedo for IBL (water surface has no diffuse color)
+    // The underwater_color (stored in albedo) is for scatter, not surface reflectance
+    // Water gets its color from specular reflections (IBL) + subsurface scatter
+    var ibl_albedo = albedo;
+    if (is_water) {
+        // Water surface has negligible diffuse reflection - it's all specular
+        // Using black albedo means IBL will be pure specular (sky reflection)
+        ibl_albedo = vec3<f32>(0.0, 0.0, 0.0);
+    }
+    
     // Use unified eval_ibl function from lighting_ibl.wgsl (P4 spec)
-    var ibl_contrib = eval_ibl(rotated_normal, rotated_view, albedo, metallic, roughness, f0);
-    ibl_contrib = ibl_contrib * (u_ibl.intensity * occlusion);
+    var ibl_contrib = eval_ibl(rotated_normal, rotated_view, ibl_albedo, metallic, roughness, f0);
+
+    // Capture pre-occlusion IBL for debug mode (still apply intensity)
+    let ibl_contrib_pre_ao = ibl_contrib * u_ibl.intensity;
+    
+    // Also compute split IBL for PBR debug modes (diffuse/specular separation)
+    let ibl_split = eval_ibl_split(rotated_normal, rotated_view, ibl_albedo, metallic, roughness, f0);
+    
+    // Apply IBL intensity and occlusion (no artificial boost - proper split-sum should work)
+    // For water, don't apply occlusion to IBL (water surface is exposed to sky)
+    var ibl_occlusion = occlusion;
+    if (is_water) {
+        ibl_occlusion = 1.0;
+        // Water IBL is pure specular (no diffuse) - this is handled by ibl_albedo = black above
+        // The reflection color comes entirely from the environment - no tinting
+    }
+    ibl_contrib = ibl_contrib * u_ibl.intensity * ibl_occlusion;
+    
+    // Scale split components by intensity and occlusion for debug output
+    let ibl_diffuse_scaled = ibl_split.diffuse * u_ibl.intensity * ibl_occlusion;
+    let ibl_specular_scaled = ibl_split.specular * u_ibl.intensity * ibl_occlusion;
 
     // ──────────────────────────────────────────────────────────────────────────
     // Debug Modes (bypass PBR when debug_mode > 0)
@@ -846,14 +1378,499 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     } else if (debug_mode == 3u) {
         // DBG_BLEND_LUT_OVER_ALBEDO: Show lerp(albedo, lut, colormap_strength)
         final_color = mix(material_albedo, overlay_rgb, colormap_strength);
+    } else if (debug_mode == DBG_WATER_MASK_BINARY) {
+        // ── MODE 4: "What pixels are being treated as water?" ──
+        // Uses the EXACT SAME `is_water` variable as the main shading path.
+        // CYAN = water branch, MAGENTA = land branch. No shading, no tonemap.
+        // Interpretation:
+        //   - CYAN outside real lakes → upstream bug (mask generation/upload)
+        //   - Mask looks correct but water renders wrong → downstream bug (shader branch)
+        let c_water = vec3<f32>(0.0, 1.0, 1.0);  // CYAN
+        let c_land  = vec3<f32>(1.0, 0.0, 1.0);  // MAGENTA
+        out.color = vec4<f32>(select(c_land, c_water, is_water), 1.0);
+        return out;
+    } else if (debug_mode == DBG_WATER_MASK_RAW) {
+        // ── MODE 5: "What values is the shader receiving for the mask?" ──
+        // Shows the EXACT `water_mask_value` being sampled, with error flagging.
+        // Catches: wrong texture bound, wrong normalization, wrong channel, NaN/Inf.
+        // Interpretation:
+        //   - GREEN = NaN/Inf (uninitialized/bad upload)
+        //   - RED = value < 0 (invalid normalization)
+        //   - YELLOW = value > 1 (invalid normalization)
+        //   - Grayscale = value in [0,1] (black=0, white=1)
+        //   - Binary mask: expect only two values (black/white)
+        //   - Shore-distance gradient: lake edges darker, center brighter
+        let m = water_mask_value;
+        if (!is_finite_f32(m)) {
+            out.color = vec4<f32>(0.0, 1.0, 0.0, 1.0); // GREEN = NaN/Inf
+            return out;
+        }
+        if (m < 0.0) {
+            out.color = vec4<f32>(1.0, 0.0, 0.0, 1.0); // RED = <0
+            return out;
+        }
+        if (m > 1.0) {
+            out.color = vec4<f32>(1.0, 1.0, 0.0, 1.0); // YELLOW = >1
+            return out;
+        }
+        // In-range: exact grayscale, no gamma, no tonemap
+        out.color = vec4<f32>(vec3<f32>(m), 1.0);
+        return out;
+    } else if (debug_mode == DBG_IBL_ONLY) {
+        // ── MODE 6: "Is IBL working, independent of sun/AO/fog?" ──
+        // Shows ONLY `ibl_contrib` with same tonemap path as normal frames.
+        // No direct sun, no AO, no fog, no water tint.
+        // Interpretation:
+        //   - Changing HDRI should change this output (if not, IBL path broken)
+        //   - Different roughness/normal should show different IBL response
+        //   - If everything looks identical, IBL terms are clamped or not varying
+        // Uses pre-AO IBL contribution to isolate environment lighting from occlusion.
+        let ibl_only_linear = max(ibl_contrib_pre_ao, vec3<f32>(0.0));
+        let mapped = tonemap_aces(ibl_only_linear);
+        let out_srgb = linear_to_srgb(mapped);
+        out.color = vec4<f32>(out_srgb, 1.0);
+        return out;
+    } else if (debug_mode == DBG_PBR_DIFFUSE_ONLY) {
+        // ── MODE 7: PBR Diffuse Only ──
+        // Shows ONLY the diffuse IBL term (no specular, no sun).
+        // For energy sanity: diffuse should be bounded by albedo * irradiance.
+        // Interpretation:
+        //   - Should show albedo-tinted environmental lighting
+        //   - Metals should be near-black (kD approaches 0 for metallic=1)
+        let diffuse_linear = max(ibl_diffuse_scaled, vec3<f32>(0.0));
+        let mapped = tonemap_aces(diffuse_linear);
+        let out_srgb = linear_to_srgb(mapped);
+        out.color = vec4<f32>(out_srgb, 1.0);
+        return out;
+    } else if (debug_mode == DBG_PBR_SPECULAR_ONLY) {
+        // ── MODE 8: PBR Specular Only ──
+        // Shows ONLY the specular IBL term (no diffuse, no sun).
+        // For energy sanity: specular should vary with roughness and view angle.
+        // Interpretation:
+        //   - Low roughness = sharp reflections, high roughness = blurry
+        //   - Grazing angles = stronger specular (Fresnel)
+        let specular_linear = max(ibl_specular_scaled, vec3<f32>(0.0));
+        let mapped = tonemap_aces(specular_linear);
+        let out_srgb = linear_to_srgb(mapped);
+        out.color = vec4<f32>(out_srgb, 1.0);
+        return out;
+    } else if (debug_mode == DBG_PBR_FRESNEL) {
+        // ── MODE 9: Fresnel Term Visualization ──
+        // Shows the Fresnel term F as grayscale (average of RGB components).
+        // For Fresnel behavior: should be stronger at grazing angles.
+        // Interpretation:
+        //   - Near-normal viewing = F close to F0 (typically ~0.04 for dielectrics)
+        //   - Grazing angles = F approaches 1.0 (white)
+        let fresnel_avg = (ibl_split.fresnel.r + ibl_split.fresnel.g + ibl_split.fresnel.b) / 3.0;
+        out.color = vec4<f32>(vec3<f32>(fresnel_avg), 1.0);
+        return out;
+    } else if (debug_mode == DBG_PBR_NDOTV) {
+        // ── MODE 10: N.V (View Angle) Visualization ──
+        // Shows N.V as grayscale (1.0 = normal facing camera, 0.0 = grazing).
+        // Interpretation:
+        //   - Flat surfaces facing camera = white
+        //   - Steep slopes / edges = darker
+        //   - Should correlate with where Fresnel is stronger (inverse relationship)
+        out.color = vec4<f32>(vec3<f32>(ibl_split.n_dot_v), 1.0);
+        return out;
+    } else if (debug_mode == DBG_PBR_ROUGHNESS) {
+        // ── MODE 11: Roughness Visualization ──
+        // Shows the roughness value as grayscale (after any multiplier).
+        // Interpretation:
+        //   - White = rough (matte), Black = smooth (shiny)
+        //   - Should correlate with specular highlight width
+        out.color = vec4<f32>(vec3<f32>(roughness), 1.0);
+        return out;
+    } else if (debug_mode == DBG_PBR_ENERGY) {
+        // ── MODE 12: Energy (Diffuse + Specular) Before Tonemap ──
+        // Shows raw luminance of (diffuse + specular) for energy histogram.
+        // NO tonemap - this is for quantitative analysis.
+        // Interpretation:
+        //   - Values should rarely exceed 1.0 for dielectrics with IBL only
+        //   - Use this to generate fig_pbr_energy_hist.png
+        //   - Encode: luminance clamped to [0,1] as grayscale (saturated = energy > 1)
+        let energy_linear = ibl_diffuse_scaled + ibl_specular_scaled;
+        let energy_luma = luminance(energy_linear);
+        // Clamp at 1.0 - anything above shows as pure white (energy violation)
+        let energy_vis = clamp(energy_luma, 0.0, 1.0);
+        out.color = vec4<f32>(vec3<f32>(energy_vis), 1.0);
+        return out;
+    } else if (debug_mode == DBG_PBR_LINEAR_COMBINED) {
+        // ── MODE 13: Linear Unclamped (Diffuse + Specular) ──
+        // For recomposition proof: encode linear RGB in [0,4] range to [0,1] for PNG export.
+        // Decode in Python: linear = encoded * 4.0
+        // This should equal ibl_contrib_pre_ao (before AO is applied)
+        let combined_linear = ibl_diffuse_scaled + ibl_specular_scaled;
+        let encoded = clamp(combined_linear / 4.0, vec3<f32>(0.0), vec3<f32>(1.0));
+        out.color = vec4<f32>(encoded, 1.0);
+        return out;
+    } else if (debug_mode == DBG_PBR_LINEAR_DIFFUSE) {
+        // ── MODE 14: Linear Unclamped Diffuse Only ──
+        // Encode linear diffuse in [0,4] range to [0,1] for PNG export.
+        let encoded = clamp(ibl_diffuse_scaled / 4.0, vec3<f32>(0.0), vec3<f32>(1.0));
+        out.color = vec4<f32>(encoded, 1.0);
+        return out;
+    } else if (debug_mode == DBG_PBR_LINEAR_SPECULAR) {
+        // ── MODE 15: Linear Unclamped Specular Only ──
+        // Encode linear specular in [0,4] range to [0,1] for PNG export.
+        let encoded = clamp(ibl_specular_scaled / 4.0, vec3<f32>(0.0), vec3<f32>(1.0));
+        out.color = vec4<f32>(encoded, 1.0);
+        return out;
+    } else if (debug_mode == DBG_PBR_RECOMP_ERROR) {
+        // ── MODE 16: Recomposition Error Heatmap ──
+        // Shows abs(ibl_total - (diffuse + specular)) amplified 100x.
+        // This should be near-zero if IBL = diffuse + specular.
+        // Interpretation:
+        //   - Black = perfect recomposition (error < 0.01 linear)
+        //   - Any color = error (amplified to be visible)
+        //   - If P95 error < 0.001, recomposition is correct
+        let recomposed = ibl_diffuse_scaled + ibl_specular_scaled;
+        let error = abs(ibl_contrib_pre_ao - recomposed);
+        // Amplify 100x so small errors are visible
+        let error_vis = clamp(error * 100.0, vec3<f32>(0.0), vec3<f32>(1.0));
+        out.color = vec4<f32>(error_vis, 1.0);
+        return out;
+    } else if (debug_mode == DBG_SPECAA_SPARKLE) {
+        // ── MODE 17: SpecAA Sparkle Stress Test ──
+        // Inject synthetic high-frequency normal perturbation to stress-test Toksvig.
+        // The perturbation creates a checkerboard pattern that should cause sparkles
+        // unless SpecAA properly widens the lobe via screen-derivative variance.
+        // Metric: Compare high-freq energy between SpecAA ON vs OFF.
+        
+        // Generate synthetic high-freq normal perturbation (screen-space checkerboard)
+        let screen_pos = input.clip_position.xy;
+        
+        // Perturb shading normal with high-frequency tangent-space noise
+        // This creates rapid normal changes that dpdx/dpdy will detect
+        let perturb_strength = 0.3; // Strong enough to cause visible sparkles
+        let perturb = vec3<f32>(
+            sin(screen_pos.x * 7.3 + screen_pos.y * 3.7) * perturb_strength,
+            sin(screen_pos.x * 5.1 - screen_pos.y * 8.3) * perturb_strength,
+            0.0
+        );
+        let sparkle_normal = normalize(shading_normal + perturb);
+        
+        // CRITICAL: Recompute variance on the PERTURBED normal
+        // This is where SpecAA must detect the high-frequency variation
+        var sparkle_roughness = roughness;
+        var sparkle_sigma2_for_debug = 0.0;  // For debug mode 20
+        if (spec_aa_enabled) {
+            let dndx_sparkle = dpdx(sparkle_normal);
+            let dndy_sparkle = dpdy(sparkle_normal);
+            // Use same 100x amplification as main path
+            let sigma_scale = max(u_overlay.params2.w, 1.0) * 100.0;
+            let sparkle_sigma2 = 0.5 * (dot(dndx_sparkle, dndx_sparkle) + dot(dndy_sparkle, dndy_sparkle)) * sigma_scale;
+            sparkle_sigma2_for_debug = sparkle_sigma2;  // Save raw value for debug
+            let sparkle_sigma2_clamped = clamp(sparkle_sigma2, 0.0, 1.0);
+            
+            // Apply Toksvig roughness boost on perturbed normal
+            let r2_sparkle = sparkle_roughness * sparkle_roughness;
+            sparkle_roughness = sqrt(r2_sparkle + sparkle_sigma2_clamped * (1.0 - r2_sparkle));
+            sparkle_roughness = clamp(sparkle_roughness, 0.04, 1.0);
+        }
+        
+        // Recompute specular IBL with perturbed normal and SpecAA-corrected roughness
+        let sparkle_ibl = eval_ibl(
+            sparkle_normal,
+            view_dir,
+            albedo,
+            metallic,
+            sparkle_roughness, // Uses freshly-computed Toksvig roughness on perturbed normal
+            f0
+        );
+        
+        // Extract specular component (approximate: assume kD same ratio)
+        let n_dot_v_sparkle = saturate(dot(sparkle_normal, view_dir));
+        let f_sparkle = fresnel_schlick_roughness(n_dot_v_sparkle, f0, sparkle_roughness);
+        let kS_sparkle = f_sparkle;
+        let kD_sparkle = (vec3<f32>(1.0) - kS_sparkle) * (1.0 - metallic);
+        let total_k = kD_sparkle + kS_sparkle;
+        let spec_ratio = kS_sparkle / max(total_k, vec3<f32>(0.001));
+        let sparkle_spec = sparkle_ibl * spec_ratio * u_ibl.intensity;
+        
+        // Output with tonemap for visibility
+        let mapped = tonemap_aces(sparkle_spec);
+        let out_srgb = linear_to_srgb(mapped);
+        out.color = vec4<f32>(out_srgb, 1.0);
+        return out;
+    } else if (debug_mode == DBG_POM_OFFSET_MAG) {
+        // ── MODE 18: POM Offset Magnitude Visualization ──
+        // Shows the parallax UV offset magnitude as grayscale.
+        // Black = no offset (POM disabled or flat area)
+        // White = maximum offset (areas with strong parallax displacement)
+        // This proves POM is actually displacing texture coordinates.
+        // Interpretation:
+        //   - Should correlate with view angle (more offset at grazing angles)
+        //   - Should correlate with height variation (ridges/valleys show more offset)
+        //   - If uniformly black when POM enabled → POM not working or pom_scale too small
+        //   - If uniform noise → something wrong with height sampling
+        // Scale factor: POM offset is typically small (0.0-0.1 UV units)
+        // We amplify by 10x for visibility (0.1 UV offset → 1.0 grayscale)
+        let offset_vis = clamp(pom_offset_magnitude * 10.0, 0.0, 1.0);
+        out.color = vec4<f32>(vec3<f32>(offset_vis), 1.0);
+        return out;
+    } else if (debug_mode == DBG_SPECAA_SIGMA2) {
+        // ── MODE 19: SpecAA Sigma² (Variance) Visualization ──
+        // Shows the normal variance (σ²) used by SpecAA/Toksvig as grayscale.
+        // Black = no variance (flat normal field)
+        // White = high variance (high-frequency normal changes)
+        // Interpretation:
+        //   - Terrain edges/ridges should show higher variance
+        //   - Flat areas should be near-black
+        //   - If uniformly black when SpecAA enabled → variance not being detected
+        //   - Should correlate with where sparkle reduction occurs
+        // Scale: σ² is typically small (0.0-0.1), amplify 20x for visibility
+        let sigma2_vis = clamp(specaa_sigma2 * 20.0, 0.0, 1.0);
+        out.color = vec4<f32>(vec3<f32>(sigma2_vis), 1.0);
+        return out;
+    } else if (debug_mode == DBG_SPECAA_SPARKLE_SIGMA2) {
+        // ── MODE 20: SpecAA Sparkle Sigma² Visualization ──
+        // Shows the variance computed on the SPARKLE-PERTURBED normal.
+        // This proves that dpdx/dpdy can detect the synthetic perturbation.
+        // Should show high variance (bright) across entire terrain.
+        // If black: variance not being detected on perturbed normals.
+        
+        // Generate same sparkle perturbation as mode 17
+        let screen_pos = input.clip_position.xy;
+        let perturb_strength = 0.3;
+        let perturb = vec3<f32>(
+            sin(screen_pos.x * 7.3 + screen_pos.y * 3.7) * perturb_strength,
+            sin(screen_pos.x * 5.1 - screen_pos.y * 8.3) * perturb_strength,
+            0.0
+        );
+        let sparkle_normal_dbg = normalize(shading_normal + perturb);
+        
+        // Compute variance on perturbed normal
+        let dndx_dbg = dpdx(sparkle_normal_dbg);
+        let dndy_dbg = dpdy(sparkle_normal_dbg);
+        let sigma_scale_dbg = max(u_overlay.params2.w, 1.0) * 100.0;
+        let sparkle_sigma2_dbg = 0.5 * (dot(dndx_dbg, dndx_dbg) + dot(dndy_dbg, dndy_dbg)) * sigma_scale_dbg;
+        
+        // Visualize (no additional scaling - should already be visible with 100x)
+        let sigma2_vis_sparkle = clamp(sparkle_sigma2_dbg, 0.0, 1.0);
+        out.color = vec4<f32>(vec3<f32>(sigma2_vis_sparkle), 1.0);
+        return out;
+    } else if (debug_mode == DBG_TRIPLANAR_WEIGHTS) {
+        // ── MODE 21: Triplanar Blend Weights Visualization ──
+        // Shows RGB = x/y/z projection weights.
+        // T1 requirement: wx + wy + wz = 1, weights change smoothly with normal.
+        // Interpretation:
+        //   - RED dominant = surface faces X axis (YZ plane projection dominant)
+        //   - GREEN dominant = surface faces Y axis (XZ plane projection dominant, i.e. flat/horizontal)
+        //   - BLUE dominant = surface faces Z axis (XY plane projection dominant)
+        //   - Steep cliffs should show RED or BLUE, flat areas should show GREEN
+        //   - Transitions should be smooth, not abrupt
+        // Use base_normal for stable triplanar weights (no high-frequency jitter)
+        let tri_weights = compute_triplanar_weights(base_normal, tri_blend);
+        out.color = vec4<f32>(tri_weights, 1.0);
+        return out;
+    } else if (debug_mode == DBG_TRIPLANAR_CHECKER) {
+        // ── MODE 22: Triplanar Checker Pattern ──
+        // Shows a procedural checker pattern sampled via triplanar mapping.
+        // Interpretation:
+        //   - Checker squares should be uniform size (no distortion) when projection matches surface
+        //   - If squares stretch on steep slopes, triplanar isn't working correctly
+        //   - Pattern should remain world-space stable (no swimming with camera movement)
+        let checker_scale = 8.0; // Number of checker squares per world unit
+        // Use base_normal for stable triplanar weights
+        let checker_val = sample_triplanar_checker(
+            input.world_position,
+            base_normal,  // Stable geometric normal
+            tri_scale,
+            tri_blend,
+            checker_scale
+        );
+        // Output as grayscale for clear checker visibility
+        out.color = vec4<f32>(vec3<f32>(checker_val), 1.0);
+        return out;
+    } else if (debug_mode == DBG_FLAKE_NO_SPECULAR) {
+        // ── MODE 23: No Specular (Diffuse Only) ──
+        // Shows terrain with ONLY diffuse/ambient lighting (no IBL specular).
+        // If flakes disappear here → flakes are specular aliasing.
+        // Interpretation:
+        //   - Should look flat/matte with no shiny highlights
+        //   - If flakes still visible → they're in diffuse path (unlikely)
+        //   - Compare to mode 8 (specular only) to isolate contribution
+        let ambient_strength = mix(u_shading.clamp1.x, u_shading.clamp1.y, 1.0 - abs(blended_normal.y));
+        let ambient = albedo * ambient_strength;
+        let direct_mult = mix(0.65, 1.0, occlusion);
+        // Use ONLY diffuse IBL term (no specular)
+        let diffuse_only = ibl_diffuse_scaled;
+        let shaded_no_spec = ambient + lighting * direct_mult + diffuse_only;
+        let exposure = max(u_shading.light_params.w, 0.0);
+        let tonemapped = tonemap_aces(shaded_no_spec * exposure);
+        out.color = vec4<f32>(linear_to_srgb(tonemapped), 1.0);
+        return out;
+    } else if (debug_mode == DBG_FLAKE_NO_HEIGHT_NORMAL) {
+        // ── MODE 24: No Height Normal ──
+        // Normal selection is done at top of shader - this mode uses base_normal.
+        // Shows terrain with ONLY vertex/geometric normals (no height-map detail).
+        // If flakes disappear here → flakes are from height-normal frequency.
+        // (Normal path continues below - just a marker for documentation)
+        // The actual shading uses the modified blended_normal which is now base_normal.
+        // Fall through to normal shading path with the substituted normal.
+    } else if (debug_mode == DBG_FLAKE_DDXDDY_NORMAL) {
+        // ── MODE 25: Derivative-Based Normal (Ground Truth) ──
+        // Normal selection is done at top of shader - this mode uses n_dd.
+        // Uses n_dd = cross(dpdx(world_pos), dpdy(world_pos)) as shading normal.
+        // This is the "mathematically correct" per-pixel surface normal.
+        // If this looks clean while mode 24 has flakes → current Sobel is the problem.
+        // (Normal path continues below - just a marker for documentation)
+        // Fall through to normal shading path with the substituted normal.
+    } else if (debug_mode == DBG_FLAKE_HEIGHT_LOD) {
+        // ── MODE 26: Height LOD Visualization ──
+        // Shows the computed LOD level for height sampling as grayscale.
+        // Interpretation:
+        //   - Black = LOD 0 (full resolution, near camera)
+        //   - White = max LOD (lowest resolution, far/grazing)
+        //   - Should show smooth gradient with distance
+        //   - If chaotic/noisy → LOD computation is wrong
+        let max_lod = f32(textureNumLevels(height_tex) - 1u);
+        let lod_normalized = height_lod / max(max_lod, 1.0);
+        out.color = vec4<f32>(vec3<f32>(lod_normalized), 1.0);
+        return out;
+    } else if (debug_mode == DBG_FLAKE_NORMAL_BLEND) {
+        // ── MODE 27: Effective Normal Blend Visualization ──
+        // Shows the normal_blend after Milestone 3's LOD-based minification fade.
+        // Interpretation:
+        //   - White = full height-normal contribution (near camera)
+        //   - Black = no height-normal contribution (far/grazing)
+        //   - Should show smooth gradient matching distance
+        //   - If uniform white → minification fade not working
+        out.color = vec4<f32>(vec3<f32>(normal_blend), 1.0);
+        return out;
+    } else if (debug_mode == 100u) {
+        // DBG_WATER_BINARY: Unambiguous binary water classification
+        // Blue = water, Dark gray = land. No lighting, no tonemap.
+        final_color = debug_water_is_water(is_water);
+    } else if (debug_mode == 101u) {
+        // DBG_WATER_SCALAR: Shore-distance gradient visualization
+        // Falsecolor ramp with white shoreline ring on water, dark gray on land.
+        // If gradient appears in wrong location => UV orientation bug
+        final_color = debug_water_scalar(is_water, water_mask_value);
+    } else if (debug_mode == 102u) {
+        // DBG_WATER_IBL_SPEC_ISOLATED: IBL specular on water ONLY
+        // Land is pure black (no cheating). Water shows compressed HDR IBL.
+        final_color = debug_water_ibl_spec_only(is_water, ibl_contrib);
+    } else if (debug_mode == 103u) {
+        // DBG_PREFILT_RAW: Direct sample of specular cubemap (no Fresnel)
+        // This isolates whether the cubemap itself is returning data
+        let refl_dir = reflect(-view_dir, shading_normal);
+        let rot_refl = rotate_y(refl_dir, u_ibl.sin_theta, u_ibl.cos_theta);
+        let prefilt = textureSampleLevel(envSpecular, envSampler, rot_refl, 0.0).rgb;
+        final_color = debug_water_prefilt_raw(is_water, prefilt);
+    } else if (debug_mode == 104u) {
+        // DBG_CUBEMAP_DIRECT: Sample envSpecular with unrotated reflection, ignore Fresnel
+        // Water: use (0.0, 1.0, 0.0) reflection = straight up to sky
+        let sky_dir = vec3<f32>(0.0, 1.0, 0.0);
+        let prefilt_sky = textureSampleLevel(envSpecular, envSampler, sky_dir, 0.0).rgb;
+        final_color = debug_water_prefilt_raw(is_water, prefilt_sky);
+    } else if (debug_mode == 105u) {
+        // DBG_IRRADIANCE_DIRECT: Sample envIrradiance (irradiance cubemap) with up direction
+        // This tests if the OTHER cubemap (envIrradiance) has data
+        let sky_dir = vec3<f32>(0.0, 1.0, 0.0);
+        let irr_sky = textureSampleLevel(envIrradiance, envSampler, sky_dir, 0.0).rgb;
+        // Use same helper as specular - cyan means data, magenta means zero
+        // Reuse the debug_water_prefilt_raw function which already has this logic
+        final_color = debug_water_prefilt_raw(is_water, irr_sky);
+    } else if (debug_mode == 110u) {
+        // DBG_PURE_RED: Sanity check - just return pure red
+        // If this doesn't show red, debug_mode isn't being set correctly
+        final_color = vec3<f32>(1.0, 0.0, 0.0);
+    } else if (debug_mode == 111u) {
+        // DBG_SPEC_NEG_Z: Sample envSpecular with -Z direction (front face)
+        let front_dir = vec3<f32>(0.0, 0.0, -1.0);
+        let prefilt_front = textureSampleLevel(envSpecular, envSampler, front_dir, 0.0).rgb;
+        final_color = debug_water_prefilt_raw(is_water, prefilt_front);
+    } else if (debug_mode == 112u) {
+        // DBG_SPEC_POS_X: Sample envSpecular with +X direction (right face)
+        let right_dir = vec3<f32>(1.0, 0.0, 0.0);
+        let prefilt_right = textureSampleLevel(envSpecular, envSampler, right_dir, 0.0).rgb;
+        final_color = debug_water_prefilt_raw(is_water, prefilt_right);
+    } else if (debug_mode == 113u) {
+        // DBG_IRR_NEG_Z: Sample envIrradiance with -Z direction
+        let front_dir = vec3<f32>(0.0, 0.0, -1.0);
+        let irr_front = textureSampleLevel(envIrradiance, envSampler, front_dir, 0.0).rgb;
+        final_color = debug_water_prefilt_raw(is_water, irr_front);
     } else {
         // Normal PBR shading path
-        let ambient_strength = mix(u_shading.clamp1.x, u_shading.clamp1.y, slope_factor);
-        let ambient = albedo * ambient_strength;
-        let direct = lighting * mix(0.65, 1.0, occlusion);
+        var shaded = vec3<f32>(0.0);
+        
+        if (is_water) {
+            // Water: specular-dominant shading (minimal diffuse, strong reflections)
+            // Fresnel is already baked into eval_ibl via fresnel_schlick_roughness
+            // Direct specular from sun
+            let n_dot_v = max(dot(shading_normal, view_dir), 0.001);
+            let n_dot_l = max(dot(shading_normal, light_dir), 0.0);
+            let h = normalize(view_dir + light_dir);
+            let n_dot_h = max(dot(shading_normal, h), 0.0);
+            let v_dot_h = max(dot(view_dir, h), 0.001);
+            
+            // GGX Distribution for water - use proper alpha² without over-clamping
+            // For very smooth surfaces (roughness ~0.01), D can legitimately reach 10000+
+            // This is physically correct and produces natural sun glints
+            let alpha = roughness * roughness;
+            let alpha2 = max(alpha * alpha, 1e-8); // Minimal clamp for numerical stability only
+            let n_dot_h2 = n_dot_h * n_dot_h;
+            let denom = n_dot_h2 * (alpha2 - 1.0) + 1.0;
+            let D = alpha2 / (PI * denom * denom);
+            
+            // Fresnel (Schlick) using v_dot_h for correct specular Fresnel
+            let fresnel = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
+            
+            // Geometry term (Smith GGX, height-correlated)
+            // For very smooth surfaces, G approaches 1.0
+            let k = alpha / 2.0;
+            let g_v = n_dot_v / (n_dot_v * (1.0 - k) + k);
+            let g_l = n_dot_l / (n_dot_l * (1.0 - k) + k);
+            let G = g_v * g_l;
+            
+            // Cook-Torrance specular BRDF (no artificial boosts!)
+            let spec_denom = 4.0 * n_dot_v * n_dot_l + 0.0001;
+            let direct_spec = D * fresnel * G / spec_denom;
+            
+            // Sun contribution - NO artificial boost; proper GGX + low roughness = natural glints
+            let sun_color = vec3<f32>(1.0, 0.98, 0.95); // Slightly warm sun
+            let sun_intensity = u_shading.light_params.z; // Use actual sun intensity (no boost!)
+            let sun_spec = direct_spec * sun_color * sun_intensity * n_dot_l;
+            
+            // Water shading strategy for visible depth gradient:
+            // 1. IBL gives environmental reflections (dominant on calm water)
+            // 2. Sun specular gives glints where waves face the sun
+            // 3. Depth tint modulates the overall brightness based on water depth
+            // 
+            // For depth to be visible, we need to darken deep water regions
+            // even when they have specular highlights. This mimics how real
+            // deep water absorbs more light than shallow water.
+            
+            // Use water_depth_value (promoted to outer scope)
+            // water_depth_value: 1.0 = deep, 0.0 = shallow
+            // Depth attenuation: shallow = 100%, deep = 30% (70% absorbed)
+            // This is aggressive but necessary for depth to be visible against bright specular
+            let depth_atten = mix(1.0, 0.3, water_depth_value);
+            
+            // Combine: reflections + specular, attenuated by depth
+            let reflective = (ibl_contrib + sun_spec) * depth_atten;
+            
+            // Add depth scatter (visible in non-specular areas, gives shoreline gradient)
+            // Scatter represents light from the bottom/underwater - should be subtle
+            shaded = reflective + water_scatter * 1.0;
+            
+        } else {
+            // Regular terrain: ambient + direct + IBL
+            let shading_slope = 1.0 - abs(shading_normal.y);
+            let ambient_strength = mix(u_shading.clamp1.x, u_shading.clamp1.y, shading_slope);
+            let ambient = albedo * ambient_strength;
+            let direct_mult = mix(0.65, 1.0, occlusion);
+            let direct = lighting * direct_mult;
+            shaded = ambient + direct + ibl_contrib;
+        }
+        
         let exposure = max(u_shading.light_params.w, 0.0);
-        let shaded = (ambient + direct + ibl_contrib) * exposure;
-        let tonemapped = tonemap_reinhard(shaded);
+        shaded = shaded * exposure;
+        
+        // Use ACES tonemapping for better highlight preservation than Reinhard
+        let tonemapped = tonemap_aces(shaded);
         final_color = tonemapped;
     }
 

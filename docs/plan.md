@@ -1,299 +1,153 @@
-## 1. Goals and constraints
+## Implementation Status (Dec 2025)
 
-- **Goal:** [interactive_viewer_terrain_demo.py] should show the actual Gore Range terrain (or whatever DEM/HDR you pass), not a uniform purple frame.
-- **Constraints:**
-  - Reuse existing terrain code (`terrain_pbr_pom`, [TerrainRenderer], `RendererConfig`) rather than duplicating shaders/pipelines.
-  - Keep viewer architecture clean and testable per `AGENTS.md`.
-  - Avoid breaking the existing headless `terrain_demo` and tests.
+**All milestones completed.** The following changes were made to `terrain_pbr_pom.wgsl`:
 
----
+### Milestone 1 — Debug Modes ✓
+- **Mode 23** (`DBG_FLAKE_NO_SPECULAR`): Diffuse-only rendering (no IBL specular)
+- **Mode 24** (`DBG_FLAKE_NO_HEIGHT_NORMAL`): Uses `base_normal` instead of height-derived normal
+- **Mode 25** (`DBG_FLAKE_DDXDDY_NORMAL`): Uses `n_dd = cross(dpdx(world_pos), dpdy(world_pos))` as ground truth
+- **Mode 26** (`DBG_FLAKE_HEIGHT_LOD`): Visualizes computed LOD level (black=0, white=max)
+- **Mode 27** (`DBG_FLAKE_NORMAL_BLEND`): Visualizes effective normal_blend after LOD fade
 
-## 2. High-level design
+### Milestone 2 — LOD-aware Sobel ✓
+- Added `sample_height_geom_level(uv, lod)` for explicit LOD sampling
+- Added `compute_height_lod(uv)` to compute LOD from screen-space UV footprint
+- Added `calculate_normal_lod_aware(uv)` that uses consistent LOD for all 9 Sobel taps
+- Added `calculate_normal_ddxddy(world_pos)` for derivative-based normal comparison
+- Default path now uses LOD-aware Sobel (`calculate_normal_lod_aware`)
 
-Conceptually:
+### Milestone 3 — Minification Fade ✓
+- `normal_blend` now fades based on LOD: full at LOD 0-1, fades to 0 by LOD 4
+- Prevents sparkles at distance/grazing angles even with correct mip selection
 
-- The **terrain demo** already knows how to:
-  - Build a `RendererConfig` from CLI args.
-  - Use terrain shaders + IBL to render a heightmap scene to an image.
+### Triplanar Requirements ✓
+- **T1**: `compute_triplanar_weights` normalizes weights so wx + wy + wz = 1
+- **T2**: World-position-based UVs prevent stretching on steep slopes
+- Uses `base_normal` (not `blended_normal`) for stable triplanar weights
 
-- The **interactive viewer** knows how to:
-  - Own a `wgpu::Device/Queue`.
-  - Run P5/P6 GI/screen-space pipelines.
-  - Render scene geometry (meshes) into its targets.
-  - Take snapshots at arbitrary resolution.
-
-What’s missing is a **TerrainScene** that:
-
-- Can be created inside the viewer from a `RendererConfig` (or equivalent), and
-- Knows how to render the terrain into the viewer’s render targets each frame.
-
-We’ll add that and a small Python API to call it.
+**To test debug modes:** Set `VF_COLOR_DEBUG_MODE=<mode>` environment variable.
 
 ---
 
-## 3. Milestone plan
+## Milestone 1 — Prove (or falsify) “it’s specular caused by the height-normal”
 
-### M1 — Confirm and reuse terrain configuration
+### Work
 
-**Files:**
+1. Add **one “specular off” switch** in shader (or debug mode):
 
-- [python/forge3d/terrain_demo.py]
-- `python/forge3d/terrain_pbr_pom.py`
-- [src/render/params.rs] (RendererConfig)
-- [src/terrain_renderer.rs]
+   * `specular_contrib = vec3(0)` (leave diffuse/IBL intact)
+2. Add **one “height normal off” switch**:
 
-**Tasks:**
+   * `height_normal = base_normal` (or `normal_blend = 0`)
+3. Add **a derivative-based geometric normal** as a third comparison:
 
-- Verify that [_build_renderer_config(args)] ultimately builds a `RendererConfig` (or something equivalent) on the Rust side.
-- Identify exactly which pieces the viewer needs:
-  - DEM path, HDR path.
-  - Z-scale, camera radius/angles.
-  - IBL options.
-  - Colormap and material controls.
+   * `n_dd = normalize(cross(dpdx(world_pos), dpdy(world_pos)))`
+   * Use it for shading normal in a debug mode.
 
-**Outcome:** A clear mapping from Python CLI args → a single Rust config type the viewer can understand (likely `RendererConfig`).
+### Deliverables
 
----
+* `reports/.../flake/flake_baseline.png`
+* `reports/.../flake/flake_no_specular.png`
+* `reports/.../flake/flake_no_height_normal.png`
+* `reports/.../flake/flake_ddxddy_normal.png` (shading with derivative normal)
 
-### M2 — Introduce a reusable `TerrainScene` module (Rust only)
+### Acceptance
 
-**Files:**
-
-- New: `src/terrain/scene.rs` (or similar)
-- Existing: [src/terrain_renderer.rs]
-
-**Tasks:**
-
-- Factor the **GPU-facing pieces** of [TerrainRenderer] into a non-PyO3 helper:
-
-  ```rust
-  pub struct TerrainScene {
-      // device/queue references (Arc<..> or borrowed)
-      // terrain pipelines, bind groups, textures
-      // colormap LUT, IBL resources, etc.
-  }
-
-  impl TerrainScene {
-      pub fn new(device: &Device, queue: &Queue, cfg: &RendererConfig) -> Result<Self>;
-      pub fn render(
-          &mut self,
-          encoder: &mut wgpu::CommandEncoder,
-          color_view: &wgpu::TextureView,
-          depth_view: &wgpu::TextureView,
-      ) -> Result<()>;
-  }
-  ```
-
-- Refactor [TerrainRenderer] so that it **owns a `TerrainScene` internally** instead of duplicating pipeline code:
-
-  ```rust
-  pub struct TerrainRenderer {
-      device: Arc<Device>,
-      queue: Arc<Queue>,
-      scene: Mutex<TerrainScene>,
-      // existing lights/config fields
-  }
-  ```
-
-**Outcome:** A single terrain rendering implementation, reusable both by headless terrain and the interactive viewer.
+* If `no_specular` kills flakes ⇒ it’s *spec aliasing*.
+* If `no_height_normal` kills flakes ⇒ it’s *height-normal bandwidth*.
+* If `ddxddy_normal` looks clean ⇒ current Sobel pipeline is the problem (very likely).
 
 ---
 
-### M3 — Attach `TerrainScene` to the viewer
+## Milestone 2 — Make Sobel height-normal **LOD-aware** (this is the big fix)
 
-**Files:**
+Right now:
 
-- [src/viewer/mod.rs]
+* `sample_height_geom()` uses `textureSample()` → implicit LOD chosen by hardware
+* but Sobel offsets use `texel_size = 1 / textureSize(level0)` → **wrong** if the sampling is happening at mip>0
+  This mismatch creates exactly the kind of shimmering “salt/pepper flakes”.
 
-**Tasks:**
+### Work
 
-- Add a field on [Viewer]:
+Replace Sobel with a version that:
 
-  ```rust
-  pub struct Viewer {
-      // ...
-      terrain_scene: Option<TerrainScene>,
-      // ...
-  }
-  ```
+1. Computes a consistent mip level from the **screen-space footprint of uv**
+2. Uses that mip level for **all 9 samples**
+3. Scales Sobel offsets by the mip’s texel size
 
-- Add a method:
+**Core idea (WGSL sketch):**
 
-  ```rust
-  impl Viewer {
-      pub fn load_terrain_from_config(
-          &mut self,
-          cfg: &RendererConfig,
-      ) -> anyhow::Result<()> {
-          let device = &self.device;
-          let queue = &self.queue;
-          let scene = TerrainScene::new(device, queue, cfg)?;
-          self.terrain_scene = Some(scene);
-          Ok(())
-      }
-  }
-  ```
+```wgsl
+let dims = vec2<f32>(textureDimensions(height_tex)); // level 0 dims
+let ddx_uv = dpdx(uv);
+let ddy_uv = dpdy(uv);
 
-- In the main render loop (where the fallback pipeline currently draws the purple full-screen triangle), change logic to:
+// footprint in texels
+let rho = max(length(ddx_uv * dims), length(ddy_uv * dims));
+let lod = clamp(log2(max(rho, 1e-8)), 0.0, f32(textureNumLevels(height_tex) - 1u));
 
-  ```rust
-  if let Some(scene) = &mut self.terrain_scene {
-      scene.render(&mut encoder, &color_view, &depth_view)?;
-  } else {
-      // existing fallback_pipeline solid color path
-  }
-  ```
+let mip_scale = exp2(lod);
+let texel_uv = mip_scale / dims;
 
-**Outcome:** Viewer can render a terrain scene instead of falling back to the purple debug pipeline when a `TerrainScene` has been loaded.
+// then do Sobel taps with textureSampleLevel(height_tex, ..., lod)
+```
 
----
+And in `sample_height_geom`, add a `lod` parameter:
 
-### M4 — Create a dedicated Rust entrypoint: `open_terrain_viewer`
+```wgsl
+fn sample_height_geom_level(uv: vec2<f32>, lod: f32) -> f32 {
+    let uv_clamped = clamp(uv, vec2(0.0), vec2(1.0));
+    let h_raw = textureSampleLevel(height_tex, height_samp, uv_clamped, lod).r;
+    // ... transform ...
+    return h;
+}
+```
 
-**Files:**
+### Deliverables
 
-- [src/lib.rs] (PyO3 interface)
-- Possibly [src/cli/interactive_viewer.rs] (if you want a Rust-only CLI later)
+* New renders:
 
-**Tasks:**
+  * `reports/.../flake/height_normal_before.png`
+  * `reports/.../flake/height_normal_after.png`
+* New debug output:
 
-- Add a new native function:
+  * `reports/.../flake/dbg_height_lod.png` (visualize `lod / max_lod`)
+* Optional metric:
 
-  ```rust
-  #[pyfunction]
-  fn open_terrain_viewer(
-      cfg: RendererConfig,
-      width: u32,
-      height: u32,
-      title: String,
-      // vsync, fov, znear/zfar, snapshot_* and initial_commands exactly like open_viewer
-      // ...
-  ) -> PyResult<()> {
-      // 1. Build a ViewerConfig as in open_viewer.
-      // 2. Construct Viewer.
-      // 3. Call viewer.load_terrain_from_config(&cfg).
-      // 4. Run viewer loop / snapshot as usual.
-  }
-  ```
+  * `flake_score_before`, `flake_score_after` in manifest (HF energy on *specular-only* image is a good metric)
 
-- Make sure the signature is symmetrical with [open_viewer] so Python can wrap it easily.
+### Acceptance
 
-**Outcome:** Native API that ties together viewer setup + terrain loading in one call.
+* Flakes reduced dramatically, especially in far-field + grazing regions.
+* `dbg_height_lod` shows sane LOD gradients (not constant 0, not chaotic).
 
 ---
 
-### M5 — Python API and example changes
+## Milestone 3 — Add a **minification fade** for height-normal contribution (safety belt)
 
-**Files:**
+Even with correct mip selection, if the height-normal amplitude is too strong when minified, specular can still sparkle.
 
-- [python/forge3d/__init__.py]
-- [examples/interactive_viewer_terrain_demo.py]
+### Work
 
-**Tasks:**
+Fade `normal_blend` (or reduce Sobel strength) as `lod` increases:
 
-1. **Python wrapper:**
+* Example: start fading at `lod > 1`, fully off by `lod > 4` (tune later)
 
-   In [forge3d/__init__.py], add:
+### Deliverables
 
-   ```python
-   def open_terrain_viewer(
-       config,
-       *,
-       width: int = 1024,
-       height: int = 768,
-       title: str = "forge3d Terrain Interactive Viewer",
-       vsync: bool = True,
-       fov_deg: float = 45.0,
-       znear: float = 0.1,
-       zfar: float = 1000.0,
-       snapshot_path: str | None = None,
-       snapshot_width: int | None = None,
-       snapshot_height: int | None = None,
-       initial_commands: list[str] | None = None,
-   ) -> None:
-       # mirror validation from open_viewer for snapshot_* and env var
-       # then call _native.open_terrain_viewer(...)
-   ```
+* `reports/.../flake/flake_after_lod_fade.png`
+* `reports/.../flake/dbg_effective_normal_blend.png` grayscale
 
-   Reuse the same snapshot validation logic we already wrote for [open_viewer].
+### Acceptance
 
-2. **Example script:**
-
-   In [examples/interactive_viewer_terrain_demo.py], change [main()] to:
-
-   ```python
-   cfg = terrain_demo._build_renderer_config(args)
-   width, height = args.size
-
-   f3d.open_terrain_viewer(
-       cfg,
-       width=int(width),
-       height=int(height),
-       title=str(args.title),
-       snapshot_path=str(args.snapshot_path) if args.snapshot_path is not None else None,
-       snapshot_width=args.snapshot_width,
-       snapshot_height=args.snapshot_height,
-       initial_commands=[
-           ":gi gtao on",
-           ":fog on",
-       ],
-   )
-   ```
-
-**Outcome:** From Python you now explicitly say “open a viewer with this terrain config”, and the Rust side has what it needs to render a real scene.
+* Remaining sparkles disappear without making near-field terrain look “mushy”.
 
 ---
 
-### M6 — Tests and verification
+## Milestone 4 — Only after flakes are gone: return to SpecAA
 
-**Files:**
+Once your height-normal is genuinely mip-filtered and stable, SpecAA tests become meaningful again. Before that, you’re trying to band-aid a signal-processing bug.
 
-- `tests/test_terrain_renderer.py`
-- New or existing I1 tests (e.g. `tests/test_I1_open_viewer_api.py`)
-- Possibly a new `tests/test_interactive_terrain_viewer.py` (optional)
+### Deliverables
 
-**Tasks:**
-
-- Ensure existing terrain tests still pass (`python -m pytest tests/test_terrain_renderer.py -q`).
-- Add a lightweight smoke test for the terrain viewer, e.g.:
-
-  ```python
-  def test_interactive_terrain_viewer_smoke(tmp_path):
-      import forge3d as f3d
-      from examples import terrain_demo
-
-      args = argparse.Namespace(
-          dem=terrain_demo.DEFAULT_DEM,
-          hdr=terrain_demo.DEFAULT_HDR,
-          size=(320, 180),
-          exposure=1.0,
-          # fill required fields minimally
-      )
-      cfg = terrain_demo._build_renderer_config(args)
-      out = tmp_path / "iv_terrain.png"
-
-      # Use a tiny snapshot to keep test fast
-      f3d.open_terrain_viewer(
-          cfg,
-          width=320,
-          height=180,
-          snapshot_path=str(out),
-          snapshot_width=320,
-          snapshot_height=180,
-      )
-
-      assert out.exists()
-      # Optionally, check that the image is not a flat color.
-  ```
-
----
-
-## 4. What this gives you
-
-Once these steps are implemented:
-
-- [interactive_viewer_terrain_demo.py] will:
-  - Build the same terrain configuration as the headless demo,
-  - Pass it into a viewer that actually instantiates terrain GPU resources,
-  - Render a real terrain scene with SSAO/fog/etc,
-  - Take a high-res snapshot that looks like your PBR+POM terrain, not a purple fallback.
+* `fig_specaa_sparkle_test.png` (synthetic) goes PASS *or* marked XFAIL with explicit rationale.

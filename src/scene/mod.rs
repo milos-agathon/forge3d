@@ -363,10 +363,10 @@ impl SsaoResources {
                 ],
             });
 
-        // @group(2) @binding(0) var color_input: texture_2d<f32>;
-        // @group(2) @binding(1) var color_storage: texture_storage_2d<rgba8unorm, write>;
-        // @group(2) @binding(2) var ssao_blurred_tex: texture_2d<f32>;
-        // @group(2) @binding(3) var<uniform> comp_params: vec4<f32>;
+        // @group(0) @binding(0) var color_input: texture_2d<f32>;
+        // @group(0) @binding(1) var composite_output: texture_storage_2d<rgba8unorm, write>;
+        // @group(0) @binding(2) var ao_input: texture_2d<f32>;
+        // @group(0) @binding(3) var<uniform> composite_params: vec4<f32>;
         let composite_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("ssao_composite_bind_group_layout"),
@@ -452,8 +452,8 @@ impl SsaoResources {
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("ssao-composite-pipeline-layout"),
-                    // Shader may address group 2; provide empty layouts for group 0 and 1
-                    bind_group_layouts: &[&empty_bgl, &empty_bgl, &composite_bind_group_layout],
+                    // Shader uses @group(0) for composite bindings
+                    bind_group_layouts: &[&composite_bind_group_layout],
                     push_constant_ranges: &[],
                 }),
             ),
@@ -760,8 +760,8 @@ impl SsaoResources {
                 timestamp_writes: None,
             });
             pass.set_pipeline(&self.composite_pipeline);
-            // Composite pipeline layout expects the bind group at index 2
-            pass.set_bind_group(2, &composite_bind_group, &[]);
+            // Composite pipeline layout expects the bind group at index 0
+            pass.set_bind_group(0, &composite_bind_group, &[]);
             pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
         }
 
@@ -3512,6 +3512,24 @@ impl Scene {
         if let Some(ref mut renderer) = self.water_surface_renderer {
             let g = crate::gpu::ctx();
             renderer.upload_water_mask(&g.device, &g.queue, &data_vec_u8, width, height);
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Water surface not enabled. Call enable_water_surface() first.",
+            ))
+        }
+    }
+
+    /// Set water surface debug mode.
+    ///
+    /// - 0: Normal rendering (default)
+    /// - 100: Binary water mask (blue = water, gray = land)
+    /// - 101: Shore-distance scalar (falsecolor ramp with white shoreline ring)
+    /// - 102: IBL specular isolation (land = black, water shows compressed HDR fresnel)
+    #[pyo3(text_signature = "($self, mode)")]
+    pub fn set_water_surface_debug_mode(&mut self, mode: u32) -> PyResult<()> {
+        if let Some(ref mut renderer) = self.water_surface_renderer {
+            renderer.set_debug_mode(mode);
             Ok(())
         } else {
             Err(pyo3::exceptions::PyRuntimeError::new_err(

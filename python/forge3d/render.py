@@ -1411,7 +1411,21 @@ def _detect_water_mask_via_scene(
     return mask
 
 
-def _postprocess_water_mask(mask: np.ndarray, keep_components: int = 1, min_area_px: int = 0) -> np.ndarray:
+def _postprocess_water_mask(
+    mask: np.ndarray,
+    keep_components: int = 1,
+    min_area_px: int = 0,
+    valid_dem_mask: np.ndarray | None = None,
+) -> np.ndarray:
+    """Postprocess water mask: keep largest components, reject border+NoData artifacts.
+    
+    Args:
+        mask: Binary water mask
+        keep_components: Max number of largest components to keep
+        min_area_px: Minimum area in pixels for a component to be kept
+        valid_dem_mask: Optional mask of valid DEM pixels (True=valid, False=NoData).
+                        Components touching border AND intersecting NoData are rejected.
+    """
     m = np.asarray(mask, dtype=bool)
     try:
         from scipy import ndimage  # type: ignore
@@ -1420,9 +1434,44 @@ def _postprocess_water_mask(mask: np.ndarray, keep_components: int = 1, min_area
         if n <= 1:
             return m
         areas = ndimage.sum(np.ones_like(lab, dtype=np.int32), labels=lab, index=np.arange(1, n + 1))
+        
+        # Build border mask (1px border)
+        H, W = m.shape
+        border_mask = np.zeros((H, W), dtype=bool)
+        border_mask[0, :] = True
+        border_mask[-1, :] = True
+        border_mask[:, 0] = True
+        border_mask[:, -1] = True
+        
+        # For each component, check if it touches border AND intersects NoData
+        # (This catches the corner wedge artifacts from NoData regions)
+        invalid_dem_mask = None
+        if valid_dem_mask is not None:
+            invalid_dem_mask = ~np.asarray(valid_dem_mask, dtype=bool)
+        
+        keep_labels = []
         idx_sorted = np.argsort(areas)[::-1]
         keep_k = int(max(1, keep_components))
-        keep_labels = [int(i + 1) for i in idx_sorted[:keep_k] if areas[i] >= max(0, min_area_px)]
+        
+        for i in idx_sorted:
+            label_id = int(i + 1)
+            if areas[i] < max(0, min_area_px):
+                continue
+            
+            component = (lab == label_id)
+            touches_border = np.any(component & border_mask)
+            
+            # If touches border AND we have NoData info, check if it intersects NoData
+            if touches_border and invalid_dem_mask is not None:
+                intersects_nodata = np.any(component & invalid_dem_mask)
+                if intersects_nodata:
+                    # Reject: this is a NoData-connected border artifact
+                    continue
+            
+            keep_labels.append(label_id)
+            if len(keep_labels) >= keep_k:
+                break
+        
         out = (lab > 0) & np.isin(lab, keep_labels)
         return out
     except Exception:
@@ -1446,11 +1495,56 @@ def detect_dem_water_mask(
     spacing: tuple[float, float] | None = None,
     base_min_area_pct: float = 0.01,
     keep_components: int = 2,
+    nodata_value: float | None = None,
 ) -> np.ndarray:
+    """Detect water regions in a DEM based on elevation and flatness.
+    
+    Args:
+        heightmap: 2D elevation array
+        domain: (min, max) elevation range for normalization
+        level_normalized: Water level as fraction of domain range [0,1]
+        slope_threshold: Max gradient magnitude for "flat" classification
+        spacing: Pixel spacing (dx, dy) for gradient calculation
+        base_min_area_pct: Minimum component area as percentage of total pixels
+        keep_components: Max number of largest water components to keep
+        nodata_value: Optional explicit NoData value. If None, auto-detect NaN/inf.
+        
+    Returns:
+        Boolean mask where True = water
+    """
     h = np.asarray(heightmap, dtype=np.float32)
+    
+    # ── Step 1: Build valid DEM mask (detect NoData) ──
+    # NoData = NaN, inf, or explicit nodata_value
+    valid_dem_mask = np.isfinite(h)
+    if nodata_value is not None:
+        valid_dem_mask &= (h != float(nodata_value))
+    
+    # Also reject extreme outliers that likely indicate NoData (e.g., -9999, -32768)
+    # Common NoData sentinel values in DEMs
+    NODATA_SENTINELS = [-9999.0, -32768.0, -3.4028235e+38, 3.4028235e+38]
+    for sentinel in NODATA_SENTINELS:
+        valid_dem_mask &= ~np.isclose(h, sentinel, rtol=1e-5)
+    
+    # If most pixels are invalid, something is very wrong - bail out
+    valid_frac = np.sum(valid_dem_mask) / max(1, h.size)
+    if valid_frac < 0.1:
+        # Return empty mask rather than garbage
+        return np.zeros_like(h, dtype=bool)
+    
+    # ── Step 2: Compute domain using only valid pixels ──
     lo, hi = float(domain[0]), float(domain[1])
+    # If domain looks like it might include NoData, recompute from valid pixels
+    h_valid = h[valid_dem_mask]
+    if h_valid.size > 0:
+        valid_lo, valid_hi = float(np.min(h_valid)), float(np.max(h_valid))
+        # If provided domain extends far below valid data, it likely includes NoData
+        if lo < valid_lo - 0.1 * (valid_hi - valid_lo):
+            lo = valid_lo
+        if hi > valid_hi + 0.1 * (valid_hi - valid_lo):
+            hi = valid_hi
     rng = max(hi - lo, 1e-6)
-
+    
     level_abs = lo + float(level_normalized) * rng
 
     spacing_use = spacing if spacing is not None else (1.0, 1.0)
@@ -1469,17 +1563,27 @@ def detect_dem_water_mask(
     if not mask.size:
         return mask
 
+    # ── Step 3: Apply flatness + low elevation criteria (only on valid pixels) ──
     h_norm = np.clip((h - lo) / rng, 0.0, 1.0)
     gy, gx = np.gradient(h_norm)
     grad = np.sqrt(gx * gx + gy * gy)
     flat = grad <= float(slope_threshold)
     low = h_norm <= float(level_normalized)
     mask &= (flat & low)
+    
+    # ── Step 4: Force NoData pixels to NOT be water ──
+    mask &= valid_dem_mask
 
+    # ── Step 5: Postprocess - reject border+NoData artifacts ──
     try:
         total_px = h.shape[0] * h.shape[1]
         min_area_px = int(total_px * float(base_min_area_pct) / 100.0)
-        mask = _postprocess_water_mask(mask, keep_components=int(max(1, keep_components)), min_area_px=min_area_px)
+        mask = _postprocess_water_mask(
+            mask,
+            keep_components=int(max(1, keep_components)),
+            min_area_px=min_area_px,
+            valid_dem_mask=valid_dem_mask,  # Pass for border+NoData rejection
+        )
     except Exception:
         pass
 

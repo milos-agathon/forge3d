@@ -14,6 +14,7 @@
 //! src/terrain_render_params.rs, src/shaders/terrain_pbr_pom.wgsl
 
 use anyhow::{anyhow, Result};
+use log::info;
 use bytemuck::{Pod, Zeroable};
 use numpy::PyReadonlyArray2;
 use pyo3::exceptions::PyRuntimeError;
@@ -81,7 +82,7 @@ struct NoopShadow {
 struct OverlayUniforms {
     params0: [f32; 4], // domain_min, inv_range, overlay_strength, offset
     params1: [f32; 4], // blend_mode, debug_mode, albedo_mode, colormap_strength
-    params2: [f32; 4], // gamma, pad, pad, pad
+    params2: [f32; 4], // gamma, roughness_mult, spec_aa_enabled, pad
 }
 
 impl OverlayUniforms {
@@ -89,7 +90,8 @@ impl OverlayUniforms {
         Self {
             params0: [0.0; 4],
             params1: [0.0; 4],
-            params2: [2.2, 0.0, 0.0, 0.0], // default gamma = 2.2
+            // gamma=2.2, roughness_mult=1.0, spec_aa_enabled=1.0 (enabled), pad=0
+            params2: [2.2, 1.0, 1.0, 0.0],
         }
     }
 }
@@ -463,7 +465,10 @@ impl TerrainRenderer {
     ///     params: Terrain render parameters
     ///     heightmap: 2D numpy array (H, W) of float32 heights
     ///     target: Optional render target (None for offscreen)
-    ///     water_mask: Optional 2D mask (H, W) in heightmap space, where values > 0 indicate water.
+    ///     water_mask: Optional 2D mask (H, W) in heightmap space. Float32 values 0.0-1.0 where:
+    ///                 - 0.0 = not water
+    ///                 - Values between 0.0 and 1.0 = distance from shore (0=shore, 1=deep center)
+    ///                 - 1.0 = maximum depth / furthest from shore
     ///
     /// Returns:
     ///     Frame object with rendered RGBA8 image
@@ -476,7 +481,7 @@ impl TerrainRenderer {
         params: &crate::terrain_render_params::TerrainRenderParams,
         heightmap: PyReadonlyArray2<'py, f32>,
         target: Option<&Bound<'_, PyAny>>,
-        water_mask: Option<PyReadonlyArray2<'py, bool>>,
+        water_mask: Option<PyReadonlyArray2<'py, f32>>,
     ) -> PyResult<Py<crate::Frame>> {
         if target.is_some() {
             return Err(PyRuntimeError::new_err(
@@ -1280,7 +1285,7 @@ impl TerrainScene {
         env_maps: &crate::ibl_wrapper::IBL,
         params: &crate::terrain_render_params::TerrainRenderParams,
         heightmap: PyReadonlyArray2<f32>,
-        water_mask: Option<PyReadonlyArray2<bool>>,
+        water_mask: Option<PyReadonlyArray2<f32>>,
     ) -> Result<crate::Frame> {
         // P1-06: Advance light buffer frame (triple-buffering)
         let mut light_buffer_guard = self
@@ -1344,15 +1349,33 @@ impl TerrainScene {
             self.upload_heightmap_texture(width as u32, height as u32, &heightmap_data)?;
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Optional water mask upload (bool -> R8Unorm 0/255)
+        // Optional water mask upload (f32 -> R8Unorm, values 0.0-1.0)
+        // Now encodes distance-to-shore: 0=not water, >0 = water with value = distance from shore
         let mut water_mask_view_uploaded: Option<wgpu::TextureView> = None;
         if let Some(mask) = water_mask {
             let mask_array = mask.as_array();
             if mask_array.shape() == heightmap_array.shape() {
                 let mut mask_bytes = Vec::with_capacity(width * height);
+                let mut water_count = 0usize;
+                let mut has_gradient = false;
                 for value in mask_array.iter() {
-                    mask_bytes.push(if *value { 255u8 } else { 0u8 });
+                    let v = value.clamp(0.0, 1.0);
+                    if v > 0.0 {
+                        water_count += 1;
+                        // Check if we have intermediate values (distance encoding)
+                        if v > 0.01 && v < 0.99 {
+                            has_gradient = true;
+                        }
+                    }
+                    mask_bytes.push((v * 255.0) as u8);
                 }
+                log::info!(
+                    target: "terrain.water",
+                    "Uploading water mask: {}x{}, {} water pixels ({:.2}%), distance_encoded={}",
+                    width, height, water_count,
+                    100.0 * water_count as f64 / (width * height) as f64,
+                    has_gradient
+                );
                 let tex =
                     self.upload_water_mask_texture(width as u32, height as u32, &mask_bytes)?;
                 let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1859,6 +1882,8 @@ impl TerrainScene {
         log::info!(target: "color.debug", "║ Blend Mode: {}", blend_mode);
         log::info!(target: "color.debug", "║ Debug Mode: {}", debug_mode);
         log::info!(target: "color.debug", "║ Gamma: {}", binding.uniform.params2[0]);
+        log::info!(target: "color.debug", "║ Roughness Mult: {}", binding.uniform.params2[1]);
+        log::info!(target: "color.debug", "║ Spec AA Enabled: {}", binding.uniform.params2[2]);
 
         // Sample LUT at t=0.0, 0.5, 1.0 if available
         if binding.lut.is_some() {
@@ -1881,11 +1906,52 @@ impl TerrainScene {
         let overlays = params.overlays();
 
         // Get debug mode from environment variable
+        // 0 = normal, 1 = color LUT, 2 = triplanar albedo, 3 = blend LUT+albedo, 
+        // 4 = water mask binary, 5 = raw water mask value, 6 = IBL contribution
+        // 7 = PBR diffuse only, 8 = PBR specular only, 9 = Fresnel, 10 = N.V, 11 = roughness, 12 = energy
+        // 13 = linear combined, 14 = linear diffuse, 15 = linear specular, 16 = recomp error, 17 = SpecAA sparkle
+        // 18 = POM offset magnitude, 19 = SpecAA sigma², 20 = SpecAA sparkle sigma²
+        // 21 = triplanar weights (RGB=xyz), 22 = triplanar checker pattern
+        // 23 = no specular (diffuse only), 24 = no height normal, 25 = ddxddy normal, 26 = height LOD, 27 = normal blend
+        // 100 = binary water classification, 101 = shore-distance scalar, 102 = IBL spec isolated
+        // 110 = pure red sanity check, 111 = spec -Z, 112 = spec +X, 113 = irr -Z
         let debug_mode = std::env::var("VF_COLOR_DEBUG_MODE")
             .ok()
             .and_then(|s| s.parse::<i32>().ok())
             .unwrap_or(0);
-        let debug_mode_f = debug_mode.clamp(0, 3) as f32;
+        // Allow modes 0-27 and 100-113
+        let debug_mode_f = if debug_mode >= 100 && debug_mode <= 113 {
+            debug_mode as f32
+        } else {
+            debug_mode.clamp(0, 27) as f32
+        };
+        // Log debug mode for diagnosis
+        if debug_mode != 0 {
+            info!("VF_COLOR_DEBUG_MODE: raw={}, resolved={}", debug_mode, debug_mode_f);
+        }
+        
+        // Get roughness multiplier from environment variable (default 1.0)
+        // Used for roughness sweep in PBR proof pack
+        let roughness_mult = std::env::var("VF_ROUGHNESS_MULT")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(1.0)
+            .max(0.001);
+
+        // Get spec AA enabled from environment variable (default 1.0 = enabled)
+        // Set to 0.0 to disable specular anti-aliasing (Toksvig)
+        let spec_aa_enabled = std::env::var("VF_SPEC_AA_ENABLED")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(1.0);
+
+        // Get spec AA sigma scale from environment variable (default 1.0)
+        // Controls sensitivity of screen-derivative variance for Toksvig roughness boost
+        let specaa_sigma_scale = std::env::var("VF_SPECAA_SIGMA_SCALE")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(1.0)
+            .max(0.0);
 
         // Get albedo_mode as enum value
         let albedo_mode_f = match params.albedo_mode() {
@@ -1902,7 +1968,7 @@ impl TerrainScene {
             uniform: OverlayUniforms {
                 params0: [0.0; 4],
                 params1: [0.0, debug_mode_f, albedo_mode_f, colormap_strength],
-                params2: [gamma, 0.0, 0.0, 0.0],
+                params2: [gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale],
             },
             lut: None,
         };

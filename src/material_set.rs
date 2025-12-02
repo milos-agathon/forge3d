@@ -72,43 +72,46 @@ impl MaterialSet {
         let mut materials = Vec::new();
         let mut texture_paths = Vec::new();
 
-        // Material 0: Rock (low altitude, high roughness)
+        // Material 0: Rock (steep slopes, low altitude) - rough with some wet patches
+        // Lower roughness creates visible specular highlights on polished/wet rock
         materials.push(
             crate::core::material::PbrMaterial::dielectric(
-                glam::Vec3::new(0.35, 0.35, 0.35), // gray rock
-                0.6,                               // roughness
+                glam::Vec3::new(0.28, 0.26, 0.24), // neutral gray rock
+                0.35,                               // roughness - noticeable specular
             )
-            .with_normal_scale(normal_strength),
+            .with_normal_scale(normal_strength * 1.5), // Enhanced normal detail
         );
         texture_paths.push(resolve_default_texture("rock_albedo.png"));
 
-        // Material 1: Grass (mid altitude, medium roughness)
+        // Material 1: Grass (mid altitude, flat areas) - matte organic surface
+        // High roughness = diffuse response, distinct from rock
         materials.push(
             crate::core::material::PbrMaterial::dielectric(
-                glam::Vec3::new(0.25, 0.45, 0.15), // green grass
-                0.7,                               // roughness
+                glam::Vec3::new(0.18, 0.38, 0.10), // saturated green
+                0.85,                               // roughness - very matte (grass is diffuse)
             )
-            .with_normal_scale(normal_strength),
+            .with_normal_scale(normal_strength * 0.8), // Softer normals for grass
         );
         texture_paths.push(resolve_default_texture("grass_albedo.png"));
 
-        // Material 2: Dirt/soil (transition)
+        // Material 2: Dirt/soil (transition zones) - medium rough with wetness variation
         materials.push(
             crate::core::material::PbrMaterial::dielectric(
-                glam::Vec3::new(0.4, 0.3, 0.2), // brown dirt
-                0.65,                           // roughness
+                glam::Vec3::new(0.35, 0.25, 0.15), // warm brown dirt
+                0.50,                               // roughness - between rock and grass
             )
-            .with_normal_scale(normal_strength),
+            .with_normal_scale(normal_strength * 1.2), // Visible soil texture
         );
         texture_paths.push(resolve_default_texture("dirt_albedo.png"));
 
-        // Material 3: Snow (high altitude, low roughness)
+        // Material 3: Snow (high altitude peaks) - icy/specular surface
+        // Very low roughness for visible environment reflections and sun glints
         materials.push(
             crate::core::material::PbrMaterial::dielectric(
-                glam::Vec3::new(0.92, 0.92, 0.95), // white-blue snow
-                0.18,                              // roughness
+                glam::Vec3::new(0.95, 0.97, 1.0), // bright white-blue snow
+                0.08,                              // roughness - icy, mirror-like
             )
-            .with_normal_scale(normal_strength * 0.5), // less pronounced normals on snow
+            .with_normal_scale(normal_strength * 0.3), // Subtle snow surface variation
         );
         texture_paths.push(resolve_default_texture("snow_albedo.png"));
 
@@ -374,8 +377,9 @@ impl GpuMaterialSet {
         let mut resolved_width = target_width.max(1);
         let mut resolved_height = target_height.max(1);
         let layer_count_u32 = layer_count as u32;
-        let mut generate_mips = false;
-        let mut mip_level_count = 1u32;
+        // ALWAYS generate mipmaps for material textures to prevent aliasing/sparkle
+        let mut generate_mips = true;
+        let mut mip_level_count = compute_mip_level_count(resolved_width, resolved_height);
         let mut final_bytes;
 
         loop {
@@ -538,6 +542,7 @@ impl GpuMaterialSet {
             mag_filter: FilterMode::Linear,
             min_filter: FilterMode::Linear,
             mipmap_filter: FilterMode::Linear,
+            anisotropy_clamp: 16,  // Max anisotropic filtering to reduce triplanar aliasing
             ..Default::default()
         });
 

@@ -105,13 +105,20 @@ def _parse_args() -> argparse.Namespace:
         type=str,
         choices=["material", "colormap", "mix"],
         default="mix",
-        help="Albedo source: material, colormap, or mix (default).",
+        help=(
+            "Albedo source: 'material' (PBR triplanar textures only), "
+            "'colormap' (elevation colormap only, bypasses PBR shading), "
+            "or 'mix' (blend between material and colormap using --colormap-strength)."
+        ),
     )
     parser.add_argument(
         "--colormap-strength",
         type=float,
         default=0.5,
-        help="Colormap blend strength [0.0-1.0] when using mix albedo mode.",
+        help=(
+            "Colormap blend strength [0.0-1.0] when using 'mix' albedo mode. "
+            "0.0 = full material (no colormap), 1.0 = full colormap."
+        ),
     )
     parser.add_argument(
         "--height-curve-mode",
@@ -171,19 +178,29 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--water-level",
         type=float,
-        default=0.35,
-        help="Normalized water height in [0,1] relative to inferred DEM domain.",
+        default=0.08,
+        help="Normalized water height in [0,1] relative to inferred DEM domain. Lower = stricter detection.",
     )
     parser.add_argument(
         "--water-slope",
         type=float,
-        default=0.02,
-        help="Slope threshold in normalized units for water detection.",
+        default=0.015,
+        help="Slope threshold in normalized units for water detection. Lower = stricter (flatter areas only).",
     )
     parser.add_argument(
         "--water-mask-output",
         type=Path,
         help="Optional debug PNG showing the detected water mask.",
+    )
+    parser.add_argument(
+        "--water-mask-output-mode",
+        type=str,
+        choices=["binary", "overlay"],
+        default="overlay",
+        help=(
+            "Format for --water-mask-output: 'binary' for pure 0/255 grayscale "
+            "(good for analysis), 'overlay' for colored RGBA (good for visual inspection)."
+        ),
     )
     parser.add_argument(
         "--water-material",
@@ -200,6 +217,19 @@ def _parse_args() -> argparse.Namespace:
         "--pom-disabled",
         action="store_true",
         help="Disable parallax occlusion mapping (POM) in the terrain PBR+POM shader.",
+    )
+    parser.add_argument(
+        "--debug-mode",
+        type=int,
+        default=0,
+        help=(
+            "Shader debug mode: 0=normal, 4=water mask binary (CYAN/MAGENTA), "
+            "5=raw mask value (grayscale), 6=IBL only, "
+            "7=diffuse only, 8=specular only, 9=Fresnel, 10=N.V, 11=roughness, 12=energy, "
+            "13=linear combined, 14=linear diffuse, 15=linear specular, 16=recomp error, 17=SpecAA sparkle, "
+            "18=POM offset magnitude (grayscale), 19=SpecAA sigma², 20=SpecAA sparkle sigma², "
+            "100=water binary (blue/gray), 101=shore-distance falsecolor, 102=IBL spec isolated."
+        ),
     )
 
     return parser.parse_args()
@@ -227,6 +257,13 @@ def main() -> int:
         raise SystemExit(
             f"Error: --height-curve-power must be greater than zero, got {args.height_curve_power}"
         )
+
+    # Set debug mode via environment variable (read by terrain shader)
+    import os
+    debug_mode = getattr(args, "debug_mode", 0)
+    if debug_mode != 0:
+        os.environ["VF_COLOR_DEBUG_MODE"] = str(debug_mode)
+        print(f"[DEBUG] Setting VF_COLOR_DEBUG_MODE={debug_mode}")
 
     return _impl.run(args)
 

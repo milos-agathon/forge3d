@@ -13,6 +13,7 @@ struct WaterSurfaceUniforms {
     lighting_params: vec4<f32>,                // reflection_strength (x), refraction_strength (y), fresnel_power (z), roughness (w)
     animation_params: vec4<f32>,               // ripple_scale (x), ripple_speed (y), flow_direction (xy)
     foam_params: vec4<f32>,                    // foam_width_px (x), foam_intensity (y), foam_noise_scale (z), mask_enabled (w)
+    debug_params: vec4<f32>,                   // debug_mode (x), reserved (yzw)
 };
 
 @group(0) @binding(0) var<uniform> water_uniforms : WaterSurfaceUniforms;
@@ -77,6 +78,63 @@ fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
     return f0 + (1.0 - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
 }
 
+// ---------- Debug Helpers ----------
+fn saturate(x: f32) -> f32 { return clamp(x, 0.0, 1.0); }
+fn saturate3(v: vec3<f32>) -> vec3<f32> { return clamp(v, vec3<f32>(0.0), vec3<f32>(1.0)); }
+
+fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    // Use ONLY for debug visibility (not physically correct display pipeline).
+    let a = vec3<f32>(0.055);
+    let lo = c * 12.92;
+    let hi = (1.0 + a) * pow(c, vec3<f32>(1.0 / 2.4)) - a;
+    let cutoff = vec3<f32>(0.0031308);
+    return select(hi, lo, c <= cutoff);
+}
+
+// Very visible 0..1 ramp that isn't subtle.
+fn ramp_falsecolor(t: f32) -> vec3<f32> {
+    // t in [0..1]
+    let x = saturate(t);
+    // blue -> cyan -> green -> yellow -> red
+    let r = saturate(1.5 * x - 0.5);
+    let g = saturate(1.5 - abs(2.0 * x - 1.0) * 1.5);
+    let b = saturate(1.5 * (1.0 - x) - 0.5);
+    return vec3<f32>(r, g, b);
+}
+
+// Simple HDR compression for debug (monotonic, not ACES).
+fn compress_hdr(x: vec3<f32>) -> vec3<f32> {
+    return x / (vec3<f32>(1.0) + x);
+}
+
+// ---------- Debug Mode Functions ----------
+// DEBUG 1: Binary water classification (water = blue, land = dark gray)
+fn debug_water_is_water(is_water: bool) -> vec3<f32> {
+    let land = vec3<f32>(0.08, 0.08, 0.08);
+    let water = vec3<f32>(0.0, 0.2, 1.0); // unmistakable blue
+    return select(land, water, is_water);
+}
+
+// DEBUG 2: Shore-distance scalar visualization with falsecolor ramp
+fn debug_water_scalar(is_water: bool, water_scalar: f32) -> vec3<f32> {
+    let land = vec3<f32>(0.05, 0.05, 0.05);
+    // Clamp scalar and exaggerate contrast
+    let t = saturate(water_scalar);
+    let rgb_water = ramp_falsecolor(t);
+    // Add bright ring near shoreline (t near 0 = shore)
+    let shore_ring = smoothstep(0.06, 0.00, t);
+    let rgb_water2 = clamp(rgb_water + shore_ring * vec3<f32>(1.0, 1.0, 1.0), vec3<f32>(0.0), vec3<f32>(1.0));
+    return select(land, rgb_water2, is_water);
+}
+
+// DEBUG 3: IBL specular on water only (land = black)
+fn debug_water_ibl_spec_only(is_water: bool, ibl_spec: vec3<f32>) -> vec3<f32> {
+    let land = vec3<f32>(0.0, 0.0, 0.0); // black = no cheating
+    let s = max(ibl_spec, vec3<f32>(0.0));
+    let rgb_dbg = compress_hdr(s);
+    return select(land, rgb_dbg, is_water);
+}
+
 // ---------- Vertex Shader ----------
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
@@ -123,6 +181,45 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         discard;
     }
 
+    // Debug mode dispatch (bypass normal rendering)
+    let debug_mode = u32(water_uniforms.debug_params.x + 0.5);
+    let mask_enabled = water_uniforms.foam_params.w > 0.5;
+
+    // Sample mask for debug modes (use textureLoad for nearest/integer sampling)
+    var water_scalar: f32 = 1.0;
+    var is_water: bool = true; // Default: everything is water for dedicated water surface
+    if (mask_enabled) {
+        let dims = textureDimensions(water_mask_tex, 0u);
+        if (dims.x > 0u && dims.y > 0u) {
+            // textureLoad for unfiltered debug accuracy
+            let texel = vec2<i32>(vec2<f32>(dims) * in.uv);
+            let clamped_texel = clamp(texel, vec2<i32>(0), vec2<i32>(dims) - vec2<i32>(1));
+            water_scalar = textureLoad(water_mask_tex, clamped_texel, 0).r;
+            is_water = water_scalar > 0.5;
+        }
+    }
+
+    // Debug mode 100: Binary water mask
+    if (debug_mode == 100u) {
+        return vec4<f32>(debug_water_is_water(is_water), 1.0);
+    }
+    // Debug mode 101: Shore-distance scalar visualization
+    if (debug_mode == 101u) {
+        return vec4<f32>(debug_water_scalar(is_water, water_scalar), 1.0);
+    }
+    // Debug mode 102: IBL specular isolation (placeholder: use fresnel as proxy)
+    if (debug_mode == 102u) {
+        // Compute a simple IBL-like specular term for debug
+        let view_dir = normalize(-in.world_pos);
+        let normal = normalize(in.normal);
+        let ndotv = max(dot(normal, view_dir), 0.0);
+        let f0 = vec3<f32>(0.02);
+        let fresnel = fresnel_schlick(ndotv, f0);
+        // Use fresnel as proxy for IBL spec (scale up for visibility)
+        let ibl_spec_proxy = fresnel * 5.0;
+        return vec4<f32>(debug_water_ibl_spec_only(is_water, ibl_spec_proxy), 1.0);
+    }
+
     // Base water color
     let base_color = water_uniforms.color_params.rgb;
     let hue_shift_amount = water_uniforms.color_params.w;
@@ -164,7 +261,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var final_alpha = water_uniforms.surface_params.w * distance_alpha;
 
     // Optional water mask gating
-    let mask_enabled = water_uniforms.foam_params.w > 0.5;
     if (mask_enabled) {
         let dims : vec2<u32> = textureDimensions(water_mask_tex, 0u);
         if (dims.x > 0u && dims.y > 0u) {

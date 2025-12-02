@@ -59,6 +59,9 @@ pub struct WaterSurfaceParams {
     pub foam_width_px: f32,    // hint only (used to scale effect)
     pub foam_intensity: f32,   // blend weight
     pub foam_noise_scale: f32, // procedural breakup
+
+    // Debug mode (0 = normal, 100 = water mask, 101 = shore-distance, 102 = IBL spec)
+    pub debug_mode: u32,
 }
 
 impl Default for WaterSurfaceParams {
@@ -94,6 +97,9 @@ impl Default for WaterSurfaceParams {
             foam_width_px: 2.0,
             foam_intensity: 0.85,
             foam_noise_scale: 20.0,
+
+            // Debug mode
+            debug_mode: 0,
         }
     }
 }
@@ -111,6 +117,7 @@ pub struct WaterSurfaceUniforms {
     pub lighting_params: [f32; 4], // 16 bytes - reflection_strength (x), refraction_strength (y), fresnel_power (z), roughness (w)
     pub animation_params: [f32; 4], // 16 bytes - ripple_scale (x), ripple_speed (y), flow_direction (zw)
     pub foam_params: [f32; 4], // 16 bytes - foam_width_px (x), foam_intensity (y), foam_noise_scale (z), mask_enabled (w)
+    pub debug_params: [f32; 4], // 16 bytes - debug_mode (x), reserved (yzw)
 }
 
 impl Default for WaterSurfaceUniforms {
@@ -156,6 +163,7 @@ impl Default for WaterSurfaceUniforms {
                 params.foam_noise_scale,
                 0.0, // mask_enabled off by default
             ],
+            debug_params: [0.0, 0.0, 0.0, 0.0], // debug_mode = 0 (normal)
         };
 
         // Set world transform to position the water surface
@@ -571,6 +579,12 @@ impl WaterSurfaceRenderer {
         self.update_uniforms();
     }
 
+    /// Set debug mode (0 = normal, 100 = water mask, 101 = shore-distance, 102 = IBL spec)
+    pub fn set_debug_mode(&mut self, mode: u32) {
+        self.params.debug_mode = mode;
+        self.update_uniforms();
+    }
+
     /// Upload an external water mask (R8Unorm, 0=land, 255=water)
     pub fn upload_water_mask(
         &mut self,
@@ -731,6 +745,9 @@ impl WaterSurfaceRenderer {
             self.params.foam_noise_scale,
             self.uniforms.foam_params[3],
         ];
+
+        // Update debug params
+        self.uniforms.debug_params[0] = self.params.debug_mode as f32;
 
         // Update world transform
         self.uniforms.world_transform =

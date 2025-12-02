@@ -47,6 +47,37 @@ QUANTILE_DEFAULT_LO = 0.0
 QUANTILE_DEFAULT_HI = 1.0
 
 
+def _binary_mask_to_shore_distance(mask: np.ndarray) -> np.ndarray:
+    """Convert binary water mask to normalized distance-to-shore field.
+    
+    Uses Euclidean distance transform to compute distance from each water
+    pixel to the nearest shore (mask boundary). Result is normalized so
+    0.0 = shore and 1.0 = maximum distance (lake center).
+    
+    Args:
+        mask: Binary boolean mask where True = water
+        
+    Returns:
+        Float32 array where 0.0 = not water or at shore, values 0-1 = distance from shore
+    """
+    from scipy.ndimage import distance_transform_edt
+    
+    mask = np.asarray(mask, dtype=bool)
+    if not np.any(mask):
+        return np.zeros(mask.shape, dtype=np.float32)
+    
+    # Distance transform: each True pixel gets its distance to nearest False pixel
+    dist = distance_transform_edt(mask)
+    
+    # Normalize to 0-1 range
+    max_dist = dist.max()
+    if max_dist > 0:
+        dist = dist / max_dist
+    
+    # Result: 0.0 outside water, 0.0 at shore (edge), up to 1.0 at lake center
+    return dist.astype(np.float32)
+
+
 def _require_attributes(attr_names: Iterable[str]) -> None:
     missing = [name for name in attr_names if not hasattr(f3d, name)]
     if missing:
@@ -360,12 +391,27 @@ def _save_image(img, path: Path) -> None:
             print("  Warning: Saved as .npy (no PNG writer available)")
 
 
-def _save_water_mask(mask, path: Path) -> None:
+def _save_water_mask(mask, path: Path, mode: str = "overlay") -> None:
+    """Save water mask to disk.
+
+    Args:
+        mask: Boolean mask array
+        path: Output file path
+        mode: 'binary' for pure 0/255 grayscale (good for analysis),
+              'overlay' for colored RGBA (good for visual inspection)
+    """
     h, w = mask.shape
-    img = np.zeros((h, w, 4), dtype=np.uint8)
-    img[:, :, 3] = 255
-    img[mask, 0:3] = (0, 0, 255)
-    _save_image(img, path)
+    if mode == "binary":
+        # Pure grayscale: 0 = not water, 255 = water
+        img = np.zeros((h, w), dtype=np.uint8)
+        img[mask] = 255
+        _save_image(np.stack([img, img, img, np.full_like(img, 255)], axis=-1), path)
+    else:
+        # Colored overlay: black background, blue water
+        img = np.zeros((h, w, 4), dtype=np.uint8)
+        img[:, :, 3] = 255
+        img[mask, 0:3] = (0, 0, 255)
+        _save_image(img, path)
 
 
 def _resize_mask_to_frame(mask: np.ndarray, out_hw: tuple[int, int]) -> np.ndarray:
@@ -391,62 +437,87 @@ def _resize_mask_to_frame(mask: np.ndarray, out_hw: tuple[int, int]) -> np.ndarr
     return mask_np[row_idx[:, None], col_idx[None, :]]
 
 
-def _remove_border_connected(mask: np.ndarray) -> np.ndarray:
-    """Clear all mask components that touch a band near the image border.
+def _remove_border_connected(
+    mask: np.ndarray,
+    max_aspect_ratio: float = 8.0,
+    max_border_contact: float = 0.25,
+) -> np.ndarray:
+    """Remove mask components that touch the border AND look like edge artifacts.
 
-    We use 4-connectivity and treat a small band around the outer rim as the
-    "border" so that large ocean-like regions that stop a few pixels short of
-    the exact edge are still removed. Complexity is O(H*W).
+    A component is considered an "edge artifact" if it touches the border AND:
+    - Has very elongated aspect ratio (thin strips along borders), OR
+    - Has high border contact fraction (blocky wedges hugging the edge)
+
+    Real lakes clipped by tile boundary are usually compact with low-to-moderate
+    border contact and get preserved.
+
+    Args:
+        mask: Boolean mask of water candidates
+        max_aspect_ratio: Components with aspect ratio > this that touch border
+            are removed. Default 8.0 means a 80x10 strip would be removed.
+        max_border_contact: Components with > this fraction of their pixels
+            on the border are removed. Default 0.25 catches blocky wedges.
+
+    Complexity is O(H*W) for labeling + O(num_components) for analysis.
     """
+    try:
+        from scipy import ndimage
+    except ImportError:
+        # Without scipy, we can't do proper component analysis - skip filtering
+        return mask
 
     m = np.asarray(mask, dtype=bool)
     if not np.any(m):
         return m
 
     h, w = m.shape
-    visited = np.zeros_like(m, dtype=bool)
+    band = max(1, min(h, w) // 128)  # Border band width
+
+    # Label connected components
+    labeled, num_features = ndimage.label(m)
+    if num_features == 0:
+        return m
+
     out = m.copy()
 
-    from collections import deque
+    # For each component, check if it touches border AND looks like artifact
+    for comp_id in range(1, num_features + 1):
+        comp_mask = labeled == comp_id
+        rows, cols = np.where(comp_mask)
+        if len(rows) == 0:
+            continue
 
-    q: "deque[tuple[int, int]]" = deque()
+        # Check if component touches any border band
+        in_top_band = rows < band
+        in_bottom_band = rows >= h - band
+        in_left_band = cols < band
+        in_right_band = cols >= w - band
 
-    def enqueue(i: int, j: int) -> None:
-        if 0 <= i < h and 0 <= j < w and not visited[i, j] and out[i, j]:
-            visited[i, j] = True
-            q.append((i, j))
+        touches_top = np.any(in_top_band)
+        touches_bottom = np.any(in_bottom_band)
+        touches_left = np.any(in_left_band)
+        touches_right = np.any(in_right_band)
+        touches_border = touches_top or touches_bottom or touches_left or touches_right
 
-    # Treat a small band near the outer rim as the "border" for seeding.
-    band = max(1, min(h, w) // 128)  # ~31px for 4000x4000, 6px for 800x600
+        if not touches_border:
+            continue  # Keep components that don't touch border
 
-    # Top / bottom bands
-    for j in range(w):
-        for di in range(band):
-            if out[di, j]:
-                enqueue(di, j)
-            if out[h - 1 - di, j]:
-                enqueue(h - 1 - di, j)
+        # Calculate aspect ratio of bounding box
+        bbox_h = rows.max() - rows.min() + 1
+        bbox_w = cols.max() - cols.min() + 1
+        aspect_ratio = max(bbox_h, bbox_w) / max(1, min(bbox_h, bbox_w))
 
-    # Left / right bands
-    for i in range(h):
-        for dj in range(band):
-            if out[i, dj]:
-                enqueue(i, dj)
-            if out[i, w - 1 - dj]:
-                enqueue(i, w - 1 - dj)
+        # Calculate border contact fraction: what % of component pixels are in border band
+        area = len(rows)
+        border_pixels = np.sum(in_top_band | in_bottom_band | in_left_band | in_right_band)
+        border_contact = border_pixels / area if area > 0 else 0
 
-    # Flood-fill and clear all border-connected pixels.
-    while q:
-        i, j = q.popleft()
-        out[i, j] = False
-        if i > 0:
-            enqueue(i - 1, j)
-        if i + 1 < h:
-            enqueue(i + 1, j)
-        if j > 0:
-            enqueue(i, j - 1)
-        if j + 1 < w:
-            enqueue(i, j + 1)
+        # Remove if elongated (thin strip) OR high border contact (blocky wedge)
+        is_thin_strip = aspect_ratio > max_aspect_ratio
+        is_border_hugger = border_contact > max_border_contact
+
+        if is_thin_strip or is_border_hugger:
+            out[comp_mask] = False
 
     return out
 
@@ -719,8 +790,8 @@ def run(args: Any) -> int:
                     level_normalized=float(args.water_level),
                     slope_threshold=float(args.water_slope),
                     spacing=spacing_water,
-                    base_min_area_pct=0.0,
-                    keep_components=16,
+                    base_min_area_pct=0.01,  # Require at least 0.01% of image
+                    keep_components=3,  # Keep only top 3 largest water bodies
                 )
             except Exception:
                 water_mask = _detect_dem_water_mask(
@@ -729,8 +800,8 @@ def run(args: Any) -> int:
                     level_normalized=float(args.water_level),
                     slope_threshold=float(args.water_slope),
                     spacing=getattr(dem, "resolution", (1.0, 1.0)),
-                    base_min_area_pct=0.0,
-                    keep_components=16,
+                    base_min_area_pct=0.01,
+                    keep_components=3,
                 )
 
     materials = f3d.MaterialSet.terrain_default(
@@ -850,8 +921,63 @@ def run(args: Any) -> int:
 
     water_material = str(getattr(args, "water_material", "overlay")).lower()
     water_mask_kw = None
+
+    # For PBR mode, we must clean the mask *before* passing to the GPU shader.
+    # The overlay path does its own cleaning later (combined with render-time
+    # dark pixel detection), but PBR mode needs a clean mask upfront.
     if water_material == "pbr" and water_mask is not None:
-        water_mask_kw = water_mask
+        # 1) Remove any component touching the image border (kills edge artifacts)
+        cleaned_mask = _remove_border_connected(water_mask)
+        # 2) Morphological opening to remove isolated pixels/speckles
+        try:
+            from scipy import ndimage
+            structure = np.ones((3, 3), dtype=bool)
+            cleaned_mask = ndimage.binary_opening(cleaned_mask, structure=structure, iterations=1)
+        except ImportError:
+            pass
+        # 3) Postprocess: keep only largest components, stricter min area (0.2%)
+        h_m, w_m = cleaned_mask.shape
+        min_area_px = int(max(1, h_m * w_m * 0.002))  # 0.2% minimum
+        cleaned_mask = _postprocess_water_mask(
+            cleaned_mask,
+            keep_components=3,
+            min_area_px=min_area_px,
+        )
+        # 4) Convert to shore-distance field (0.0 = shore, 1.0 = lake center)
+        # This gives meaningful depth variation for water shading
+        water_mask_float = _binary_mask_to_shore_distance(cleaned_mask)
+        water_mask_kw = water_mask_float
+
+    # Save debug water mask (the CLEANED version that actually goes to GPU/overlay)
+    water_mask_out = getattr(args, "water_mask_output", None)
+    mask_out_mode = getattr(args, "water_mask_output_mode", "overlay")
+    if water_mask_out is not None and water_mask_kw is not None and water_material == "pbr":
+        # For visualization, convert float distance back to binary for overlay mode
+        if mask_out_mode == "overlay":
+            _save_water_mask(water_mask_kw > 0.0, Path(water_mask_out), mode=mask_out_mode)
+        else:
+            _save_water_mask(water_mask_kw > 0.0, Path(water_mask_out), mode=mask_out_mode)
+
+    # Debug: report mask statistics before rendering
+    if water_mask_kw is not None:
+        import os
+        _n_water = int(np.sum(water_mask_kw > 0.0))
+        _pct = 100.0 * _n_water / water_mask_kw.size
+        _has_gradient = np.any((water_mask_kw > 0.01) & (water_mask_kw < 0.99))
+        print(f"[WATER DEBUG] Passing mask to GPU: shape={water_mask_kw.shape}, dtype={water_mask_kw.dtype}, water_pixels={_n_water} ({_pct:.2f}%), distance_encoded={_has_gradient}")
+        # Extended debug: print water pixel locations (row, col) in numpy array
+        water_yx = np.argwhere(water_mask_kw > 0.0)
+        if len(water_yx) > 0:
+            y_min, y_max = int(water_yx[:, 0].min()), int(water_yx[:, 0].max())
+            x_min, x_max = int(water_yx[:, 1].min()), int(water_yx[:, 1].max())
+            h, w = water_mask_kw.shape
+            print(f"[WATER DEBUG] CPU mask water bounds: row[{y_min}..{y_max}], col[{x_min}..{x_max}] of array {h}x{w}")
+            # Position interpretation
+            is_upper = y_min < h // 2
+            is_right = x_max > w // 2
+            print(f"[WATER DEBUG] CPU position: upper-half={is_upper}, right-half={is_right}")
+        if os.environ.get("VF_COLOR_DEBUG_MODE") == "4":
+            print(f"[WATER DEBUG] VF_COLOR_DEBUG_MODE=4 (water mask visualization enabled)")
 
     try:
         frame = renderer.render_terrain_pbr_pom(
@@ -915,13 +1041,21 @@ def run(args: Any) -> int:
         # DEM rims are never treated as water.
         combined_mask = _remove_border_connected(combined_mask)
 
-        # Optionally drop tiny speckles; this is a no-op when SciPy is not
-        # available because _postprocess_water_mask will simply return the mask.
+        # Strict filtering to remove false positives (speckles)
+        # 1) Morphological opening to remove isolated pixels
+        try:
+            from scipy import ndimage
+            structure = np.ones((3, 3), dtype=bool)
+            combined_mask = ndimage.binary_opening(combined_mask, structure=structure, iterations=1)
+        except ImportError:
+            pass
+        
+        # 2) Keep only largest components with stricter min area (0.2% of image)
         h_m, w_m = combined_mask.shape
-        min_area_px = int(max(1, h_m * w_m * 0.0005))
+        min_area_px = int(max(1, h_m * w_m * 0.002))  # 0.2% minimum
         combined_mask = _postprocess_water_mask(
             combined_mask,
-            keep_components=16,
+            keep_components=3,  # Keep only 3 largest water bodies
             min_area_px=min_area_px,
         )
 
@@ -930,8 +1064,9 @@ def run(args: Any) -> int:
         # Optional debug: if caller supplied --water-mask-output, emit a mask PNG
         # so it is easy to verify which pixels are classified as water.
         water_mask_out = getattr(args, "water_mask_output", None)
+        mask_out_mode = getattr(args, "water_mask_output_mode", "overlay")
         if water_mask_out is not None:
-            _save_water_mask(combined_mask, Path(water_mask_out))
+            _save_water_mask(combined_mask, Path(water_mask_out), mode=mask_out_mode)
 
         _save_image(tinted, args.output)
     else:
