@@ -1,153 +1,132 @@
-## Implementation Status (Dec 2025)
-
-**All milestones completed.** The following changes were made to `terrain_pbr_pom.wgsl`:
-
-### Milestone 1 — Debug Modes ✓
-- **Mode 23** (`DBG_FLAKE_NO_SPECULAR`): Diffuse-only rendering (no IBL specular)
-- **Mode 24** (`DBG_FLAKE_NO_HEIGHT_NORMAL`): Uses `base_normal` instead of height-derived normal
-- **Mode 25** (`DBG_FLAKE_DDXDDY_NORMAL`): Uses `n_dd = cross(dpdx(world_pos), dpdy(world_pos))` as ground truth
-- **Mode 26** (`DBG_FLAKE_HEIGHT_LOD`): Visualizes computed LOD level (black=0, white=max)
-- **Mode 27** (`DBG_FLAKE_NORMAL_BLEND`): Visualizes effective normal_blend after LOD fade
-
-### Milestone 2 — LOD-aware Sobel ✓
-- Added `sample_height_geom_level(uv, lod)` for explicit LOD sampling
-- Added `compute_height_lod(uv)` to compute LOD from screen-space UV footprint
-- Added `calculate_normal_lod_aware(uv)` that uses consistent LOD for all 9 Sobel taps
-- Added `calculate_normal_ddxddy(world_pos)` for derivative-based normal comparison
-- Default path now uses LOD-aware Sobel (`calculate_normal_lod_aware`)
-
-### Milestone 3 — Minification Fade ✓
-- `normal_blend` now fades based on LOD: full at LOD 0-1, fades to 0 by LOD 4
-- Prevents sparkles at distance/grazing angles even with correct mip selection
-
-### Triplanar Requirements ✓
-- **T1**: `compute_triplanar_weights` normalizes weights so wx + wy + wz = 1
-- **T2**: World-position-based UVs prevent stretching on steep slopes
-- Uses `base_normal` (not `blended_normal`) for stable triplanar weights
-
-**To test debug modes:** Set `VF_COLOR_DEBUG_MODE=<mode>` environment variable.
+Here’s a clean, execution-ready plan (with concrete artifacts) to tackle the “flake” root cause you identified: **height Sobel normals sampling at an implicit LOD while offsets assume LOD0 texels** (mip mismatch), plus making the new debug modes *provably* non-no-op.
 
 ---
 
-## Milestone 1 — Prove (or falsify) “it’s specular caused by the height-normal”
+## Milestone 0 — Lock a reproducible baseline (so fixes are measurable)
 
-### Work
+**Goal:** one command that always reproduces flakes.
 
-1. Add **one “specular off” switch** in shader (or debug mode):
+**Deliverables**
 
-   * `specular_contrib = vec3(0)` (leave diffuse/IBL intact)
-2. Add **one “height normal off” switch**:
+* `reports/flake/baseline_material.png` (flakes present)
+* `reports/flake/baseline_colormap.png` (no flakes)
+* `reports/flake/repro_cmd.txt` (exact CLI + env vars)
 
-   * `height_normal = base_normal` (or `normal_blend = 0`)
-3. Add **a derivative-based geometric normal** as a third comparison:
+**Acceptance**
 
-   * `n_dd = normalize(cross(dpdx(world_pos), dpdy(world_pos)))`
-   * Use it for shading normal in a debug mode.
-
-### Deliverables
-
-* `reports/.../flake/flake_baseline.png`
-* `reports/.../flake/flake_no_specular.png`
-* `reports/.../flake/flake_no_height_normal.png`
-* `reports/.../flake/flake_ddxddy_normal.png` (shading with derivative normal)
-
-### Acceptance
-
-* If `no_specular` kills flakes ⇒ it’s *spec aliasing*.
-* If `no_height_normal` kills flakes ⇒ it’s *height-normal bandwidth*.
-* If `ddxddy_normal` looks clean ⇒ current Sobel pipeline is the problem (very likely).
+* Baseline material render shows visible salt/flake artifacts at the same ROI each run.
 
 ---
 
-## Milestone 2 — Make Sobel height-normal **LOD-aware** (this is the big fix)
+## Milestone 1 — Make debug modes trustworthy (plumbing + non-uniform asserts)
 
-Right now:
+Right now your attached outputs suggest **some debug modes are producing a flat clear-color image** (solid blue), which means either:
 
-* `sample_height_geom()` uses `textureSample()` → implicit LOD chosen by hardware
-* but Sobel offsets use `texel_size = 1 / textureSize(level0)` → **wrong** if the sampling is happening at mip>0
-  This mismatch creates exactly the kind of shimmering “salt/pepper flakes”.
+* the mode isn’t actually selected in shader, or
+* the branch returns a constant, or
+* the path is being short-circuited / not writing expected values.
 
-### Work
+**Work**
 
-Replace Sobel with a version that:
+1. **End-to-end debug mode wiring**
 
-1. Computes a consistent mip level from the **screen-space footprint of uv**
-2. Uses that mip level for **all 9 samples**
-3. Scales Sobel offsets by the mip’s texel size
+   * Rust: log `VF_COLOR_DEBUG_MODE` final resolved value (already hinted).
+   * WGSL: add a one-line “mode stamp” overlay (e.g., add `mode/255` to one channel) so you can see *which* mode actually drew.
 
-**Core idea (WGSL sketch):**
+2. **Non-uniformity tests**
 
-```wgsl
-let dims = vec2<f32>(textureDimensions(height_tex)); // level 0 dims
-let ddx_uv = dpdx(uv);
-let ddy_uv = dpdy(uv);
+   * For modes that should vary spatially (24/25/26/27), assert image variance is above epsilon.
 
-// footprint in texels
-let rho = max(length(ddx_uv * dims), length(ddy_uv * dims));
-let lod = clamp(log2(max(rho, 1e-8)), 0.0, f32(textureNumLevels(height_tex) - 1u));
+**Deliverables**
 
-let mip_scale = exp2(lod);
-let texel_uv = mip_scale / dims;
+* `reports/flake/debug_grid.png` (2×3 grid: mode 23–27 + baseline)
+* `tests/test_debug_modes_nonuniform.py` (fails if mode 26/27 are flat)
+* `reports/flake/debug_mode_log.txt` (captured stdout with resolved mode values)
 
-// then do Sobel taps with textureSampleLevel(height_tex, ..., lod)
-```
+**Acceptance**
 
-And in `sample_height_geom`, add a `lod` parameter:
-
-```wgsl
-fn sample_height_geom_level(uv: vec2<f32>, lod: f32) -> f32 {
-    let uv_clamped = clamp(uv, vec2(0.0), vec2(1.0));
-    let h_raw = textureSampleLevel(height_tex, height_samp, uv_clamped, lod).r;
-    // ... transform ...
-    return h;
-}
-```
-
-### Deliverables
-
-* New renders:
-
-  * `reports/.../flake/height_normal_before.png`
-  * `reports/.../flake/height_normal_after.png`
-* New debug output:
-
-  * `reports/.../flake/dbg_height_lod.png` (visualize `lod / max_lod`)
-* Optional metric:
-
-  * `flake_score_before`, `flake_score_after` in manifest (HF energy on *specular-only* image is a good metric)
-
-### Acceptance
-
-* Flakes reduced dramatically, especially in far-field + grazing regions.
-* `dbg_height_lod` shows sane LOD gradients (not constant 0, not chaotic).
+* Mode 26 (Height LOD) shows smooth gradients (not a flat frame).
+* Mode 27 (Normal Blend) clearly varies across the screen.
+* Tests fail if those become flat again.
 
 ---
 
-## Milestone 3 — Add a **minification fade** for height-normal contribution (safety belt)
+## Milestone 2 — LOD-consistent Sobel normals (the real fix)
 
-Even with correct mip selection, if the height-normal amplitude is too strong when minified, specular can still sparkle.
+**Goal:** every one of the 9 Sobel taps samples the **same explicit LOD**, and the offsets are computed in **that LOD’s texel units**.
 
-### Work
+**Work**
 
-Fade `normal_blend` (or reduce Sobel strength) as `lod` increases:
+1. `compute_height_lod(uv)` from `dpdx/ddy(uv)` footprint (screen-space UV derivatives).
+2. `sample_height_geom_level(uv, lod)` using `textureSampleLevel`.
+3. `calculate_normal_lod_aware(uv)`:
 
-* Example: start fading at `lod > 1`, fully off by `lod > 4` (tune later)
+   * compute `texel_size_lod = 1.0 / textureSize(height_tex, lod_int)`
+   * apply Sobel offsets using `texel_size_lod`
+   * take all 9 samples at the same `lod`
+4. Keep `calculate_normal_ddxddy(world_pos)` as “ground truth” comparator.
 
-### Deliverables
+**Deliverables**
 
-* `reports/.../flake/flake_after_lod_fade.png`
-* `reports/.../flake/dbg_effective_normal_blend.png` grayscale
+* `reports/flake/before_after.png` (baseline vs fixed)
+* `reports/flake/mode25_ddxddy.png` (should be clean/stable)
+* `reports/flake/mode24_no_height_normal.png` (should closely match fixed in flake regions)
+* `reports/flake/mode26_height_lod.png` (verifies LOD field is sane)
 
-### Acceptance
+**Acceptance**
 
-* Remaining sparkles disappear without making near-field terrain look “mushy”.
+* Material mode no longer exhibits the fine “salt” flakes at grazing angles.
+* Mode 25 (ddx/ddy normal) and the fixed Sobel look qualitatively consistent (no high-frequency popping).
+* LOD visualization behaves smoothly (no hard discontinuities except expected transitions).
 
 ---
 
-## Milestone 4 — Only after flakes are gone: return to SpecAA
+## Milestone 3 — Bandlimit/fade strategy for extreme minification (polish + robustness)
 
-Once your height-normal is genuinely mip-filtered and stable, SpecAA tests become meaningful again. Before that, you’re trying to band-aid a signal-processing bug.
+Even with LOD-consistent Sobel, very far/minified views can still introduce high-frequency normal energy. Your “fade normal blend from LOD 1→4” idea is exactly the right kind of stabilization knob.
 
-### Deliverables
+**Work**
 
-* `fig_specaa_sparkle_test.png` (synthetic) goes PASS *or* marked XFAIL with explicit rationale.
+* Implement `normal_blend = lerp(user_blend, 0.0, smoothstep(lod_lo, lod_hi, lod))`
+* Optionally clamp maximum normal perturbation magnitude as LOD increases.
+
+**Deliverables**
+
+* `reports/flake/normal_blend_curve.png` (plot or table of blend vs lod)
+* `reports/flake/mode27_normal_blend.png` (visual proof it’s applied)
+* `p5_meta.json` (or similar) updated with parameters: `{lod_lo, lod_hi, blend_min, blend_max}`
+
+**Acceptance**
+
+* No “popping” when orbiting camera (temporal stability improves).
+* Far-field stays stable without washing out near-field detail.
+
+---
+
+## Milestone 4 — Regression guardrails (so flakes never come back)
+
+**Work**
+
+* Add a simple “flake score” metric to CI:
+
+  * render mode 23 (no specular) and baseline material
+  * compute high-frequency energy (e.g., Laplacian magnitude percentile) in a fixed ROI
+  * require it below a threshold for the fixed configuration
+
+**Deliverables**
+
+* `tests/test_flake_regression.py` (produces `reports/flake/flake_score.json`)
+* `reports/flake/flake_score.json` (p95, p99, and pass/fail)
+
+**Acceptance**
+
+* CI fails if someone reintroduces implicit-LOD height sampling or mismatched texel offsets.
+
+---
+
+### What I’d do first (if you want the most leverage)
+
+1. **Milestone 1** (debug modes non-uniform + grid proof) — because without this, you can’t trust the diagnosis images.
+2. **Milestone 2** (LOD-consistent Sobel) — because it targets the exact mismatch you documented.
+
+If you paste the current implementations of `compute_height_lod()` and the debug-mode `switch`/`if` chain in `fs_main`, I can point out the most likely reason those modes are still producing solid-color frames and propose the precise fix.
