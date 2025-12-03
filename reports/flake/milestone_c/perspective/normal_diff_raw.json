@@ -1,0 +1,7 @@
+{
+  "raw_diff_p95": 205.0,
+  "raw_diff_max": 225.66666666666666,
+  "amplification_factor": 10.0,
+  "saturation_fraction": 1.0,
+  "threshold_max": 1.0
+}

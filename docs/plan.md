@@ -1,132 +1,124 @@
-Here’s a clean, execution-ready plan (with concrete artifacts) to tackle the “flake” root cause you identified: **height Sobel normals sampling at an implicit LOD while offsets assume LOD0 texels** (mip mismatch), plus making the new debug modes *provably* non-no-op.
+Milestone A — Make debug modes provably distinct (unblocker)
 
----
+Why
 
-## Milestone 0 — Lock a reproducible baseline (so fixes are measurable)
+Your log + images show:
+	•	Mode 0 differs ✅
+	•	Modes 23–27 are pixel-identical ❌ (so your new diagnostic modes aren’t actually diagnosing)
 
-**Goal:** one command that always reproduces flakes.
+This means the shader is almost certainly doing something like if (debug_mode >= 23) { return <same viz>; } or a switch with a fallthrough/default that catches 23–27.
 
-**Deliverables**
+Work
+	1.	Hard-wire sentinel colors first (to validate branching):
+	•	23 → pure red
+	•	24 → pure green
+	•	25 → pure blue
+	•	26 → grayscale ramp from computed LOD
+	•	27 → grayscale ramp from normal_blend
+	2.	Once branching is verified, swap sentinel returns back to the real visualizations.
 
-* `reports/flake/baseline_material.png` (flakes present)
-* `reports/flake/baseline_colormap.png` (no flakes)
-* `reports/flake/repro_cmd.txt` (exact CLI + env vars)
+Deliverables
+	•	reports/flake_diag/mode23_sentinel.png … mode27_sentinel.png (must be obviously different)
+	•	Updated tests/test_flake_diagnosis.py:
+	•	asserts mode23 != mode24 != … != mode27 (pairwise non-equality)
+	•	keeps your “non-uniform” checks, but adds “not identical to other modes”
+	•	reports/flake_diag/debug_grid_v2.png (6-up grid, visibly distinct)
 
-**Acceptance**
+Acceptance: pixel-equality between any two of {23..27} must be false.
 
-* Baseline material render shows visible salt/flake artifacts at the same ROI each run.
+⸻
 
----
+Milestone B — Validate the actual flake root cause with the now-working modes
 
-## Milestone 1 — Make debug modes trustworthy (plumbing + non-uniform asserts)
+Why
 
-Right now your attached outputs suggest **some debug modes are producing a flat clear-color image** (solid blue), which means either:
+Right now your “interpretation” is plausible, but mode 26/27 aren’t actually showing LOD/blend yet (they’re identical to 24/25), so we can’t trust the narrative until A is done.
 
-* the mode isn’t actually selected in shader, or
-* the branch returns a constant, or
-* the path is being short-circuited / not writing expected values.
+Work (after A)
 
-**Work**
+Run the same camera + settings and capture:
+	•	Mode 23 (No Specular) → confirm flakes disappear = spec aliasing
+	•	Mode 24 (No Height Normal) → confirm whether height-normal bandwidth is the driver
+	•	Mode 25 (ddxddy normal) → sanity check “ground truth” stability
+	•	Mode 26 (Height LOD) → verify LOD is a smooth field (no banding/tiling)
+	•	Mode 27 (Normal Blend) → confirm blend follows your intended fade curve spatially
 
-1. **End-to-end debug mode wiring**
+Deliverables
+	•	reports/flake_diag/modes_23_27_<scene>.png (individual)
+	•	reports/flake_diag/debug_grid_<scene>.png (grid)
+	•	reports/flake_diag/flake_readout.json containing:
+	•	sparkle metric / energy metric for baseline vs (23,24)
+	•	% pixels above threshold in specular-only view (if you have it)
 
-   * Rust: log `VF_COLOR_DEBUG_MODE` final resolved value (already hinted).
-   * WGSL: add a one-line “mode stamp” overlay (e.g., add `mode/255` to one channel) so you can see *which* mode actually drew.
+Acceptance: Mode 26/27 must visually encode LOD/blend (not look like “generic smooth normal”).
 
-2. **Non-uniformity tests**
+⸻
 
-   * For modes that should vary spatially (24/25/26/27), assert image variance is above epsilon.
+Milestone C — Lock the LOD-aware Sobel fix into a regression-proof implementation
 
-**Deliverables**
+Why
 
-* `reports/flake/debug_grid.png` (2×3 grid: mode 23–27 + baseline)
-* `tests/test_debug_modes_nonuniform.py` (fails if mode 26/27 are flat)
-* `reports/flake/debug_mode_log.txt` (captured stdout with resolved mode values)
+Your stated “root cause” is exactly the classic bug: implicit LOD height sampling + level-0 texel offsets. You implemented the right class of fix (consistent LOD across 9 taps), but we need to make it robust and measurable.
 
-**Acceptance**
+Work
+	1.	Compute LOD from UV derivatives, not world position:
+	•	rho = max(length(dpdx(uv) * texDims), length(dpdy(uv) * texDims))
+	•	lod = clamp(log2(rho), 0, maxMip)
+	2.	Scale Sobel offsets to the chosen mip:
+	•	texel_uv = (1.0 / texDims) * exp2(lod) (or equivalent)
+	3.	Ensure all 9 taps use textureSampleLevel(..., lod) and offsets derived from that mip’s texel size.
 
-* Mode 26 (Height LOD) shows smooth gradients (not a flat frame).
-* Mode 27 (Normal Blend) clearly varies across the screen.
-* Tests fail if those become flat again.
+Deliverables
+	•	Code: calculate_normal_lod_aware() uses one lod, one texel scale, nine SampleLevels.
+	•	reports/flake_diag/normal_compare.png:
+	•	baseline (old), fixed (lod-aware), ddxddy
+	•	reports/flake_diag/normal_diff_heatmap.png (fixed vs ddxddy)
 
----
+Acceptance: flakes are reduced without “popping”; normal field should not show mip-grid discontinuities when orbiting.
 
-## Milestone 2 — LOD-consistent Sobel normals (the real fix)
+⸻
 
-**Goal:** every one of the 9 Sobel taps samples the **same explicit LOD**, and the offsets are computed in **that LOD’s texel units**.
+Milestone D — Tune the minification fade so it doesn’t over-smooth
 
-**Work**
+Why
 
-1. `compute_height_lod(uv)` from `dpdx/ddy(uv)` footprint (screen-space UV derivatives).
-2. `sample_height_geom_level(uv, lod)` using `textureSampleLevel`.
-3. `calculate_normal_lod_aware(uv)`:
+Your “fixed vs ground truth” montage shows a huge qualitative difference: ddxddy is extremely smooth; LOD-aware Sobel still has structured variation. That can be fine, but you want controlled bandlimit, not accidental blur or residual contouring.
 
-   * compute `texel_size_lod = 1.0 / textureSize(height_tex, lod_int)`
-   * apply Sobel offsets using `texel_size_lod`
-   * take all 9 samples at the same `lod`
-4. Keep `calculate_normal_ddxddy(world_pos)` as “ground truth” comparator.
+Work
+	1.	Make lod_lo/lod_hi/blend curve configurable (even if only via constants/env for now).
+	2.	Consider a smoother curve (e.g., smoothstep) instead of linear to reduce threshold-y transitions.
+	3.	Add a “near detail preserved” check:
+	•	render same shot at two distances
+	•	verify near retains high-frequency detail relative to far
 
-**Deliverables**
+Deliverables
+	•	reports/flake_diag/normal_blend_curve_v2.png
+	•	reports/flake_diag/orbit_sequence/ (N frames or 4 keyframes) showing no popping
+	•	Updated docs/plan.md section: bandlimit/fade policy + recommended defaults
 
-* `reports/flake/before_after.png` (baseline vs fixed)
-* `reports/flake/mode25_ddxddy.png` (should be clean/stable)
-* `reports/flake/mode24_no_height_normal.png` (should closely match fixed in flake regions)
-* `reports/flake/mode26_height_lod.png` (verifies LOD field is sane)
+Acceptance: far field stable; near field still has terrain micro-shape; orbit has no visible popping rings.
 
-**Acceptance**
+⸻
 
-* Material mode no longer exhibits the fine “salt” flakes at grazing angles.
-* Mode 25 (ddx/ddy normal) and the fixed Sobel look qualitatively consistent (no high-frequency popping).
-* LOD visualization behaves smoothly (no hard discontinuities except expected transitions).
+Milestone E — CI-proof pack (so this never regresses)
 
----
+Work
+	•	Add a dedicated test scene + camera preset (your 256×256 harness is perfect).
+	•	In CI:
+	1.	Render modes 0, 23–27
+	2.	Assert:
+	•	23–27 are pairwise non-identical
+	•	sparkle/energy metric improvements hold vs baseline
+	•	mode26 has sufficient dynamic range (e.g., p95 - p05 > epsilon)
 
-## Milestone 3 — Bandlimit/fade strategy for extreme minification (polish + robustness)
+Deliverables
+	•	tests/test_flake_diagnosis.py upgraded with:
+	•	pairwise image difference assertions
+	•	metric persistence thresholds
+	•	reports/flake_diag/latest/ artifact bundle written by CI (optional but ideal)
 
-Even with LOD-consistent Sobel, very far/minified views can still introduce high-frequency normal energy. Your “fade normal blend from LOD 1→4” idea is exactly the right kind of stabilization knob.
+⸻
 
-**Work**
+Immediate next action (what I would do first)
 
-* Implement `normal_blend = lerp(user_blend, 0.0, smoothstep(lod_lo, lod_hi, lod))`
-* Optionally clamp maximum normal perturbation magnitude as LOD increases.
-
-**Deliverables**
-
-* `reports/flake/normal_blend_curve.png` (plot or table of blend vs lod)
-* `reports/flake/mode27_normal_blend.png` (visual proof it’s applied)
-* `p5_meta.json` (or similar) updated with parameters: `{lod_lo, lod_hi, blend_min, blend_max}`
-
-**Acceptance**
-
-* No “popping” when orbiting camera (temporal stability improves).
-* Far-field stays stable without washing out near-field detail.
-
----
-
-## Milestone 4 — Regression guardrails (so flakes never come back)
-
-**Work**
-
-* Add a simple “flake score” metric to CI:
-
-  * render mode 23 (no specular) and baseline material
-  * compute high-frequency energy (e.g., Laplacian magnitude percentile) in a fixed ROI
-  * require it below a threshold for the fixed configuration
-
-**Deliverables**
-
-* `tests/test_flake_regression.py` (produces `reports/flake/flake_score.json`)
-* `reports/flake/flake_score.json` (p95, p99, and pass/fail)
-
-**Acceptance**
-
-* CI fails if someone reintroduces implicit-LOD height sampling or mismatched texel offsets.
-
----
-
-### What I’d do first (if you want the most leverage)
-
-1. **Milestone 1** (debug modes non-uniform + grid proof) — because without this, you can’t trust the diagnosis images.
-2. **Milestone 2** (LOD-consistent Sobel) — because it targets the exact mismatch you documented.
-
-If you paste the current implementations of `compute_height_lod()` and the debug-mode `switch`/`if` chain in `fs_main`, I can point out the most likely reason those modes are still producing solid-color frames and propose the precise fix.
+Milestone A. Until 23–27 are truly distinct, every conclusion drawn from them is shaky. Your current output already proves the issue: modes 23–27 are identical pixel-for-pixel, so the shader isn’t branching per-mode the way you think.

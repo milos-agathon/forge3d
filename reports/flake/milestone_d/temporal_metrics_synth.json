@@ -1,0 +1,13 @@
+{
+  "metrics": {
+    "delta_mean": 1.206240177154541,
+    "delta_p99": 17.216583251953125,
+    "delta_max": 78.78659057617188,
+    "frame_count": 36
+  },
+  "thresholds": {
+    "delta_mean_max": 5.0,
+    "delta_p99_max": 50.0,
+    "delta_max_max": 150.0
+  }
+}

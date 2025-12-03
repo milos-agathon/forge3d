@@ -1,0 +1,45 @@
+{
+  "metrics": [
+    {
+      "mode": 23,
+      "mean_r": 79.18080139160156,
+      "mean_g": 102.09318542480469,
+      "mean_b": 48.86235046386719,
+      "dominant_channel": "none",
+      "passes_check": false
+    },
+    {
+      "mode": 24,
+      "mean_r": 0.0,
+      "mean_g": 0.0,
+      "mean_b": 0.0849609375,
+      "dominant_channel": "none",
+      "passes_check": false
+    },
+    {
+      "mode": 25,
+      "mean_r": 0.0,
+      "mean_g": 0.0,
+      "mean_b": 0.0869140625,
+      "dominant_channel": "none",
+      "passes_check": false
+    },
+    {
+      "mode": 26,
+      "mean_r": 0.0,
+      "mean_g": 0.0,
+      "mean_b": 0.0,
+      "dominant_channel": "grayscale",
+      "passes_check": false
+    },
+    {
+      "mode": 27,
+      "mean_r": 255.0,
+      "mean_g": 255.0,
+      "mean_b": 255.0,
+      "dominant_channel": "grayscale",
+      "passes_check": false
+    }
+  ],
+  "note": "Sentinel checks require sentinel shader build"
+}

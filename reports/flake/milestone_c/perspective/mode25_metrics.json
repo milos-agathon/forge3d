@@ -1,0 +1,14 @@
+{
+  "metrics": {
+    "alpha_mean": 1.0,
+    "luma_p05": 0.0,
+    "luma_p95": 0.0,
+    "luma_range": 0.0,
+    "unique_bins": 2
+  },
+  "thresholds": {
+    "alpha_mean_min": 0.99,
+    "luma_range_min": 0.0,
+    "unique_bins_min": 1
+  }
+}

@@ -939,12 +939,16 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         height_normal = n_dd;
     }
     
-    // Milestone 3: Minification fade for height-normal contribution
+    // Milestone 3/D: Minification fade for height-normal contribution
     // As LOD increases (far/grazing), reduce height-normal influence to prevent sparkles.
-    // LOD 0-1: full contribution, LOD 1-4: fade out, LOD 4+: no contribution
-    let lod_fade_start = 1.0;
-    let lod_fade_end = 4.0;
-    let lod_fade = 1.0 - saturate((height_lod - lod_fade_start) / (lod_fade_end - lod_fade_start));
+    // Using smoothstep for threshold-free transition (Milestone D improvement).
+    // LOD 0-1: full contribution, LOD 1-4: smoothstep fade, LOD 4+: no contribution
+    // Policy: lod_lo=1.0 (near detail preserved), lod_hi=4.0 (far field stable)
+    let lod_fade_start = 1.0;  // lod_lo: below this, full height-normal
+    let lod_fade_end = 4.0;    // lod_hi: above this, no height-normal
+    // smoothstep(edge0, edge1, x) = smooth hermite interpolation
+    // We want fade=1.0 at lod_fade_start and fade=0.0 at lod_fade_end
+    let lod_fade = 1.0 - smoothstep(lod_fade_start, lod_fade_end, height_lod);
     
     let normal_blend_base = clamp(u_shading.triplanar_params.z, 0.0, 1.0);
     let normal_blend = normal_blend_base * lod_fade;
@@ -1687,56 +1691,37 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // ── MODE 23: No Specular (Diffuse Only) ──
         // Shows terrain with ONLY diffuse/ambient lighting (no IBL specular).
         // If flakes disappear here → flakes are specular aliasing.
-        // Interpretation:
-        //   - Should look flat/matte with no shiny highlights
-        //   - If flakes still visible → they're in diffuse path (unlikely)
-        //   - Compare to mode 8 (specular only) to isolate contribution
-        let ambient_strength = mix(u_shading.clamp1.x, u_shading.clamp1.y, 1.0 - abs(blended_normal.y));
-        let ambient = albedo * ambient_strength;
-        let direct_mult = mix(0.65, 1.0, occlusion);
-        // Use ONLY diffuse IBL term (no specular)
-        let diffuse_only = ibl_diffuse_scaled;
-        let shaded_no_spec = ambient + lighting * direct_mult + diffuse_only;
-        let exposure = max(u_shading.light_params.w, 0.0);
-        let tonemapped = tonemap_aces(shaded_no_spec * exposure);
-        out.color = vec4<f32>(linear_to_srgb(tonemapped), 1.0);
+        let ambient_strength_23 = mix(u_shading.clamp1.x, u_shading.clamp1.y, 1.0 - abs(blended_normal.y));
+        let ambient_23 = albedo * ambient_strength_23;
+        let direct_mult_23 = mix(0.65, 1.0, occlusion);
+        let diffuse_only_23 = ibl_diffuse_scaled;
+        let shaded_no_spec = ambient_23 + lighting * direct_mult_23 + diffuse_only_23;
+        let exposure_23 = max(u_shading.light_params.w, 0.0);
+        let tonemapped_23 = tonemap_aces(shaded_no_spec * exposure_23);
+        out.color = vec4<f32>(linear_to_srgb(tonemapped_23), 1.0);
         return out;
     } else if (debug_mode == DBG_FLAKE_NO_HEIGHT_NORMAL) {
         // ── MODE 24: No Height Normal ──
-        // Normal selection is done at top of shader - this mode uses base_normal.
-        // Shows terrain with ONLY vertex/geometric normals (no height-map detail).
+        // Uses base_normal (geometric normal) instead of height-derived normal.
         // If flakes disappear here → flakes are from height-normal frequency.
-        // (Normal path continues below - just a marker for documentation)
-        // The actual shading uses the modified blended_normal which is now base_normal.
+        // Normal substitution is done at top of shader.
         // Fall through to normal shading path with the substituted normal.
     } else if (debug_mode == DBG_FLAKE_DDXDDY_NORMAL) {
         // ── MODE 25: Derivative-Based Normal (Ground Truth) ──
-        // Normal selection is done at top of shader - this mode uses n_dd.
-        // Uses n_dd = cross(dpdx(world_pos), dpdy(world_pos)) as shading normal.
+        // Uses n_dd = cross(dpdx, dpdy) as the shading normal.
         // This is the "mathematically correct" per-pixel surface normal.
-        // If this looks clean while mode 24 has flakes → current Sobel is the problem.
-        // (Normal path continues below - just a marker for documentation)
+        // Normal substitution is done at top of shader.
         // Fall through to normal shading path with the substituted normal.
     } else if (debug_mode == DBG_FLAKE_HEIGHT_LOD) {
         // ── MODE 26: Height LOD Visualization ──
-        // Shows the computed LOD level for height sampling as grayscale.
-        // Interpretation:
-        //   - Black = LOD 0 (full resolution, near camera)
-        //   - White = max LOD (lowest resolution, far/grazing)
-        //   - Should show smooth gradient with distance
-        //   - If chaotic/noisy → LOD computation is wrong
+        // Grayscale ramp from computed LOD (already distinct)
         let max_lod = f32(textureNumLevels(height_tex) - 1u);
         let lod_normalized = height_lod / max(max_lod, 1.0);
         out.color = vec4<f32>(vec3<f32>(lod_normalized), 1.0);
         return out;
     } else if (debug_mode == DBG_FLAKE_NORMAL_BLEND) {
         // ── MODE 27: Effective Normal Blend Visualization ──
-        // Shows the normal_blend after Milestone 3's LOD-based minification fade.
-        // Interpretation:
-        //   - White = full height-normal contribution (near camera)
-        //   - Black = no height-normal contribution (far/grazing)
-        //   - Should show smooth gradient matching distance
-        //   - If uniform white → minification fade not working
+        // Grayscale ramp from normal_blend (already distinct)
         out.color = vec4<f32>(vec3<f32>(normal_blend), 1.0);
         return out;
     } else if (debug_mode == 100u) {
@@ -1872,6 +1857,22 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // Use ACES tonemapping for better highlight preservation than Reinhard
         let tonemapped = tonemap_aces(shaded);
         final_color = tonemapped;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Milestone 1: Mode Stamp Overlay
+    // ──────────────────────────────────────────────────────────────────────────
+    // Add debug_mode/255 to blue channel in top-left 8x8 corner for visual mode ID.
+    // This allows verifying which debug mode actually rendered (trust but verify).
+    // The stamp is small enough not to interfere with visual inspection.
+    if (debug_mode > 0u) {
+        let stamp_size = 8.0;
+        let screen_pos = input.clip_position.xy;
+        if (screen_pos.x < stamp_size && screen_pos.y < stamp_size) {
+            // Encode mode in blue channel: 0.0-1.0 maps to mode 0-255
+            let mode_signal = f32(debug_mode) / 255.0;
+            final_color.b = clamp(final_color.b + mode_signal, 0.0, 1.0);
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
