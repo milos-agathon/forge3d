@@ -1,0 +1,21 @@
+{
+  "measured": {
+    "alpha_mean": 1.0,
+    "luma_p05": 0.40015846490859985,
+    "luma_p95": 0.6623396277427673,
+    "luma_range": 0.2621811628341675,
+    "unique_bins_256": 85,
+    "valid_ratio": 1.0
+  },
+  "missing_inputs": [],
+  "notes": [],
+  "pass": true,
+  "schema_missing_keys": [],
+  "schema_ok": true,
+  "thresholds": {
+    "alpha_mean_min": 0.99,
+    "luma_range_min": 0.2,
+    "unique_bins_256_min": 64,
+    "valid_ratio_min": 0.99
+  }
+}

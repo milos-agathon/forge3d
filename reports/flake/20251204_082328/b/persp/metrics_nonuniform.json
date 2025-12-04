@@ -1,0 +1,37 @@
+{
+  "measured": {
+    "mode26": {
+      "alpha_all_255": true,
+      "mean": 0.4987892508506775,
+      "p05": 0.13333334028720856,
+      "p95": 0.8627451062202454,
+      "range": 0.7294117659330368,
+      "unique_bins_256": 256
+    },
+    "mode27": {
+      "alpha_all_255": true,
+      "mean": 0.47929447889328003,
+      "p05": 0.16470588743686676,
+      "p95": 0.7882353067398071,
+      "range": 0.6235294193029404,
+      "unique_bins_256": 251
+    }
+  },
+  "missing_inputs": [],
+  "notes": [],
+  "pass": true,
+  "schema_missing_keys": [],
+  "schema_ok": true,
+  "thresholds": {
+    "mode26": {
+      "alpha_all_255": true,
+      "range_min": 0.2,
+      "unique_bins_256_min": 64
+    },
+    "mode27": {
+      "alpha_all_255": true,
+      "range_min": 0.15,
+      "unique_bins_256_min": 48
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "measured": {
+    "pairs": [
+      {
+        "a": 0,
+        "b": 23,
+        "mad": 0.34863579273223877,
+        "pass": true,
+        "ssim": 0.6168426275253296
+      },
+      {
+        "a": 0,
+        "b": 24,
+        "mad": 0.15011842548847198,
+        "pass": true,
+        "ssim": 0.9035294651985168
+      },
+      {
+        "a": 26,
+        "b": 27,
+        "mad": 0.17226561903953552,
+        "pass": true,
+        "ssim": 0.4625038802623749
+      }
+    ]
+  },
+  "missing_inputs": [],
+  "notes": [],
+  "pass": true,
+  "schema_missing_keys": [],
+  "schema_ok": true,
+  "thresholds": {
+    "default_mad_min": 0.002,
+    "default_ssim_max": 0.995,
+    "mode26_27_mad_min": 0.01,
+    "mode26_27_ssim_max": 0.98
+  }
+}

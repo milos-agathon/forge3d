@@ -1,0 +1,13 @@
+{
+  "measured": {
+    "missing_count": 0
+  },
+  "missing_inputs": [],
+  "notes": [],
+  "pass": true,
+  "schema_missing_keys": [],
+  "schema_ok": true,
+  "thresholds": {
+    "all_pngs_exist": true
+  }
+}

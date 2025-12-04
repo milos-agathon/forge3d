@@ -1,0 +1,55 @@
+{
+  "measured": {
+    "ramps": [
+      {
+        "alpha_all_255": true,
+        "axis": "x",
+        "name": "sentinel_mode26.png",
+        "p05": 0.0470588244497776,
+        "p95": 0.9529411196708679,
+        "pass": true,
+        "unique_bins_256": 256
+      },
+      {
+        "alpha_all_255": true,
+        "axis": "y",
+        "name": "sentinel_mode27.png",
+        "p05": 0.0470588244497776,
+        "p95": 0.9529411196708679,
+        "pass": true,
+        "unique_bins_256": 256
+      }
+    ],
+    "solids": [
+      {
+        "alpha_all_255": true,
+        "name": "sentinel_mode23.png",
+        "pass": true,
+        "ratio": 1.0
+      },
+      {
+        "alpha_all_255": true,
+        "name": "sentinel_mode24.png",
+        "pass": true,
+        "ratio": 1.0
+      },
+      {
+        "alpha_all_255": true,
+        "name": "sentinel_mode25.png",
+        "pass": true,
+        "ratio": 1.0
+      }
+    ]
+  },
+  "missing_inputs": [],
+  "notes": [],
+  "pass": true,
+  "schema_missing_keys": [],
+  "schema_ok": true,
+  "thresholds": {
+    "alpha_all_255": true,
+    "ramp_range_min": 0.8,
+    "ramp_unique_bins_256": 256,
+    "solid_ratio_min": 0.999
+  }
+}

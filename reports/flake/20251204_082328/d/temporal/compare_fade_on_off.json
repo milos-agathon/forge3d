@@ -1,0 +1,29 @@
+{
+  "measured": {
+    "luma_ratio_mean": 0.1240818852551999,
+    "luma_ratio_p99": 0.14285719475780478,
+    "spec_ratio_mean": 0.33331772012412797,
+    "spec_ratio_p99": 0.4285708836146763
+  },
+  "missing_inputs": [],
+  "notes": [],
+  "pass": true,
+  "schema_missing_keys": [],
+  "schema_ok": true,
+  "thresholds": {
+    "luma_abs": {
+      "delta_max_max": 50.0,
+      "delta_mean_max": 1.0,
+      "delta_p99_max": 10.0
+    },
+    "relative": {
+      "delta_mean_ratio_max": 0.7,
+      "delta_p99_ratio_max": 0.8
+    },
+    "spec_abs": {
+      "delta_max_max": 70.0,
+      "delta_mean_max": 1.2,
+      "delta_p99_max": 14.0
+    }
+  }
+}

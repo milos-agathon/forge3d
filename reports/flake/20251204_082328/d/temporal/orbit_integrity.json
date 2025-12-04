@@ -1,0 +1,17 @@
+{
+  "measured": {
+    "camera_continuity": true,
+    "no_duplicates": false,
+    "no_flatline": true
+  },
+  "missing_inputs": [],
+  "notes": [],
+  "pass": false,
+  "schema_missing_keys": [],
+  "schema_ok": true,
+  "thresholds": {
+    "camera_continuity_required": true,
+    "duplicates_disallowed": true,
+    "flatline_disallowed": true
+  }
+}
