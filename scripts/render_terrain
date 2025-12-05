@@ -1,0 +1,134 @@
+python examples/terrain_demo.py 
+  --dem assets/Gore_Range_Albers_1m.tif 
+  --hdr assets/hdri/brown_photostudio_02_4k.hdr
+  --size 1920 1080 
+  --render-scale 1 
+  --msaa 8 
+  --ibl-res 1024 
+  --ibl-intensity 0.6 
+  --cam-radius 1400 
+  --cam-phi 135 
+  --cam-theta 35 
+  --exposure 0.5 
+  --sun-azimuth 135 
+  --sun-elevation 15 
+  --sun-intensity 0.6 
+  --sun-color 1.0 0.5 0.9 
+  --preset outdoor_sun 
+  --gi ibl,ssao 
+  --sky hdri
+  --volumetric "density=0.04,phase=hg,g=0.5" 
+  --shadows pcf 
+  --shadow-map-res 4096 
+  --cascades 4 
+  --pcss-blocker-radius 0.002 
+  --pcss-filter-radius 0.01 
+  --shadow-light-size 0.01 
+  --albedo-mode mix 
+  --colormap "#d0c087,#b27a43,#e26c6b,#3a2921"
+  --colormap-strength 0.6
+  --colormap-interpolate
+  --colormap-size 512
+  --output examples/output/terrain_outdoor_sunrise.png 
+  --overwrite
+
+python examples/terrain_demo.py 
+  --size 2048 2048 
+  --msaa 4 
+  --z-scale 3.0 
+  --albedo-mode colormap 
+  --colormap "viridis" 
+  --colormap-domain 2500 4300 
+  --colormap-interpolate 
+  --colormap-size 512 
+  --height-curve-mode pow 
+  --height-curve-strength 0.8 
+  --height-curve-power 1.6 
+  --exposure 1.0 
+  --gi "" 
+  --sky hdri 
+  --pom-disabled 
+  --output examples/output/terrain_topographic_atlas.png 
+  --overwrite
+
+python examples/terrain_demo.py 
+  --size 1600 900 
+  --render-scale 1.25 
+  --msaa 8 
+  --preset studio_pbr 
+  --ibl-res 256 
+  --ibl-intensity 1.0 
+  --cam-radius 800 
+  --cam-phi 120 
+  --cam-theta 45 
+  --exposure 1.0 
+  --albedo-mode mix 
+  --colormap magma 
+  --colormap-strength 0.4 
+  --height-curve-mode smoothstep 
+  --height-curve-strength 0.5 
+  --shadows vsm 
+  --shadow-map-res 2048 
+  --shadow-moment-bias 0.0008 
+  --gi ibl,ssao 
+  --sky hdri 
+  --output examples/output/terrain_studio_pbr.png 
+  --overwrite
+
+python examples/terrain_demo.py 
+  --size 1920 1080 
+  --msaa 4 
+  --preset toon_viz 
+  --albedo-mode mix 
+  --colormap magma 
+  --colormap-strength 0.8 
+  --z-scale 2.5 
+  --height-curve-mode smoothstep 
+  --height-curve-strength 0.7 
+  --exposure 1.0 
+  --gi ibl 
+  --sky preetham 
+  --shadows hard 
+  --debug-lights 
+  --pom-disabled 
+  --output examples/output/terrain_toon_magma.png 
+  --overwrite
+
+python examples/terrain_demo.py 
+  --size 1600 900 
+  --msaa 4 
+  --z-scale 1.8 
+  --water-detect 
+  --water-level 0.06 
+  --water-slope 0.01 
+  --water-material overlay 
+  --water-mask-output examples/output/water_mask_binary.png 
+  --water-mask-output-mode binary 
+  --debug-mode 101 
+  --albedo-mode colormap 
+  --colormap terrain 
+  --colormap-strength 1.0 
+  --exposure 1.0 
+  --gi "" 
+  --output examples/output/terrain_water_diagnostics.png 
+  --overwrite
+
+python examples/terrain_demo.py 
+  --size 1280 720 
+  --msaa 4 
+  --preset outdoor_sun 
+  --cam-radius 1100 
+  --cam-phi 150 
+  --cam-theta 40 
+  --exposure 1.0 
+  --gi ibl,ssao 
+  --sky hosek-wilkie 
+  --water-detect 
+  --water-material overlay 
+  --albedo-mode mix 
+  --colormap terrain 
+  --colormap-strength 0.5 
+  --output examples/output/terrain_viewer_seed.png 
+  --window 
+  --viewer 
+  --overwrite

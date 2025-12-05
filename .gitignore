@@ -294,7 +294,7 @@ diag_out/
 # RELEVANT FILES:examples/textured_sphere.py,examples/textured_quad_gltf_like.py,README.md
 
 out/
-# reports/
+reports/
 examples/output/
 
 # forge3d outputs (A13) 
