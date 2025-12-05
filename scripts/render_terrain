@@ -1,36 +1,294 @@
-python examples/terrain_demo.py 
-  --dem assets/Gore_Range_Albers_1m.tif 
-  --hdr assets/hdri/brown_photostudio_02_4k.hdr
-  --size 1920 1080 
-  --render-scale 1 
-  --msaa 8 
-  --ibl-res 1024 
-  --ibl-intensity 0.6 
-  --cam-radius 1400 
-  --cam-phi 135 
-  --cam-theta 35 
-  --exposure 0.5 
-  --sun-azimuth 135 
-  --sun-elevation 15 
-  --sun-intensity 0.6 
-  --sun-color 1.0 0.5 0.9 
-  --preset outdoor_sun 
-  --gi ibl,ssao 
-  --sky hdri
-  --volumetric "density=0.04,phase=hg,g=0.5" 
-  --shadows pcf 
-  --shadow-map-res 4096 
-  --cascades 4 
-  --pcss-blocker-radius 0.002 
-  --pcss-filter-radius 0.01 
-  --shadow-light-size 0.01 
-  --albedo-mode mix 
-  --colormap "#d0c087,#b27a43,#e26c6b,#3a2921"
-  --colormap-strength 0.6
-  --colormap-interpolate
-  --colormap-size 512
-  --output examples/output/terrain_outdoor_sunrise.png 
+# main
+python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/hdri/snow_field_4k.hdr \
+  --size 1920 1080 \
+  --render-scale 1 \
+  --msaa 8 \
+  --ibl-res 1024 \
+  --ibl-intensity 0.6 \
+  --cam-radius 1400 \
+  --cam-phi 135 \
+  --cam-theta 35 \
+  --exposure 0.5 \
+  --sun-azimuth 135 \
+  --sun-elevation 15 \
+  --sun-intensity 0.6 \
+  --sun-color 1.0 0.5 0.9 \
+  --preset outdoor_sun \
+  --gi ibl,ssao \
+  --sky hdri \
+  --volumetric "density=0.04,phase=hg,g=0.5" \
+  --shadows pcf \
+  --shadow-map-res 4096 \
+  --cascades 4 \
+  --pcss-blocker-radius 0.002 \
+  --pcss-filter-radius 0.01 \
+  --shadow-light-size 0.01 \
+  --albedo-mode mix \
+  --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
+  --colormap-strength 0.6 \
+  --colormap-interpolate \
+  --colormap-size 512 \
+  --output examples/output/terrain_outdoor_sunrise.png \
   --overwrite
+
+## normal
+
+VF_COLOR_DEBUG_MODE=24 python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/hdri/snow_field_4k.hdr \
+  --size 1920 1080 \
+  --render-scale 1 \
+  --msaa 8 \
+  --ibl-res 1024 \
+  --ibl-intensity 0.6 \
+  --cam-radius 1400 \
+  --cam-phi 135 \
+  --cam-theta 35 \
+  --exposure 0.5 \
+  --sun-azimuth 135 \
+  --sun-elevation 15 \
+  --sun-intensity 0.6 \
+  --sun-color 1.0 0.5 0.9 \
+  --preset outdoor_sun \
+  --gi ibl,ssao \
+  --sky hdri \
+  --volumetric "density=0.04,phase=hg,g=0.5" \
+  --shadows pcf \
+  --shadow-map-res 4096 \
+  --cascades 4 \
+  --pcss-blocker-radius 0.002 \
+  --pcss-filter-radius 0.01 \
+  --shadow-light-size 0.01 \
+  --albedo-mode mix \
+  --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
+  --colormap-strength 0.6 \
+  --colormap-interpolate \
+  --colormap-size 512 \
+  --output examples/output/terrain_geom_normal.png \
+  --overwrite
+
+## IBL off
+python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/hdri/snow_field_4k.hdr \
+  --size 1920 1080 \
+  --render-scale 1 \
+  --msaa 8 \
+  --ibl-res 1024 \
+  --ibl-intensity 0.6 \
+  --cam-radius 1400 \
+  --cam-phi 135 \
+  --cam-theta 35 \
+  --exposure 0.5 \
+  --sun-azimuth 135 \
+  --sun-elevation 15 \
+  --sun-intensity 0.6 \
+  --sun-color 1.0 0.5 0.9 \
+  --preset outdoor_sun \
+  --gi "" \
+  --sky hdri \
+  --volumetric "density=0.04,phase=hg,g=0.5" \
+  --shadows pcf \
+  --shadow-map-res 4096 \
+  --cascades 4 \
+  --pcss-blocker-radius 0.002 \
+  --pcss-filter-radius 0.01 \
+  --shadow-light-size 0.01 \
+  --albedo-mode mix \
+  --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
+  --colormap-strength 0.6 \
+  --colormap-interpolate \
+  --colormap-size 512 \
+  --output examples/output/terrain_ibl_off.png \
+  --overwrite
+
+# IBL only (no sun, still has diff+spec)
+VF_COLOR_DEBUG_MODE=6 python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/hdri/snow_field_4k.hdr \
+  --size 1920 1080 \
+  --render-scale 1 \
+  --msaa 8 \
+  --ibl-res 1024 \
+  --ibl-intensity 0.6 \
+  --cam-radius 1400 \
+  --cam-phi 135 \
+  --cam-theta 35 \
+  --exposure 0.5 \
+  --sun-azimuth 135 \
+  --sun-elevation 15 \
+  --sun-intensity 0.6 \
+  --sun-color 1.0 0.5 0.9 \
+  --preset outdoor_sun \
+  --gi ibl,ssao \
+  --sky hdri \
+  --volumetric "density=0.04,phase=hg,g=0.5" \
+  --shadows pcf \
+  --shadow-map-res 4096 \
+  --cascades 4 \
+  --pcss-blocker-radius 0.002 \
+  --pcss-filter-radius 0.01 \
+  --shadow-light-size 0.01 \
+  --albedo-mode mix \
+  --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
+  --colormap-strength 0.6 \
+  --colormap-interpolate \
+  --colormap-size 512 \
+  --output examples/output/terrain_ibl_only.png \
+  --overwrite
+
+## IBL diffuse only (no spec, no sun)
+VF_COLOR_DEBUG_MODE=6 python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/hdri/snow_field_4k.hdr \
+  --size 1920 1080 \
+  --render-scale 1 \
+  --msaa 8 \
+  --ibl-res 1024 \
+  --ibl-intensity 0.6 \
+  --cam-radius 1400 \
+  --cam-phi 135 \
+  --cam-theta 35 \
+  --exposure 0.5 \
+  --sun-azimuth 135 \
+  --sun-elevation 15 \
+  --sun-intensity 0.6 \
+  --sun-color 1.0 0.5 0.9 \
+  --preset outdoor_sun \
+  --gi ibl,ssao \
+  --sky hdri \
+  --volumetric "density=0.04,phase=hg,g=0.5" \
+  --shadows pcf \
+  --shadow-map-res 4096 \
+  --cascades 4 \
+  --pcss-blocker-radius 0.002 \
+  --pcss-filter-radius 0.01 \
+  --shadow-light-size 0.01 \
+  --albedo-mode mix \
+  --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
+  --colormap-strength 0.6 \
+  --colormap-interpolate \
+  --colormap-size 512 \
+  --output examples/output/terrain_ibl_diffuse_only.png \
+  --overwrite
+
+## IBL specular only (no diffuse, no sun)
+VF_COLOR_DEBUG_MODE=8 python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/hdri/snow_field_4k.hdr \
+  --size 1920 1080 \
+  --render-scale 1 \
+  --msaa 8 \
+  --ibl-res 1024 \
+  --ibl-intensity 0.6 \
+  --cam-radius 1400 \
+  --cam-phi 135 \
+  --cam-theta 35 \
+  --exposure 0.5 \
+  --sun-azimuth 135 \
+  --sun-elevation 15 \
+  --sun-intensity 0.6 \
+  --sun-color 1.0 0.5 0.9 \
+  --preset outdoor_sun \
+  --gi ibl,ssao \
+  --sky hdri \
+  --volumetric "density=0.04,phase=hg,g=0.5" \
+  --shadows pcf \
+  --shadow-map-res 4096 \
+  --cascades 4 \
+  --pcss-blocker-radius 0.002 \
+  --pcss-filter-radius 0.01 \
+  --shadow-light-size 0.01 \
+  --albedo-mode mix \
+  --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
+  --colormap-strength 0.6 \
+  --colormap-interpolate \
+  --colormap-size 512 \
+  --output examples/output/terrain_ibl_specular_only.png \
+  --overwrite
+
+# “Beauty” but with specular suppressed (diffuse‑only terrain):
+
+VF_COLOR_DEBUG_MODE=23 python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/hdri/snow_field_4k.hdr \
+  --size 1920 1080 \
+  --render-scale 1 \
+  --msaa 8 \
+  --ibl-res 1024 \
+  --ibl-intensity 0.6 \
+  --cam-radius 1400 \
+  --cam-phi 135 \
+  --cam-theta 35 \
+  --exposure 0.5 \
+  --sun-azimuth 135 \
+  --sun-elevation 15 \
+  --sun-intensity 0.6 \
+  --sun-color 1.0 0.5 0.9 \
+  --preset outdoor_sun \
+  --gi ibl,ssao \
+  --sky hdri \
+  --volumetric "density=0.04,phase=hg,g=0.5" \
+  --shadows pcf \
+  --shadow-map-res 4096 \
+  --cascades 4 \
+  --pcss-blocker-radius 0.002 \
+  --pcss-filter-radius 0.01 \
+  --shadow-light-size 0.01 \
+  --albedo-mode mix \
+  --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
+  --colormap-strength 0.6 \
+  --colormap-interpolate \
+  --colormap-size 512 \
+  --output examples/output/terrain_diffuse_only.png \
+  --overwrite
+
+# Disable SpecAA:
+
+VF_SPEC_AA_ENABLED=0 python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/hdri/snow_field_4k.hdr \
+  --size 1920 1080 \
+  --render-scale 1 \
+  --msaa 8 \
+  --ibl-res 1024 \
+  --ibl-intensity 0.6 \
+  --cam-radius 1400 \
+  --cam-phi 135 \
+  --cam-theta 35 \
+  --exposure 0.5 \
+  --sun-azimuth 135 \
+  --sun-elevation 15 \
+  --sun-intensity 0.6 \
+  --sun-color 1.0 0.5 0.9 \
+  --preset outdoor_sun \
+  --gi ibl,ssao \
+  --sky hdri \
+  --volumetric "density=0.04,phase=hg,g=0.5" \
+  --shadows pcf \
+  --shadow-map-res 4096 \
+  --cascades 4 \
+  --pcss-blocker-radius 0.002 \
+  --pcss-filter-radius 0.01 \
+  --shadow-light-size 0.01 \
+  --albedo-mode mix \
+  --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
+  --colormap-strength 0.6 \
+  --colormap-interpolate \
+  --colormap-size 512 \
+  --output examples/output/terrain_specaa_off.png \
+  --overwrite
+
+
+
+
+
+
+
+
+
 
 python examples/terrain_demo.py 
   --size 2048 2048 

@@ -731,6 +731,63 @@ fn calculate_pbr_brdf(
     return (diffuse + specular) * n_dot_l;
 }
 
+/// Split-normal PBR BRDF: uses smooth normal for specular (eliminates aliasing),
+/// detailed normal for diffuse (keeps surface detail). Standard terrain technique.
+fn calculate_pbr_brdf_split_normal(
+    diffuse_normal : vec3<f32>,   // Height-derived normal for diffuse shading
+    specular_normal : vec3<f32>,  // Geometric/smooth normal for specular (anti-alias)
+    view_dir : vec3<f32>,
+    light_dir : vec3<f32>,
+    albedo : vec3<f32>,
+    roughness : f32,
+    metallic : f32,
+    f0 : vec3<f32>
+) -> vec3<f32> {
+    let halfway = normalize(view_dir + light_dir);
+
+    // Diffuse uses detailed normal for surface variation
+    let n_dot_l_diff = max(dot(diffuse_normal, light_dir), 0.0);
+    
+    // Specular uses smooth normal to avoid aliasing
+    let n_dot_l_spec = max(dot(specular_normal, light_dir), 0.0);
+    let n_dot_v = max(dot(specular_normal, view_dir), 0.0);
+    let n_dot_h = max(dot(specular_normal, halfway), 0.0);
+    let v_dot_h = max(dot(view_dir, halfway), 0.0);
+
+    if (n_dot_l_diff <= 0.0 && n_dot_l_spec <= 0.0) {
+        return vec3<f32>(0.0, 0.0, 0.0);
+    }
+
+    // GGX Distribution (specular normal)
+    let alpha = max(roughness * roughness, 1e-3);
+    let alpha_sq = alpha * alpha;
+    let denom = (n_dot_h * n_dot_h * (alpha_sq - 1.0)) + 1.0;
+    let distribution = alpha_sq / (PI * denom * denom);
+
+    // Smith Geometry (specular normal)
+    let k = (roughness + 1.0);
+    let k_sq = (k * k) / 8.0;
+    let g1_l = n_dot_l_spec / (n_dot_l_spec * (1.0 - k_sq) + k_sq + 1e-5);
+    let g1_v = n_dot_v / (n_dot_v * (1.0 - k_sq) + k_sq + 1e-5);
+    let geometry = g1_l * g1_v;
+
+    // Fresnel
+    let fresnel = f0 + (vec3<f32>(1.0, 1.0, 1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
+
+    // Specular term (smooth normal) - only if facing light
+    var specular = vec3<f32>(0.0);
+    if (n_dot_l_spec > 0.0 && n_dot_v > 0.0) {
+        specular = (distribution * geometry) * fresnel / max(4.0 * n_dot_l_spec * n_dot_v, 1e-3);
+        specular = specular * n_dot_l_spec;
+    }
+    
+    // Diffuse term (detailed normal)
+    let k_d = (vec3<f32>(1.0, 1.0, 1.0) - fresnel) * (1.0 - metallic);
+    let diffuse = k_d * albedo / PI * n_dot_l_diff;
+    
+    return diffuse + specular;
+}
+
 // P2-05: Bridge function to map terrain parameters to ShadingParamsGPU for optional eval_brdf
 // Maps a subset of TerrainShadingUniforms to ShadingParamsGPU, ignoring unsupported terrain knobs
 fn terrain_to_shading_params(
@@ -1259,11 +1316,10 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         let dndx = dpdx(shading_normal);
         let dndy = dpdy(shading_normal);
         // Variance proxy: average squared magnitude of derivatives
-        // Scale factor tunable via params2.w (default 1.0)
-        // Scale factor tunable - screen derivatives of normalized vectors are small
-        // For smooth terrain normals, use moderate 10x amplification
-        // (Sparkle test uses 100x for synthetic HF perturbation)
-        let sigma_scale = max(u_overlay.params2.w, 1.0) * 10.0;
+        // Scale factor tunable via VF_SPECAA_SIGMA_SCALE env var (params2.w, default 1.0)
+        // Screen derivatives of normalized vectors are small, so amplify aggressively
+        // 25x base amplification helps catch ridge-line normal variance
+        let sigma_scale = max(u_overlay.params2.w, 1.0) * 25.0;
         specaa_sigma2 = 0.5 * (dot(dndx, dndx) + dot(dndy, dndy)) * sigma_scale;
         specaa_sigma2 = clamp(specaa_sigma2, 0.0, 1.0);
         
@@ -1278,8 +1334,10 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     if (roughness_mult != 1.0) {
         roughness = roughness * roughness_mult;
     }
-    // Roughness floor: 0.3 for terrain (reduces specular aliasing), 0.02 for water (needs reflections)
-    let roughness_floor = select(0.3, 0.02, is_water);
+    // Roughness floor: aggressive floor for terrain to eliminate specular aliasing
+    // 0.65 is high enough to significantly widen the specular lobe, eliminating subpixel flakes
+    // Water keeps low roughness (0.02) for crisp reflections
+    let roughness_floor = select(0.65, 0.02, is_water);
     roughness = clamp(roughness, roughness_floor, 1.0);
     metallic = clamp(metallic, 0.0, 1.0);
     var f0 = mix(vec3<f32>(0.04, 0.04, 0.04), albedo, metallic);
@@ -1290,7 +1348,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     }
     let light_dir = normalize(u_terrain.sun_exposure.xyz);
     
-    // P2-05: Optional BRDF dispatch (flag-controlled)
+    // P2-05: Standard single-normal BRDF
     var lighting: vec3<f32>;
     if (TERRAIN_USE_BRDF_DISPATCH) {
         // Use unified BRDF dispatch (allows model switching)
@@ -1298,7 +1356,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         let n_dot_l = max(dot(shading_normal, light_dir), 0.0);
         lighting = eval_brdf(shading_normal, view_dir, light_dir, albedo, shading_params) * n_dot_l;
     } else {
-        // Use original terrain-specific calculate_pbr_brdf (default, preserves current look)
+        // Use original terrain-specific calculate_pbr_brdf
         lighting = calculate_pbr_brdf(
             shading_normal,
             view_dir,

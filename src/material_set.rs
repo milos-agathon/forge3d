@@ -72,12 +72,13 @@ impl MaterialSet {
         let mut materials = Vec::new();
         let mut texture_paths = Vec::new();
 
-        // Material 0: Rock (steep slopes, low altitude) - rough with some wet patches
-        // Lower roughness creates visible specular highlights on polished/wet rock
+        // Material 0: Rock (steep slopes, low altitude) - rough weathered surface
+        // Moderate-high roughness reduces specular aliasing on cliff faces
+        // Real rock varies widely; 0.5 is typical for weathered granite/sandstone
         materials.push(
             crate::core::material::PbrMaterial::dielectric(
                 glam::Vec3::new(0.28, 0.26, 0.24), // neutral gray rock
-                0.35,                               // roughness - noticeable specular
+                0.50,                               // roughness - weathered rock
             )
             .with_normal_scale(normal_strength * 1.5), // Enhanced normal detail
         );
@@ -104,12 +105,13 @@ impl MaterialSet {
         );
         texture_paths.push(resolve_default_texture("dirt_albedo.png"));
 
-        // Material 3: Snow (high altitude peaks) - icy/specular surface
-        // Very low roughness for visible environment reflections and sun glints
+        // Material 3: Snow (high altitude peaks) - powder/packed snow surface
+        // Moderate roughness to reduce specular aliasing while keeping soft highlights
+        // Real snow ranges from 0.2 (fresh powder) to 0.5 (packed/wet); 0.25 is a good balance
         materials.push(
             crate::core::material::PbrMaterial::dielectric(
                 glam::Vec3::new(0.95, 0.97, 1.0), // bright white-blue snow
-                0.08,                              // roughness - icy, mirror-like
+                0.25,                              // roughness - powder snow, still bright
             )
             .with_normal_scale(normal_strength * 0.3), // Subtle snow surface variation
         );
