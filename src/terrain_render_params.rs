@@ -162,6 +162,40 @@ pub struct SamplingSettingsNative {
     pub address_w: AddressModeNative,
 }
 
+/// Shadow settings extracted from Python ShadowSettings dataclass
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct ShadowSettingsNative {
+    pub enabled: bool,
+    pub technique: String,
+    pub resolution: u32,
+    pub cascades: u32,
+    pub max_distance: f32,
+    pub softness: f32,
+    pub intensity: f32,
+    pub slope_scale_bias: f32,
+    pub depth_bias: f32,
+    pub normal_bias: f32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for ShadowSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            technique: "PCSS".to_string(),
+            resolution: 2048,
+            cascades: 4,
+            max_distance: 3000.0,
+            softness: 0.01,
+            intensity: 1.0,
+            slope_scale_bias: 0.001,
+            depth_bias: 0.0005,
+            normal_bias: 0.0002,
+        }
+    }
+}
+
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
 pub struct DecodedTerrainSettings {
@@ -171,6 +205,7 @@ pub struct DecodedTerrainSettings {
     pub lod: LodSettingsNative,
     pub clamp: ClampSettingsNative,
     pub sampling: SamplingSettingsNative,
+    pub shadow: ShadowSettingsNative,
 }
 
 #[cfg(feature = "extension-module")]
@@ -403,16 +438,20 @@ impl TerrainRenderParams {
         let azimuth_rad = azimuth.to_radians();
         let elevation_rad = elevation.to_radians();
         let cos_el = elevation_rad.cos();
+        let sin_el = elevation_rad.sin();
+        // Z-up coordinate system: X=East, Y=North, Z=Up
+        // Azimuth 0° = East, 90° = South, 180° = West, 270° = North
+        // Elevation 0° = horizon, 90° = zenith
         let direction = match light_type.as_str() {
             "Directional" | "directional" => normalize_direction(
-                cos_el * azimuth_rad.cos(),
-                elevation_rad.sin(),
-                cos_el * azimuth_rad.sin(),
+                cos_el * azimuth_rad.cos(),   // X: horizontal component in azimuth direction
+                cos_el * azimuth_rad.sin(),   // Y: horizontal component perpendicular
+                sin_el,                       // Z: vertical component (up for Z-up system)
             ),
             _ => normalize_direction(
                 cos_el * azimuth_rad.cos(),
-                elevation_rad.sin(),
                 cos_el * azimuth_rad.sin(),
+                sin_el,
             ),
         };
 
@@ -498,6 +537,38 @@ impl TerrainRenderParams {
             )?,
         };
 
+        // Parse shadow settings from Python ShadowSettings dataclass
+        let shadow_native = ShadowSettingsNative {
+            enabled: shadows.getattr("enabled")?.extract().unwrap_or(true),
+            technique: shadows
+                .getattr("technique")?
+                .extract::<String>()
+                .unwrap_or_else(|_| "PCSS".to_string()),
+            resolution: shadows
+                .getattr("resolution")?
+                .extract::<i64>()
+                .unwrap_or(2048) as u32,
+            cascades: shadows
+                .getattr("cascades")?
+                .extract::<i64>()
+                .unwrap_or(4) as u32,
+            max_distance: shadows
+                .getattr("max_distance")?
+                .extract()
+                .unwrap_or(3000.0),
+            softness: shadows.getattr("softness")?.extract().unwrap_or(0.01),
+            intensity: shadows.getattr("intensity")?.extract().unwrap_or(1.0),
+            slope_scale_bias: shadows
+                .getattr("slope_scale_bias")?
+                .extract()
+                .unwrap_or(0.001),
+            depth_bias: shadows.getattr("depth_bias")?.extract().unwrap_or(0.0005),
+            normal_bias: shadows
+                .getattr("normal_bias")?
+                .extract()
+                .unwrap_or(0.0002),
+        };
+
         let decoded = DecodedTerrainSettings {
             light: LightSettingsNative {
                 direction,
@@ -509,6 +580,7 @@ impl TerrainRenderParams {
             lod: lod_native,
             clamp: clamp_native,
             sampling: sampling_native,
+            shadow: shadow_native,
         };
 
         let overlays = extract_overlays(params.getattr("overlays")?.as_gil_ref())?;

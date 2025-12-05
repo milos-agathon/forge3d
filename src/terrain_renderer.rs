@@ -51,8 +51,13 @@ pub struct TerrainScene {
     color_format: wgpu::TextureFormat,
     // P1-08: Light buffer for multi-light support
     light_buffer: Arc<Mutex<LightBuffer>>,
-    // Noop shadow resources for bind group at index 3 (required by pipeline layout)
+    // Noop shadow resources for bind group at index 3 (fallback when shadows disabled)
     noop_shadow: NoopShadow,
+    // P1-Shadow: CSM renderer for terrain self-shadowing
+    csm_renderer: crate::shadows::CsmRenderer,
+    shadow_depth_pipeline: wgpu::RenderPipeline,
+    shadow_depth_bind_group_layout: wgpu::BindGroupLayout,
+    shadow_bind_group_layout: wgpu::BindGroupLayout,
     // P0-03: Config plumbing (no shader/pipeline behavior changes)
     #[cfg(feature = "enable-renderer-config")]
     config: Arc<Mutex<crate::render::params::RendererConfig>>,
@@ -75,6 +80,21 @@ struct NoopShadow {
     moment_maps_view: wgpu::TextureView,
     moment_sampler: wgpu::Sampler,
     bind_group: wgpu::BindGroup,
+}
+
+/// Shadow pass uniforms for terrain shadow depth rendering
+/// Size: 112 bytes (must match WGSL struct exactly)
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ShadowPassUniforms {
+    /// Light view-projection matrix for this cascade (64 bytes)
+    light_view_proj: [[f32; 4]; 4],
+    /// Terrain params vec4: (spacing, height_exag, height_min, height_max) (16 bytes)
+    terrain_params: [f32; 4],
+    /// Grid params vec4: (grid_resolution as f32, _pad, _pad, _pad) (16 bytes)
+    grid_params: [f32; 4],
+    /// Height curve params: (mode, strength, power, _pad) (16 bytes)
+    height_curve: [f32; 4],
 }
 
 #[repr(C, align(16))]
@@ -474,7 +494,7 @@ impl TerrainRenderer {
     ///     Frame object with rendered RGBA8 image
     #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None, water_mask=None))]
     pub fn render_terrain_pbr_pom<'py>(
-        &self,
+        &mut self,
         py: Python<'py>,
         material_set: &crate::material_set::MaterialSet,
         env_maps: &crate::ibl_wrapper::IBL,
@@ -489,7 +509,7 @@ impl TerrainRenderer {
             ));
         }
 
-        // Render internally via TerrainScene
+        // Render internally via TerrainScene (requires &mut for shadow rendering)
         let frame = self
             .scene
             .render_internal(material_set, env_maps, params, heightmap, water_mask)
@@ -823,7 +843,36 @@ impl TerrainScene {
             Self::create_blit_pipeline(device.as_ref(), &blit_bind_group_layout, color_format);
 
         // Create noop shadow resources for bind group at index 3
-        let noop_shadow = Self::create_noop_shadow(device.as_ref(), &shadow_bind_group_layout)?;
+        // Shadow depth texture is cleared to 1.0 so terrain is fully lit when not using real shadows
+        let noop_shadow = Self::create_noop_shadow(device.as_ref(), queue.as_ref(), &shadow_bind_group_layout)?;
+
+        // P1-Shadow: Create CSM renderer with default configuration
+        // These are init-time defaults; per-render params (bias, etc.) are updated in render_internal
+        // cascade_count and shadow_map_size are set at init (can't change without recreating)
+        let csm_config = crate::shadows::CsmConfig {
+            cascade_count: 4,       // Default, can be overridden by recreating renderer
+            shadow_map_size: 2048,  // Default, can be overridden by recreating renderer
+            max_shadow_distance: 3000.0,
+            cascade_splits: vec![], // Auto-calculate
+            pcf_kernel_size: 3,     // 3x3 PCF for soft shadows
+            depth_bias: 0.0005,     // Will be updated from params at render time
+            slope_bias: 0.001,      // Will be updated from params at render time
+            peter_panning_offset: 0.0002,
+            enable_evsm: false,
+            stabilize_cascades: true,
+            cascade_blend_range: 0.1,
+            ..Default::default()
+        };
+        let csm_renderer = crate::shadows::CsmRenderer::new(device.as_ref(), csm_config);
+
+        // Create shadow depth bind group layout (for terrain shadow rendering)
+        let shadow_depth_bind_group_layout = Self::create_shadow_depth_bind_group_layout(device.as_ref());
+        
+        // Create shadow depth pipeline
+        let shadow_depth_pipeline = Self::create_shadow_depth_pipeline(
+            device.as_ref(),
+            &shadow_depth_bind_group_layout,
+        );
 
         let pipeline_cache = PipelineCache {
             sample_count: 1,
@@ -848,6 +897,10 @@ impl TerrainScene {
             color_format,
             light_buffer: Arc::new(Mutex::new(light_buffer)),
             noop_shadow,
+            csm_renderer,
+            shadow_depth_pipeline,
+            shadow_depth_bind_group_layout,
+            shadow_bind_group_layout,
             // P0-03: Initialize with default config (no behavior changes)
             #[cfg(feature = "enable-renderer-config")]
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
@@ -927,40 +980,45 @@ impl TerrainScene {
 
     /// Create noop shadow resources for bind group at index 3
     /// Provides dummy shadow resources when shadows are not used (e.g., IBL rotation mode)
+    /// The shadow depth texture is cleared to 1.0 (max depth) so all shadow comparisons pass (fully lit)
     fn create_noop_shadow(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         shadow_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> Result<NoopShadow> {
-        use crate::core::shadow_mapping::CsmUniforms;
+        // Use the simpler CsmUniforms from core::shadow_mapping to match the shader
+        use crate::core::shadow_mapping::{CsmCascadeData, CsmUniforms};
 
         // Create dummy CSM uniforms buffer (binding 0)
+        // Must have cascade_count >= 1 to avoid shader undefined behavior
+        // With far_distance = 100000, all geometry is in cascade 0
+        // The shadow map will be cleared to depth 1.0, so all comparisons pass (fully lit)
+        let identity_mat = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let default_cascade = CsmCascadeData {
+            light_projection: identity_mat,
+            light_view_proj: identity_mat,
+            near_distance: 0.0,
+            far_distance: 100000.0,
+            texel_size: 1.0,
+            _padding: 0.0,
+        };
         let csm_uniforms = CsmUniforms {
             light_direction: [0.0, -1.0, 0.0, 0.0],
-            light_view: [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
-            cascades: [CsmCascadeData {
-                light_projection: [
-                    [1.0, 0.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.0],
-                    [0.0, 0.0, 0.0, 1.0],
-                ],
-                near_distance: 0.1,
-                far_distance: 1000.0,
-                texel_size: 1.0,
-                _padding: 0.0,
-            }; 4],
-            cascade_count: 0,
-            pcf_kernel_size: 0,
+            light_view: identity_mat,
+            cascades: [default_cascade; 4],
+            cascade_count: 1, // Must be >= 1 for valid shader behavior
+            pcf_kernel_size: 1, // No filtering for noop
             depth_bias: 0.0,
             slope_bias: 0.0,
             shadow_map_size: 1.0,
             debug_mode: 0,
-            _padding: [0.0; 2],
+            peter_panning_offset: 0.0,
+            _padding: 0.0,
         };
         let csm_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain.noop_shadow.csm_uniforms"),
@@ -969,6 +1027,7 @@ impl TerrainScene {
         });
 
         // Create 1x1 depth texture array (binding 1: shadow_maps)
+        // Must include RENDER_ATTACHMENT to allow depth clear to 1.0 (max depth = fully lit)
         let shadow_maps_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("terrain.noop_shadow.maps"),
             size: wgpu::Extent3d {
@@ -980,9 +1039,45 @@ impl TerrainScene {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
+        // Create a 2D view for depth clear (render pass requires D2, not D2Array)
+        let shadow_clear_view = shadow_maps_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("terrain.noop_shadow.maps.clear_view"),
+            format: Some(wgpu::TextureFormat::Depth32Float),
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            aspect: wgpu::TextureAspect::DepthOnly,
+            base_mip_level: 0,
+            mip_level_count: Some(1),
+            base_array_layer: 0,
+            array_layer_count: Some(1),
+        });
+
+        // Clear shadow depth to 1.0 (max depth) so all shadow comparisons pass (fully lit)
+        // This ensures terrain is not in shadow when using noop shadow resources
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("terrain.noop_shadow.clear_encoder"),
+        });
+        {
+            let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terrain.noop_shadow.depth_clear"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &shadow_clear_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0), // Max depth = fully lit
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            // Empty pass - just clear
+        }
+        queue.submit(Some(encoder.finish()));
+
         let shadow_maps_view = shadow_maps_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("terrain.noop_shadow.maps.view"),
             format: Some(wgpu::TextureFormat::Depth32Float),
@@ -1111,22 +1206,18 @@ impl TerrainScene {
     /// Create shadow bind group layout for terrain shader (group 3)
     /// Matches terrain_pbr_pom.wgsl @group(3) bindings: CSM uniforms, shadow maps, moment maps
     fn create_shadow_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        use crate::core::shadow_mapping::CsmUniforms;
-
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain_pbr_pom.shadow_bind_group_layout"),
             entries: &[
                 // @binding(0): CSM uniforms
+                // Note: no min_binding_size to allow buffers larger than shader struct
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: Some(
-                            std::num::NonZeroU64::new(std::mem::size_of::<CsmUniforms>() as u64)
-                                .unwrap(),
-                        ),
+                        min_binding_size: None, // Shader validates at bind time
                     },
                     count: None,
                 },
@@ -1263,6 +1354,408 @@ impl TerrainScene {
         })
     }
 
+    /// Create bind group layout for shadow depth pass (terrain shadow rendering)
+    fn create_shadow_depth_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain.shadow_depth.bind_group_layout"),
+            entries: &[
+                // @binding(0): Shadow pass uniforms
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(
+                            std::num::NonZeroU64::new(std::mem::size_of::<ShadowPassUniforms>() as u64)
+                                .unwrap(),
+                        ),
+                    },
+                    count: None,
+                },
+                // @binding(1): Heightmap texture (non-filterable R32Float)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // @binding(2): Heightmap sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+            ],
+        })
+    }
+
+    /// Create depth-only pipeline for terrain shadow rendering
+    fn create_shadow_depth_pipeline(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> wgpu::RenderPipeline {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain.shadow_depth.shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shaders/terrain_shadow_depth.wgsl").into(),
+            ),
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain.shadow_depth.pipeline_layout"),
+            bind_group_layouts: &[bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("terrain.shadow_depth.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_shadow",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_shadow",
+                targets: &[], // No color output - depth only
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 2, // Constant bias to prevent shadow acne
+                    slope_scale: 2.0, // Slope-scaled bias
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        })
+    }
+
+    /// Render shadow depth passes for all cascades
+    /// Returns a shadow bind group with real shadow textures
+    fn render_shadow_depth_passes(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        heightmap_view: &wgpu::TextureView,
+        terrain_spacing: f32,
+        height_exag: f32,
+        height_min: f32,
+        height_max: f32,
+        view_matrix: glam::Mat4,
+        proj_matrix: glam::Mat4,
+        sun_direction: glam::Vec3,
+        near_plane: f32,
+        far_plane: f32,
+        height_curve: [f32; 4], // (mode, strength, power, _pad)
+    ) -> wgpu::BindGroup {
+        // For terrain shadows, we compute cascades differently than standard CSM.
+        // The terrain is a 1x1 unit square in world XY, so we create a single cascade
+        // that covers this terrain extent from the light's perspective.
+        
+        // Light direction (normalized)
+        let light_dir = sun_direction.normalize();
+        
+        // Compute light view matrix (looking down the light direction)
+        // IMPORTANT: Terrain uses Z-up coordinate system (world_position.z = height)
+        // So light_up should be Z, unless light is nearly vertical along Z
+        let light_up = if light_dir.z.abs() > 0.99 {
+            glam::Vec3::Y // Use Y as up if light is nearly vertical along Z
+        } else {
+            glam::Vec3::Z // Z-up to match terrain coordinate system
+        };
+        
+        // Terrain bounds in shadow-normalized space
+        // CRITICAL: For shadow mapping to work, XY and Z scales must be comparable.
+        // The terrain's raw height range (height_min to height_max) is thousands of meters,
+        // while XY is only [-0.5, 0.5]. This scale mismatch prevents self-shadowing.
+        // 
+        // Solution: Normalize heights to match XY scale for shadow calculations.
+        // The shadow depth shader must also use this same normalization.
+        let half_spacing = terrain_spacing * 0.5;
+        let height_range = (height_max - height_min).max(1.0);
+        
+        // Normalize terrain Z to [0, 1] range, then scale by height_exag for visual effect
+        // This gives Z range of [0, height_exag], which is comparable to XY range [-0.5, 0.5]
+        let shadow_z_min = 0.0;
+        let shadow_z_max = height_exag; // Height range normalized to [0, h_exag]
+        
+        let terrain_min = glam::Vec3::new(-half_spacing, -half_spacing, shadow_z_min);
+        let terrain_max = glam::Vec3::new(half_spacing, half_spacing, shadow_z_max);
+        let terrain_center = (terrain_min + terrain_max) * 0.5;
+        
+        // Position the light camera far behind the terrain CENTROID along the light direction
+        // This ensures the terrain is in front of the camera, centered in view
+        let terrain_diagonal = (terrain_max - terrain_min).length();
+        let light_camera_distance = terrain_diagonal * 2.0;
+        let light_camera_pos = terrain_center - light_dir * light_camera_distance;
+        let light_view = glam::Mat4::look_to_rh(light_camera_pos, light_dir, light_up);
+        
+        // Transform terrain corners to light space and compute AABB
+        let corners = [
+            glam::Vec3::new(terrain_min.x, terrain_min.y, terrain_min.z),
+            glam::Vec3::new(terrain_max.x, terrain_min.y, terrain_min.z),
+            glam::Vec3::new(terrain_min.x, terrain_max.y, terrain_min.z),
+            glam::Vec3::new(terrain_max.x, terrain_max.y, terrain_min.z),
+            glam::Vec3::new(terrain_min.x, terrain_min.y, terrain_max.z),
+            glam::Vec3::new(terrain_max.x, terrain_min.y, terrain_max.z),
+            glam::Vec3::new(terrain_min.x, terrain_max.y, terrain_max.z),
+            glam::Vec3::new(terrain_max.x, terrain_max.y, terrain_max.z),
+        ];
+        
+        let mut light_min = glam::Vec3::splat(f32::MAX);
+        let mut light_max = glam::Vec3::splat(f32::MIN);
+        for corner in &corners {
+            let light_pos = (light_view * corner.extend(1.0)).truncate();
+            light_min = light_min.min(light_pos);
+            light_max = light_max.max(light_pos);
+        }
+        
+        // Expand bounds significantly to ensure entire terrain is covered
+        // Use larger padding to account for perspective distortion in camera view
+        let padding = terrain_spacing * 0.3;
+        light_min -= glam::Vec3::splat(padding);
+        light_max += glam::Vec3::splat(padding);
+        
+        // Create orthographic projection covering terrain AABB
+        // Note: In RH view space, objects in front of camera have NEGATIVE Z
+        // orthographic_rh expects positive near/far distances from the camera
+        // So we negate and swap to get proper near/far
+        let z_padding = terrain_spacing * 0.1;
+        let proj_near = -light_max.z - z_padding;  // Negate and swap (closer = larger negative Z)
+        let proj_far = -light_min.z + z_padding;   // Farther = smaller negative Z
+        
+        let light_proj = glam::Mat4::orthographic_rh(
+            light_min.x, light_max.x,
+            light_min.y, light_max.y,
+            proj_near,
+            proj_far,
+        );
+        
+        // Update CsmRenderer uniforms directly for terrain shadow
+        let light_view_proj = light_proj * light_view;
+        
+        self.csm_renderer.uniforms.light_direction = [light_dir.x, light_dir.y, light_dir.z, 0.0];
+        self.csm_renderer.uniforms.light_view = light_view.to_cols_array();
+        self.csm_renderer.uniforms.cascade_count = 1; // Single cascade for terrain
+        self.csm_renderer.uniforms.cascades[0].light_projection = light_proj.to_cols_array();
+        self.csm_renderer.uniforms.cascades[0].light_view_proj = light_view_proj.to_cols_array_2d();
+        self.csm_renderer.uniforms.cascades[0].near_distance = 0.0;
+        self.csm_renderer.uniforms.cascades[0].far_distance = far_plane;
+        self.csm_renderer.uniforms.cascades[0].texel_size = 
+            (light_max.x - light_min.x) / self.csm_renderer.config.shadow_map_size as f32;
+        
+        // Upload CSM uniforms
+        self.csm_renderer.upload_uniforms(&self.queue);
+
+        // Shadow grid resolution (vertices per side)
+        // Higher resolution = more accurate terrain shadows at cost of performance
+        const SHADOW_GRID_RES: u32 = 1024;
+        let vertices_per_cascade = (SHADOW_GRID_RES - 1) * (SHADOW_GRID_RES - 1) * 6; // 2 triangles per quad, 3 vertices each
+
+        // For terrain, we only use cascade 0 (single shadow map covering entire terrain)
+        // Note: uniforms.cascade_count is set to 1 above
+        for cascade_idx in 0..1 {
+            let cascade = &self.csm_renderer.uniforms.cascades[cascade_idx as usize];
+            
+            // Use the SAME light_view_proj that was stored in the CSM uniforms
+            // This ensures the shadow depth pass uses exactly the same matrix as the main shader
+            // DO NOT recompute - use the pre-stored value directly
+            let stored_light_view_proj = cascade.light_view_proj;
+
+            // Create shadow pass uniforms for this cascade
+            let shadow_uniforms = ShadowPassUniforms {
+                light_view_proj: stored_light_view_proj,
+                terrain_params: [terrain_spacing, height_exag, height_min, height_max],
+                grid_params: [SHADOW_GRID_RES as f32, 0.0, 0.0, 0.0],
+                height_curve,
+            };
+            
+            let shadow_uniform_buffer =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("terrain.shadow.cascade_{}.uniforms", cascade_idx)),
+                        contents: bytemuck::bytes_of(&shadow_uniforms),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+
+            // Create bind group for this cascade pass
+            let shadow_depth_bind_group =
+                self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("terrain.shadow.cascade_{}.bind_group", cascade_idx)),
+                    layout: &self.shadow_depth_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: shadow_uniform_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(heightmap_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                        },
+                    ],
+                });
+
+            // Render shadow depth pass for this cascade
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(&format!("terrain.shadow.cascade_{}.pass", cascade_idx)),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.csm_renderer.shadow_map_views[cascade_idx as usize],
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0), // Clear to far depth
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                pass.set_pipeline(&self.shadow_depth_pipeline);
+                pass.set_bind_group(0, &shadow_depth_bind_group, &[]);
+                pass.draw(0..vertices_per_cascade, 0..1);
+            }
+        }
+
+        // Create shadow bind group for main render pass using real CSM textures
+        self.create_shadow_bind_group()
+    }
+
+    /// Create shadow bind group from CsmRenderer resources for main render pass
+    /// Uses the simpler CsmUniforms struct that the terrain shader expects
+    fn create_shadow_bind_group(&self) -> wgpu::BindGroup {
+        use crate::core::shadow_mapping::{CsmCascadeData, CsmUniforms};
+        
+        // Convert CsmRenderer uniforms to the simpler terrain-compatible format
+        let csm = &self.csm_renderer.uniforms;
+        let terrain_csm_uniforms = CsmUniforms {
+            light_direction: csm.light_direction,
+            light_view: [
+                [csm.light_view[0], csm.light_view[1], csm.light_view[2], csm.light_view[3]],
+                [csm.light_view[4], csm.light_view[5], csm.light_view[6], csm.light_view[7]],
+                [csm.light_view[8], csm.light_view[9], csm.light_view[10], csm.light_view[11]],
+                [csm.light_view[12], csm.light_view[13], csm.light_view[14], csm.light_view[15]],
+            ],
+            cascades: {
+                // Helper to convert [f32; 16] to [[f32; 4]; 4]
+                fn flat_to_2d(arr: &[f32; 16]) -> [[f32; 4]; 4] {
+                    [
+                        [arr[0], arr[1], arr[2], arr[3]],
+                        [arr[4], arr[5], arr[6], arr[7]],
+                        [arr[8], arr[9], arr[10], arr[11]],
+                        [arr[12], arr[13], arr[14], arr[15]],
+                    ]
+                }
+                [
+                    CsmCascadeData {
+                        light_projection: flat_to_2d(&csm.cascades[0].light_projection),
+                        light_view_proj: csm.cascades[0].light_view_proj,
+                        near_distance: csm.cascades[0].near_distance,
+                        far_distance: csm.cascades[0].far_distance,
+                        texel_size: csm.cascades[0].texel_size,
+                        _padding: 0.0,
+                    },
+                    CsmCascadeData {
+                        light_projection: flat_to_2d(&csm.cascades[1].light_projection),
+                        light_view_proj: csm.cascades[1].light_view_proj,
+                        near_distance: csm.cascades[1].near_distance,
+                        far_distance: csm.cascades[1].far_distance,
+                        texel_size: csm.cascades[1].texel_size,
+                        _padding: 0.0,
+                    },
+                    CsmCascadeData {
+                        light_projection: flat_to_2d(&csm.cascades[2].light_projection),
+                        light_view_proj: csm.cascades[2].light_view_proj,
+                        near_distance: csm.cascades[2].near_distance,
+                        far_distance: csm.cascades[2].far_distance,
+                        texel_size: csm.cascades[2].texel_size,
+                        _padding: 0.0,
+                    },
+                    CsmCascadeData {
+                        light_projection: flat_to_2d(&csm.cascades[3].light_projection),
+                        light_view_proj: csm.cascades[3].light_view_proj,
+                        near_distance: csm.cascades[3].near_distance,
+                        far_distance: csm.cascades[3].far_distance,
+                        texel_size: csm.cascades[3].texel_size,
+                        _padding: 0.0,
+                    },
+                ]
+            },
+            cascade_count: csm.cascade_count,
+            pcf_kernel_size: csm.pcf_kernel_size,
+            depth_bias: csm.depth_bias,
+            slope_bias: csm.slope_bias,
+            shadow_map_size: csm.shadow_map_size,
+            debug_mode: csm.debug_mode,
+            peter_panning_offset: csm.peter_panning_offset,
+            _padding: 0.0,
+        };
+        
+        // Create buffer with the terrain-compatible uniforms
+        let terrain_csm_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain.shadow.csm_uniforms"),
+            contents: bytemuck::bytes_of(&terrain_csm_uniforms),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        
+        // Create full shadow texture view (array view for all cascades)
+        let shadow_texture_view = self.csm_renderer.shadow_texture_view();
+
+        // Get or create moment texture view (use noop fallback if EVSM disabled)
+        let moment_texture_view = self.csm_renderer.moment_texture_view();
+        let moment_view_ref = moment_texture_view
+            .as_ref()
+            .unwrap_or(&self.noop_shadow.moment_maps_view);
+
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain.shadow.main_bind_group"),
+            layout: &self.shadow_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: terrain_csm_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&shadow_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.csm_renderer.shadow_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(moment_view_ref),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.noop_shadow.moment_sampler),
+                },
+            ],
+        })
+    }
+
     fn map_filter_mode(mode: FilterModeNative) -> wgpu::FilterMode {
         match mode {
             FilterModeNative::Linear => wgpu::FilterMode::Linear,
@@ -1280,7 +1773,7 @@ impl TerrainScene {
 
     /// Internal render method
     pub(crate) fn render_internal(
-        &self,
+        &mut self,
         material_set: &crate::material_set::MaterialSet,
         env_maps: &crate::ibl_wrapper::IBL,
         params: &crate::terrain_render_params::TerrainRenderParams,
@@ -1699,12 +2192,111 @@ impl TerrainScene {
             readback_sample_count: 1, // internal_texture is always sample_count=1
         };
         assert_msaa_invariants(&invariants, self.color_format)?;
+        
+        // Drop pipeline_cache lock before shadow rendering (needs &mut self)
+        drop(pipeline_cache);
 
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("terrain.encoder"),
             });
+
+        // ──────────────────────────────────────────────────────────────────────────
+        // P1-Shadow: Render shadow depth passes for terrain self-shadowing
+        // ──────────────────────────────────────────────────────────────────────────
+        // Compute camera matrices for shadow cascade calculations
+        let phi_rad = params.cam_phi_deg.to_radians();
+        let theta_rad = params.cam_theta_deg.to_radians();
+        let eye_x = params.cam_target[0] + params.cam_radius * theta_rad.sin() * phi_rad.cos();
+        let eye_y = params.cam_target[1] + params.cam_radius * theta_rad.cos();
+        let eye_z = params.cam_target[2] + params.cam_radius * theta_rad.sin() * phi_rad.sin();
+        let eye = glam::Vec3::new(eye_x, eye_y, eye_z);
+        let target = glam::Vec3::from_array(params.cam_target);
+        let up = glam::Vec3::Y;
+        let view_matrix = glam::Mat4::look_at_rh(eye, target, up);
+        let aspect = params.size_px.0 as f32 / params.size_px.1 as f32;
+        let proj_matrix = glam::Mat4::perspective_rh(
+            params.fov_y_deg.to_radians(),
+            aspect,
+            params.clip.0,
+            params.clip.1,
+        );
+
+        // Get sun direction (negate for light-to-surface direction)
+        let sun_direction = glam::Vec3::new(
+            -decoded.light.direction[0],
+            -decoded.light.direction[1],
+            -decoded.light.direction[2],
+        );
+
+        // Terrain parameters for shadow rendering
+        // CRITICAL: Shadow shader terrain extent must match main shader exactly!
+        // Main shader: world_xy = (uv - 0.5) * spacing where spacing = u_terrain.spacing_h_exag.x = 1.0
+        // So main terrain is a 1x1 unit square centered at origin (-0.5 to 0.5)
+        let terrain_spacing = 1.0; // Must match main shader!
+        let height_exag = params.z_scale;
+        // Get height bounds from clamp settings
+        let height_min = decoded.clamp.height_range.0;
+        let height_max = decoded.clamp.height_range.1;
+
+        // P1-Shadow CLI: Update CSM renderer with shadow settings from params
+        // These are dynamic settings that can change per-render
+        let shadow_settings = &decoded.shadow;
+        self.csm_renderer.config.depth_bias = shadow_settings.depth_bias;
+        self.csm_renderer.config.slope_bias = shadow_settings.slope_scale_bias;
+        self.csm_renderer.config.peter_panning_offset = shadow_settings.normal_bias;
+        self.csm_renderer.config.max_shadow_distance = shadow_settings.max_distance;
+        
+        log::info!(
+            target: "terrain.shadow",
+            "Shadow CLI params: enabled={}, technique={}, cascades={}, resolution={}, max_dist={:.0}",
+            shadow_settings.enabled, shadow_settings.technique, shadow_settings.cascades,
+            shadow_settings.resolution, shadow_settings.max_distance
+        );
+        log::info!(
+            target: "terrain.shadow",
+            "Shadow bias: depth={:.6}, slope={:.6}, normal={:.6}, softness={:.4}",
+            shadow_settings.depth_bias, shadow_settings.slope_scale_bias,
+            shadow_settings.normal_bias, shadow_settings.softness
+        );
+
+        // Get height curve parameters for shadow depth pass
+        let height_curve_mode_f = match params.height_curve_mode.as_str() {
+            "linear" => 0.0,
+            "pow" => 1.0,
+            "smoothstep" => 2.0,
+            "lut" => 3.0, // Note: LUT not supported in shadow pass, falls back to linear
+            _ => 0.0,
+        };
+        let height_curve = [
+            height_curve_mode_f,
+            params.height_curve_strength.clamp(0.0, 1.0),
+            params.height_curve_power.max(0.01),
+            0.0,
+        ];
+
+        // Render shadow depth passes and get shadow bind group
+        let shadow_bind_group = self.render_shadow_depth_passes(
+            &mut encoder,
+            &heightmap_view,
+            terrain_spacing,
+            height_exag,
+            height_min,
+            height_max,
+            view_matrix,
+            proj_matrix,
+            sun_direction,
+            params.clip.0,
+            params.clip.1.min(self.csm_renderer.config.max_shadow_distance),
+            height_curve,
+        );
+
+        // Re-acquire pipeline lock for main render pass
+        let pipeline_cache = self
+            .pipeline
+            .lock()
+            .map_err(|_| anyhow!("TerrainRenderer pipeline mutex poisoned"))?;
 
         {
             let color_view = msaa_view.as_ref().unwrap_or(&internal_view);
@@ -1756,9 +2348,8 @@ impl TerrainScene {
 
                 pass.set_bind_group(2, &ibl_bind_group, &[]);
 
-                // Always bind noop shadow at index 3 (required by pipeline layout)
-                // The pipeline expects "terrain_pbr_pom.shadow_bind_group_layout" at index 3
-                pass.set_bind_group(3, &self.noop_shadow.bind_group, &[]);
+                // P1-Shadow: Bind real shadow bind group at index 3 (with CSM depth maps)
+                pass.set_bind_group(3, &shadow_bind_group, &[]);
 
                 pass.draw(0..3, 0..1);
             }

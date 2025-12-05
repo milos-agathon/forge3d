@@ -18,6 +18,9 @@ use wgpu::{
 pub struct ShadowCascade {
     /// Light-space projection matrix for this cascade
     pub light_projection: [f32; 16],
+    /// Combined light_view_proj matrix (projection * view)
+    /// Pre-computed for efficiency and to ensure consistency with shadow depth pass
+    pub light_view_proj: [[f32; 4]; 4],
     /// Near plane distance in view space
     pub near_distance: f32,
     /// Far plane distance in view space
@@ -30,9 +33,10 @@ pub struct ShadowCascade {
 
 impl ShadowCascade {
     /// Create a new shadow cascade
-    pub fn new(near: f32, far: f32, light_projection: Mat4, texel_size: f32) -> Self {
+    pub fn new(near: f32, far: f32, light_projection: Mat4, light_view_proj: Mat4, texel_size: f32) -> Self {
         Self {
             light_projection: light_projection.to_cols_array(),
+            light_view_proj: light_view_proj.to_cols_array_2d(),
             near_distance: near,
             far_distance: far,
             texel_size,
@@ -99,6 +103,7 @@ impl Default for CsmUniforms {
             light_view: Mat4::IDENTITY.to_cols_array(),
             cascades: [ShadowCascade {
                 light_projection: Mat4::IDENTITY.to_cols_array(),
+                light_view_proj: Mat4::IDENTITY.to_cols_array_2d(),
                 near_distance: 0.0,
                 far_distance: 100.0,
                 texel_size: 0.1,
@@ -457,10 +462,13 @@ impl CsmRenderer {
                 -max_bounds.z - 50.0, // Extended near plane to catch occluders
                 -min_bounds.z,
             );
+            
+            // Compute combined view-projection matrix
+            let light_view_proj = light_projection * light_view;
 
             // Create cascade
             self.uniforms.cascades[i] =
-                ShadowCascade::new(near_dist, far_dist, light_projection, world_units_per_texel);
+                ShadowCascade::new(near_dist, far_dist, light_projection, light_view_proj, world_units_per_texel);
         }
     }
 

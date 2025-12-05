@@ -317,6 +317,7 @@ def _build_params(
     height_curve_strength: float = 0.0,
     height_curve_power: float = 1.0,
     height_curve_lut=None,
+    shadow_config=None,  # Optional ShadowParams from CLI
 ):
     overlays = [
         f3d.OverlayLayer.from_colormap1d(
@@ -351,15 +352,15 @@ def _build_params(
         height_curve_power=height_curve_power,
         height_curve_lut=height_curve_lut,
         shadows=TerrainShadowSettings(
-            enabled=True,
-            technique="PCSS",
-            resolution=4096,
-            cascades=3,
-            max_distance=4000.0,
-            softness=1.5,
+            enabled=shadow_config.enabled if shadow_config else True,
+            technique=shadow_config.technique.upper() if shadow_config else "PCSS",
+            resolution=shadow_config.map_size if shadow_config else 4096,
+            cascades=shadow_config.cascades if shadow_config else 3,
+            max_distance=4000.0,  # TODO: add to ShadowParams
+            softness=shadow_config.light_size if shadow_config else 1.5,
             intensity=0.8,
             slope_scale_bias=0.5,
-            depth_bias=0.002,
+            depth_bias=shadow_config.moment_bias if shadow_config else 0.002,
             normal_bias=0.5,
             min_variance=1e-4,
             light_bleed_reduction=0.5,
@@ -661,6 +662,7 @@ def render_sunrise_to_noon_sequence(
                 ibl_enabled=ibl_enabled,
                 light_azimuth_deg=azimuth_deg,
                 light_elevation_deg=elev,
+                shadow_config=cfg.shadows,  # Pass shadow config from renderer config
             )
 
             # Native binding currently expects a non-None IBL handle; turning IBL on/off
@@ -870,6 +872,7 @@ def run(args: Any) -> int:
         height_curve_strength=float(args.height_curve_strength),
         height_curve_power=float(args.height_curve_power),
         height_curve_lut=height_curve_lut,
+        shadow_config=renderer_config.shadows,  # Pass CLI shadow config
     )
 
     renderer = f3d.TerrainRenderer(sess)

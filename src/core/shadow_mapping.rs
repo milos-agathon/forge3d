@@ -91,8 +91,11 @@ pub struct CsmUniforms {
     /// Debug visualization mode
     pub debug_mode: u32,
 
+    /// Peter-panning prevention offset
+    pub peter_panning_offset: f32,
+
     /// Padding for alignment
-    pub _padding: [f32; 2],
+    pub _padding: f32,
 }
 
 /// GPU representation of a shadow cascade
@@ -101,6 +104,10 @@ pub struct CsmUniforms {
 pub struct CsmCascadeData {
     /// Light-space projection matrix
     pub light_projection: [[f32; 4]; 4],
+
+    /// Combined light_view_proj matrix (projection * view)
+    /// Pre-computed for efficiency and to ensure consistency with shadow depth pass
+    pub light_view_proj: [[f32; 4]; 4],
 
     /// Near plane distance
     pub near_distance: f32,
@@ -295,6 +302,7 @@ impl ShadowMapping {
             // Convert cascades to GPU format
             let mut cascade_data = [CsmCascadeData {
                 light_projection: [[0.0; 4]; 4],
+                light_view_proj: [[0.0; 4]; 4],
                 near_distance: 0.0,
                 far_distance: 0.0,
                 texel_size: 0.0,
@@ -303,8 +311,10 @@ impl ShadowMapping {
 
             for (i, cascade) in self.cascades.iter().enumerate() {
                 if i < 4 {
+                    let light_view_proj = cascade.light_projection * self.light_view_matrix;
                     cascade_data[i] = CsmCascadeData {
                         light_projection: cascade.light_projection.to_cols_array_2d(),
+                        light_view_proj: light_view_proj.to_cols_array_2d(),
                         near_distance: cascade.near_distance,
                         far_distance: cascade.far_distance,
                         texel_size: cascade.texel_size,
@@ -329,7 +339,8 @@ impl ShadowMapping {
                 slope_bias: self.config.slope_bias,
                 shadow_map_size: self.config.shadow_map_size as f32,
                 debug_mode: if self.config.debug_mode { 1 } else { 0 },
-                _padding: [0.0; 2],
+                peter_panning_offset: 0.001, // Default peter-panning offset
+                _padding: 0.0,
             };
 
             queue.write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));

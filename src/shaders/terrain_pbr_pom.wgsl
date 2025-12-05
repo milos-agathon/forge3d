@@ -41,9 +41,19 @@
 const TERRAIN_USE_BRDF_DISPATCH: bool = false;
 const TERRAIN_BRDF_MODEL: u32 = BRDF_COOK_TORRANCE_GGX;  // Used when TERRAIN_USE_BRDF_DISPATCH = true
 
-// P3-10: Optional shadow sampling flag (default: false to avoid regressions)
-// Set to true to enable CSM shadow visibility on terrain direct lighting
-const TERRAIN_USE_SHADOWS: bool = false;
+// P3-10: CSM shadow sampling for terrain direct lighting
+// Enabled: terrain receives shadows from CSM depth maps
+const TERRAIN_USE_SHADOWS: bool = true;
+
+// P1-Shadow: Shadow intensity tuning
+// SHADOW_MIN: minimum brightness in fully shadowed areas (0.0 = pitch black, 0.3 = soft shadows)
+// SHADOW_IBL_FACTOR: how much IBL diffuse is reduced in shadow (0.0 = no effect, 1.0 = full shadow)
+const SHADOW_MIN: f32 = 0.01;        // Shadows darken to 1% of direct light (very dark)
+const SHADOW_IBL_FACTOR: f32 = 0.9;  // IBL diffuse reduced by 90% in shadow
+
+// P1-Shadow Debug: Set to true to visualize shadow cascade coverage
+// Color codes terrain by which cascade is used: Red=0, Green=1, Blue=2, Yellow=3
+const DEBUG_SHADOW_CASCADES: bool = false;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Debug Mode Constants — "truth serum" diagnostics for water/IBL/PBR
@@ -204,27 +214,32 @@ var<uniform> u_ibl : IblUniforms;
 
 // P3-10: Optional shadow bindings at @group(3) (only used when TERRAIN_USE_SHADOWS = true)
 // These mirror the shadow bindings from shadows.wgsl but at a different group to avoid IBL conflict
-// Shadow cascade data (matches CsmUniforms from shadows.wgsl)
+// Simplified shadow cascade data for terrain
+// Must match Rust struct in crate::core::shadow_mapping::CsmCascadeData
 struct ShadowCascade {
     light_projection: mat4x4<f32>,
+    light_view_proj: mat4x4<f32>,  // Pre-computed projection * view for consistency
     near_distance: f32,
     far_distance: f32,
     texel_size: f32,
     _padding: f32,
 }
 
+// Simplified CsmUniforms for terrain shadow sampling
+// Only contains fields actually used by terrain shadow code
+// Must match Rust struct in crate::core::shadow_mapping::CsmUniforms
 struct CsmUniforms {
-    light_direction: vec4<f32>,
-    light_view: mat4x4<f32>,
-    cascades: array<ShadowCascade, 4>,
-    cascade_count: u32,
-    pcf_kernel_size: u32,
-    technique: u32,
-    debug_mode: u32,
-    depth_bias: f32,
-    slope_bias: f32,
-    peter_panning_offset: f32,
-    cascade_blend_range: f32,
+    light_direction: vec4<f32>,        // 16 bytes, offset 0
+    light_view: mat4x4<f32>,           // 64 bytes, offset 16
+    cascades: array<ShadowCascade, 4>, // 320 bytes, offset 80 (4 * 80)
+    cascade_count: u32,                // 4 bytes, offset 400
+    pcf_kernel_size: u32,              // 4 bytes, offset 404
+    depth_bias: f32,                   // 4 bytes, offset 408
+    slope_bias: f32,                   // 4 bytes, offset 412
+    shadow_map_size: f32,              // 4 bytes, offset 416
+    debug_mode: u32,                   // 4 bytes, offset 420
+    peter_panning_offset: f32,         // 4 bytes, offset 424 (needed by shader)
+    _padding: f32,                     // 4 bytes, offset 428 -> total 432
 }
 
 @group(3) @binding(0)
@@ -264,25 +279,33 @@ fn sample_shadow_pcf_terrain(
 ) -> f32 {
     let cascade = csm_uniforms.cascades[cascade_idx];
     
-    // Transform to light space
-    let light_space_pos = cascade.light_projection * csm_uniforms.light_view * vec4<f32>(world_pos, 1.0);
+    // Transform to light space using pre-computed combined matrix
+    let light_space_pos = cascade.light_view_proj * vec4<f32>(world_pos, 1.0);
     let ndc = light_space_pos.xyz / light_space_pos.w;
     
     // Convert to texture coordinates [0,1]
+    // Note: ndc.x and ndc.y are in [-1, 1], need to map to [0, 1]
+    // For Y, we flip because texture V=0 is at top, but NDC Y=-1 is at bottom
     let shadow_coords = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
+    
+    // glam's orthographic_rh already outputs Z in [0, 1] range for WebGPU
+    // No additional mapping needed - use ndc.z directly
+    let depth_01 = ndc.z;
     
     // Check if outside shadow map bounds
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 || shadow_coords.y < 0.0 || shadow_coords.y > 1.0) {
         return 1.0; // No shadow outside bounds
     }
     
-    // Apply depth bias
+    // Apply depth bias to prevent shadow acne
+    // Combine constant bias with slope-scaled bias for grazing angles
     let light_dir_norm = normalize(csm_uniforms.light_direction.xyz);
     let n_dot_l = max(dot(normal, light_dir_norm), 0.0);
-    let bias = max(csm_uniforms.depth_bias * (1.0 - n_dot_l), csm_uniforms.peter_panning_offset);
-    let compare_depth = ndc.z - bias;
+    let slope_factor = clamp(1.0 - n_dot_l, 0.0, 1.0);
+    let bias = 0.002 + 0.005 * slope_factor;  // Normal bias values
+    let compare_depth = depth_01 - bias;
     
-    // Simple PCF 3x3
+    // PCF shadow sampling (3x3)
     let texel_size = cascade.texel_size;
     var shadow_sum = 0.0;
     for (var y = -1; y <= 1; y = y + 1) {
@@ -303,13 +326,93 @@ fn sample_shadow_pcf_terrain(
     return shadow_sum / 9.0;
 }
 
+/// Normalize world position for shadow calculations
+/// Shadow maps use normalized heights [0, h_exag] to match XY scale [-0.5, 0.5]
+/// This function computes shadow-normalized position by sampling height from heightmap
+/// IMPORTANT: We sample height directly here instead of using interpolated world_pos.z
+/// because the main shader uses a fullscreen triangle (3 vertices) and interpolates
+/// world_position.z, which gives incorrect heights at most fragments.
+fn normalize_for_shadow(world_xy: vec2<f32>, tex_coord: vec2<f32>) -> vec3<f32> {
+    let h_min = u_shading.clamp0.x;
+    let h_max = u_shading.clamp0.y;
+    let h_exag = u_terrain.spacing_h_exag.z;
+    let h_range = max(h_max - h_min, 1e-6);
+    
+    // Sample height directly from heightmap at this fragment's UV
+    // This matches what the shadow depth shader does
+    let h_raw = textureSample(height_tex, height_samp, tex_coord).r;
+    let h_norm = clamp((h_raw - h_min) / h_range, 0.0, 1.0);
+    
+    // Apply height curve (must match shadow depth shader)
+    let h_curved = apply_height_curve01(h_norm);
+    
+    // Compute shadow-normalized Z
+    let shadow_z = h_curved * h_exag;
+    
+    return vec3<f32>(world_xy.x, world_xy.y, shadow_z);
+}
+
 /// Calculate shadow visibility for terrain
-fn calculate_shadow_terrain(world_pos: vec3<f32>, normal: vec3<f32>, view_depth: f32) -> f32 {
+fn calculate_shadow_terrain(world_pos: vec3<f32>, normal: vec3<f32>, view_depth: f32, tex_coord: vec2<f32>) -> f32 {
     // Select appropriate cascade
     let cascade_idx = select_cascade_terrain(view_depth);
     
+    // Normalize world position for shadow lookup (match shadow map's normalized heights)
+    // Pass tex_coord for proper height sampling
+    let shadow_pos = normalize_for_shadow(world_pos.xy, tex_coord);
+    
     // Sample shadow with PCF
-    return sample_shadow_pcf_terrain(world_pos, normal, cascade_idx);
+    return sample_shadow_pcf_terrain(shadow_pos, normal, cascade_idx);
+}
+
+/// Debug: Get cascade color for visualization
+/// Red=cascade 0, Green=cascade 1, Blue=cascade 2, Yellow=cascade 3
+fn get_cascade_debug_color(cascade_idx: u32) -> vec3<f32> {
+    switch cascade_idx {
+        case 0u: { return vec3<f32>(1.0, 0.2, 0.2); } // Red
+        case 1u: { return vec3<f32>(0.2, 1.0, 0.2); } // Green  
+        case 2u: { return vec3<f32>(0.2, 0.2, 1.0); } // Blue
+        case 3u: { return vec3<f32>(1.0, 1.0, 0.2); } // Yellow
+        default: { return vec3<f32>(1.0, 0.0, 1.0); } // Magenta (error)
+    }
+}
+
+/// Debug: Calculate shadow with debug info
+/// Returns (shadow_visibility, cascade_debug_color)
+fn debug_shadow_with_vis(
+    world_pos: vec3<f32>,
+    normal: vec3<f32>,
+    view_depth: f32,
+    tex_coord: vec2<f32>
+) -> vec4<f32> {
+    let cascade_idx = select_cascade_terrain(view_depth);
+    let shadow_pos = normalize_for_shadow(world_pos.xy, tex_coord);
+    let shadow_vis = sample_shadow_pcf_terrain(shadow_pos, normal, cascade_idx);
+    let cascade_color = get_cascade_debug_color(cascade_idx);
+    
+    // Return shadow visibility in w, cascade color in xyz
+    return vec4<f32>(cascade_color, shadow_vis);
+}
+
+/// Debug: Show shadow map UV coordinates
+/// Red = U coordinate, Green = V coordinate, Blue = depth (NDC.z)
+fn debug_shadow_coords(world_pos: vec3<f32>, cascade_idx: u32) -> vec3<f32> {
+    let cascade = csm_uniforms.cascades[cascade_idx];
+    let light_space_pos = cascade.light_view_proj * vec4<f32>(world_pos, 1.0);
+    let ndc = light_space_pos.xyz / light_space_pos.w;
+    
+    // Convert to texture coordinates [0,1]
+    let shadow_u = ndc.x * 0.5 + 0.5;
+    let shadow_v = ndc.y * -0.5 + 0.5;
+    let shadow_depth = ndc.z;
+    
+    // Return as colors: R=U, G=V, B=depth
+    // If R or G is outside [0,1], coordinates are out of shadow map bounds
+    return vec3<f32>(
+        clamp(shadow_u, 0.0, 1.0),
+        clamp(shadow_v, 0.0, 1.0),
+        clamp(shadow_depth, 0.0, 1.0)
+    );
 }
 
 struct VertexInput {
@@ -1371,16 +1474,32 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     lighting = lighting * u_shading.light_params.rgb;
     
     // P3-10: Apply CSM shadow visibility (optional, gated by TERRAIN_USE_SHADOWS)
+    var shadow_debug_color = vec3<f32>(0.0);
+    var shadow_visibility = 1.0;
+    var shadow_factor = 1.0; // Factor for IBL shadow application
     if (TERRAIN_USE_SHADOWS) {
         // Calculate view-space depth for cascade selection
         let view_pos = u_terrain.view * vec4<f32>(input.world_position, 1.0);
         let view_depth = -view_pos.z; // Positive depth in view space
         
-        // Sample shadow visibility (0.0 = full shadow, 1.0 = no shadow)
-        let shadow_visibility = calculate_shadow_terrain(input.world_position, blended_normal, view_depth);
+        if (DEBUG_SHADOW_CASCADES) {
+            // Debug mode: get both shadow visibility and cascade color
+            let shadow_debug = debug_shadow_with_vis(input.world_position, blended_normal, view_depth, input.tex_coord);
+            shadow_debug_color = shadow_debug.xyz;
+            shadow_visibility = shadow_debug.w;
+        } else {
+            // Normal mode: just get shadow visibility
+            shadow_visibility = calculate_shadow_terrain(input.world_position, blended_normal, view_depth, input.tex_coord);
+        }
         
-        // Apply shadow to direct lighting only
-        lighting = lighting * shadow_visibility;
+        // Apply shadow to direct lighting with intensity tuning
+        // shadow_visibility: 0.0 = fully shadowed, 1.0 = fully lit
+        // Map to [SHADOW_MIN, 1.0] for softer shadows that don't go pitch black
+        let direct_shadow = mix(SHADOW_MIN, 1.0, shadow_visibility);
+        lighting = lighting * direct_shadow;
+        
+        // Compute factor for IBL shadow (used below)
+        shadow_factor = mix(1.0 - SHADOW_IBL_FACTOR, 1.0, shadow_visibility);
     } else {
         // Legacy POM-based shadow factor (preserved for backward compatibility)
         if (shadow_enabled && pom_enabled) {
@@ -1420,10 +1539,14 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // Water IBL is pure specular (no diffuse) - this is handled by ibl_albedo = black above
         // The reflection color comes entirely from the environment - no tinting
     }
-    ibl_contrib = ibl_contrib * u_ibl.intensity * ibl_occlusion;
+    // Apply shadow to IBL diffuse (shadowed areas receive less ambient light)
+    // But keep specular unaffected (sky reflections should still be visible)
+    let ibl_diffuse_with_shadow = ibl_split.diffuse * shadow_factor;
+    let ibl_with_shadow = ibl_diffuse_with_shadow + ibl_split.specular;
+    ibl_contrib = ibl_with_shadow * u_ibl.intensity * ibl_occlusion;
     
     // Scale split components by intensity and occlusion for debug output
-    let ibl_diffuse_scaled = ibl_split.diffuse * u_ibl.intensity * ibl_occlusion;
+    let ibl_diffuse_scaled = ibl_split.diffuse * u_ibl.intensity * ibl_occlusion * shadow_factor;
     let ibl_specular_scaled = ibl_split.specular * u_ibl.intensity * ibl_occlusion;
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -1931,6 +2054,68 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             let mode_signal = f32(debug_mode) / 255.0;
             final_color.b = clamp(final_color.b + mode_signal, 0.0, 1.0);
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // P1-Shadow Debug: Cascade Visualization Overlay
+    // ──────────────────────────────────────────────────────────────────────────
+    if (TERRAIN_USE_SHADOWS && DEBUG_SHADOW_CASCADES) {
+        // Calculate view depth for cascade selection
+        let view_pos_dbg = u_terrain.view * vec4<f32>(input.world_position, 1.0);
+        let view_depth_dbg = -view_pos_dbg.z;
+        // Force cascade 0 for debugging - shadow depth pass only renders cascade 0
+        let cascade_idx_dbg = 0u;  // Force cascade 0
+        
+        // Get shadow UV coordinates and NDC using normalized position
+        let shadow_pos_dbg = normalize_for_shadow(input.world_position.xy, input.tex_coord);
+        let cascade_dbg = csm_uniforms.cascades[cascade_idx_dbg];
+        let light_space_pos_dbg = cascade_dbg.light_view_proj * vec4<f32>(shadow_pos_dbg, 1.0);
+        let ndc_dbg = light_space_pos_dbg.xyz / light_space_pos_dbg.w;
+        let shadow_uv_dbg = vec2<f32>(ndc_dbg.x * 0.5 + 0.5, ndc_dbg.y * -0.5 + 0.5);
+        let compare_depth_dbg = ndc_dbg.z;
+        
+        // Sample shadow map depth
+        let sampled_depth_dbg = textureSampleLevel(
+            shadow_maps,
+            moment_sampler,
+            shadow_uv_dbg,
+            i32(cascade_idx_dbg),
+            0.0
+        );
+        
+        // Depth difference: positive = receiver behind shadow map surface (shadow)
+        //                   negative = receiver in front (lit)
+        let depth_diff = compare_depth_dbg - sampled_depth_dbg;
+        
+        // Debug: Find the threshold where shadow comparison switches
+        // Binary search: find depth where compare starts failing
+        var low_d = 0.0;
+        var high_d = 1.0;
+        for (var i = 0; i < 10; i = i + 1) {
+            let mid_d = (low_d + high_d) * 0.5;
+            let result = textureSampleCompare(shadow_maps, shadow_sampler, shadow_uv_dbg, i32(cascade_idx_dbg), mid_d);
+            if (result > 0.5) {
+                low_d = mid_d;  // Passing, shadow map depth is higher than mid
+            } else {
+                high_d = mid_d;  // Failing, shadow map depth is lower than mid
+            }
+        }
+        // low_d is approximately the shadow map depth value
+        // Visualize the actual shadow comparison result
+        // If depths match (diff < 0.1), the shadow comparison should work
+        let shadow_vis = textureSampleCompare(shadow_maps, shadow_sampler, shadow_uv_dbg, i32(cascade_idx_dbg), ndc_dbg.z);
+        
+        // R = shadow map depth (binary search result)
+        // G = main shader depth (expected value)
+        // B = actual shadow comparison result at main shader depth
+        final_color = vec3<f32>(low_d, ndc_dbg.z, shadow_vis);
+        
+        // Debug: Compare ndc.z (after matrix) vs shadow_map_depth
+        // R = ndc.z (main shader's computed depth after matrix transform)
+        // G = shadow_map_depth (what shadow shader wrote)
+        // B = 1.0 if depths within 0.05 of each other, 0.0 otherwise
+        let depth_match = select(0.0, 1.0, abs(ndc_dbg.z - low_d) < 0.05);
+        final_color = vec3<f32>(ndc_dbg.z, low_d, depth_match);
     }
 
     // ──────────────────────────────────────────────────────────────────────────

@@ -66,7 +66,7 @@ class ShadowSettings:
     fade_start: float
 
     def __post_init__(self) -> None:
-        valid = {"PCSS", "ESM", "EVSM", "PCF"}
+        valid = {"PCSS", "ESM", "EVSM", "PCF", "CSM"}
         if self.technique not in valid:
             raise ValueError(f"Invalid technique: {self.technique}")
 
