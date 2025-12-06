@@ -48,12 +48,13 @@ const TERRAIN_USE_SHADOWS: bool = true;
 // P1-Shadow: Shadow intensity tuning
 // SHADOW_MIN: minimum brightness in fully shadowed areas (0.0 = pitch black, 0.3 = soft shadows)
 // SHADOW_IBL_FACTOR: how much IBL diffuse is reduced in shadow (0.0 = no effect, 1.0 = full shadow)
-const SHADOW_MIN: f32 = 0.01;        // Shadows darken to 1% of direct light (very dark)
-const SHADOW_IBL_FACTOR: f32 = 0.9;  // IBL diffuse reduced by 90% in shadow
+const SHADOW_MIN: f32 = 0.15;        // Shadows darken to 15% of direct light (softer, more natural)
+const SHADOW_IBL_FACTOR: f32 = 0.6;  // IBL diffuse reduced by 60% in shadow (allows some sky bounce)
 
 // P1-Shadow Debug: Set to true to visualize shadow cascade coverage
 // Color codes terrain by which cascade is used: Red=0, Green=1, Blue=2, Yellow=3
 const DEBUG_SHADOW_CASCADES: bool = false;
+const DEBUG_SHADOW_RAW: bool = false;  // Show raw shadow visibility as grayscale
 
 // ──────────────────────────────────────────────────────────────────────────
 // Debug Mode Constants — "truth serum" diagnostics for water/IBL/PBR
@@ -2026,7 +2027,8 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             // Regular terrain: ambient + direct + IBL
             let shading_slope = 1.0 - abs(shading_normal.y);
             let ambient_strength = mix(u_shading.clamp1.x, u_shading.clamp1.y, shading_slope);
-            let ambient = albedo * ambient_strength;
+            // Apply shadow to ambient as well - shadowed areas receive less ambient light
+            let ambient = albedo * ambient_strength * shadow_factor;
             let direct_mult = mix(0.65, 1.0, occlusion);
             let direct = lighting * direct_mult;
             shaded = ambient + direct + ibl_contrib;
@@ -2116,6 +2118,22 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // B = 1.0 if depths within 0.05 of each other, 0.0 otherwise
         let depth_match = select(0.0, 1.0, abs(ndc_dbg.z - low_d) < 0.05);
         final_color = vec3<f32>(ndc_dbg.z, low_d, depth_match);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // P1-Shadow Debug: Raw Shadow Visibility
+    // ──────────────────────────────────────────────────────────────────────────
+    if (TERRAIN_USE_SHADOWS && DEBUG_SHADOW_RAW) {
+        // Show raw shadow_visibility as grayscale
+        // Black = fully shadowed (0.0), White = fully lit (1.0)
+        // Red tint = in shadow (visibility < 0.5)
+        if (shadow_visibility < 0.5) {
+            // In shadow - show as red-tinted grayscale
+            final_color = vec3<f32>(shadow_visibility * 2.0, shadow_visibility * 0.5, shadow_visibility * 0.5);
+        } else {
+            // Lit - show as grayscale
+            final_color = vec3<f32>(shadow_visibility, shadow_visibility, shadow_visibility);
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
