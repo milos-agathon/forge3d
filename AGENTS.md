@@ -5,7 +5,7 @@ This document is for **AI coding agents** working inside the `forge3d` repositor
 If you only remember a few things, remember:
 
 - **Rust crate first, Python package second** – Rust `src/` is the rendering engine, Python `python/forge3d/` is a high-level, well-validated facade.
-- **Tests and docs define behavior** – Always consult `tests/` and `docs/` before changing semantics or signatures.
+- **Tests and docs define behavior** – Always consult `tests/` and `docs/` before changing semantics or signatures. Tests must always be written in Python, never in Rust.
 - **Memory, GPU features, and QA are strict** – Don’t ignore the memory budget, feature flags, or acceptance tests.
 
 ## Coding rules

@@ -94,8 +94,8 @@ pub struct CsmUniforms {
     /// Peter-panning prevention offset
     pub peter_panning_offset: f32,
 
-    /// Padding for alignment
-    pub _padding: f32,
+    /// PCSS light radius (optional softness control)
+    pub pcss_light_radius: f32,
 }
 
 /// GPU representation of a shadow cascade
@@ -306,7 +306,7 @@ impl ShadowMapping {
                 near_distance: 0.0,
                 far_distance: 0.0,
                 texel_size: 0.0,
-                _padding: 0.0,
+            _padding: 0.0,
             }; 4];
 
             for (i, cascade) in self.cascades.iter().enumerate() {
@@ -340,7 +340,7 @@ impl ShadowMapping {
                 shadow_map_size: self.config.shadow_map_size as f32,
                 debug_mode: if self.config.debug_mode { 1 } else { 0 },
                 peter_panning_offset: 0.001, // Default peter-panning offset
-                _padding: 0.0,
+                pcss_light_radius: 0.0,
             };
 
             queue.write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));

@@ -244,3 +244,4 @@ In your final response to me, you MUST output:
 No extra commentary. No tables. No “should”. Only factual statements and paths.
 
 ---
+you must fully read AGENTS.md to get familiar with my codebase rules. Then you must fully read docs\plan.md and fully implement Phase P1. After every edit you make, immediately run the code. If the output doesn't meet the expectations: keep iterating (edit → run tests) until you meet them fully. Do not stop early. Do not claim success without a green test run. Do not stop until you are confident that your results meet the expectations.

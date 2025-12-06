@@ -46,17 +46,18 @@ pub struct LineRenderer {
 }
 
 /// Line rendering uniforms with H9 caps/joins support
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct LineUniform {
     transform: [[f32; 4]; 4], // View-projection matrix
     stroke_color: [f32; 4],   // RGBA stroke color
     stroke_width: f32,        // Line width in world units
+    _pad0: f32,               // Align viewport_size to 8-byte boundary (std140/std430)
     viewport_size: [f32; 2],  // Viewport dimensions for AA
     miter_limit: f32,         // H9: Miter limit for joins
     cap_style: u32,           // H9: LineCap as u32
     join_style: u32,          // H9: LineJoin as u32
-    _pad: [f32; 2],           // Alignment padding
+    _pad1: [f32; 5],          // Tail padding to reach 128-byte std140 size
 }
 
 /// Line segment instance data for GPU expansion
@@ -404,7 +405,13 @@ impl LineRenderer {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
@@ -531,11 +538,12 @@ impl LineRenderer {
                 transform: *transform,
                 stroke_color: [1.0, 1.0, 1.0, 1.0],
                 stroke_width: 1.0,
+                _pad0: 0.0,
                 viewport_size,
                 miter_limit: 4.0,
                 cap_style: LineCap::Butt as u32,
                 join_style: LineJoin::Miter as u32,
-                _pad: [0.0; 2],
+                _pad1: [0.0; 5],
             };
             queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
 
@@ -569,11 +577,12 @@ impl LineRenderer {
                 transform: *transform,
                 stroke_color: [1.0, 1.0, 1.0, 1.0],
                 stroke_width: 1.0,
+                _pad0: 0.0,
                 viewport_size,
                 miter_limit,
                 cap_style: cap_style as u32,
                 join_style: join_style as u32,
-                _pad: [0.0; 2],
+                _pad1: [0.0; 5],
             };
             queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
 
@@ -603,11 +612,12 @@ impl LineRenderer {
                 transform: *transform,
                 stroke_color: [1.0, 1.0, 1.0, 1.0], // Default white, overridden per-instance
                 stroke_width: 1.0,
+                _pad0: 0.0,
                 viewport_size,
                 miter_limit,
                 cap_style: cap_style as u32,
                 join_style: join_style as u32,
-                _pad: [0.0; 2],
+                _pad1: [0.0; 5],
             };
 
             queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));

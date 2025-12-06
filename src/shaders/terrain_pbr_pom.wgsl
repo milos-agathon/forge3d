@@ -41,9 +41,10 @@
 const TERRAIN_USE_BRDF_DISPATCH: bool = false;
 const TERRAIN_BRDF_MODEL: u32 = BRDF_COOK_TORRANCE_GGX;  // Used when TERRAIN_USE_BRDF_DISPATCH = true
 
-// P3-10: CSM shadow sampling for terrain direct lighting
-// Enabled: terrain receives shadows from CSM depth maps
-const TERRAIN_USE_SHADOWS: bool = true;
+// P3-10/P1: CSM shadow sampling for terrain direct lighting
+// Single source of truth for enabling terrain shadows
+const TERRAIN_SHADOWS_ENABLED: bool = true;
+const TERRAIN_USE_SHADOWS: bool = TERRAIN_SHADOWS_ENABLED;
 
 // P1-Shadow: Shadow intensity tuning
 // SHADOW_MIN: minimum brightness in fully shadowed areas (0.0 = pitch black, 0.3 = soft shadows)
@@ -53,8 +54,8 @@ const SHADOW_IBL_FACTOR: f32 = 0.6;  // IBL diffuse reduced by 60% in shadow (al
 
 // P1-Shadow Debug: Set to true to visualize shadow cascade coverage
 // Color codes terrain by which cascade is used: Red=0, Green=1, Blue=2, Yellow=3
-const DEBUG_SHADOW_CASCADES: bool = false;
-const DEBUG_SHADOW_RAW: bool = false;  // Show raw shadow visibility as grayscale
+override DEBUG_SHADOW_CASCADES: bool = false;
+override DEBUG_SHADOW_RAW: bool = false;  // Show raw shadow visibility as grayscale
 
 // ──────────────────────────────────────────────────────────────────────────
 // Debug Mode Constants — "truth serum" diagnostics for water/IBL/PBR
@@ -240,7 +241,7 @@ struct CsmUniforms {
     shadow_map_size: f32,              // 4 bytes, offset 416
     debug_mode: u32,                   // 4 bytes, offset 420
     peter_panning_offset: f32,         // 4 bytes, offset 424 (needed by shader)
-    _padding: f32,                     // 4 bytes, offset 428 -> total 432
+    pcss_light_radius: f32,            // 4 bytes, offset 428 -> total 432
 }
 
 @group(3) @binding(0)
@@ -303,14 +304,18 @@ fn sample_shadow_pcf_terrain(
     let light_dir_norm = normalize(csm_uniforms.light_direction.xyz);
     let n_dot_l = max(dot(normal, light_dir_norm), 0.0);
     let slope_factor = clamp(1.0 - n_dot_l, 0.0, 1.0);
-    let bias = 0.002 + 0.005 * slope_factor;  // Normal bias values
+    let bias = csm_uniforms.depth_bias
+        + csm_uniforms.slope_bias * slope_factor
+        + csm_uniforms.peter_panning_offset;
     let compare_depth = depth_01 - bias;
     
-    // PCF shadow sampling (3x3)
-    let texel_size = cascade.texel_size;
+    // PCF/PCSS shadow sampling (kernel size driven by uniforms)
+    let kernel_size = i32(max(csm_uniforms.pcf_kernel_size, 1u));
+    let radius = kernel_size / 2;
+    let texel_size = cascade.texel_size * max(csm_uniforms.pcss_light_radius, 1.0);
     var shadow_sum = 0.0;
-    for (var y = -1; y <= 1; y = y + 1) {
-        for (var x = -1; x <= 1; x = x + 1) {
+    for (var y = -radius; y <= radius; y = y + 1) {
+        for (var x = -radius; x <= radius; x = x + 1) {
             let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
             let sample_coords = shadow_coords + offset;
             let depth_sample = textureSampleCompare(
@@ -323,8 +328,9 @@ fn sample_shadow_pcf_terrain(
             shadow_sum = shadow_sum + depth_sample;
         }
     }
-    
-    return shadow_sum / 9.0;
+
+    let kernel_area = f32(kernel_size * kernel_size);
+    return shadow_sum / kernel_area;
 }
 
 /// Normalize world position for shadow calculations

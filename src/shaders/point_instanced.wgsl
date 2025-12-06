@@ -121,8 +121,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // Fixed light direction
         let L = normalize(vec3<f32>(0.5, 0.5, 1.0));
         let diff = max(0.0, dot(n, L));
-        color.rgb = color.rgb * (0.3 + 0.7 * diff);
-        color.a = in.color.a;
+        let lit = color.rgb * (0.3 + 0.7 * diff);
+        color = vec4<f32>(lit, in.color.a);
     } else if (uniforms.atlas_size.x > 1.0 && uniforms.shape_mode == 4u) {
         // Sample from texture atlas  
         let atlas_color = textureSample(atlas_texture, atlas_sampler, in.uv);

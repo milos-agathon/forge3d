@@ -55,7 +55,7 @@ fn get_global_config() -> (u32, f32) {
 }
 
 /// Point rendering uniforms with H20,H21,H22 enhancements
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct PointUniform {
     transform: [[f32; 4]; 4],   // View-projection matrix
@@ -64,6 +64,7 @@ struct PointUniform {
     debug_mode: u32,            // H20: Debug rendering flags
     atlas_size: [f32; 2],       // H21: Texture atlas dimensions
     enable_clip_w_scaling: u32, // H22: Enable clip.w aware sizing
+    _pad0: f32,                 // Align depth_range to 8-byte boundary (std140/std430)
     depth_range: [f32; 2],      // H22: Near/far planes for clip.w scaling
     shape_mode: u32,            // H2: shape/material mode (0=circle,4=texture,5=sphere impostor)
     lod_threshold: f32,         // H2: pixel-size threshold for LOD
@@ -484,7 +485,13 @@ impl PointRenderer {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
@@ -731,6 +738,7 @@ impl PointRenderer {
                 debug_mode: self.debug_flags.to_bitfield(),
                 atlas_size,
                 enable_clip_w_scaling: self.enable_clip_w_scaling as u32,
+                _pad0: 0.0,
                 depth_range: [self.depth_range.0, self.depth_range.1],
                 shape_mode: self.shape_mode,
                 lod_threshold: self.lod_threshold,
@@ -771,6 +779,7 @@ impl PointRenderer {
                 debug_mode: self.debug_flags.to_bitfield(),
                 atlas_size,
                 enable_clip_w_scaling: self.enable_clip_w_scaling as u32,
+                _pad0: 0.0,
                 depth_range: [self.depth_range.0, self.depth_range.1],
                 shape_mode: self.shape_mode,
                 lod_threshold: self.lod_threshold,
@@ -816,6 +825,7 @@ impl PointRenderer {
                 debug_mode: self.debug_flags.to_bitfield(), // H20
                 atlas_size,                                 // H21
                 enable_clip_w_scaling: self.enable_clip_w_scaling as u32, // H22
+                _pad0: 0.0,
                 depth_range: [self.depth_range.0, self.depth_range.1], // H22
                 shape_mode: self.shape_mode,
                 lod_threshold: self.lod_threshold,

@@ -58,6 +58,7 @@ pub struct TerrainScene {
     shadow_depth_pipeline: wgpu::RenderPipeline,
     shadow_depth_bind_group_layout: wgpu::BindGroupLayout,
     shadow_bind_group_layout: wgpu::BindGroupLayout,
+    shadow_pcss_radius: f32,
     // P0-03: Config plumbing (no shader/pipeline behavior changes)
     #[cfg(feature = "enable-renderer-config")]
     config: Arc<Mutex<crate::render::params::RendererConfig>>,
@@ -168,6 +169,8 @@ struct PipelineCache {
     sample_count: u32,
     pipeline: wgpu::RenderPipeline,
 }
+
+const TERRAIN_DEFAULT_CASCADE_SPLITS: [f32; 4] = [50.0, 200.0, 800.0, 3000.0];
 
 const MATERIAL_LAYER_CAPACITY: usize = 4;
 
@@ -901,6 +904,7 @@ impl TerrainScene {
             shadow_depth_pipeline,
             shadow_depth_bind_group_layout,
             shadow_bind_group_layout,
+            shadow_pcss_radius: 0.0,
             // P0-03: Initialize with default config (no behavior changes)
             #[cfg(feature = "enable-renderer-config")]
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
@@ -1018,7 +1022,7 @@ impl TerrainScene {
             shadow_map_size: 1.0,
             debug_mode: 0,
             peter_panning_offset: 0.0,
-            _padding: 0.0,
+            pcss_light_radius: 0.0,
         };
         let csm_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain.noop_shadow.csm_uniforms"),
@@ -1546,20 +1550,63 @@ impl TerrainScene {
             proj_near,
             proj_far,
         );
-        
+
+        // Determine cascade count and splits (fallback to linear if missing)
+        let mut cascade_count = self
+            .csm_renderer
+            .config
+            .cascade_count
+            .max(1)
+            .min(self.csm_renderer.shadow_map_views.len() as u32);
+        let splits = if self
+            .csm_renderer
+            .config
+            .cascade_splits
+            .len()
+            >= cascade_count as usize + 1
+        {
+            self.csm_renderer.config.cascade_splits.clone()
+        } else {
+            let mut fallback = Vec::with_capacity(cascade_count as usize + 1);
+            fallback.push(near_plane);
+            let step = (far_plane - near_plane) / cascade_count as f32;
+            for i in 1..=cascade_count {
+                fallback.push((near_plane + step * i as f32).min(far_plane));
+            }
+            fallback
+        };
+        // Guard against degenerate splits
+        if splits.len() < 2 {
+            cascade_count = 1;
+        }
+
         // Update CsmRenderer uniforms directly for terrain shadow
         let light_view_proj = light_proj * light_view;
-        
+        let texel_size = (light_max.x - light_min.x) / self.csm_renderer.config.shadow_map_size as f32;
+
         self.csm_renderer.uniforms.light_direction = [light_dir.x, light_dir.y, light_dir.z, 0.0];
         self.csm_renderer.uniforms.light_view = light_view.to_cols_array();
-        self.csm_renderer.uniforms.cascade_count = 1; // Single cascade for terrain
-        self.csm_renderer.uniforms.cascades[0].light_projection = light_proj.to_cols_array();
-        self.csm_renderer.uniforms.cascades[0].light_view_proj = light_view_proj.to_cols_array_2d();
-        self.csm_renderer.uniforms.cascades[0].near_distance = 0.0;
-        self.csm_renderer.uniforms.cascades[0].far_distance = far_plane;
-        self.csm_renderer.uniforms.cascades[0].texel_size = 
-            (light_max.x - light_min.x) / self.csm_renderer.config.shadow_map_size as f32;
-        
+        self.csm_renderer.uniforms.cascade_count = cascade_count;
+        self.csm_renderer.uniforms.pcf_kernel_size = self.csm_renderer.config.pcf_kernel_size;
+        self.csm_renderer.uniforms.depth_bias = self.csm_renderer.config.depth_bias;
+        self.csm_renderer.uniforms.slope_bias = self.csm_renderer.config.slope_bias;
+        self.csm_renderer.uniforms.shadow_map_size = self.csm_renderer.config.shadow_map_size as f32;
+        self.csm_renderer.uniforms.peter_panning_offset =
+            self.csm_renderer.config.peter_panning_offset;
+
+        for cascade_idx in 0..cascade_count as usize {
+            let near_d = splits.get(cascade_idx).copied().unwrap_or(near_plane);
+            let far_d = splits.get(cascade_idx + 1).copied().unwrap_or(far_plane);
+            self.csm_renderer.uniforms.cascades[cascade_idx].light_projection =
+                light_proj.to_cols_array();
+            self.csm_renderer.uniforms.cascades[cascade_idx].light_view_proj =
+                light_view_proj.to_cols_array_2d();
+            self.csm_renderer.uniforms.cascades[cascade_idx].near_distance = near_d;
+            self.csm_renderer.uniforms.cascades[cascade_idx].far_distance = far_d;
+            self.csm_renderer.uniforms.cascades[cascade_idx].texel_size = texel_size;
+            self.csm_renderer.uniforms.cascades[cascade_idx]._padding = 0.0;
+        }
+
         // Upload CSM uniforms
         self.csm_renderer.upload_uniforms(&self.queue);
 
@@ -1568,9 +1615,8 @@ impl TerrainScene {
         const SHADOW_GRID_RES: u32 = 1024;
         let vertices_per_cascade = (SHADOW_GRID_RES - 1) * (SHADOW_GRID_RES - 1) * 6; // 2 triangles per quad, 3 vertices each
 
-        // For terrain, we only use cascade 0 (single shadow map covering entire terrain)
-        // Note: uniforms.cascade_count is set to 1 above
-        for cascade_idx in 0..1 {
+        // Render each cascade with the same terrain-aligned projection
+        for cascade_idx in 0..cascade_count {
             let cascade = &self.csm_renderer.uniforms.cascades[cascade_idx as usize];
             
             // Use the SAME light_view_proj that was stored in the CSM uniforms
@@ -1709,7 +1755,7 @@ impl TerrainScene {
             shadow_map_size: csm.shadow_map_size,
             debug_mode: csm.debug_mode,
             peter_panning_offset: csm.peter_panning_offset,
-            _padding: 0.0,
+            pcss_light_radius: self.shadow_pcss_radius,
         };
         
         // Create buffer with the terrain-compatible uniforms
@@ -2091,15 +2137,14 @@ impl TerrainScene {
                 .light_buffer
                 .lock()
                 .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
-            // Reuse the same shadow layout (create it here since we don't store it)
-            let shadow_bind_group_layout =
-                Self::create_shadow_bind_group_layout(self.device.as_ref());
+            // Reuse the existing shadow bind group layout to keep pipeline layout
+            // consistent with the bind groups we create elsewhere.
             pipeline_cache.pipeline = Self::create_render_pipeline(
                 self.device.as_ref(),
                 &self.bind_group_layout,
                 light_buffer.bind_group_layout(),
                 &self.ibl_bind_group_layout,
-                &shadow_bind_group_layout,
+                &self.shadow_bind_group_layout,
                 self.color_format,
                 effective_msaa,
             );
@@ -2241,24 +2286,62 @@ impl TerrainScene {
         let height_max = decoded.clamp.height_range.1;
 
         // P1-Shadow CLI: Update CSM renderer with shadow settings from params
-        // These are dynamic settings that can change per-render
         let shadow_settings = &decoded.shadow;
+        self.shadow_pcss_radius = shadow_settings.pcss_light_radius.max(0.0);
+        let cascade_count = shadow_settings
+            .cascades
+            .max(1)
+            .min(self.csm_renderer.shadow_map_views.len() as u32);
+        let shadow_far = params
+            .clip
+            .1
+            .min(shadow_settings.max_distance)
+            .max(params.clip.0);
+
+        let mut cascade_splits: Vec<f32> = Vec::with_capacity(cascade_count as usize + 1);
+        cascade_splits.push(params.clip.0);
+        for split in TERRAIN_DEFAULT_CASCADE_SPLITS
+            .iter()
+            .take(cascade_count.saturating_sub(1) as usize)
+        {
+            let clamped = (*split).min(shadow_far);
+            if clamped > *cascade_splits.last().unwrap_or(&params.clip.0) {
+                cascade_splits.push(clamped);
+            }
+        }
+        while cascade_splits.len() < cascade_count as usize {
+            let last = *cascade_splits.last().unwrap_or(&params.clip.0);
+            let remaining = cascade_count as usize + 1 - cascade_splits.len();
+            let step = (shadow_far - last) / remaining.max(1) as f32;
+            cascade_splits.push((last + step).min(shadow_far));
+        }
+        if cascade_splits.len() == cascade_count as usize {
+            cascade_splits.push(shadow_far);
+        } else {
+            *cascade_splits.last_mut().unwrap() = shadow_far;
+        }
+
+        self.csm_renderer.config.cascade_count = cascade_count;
+        self.csm_renderer.config.cascade_splits = cascade_splits.clone();
+        self.csm_renderer.config.shadow_map_size = shadow_settings.resolution;
+        self.csm_renderer.config.max_shadow_distance = shadow_far;
         self.csm_renderer.config.depth_bias = shadow_settings.depth_bias;
         self.csm_renderer.config.slope_bias = shadow_settings.slope_scale_bias;
         self.csm_renderer.config.peter_panning_offset = shadow_settings.normal_bias;
-        self.csm_renderer.config.max_shadow_distance = shadow_settings.max_distance;
+        self.csm_renderer.config.pcf_kernel_size =
+            if self.shadow_pcss_radius > 0.0 { 3 } else { 1 };
         
         log::info!(
             target: "terrain.shadow",
-            "Shadow CLI params: enabled={}, technique={}, cascades={}, resolution={}, max_dist={:.0}",
+            "Shadow CLI params: enabled={}, technique={}, cascades={}, resolution={}, max_dist={:.0}, pcss_radius={:.4}",
             shadow_settings.enabled, shadow_settings.technique, shadow_settings.cascades,
-            shadow_settings.resolution, shadow_settings.max_distance
+            shadow_settings.resolution, shadow_settings.max_distance, self.shadow_pcss_radius
         );
         log::info!(
             target: "terrain.shadow",
-            "Shadow bias: depth={:.6}, slope={:.6}, normal={:.6}, softness={:.4}",
+            "Shadow bias: depth={:.6}, slope={:.6}, normal={:.6}, softness={:.4}, splits={:?}",
             shadow_settings.depth_bias, shadow_settings.slope_scale_bias,
-            shadow_settings.normal_bias, shadow_settings.softness
+            shadow_settings.normal_bias, shadow_settings.softness, cascade_splits
         );
 
         // Get height curve parameters for shadow depth pass
@@ -2276,21 +2359,29 @@ impl TerrainScene {
             0.0,
         ];
 
-        // Render shadow depth passes and get shadow bind group
-        let shadow_bind_group = self.render_shadow_depth_passes(
-            &mut encoder,
-            &heightmap_view,
-            terrain_spacing,
-            height_exag,
-            height_min,
-            height_max,
-            view_matrix,
-            proj_matrix,
-            sun_direction,
-            params.clip.0,
-            params.clip.1.min(self.csm_renderer.config.max_shadow_distance),
-            height_curve,
-        );
+        // Render shadow depth passes and get shadow bind group (fallback to noop if disabled)
+        let mut _shadow_bind_group_owned: Option<wgpu::BindGroup> = None;
+        let use_shadows = shadow_settings.enabled;
+        let shadow_bind_group = if use_shadows {
+            let bg = self.render_shadow_depth_passes(
+                &mut encoder,
+                &heightmap_view,
+                terrain_spacing,
+                height_exag,
+                height_min,
+                height_max,
+                view_matrix,
+                proj_matrix,
+                sun_direction,
+                params.clip.0,
+                shadow_far,
+                height_curve,
+            );
+            _shadow_bind_group_owned = Some(bg);
+            _shadow_bind_group_owned.as_ref().unwrap()
+        } else {
+            &self.noop_shadow.bind_group
+        };
 
         // Re-acquire pipeline lock for main render pass
         let pipeline_cache = self
@@ -2349,7 +2440,7 @@ impl TerrainScene {
                 pass.set_bind_group(2, &ibl_bind_group, &[]);
 
                 // P1-Shadow: Bind real shadow bind group at index 3 (with CSM depth maps)
-                pass.set_bind_group(3, &shadow_bind_group, &[]);
+                pass.set_bind_group(3, shadow_bind_group, &[]);
 
                 pass.draw(0..3, 0..1);
             }

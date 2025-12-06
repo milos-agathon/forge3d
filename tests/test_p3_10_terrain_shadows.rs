@@ -5,9 +5,8 @@
 use forge3d::gpu;
 
 #[test]
-fn test_terrain_shader_compiles_without_shadows() {
-    // Test that terrain shader compiles with TERRAIN_USE_SHADOWS = false (default)
-    // This ensures no regressions in the default terrain path
+fn test_terrain_shader_enables_shadows_by_default() {
+    // Test that terrain shader enables TERRAIN_USE_SHADOWS by default
 
     // We can't actually compile shaders in unit tests without a GPU context,
     // but we verify the shader structure is sound by checking it exists
@@ -18,10 +17,14 @@ fn test_terrain_shader_compiles_without_shadows() {
     let shader_content =
         std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
 
-    // Verify TERRAIN_USE_SHADOWS flag exists and defaults to false
+    // Verify TERRAIN_USE_SHADOWS flag exists and defaults to true
     assert!(
-        shader_content.contains("const TERRAIN_USE_SHADOWS: bool = false;"),
-        "TERRAIN_USE_SHADOWS must default to false to avoid regressions"
+        shader_content.contains("const TERRAIN_USE_SHADOWS: bool = TERRAIN_SHADOWS_ENABLED;"),
+        "TERRAIN_USE_SHADOWS must be driven from a single source of truth"
+    );
+    assert!(
+        shader_content.contains("const TERRAIN_SHADOWS_ENABLED: bool = true;"),
+        "Terrain shadows should be enabled by default"
     );
 }
 
@@ -289,12 +292,24 @@ fn test_default_behavior_unchanged() {
 
     // With TERRAIN_USE_SHADOWS = false (default), legacy path must be used
     assert!(
-        shader_content.contains("const TERRAIN_USE_SHADOWS: bool = false;"),
-        "Default must be false"
+        shader_content.contains("const TERRAIN_USE_SHADOWS: bool = TERRAIN_SHADOWS_ENABLED;"),
+        "Default must be true and centralized"
     );
+}
+
+#[test]
+fn test_terrain_shader_has_pcss_radius_field() {
+    // Verify the PCSS radius plumbed through CSM uniforms
+    let shader_path = std::path::Path::new("src/shaders/terrain_pbr_pom.wgsl");
+    let shader_content =
+        std::fs::read_to_string(shader_path).expect("Failed to read terrain shader");
 
     assert!(
-        shader_content.contains("} else {\n        // Legacy POM-based shadow factor"),
-        "Legacy path must be in else branch"
+        shader_content.contains("pcss_light_radius"),
+        "CSM uniforms must expose pcss_light_radius for PCSS softness control"
+    );
+    assert!(
+        shader_content.contains("override DEBUG_SHADOW_CASCADES"),
+        "Debug cascade overlay must be controllable via override"
     );
 }

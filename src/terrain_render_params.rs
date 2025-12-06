@@ -172,6 +172,7 @@ pub struct ShadowSettingsNative {
     pub cascades: u32,
     pub max_distance: f32,
     pub softness: f32,
+    pub pcss_light_radius: f32,
     pub intensity: f32,
     pub slope_scale_bias: f32,
     pub depth_bias: f32,
@@ -188,6 +189,7 @@ impl Default for ShadowSettingsNative {
             cascades: 4,
             max_distance: 3000.0,
             softness: 0.01,
+            pcss_light_radius: 0.0,
             intensity: 1.0,
             slope_scale_bias: 0.001,
             depth_bias: 0.0005,
@@ -538,6 +540,13 @@ impl TerrainRenderParams {
         };
 
         // Parse shadow settings from Python ShadowSettings dataclass
+        let softness = shadows.getattr("softness")?.extract().unwrap_or(0.01);
+        // Optional PCSS light radius: default to 0.0 to preserve hard-shadow baseline when unset
+        let pcss_light_radius = shadows
+            .getattr("pcss_light_radius")
+            .ok()
+            .and_then(|value| value.extract().ok())
+            .unwrap_or(0.0);
         let shadow_native = ShadowSettingsNative {
             enabled: shadows.getattr("enabled")?.extract().unwrap_or(true),
             technique: shadows
@@ -551,12 +560,13 @@ impl TerrainRenderParams {
             cascades: shadows
                 .getattr("cascades")?
                 .extract::<i64>()
-                .unwrap_or(4) as u32,
+                .unwrap_or(1) as u32,
             max_distance: shadows
                 .getattr("max_distance")?
                 .extract()
                 .unwrap_or(3000.0),
-            softness: shadows.getattr("softness")?.extract().unwrap_or(0.01),
+            softness,
+            pcss_light_radius,
             intensity: shadows.getattr("intensity")?.extract().unwrap_or(1.0),
             slope_scale_bias: shadows
                 .getattr("slope_scale_bias")?

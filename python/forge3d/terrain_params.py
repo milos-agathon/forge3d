@@ -64,6 +64,8 @@ class ShadowSettings:
     light_bleed_reduction: float
     evsm_exponent: float
     fade_start: float
+    # Optional PCSS light radius (world units). Defaults to hard shadows when zero.
+    pcss_light_radius: float = 0.0
 
     def __post_init__(self) -> None:
         valid = {"PCSS", "ESM", "EVSM", "PCF", "CSM"}
@@ -82,6 +84,9 @@ class ShadowSettings:
 
         if self.softness < 0.0:
             raise ValueError("softness must be >= 0")
+
+        if self.pcss_light_radius < 0.0:
+            raise ValueError("pcss_light_radius must be >= 0")
 
         if self.intensity < 0.0:
             raise ValueError("intensity must be >= 0")
@@ -392,6 +397,7 @@ def make_terrain_params_config(
             cascades=3,
             max_distance=4000.0,
             softness=1.5,
+            pcss_light_radius=0.0,
             intensity=0.8,
             slope_scale_bias=0.5,
             depth_bias=0.002,
