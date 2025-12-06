@@ -54,8 +54,17 @@ const SHADOW_IBL_FACTOR: f32 = 0.6;  // IBL diffuse reduced by 60% in shadow (al
 
 // P1-Shadow Debug: Set to true to visualize shadow cascade coverage
 // Color codes terrain by which cascade is used: Red=0, Green=1, Blue=2, Yellow=3
-override DEBUG_SHADOW_CASCADES: bool = false;
-override DEBUG_SHADOW_RAW: bool = false;  // Show raw shadow visibility as grayscale
+// Note: These are compile-time constants. For runtime override, use debug_mode in CsmUniforms:
+//   csm_uniforms.debug_mode == 1 -> cascade boundary overlay
+//   csm_uniforms.debug_mode == 2 -> raw shadow visibility overlay
+// Environment variable: FORGE3D_TERRAIN_SHADOW_DEBUG="cascades" or "raw"
+const DEBUG_SHADOW_CASCADES: bool = false;
+const DEBUG_SHADOW_RAW: bool = false;  // Show raw shadow visibility as grayscale
+
+// Shadow debug mode constants (must match Rust side)
+const SHADOW_DEBUG_NONE: u32 = 0u;
+const SHADOW_DEBUG_CASCADES: u32 = 1u;
+const SHADOW_DEBUG_RAW: u32 = 2u;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Debug Mode Constants — "truth serum" diagnostics for water/IBL/PBR
@@ -1489,7 +1498,9 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         let view_pos = u_terrain.view * vec4<f32>(input.world_position, 1.0);
         let view_depth = -view_pos.z; // Positive depth in view space
         
-        if (DEBUG_SHADOW_CASCADES) {
+        // Check for cascade debug mode (compile-time OR runtime via csm_uniforms.debug_mode)
+        let shadow_debug_mode = csm_uniforms.debug_mode;
+        if (DEBUG_SHADOW_CASCADES || shadow_debug_mode == SHADOW_DEBUG_CASCADES) {
             // Debug mode: get both shadow visibility and cascade color
             let shadow_debug = debug_shadow_with_vis(input.world_position, blended_normal, view_depth, input.tex_coord);
             shadow_debug_color = shadow_debug.xyz;
@@ -2066,8 +2077,10 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
 
     // ──────────────────────────────────────────────────────────────────────────
     // P1-Shadow Debug: Cascade Visualization Overlay
+    // Activated by compile-time DEBUG_SHADOW_CASCADES or runtime csm_uniforms.debug_mode == 1
     // ──────────────────────────────────────────────────────────────────────────
-    if (TERRAIN_USE_SHADOWS && DEBUG_SHADOW_CASCADES) {
+    let csm_debug_mode = csm_uniforms.debug_mode;
+    if (TERRAIN_USE_SHADOWS && (DEBUG_SHADOW_CASCADES || csm_debug_mode == SHADOW_DEBUG_CASCADES)) {
         // Calculate view depth for cascade selection
         let view_pos_dbg = u_terrain.view * vec4<f32>(input.world_position, 1.0);
         let view_depth_dbg = -view_pos_dbg.z;
@@ -2128,8 +2141,9 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
 
     // ──────────────────────────────────────────────────────────────────────────
     // P1-Shadow Debug: Raw Shadow Visibility
+    // Activated by compile-time DEBUG_SHADOW_RAW or runtime csm_uniforms.debug_mode == 2
     // ──────────────────────────────────────────────────────────────────────────
-    if (TERRAIN_USE_SHADOWS && DEBUG_SHADOW_RAW) {
+    if (TERRAIN_USE_SHADOWS && (DEBUG_SHADOW_RAW || csm_debug_mode == SHADOW_DEBUG_RAW)) {
         // Show raw shadow_visibility as grayscale
         // Black = fully shadowed (0.0), White = fully lit (1.0)
         // Red tint = in shadow (visibility < 0.5)

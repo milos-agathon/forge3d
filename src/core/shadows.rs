@@ -8,6 +8,20 @@
 use bytemuck::Zeroable;
 use glam::{Mat4, Vec3};
 
+/// Parse shadow debug mode from FORGE3D_TERRAIN_SHADOW_DEBUG environment variable.
+///
+/// Returns:
+///   0 = disabled (default)
+///   1 = cascade boundary overlay ("cascades")
+///   2 = raw shadow visibility ("raw")
+fn parse_shadow_debug_env() -> u32 {
+    match std::env::var("FORGE3D_TERRAIN_SHADOW_DEBUG").as_deref() {
+        Ok("cascades") | Ok("1") => 1,
+        Ok("raw") | Ok("2") => 2,
+        _ => 0,
+    }
+}
+
 /// Configuration for cascaded shadow maps
 #[derive(Debug, Clone)]
 pub struct CsmConfig {
@@ -207,8 +221,11 @@ pub struct CsmShadowMap {
     uniform_buffer: wgpu::Buffer,
     /// Current cascade data
     cascades: Vec<ShadowCascade>,
-    /// Debug visualization enabled
-    debug_visualization: bool,
+    /// Shadow debug mode:
+    ///   0 = disabled
+    ///   1 = cascade boundary overlay (color-coded by cascade)
+    ///   2 = raw shadow visibility (grayscale)
+    debug_mode: u32,
 }
 
 impl CsmShadowMap {
@@ -289,7 +306,7 @@ impl CsmShadowMap {
             shadow_sampler,
             uniform_buffer,
             cascades: vec![ShadowCascade::zeroed(); cascade_count],
-            debug_visualization: false,
+            debug_mode: parse_shadow_debug_env(),
         }
     }
 
@@ -298,9 +315,17 @@ impl CsmShadowMap {
         self.light = light;
     }
 
-    /// Enable/disable debug cascade visualization
+    /// Enable/disable debug cascade visualization (legacy API)
     pub fn set_debug_visualization(&mut self, enabled: bool) {
-        self.debug_visualization = enabled;
+        self.debug_mode = if enabled { 1 } else { 0 };
+    }
+
+    /// Set shadow debug mode:
+    ///   0 = disabled
+    ///   1 = cascade boundary overlay
+    ///   2 = raw shadow visibility
+    pub fn set_debug_mode(&mut self, mode: u32) {
+        self.debug_mode = mode;
     }
 
     /// Update shadow cascades for current camera
@@ -431,7 +456,7 @@ impl CsmShadowMap {
             depth_bias: self.config.depth_bias,
             slope_bias: self.config.slope_bias,
             shadow_map_size: self.config.shadow_map_size as f32,
-            debug_mode: if self.debug_visualization { 1 } else { 0 },
+            debug_mode: self.debug_mode,
             _padding: [0.0; 2],
         };
 

@@ -40,8 +40,12 @@ pub struct ShadowMappingConfig {
     /// Slope-scaled bias factor
     pub slope_bias: f32,
 
-    /// Enable debug cascade visualization
-    pub debug_mode: bool,
+    /// Shadow debug visualization mode:
+    ///   0 = disabled
+    ///   1 = cascade boundary overlay (color-coded by cascade)
+    ///   2 = raw shadow visibility (grayscale)
+    /// Set via FORGE3D_TERRAIN_SHADOW_DEBUG env var: "cascades" or "raw"
+    pub debug_mode: u32,
 
     /// Shadow map format (D24Plus or D32Float)
     pub depth_format: TextureFormat,
@@ -54,7 +58,7 @@ impl Default for ShadowMappingConfig {
             pcf_quality: PcfQuality::Medium,
             depth_bias: 0.005,
             slope_bias: 1.0,
-            debug_mode: false,
+            debug_mode: 0,
             depth_format: TextureFormat::Depth24Plus,
         }
     }
@@ -338,7 +342,7 @@ impl ShadowMapping {
                 depth_bias: self.config.depth_bias,
                 slope_bias: self.config.slope_bias,
                 shadow_map_size: self.config.shadow_map_size as f32,
-                debug_mode: if self.config.debug_mode { 1 } else { 0 },
+                debug_mode: self.config.debug_mode,
                 peter_panning_offset: 0.001, // Default peter-panning offset
                 pcss_light_radius: 0.0,
             };
