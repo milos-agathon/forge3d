@@ -6001,7 +6001,8 @@ impl Scene {
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
 
-        renderer.set_enabled(false);
+        // Reflection pass: enable clip plane + disable sampling (mode=reflection pass)
+        renderer.set_reflection_pass_mode();
         renderer.upload_uniforms(&g.queue);
 
         let reflection_view =
@@ -6042,6 +6043,7 @@ impl Scene {
         g.queue
             .write_buffer(&self.ubo, 0, bytemuck::bytes_of(&self.last_uniforms));
 
+        // Restore reflection sampling for the main pass
         renderer.set_enabled(true);
         renderer.upload_uniforms(&g.queue);
 

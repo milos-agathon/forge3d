@@ -111,7 +111,7 @@ impl ReflectionPlane {
 pub struct PlanarReflectionUniforms {
     /// Reflection plane data
     pub reflection_plane: ReflectionPlane,
-    /// Enable/disable reflection rendering
+    /// Reflection mode: 0=disabled, 1=main pass sampling enabled, 2=reflection pass (clip only)
     pub enable_reflections: u32,
     /// Reflection intensity [0, 1]
     pub reflection_intensity: f32,
@@ -135,11 +135,16 @@ pub struct PlanarReflectionUniforms {
     pub _padding: [f32; 7], // 28 bytes to round 292 → 320
 }
 
+// Reflection mode values (shared with WGSL)
+const REFLECTION_DISABLED: u32 = 0;
+const REFLECTION_ENABLED: u32 = 1;
+const REFLECTION_PASS: u32 = 2;
+
 impl Default for PlanarReflectionUniforms {
     fn default() -> Self {
         Self {
             reflection_plane: ReflectionPlane::default(),
-            enable_reflections: 1,
+            enable_reflections: REFLECTION_ENABLED,
             reflection_intensity: 0.8,
             fresnel_power: 5.0,
             blur_kernel_size: 5,
@@ -349,7 +354,16 @@ impl PlanarReflectionRenderer {
 
     /// Enable/disable reflections
     pub fn set_enabled(&mut self, enabled: bool) {
-        self.uniforms.enable_reflections = if enabled { 1 } else { 0 };
+        self.uniforms.enable_reflections = if enabled {
+            REFLECTION_ENABLED
+        } else {
+            REFLECTION_DISABLED
+        };
+    }
+
+    /// Mark uniforms for reflection render pass (clip plane active, no sampling)
+    pub fn set_reflection_pass_mode(&mut self) {
+        self.uniforms.enable_reflections = REFLECTION_PASS;
     }
 
     /// Set debug mode

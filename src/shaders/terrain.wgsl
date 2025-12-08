@@ -140,10 +140,20 @@ fn apply_planar_reflection(
   world_normal: vec3<f32>,
   base_color: vec3<f32>,
 ) -> vec3<f32> {
+  // Mode 0: reflections disabled; Mode 1: enabled for main pass; Mode 2: reflection pass (clip only)
+  let plane = reflection_uniforms.reflection_plane.plane_equation;
+  if reflection_uniforms.enable_reflections == 2u {
+    // Reflection pass: clip geometry below the plane and skip sampling the reflection texture
+    if distance_to_plane(world_pos, plane) < 0.0 {
+      discard;
+    }
+    return base_color;
+  }
   if reflection_uniforms.enable_reflections == 0u {
     return base_color;
   }
 
+  // Main pass sampling path (mode 1)
   let plane = reflection_uniforms.reflection_plane.plane_equation;
   let reflected_pos = reflection_uniforms.reflection_plane.reflection_view * vec4<f32>(world_pos, 1.0);
   let projected = reflection_uniforms.reflection_plane.reflection_projection * reflected_pos;
