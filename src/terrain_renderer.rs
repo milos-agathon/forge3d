@@ -59,6 +59,9 @@ pub struct TerrainScene {
     shadow_depth_bind_group_layout: wgpu::BindGroupLayout,
     shadow_bind_group_layout: wgpu::BindGroupLayout,
     shadow_pcss_radius: f32,
+    // P2: Fog bind group layout and buffer
+    fog_bind_group_layout: wgpu::BindGroupLayout,
+    fog_uniform_buffer: wgpu::Buffer,
     // P0-03: Config plumbing (no shader/pipeline behavior changes)
     #[cfg(feature = "enable-renderer-config")]
     config: Arc<Mutex<crate::render::params::RendererConfig>>,
@@ -113,6 +116,40 @@ impl OverlayUniforms {
             params1: [0.0; 4],
             // gamma=2.2, roughness_mult=1.0, spec_aa_enabled=1.0 (enabled), pad=0
             params2: [2.2, 1.0, 1.0, 0.0],
+        }
+    }
+}
+
+/// P2: Atmospheric fog uniforms
+/// Must match FogUniforms struct in terrain_pbr_pom.wgsl exactly.
+/// When fog_density = 0.0, fog is disabled (no-op preserving P1 output).
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct FogUniforms {
+    /// Fog density coefficient (0.0 = no fog)
+    fog_density: f32,
+    /// Height falloff rate (controls fog thinning at higher altitudes)
+    fog_height_falloff: f32,
+    /// Base height for fog calculation (world-space Y)
+    fog_base_height: f32,
+    /// Camera world-space Y position
+    camera_height: f32,
+    /// Inscatter color (linear RGB)
+    fog_inscatter: [f32; 3],
+    /// Padding for 16-byte alignment
+    _padding: f32,
+}
+
+impl FogUniforms {
+    /// Create fog uniforms with fog disabled (no-op for P1 compatibility)
+    fn disabled() -> Self {
+        Self {
+            fog_density: 0.0,
+            fog_height_falloff: 0.0,
+            fog_base_height: 0.0,
+            camera_height: 0.0,
+            fog_inscatter: [1.0, 1.0, 1.0],
+            _padding: 0.0,
         }
     }
 }
@@ -833,12 +870,21 @@ impl TerrainScene {
         // Create shadow bind group layout (reused for noop shadow and pipeline)
         let shadow_bind_group_layout = Self::create_shadow_bind_group_layout(device.as_ref());
 
+        // P2: Create fog bind group layout and initial uniform buffer
+        let fog_bind_group_layout = Self::create_fog_bind_group_layout(device.as_ref());
+        let fog_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain.fog.uniform_buffer"),
+            contents: bytemuck::bytes_of(&FogUniforms::disabled()),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
         let pipeline = Self::create_render_pipeline(
             device.as_ref(),
             &bind_group_layout,
             light_buffer_layout,
             &ibl_bind_group_layout,
             &shadow_bind_group_layout,
+            &fog_bind_group_layout,
             color_format,
             1,
         );
@@ -852,6 +898,8 @@ impl TerrainScene {
         // P1-Shadow: Create CSM renderer with default configuration
         // These are init-time defaults; per-render params (bias, etc.) are updated in render_internal
         // cascade_count and shadow_map_size are set at init (can't change without recreating)
+        // Parse debug_mode from FORGE3D_TERRAIN_SHADOW_DEBUG env var
+        let shadow_debug_mode = crate::core::shadows::parse_shadow_debug_env();
         let csm_config = crate::shadows::CsmConfig {
             cascade_count: 4,       // Default, can be overridden by recreating renderer
             shadow_map_size: 2048,  // Default, can be overridden by recreating renderer
@@ -864,8 +912,16 @@ impl TerrainScene {
             enable_evsm: false,
             stabilize_cascades: true,
             cascade_blend_range: 0.1,
+            debug_mode: shadow_debug_mode, // From FORGE3D_TERRAIN_SHADOW_DEBUG env var
             ..Default::default()
         };
+        if shadow_debug_mode > 0 {
+            log::info!(
+                target: "terrain.shadow",
+                "Shadow debug mode enabled: {} (FORGE3D_TERRAIN_SHADOW_DEBUG)",
+                shadow_debug_mode
+            );
+        }
         let csm_renderer = crate::shadows::CsmRenderer::new(device.as_ref(), csm_config);
 
         // Create shadow depth bind group layout (for terrain shadow rendering)
@@ -905,6 +961,9 @@ impl TerrainScene {
             shadow_depth_bind_group_layout,
             shadow_bind_group_layout,
             shadow_pcss_radius: 0.0,
+            // P2: Fog bind group layout and buffer
+            fog_bind_group_layout,
+            fog_uniform_buffer,
             // P0-03: Initialize with default config (no behavior changes)
             #[cfg(feature = "enable-renderer-config")]
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
@@ -1015,7 +1074,7 @@ impl TerrainScene {
             light_direction: [0.0, -1.0, 0.0, 0.0],
             light_view: identity_mat,
             cascades: [default_cascade; 4],
-            cascade_count: 1, // Must be >= 1 for valid shader behavior
+            cascade_count: 0, // Sentinel: 0 cascades = NoopShadow (shader treats as fully lit)
             pcf_kernel_size: 1, // No filtering for noop
             depth_bias: 0.0,
             slope_bias: 0.0,
@@ -1265,12 +1324,34 @@ impl TerrainScene {
         })
     }
 
+    /// P2: Create fog bind group layout for terrain shader (group 4)
+    /// Matches terrain_pbr_pom.wgsl @group(4) bindings: FogUniforms
+    fn create_fog_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain_pbr_pom.fog_bind_group_layout"),
+            entries: &[
+                // @binding(0): FogUniforms
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        })
+    }
+
     fn create_render_pipeline(
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
         light_buffer_layout: &wgpu::BindGroupLayout,
         ibl_bind_group_layout: &wgpu::BindGroupLayout,
         shadow_bind_group_layout: &wgpu::BindGroupLayout,
+        fog_bind_group_layout: &wgpu::BindGroupLayout,
         color_format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> wgpu::RenderPipeline {
@@ -1287,6 +1368,7 @@ impl TerrainScene {
                 light_buffer_layout,       // @group(1): lights (bindings 3-5)
                 ibl_bind_group_layout,     // @group(2): IBL (bindings 0-4)
                 &shadow_bind_group_layout, // @group(3): shadows (bindings 0-4)
+                fog_bind_group_layout,     // @group(4): fog (binding 0)
             ],
             push_constant_ranges: &[],
         });
@@ -1593,6 +1675,7 @@ impl TerrainScene {
         self.csm_renderer.uniforms.shadow_map_size = self.csm_renderer.config.shadow_map_size as f32;
         self.csm_renderer.uniforms.peter_panning_offset =
             self.csm_renderer.config.peter_panning_offset;
+        self.csm_renderer.uniforms.debug_mode = self.csm_renderer.config.debug_mode;
 
         for cascade_idx in 0..cascade_count as usize {
             let near_d = splits.get(cascade_idx).copied().unwrap_or(near_plane);
@@ -2137,7 +2220,7 @@ impl TerrainScene {
                 .light_buffer
                 .lock()
                 .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
-            // Reuse the existing shadow bind group layout to keep pipeline layout
+            // Reuse the existing shadow and fog bind group layouts to keep pipeline layout
             // consistent with the bind groups we create elsewhere.
             pipeline_cache.pipeline = Self::create_render_pipeline(
                 self.device.as_ref(),
@@ -2145,6 +2228,7 @@ impl TerrainScene {
                 light_buffer.bind_group_layout(),
                 &self.ibl_bind_group_layout,
                 &self.shadow_bind_group_layout,
+                &self.fog_bind_group_layout,
                 self.color_format,
                 effective_msaa,
             );
@@ -2383,6 +2467,34 @@ impl TerrainScene {
             &self.noop_shadow.bind_group
         };
 
+        // P2: Create fog bind group with current fog uniforms
+        // When fog_density = 0 (default), fog is disabled (no-op for P1 compatibility)
+        // Auto-compute base_height from terrain min if not specified (base_height <= 0)
+        let fog_base_height = if decoded.fog.base_height <= 0.0 {
+            // Auto: use terrain min height in world units (height_min * z_scale)
+            height_min * height_exag
+        } else {
+            decoded.fog.base_height
+        };
+        let fog_uniforms = FogUniforms {
+            fog_density: decoded.fog.density,
+            fog_height_falloff: decoded.fog.height_falloff,
+            fog_base_height,
+            camera_height: eye_y,  // Camera Y position for fog height calculation
+            fog_inscatter: decoded.fog.inscatter,
+            _padding: 0.0,
+        };
+        self.queue.write_buffer(&self.fog_uniform_buffer, 0, bytemuck::bytes_of(&fog_uniforms));
+        
+        let fog_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain.fog.bind_group"),
+            layout: &self.fog_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: self.fog_uniform_buffer.as_entire_binding(),
+            }],
+        });
+
         // Re-acquire pipeline lock for main render pass
         let pipeline_cache = self
             .pipeline
@@ -2441,6 +2553,9 @@ impl TerrainScene {
 
                 // P1-Shadow: Bind real shadow bind group at index 3 (with CSM depth maps)
                 pass.set_bind_group(3, shadow_bind_group, &[]);
+
+                // P2: Bind fog bind group at index 4
+                pass.set_bind_group(4, &fog_bind_group, &[]);
 
                 pass.draw(0..3, 0..1);
             }

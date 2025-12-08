@@ -268,6 +268,29 @@ var moment_maps: texture_2d_array<f32>;
 @group(3) @binding(4)
 var moment_sampler: sampler;
 
+// ──────────────────────────────────────────────────────────────────────────
+// P2: Atmospheric Fog Uniforms (@group(4))
+// Height-based fog with tunable density and inscatter color.
+// When fog_density = 0.0, fog is a no-op preserving P1 output exactly.
+// ──────────────────────────────────────────────────────────────────────────
+struct FogUniforms {
+    // Fog density coefficient (0.0 = no fog, higher = denser)
+    fog_density: f32,
+    // Height falloff rate (controls how fog thins at higher altitudes)
+    fog_height_falloff: f32,
+    // Base height for fog calculation (world-space Y)
+    fog_base_height: f32,
+    // Camera world-space Y position
+    camera_height: f32,
+    // Inscatter color (linear RGB, typically sky-tinted)
+    fog_inscatter: vec3<f32>,
+    // Padding for 16-byte alignment
+    _padding: f32,
+}
+
+@group(4) @binding(0)
+var<uniform> fog_uniforms: FogUniforms;
+
 // P3-10: Shadow sampling functions (simplified for terrain)
 // These are lightweight versions for terrain use, gated behind TERRAIN_USE_SHADOWS flag
 
@@ -288,6 +311,12 @@ fn sample_shadow_pcf_terrain(
     normal: vec3<f32>,
     cascade_idx: u32,
 ) -> f32 {
+    // P0 early-out: NoopShadow sentinel via cascade_count == 0
+    // Real CSM always has at least one cascade; noop has cascade_count = 0
+    if (csm_uniforms.cascade_count == 0u) {
+        return 1.0;  // Fully lit when shadows disabled
+    }
+    // Normal shadow sampling path
     let cascade = csm_uniforms.cascades[cascade_idx];
     
     // Transform to light space using pre-computed combined matrix
@@ -344,15 +373,19 @@ fn sample_shadow_pcf_terrain(
 
 /// Normalize world position for shadow calculations
 /// Shadow maps use normalized heights [0, h_exag] to match XY scale [-0.5, 0.5]
-/// This function computes shadow-normalized position by sampling height from heightmap
-/// IMPORTANT: We sample height directly here instead of using interpolated world_pos.z
-/// because the main shader uses a fullscreen triangle (3 vertices) and interpolates
-/// world_position.z, which gives incorrect heights at most fragments.
-fn normalize_for_shadow(world_xy: vec2<f32>, tex_coord: vec2<f32>) -> vec3<f32> {
+/// This function computes shadow-normalized position from tex_coord (not interpolated world_pos)
+/// CRITICAL: The main shader uses a fullscreen triangle (3 vertices) where interpolated
+/// world_position is INCORRECT at most fragments. We must compute both XY and Z from tex_coord.
+fn normalize_for_shadow(tex_coord: vec2<f32>) -> vec3<f32> {
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
     let h_exag = u_terrain.spacing_h_exag.z;
+    let spacing = u_terrain.spacing_h_exag.x;
     let h_range = max(h_max - h_min, 1e-6);
+    
+    // Compute world XY from tex_coord (not from interpolated world_position!)
+    // This matches what the shadow depth shader does: world_xy = (uv - 0.5) * spacing
+    let world_xy = (tex_coord - vec2<f32>(0.5, 0.5)) * spacing;
     
     // Sample height directly from heightmap at this fragment's UV
     // This matches what the shadow depth shader does
@@ -362,7 +395,7 @@ fn normalize_for_shadow(world_xy: vec2<f32>, tex_coord: vec2<f32>) -> vec3<f32> 
     // Apply height curve (must match shadow depth shader)
     let h_curved = apply_height_curve01(h_norm);
     
-    // Compute shadow-normalized Z
+    // Compute shadow-normalized Z (matches shadow depth shader: world_z = h_curved * h_exag)
     let shadow_z = h_curved * h_exag;
     
     return vec3<f32>(world_xy.x, world_xy.y, shadow_z);
@@ -370,12 +403,17 @@ fn normalize_for_shadow(world_xy: vec2<f32>, tex_coord: vec2<f32>) -> vec3<f32> 
 
 /// Calculate shadow visibility for terrain
 fn calculate_shadow_terrain(world_pos: vec3<f32>, normal: vec3<f32>, view_depth: f32, tex_coord: vec2<f32>) -> f32 {
+    // P0 early-out: when there are no active cascades, terrain is fully lit
+    if (csm_uniforms.cascade_count == 0u) {
+        return 1.0;
+    }
+
     // Select appropriate cascade
     let cascade_idx = select_cascade_terrain(view_depth);
     
     // Normalize world position for shadow lookup (match shadow map's normalized heights)
-    // Pass tex_coord for proper height sampling
-    let shadow_pos = normalize_for_shadow(world_pos.xy, tex_coord);
+    // Compute from tex_coord since world_pos is incorrectly interpolated for fullscreen triangle
+    let shadow_pos = normalize_for_shadow(tex_coord);
     
     // Sample shadow with PCF
     return sample_shadow_pcf_terrain(shadow_pos, normal, cascade_idx);
@@ -401,8 +439,14 @@ fn debug_shadow_with_vis(
     view_depth: f32,
     tex_coord: vec2<f32>
 ) -> vec4<f32> {
+    // P0 early-out: NoopShadow sentinel via cascade_count == 0 → fully lit, cascade 0 color
+    if (csm_uniforms.cascade_count == 0u) {
+        let cascade_color = get_cascade_debug_color(0u);
+        return vec4<f32>(cascade_color, 1.0);
+    }
+    
     let cascade_idx = select_cascade_terrain(view_depth);
-    let shadow_pos = normalize_for_shadow(world_pos.xy, tex_coord);
+    let shadow_pos = normalize_for_shadow(tex_coord);
     let shadow_vis = sample_shadow_pcf_terrain(shadow_pos, normal, cascade_idx);
     let cascade_color = get_cascade_debug_color(cascade_idx);
     
@@ -1081,6 +1125,62 @@ fn debug_water_prefilt_raw(is_water_flag: bool, prefilt_color: vec3<f32>) -> vec
     }
     let rgb_dbg = compress_hdr(s);
     return select(land, rgb_dbg, is_water_flag);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// P2: Atmospheric Fog
+// Height-based exponential fog applied after PBR shading, before tonemap.
+// When fog_density = 0.0, returns base_color unchanged (no-op).
+//
+// Coordinate system: Z-up (world_pos.z = elevation)
+// Density scaling: quadratic (density²) for perceptually linear 0-1 range
+// ──────────────────────────────────────────────────────────────────────────
+fn apply_atmospheric_fog(
+    base_color: vec3<f32>,
+    world_pos: vec3<f32>,
+    camera_pos: vec3<f32>,
+) -> vec3<f32> {
+    // Early-out when fog is disabled (density = 0) for exact no-op
+    let density_raw = fog_uniforms.fog_density;
+    if (density_raw <= 0.0) {
+        return base_color;
+    }
+    
+    // DEBUG: Return red to verify fog is being applied
+    // return vec3<f32>(1.0, 0.0, 0.0);
+    
+    // Quadratic density scaling: makes 0-1 range perceptually useful
+    // density=0.1 → 0.01, density=0.5 → 0.25, density=1.0 → 1.0
+    let density = density_raw * density_raw;
+    
+    // Compute view distance
+    let to_camera = camera_pos - world_pos;
+    let view_distance = length(to_camera);
+    
+    // Height-based fog modulation:
+    // Fog is denser at lower altitudes, thinner at higher altitudes.
+    // Uses exponential falloff from base height.
+    // NOTE: Terrain is Z-up, so world_pos.z is elevation.
+    let height_falloff = fog_uniforms.fog_height_falloff;
+    let base_height = fog_uniforms.fog_base_height;
+    
+    // Compute height factor: 1.0 at base_height, decreasing exponentially above
+    // Fragment elevation relative to base (Z-up coordinate system)
+    let fragment_elevation = max(world_pos.z - base_height, 0.0);
+    let height_factor = exp(-height_falloff * fragment_elevation);
+    
+    // Exponential fog extinction with height modulation
+    // Scale factor K converts world units to fog-friendly range
+    // K=0.005 tuned for: density=0.1 subtle, 0.2 moderate, 0.3 strong but visible
+    let extinction = exp(-density * view_distance * height_factor * 0.005);
+    
+    // Inscatter color (fog color seen in distance)
+    let inscatter = fog_uniforms.fog_inscatter;
+    
+    // Mix: at extinction=1 (no fog), result is base_color
+    //      at extinction=0 (full fog), result is inscatter
+    let fog_result = mix(inscatter, base_color, extinction);
+    return fog_result;
 }
 
 @fragment
@@ -2054,6 +2154,10 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         let exposure = max(u_shading.light_params.w, 0.0);
         shaded = shaded * exposure;
         
+        // P2: Apply atmospheric fog after exposure, before tonemap
+        // When fog_density = 0, this is a no-op preserving P1 output
+        shaded = apply_atmospheric_fog(shaded, input.world_position, camera_pos);
+        
         // Use ACES tonemapping for better highlight preservation than Reinhard
         let tonemapped = tonemap_aces(shaded);
         final_color = tonemapped;
@@ -2088,7 +2192,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         let cascade_idx_dbg = 0u;  // Force cascade 0
         
         // Get shadow UV coordinates and NDC using normalized position
-        let shadow_pos_dbg = normalize_for_shadow(input.world_position.xy, input.tex_coord);
+        let shadow_pos_dbg = normalize_for_shadow(input.tex_coord);
         let cascade_dbg = csm_uniforms.cascades[cascade_idx_dbg];
         let light_space_pos_dbg = cascade_dbg.light_view_proj * vec4<f32>(shadow_pos_dbg, 1.0);
         let ndc_dbg = light_space_pos_dbg.xyz / light_space_pos_dbg.w;

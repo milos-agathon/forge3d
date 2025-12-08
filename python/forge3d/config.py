@@ -63,6 +63,7 @@ _BRDF_MODELS: Dict[str, str] = {
 }
 
 _SHADOW_TECHNIQUES: Dict[str, str] = {
+    "none": "none",  # P0: Disable shadows entirely
     "hard": "hard",
     "pcf": "pcf",
     "pcss": "pcss",
@@ -425,6 +426,9 @@ class ShadowParams:
             base.enabled = bool(data["enabled"])
         if "technique" in data:
             base.technique = _normalize_choice(data["technique"], _SHADOW_TECHNIQUES, "shadow technique")
+            # P0: 'none' technique means shadows disabled
+            if base.technique == "none":
+                base.enabled = False
         if "map_size" in data:
             base.map_size = int(data["map_size"])
         if "cascades" in data:

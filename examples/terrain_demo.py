@@ -150,7 +150,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--brdf", type=str, help="Shading BRDF model name.")
     parser.add_argument("--preset", type=str, help="High-level preset (studio_pbr, outdoor_sun, toon_viz).")
-    parser.add_argument("--shadows", type=str, help="Shadow technique (hard, pcf, pcss, vsm, evsm, msm, csm).")
+    parser.add_argument("--shadows", type=str, help="Shadow technique (none, hard, pcf, pcss, vsm, evsm, msm, csm). 'none' disables shadows for P0 baseline.")
     parser.add_argument("--shadow-map-res", dest="shadow_map_res", type=int, help="Shadow map resolution.")
     parser.add_argument("--cascades", type=int, help="Cascade count for cascaded shadow maps.")
     parser.add_argument("--pcss-blocker-radius", dest="pcss_blocker_radius", type=float, help="PCSS blocker radius.")
@@ -230,6 +230,25 @@ def _parse_args() -> argparse.Namespace:
             "18=POM offset magnitude (grayscale), 19=SpecAA sigma², 20=SpecAA sparkle sigma², "
             "100=water binary (blue/gray), 101=shore-distance falsecolor, 102=IBL spec isolated."
         ),
+    )
+    # P2: Atmospheric fog parameters
+    parser.add_argument(
+        "--fog-density",
+        type=float,
+        default=0.0,
+        help="Fog density coefficient. 0.0 = disabled (default), higher = denser fog.",
+    )
+    parser.add_argument(
+        "--fog-height-falloff",
+        type=float,
+        default=0.0,
+        help="Fog height falloff rate. Controls how fog thins at higher altitudes.",
+    )
+    parser.add_argument(
+        "--fog-inscatter",
+        type=str,
+        default="1.0,1.0,1.0",
+        help="Fog inscatter color as comma-separated RGB (0-1 range). Default: '1.0,1.0,1.0' (white).",
     )
 
     return parser.parse_args()

@@ -14,7 +14,7 @@ use glam::{Mat4, Vec3};
 ///   0 = disabled (default)
 ///   1 = cascade boundary overlay ("cascades")
 ///   2 = raw shadow visibility ("raw")
-fn parse_shadow_debug_env() -> u32 {
+pub fn parse_shadow_debug_env() -> u32 {
     match std::env::var("FORGE3D_TERRAIN_SHADOW_DEBUG").as_deref() {
         Ok("cascades") | Ok("1") => 1,
         Ok("raw") | Ok("2") => 2,

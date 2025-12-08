@@ -68,9 +68,13 @@ class ShadowSettings:
     pcss_light_radius: float = 0.0
 
     def __post_init__(self) -> None:
-        valid = {"PCSS", "ESM", "EVSM", "PCF", "CSM"}
+        # P0: "NONE" disables shadows entirely
+        valid = {"NONE", "PCSS", "ESM", "EVSM", "PCF", "CSM"}
         if self.technique not in valid:
             raise ValueError(f"Invalid technique: {self.technique}")
+        # When technique is NONE, shadows are disabled
+        if self.technique == "NONE":
+            self.enabled = False
 
         valid_resolutions = {512, 1024, 2048, 4096, 8192}
         if self.resolution not in valid_resolutions:
@@ -99,6 +103,35 @@ class ShadowSettings:
 
         if self.evsm_exponent <= 0.0:
             raise ValueError("evsm_exponent must be > 0")
+
+
+@dataclass
+class FogSettings:
+    """P2: Atmospheric fog configuration.
+    
+    Height-based exponential fog applied after PBR, before tonemap.
+    When density = 0.0, fog is disabled (no-op for P1 compatibility).
+    
+    base_height: World-space Z coordinate below which fog is at full density.
+                 Should be set to the minimum terrain elevation (in world units).
+                 If None, will be auto-computed from terrain bounds.
+    """
+
+    density: float = 0.0  # 0.0 = disabled
+    height_falloff: float = 0.0
+    base_height: Optional[float] = None  # None = auto from terrain min height
+    inscatter: Tuple[float, float, float] = (1.0, 1.0, 1.0)
+
+    def __post_init__(self) -> None:
+        if self.density < 0.0:
+            raise ValueError("density must be >= 0")
+        if self.height_falloff < 0.0:
+            raise ValueError("height_falloff must be >= 0")
+        if len(self.inscatter) != 3:
+            raise ValueError("inscatter must be (R, G, B)")
+        for c in self.inscatter:
+            if not 0.0 <= c <= 1.0:
+                raise ValueError("inscatter components must be in [0, 1]")
 
 
 @dataclass
@@ -257,8 +290,13 @@ class TerrainRenderParams:
     height_curve_strength: float = 0.0
     height_curve_power: float = 1.0
     height_curve_lut: Optional[np.ndarray] = None
+    # P2: Atmospheric fog (defaults to disabled for P1 compatibility)
+    fog: Optional[FogSettings] = None
 
     def __post_init__(self) -> None:
+        # Default fog to disabled if not provided
+        if self.fog is None:
+            self.fog = FogSettings()
         width, height = self.size_px
         if width < 64 or height < 64:
             raise ValueError("size_px must be >= 64x64")
@@ -376,6 +414,7 @@ def make_terrain_params_config(
     sampling: Optional[SamplingSettings] = None,
     clamp: Optional[ClampSettings] = None,
     overlays: Optional[list] = None,
+    fog: Optional[FogSettings] = None,
 ) -> TerrainRenderParams:
     light_color = [1.0, 1.0, 1.0]
     if sun_color is not None:
@@ -390,6 +429,8 @@ def make_terrain_params_config(
     light_intensity = float(sun_intensity)
 
     if shadows is None:
+        # Default shadow settings with small bias values for proper depth comparison.
+        # Large bias values (e.g., 0.5) cause all fragments to appear lit (no shadows).
         shadows = ShadowSettings(
             enabled=True,
             technique="PCSS",
@@ -399,9 +440,9 @@ def make_terrain_params_config(
             softness=1.5,
             pcss_light_radius=0.0,
             intensity=0.8,
-            slope_scale_bias=0.5,
-            depth_bias=0.002,
-            normal_bias=0.5,
+            slope_scale_bias=0.001,   # Slope-scaled bias for grazing angles
+            depth_bias=0.0005,        # Base depth bias
+            normal_bias=0.0002,       # Peter-panning offset (bias along normal)
             min_variance=1e-4,
             light_bleed_reduction=0.5,
             evsm_exponent=40.0,
@@ -492,6 +533,7 @@ def make_terrain_params_config(
         height_curve_strength=height_curve_strength,
         height_curve_power=height_curve_power,
         height_curve_lut=height_curve_lut,
+        fog=fog,
     )
 
 
@@ -499,6 +541,7 @@ __all__ = [
     "LightSettings",
     "IblSettings",
     "ShadowSettings",
+    "FogSettings",
     "TriplanarSettings",
     "PomSettings",
     "LodSettings",

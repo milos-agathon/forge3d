@@ -1,4 +1,9 @@
-# main
+# ============================================================================
+# P0 — True Baseline (no shadows, no fog)
+# Shadows fully disabled via --shadows none. No fog flags.
+# Output: examples/output/terrain_p0_baseline.png
+# ============================================================================
+
 python examples/terrain_demo.py \
   --dem assets/Gore_Range_Albers_1m.tif \
   --hdr assets/hdri/brown_photostudio_02_4k.hdr \
@@ -7,128 +12,92 @@ python examples/terrain_demo.py \
   --cam-radius 1400 --cam-phi 135 --cam-theta 35 \
   --exposure 0.5 --sun-azimuth 135 --sun-elevation 15 \
   --sun-intensity 0.6 --sun-color 1.0 0.5 0.9 \
-  --preset outdoor_sun --gi ibl,ssao --sky hdri \
+  --gi ibl,ssao --sky hdri \
   --albedo-mode mix --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
   --colormap-strength 0.6 --colormap-interpolate --colormap-size 512 \
-  --output examples/output/terrain_main.png --overwrite
+  --shadows none \
+  --output examples/output/terrain_p0_baseline.png --overwrite
 
 
-# shadows
+# ============================================================================
+# P1 — CSM shadows (terrain P1)
+# Same scene, but exercise the CSM shadow technique explicitly.
+# Output: examples/output/terrain_p1_csm.png
+# ============================================================================
+
 python examples/terrain_demo.py \
   --dem assets/Gore_Range_Albers_1m.tif \
   --hdr assets/hdri/brown_photostudio_02_4k.hdr \
-  --size 1920 1080 --render-scale 1 --msaa 1 \
-  --ibl-res 256 --ibl-intensity 0.2 \
-  --cam-radius 1200 --cam-phi 135 --cam-theta 35 \
-  --sun-azimuth 45 --sun-elevation 15 --sun-intensity 3.0 \
+  --size 1920 1080 --render-scale 1 --msaa 8 \
+  --ibl-res 1024 --ibl-intensity 0.9 \
+  --cam-radius 1400 --cam-phi 135 --cam-theta 35 \
+  --exposure 0.6 --sun-azimuth 135 --sun-elevation 15 \
+  --sun-intensity 0.4 --sun-color 1.0 0.5 0.9 \
+  --gi ibl,ssao --sky hdri \
   --albedo-mode mix --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
+  --colormap-strength 0.6 --colormap-interpolate --colormap-size 512 \
+  --shadows csm --cascades 4 --shadow-map-res 2048 \
+  --output examples/output/terrain_p1_csm.png --overwrite
+
+# no shadows
+  python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/hdri/brown_photostudio_02_4k.hdr \
+  --size 1920 1080 --render-scale 1 --msaa 8 \
+  --ibl-res 1024 --ibl-intensity 0.6 \
+  --cam-radius 1400 --cam-phi 135 --cam-theta 35 \
+  --exposure 0.5 --sun-azimuth 135 --sun-elevation 15 \
+  --sun-intensity 0.6 --sun-color 1.0 0.5 0.9 \
+  --gi ibl,ssao --sky hdri \
+  --albedo-mode mix --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
+  --colormap-strength 0.6 --colormap-interpolate --colormap-size 512 \
+  --shadows none --cascades 4 --shadow-map-res 4096 \
+  --output examples/output/terrain_p1_none.png --overwrite
+
+
+# ============================================================================
+# P2a — Atmospheric fog *disabled* (should match P1)
+# Proof that adding fog wiring is a strict no-op when density = 0.
+# Output: examples/output/terrain_p2_nofog.png
+# ============================================================================
+
+python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/hdri/brown_photostudio_02_4k.hdr \
+  --size 1920 1080 --render-scale 1 --msaa 8 \
+  --ibl-res 1024 --ibl-intensity 0.6 \
+  --cam-radius 1400 --cam-phi 135 --cam-theta 35 \
+  --exposure 0.5 --sun-azimuth 135 --sun-elevation 15 \
+  --sun-intensity 0.6 --sun-color 1.0 0.5 0.9 \
+  --gi ibl,ssao --sky hdri \
+  --albedo-mode mix --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
+  --colormap-strength 0.6 --colormap-interpolate --colormap-size 512 \
   --shadows csm --cascades 4 --shadow-map-res 4096 \
-  --output examples/output/terrain_shadows.png --overwrite
+  --output examples/output/terrain_p2_nofog.png --overwrite
 
 
+# ============================================================================
+# P2b — Atmospheric fog *enabled* (visible effect)
+# Same as P1, but with height-based fog enabled.
+# fog-density=0.2 → moderate fog (quadratic: 0.04 effective)
+# fog-height-falloff=0.002 → fog thins with altitude
+# fog-inscatter=0.7,0.78,0.88 → atmospheric blue-gray tint
+# Output: examples/output/terrain_p2_fog.png
+# ============================================================================
 
-
-
-
-
-
-python examples/terrain_demo.py 
-  --size 2048 2048 
-  --msaa 4 
-  --z-scale 3.0 
-  --albedo-mode colormap 
-  --colormap "viridis" 
-  --colormap-domain 2500 4300 
-  --colormap-interpolate 
-  --colormap-size 512 
-  --height-curve-mode pow 
-  --height-curve-strength 0.8 
-  --height-curve-power 1.6 
-  --exposure 1.0 
-  --gi "" 
-  --sky hdri 
-  --pom-disabled 
-  --output examples/output/terrain_topographic_atlas.png 
-  --overwrite
-
-python examples/terrain_demo.py 
-  --size 1600 900 
-  --render-scale 1.25 
-  --msaa 8 
-  --preset studio_pbr 
-  --ibl-res 256 
-  --ibl-intensity 1.0 
-  --cam-radius 800 
-  --cam-phi 120 
-  --cam-theta 45 
-  --exposure 1.0 
-  --albedo-mode mix 
-  --colormap magma 
-  --colormap-strength 0.4 
-  --height-curve-mode smoothstep 
-  --height-curve-strength 0.5 
-  --shadows vsm 
-  --shadow-map-res 2048 
-  --shadow-moment-bias 0.0008 
-  --gi ibl,ssao 
-  --sky hdri 
-  --output examples/output/terrain_studio_pbr.png 
-  --overwrite
-
-python examples/terrain_demo.py 
-  --size 1920 1080 
-  --msaa 4 
-  --preset toon_viz 
-  --albedo-mode mix 
-  --colormap magma 
-  --colormap-strength 0.8 
-  --z-scale 2.5 
-  --height-curve-mode smoothstep 
-  --height-curve-strength 0.7 
-  --exposure 1.0 
-  --gi ibl 
-  --sky preetham 
-  --shadows hard 
-  --debug-lights 
-  --pom-disabled 
-  --output examples/output/terrain_toon_magma.png 
-  --overwrite
-
-python examples/terrain_demo.py 
-  --size 1600 900 
-  --msaa 4 
-  --z-scale 1.8 
-  --water-detect 
-  --water-level 0.06 
-  --water-slope 0.01 
-  --water-material overlay 
-  --water-mask-output examples/output/water_mask_binary.png 
-  --water-mask-output-mode binary 
-  --debug-mode 101 
-  --albedo-mode colormap 
-  --colormap terrain 
-  --colormap-strength 1.0 
-  --exposure 1.0 
-  --gi "" 
-  --output examples/output/terrain_water_diagnostics.png 
-  --overwrite
-
-python examples/terrain_demo.py 
-  --size 1280 720 
-  --msaa 4 
-  --preset outdoor_sun 
-  --cam-radius 1100 
-  --cam-phi 150 
-  --cam-theta 40 
-  --exposure 1.0 
-  --gi ibl,ssao 
-  --sky hosek-wilkie 
-  --water-detect 
-  --water-material overlay 
-  --albedo-mode mix 
-  --colormap terrain 
-  --colormap-strength 0.5 
-  --output examples/output/terrain_viewer_seed.png 
-  --window 
-  --viewer 
-  --overwrite
+python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/hdri/brown_photostudio_02_4k.hdr \
+  --size 1920 1080 --render-scale 1 --msaa 8 \
+  --ibl-res 1024 --ibl-intensity 0.6 \
+  --cam-radius 1400 --cam-phi 135 --cam-theta 35 \
+  --exposure 0.5 --sun-azimuth 135 --sun-elevation 15 \
+  --sun-intensity 0.6 --sun-color 1.0 0.5 0.9 \
+  --gi ibl,ssao --sky hdri \
+  --albedo-mode mix --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
+  --colormap-strength 0.6 --colormap-interpolate --colormap-size 512 \
+  --shadows csm --cascades 4 --shadow-map-res 4096 \
+  --fog-density 0.2 \
+  --fog-height-falloff 0.002 \
+  --fog-inscatter "0.7,0.78,0.88" \
+  --output examples/output/terrain_p2_fog.png --overwrite

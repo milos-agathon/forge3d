@@ -198,6 +198,33 @@ impl Default for ShadowSettingsNative {
     }
 }
 
+/// P2: Fog settings extracted from Python FogSettings or CLI args
+/// When density = 0.0, fog is disabled (no-op for P1 compatibility)
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct FogSettingsNative {
+    /// Fog density coefficient (0.0 = disabled)
+    pub density: f32,
+    /// Height falloff rate (higher = fog thins faster at altitude)
+    pub height_falloff: f32,
+    /// Base height for fog calculation (world-space Y)
+    pub base_height: f32,
+    /// Inscatter color (linear RGB, typically sky-tinted)
+    pub inscatter: [f32; 3],
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for FogSettingsNative {
+    fn default() -> Self {
+        Self {
+            density: 0.0,       // Disabled by default (P1 compatibility)
+            height_falloff: 0.0,
+            base_height: 0.0,
+            inscatter: [1.0, 1.0, 1.0],
+        }
+    }
+}
+
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
 pub struct DecodedTerrainSettings {
@@ -208,6 +235,7 @@ pub struct DecodedTerrainSettings {
     pub clamp: ClampSettingsNative,
     pub sampling: SamplingSettingsNative,
     pub shadow: ShadowSettingsNative,
+    pub fog: FogSettingsNative,
 }
 
 #[cfg(feature = "extension-module")]
@@ -579,6 +607,31 @@ impl TerrainRenderParams {
                 .unwrap_or(0.0002),
         };
 
+        // P2: Extract fog settings (defaults to disabled for P1 compatibility)
+        let fog_native = if let Ok(fog) = params.getattr("fog") {
+            // Extract inscatter as Vec<f32> then convert to [f32; 3] (tuple extraction can fail)
+            let inscatter_vec: Vec<f32> = fog
+                .getattr("inscatter")
+                .and_then(|v| v.extract())
+                .unwrap_or_else(|_| vec![1.0, 1.0, 1.0]);
+            let inscatter = [
+                inscatter_vec.first().copied().unwrap_or(1.0),
+                inscatter_vec.get(1).copied().unwrap_or(1.0),
+                inscatter_vec.get(2).copied().unwrap_or(1.0),
+            ];
+            let density: f32 = fog.getattr("density").and_then(|v| v.extract()).unwrap_or(0.0);
+            let height_falloff: f32 = fog.getattr("height_falloff").and_then(|v| v.extract()).unwrap_or(0.0);
+            let base_height: f32 = fog.getattr("base_height").and_then(|v| v.extract()).unwrap_or(0.0);
+            FogSettingsNative {
+                density,
+                height_falloff,
+                base_height,
+                inscatter,
+            }
+        } else {
+            FogSettingsNative::default()
+        };
+
         let decoded = DecodedTerrainSettings {
             light: LightSettingsNative {
                 direction,
@@ -591,6 +644,7 @@ impl TerrainRenderParams {
             clamp: clamp_native,
             sampling: sampling_native,
             shadow: shadow_native,
+            fog: fog_native,
         };
 
         let overlays = extract_overlays(params.getattr("overlays")?.as_gil_ref())?;

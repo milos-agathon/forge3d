@@ -14,6 +14,7 @@ from . import io as _io
 from .config import load_renderer_config
 from .terrain_params import (
     ShadowSettings as TerrainShadowSettings,
+    FogSettings as TerrainFogSettings,
     load_height_curve_lut,
     make_terrain_params_config,
 )
@@ -318,6 +319,7 @@ def _build_params(
     height_curve_power: float = 1.0,
     height_curve_lut=None,
     shadow_config=None,  # Optional ShadowParams from CLI
+    fog_config=None,  # P2: Optional FogSettings from CLI
 ):
     overlays = [
         f3d.OverlayLayer.from_colormap1d(
@@ -359,15 +361,18 @@ def _build_params(
             max_distance=4000.0,  # TODO: add to ShadowParams
             softness=shadow_config.light_size if shadow_config else 1.5,
             intensity=0.8,
-            slope_scale_bias=0.5,
-            depth_bias=shadow_config.moment_bias if shadow_config else 0.002,
-            normal_bias=0.5,
+            # Shadow bias values - these must be small (0.0001-0.01) for proper depth comparison
+            # Larger values cause all fragments to appear lit (no shadows)
+            slope_scale_bias=0.001,  # Slope-scaled bias for grazing angles
+            depth_bias=shadow_config.moment_bias if shadow_config else 0.0005,  # Base depth bias
+            normal_bias=0.0002,  # Peter-panning offset (bias along normal)
             min_variance=1e-4,
             light_bleed_reduction=0.5,
             evsm_exponent=40.0,
             fade_start=1.0,
         ),
         overlays=overlays,
+        fog=fog_config,  # P2: Pass fog config (None = disabled)
     )
 
     if pom_enabled is not None:
@@ -848,6 +853,26 @@ def run(args: Any) -> int:
     sun_intensity = float(args.sun_intensity) if getattr(args, "sun_intensity", None) is not None else 3.0
     sun_color = tuple(args.sun_color) if getattr(args, "sun_color", None) is not None else None
 
+    # P2: Parse fog parameters from CLI
+    fog_density = float(getattr(args, "fog_density", 0.0) or 0.0)
+    fog_height_falloff = float(getattr(args, "fog_height_falloff", 0.0) or 0.0)
+    fog_inscatter_str = getattr(args, "fog_inscatter", "1.0,1.0,1.0") or "1.0,1.0,1.0"
+    try:
+        fog_inscatter = tuple(float(x.strip()) for x in fog_inscatter_str.split(","))[:3]
+        if len(fog_inscatter) < 3:
+            fog_inscatter = (1.0, 1.0, 1.0)
+    except (ValueError, AttributeError):
+        fog_inscatter = (1.0, 1.0, 1.0)
+    
+    # Only create FogSettings if density > 0 (otherwise leave as None for no-op)
+    fog_config = None
+    if fog_density > 0.0:
+        fog_config = TerrainFogSettings(
+            density=fog_density,
+            height_falloff=fog_height_falloff,
+            inscatter=fog_inscatter,
+        )
+
     params = _build_params(
         size=(int(args.size[0]), int(args.size[1])),
         render_scale=float(args.render_scale),
@@ -873,6 +898,7 @@ def run(args: Any) -> int:
         height_curve_power=float(args.height_curve_power),
         height_curve_lut=height_curve_lut,
         shadow_config=renderer_config.shadows,  # Pass CLI shadow config
+        fog_config=fog_config,  # P2: Pass fog config
     )
 
     renderer = f3d.TerrainRenderer(sess)
