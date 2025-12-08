@@ -62,6 +62,19 @@ pub struct TerrainScene {
     // P2: Fog bind group layout and buffer
     fog_bind_group_layout: wgpu::BindGroupLayout,
     fog_uniform_buffer: wgpu::Buffer,
+    // P4: Water planar reflection resources (dynamically resized to half main resolution)
+    water_reflection_bind_group_layout: wgpu::BindGroupLayout,
+    water_reflection_uniform_buffer: wgpu::Buffer,
+    water_reflection_texture: Mutex<wgpu::Texture>,
+    water_reflection_view: Mutex<wgpu::TextureView>,
+    water_reflection_sampler: wgpu::Sampler,
+    water_reflection_depth_texture: Mutex<wgpu::Texture>,
+    water_reflection_depth_view: Mutex<wgpu::TextureView>,
+    water_reflection_size: Mutex<(u32, u32)>,
+    // P4: Fallback 1x1 texture for reflection pass (to avoid binding render target as resource)
+    water_reflection_fallback_view: wgpu::TextureView,
+    // P4: Non-MSAA pipeline for reflection pass (reflection textures are always sample_count=1)
+    water_reflection_pipeline: wgpu::RenderPipeline,
     // P0-03: Config plumbing (no shader/pipeline behavior changes)
     #[cfg(feature = "enable-renderer-config")]
     config: Arc<Mutex<crate::render::params::RendererConfig>>,
@@ -152,6 +165,119 @@ impl FogUniforms {
             _padding: 0.0,
         }
     }
+}
+
+/// P4: Water planar reflection uniforms
+/// Must match WaterReflectionUniforms struct in terrain_pbr_pom.wgsl exactly.
+/// When enable_reflections = 0, reflections are disabled (no-op preserving P3 output).
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct WaterReflectionUniforms {
+    /// Reflection view-projection matrix (mirrored camera)
+    reflection_view_proj: [[f32; 4]; 4],
+    /// Water plane parameters: normal (xyz), distance (w)
+    water_plane: [f32; 4],
+    /// Reflection params: (intensity, fresnel_power, wave_strength, shore_atten_width)
+    reflection_params: [f32; 4],
+    /// Camera world position for Fresnel calculation
+    camera_world_pos: [f32; 4],
+    /// Enable flags: (enable_reflections, debug_mode, resolution, _pad)
+    enable_flags: [f32; 4],
+}
+
+impl WaterReflectionUniforms {
+    /// Create water reflection uniforms with reflections disabled (no-op for P3 compatibility)
+    fn disabled() -> Self {
+        Self {
+            reflection_view_proj: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            water_plane: [0.0, 1.0, 0.0, 0.0],
+            reflection_params: [0.8, 5.0, 0.02, 0.3],
+            camera_world_pos: [0.0, 0.0, 0.0, 1.0],
+            enable_flags: [0.0, 0.0, 0.5, 0.0],
+        }
+    }
+
+    /// Create enabled water reflection uniforms for main pass (samples from reflection texture)
+    fn enabled_main_pass(
+        reflection_view_proj: [[f32; 4]; 4],
+        water_plane_height: f32,
+        camera_pos: [f32; 3],
+        intensity: f32,
+        fresnel_power: f32,
+        wave_strength: f32,
+        shore_atten_width: f32,
+        resolution_scale: f32,
+    ) -> Self {
+        Self {
+            reflection_view_proj,
+            // Water plane: Z-up normal (0, 0, 1) at height h => plane equation is z - h = 0
+            // Note: The terrain shader uses Z-up coordinates (world_position.z is height)
+            water_plane: [0.0, 0.0, 1.0, -water_plane_height],
+            reflection_params: [intensity, fresnel_power, wave_strength, shore_atten_width],
+            camera_world_pos: [camera_pos[0], camera_pos[1], camera_pos[2], 1.0],
+            // enable_flags: (enable_reflections=1, reflection_pass_mode=0, resolution_scale, _pad)
+            enable_flags: [1.0, 0.0, resolution_scale, 0.0],
+        }
+    }
+
+    /// Create uniforms for reflection render pass (clips below water plane, doesn't sample reflection)
+    fn for_reflection_pass(water_plane_height: f32) -> Self {
+        Self {
+            // Identity matrix - not used in reflection pass
+            reflection_view_proj: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            // Water plane: Z-up normal for clip plane calculation (terrain uses Z-up)
+            water_plane: [0.0, 0.0, 1.0, -water_plane_height],
+            reflection_params: [0.0, 0.0, 0.0, 0.0],
+            camera_world_pos: [0.0, 0.0, 0.0, 1.0],
+            // enable_flags: (enable_reflections=0, reflection_pass_mode=1, _pad, _pad)
+            // - enable_reflections=0: don't sample reflection texture (avoid recursion)
+            // - reflection_pass_mode=1: clip fragments below water plane
+            enable_flags: [0.0, 1.0, 0.0, 0.0],
+        }
+    }
+}
+
+/// P4: Compute a mirrored view matrix across a horizontal water plane.
+/// The water plane is assumed to be Z-up at height `plane_height` (matching terrain coordinates).
+fn compute_mirrored_view_matrix(
+    view_matrix: [[f32; 4]; 4],
+    plane_height: f32,
+) -> [[f32; 4]; 4] {
+    // Reflection matrix across plane z = plane_height
+    // R = I - 2 * n * n^T where n = (0, 0, 1)
+    // This reflects the Z coordinate: z' = 2*h - z
+    let reflect = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0, 2.0 * plane_height],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+    
+    // Mirrored view = view * reflect (apply reflection in world space before view)
+    mul_mat4(view_matrix, reflect)
+}
+
+/// P4: Multiply two 4x4 matrices (row-major).
+fn mul_mat4(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    let mut result = [[0.0f32; 4]; 4];
+    for i in 0..4 {
+        for j in 0..4 {
+            for k in 0..4 {
+                result[i][j] += a[i][k] * b[k][j];
+            }
+        }
+    }
+    result
 }
 
 #[cfg(test)]
@@ -878,6 +1004,99 @@ impl TerrainScene {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        // P4: Create water reflection bind group layout and resources
+        let water_reflection_bind_group_layout = Self::create_water_reflection_bind_group_layout(device.as_ref());
+        let water_reflection_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain.water_reflection.uniform_buffer"),
+            contents: bytemuck::bytes_of(&WaterReflectionUniforms::disabled()),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // P4: Create water reflection texture (half-res as per P4 spec)
+        let water_reflection_resolution = 512u32; // Half of typical 1024 render
+        let water_reflection_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.water_reflection.texture"),
+            size: wgpu::Extent3d {
+                width: water_reflection_resolution,
+                height: water_reflection_resolution,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: color_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let water_reflection_view = water_reflection_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // P4: Create water reflection depth texture
+        let water_reflection_depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.water_reflection.depth"),
+            size: wgpu::Extent3d {
+                width: water_reflection_resolution,
+                height: water_reflection_resolution,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let water_reflection_depth_view = water_reflection_depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // P4: Create water reflection sampler
+        let water_reflection_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain.water_reflection.sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        // P4: Create fallback 1x1 texture for reflection pass (to avoid texture usage conflict)
+        // During reflection pass, we can't sample from the texture we're rendering to
+        let water_reflection_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.water_reflection.fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: color_format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        // Initialize with transparent black
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &water_reflection_fallback_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[0u8; 4], // RGBA = 0,0,0,0
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let water_reflection_fallback_view = water_reflection_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         let pipeline = Self::create_render_pipeline(
             device.as_ref(),
             &bind_group_layout,
@@ -885,9 +1104,24 @@ impl TerrainScene {
             &ibl_bind_group_layout,
             &shadow_bind_group_layout,
             &fog_bind_group_layout,
+            &water_reflection_bind_group_layout,
             color_format,
             1,
         );
+        
+        // P4: Create non-MSAA pipeline for reflection pass (reflection textures always sample_count=1)
+        let water_reflection_pipeline = Self::create_render_pipeline(
+            device.as_ref(),
+            &bind_group_layout,
+            light_buffer_layout,
+            &ibl_bind_group_layout,
+            &shadow_bind_group_layout,
+            &fog_bind_group_layout,
+            &water_reflection_bind_group_layout,
+            color_format,
+            1, // Always sample_count=1 for reflection pass
+        );
+        
         let blit_pipeline =
             Self::create_blit_pipeline(device.as_ref(), &blit_bind_group_layout, color_format);
 
@@ -964,6 +1198,17 @@ impl TerrainScene {
             // P2: Fog bind group layout and buffer
             fog_bind_group_layout,
             fog_uniform_buffer,
+            // P4: Water reflection resources (dynamically resized)
+            water_reflection_bind_group_layout,
+            water_reflection_uniform_buffer,
+            water_reflection_texture: Mutex::new(water_reflection_texture),
+            water_reflection_view: Mutex::new(water_reflection_view),
+            water_reflection_sampler,
+            water_reflection_depth_texture: Mutex::new(water_reflection_depth_texture),
+            water_reflection_depth_view: Mutex::new(water_reflection_depth_view),
+            water_reflection_size: Mutex::new((water_reflection_resolution, water_reflection_resolution)),
+            water_reflection_fallback_view,
+            water_reflection_pipeline,
             // P0-03: Initialize with default config (no behavior changes)
             #[cfg(feature = "enable-renderer-config")]
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
@@ -977,6 +1222,78 @@ impl TerrainScene {
             .lock()
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock light buffer: {}", e)))?;
         Ok(light_buffer.debug_info())
+    }
+
+    /// P4: Ensure reflection textures match the required size (half of main internal size).
+    /// Returns true if textures were recreated, false if size was already correct.
+    fn ensure_reflection_texture_size(&self, width: u32, height: u32) -> Result<bool> {
+        let target_width = (width / 2).max(1);
+        let target_height = (height / 2).max(1);
+        
+        let mut size = self.water_reflection_size.lock()
+            .map_err(|_| anyhow!("water_reflection_size mutex poisoned"))?;
+        
+        if size.0 == target_width && size.1 == target_height {
+            return Ok(false);
+        }
+        
+        log::info!(
+            target: "terrain.water_reflection",
+            "P4: Recreating reflection textures: {}x{} -> {}x{} (half of {}x{})",
+            size.0, size.1, target_width, target_height, width, height
+        );
+        
+        // Create new reflection color texture
+        let new_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.water_reflection.texture"),
+            size: wgpu::Extent3d {
+                width: target_width,
+                height: target_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.color_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let new_view = new_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        
+        // Create new reflection depth texture
+        let new_depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.water_reflection.depth"),
+            size: wgpu::Extent3d {
+                width: target_width,
+                height: target_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let new_depth_view = new_depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        
+        // Update the textures under lock
+        let mut tex = self.water_reflection_texture.lock()
+            .map_err(|_| anyhow!("water_reflection_texture mutex poisoned"))?;
+        let mut view = self.water_reflection_view.lock()
+            .map_err(|_| anyhow!("water_reflection_view mutex poisoned"))?;
+        let mut depth_tex = self.water_reflection_depth_texture.lock()
+            .map_err(|_| anyhow!("water_reflection_depth_texture mutex poisoned"))?;
+        let mut depth_view = self.water_reflection_depth_view.lock()
+            .map_err(|_| anyhow!("water_reflection_depth_view mutex poisoned"))?;
+        
+        *tex = new_texture;
+        *view = new_view;
+        *depth_tex = new_depth_texture;
+        *depth_view = new_depth_view;
+        *size = (target_width, target_height);
+        
+        Ok(true)
     }
 
     /// Preprocess terrain shader by resolving #include directives
@@ -1345,6 +1662,45 @@ impl TerrainScene {
         })
     }
 
+    /// P4: Create water reflection bind group layout for terrain shader (group 5)
+    /// Matches terrain_pbr_pom.wgsl @group(5) bindings: WaterReflectionUniforms, texture, sampler
+    fn create_water_reflection_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain_pbr_pom.water_reflection_bind_group_layout"),
+            entries: &[
+                // @binding(0): WaterReflectionUniforms
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // @binding(1): reflection_texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // @binding(2): reflection_sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        })
+    }
+
     fn create_render_pipeline(
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
@@ -1352,6 +1708,7 @@ impl TerrainScene {
         ibl_bind_group_layout: &wgpu::BindGroupLayout,
         shadow_bind_group_layout: &wgpu::BindGroupLayout,
         fog_bind_group_layout: &wgpu::BindGroupLayout,
+        water_reflection_bind_group_layout: &wgpu::BindGroupLayout,
         color_format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> wgpu::RenderPipeline {
@@ -1364,11 +1721,12 @@ impl TerrainScene {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("terrain_pbr_pom.pipeline_layout"),
             bind_group_layouts: &[
-                bind_group_layout,         // @group(0): terrain uniforms/textures (bindings 0-8)
-                light_buffer_layout,       // @group(1): lights (bindings 3-5)
-                ibl_bind_group_layout,     // @group(2): IBL (bindings 0-4)
-                &shadow_bind_group_layout, // @group(3): shadows (bindings 0-4)
-                fog_bind_group_layout,     // @group(4): fog (binding 0)
+                bind_group_layout,                   // @group(0): terrain uniforms/textures (bindings 0-11)
+                light_buffer_layout,                 // @group(1): lights (bindings 3-5)
+                ibl_bind_group_layout,               // @group(2): IBL (bindings 0-4)
+                &shadow_bind_group_layout,           // @group(3): shadows (bindings 0-4)
+                fog_bind_group_layout,               // @group(4): fog (binding 0)
+                water_reflection_bind_group_layout,  // @group(5): water reflections (bindings 0-2)
             ],
             push_constant_ranges: &[],
         });
@@ -2120,6 +2478,8 @@ impl TerrainScene {
             ],
         });
 
+        // Upload LUT texture if needed (but don't create height_curve_view yet to avoid
+        // borrow conflict with render_shadow_depth_passes which needs &mut self)
         let lut_texture_uploaded = if params.height_curve_mode() == "lut" {
             params
                 .height_curve_lut()
@@ -2128,70 +2488,8 @@ impl TerrainScene {
         } else {
             None
         };
-        let height_curve_view = lut_texture_uploaded
-            .as_ref()
-            .map(|(_, view)| view)
-            .unwrap_or(&self.height_curve_identity_view);
-
-        // Create bind group
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("terrain_pbr_pom.bind_group"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&heightmap_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(material_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Sampler(material_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: shading_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::TextureView(colormap_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::Sampler(colormap_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 8,
-                    resource: overlay_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 9,
-                    resource: wgpu::BindingResource::TextureView(height_curve_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 10,
-                    resource: wgpu::BindingResource::Sampler(&self.height_curve_lut_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 11,
-                    resource: wgpu::BindingResource::TextureView(
-                        water_mask_view_uploaded
-                            .as_ref()
-                            .unwrap_or(&self.water_mask_fallback_view),
-                    ),
-                },
-            ],
-        });
+        // Note: main bind_group creation is deferred until after shadow pass
+        // to avoid borrow conflict with &mut self in render_shadow_depth_passes
 
         // ──────────────────────────────────────────────────────────────────────────
         // MSAA Selection (single authoritative source)
@@ -2229,6 +2527,7 @@ impl TerrainScene {
                 &self.ibl_bind_group_layout,
                 &self.shadow_bind_group_layout,
                 &self.fog_bind_group_layout,
+                &self.water_reflection_bind_group_layout,
                 self.color_format,
                 effective_msaa,
             );
@@ -2467,6 +2766,72 @@ impl TerrainScene {
             &self.noop_shadow.bind_group
         };
 
+        // Now safe to borrow self.height_curve_identity_view (no more &mut self needed for shadows)
+        let height_curve_view = lut_texture_uploaded
+            .as_ref()
+            .map(|(_, view)| view as &wgpu::TextureView)
+            .unwrap_or(&self.height_curve_identity_view);
+
+        // Create main terrain bind group (deferred from earlier to avoid borrow conflict)
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain_pbr_pom.bind_group"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&heightmap_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(material_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(material_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: shading_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(colormap_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(colormap_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: overlay_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::TextureView(height_curve_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: wgpu::BindingResource::Sampler(&self.height_curve_lut_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: wgpu::BindingResource::TextureView(
+                        water_mask_view_uploaded
+                            .as_ref()
+                            .unwrap_or(&self.water_mask_fallback_view),
+                    ),
+                },
+            ],
+        });
+
         // P2: Create fog bind group with current fog uniforms
         // When fog_density = 0 (default), fog is disabled (no-op for P1 compatibility)
         // Auto-compute base_height from terrain min if not specified (base_height <= 0)
@@ -2494,6 +2859,236 @@ impl TerrainScene {
                 resource: self.fog_uniform_buffer.as_entire_binding(),
             }],
         });
+
+        // ──────────────────────────────────────────────────────────────────────────
+        // P4: Water Planar Reflection Pass
+        // ──────────────────────────────────────────────────────────────────────────
+        let reflection_settings = &decoded.reflection;
+        
+        // Ensure reflection textures are the correct size (half of internal resolution)
+        self.ensure_reflection_texture_size(internal_width, internal_height)?;
+        
+        // If reflections are enabled, render the reflection pass first
+        if reflection_settings.enabled {
+            // Compute mirrored view matrix across water plane
+            let mirrored_view = {
+                let view_arr: [[f32; 4]; 4] = view_matrix.to_cols_array_2d();
+                let mirrored_arr = compute_mirrored_view_matrix(view_arr, reflection_settings.water_plane_height);
+                glam::Mat4::from_cols_array_2d(&mirrored_arr)
+            };
+            
+            // Build reflection pass uniforms with mirrored camera
+            let reflection_uniforms = Self::build_uniforms_with_matrices(
+                params, decoded, mirrored_view, proj_matrix,
+            );
+            let reflection_uniform_buffer = self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("terrain.reflection.uniform_buffer"),
+                    contents: bytemuck::cast_slice(&reflection_uniforms),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                },
+            );
+            
+            // Create reflection pass bind group (group 0) with mirrored camera
+            let reflection_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("terrain.reflection.bind_group"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: reflection_uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&heightmap_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(material_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Sampler(material_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: shading_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(colormap_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Sampler(colormap_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: overlay_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: wgpu::BindingResource::TextureView(height_curve_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: wgpu::BindingResource::Sampler(&self.height_curve_lut_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: wgpu::BindingResource::TextureView(
+                            water_mask_view_uploaded
+                                .as_ref()
+                                .unwrap_or(&self.water_mask_fallback_view),
+                        ),
+                    },
+                ],
+            });
+            
+            // Create reflection pass water reflection uniforms (with clip plane enabled)
+            let reflection_pass_water_uniforms = WaterReflectionUniforms::for_reflection_pass(
+                reflection_settings.water_plane_height,
+            );
+            let reflection_pass_water_uniform_buffer = self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("terrain.reflection_pass.water_uniform_buffer"),
+                    contents: bytemuck::bytes_of(&reflection_pass_water_uniforms),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                },
+            );
+            
+            // Lock reflection view for render target (NOT for sampling - that causes texture conflict)
+            let reflection_view_guard = self.water_reflection_view.lock()
+                .map_err(|_| anyhow!("water_reflection_view mutex poisoned"))?;
+            
+            // Use fallback texture for bind group to avoid texture usage conflict
+            // (can't sample from texture being rendered to in same pass)
+            let reflection_pass_water_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("terrain.reflection_pass.water_bind_group"),
+                layout: &self.water_reflection_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: reflection_pass_water_uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        // Use fallback 1x1 texture - we're rendering TO reflection texture, can't sample it
+                        resource: wgpu::BindingResource::TextureView(&self.water_reflection_fallback_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&self.water_reflection_sampler),
+                    },
+                ],
+            });
+            
+            // Lock light buffer for reflection pass
+            let light_buffer_guard = self.light_buffer.lock()
+                .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
+            let light_bind_group = light_buffer_guard.bind_group()
+                .expect("LightBuffer should always provide a bind group");
+            
+            // P4: Reflection render pass (no depth - fullscreen triangle shader handles depth internally)
+            // Uses water_reflection_pipeline (always sample_count=1) to match reflection texture
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("terrain.reflection_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &*reflection_view_guard,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.1,
+                                b: 0.15,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                
+                // Use reflection-specific non-MSAA pipeline (sample_count=1)
+                pass.set_pipeline(&self.water_reflection_pipeline);
+                pass.set_bind_group(0, &reflection_bind_group, &[]);
+                pass.set_bind_group(1, light_bind_group, &[]);
+                pass.set_bind_group(2, &ibl_bind_group, &[]);
+                pass.set_bind_group(3, shadow_bind_group, &[]);
+                pass.set_bind_group(4, &fog_bind_group, &[]);
+                pass.set_bind_group(5, &reflection_pass_water_bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            
+            drop(light_buffer_guard);
+            drop(reflection_view_guard);
+            
+            log::info!(
+                target: "terrain.water_reflection",
+                "P4: Rendered reflection pass at {}x{} (plane_height={:.2})",
+                internal_width / 2, internal_height / 2,
+                reflection_settings.water_plane_height
+            );
+        }
+        
+        // P4: Create water reflection uniforms for main pass
+        // When enabled=false, reflections are disabled (P3 compatibility)
+        let water_reflection_uniforms = if reflection_settings.enabled {
+            let view_arr: [[f32; 4]; 4] = view_matrix.to_cols_array_2d();
+            let mirrored_view = compute_mirrored_view_matrix(view_arr, reflection_settings.water_plane_height);
+            let proj_arr: [[f32; 4]; 4] = proj_matrix.to_cols_array_2d();
+            let reflection_view_proj = mul_mat4(proj_arr, mirrored_view);
+            let resolution_scale = 0.5;
+            
+            WaterReflectionUniforms::enabled_main_pass(
+                reflection_view_proj,
+                reflection_settings.water_plane_height,
+                [eye_x, eye_y, eye_z],
+                reflection_settings.intensity,
+                reflection_settings.fresnel_power,
+                reflection_settings.wave_strength,
+                reflection_settings.shore_atten_width,
+                resolution_scale,
+            )
+        } else {
+            WaterReflectionUniforms::disabled()
+        };
+        self.queue.write_buffer(
+            &self.water_reflection_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&water_reflection_uniforms),
+        );
+
+        // Lock reflection view for main pass bind group
+        let reflection_view_guard = self.water_reflection_view.lock()
+            .map_err(|_| anyhow!("water_reflection_view mutex poisoned"))?;
+        
+        let water_reflection_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain.water_reflection.bind_group"),
+            layout: &self.water_reflection_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.water_reflection_uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&*reflection_view_guard),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.water_reflection_sampler),
+                },
+            ],
+        });
+        drop(reflection_view_guard);
 
         // Re-acquire pipeline lock for main render pass
         let pipeline_cache = self
@@ -2556,6 +3151,9 @@ impl TerrainScene {
 
                 // P2: Bind fog bind group at index 4
                 pass.set_bind_group(4, &fog_bind_group, &[]);
+
+                // P4: Bind water reflection bind group at index 5
+                pass.set_bind_group(5, &water_reflection_bind_group, &[]);
 
                 pass.draw(0..3, 0..1);
             }
@@ -2993,6 +3591,37 @@ impl TerrainScene {
         uniforms.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
 
         Ok(uniforms)
+    }
+
+    /// P4: Build uniform buffer data with explicit view/proj matrices (for reflection pass)
+    fn build_uniforms_with_matrices(
+        params: &crate::terrain_render_params::TerrainRenderParams,
+        decoded: &crate::terrain_render_params::DecodedTerrainSettings,
+        view: glam::Mat4,
+        proj: glam::Mat4,
+    ) -> Vec<f32> {
+        let mut uniforms = Vec::with_capacity(48);
+
+        // View matrix (column-major)
+        uniforms.extend_from_slice(&view.to_cols_array());
+        // Projection matrix (column-major)
+        uniforms.extend_from_slice(&proj.to_cols_array());
+
+        // sun_exposure: (sun direction, intensity)
+        uniforms.extend_from_slice(&[
+            decoded.light.direction[0],
+            decoded.light.direction[1],
+            decoded.light.direction[2],
+            decoded.light.intensity,
+        ]);
+
+        // spacing_h_exag: (spacing_x, spacing_y, height_exag, render_scale)
+        uniforms.extend_from_slice(&[1.0, 1.0, params.z_scale, params.render_scale]);
+
+        // pad_tail
+        uniforms.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
+
+        uniforms
     }
 
     /// Build shading uniform buffer

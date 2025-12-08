@@ -1486,6 +1486,68 @@ def _compute_slope_deg(hm: np.ndarray, spacing: tuple[float, float]) -> np.ndarr
     return (np.degrees(np.arctan(slope))).astype(np.float32)
 
 
+def _compute_depression_depths(
+    heightmap: np.ndarray,
+    valid_mask: np.ndarray | None = None,
+) -> np.ndarray:
+    """Compute closed-depression depth via a simple priority-flood.
+
+    For each pixel, this returns how far (in elevation units) it lies below
+    the minimum spill elevation to the DEM boundary, treating invalid DEM
+    samples as barriers. Non-depressed or invalid pixels get depth 0.
+
+    This is a DEM-only operation (no image brightness), intended as a
+    physically meaningful indicator of closed basins/lakes.
+    """
+    import heapq
+
+    h = np.asarray(heightmap, dtype=np.float32)
+    H, W = h.shape
+
+    if valid_mask is None:
+        vm = np.isfinite(h)
+    else:
+        vm = np.asarray(valid_mask, dtype=bool)
+
+    spill = np.full_like(h, np.inf, dtype=np.float32)
+    visited = np.zeros_like(h, dtype=bool)
+    pq: list[tuple[float, int, int]] = []
+
+    # Seed priority queue with all valid border cells. These represent
+    # potential spillways out of the DEM tile.
+    for i in range(H):
+        for j in (0, W - 1):
+            if vm[i, j] and not visited[i, j]:
+                visited[i, j] = True
+                spill[i, j] = h[i, j]
+                heapq.heappush(pq, (spill[i, j], i, j))
+    for j in range(W):
+        for i in (0, H - 1):
+            if vm[i, j] and not visited[i, j]:
+                visited[i, j] = True
+                spill[i, j] = h[i, j]
+                heapq.heappush(pq, (spill[i, j], i, j))
+
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    while pq:
+        s, i, j = heapq.heappop(pq)
+        # Skip stale queue entries
+        if s != spill[i, j]:
+            continue
+        for di, dj in dirs:
+            ni, nj = i + di, j + dj
+            if 0 <= ni < H and 0 <= nj < W and vm[ni, nj] and not visited[ni, nj]:
+                visited[ni, nj] = True
+                # Propagate spill elevation; water can only rise, never fall.
+                spill[ni, nj] = max(h[ni, nj], s)
+                heapq.heappush(pq, (spill[ni, nj], ni, nj))
+
+    depth = spill - h
+    depth[~vm] = 0.0
+    depth[depth < 0.0] = 0.0
+    return depth
+
+
 def detect_dem_water_mask(
     heightmap: np.ndarray,
     domain: tuple[float, float],
@@ -1496,6 +1558,7 @@ def detect_dem_water_mask(
     base_min_area_pct: float = 0.01,
     keep_components: int = 2,
     nodata_value: float | None = None,
+    depression_min_depth: float | None = None,
 ) -> np.ndarray:
     """Detect water regions in a DEM based on elevation and flatness.
     
@@ -1544,37 +1607,60 @@ def detect_dem_water_mask(
         if hi > valid_hi + 0.1 * (valid_hi - valid_lo):
             hi = valid_hi
     rng = max(hi - lo, 1e-6)
-    
-    level_abs = lo + float(level_normalized) * rng
 
-    spacing_use = spacing if spacing is not None else (1.0, 1.0)
-    try:
-        mask = _detect_water_mask_via_scene(
-            h,
-            spacing=spacing_use,
-            level=level_abs,
-            method="flat",
-            smooth_iters=1,
-        )
-        mask = np.asarray(mask, dtype=bool)
-    except Exception:
-        mask = h <= level_abs
+    # ── Step 3: Build initial water candidate mask ──
+    # Two modes:
+    #   1) Legacy heuristic (no depression_min_depth): use scene-based flatness +
+    #      global low elevation threshold.
+    #   2) Closed-depression mode (depression_min_depth provided): ignore global
+    #      elevation threshold and detect water purely from depression depth and
+    #      local flatness.
 
-    if not mask.size:
-        return mask
+    if depression_min_depth is not None and float(depression_min_depth) > 0.0:
+        # Closed-depression driven detection.
+        h_norm = np.clip((h - lo) / rng, 0.0, 1.0)
+        gy, gx = np.gradient(h_norm)
+        grad = np.sqrt(gx * gx + gy * gy)
+        flat = grad <= float(slope_threshold)
 
-    # ── Step 3: Apply flatness + low elevation criteria (only on valid pixels) ──
-    h_norm = np.clip((h - lo) / rng, 0.0, 1.0)
-    gy, gx = np.gradient(h_norm)
-    grad = np.sqrt(gx * gx + gy * gy)
-    flat = grad <= float(slope_threshold)
-    low = h_norm <= float(level_normalized)
-    mask &= (flat & low)
-    
-    # ── Step 4: Force NoData pixels to NOT be water ──
-    mask &= valid_dem_mask
+        depth = _compute_depression_depths(h, valid_dem_mask)
+        deep = depth >= float(depression_min_depth)
 
-    # ── Step 5: Postprocess - reject border+NoData artifacts ──
+        # Water = valid DEM pixels that are in a closed depression of at
+        # least depression_min_depth and locally flat.
+        mask = flat & deep & valid_dem_mask
+    else:
+        # Legacy elevation+flatness heuristic, used when no depression
+        # threshold is requested.
+        level_abs = lo + float(level_normalized) * rng
+
+        spacing_use = spacing if spacing is not None else (1.0, 1.0)
+        try:
+            mask = _detect_water_mask_via_scene(
+                h,
+                spacing=spacing_use,
+                level=level_abs,
+                method="flat",
+                smooth_iters=1,
+            )
+            mask = np.asarray(mask, dtype=bool)
+        except Exception:
+            mask = h <= level_abs
+
+        if not mask.size:
+            return mask
+
+        h_norm = np.clip((h - lo) / rng, 0.0, 1.0)
+        gy, gx = np.gradient(h_norm)
+        grad = np.sqrt(gx * gx + gy * gy)
+        flat = grad <= float(slope_threshold)
+        low = h_norm <= float(level_normalized)
+        mask &= (flat & low)
+
+        # Force NoData pixels to NOT be water
+        mask &= valid_dem_mask
+
+    # ── Step 4/5: Postprocess - reject border+NoData artifacts ──
     try:
         total_px = h.shape[0] * h.shape[1]
         min_area_px = int(total_px * float(base_min_area_pct) / 100.0)

@@ -32,11 +32,11 @@ python examples/terrain_demo.py \
   --ibl-res 1024 --ibl-intensity 0.9 \
   --cam-radius 1400 --cam-phi 135 --cam-theta 35 \
   --exposure 0.6 --sun-azimuth 135 --sun-elevation 15 \
-  --sun-intensity 0.4 --sun-color 1.0 0.5 0.9 \
+  --sun-intensity 0.1 --sun-color 1.0 0.5 0.9 \
   --gi ibl,ssao --sky hdri \
   --albedo-mode mix --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
-  --colormap-strength 0.6 --colormap-interpolate --colormap-size 512 \
-  --shadows csm --cascades 4 --shadow-map-res 2048 \
+  --colormap-strength 0.6 --colormap-interpolate --colormap-size 1024 \
+  --shadows csm --cascades 4 --shadow-map-res 4096 \
   --output examples/output/terrain_p1_csm.png --overwrite
 
 # no shadows

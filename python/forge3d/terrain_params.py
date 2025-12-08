@@ -135,6 +135,33 @@ class FogSettings:
 
 
 @dataclass
+class ReflectionSettings:
+    """P4: Water planar reflection configuration.
+    
+    When enabled=False, reflections are disabled (no-op for P3 compatibility).
+    Reflections sample a half-resolution render of the scene mirrored across
+    the water plane, with wave-based UV distortion and Fresnel mixing.
+    """
+
+    enabled: bool = False  # Disabled by default (P3 compatibility)
+    intensity: float = 0.8  # Reflection intensity (0.0-1.0)
+    fresnel_power: float = 5.0  # Fresnel falloff exponent
+    wave_strength: float = 0.02  # Wave-based UV distortion strength
+    shore_atten_width: float = 0.3  # Reduce reflections near land
+    water_plane_height: float = 0.0  # Water plane height in world space
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.intensity <= 1.0:
+            raise ValueError("intensity must be in [0, 1]")
+        if self.fresnel_power < 0.0:
+            raise ValueError("fresnel_power must be >= 0")
+        if self.wave_strength < 0.0:
+            raise ValueError("wave_strength must be >= 0")
+        if self.shore_atten_width < 0.0:
+            raise ValueError("shore_atten_width must be >= 0")
+
+
+@dataclass
 class TriplanarSettings:
     """Triplanar texture mapping configuration."""
 
@@ -292,11 +319,16 @@ class TerrainRenderParams:
     height_curve_lut: Optional[np.ndarray] = None
     # P2: Atmospheric fog (defaults to disabled for P1 compatibility)
     fog: Optional[FogSettings] = None
+    # P4: Water planar reflections (defaults to disabled for P3 compatibility)
+    reflection: Optional[ReflectionSettings] = None
 
     def __post_init__(self) -> None:
         # Default fog to disabled if not provided
         if self.fog is None:
             self.fog = FogSettings()
+        # Default reflection to disabled if not provided
+        if self.reflection is None:
+            self.reflection = ReflectionSettings()
         width, height = self.size_px
         if width < 64 or height < 64:
             raise ValueError("size_px must be >= 64x64")
@@ -415,6 +447,7 @@ def make_terrain_params_config(
     clamp: Optional[ClampSettings] = None,
     overlays: Optional[list] = None,
     fog: Optional[FogSettings] = None,
+    reflection: Optional[ReflectionSettings] = None,
 ) -> TerrainRenderParams:
     light_color = [1.0, 1.0, 1.0]
     if sun_color is not None:
@@ -534,6 +567,7 @@ def make_terrain_params_config(
         height_curve_power=height_curve_power,
         height_curve_lut=height_curve_lut,
         fog=fog,
+        reflection=reflection,
     )
 
 
@@ -542,6 +576,7 @@ __all__ = [
     "IblSettings",
     "ShadowSettings",
     "FogSettings",
+    "ReflectionSettings",
     "TriplanarSettings",
     "PomSettings",
     "LodSettings",

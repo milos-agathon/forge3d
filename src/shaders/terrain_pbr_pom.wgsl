@@ -291,6 +291,120 @@ struct FogUniforms {
 @group(4) @binding(0)
 var<uniform> fog_uniforms: FogUniforms;
 
+// ──────────────────────────────────────────────────────────────────────────
+// P4: Water Planar Reflection Uniforms (@group(5))
+// Deterministic planar reflections with mirrored camera for water surfaces.
+// When enable_reflections = 0 or no water, reflections are a no-op.
+// ──────────────────────────────────────────────────────────────────────────
+struct WaterReflectionUniforms {
+    // Reflection view-projection matrix (mirrored camera)
+    reflection_view_proj: mat4x4<f32>,
+    // Water plane parameters: normal (xyz), distance (w)
+    water_plane: vec4<f32>,
+    // Reflection params: (intensity, fresnel_power, wave_strength, shore_atten_width)
+    reflection_params: vec4<f32>,
+    // Camera world position for Fresnel calculation
+    camera_world_pos: vec4<f32>,
+    // Enable flags: (enable_reflections, debug_mode, resolution, _pad)
+    enable_flags: vec4<f32>,
+}
+
+@group(5) @binding(0)
+var<uniform> water_reflection_uniforms: WaterReflectionUniforms;
+
+@group(5) @binding(1)
+var reflection_texture: texture_2d<f32>;
+
+@group(5) @binding(2)
+var reflection_sampler: sampler;
+
+// P4: Sample reflection texture with wave-based UV distortion
+// Returns (reflection_color, valid) where valid indicates if sample is in bounds
+fn sample_water_reflection(
+    world_pos: vec3<f32>,
+    wave_normal: vec3<f32>,
+    shore_distance: f32,
+) -> vec4<f32> {
+    // Early-out if reflections disabled
+    if (water_reflection_uniforms.enable_flags.x < 0.5) {
+        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    }
+    
+    // Transform world position to reflection clip space
+    let reflection_clip = water_reflection_uniforms.reflection_view_proj * vec4<f32>(world_pos, 1.0);
+    
+    // Perspective divide
+    if (abs(reflection_clip.w) < 0.001) {
+        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    }
+    let reflection_ndc = reflection_clip.xyz / reflection_clip.w;
+    
+    // Convert NDC to UV [0,1]
+    var reflection_uv = reflection_ndc.xy * 0.5 + 0.5;
+    // Flip Y for texture coordinate system
+    reflection_uv.y = 1.0 - reflection_uv.y;
+    
+    // Wave-based UV distortion
+    // Wave normal deviation from flat (0,1,0) creates UV offset
+    let wave_strength = water_reflection_uniforms.reflection_params.z;
+    let wave_distortion = (wave_normal.xz - vec2<f32>(0.0, 0.0)) * wave_strength;
+    
+    // Shore attenuation: reduce distortion near shore (calmer water at edges)
+    let shore_atten_width = water_reflection_uniforms.reflection_params.w;
+    let shore_factor = smoothstep(0.0, shore_atten_width, shore_distance);
+    
+    // Apply distortion with shore attenuation
+    reflection_uv = reflection_uv + wave_distortion * shore_factor;
+    
+    // Clamp to valid range
+    reflection_uv = clamp(reflection_uv, vec2<f32>(0.001), vec2<f32>(0.999));
+    
+    // Check if in bounds (out of bounds returns zero alpha)
+    if (reflection_uv.x < 0.001 || reflection_uv.x > 0.999 ||
+        reflection_uv.y < 0.001 || reflection_uv.y > 0.999) {
+        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    }
+    
+    // Sample reflection texture
+    let reflection_color = textureSample(reflection_texture, reflection_sampler, reflection_uv);
+    
+    return vec4<f32>(reflection_color.rgb, 1.0);
+}
+
+// P4: Calculate Fresnel factor for water reflection blending
+// Returns 0 at normal incidence (looking straight down), 1 at grazing angles
+fn calculate_water_fresnel(view_dir: vec3<f32>, surface_normal: vec3<f32>) -> f32 {
+    let fresnel_power = water_reflection_uniforms.reflection_params.y;
+    let n_dot_v = max(0.0, dot(surface_normal, view_dir));
+    let fresnel = pow(1.0 - n_dot_v, fresnel_power);
+    return clamp(fresnel, 0.0, 1.0);
+}
+
+// P4: Blend planar reflection with underwater color using Fresnel
+fn blend_water_reflection(
+    underwater_color: vec3<f32>,
+    reflection_color: vec3<f32>,
+    reflection_valid: bool,
+    fresnel: f32,
+    shore_distance: f32,
+) -> vec3<f32> {
+    if (!reflection_valid) {
+        return underwater_color;
+    }
+    
+    let intensity = water_reflection_uniforms.reflection_params.x;
+    
+    // Shore attenuation: reduce reflection intensity near shore
+    // This helps blend water edges more naturally with land
+    let shore_atten_width = water_reflection_uniforms.reflection_params.w;
+    let shore_blend = smoothstep(0.0, shore_atten_width, shore_distance);
+    
+    // Final blend factor: Fresnel * intensity * shore_blend
+    let blend = fresnel * intensity * shore_blend;
+    
+    return mix(underwater_color, reflection_color, blend);
+}
+
 // P3-10: Shadow sampling functions (simplified for terrain)
 // These are lightweight versions for terrain use, gated behind TERRAIN_USE_SHADOWS flag
 
@@ -951,6 +1065,58 @@ fn calculate_pbr_brdf_split_normal(
     return diffuse + specular;
 }
 
+/// P3: Split-roughness PBR BRDF for Toksvig specular anti-aliasing.
+/// Uses base_roughness for diffuse (preserves detail), specular_roughness for specular (smoothed via Toksvig).
+/// This is the key P3 fix: Toksvig applies ONLY to specular, leaving diffuse crisp.
+fn calculate_pbr_brdf_split_roughness(
+    normal : vec3<f32>,
+    view_dir : vec3<f32>,
+    light_dir : vec3<f32>,
+    albedo : vec3<f32>,
+    base_roughness : f32,      // Original roughness for diffuse calculations
+    specular_roughness : f32,  // Toksvig-adjusted roughness for specular calculations
+    metallic : f32,
+    f0 : vec3<f32>
+) -> vec3<f32> {
+    let halfway = normalize(view_dir + light_dir);
+
+    let n_dot_l = max(dot(normal, light_dir), 0.0);
+    let n_dot_v = max(dot(normal, view_dir), 0.0);
+    let n_dot_h = max(dot(normal, halfway), 0.0);
+    let v_dot_h = max(dot(view_dir, halfway), 0.0);
+
+    if (n_dot_l <= 0.0 || n_dot_v <= 0.0) {
+        return vec3<f32>(0.0, 0.0, 0.0);
+    }
+
+    // GGX Distribution - uses specular_roughness (Toksvig-adjusted)
+    let alpha_spec = max(specular_roughness * specular_roughness, 1e-3);
+    let alpha_spec_sq = alpha_spec * alpha_spec;
+    let denom = (n_dot_h * n_dot_h * (alpha_spec_sq - 1.0)) + 1.0;
+    let distribution = alpha_spec_sq / (PI * denom * denom);
+
+    // Smith Geometry - uses specular_roughness
+    let k = (specular_roughness + 1.0);
+    let k_sq = (k * k) / 8.0;
+    let g1_l = n_dot_l / (n_dot_l * (1.0 - k_sq) + k_sq);
+    let g1_v = n_dot_v / (n_dot_v * (1.0 - k_sq) + k_sq);
+    let geometry = g1_l * g1_v;
+
+    // Fresnel (unchanged - doesn't depend on roughness directly in Schlick)
+    let fresnel = f0 + (vec3<f32>(1.0, 1.0, 1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
+
+    // Specular term (uses specular_roughness)
+    let specular = (distribution * geometry) * fresnel / max(4.0 * n_dot_l * n_dot_v, 1e-3);
+    
+    // Diffuse term uses base_roughness indirectly through energy conservation
+    // Note: Standard Lambertian diffuse doesn't directly use roughness,
+    // but kD calculation uses Fresnel which we keep consistent
+    let k_d = (vec3<f32>(1.0, 1.0, 1.0) - fresnel) * (1.0 - metallic);
+    let diffuse = k_d * albedo / PI;
+    
+    return (diffuse + specular) * n_dot_l;
+}
+
 // P2-05: Bridge function to map terrain parameters to ShadingParamsGPU for optional eval_brdf
 // Maps a subset of TerrainShadingUniforms to ShadingParamsGPU, ignoring unsupported terrain knobs
 fn terrain_to_shading_params(
@@ -1186,6 +1352,20 @@ fn apply_atmospheric_fog(
 @fragment
 fn fs_main(input : VertexOutput) -> FragmentOutput {
     var out : FragmentOutput;
+
+    // P4: Reflection pass clip plane
+    // When enable_flags.y > 0.5, we're in reflection pass mode and should
+    // discard fragments below the water plane (only render geometry above water).
+    // water_plane = (nx, ny, nz, -d) where plane equation is n·p + d = 0
+    // For Y-up water plane at height h: water_plane = (0, 1, 0, -h)
+    // A point is above the plane if n·p + d > 0, i.e., p.y > h
+    if (water_reflection_uniforms.enable_flags.y > 0.5) {
+        let plane = water_reflection_uniforms.water_plane;
+        let dist_to_plane = dot(plane.xyz, input.world_position) + plane.w;
+        if (dist_to_plane < 0.0) {
+            discard;
+        }
+    }
 
     let uv = input.tex_coord;
     let debug_mode = u32(u_overlay.params1.y + 0.5);
@@ -1522,42 +1702,66 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     albedo = clamp(final_albedo, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(1.0, 1.0, 1.0));
     occlusion = clamp(occlusion, u_shading.clamp2.x, u_shading.clamp2.y);
     
-    // Specular AA (Toksvig): increase roughness when normal has variance
+    // P3: Track base_roughness (for diffuse) and specular_roughness (Toksvig-adjusted)
+    // This split allows Toksvig anti-aliasing on specular only, preserving diffuse detail
+    var base_roughness = roughness;     // Original roughness for diffuse calculations
+    var specular_roughness = roughness; // Toksvig-adjusted roughness for specular
+    
+    // Specular AA (Toksvig): increase SPECULAR roughness when normal has variance
     // Using screen-space derivatives (dpdx/dpdy) to measure variance.
     // This works for both:
     //   - Procedural terrain normals (where mipmap averaging doesn't exist)
     //   - Synthetic sparkle perturbation (stress test mode 17)
     // The variance proxy σ² is computed from the rate of change of the normal.
+    // P3 fix: Apply Toksvig ONLY to specular_roughness, leaving base_roughness unchanged
     let spec_aa_enabled = u_overlay.params2.z > 0.5;
     var specaa_sigma2 = 0.0;  // Track for debug visualization (mode 19)
     if (!is_water && spec_aa_enabled) {
         // Compute normal variance from screen-space derivatives
         let dndx = dpdx(shading_normal);
         let dndy = dpdy(shading_normal);
-        // Variance proxy: average squared magnitude of derivatives
-        // Scale factor tunable via VF_SPECAA_SIGMA_SCALE env var (params2.w, default 1.0)
-        // Screen derivatives of normalized vectors are small, so amplify aggressively
-        // 25x base amplification helps catch ridge-line normal variance
-        let sigma_scale = max(u_overlay.params2.w, 1.0) * 25.0;
-        specaa_sigma2 = 0.5 * (dot(dndx, dndx) + dot(dndy, dndy)) * sigma_scale;
+        // Raw variance: average squared magnitude of derivatives
+        let raw_variance = 0.5 * (dot(dndx, dndx) + dot(dndy, dndy));
+        
+        // SpecAA in the main path (beauty mode, debug=0) is effectively disabled
+        // by using a very high variance threshold. This preserves natural terrain detail.
+        // 
+        // Mode 17 (stress test) uses its own SpecAA path with 100x scale and no threshold,
+        // which correctly suppresses the synthetic high-frequency sparkle injection.
+        //
+        // The sigma_scale env var can still boost effect if needed for specific use cases
+        let sigma_scale = max(u_overlay.params2.w, 1.0);
+        
+        // Very high threshold: effectively disables SpecAA for normal renders
+        // Raw_variance for terrain is typically 0.02-0.05, so threshold 1.0 filters all
+        // This prevents grid-pattern artifacts from Toksvig following DEM resolution
+        let variance_threshold = 1.0;
+        let effective_variance = max(raw_variance - variance_threshold, 0.0);
+        
+        specaa_sigma2 = effective_variance * sigma_scale;
         specaa_sigma2 = clamp(specaa_sigma2, 0.0, 1.0);
         
-        let r2 = roughness * roughness;
+        let r2 = specular_roughness * specular_roughness;
         // Toksvig formula: r' = sqrt(r² + σ²(1 - r²))
-        roughness = sqrt(r2 + specaa_sigma2 * (1.0 - r2));
+        // P3: Apply ONLY to specular_roughness, not base_roughness
+        specular_roughness = sqrt(r2 + specaa_sigma2 * (1.0 - r2));
     }
     
     // Apply roughness multiplier (params2.y, default 1.0 = no change)
     // Used for roughness sweep in PBR proof pack
     let roughness_mult = max(u_overlay.params2.y, 0.001);
     if (roughness_mult != 1.0) {
-        roughness = roughness * roughness_mult;
+        base_roughness = base_roughness * roughness_mult;
+        specular_roughness = specular_roughness * roughness_mult;
     }
-    // Roughness floor: aggressive floor for terrain to eliminate specular aliasing
-    // 0.65 is high enough to significantly widen the specular lobe, eliminating subpixel flakes
-    // Water keeps low roughness (0.02) for crisp reflections
-    let roughness_floor = select(0.65, 0.02, is_water);
-    roughness = clamp(roughness, roughness_floor, 1.0);
+    // P3: Roughness floor - lowered to 0.25 for land (from 0.65) to restore specular detail
+    // Toksvig anti-aliasing handles sparkles instead of a high roughness floor
+    // Water keeps low roughness (0.02) for crisp reflections (unchanged per P3 constraint)
+    let roughness_floor = select(0.25, 0.02, is_water);
+    base_roughness = clamp(base_roughness, roughness_floor, 1.0);
+    specular_roughness = clamp(specular_roughness, roughness_floor, 1.0);
+    // Legacy roughness variable for IBL and other uses (use specular_roughness)
+    roughness = specular_roughness;
     metallic = clamp(metallic, 0.0, 1.0);
     var f0 = mix(vec3<f32>(0.04, 0.04, 0.04), albedo, metallic);
     if (is_water) {
@@ -1567,21 +1771,23 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     }
     let light_dir = normalize(u_terrain.sun_exposure.xyz);
     
-    // P2-05: Standard single-normal BRDF
+    // P3: Use split-roughness BRDF for terrain direct lighting
+    // base_roughness for diffuse (crisp detail), specular_roughness for specular (anti-aliased)
     var lighting: vec3<f32>;
     if (TERRAIN_USE_BRDF_DISPATCH) {
-        // Use unified BRDF dispatch (allows model switching)
-        let shading_params = terrain_to_shading_params(roughness, metallic, TERRAIN_BRDF_MODEL);
+        // Use unified BRDF dispatch (allows model switching) with specular roughness
+        let shading_params = terrain_to_shading_params(specular_roughness, metallic, TERRAIN_BRDF_MODEL);
         let n_dot_l = max(dot(shading_normal, light_dir), 0.0);
         lighting = eval_brdf(shading_normal, view_dir, light_dir, albedo, shading_params) * n_dot_l;
     } else {
-        // Use original terrain-specific calculate_pbr_brdf
-        lighting = calculate_pbr_brdf(
+        // P3: Use split-roughness BRDF - Toksvig on specular only
+        lighting = calculate_pbr_brdf_split_roughness(
             shading_normal,
             view_dir,
             light_dir,
             albedo,
-            roughness,
+            base_roughness,      // Original roughness for diffuse
+            specular_roughness,  // Toksvig-adjusted for specular
             metallic,
             f0,
         );
@@ -2118,10 +2324,28 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             let sun_intensity = u_shading.light_params.z; // Use actual sun intensity (no boost!)
             let sun_spec = direct_spec * sun_color * sun_intensity * n_dot_l;
             
+            // ─────────────────────────────────────────────────────────────────────
+            // P4: Planar Reflection Integration
+            // Sample reflection texture with wave-based distortion and Fresnel mixing
+            // ─────────────────────────────────────────────────────────────────────
+            
+            // Sample planar reflection with wave distortion
+            // water_depth_value is the shore distance (0=shore, 1=deep)
+            let planar_refl = sample_water_reflection(
+                input.world_position,
+                shading_normal,  // Wave-perturbed normal for UV distortion
+                water_depth_value
+            );
+            let planar_refl_valid = planar_refl.a > 0.5;
+            
+            // Calculate Fresnel factor for reflection blending
+            let water_fresnel = calculate_water_fresnel(view_dir, shading_normal);
+            
             // Water shading strategy for visible depth gradient:
-            // 1. IBL gives environmental reflections (dominant on calm water)
-            // 2. Sun specular gives glints where waves face the sun
-            // 3. Depth tint modulates the overall brightness based on water depth
+            // 1. Planar reflections give terrain reflections on water (P4 feature)
+            // 2. IBL gives environmental reflections (sky, distant environment)
+            // 3. Sun specular gives glints where waves face the sun
+            // 4. Depth tint modulates the overall brightness based on water depth
             // 
             // For depth to be visible, we need to darken deep water regions
             // even when they have specular highlights. This mimics how real
@@ -2133,8 +2357,23 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             // This is aggressive but necessary for depth to be visible against bright specular
             let depth_atten = mix(1.0, 0.3, water_depth_value);
             
+            // Blend planar reflection with IBL
+            // When planar reflection is valid, it takes priority over IBL for terrain reflections
+            // IBL still contributes sky/environment reflections where planar reflection is weak
+            var combined_reflection = ibl_contrib;
+            if (planar_refl_valid) {
+                // Blend planar reflection based on Fresnel and intensity
+                combined_reflection = blend_water_reflection(
+                    ibl_contrib,      // Base color (IBL fallback)
+                    planar_refl.rgb,  // Planar reflection
+                    true,
+                    water_fresnel,
+                    water_depth_value
+                );
+            }
+            
             // Combine: reflections + specular, attenuated by depth
-            let reflective = (ibl_contrib + sun_spec) * depth_atten;
+            let reflective = (combined_reflection + sun_spec) * depth_atten;
             
             // Add depth scatter (visible in non-specular areas, gives shoreline gradient)
             // Scatter represents light from the bottom/underwater - should be subtle

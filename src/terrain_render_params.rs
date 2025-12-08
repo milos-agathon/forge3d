@@ -225,6 +225,39 @@ impl Default for FogSettingsNative {
     }
 }
 
+/// P4: Water reflection settings extracted from Python ReflectionSettings or CLI args
+/// When enabled = false, reflections are disabled (no-op for P3 compatibility)
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct ReflectionSettingsNative {
+    /// Enable water planar reflections
+    pub enabled: bool,
+    /// Reflection intensity (0.0-1.0, default 0.8)
+    pub intensity: f32,
+    /// Fresnel power for reflection falloff (default 5.0)
+    pub fresnel_power: f32,
+    /// Wave-based UV distortion strength (default 0.02)
+    pub wave_strength: f32,
+    /// Shore attenuation width - reduce reflections near land (default 0.3)
+    pub shore_atten_width: f32,
+    /// Water plane height in world space (default 0.0 = sea level)
+    pub water_plane_height: f32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for ReflectionSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,     // Disabled by default (P3 compatibility)
+            intensity: 0.8,
+            fresnel_power: 5.0,
+            wave_strength: 0.02,
+            shore_atten_width: 0.3,
+            water_plane_height: 0.0,
+        }
+    }
+}
+
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
 pub struct DecodedTerrainSettings {
@@ -236,6 +269,7 @@ pub struct DecodedTerrainSettings {
     pub sampling: SamplingSettingsNative,
     pub shadow: ShadowSettingsNative,
     pub fog: FogSettingsNative,
+    pub reflection: ReflectionSettingsNative,
 }
 
 #[cfg(feature = "extension-module")]
@@ -632,6 +666,26 @@ impl TerrainRenderParams {
             FogSettingsNative::default()
         };
 
+        // P4: Extract reflection settings (defaults to disabled for P3 compatibility)
+        let reflection_native = if let Ok(refl) = params.getattr("reflection") {
+            let enabled: bool = refl.getattr("enabled").and_then(|v| v.extract()).unwrap_or(false);
+            let intensity: f32 = refl.getattr("intensity").and_then(|v| v.extract()).unwrap_or(0.8);
+            let fresnel_power: f32 = refl.getattr("fresnel_power").and_then(|v| v.extract()).unwrap_or(5.0);
+            let wave_strength: f32 = refl.getattr("wave_strength").and_then(|v| v.extract()).unwrap_or(0.02);
+            let shore_atten_width: f32 = refl.getattr("shore_atten_width").and_then(|v| v.extract()).unwrap_or(0.3);
+            let water_plane_height: f32 = refl.getattr("water_plane_height").and_then(|v| v.extract()).unwrap_or(0.0);
+            ReflectionSettingsNative {
+                enabled,
+                intensity,
+                fresnel_power,
+                wave_strength,
+                shore_atten_width,
+                water_plane_height,
+            }
+        } else {
+            ReflectionSettingsNative::default()
+        };
+
         let decoded = DecodedTerrainSettings {
             light: LightSettingsNative {
                 direction,
@@ -645,6 +699,7 @@ impl TerrainRenderParams {
             sampling: sampling_native,
             shadow: shadow_native,
             fog: fog_native,
+            reflection: reflection_native,
         };
 
         let overlays = extract_overlays(params.getattr("overlays")?.as_gil_ref())?;

@@ -15,6 +15,7 @@ from .config import load_renderer_config
 from .terrain_params import (
     ShadowSettings as TerrainShadowSettings,
     FogSettings as TerrainFogSettings,
+    ReflectionSettings as TerrainReflectionSettings,
     load_height_curve_lut,
     make_terrain_params_config,
 )
@@ -320,6 +321,7 @@ def _build_params(
     height_curve_lut=None,
     shadow_config=None,  # Optional ShadowParams from CLI
     fog_config=None,  # P2: Optional FogSettings from CLI
+    reflection_config=None,  # P4: Optional ReflectionSettings from CLI
 ):
     overlays = [
         f3d.OverlayLayer.from_colormap1d(
@@ -373,6 +375,7 @@ def _build_params(
         ),
         overlays=overlays,
         fog=fog_config,  # P2: Pass fog config (None = disabled)
+        reflection=reflection_config,  # P4: Pass reflection config (None = disabled)
     )
 
     if pom_enabled is not None:
@@ -762,6 +765,15 @@ def run(args: Any) -> int:
     if getattr(args, "water_detect", False):
         water_mask = None
 
+        # Optional DEM-only closed-depression gating for automatic lake detection.
+        # When provided (via CLI/args), this is forwarded to detect_dem_water_mask
+        # as depression_min_depth in elevation units.
+        water_depression_min_depth = getattr(args, "water_depression_min_depth", None)
+        if water_depression_min_depth is not None:
+            water_min_area_pct = 0.001
+        else:
+            water_min_area_pct = 0.01
+
         # 1) Prefer the DEM's own mask (NA pixels) as water, matching the
         # geopandas_demo / render_raster behaviour.
         try:
@@ -797,8 +809,9 @@ def run(args: Any) -> int:
                     level_normalized=float(args.water_level),
                     slope_threshold=float(args.water_slope),
                     spacing=spacing_water,
-                    base_min_area_pct=0.01,  # Require at least 0.01% of image
+                    base_min_area_pct=water_min_area_pct,  # Require at least 0.01% of image
                     keep_components=3,  # Keep only top 3 largest water bodies
+                    depression_min_depth=water_depression_min_depth,
                 )
             except Exception:
                 water_mask = _detect_dem_water_mask(
@@ -807,8 +820,9 @@ def run(args: Any) -> int:
                     level_normalized=float(args.water_level),
                     slope_threshold=float(args.water_slope),
                     spacing=getattr(dem, "resolution", (1.0, 1.0)),
-                    base_min_area_pct=0.01,
+                    base_min_area_pct=water_min_area_pct,
                     keep_components=3,
+                    depression_min_depth=water_depression_min_depth,
                 )
 
     materials = f3d.MaterialSet.terrain_default(
@@ -873,6 +887,26 @@ def run(args: Any) -> int:
             inscatter=fog_inscatter,
         )
 
+    # P4: Parse reflection parameters from CLI
+    water_reflections = bool(getattr(args, "water_reflections", False))
+    reflection_intensity = float(getattr(args, "reflection_intensity", 0.8) or 0.8)
+    reflection_fresnel_power = float(getattr(args, "reflection_fresnel_power", 5.0) or 5.0)
+    reflection_wave_strength = float(getattr(args, "reflection_wave_strength", 0.02) or 0.02)
+    reflection_shore_atten = float(getattr(args, "reflection_shore_atten", 0.3) or 0.3)
+    reflection_plane_height = float(getattr(args, "reflection_plane_height", 0.0) or 0.0)
+    
+    # Only create ReflectionSettings if enabled (otherwise leave as None for no-op)
+    reflection_config = None
+    if water_reflections:
+        reflection_config = TerrainReflectionSettings(
+            enabled=True,
+            intensity=reflection_intensity,
+            fresnel_power=reflection_fresnel_power,
+            wave_strength=reflection_wave_strength,
+            shore_atten_width=reflection_shore_atten,
+            water_plane_height=reflection_plane_height,
+        )
+
     params = _build_params(
         size=(int(args.size[0]), int(args.size[1])),
         render_scale=float(args.render_scale),
@@ -899,6 +933,7 @@ def run(args: Any) -> int:
         height_curve_lut=height_curve_lut,
         shadow_config=renderer_config.shadows,  # Pass CLI shadow config
         fog_config=fog_config,  # P2: Pass fog config
+        reflection_config=reflection_config,  # P4: Pass reflection config
     )
 
     renderer = f3d.TerrainRenderer(sess)
@@ -966,7 +1001,10 @@ def run(args: Any) -> int:
             pass
         # 3) Postprocess: keep only largest components, stricter min area (0.2%)
         h_m, w_m = cleaned_mask.shape
-        min_area_px = int(max(1, h_m * w_m * 0.002))  # 0.2% minimum
+        if water_depression_min_depth is not None:
+            min_area_px = int(max(1, h_m * w_m * 0.0005))
+        else:
+            min_area_px = int(max(1, h_m * w_m * 0.002))  # 0.2% minimum
         cleaned_mask = _postprocess_water_mask(
             cleaned_mask,
             keep_components=3,
@@ -989,7 +1027,7 @@ def run(args: Any) -> int:
 
     # Debug: report mask statistics before rendering
     if water_mask_kw is not None:
-        import os
+        # Note: os is already imported at module level - do not re-import locally
         _n_water = int(np.sum(water_mask_kw > 0.0))
         _pct = 100.0 * _n_water / water_mask_kw.size
         _has_gradient = np.any((water_mask_kw > 0.01) & (water_mask_kw < 0.99))
@@ -1064,7 +1102,13 @@ def run(args: Any) -> int:
                     thresh = float(np.min(vals))
                 lake_mask = gray <= thresh
 
-        combined_mask = mask_resized | lake_mask
+        # FORGE3D_WATER_DEM_ONLY=1 disables the lake_mask union for tests
+        # that need consistent DEM-only water detection
+        use_dem_only = os.environ.get("FORGE3D_WATER_DEM_ONLY", "0") == "1"
+        if use_dem_only:
+            combined_mask = mask_resized  # DEM-only water
+        else:
+            combined_mask = mask_resized | lake_mask  # Union with brightness-based detection
 
         # Remove all connected components that touch the image border so outer
         # DEM rims are never treated as water.
@@ -1081,7 +1125,10 @@ def run(args: Any) -> int:
         
         # 2) Keep only largest components with stricter min area (0.2% of image)
         h_m, w_m = combined_mask.shape
-        min_area_px = int(max(1, h_m * w_m * 0.002))  # 0.2% minimum
+        if water_depression_min_depth is not None:
+            min_area_px = int(max(1, h_m * w_m * 0.0005))
+        else:
+            min_area_px = int(max(1, h_m * w_m * 0.002))  # 0.2% minimum
         combined_mask = _postprocess_water_mask(
             combined_mask,
             keep_components=3,  # Keep only 3 largest water bodies
