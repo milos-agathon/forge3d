@@ -321,6 +321,8 @@ class TerrainRenderParams:
     fog: Optional[FogSettings] = None
     # P4: Water planar reflections (defaults to disabled for P3 compatibility)
     reflection: Optional[ReflectionSettings] = None
+    # P5: AO weight/multiplier (0.0 = no AO effect, 1.0 = full AO). Default 0.0 for P4 compatibility.
+    ao_weight: float = 0.0
 
     def __post_init__(self) -> None:
         # Default fog to disabled if not provided
@@ -392,6 +394,10 @@ class TerrainRenderParams:
             # Store normalized LUT back on the instance for downstream consumption
             self.height_curve_lut = lut
 
+        # P5: Validate ao_weight
+        if not 0.0 <= self.ao_weight <= 1.0:
+            raise ValueError("ao_weight must be 0.0-1.0")
+
 
 def load_height_curve_lut(path: str | Path) -> np.ndarray:
     p = Path(path)
@@ -448,6 +454,7 @@ def make_terrain_params_config(
     overlays: Optional[list] = None,
     fog: Optional[FogSettings] = None,
     reflection: Optional[ReflectionSettings] = None,
+    ao_weight: float = 0.0,
 ) -> TerrainRenderParams:
     light_color = [1.0, 1.0, 1.0]
     if sun_color is not None:
@@ -568,6 +575,7 @@ def make_terrain_params_config(
         height_curve_lut=height_curve_lut,
         fog=fog,
         reflection=reflection,
+        ao_weight=ao_weight,
     )
 
 

@@ -47,6 +47,13 @@ pub struct TerrainScene {
     height_curve_identity_view: wgpu::TextureView,
     water_mask_fallback_texture: wgpu::Texture,
     water_mask_fallback_view: wgpu::TextureView,
+    // P5: Optional AO debug/fallback texture (raw SSAO or coarse height AO). Defaults to white.
+    ao_debug_fallback_texture: wgpu::Texture,
+    ao_debug_fallback_view: wgpu::TextureView,
+    ao_debug_sampler: wgpu::Sampler,
+    ao_debug_view: Option<wgpu::TextureView>,
+    coarse_ao_texture: Option<wgpu::Texture>,
+    coarse_ao_view: Option<wgpu::TextureView>,
     height_curve_lut_sampler: wgpu::Sampler,
     color_format: wgpu::TextureFormat,
     // P1-08: Light buffer for multi-light support
@@ -119,7 +126,8 @@ struct ShadowPassUniforms {
 struct OverlayUniforms {
     params0: [f32; 4], // domain_min, inv_range, overlay_strength, offset
     params1: [f32; 4], // blend_mode, debug_mode, albedo_mode, colormap_strength
-    params2: [f32; 4], // gamma, roughness_mult, spec_aa_enabled, pad
+    params2: [f32; 4], // gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale
+    params3: [f32; 4], // P5: ao_weight, ao_fallback_enabled, pad, pad
 }
 
 impl OverlayUniforms {
@@ -127,8 +135,10 @@ impl OverlayUniforms {
         Self {
             params0: [0.0; 4],
             params1: [0.0; 4],
-            // gamma=2.2, roughness_mult=1.0, spec_aa_enabled=1.0 (enabled), pad=0
-            params2: [2.2, 1.0, 1.0, 0.0],
+            // gamma=2.2, roughness_mult=1.0, spec_aa_enabled=1.0 (enabled), specaa_sigma_scale=1.0
+            params2: [2.2, 1.0, 1.0, 1.0],
+            // P5: ao_weight=0.0 (no AO effect), ao_fallback_enabled=0.0, pad, pad
+            params3: [0.0, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -841,6 +851,24 @@ impl TerrainScene {
                     },
                     count: None,
                 },
+                // @binding(12): AO debug/fallback texture (non-filterable; raw SSAO or coarse height AO)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 12,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // @binding(13): AO debug sampler (non-filtering)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 13,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
             ],
         });
 
@@ -946,6 +974,18 @@ impl TerrainScene {
             ..Default::default()
         });
 
+        // P5: AO debug sampler (non-filtering)
+        let ao_debug_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain.ao_debug.sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
         let identity_lut_data: Vec<f32> = (0..256).map(|i| i as f32 / 255.0).collect();
         let (height_curve_identity_texture, height_curve_identity_view) =
             Self::upload_height_curve_lut_internal(&device, &queue, &identity_lut_data)?;
@@ -986,6 +1026,43 @@ impl TerrainScene {
         );
         let water_mask_fallback_view =
             water_mask_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // P5: AO debug fallback texture (1x1 white)
+        let ao_debug_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.ao_debug_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &ao_debug_fallback_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&[1.0f32]),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let ao_debug_fallback_view =
+            ao_debug_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // P1-08: Initialize light buffer before pipeline creation
         let light_buffer = LightBuffer::new(&device);
@@ -1095,8 +1172,9 @@ impl TerrainScene {
                 depth_or_array_layers: 1,
             },
         );
-        let water_reflection_fallback_view = water_reflection_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
+        let water_reflection_fallback_view = water_reflection_fallback_texture.create_view(
+            &wgpu::TextureViewDescriptor::default(),
+        );
         let pipeline = Self::create_render_pipeline(
             device.as_ref(),
             &bind_group_layout,
@@ -1186,6 +1264,12 @@ impl TerrainScene {
             height_curve_identity_view,
             water_mask_fallback_texture,
             water_mask_fallback_view,
+            ao_debug_fallback_texture,
+            ao_debug_fallback_view,
+            ao_debug_sampler,
+            ao_debug_view: None,
+            coarse_ao_texture: None,
+            coarse_ao_view: None,
             height_curve_lut_sampler,
             color_format,
             light_buffer: Arc::new(Mutex::new(light_buffer)),
@@ -1222,6 +1306,125 @@ impl TerrainScene {
             .lock()
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock light buffer: {}", e)))?;
         Ok(light_buffer.debug_info())
+    }
+
+    /// P5: Set the AO debug texture view (e.g., raw SSAO output from ScreenSpaceEffectsManager).
+    /// When set, debug mode 28 will display this texture instead of the white fallback.
+    pub fn set_ao_debug_view(&mut self, view: Option<wgpu::TextureView>) {
+        self.ao_debug_view = view;
+    }
+
+    /// P5: Precompute coarse horizon AO from heightmap data.
+    /// This creates a texture where each pixel contains a simple local AO estimate
+    /// based on the height difference from neighboring samples.
+    /// Returns the created texture and view, storing them in coarse_ao_texture/view.
+    pub fn compute_coarse_ao_from_heightmap(
+        &mut self,
+        width: u32,
+        height: u32,
+        heightmap_data: &[f32],
+    ) -> Result<()> {
+        // Simple horizon-based AO: for each pixel, sample neighbors and compute
+        // how much the current pixel is "occluded" by higher neighbors.
+        // This is a very coarse approximation but runs on CPU at upload time.
+        let mut ao_data = vec![1.0f32; (width * height) as usize];
+        
+        // Stronger, broader sampling to create a visible coarse AO mask
+        let sample_radius = 8i32; // Sample neighbors within this radius
+        let height_scale = 10.0f32; // Scale factor for height differences
+        
+        for y in 0..height as i32 {
+            for x in 0..width as i32 {
+                let idx = (y as u32 * width + x as u32) as usize;
+                let center_h = heightmap_data[idx];
+                
+                let mut occlusion = 0.0f32;
+                let mut sample_count = 0;
+                
+                // Sample in 8 directions
+                for dy in -sample_radius..=sample_radius {
+                    for dx in -sample_radius..=sample_radius {
+                        if dx == 0 && dy == 0 {
+                            continue;
+                        }
+                        let nx = x + dx;
+                        let ny = y + dy;
+                        if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
+                            let nidx = (ny as u32 * width + nx as u32) as usize;
+                            let neighbor_h = heightmap_data[nidx];
+                            let dist = ((dx * dx + dy * dy) as f32).sqrt();
+                            // If neighbor is higher, it occludes this pixel
+                            let h_diff = (neighbor_h - center_h) * height_scale;
+                            if h_diff > 0.0 {
+                                // Angle-based occlusion: higher and closer = more occlusion
+                                let angle = (h_diff / dist).atan();
+                                occlusion += (angle / std::f32::consts::FRAC_PI_2).min(1.0);
+                            }
+                            sample_count += 1;
+                        }
+                    }
+                }
+                
+                if sample_count > 0 {
+                    let avg_occlusion = occlusion / sample_count as f32;
+                    ao_data[idx] = (1.0 - avg_occlusion.min(0.9)).max(0.01); // Clamp to [0.01, 1.0]
+                }
+            }
+        }
+        
+        // Create GPU texture from AO data
+        let coarse_ao_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.coarse_ao"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &coarse_ao_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&ao_data),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4), // R32Float = 4 bytes
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        
+        let coarse_ao_view = coarse_ao_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        
+        log::info!(
+            target: "terrain.ao",
+            "P5: Computed coarse horizon AO from heightmap ({}x{})",
+            width, height
+        );
+        
+        self.coarse_ao_texture = Some(coarse_ao_texture);
+        self.coarse_ao_view = Some(coarse_ao_view);
+        
+        Ok(())
+    }
+
+    /// P5: Get the coarse AO view if available, for use as AO debug texture.
+    pub fn coarse_ao_view(&self) -> Option<&wgpu::TextureView> {
+        self.coarse_ao_view.as_ref()
     }
 
     /// P4: Ensure reflection textures match the required size (half of main internal size).
@@ -2329,6 +2532,10 @@ impl TerrainScene {
             self.upload_heightmap_texture(width as u32, height as u32, &heightmap_data)?;
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+        // P5: Precompute coarse horizon AO from heightmap data
+        // This ensures a fallback AO texture is available even if SSAO is disabled
+        self.compute_coarse_ao_from_heightmap(width as u32, height as u32, &heightmap_data)?;
+
         // Optional water mask upload (f32 -> R8Unorm, values 0.0-1.0)
         // Now encodes distance-to-shore: 0=not water, >0 = water with value = distance from shore
         let mut water_mask_view_uploaded: Option<wgpu::TextureView> = None;
@@ -2829,6 +3036,19 @@ impl TerrainScene {
                             .unwrap_or(&self.water_mask_fallback_view),
                     ),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.ao_debug_view
+                            .as_ref()
+                            .or(self.coarse_ao_view.as_ref())
+                            .unwrap_or(&self.ao_debug_fallback_view),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: wgpu::BindingResource::Sampler(&self.ao_debug_sampler),
+                },
             ],
         });
 
@@ -2945,6 +3165,19 @@ impl TerrainScene {
                                 .as_ref()
                                 .unwrap_or(&self.water_mask_fallback_view),
                         ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::TextureView(
+                            self.ao_debug_view
+                                .as_ref()
+                                .or(self.coarse_ao_view.as_ref())
+                                .unwrap_or(&self.ao_debug_fallback_view),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Sampler(&self.ao_debug_sampler),
                     },
                 ],
             });
@@ -3314,11 +3547,11 @@ impl TerrainScene {
             .ok()
             .and_then(|s| s.parse::<i32>().ok())
             .unwrap_or(0);
-        // Allow modes 0-27 and 100-113
+        // Allow modes 0-28 and 100-113
         let debug_mode_f = if debug_mode >= 100 && debug_mode <= 113 {
             debug_mode as f32
         } else {
-            debug_mode.clamp(0, 27) as f32
+            debug_mode.clamp(0, 28) as f32
         };
         // Log debug mode for diagnosis
         if debug_mode != 0 {
@@ -3359,11 +3592,17 @@ impl TerrainScene {
         let colormap_strength = params.colormap_strength().clamp(0.0, 1.0);
         let gamma = params.gamma().max(0.1); // Minimum gamma to avoid division by zero
 
+        // P5: Get AO weight from params (default 0.0 = no effect)
+        let ao_weight = params.ao_weight.clamp(0.0, 1.0);
+        // P5: Enable AO fallback if coarse AO is computed (set externally, default disabled)
+        let ao_fallback_enabled = if self.coarse_ao_view.is_some() { 1.0 } else { 0.0 };
+
         let mut binding = OverlayBinding {
             uniform: OverlayUniforms {
                 params0: [0.0; 4],
                 params1: [0.0, debug_mode_f, albedo_mode_f, colormap_strength],
                 params2: [gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale],
+                params3: [ao_weight, ao_fallback_enabled, 0.0, 0.0],
             },
             lut: None,
         };

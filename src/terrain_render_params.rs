@@ -327,6 +327,8 @@ pub struct TerrainRenderParams {
     pub gamma: f32,
     pub albedo_mode: String,
     pub colormap_strength: f32,
+    /// P5: AO weight/multiplier (0.0 = no AO effect, 1.0 = full AO). Default 0.0 for P4 compatibility.
+    pub ao_weight: f32,
     pub height_curve_mode: String,
     pub height_curve_strength: f32,
     pub height_curve_power: f32,
@@ -423,6 +425,14 @@ impl TerrainRenderParams {
                 "colormap_strength must be between 0 and 1",
             ));
         }
+
+        // P5: AO weight (optional, default 0.0 for backward compatibility)
+        let ao_weight = params
+            .getattr("ao_weight")
+            .ok()
+            .and_then(|v| v.extract::<f32>().ok())
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0);
 
         let height_curve_mode: String = params
             .getattr("height_curve_mode")?
@@ -720,6 +730,7 @@ impl TerrainRenderParams {
             gamma,
             albedo_mode,
             colormap_strength,
+            ao_weight,
             height_curve_mode,
             height_curve_strength,
             height_curve_power,
@@ -811,6 +822,12 @@ impl TerrainRenderParams {
     #[getter]
     pub fn colormap_strength(&self) -> f32 {
         self.colormap_strength
+    }
+
+    /// P5: Get AO weight (0.0 = no AO, 1.0 = full AO)
+    #[getter]
+    pub fn ao_weight(&self) -> f32 {
+        self.ao_weight
     }
 
     #[getter]

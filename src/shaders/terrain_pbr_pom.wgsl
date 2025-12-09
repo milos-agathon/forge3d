@@ -103,6 +103,8 @@ const DBG_FLAKE_NO_HEIGHT_NORMAL: u32 = 24u; // Use base_normal instead of heigh
 const DBG_FLAKE_DDXDDY_NORMAL: u32 = 25u;   // Use n_dd = cross(dpdx, dpdy) as shading normal
 const DBG_FLAKE_HEIGHT_LOD: u32 = 26u;      // Visualize computed height LOD
 const DBG_FLAKE_NORMAL_BLEND: u32 = 27u;    // Visualize effective normal_blend after LOD fade
+// P5: Raw SSAO visualization
+const DBG_RAW_SSAO: u32 = 28u;
 
 struct TerrainUniforms {
     view : mat4x4<f32>,
@@ -129,7 +131,8 @@ struct TerrainShadingUniforms {
 struct OverlayUniforms {
     params0 : vec4<f32>, // domain_min, inv_range, overlay_strength, offset
     params1 : vec4<f32>, // blend_mode, debug_mode, albedo_mode, colormap_strength
-    params2 : vec4<f32>, // gamma, roughness_mult, spec_aa_enabled, pad
+    params2 : vec4<f32>, // gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale
+    params3 : vec4<f32>, // P5: ao_weight, ao_fallback_enabled, pad, pad
 };
 
 struct IblUniforms {
@@ -174,6 +177,13 @@ var height_curve_lut_samp : sampler;
 
 @group(0) @binding(11)
 var water_mask_tex : texture_2d<f32>;
+
+// P5: AO debug/fallback texture (raw SSAO or coarse height AO)
+@group(0) @binding(12)
+var ao_debug_tex : texture_2d<f32>;
+
+@group(0) @binding(13)
+var ao_debug_samp : sampler;
 
 // P1-06: Light buffer bindings (@group(1))
 struct Light {
@@ -1462,9 +1472,9 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         pom_offset_magnitude = length(pom_offset);
     }
     let parallax_uv = clamp(pom_uv, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
-    // Water mask needs flipped V coordinate: NumPy row 0 is at top, but UV v=0 is at bottom
-    let water_uv = vec2<f32>(parallax_uv.x, 1.0 - parallax_uv.y);
-    let water_mask_value = textureSampleLevel(water_mask_tex, height_samp, water_uv, 0.0).r;
+    // Water mask is already flipud'd on the Python side to match heightmap orientation,
+    // so sample with the same UV as the heightmap (no additional V flip needed).
+    let water_mask_value = textureSampleLevel(water_mask_tex, height_samp, parallax_uv, 0.0).r;
     // Water mask: 0.0 = not water, >0.0 = water (value is shore-distance ratio)
     // Use small epsilon to detect any water, not just shore-distance > 0.5
     let is_water = water_mask_value > 0.001;
@@ -1594,17 +1604,15 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         water_depth_value = shore_depth; // 0=shore/shallow, 1=deep center
         
         // Beer-Lambert absorption: deeper water = more blue, absorbs red first
-        let absorption = vec3<f32>(0.6, 0.12, 0.04); // RGB absorption per unit depth  
-        let max_depth = 4.0; // Visual depth scaling
+        let absorption = vec3<f32>(0.8, 0.15, 0.02); // RGB absorption per unit depth  
+        let max_depth = 3.0; // Visual depth scaling
         let transmittance = exp(-absorption * water_depth_value * max_depth);
         
-        // Deep water color - dark, slightly blue from Rayleigh scattering in water column
-        // These represent what you'd see looking DOWN into water, not surface reflection
-        let deep_water_color = vec3<f32>(0.01, 0.02, 0.04);
+        // Deep water color - obviously blue for clear lake identification
+        let deep_water_color = vec3<f32>(0.0, 0.15, 0.5);
         
-        // Shallow water near shore - very dark neutral (bottom is barely visible through water)
-        // Keep this dark so IBL reflections dominate
-        let shallow_color = vec3<f32>(0.02, 0.02, 0.02);
+        // Shallow water near shore - lighter but still clearly blue
+        let shallow_color = vec3<f32>(0.1, 0.25, 0.45);
         
         // Blend based on depth - this gives visible shoreline gradient
         let underwater_color = mix(shallow_color, deep_water_color, water_depth_value);
@@ -1686,8 +1694,12 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     // 0 = material (triplanar only)
     // 1 = colormap (overlay only, bypasses PBR in debug section below)
     // 2 = mix (blend between material and colormap using colormap_strength)
+    // IMPORTANT: Water always uses its own albedo regardless of albedo_mode
     var final_albedo = albedo;
-    if (albedo_mode == 0u) { // material
+    if (is_water) {
+        // Water keeps its blue underwater color - don't override with colormap
+        final_albedo = material_albedo;
+    } else if (albedo_mode == 0u) { // material
         final_albedo = material_albedo;
     } else if (albedo_mode == 1u) { // colormap
         // Colormap mode: use overlay_rgb directly
@@ -1927,29 +1939,18 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         return out;
     } else if (debug_mode == DBG_IBL_ONLY) {
         // ── MODE 6: "Is IBL working, independent of sun/AO/fog?" ──
-        // Shows ONLY `ibl_contrib` with same tonemap path as normal frames.
-        // No direct sun, no AO, no fog, no water tint.
-        // Interpretation:
-        //   - Changing HDRI should change this output (if not, IBL path broken)
-        //   - Different roughness/normal should show different IBL response
-        //   - If everything looks identical, IBL terms are clamped or not varying
-        // Uses pre-AO IBL contribution to isolate environment lighting from occlusion.
-        let ibl_only_linear = max(ibl_contrib_pre_ao, vec3<f32>(0.0));
-        let mapped = tonemap_aces(ibl_only_linear);
+        // Show pre-occlusion IBL with tonemap; no sun, no AO, no fog, no water tint.
+        let mapped = tonemap_aces(ibl_contrib_pre_ao);
         let out_srgb = linear_to_srgb(mapped);
         out.color = vec4<f32>(out_srgb, 1.0);
         return out;
-    } else if (debug_mode == DBG_PBR_DIFFUSE_ONLY) {
-        // ── MODE 7: PBR Diffuse Only ──
-        // Shows ONLY the diffuse IBL term (no specular, no sun).
-        // For energy sanity: diffuse should be bounded by albedo * irradiance.
-        // Interpretation:
-        //   - Should show albedo-tinted environmental lighting
-        //   - Metals should be near-black (kD approaches 0 for metallic=1)
-        let diffuse_linear = max(ibl_diffuse_scaled, vec3<f32>(0.0));
-        let mapped = tonemap_aces(diffuse_linear);
-        let out_srgb = linear_to_srgb(mapped);
-        out.color = vec4<f32>(out_srgb, 1.0);
+    } else if (debug_mode == DBG_RAW_SSAO) {
+        // ── MODE 28: Raw SSAO buffer ──
+        // Samples bound AO debug texture (raw SSAO or coarse AO fallback) and outputs grayscale.
+        let uv_dbg = clamp(input.tex_coord, vec2<f32>(0.0), vec2<f32>(1.0));
+        let ao_raw = textureSampleLevel(ao_debug_tex, ao_debug_samp, uv_dbg, 0.0).r;
+        let ao_vis = clamp(ao_raw, 0.0, 1.0);
+        out.color = vec4<f32>(vec3<f32>(ao_vis), 1.0);
         return out;
     } else if (debug_mode == DBG_PBR_SPECULAR_ONLY) {
         // ── MODE 8: PBR Specular Only ──
@@ -2375,9 +2376,8 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             // Combine: reflections + specular, attenuated by depth
             let reflective = (combined_reflection + sun_spec) * depth_atten;
             
-            // Add depth scatter (visible in non-specular areas, gives shoreline gradient)
-            // Scatter represents light from the bottom/underwater - should be subtle
-            shaded = reflective + water_scatter * 1.0;
+            // Water color based on underwater_color (which should be red for testing)
+            shaded = reflective + water_scatter * 5.0 + albedo * 0.3;
             
         } else {
             // Regular terrain: ambient + direct + IBL
@@ -2387,7 +2387,24 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             let ambient = albedo * ambient_strength * shadow_factor;
             let direct_mult = mix(0.65, 1.0, occlusion);
             let direct = lighting * direct_mult;
-            shaded = ambient + direct + ibl_contrib;
+            
+            // P5: Apply AO multiplier from coarse heightmap AO or SSAO
+            // ao_weight (params3.x): 0.0 = no AO effect, 1.0 = full AO
+            // When ao_weight is 0, this is a no-op preserving P4 output
+            let ao_weight = u_overlay.params3.x;
+            var ao_factor = 1.0;
+            if (ao_weight > 0.0) {
+                // Sample AO from debug texture (coarse heightmap AO or SSAO)
+                let ao_uv = clamp(input.tex_coord, vec2<f32>(0.0), vec2<f32>(1.0));
+                let ao_sample = textureSampleLevel(ao_debug_tex, ao_debug_samp, ao_uv, 0.0).r;
+                // Interpolate between 1.0 (no AO) and ao_sample based on ao_weight
+                ao_factor = mix(1.0, ao_sample, ao_weight);
+            }
+            
+            // Apply AO to ambient and indirect (IBL diffuse) lighting
+            // Keep direct specular unaffected for energy conservation
+            let ao_affected_ibl = ibl_split.diffuse * u_ibl.intensity * ibl_occlusion * shadow_factor * ao_factor + ibl_split.specular * u_ibl.intensity * ibl_occlusion;
+            shaded = ambient * ao_factor + direct + ao_affected_ibl;
         }
         
         let exposure = max(u_shading.light_params.w, 0.0);

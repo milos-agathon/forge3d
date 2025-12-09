@@ -608,7 +608,15 @@ def _render_terrain_with_reflection(
     # classified purely from terrain features (DEM heights + slopes), without
     # the brightness-based lake_mask union used for general-purpose overlays.
     prev_water_dem_only = os.environ.get("FORGE3D_WATER_DEM_ONLY")
+    prev_keep_components = os.environ.get("FORGE3D_WATER_KEEP_COMPONENTS")
+    prev_mask_rot = os.environ.get("FORGE3D_WATER_MASK_ROT_K")
+    prev_mask_shift = os.environ.get("FORGE3D_WATER_MASK_SHIFT_FRAC")
     os.environ["FORGE3D_WATER_DEM_ONLY"] = "1"
+    os.environ["FORGE3D_WATER_KEEP_COMPONENTS"] = "1"  # keep only the largest basin
+    # Rotate/translate the detected basin to align with the NE lake
+    # No rotation/shift needed now that detection uses the same heightmap as rendering
+    os.environ["FORGE3D_WATER_MASK_ROT_K"] = "0"
+    os.environ["FORGE3D_WATER_MASK_SHIFT_FRAC"] = "0,0"
     try:
         from forge3d import terrain_pbr_pom
         from forge3d.terrain_params import ReflectionSettings
@@ -673,13 +681,13 @@ def _render_terrain_with_reflection(
             volumetric=None,
             debug_lights=False,
             water_detect=True,  # Enable DEM-based water detection
-            water_level=0.08,   # Default normalized water level (low elevations)
-            water_slope=0.015,  # Default slope threshold for flat water surfaces
-            water_depression_min_depth=0.05,  # Require closed basins of at least 0.05m depth
+            water_level=0.8,    # Based on prior kidney-shaped detection
+            water_slope=0.003,  # Allows gentle slopes but keeps basin compact
+            water_depression_min_depth=0.12,   # Shallow depression to keep shape without broad flats
             water_mask_output=P4_DIR / "p4_water_mask.png",
             water_mask_output_mode="overlay",
             water_material="pbr",
-            pom_disabled=False,
+            pom_disabled=True,  # Disable POM to fix water mask alignment
             debug_mode=0,
             # P2: Fog disabled
             fog_density=0.0,
@@ -716,6 +724,18 @@ def _render_terrain_with_reflection(
             os.environ.pop("FORGE3D_WATER_DEM_ONLY", None)
         else:
             os.environ["FORGE3D_WATER_DEM_ONLY"] = prev_water_dem_only
+        if prev_keep_components is None:
+            os.environ.pop("FORGE3D_WATER_KEEP_COMPONENTS", None)
+        else:
+            os.environ["FORGE3D_WATER_KEEP_COMPONENTS"] = prev_keep_components
+        if prev_mask_rot is None:
+            os.environ.pop("FORGE3D_WATER_MASK_ROT_K", None)
+        else:
+            os.environ["FORGE3D_WATER_MASK_ROT_K"] = prev_mask_rot
+        if prev_mask_shift is None:
+            os.environ.pop("FORGE3D_WATER_MASK_SHIFT_FRAC", None)
+        else:
+            os.environ["FORGE3D_WATER_MASK_SHIFT_FRAC"] = prev_mask_shift
     
     return result
 

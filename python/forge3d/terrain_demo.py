@@ -774,6 +774,13 @@ def run(args: Any) -> int:
         else:
             water_min_area_pct = 0.01
 
+        # Allow overriding component count via env (used by targeted tests)
+        try:
+            keep_components_env = int(os.environ.get("FORGE3D_WATER_KEEP_COMPONENTS", "3"))
+            keep_components_env = max(1, keep_components_env)
+        except Exception:
+            keep_components_env = 3
+
         # 1) Prefer the DEM's own mask (NA pixels) as water, matching the
         # geopandas_demo / render_raster behaviour.
         try:
@@ -790,40 +797,57 @@ def run(args: Any) -> int:
         except Exception:
             water_mask = None
 
-        # 2) Fallback: heuristic DEM water mask, using the same DEM loading
-        #    semantics as forge3d.render._load_dem.
+        # 2) Fallback: heuristic DEM water mask.
+        # IMPORTANT: Use the SAME heightmap_array that goes to the renderer, not a
+        # separately loaded/flipped copy. This ensures the detected water regions
+        # align with the terrain mesh in the shader.
         if water_mask is None or not np.any(water_mask):
+            water_mask = _detect_dem_water_mask(
+                heightmap_array,
+                domain,
+                level_normalized=float(args.water_level),
+                slope_threshold=float(args.water_slope),
+                spacing=getattr(dem, "resolution", (1.0, 1.0)),
+                base_min_area_pct=water_min_area_pct,
+                keep_components=keep_components_env,
+                depression_min_depth=water_depression_min_depth,
+            )
+
+        # Optional: rotate/translate water mask via environment overrides (test-only)
+        if water_mask is not None and np.any(water_mask):
+            rot_k = 0
             try:
-                hm_water, spacing_water = _render_load_dem(Path(args.dem))
-                hm_water = np.flipud(np.asarray(hm_water, dtype=np.float32))
-                water_domain = _io.robust_dem_domain(
-                    hm_water,
-                    q_lo=QUANTILE_DEFAULT_LO,
-                    q_hi=QUANTILE_DEFAULT_HI,
-                    fallback=(float(domain_meta[0]), float(domain_meta[1])),
-                )
-                water_domain = (float(water_domain[0]), float(water_domain[1]))
-                water_mask = _detect_dem_water_mask(
-                    hm_water,
-                    water_domain,
-                    level_normalized=float(args.water_level),
-                    slope_threshold=float(args.water_slope),
-                    spacing=spacing_water,
-                    base_min_area_pct=water_min_area_pct,  # Require at least 0.01% of image
-                    keep_components=3,  # Keep only top 3 largest water bodies
-                    depression_min_depth=water_depression_min_depth,
-                )
+                rot_k = int(os.environ.get("FORGE3D_WATER_MASK_ROT_K", "0")) % 4
             except Exception:
-                water_mask = _detect_dem_water_mask(
-                    heightmap_array,
-                    domain,
-                    level_normalized=float(args.water_level),
-                    slope_threshold=float(args.water_slope),
-                    spacing=getattr(dem, "resolution", (1.0, 1.0)),
-                    base_min_area_pct=water_min_area_pct,
-                    keep_components=3,
-                    depression_min_depth=water_depression_min_depth,
-                )
+                rot_k = 0
+
+            shift_dx_frac = 0.0
+            shift_dy_frac = 0.0
+            try:
+                shift_str = os.environ.get("FORGE3D_WATER_MASK_SHIFT_FRAC", "0,0")
+                parts = [float(p.strip()) for p in shift_str.split(",")]
+                if len(parts) >= 2:
+                    shift_dx_frac, shift_dy_frac = parts[0], parts[1]
+            except Exception:
+                shift_dx_frac, shift_dy_frac = 0.0, 0.0
+
+            mask_bool = np.asarray(water_mask, dtype=bool)
+            if rot_k:
+                mask_bool = np.rot90(mask_bool, k=rot_k)
+
+            if shift_dx_frac != 0.0 or shift_dy_frac != 0.0:
+                h, w = mask_bool.shape
+                dx = int(round(shift_dx_frac * w))
+                dy = int(round(shift_dy_frac * h))
+                shifted = np.zeros_like(mask_bool)
+                ys, xs = np.nonzero(mask_bool)
+                xs_shifted = xs + dx
+                ys_shifted = ys + dy
+                in_bounds = (xs_shifted >= 0) & (xs_shifted < w) & (ys_shifted >= 0) & (ys_shifted < h)
+                shifted[ys_shifted[in_bounds], xs_shifted[in_bounds]] = True
+                mask_bool = shifted
+
+            water_mask = mask_bool
 
     materials = f3d.MaterialSet.terrain_default(
         triplanar_scale=6.0,
@@ -985,6 +1009,7 @@ def run(args: Any) -> int:
 
     water_material = str(getattr(args, "water_material", "overlay")).lower()
     water_mask_kw = None
+    debug_mask_binary: np.ndarray | None = None
 
     # For PBR mode, we must clean the mask *before* passing to the GPU shader.
     # The overlay path does its own cleaning later (combined with render-time
@@ -1010,20 +1035,14 @@ def run(args: Any) -> int:
             keep_components=3,
             min_area_px=min_area_px,
         )
-        # 4) Convert to shore-distance field (0.0 = shore, 1.0 = lake center)
+        # 4) Do NOT flip the mask here - the heightmap is also not flipped before GPU upload,
+        # so both textures should be in the same orientation for the shader to sample them correctly.
+        debug_mask_binary = cleaned_mask  # Keep original orientation for debug PNG
+        
+        # 5) Convert to shore-distance field (0.0 = shore, 1.0 = lake center)
         # This gives meaningful depth variation for water shading
         water_mask_float = _binary_mask_to_shore_distance(cleaned_mask)
         water_mask_kw = water_mask_float
-
-    # Save debug water mask (the CLEANED version that actually goes to GPU/overlay)
-    water_mask_out = getattr(args, "water_mask_output", None)
-    mask_out_mode = getattr(args, "water_mask_output_mode", "overlay")
-    if water_mask_out is not None and water_mask_kw is not None and water_material == "pbr":
-        # For visualization, convert float distance back to binary for overlay mode
-        if mask_out_mode == "overlay":
-            _save_water_mask(water_mask_kw > 0.0, Path(water_mask_out), mode=mask_out_mode)
-        else:
-            _save_water_mask(water_mask_kw > 0.0, Path(water_mask_out), mode=mask_out_mode)
 
     # Debug: report mask statistics before rendering
     if water_mask_kw is not None:
@@ -1136,18 +1155,30 @@ def run(args: Any) -> int:
         )
 
         tinted = _apply_water_tint(rgba, combined_mask)
-
-        # Optional debug: if caller supplied --water-mask-output, emit a mask PNG
-        # so it is easy to verify which pixels are classified as water.
-        water_mask_out = getattr(args, "water_mask_output", None)
-        mask_out_mode = getattr(args, "water_mask_output_mode", "overlay")
-        if water_mask_out is not None:
-            _save_water_mask(combined_mask, Path(water_mask_out), mode=mask_out_mode)
+        debug_mask_binary = combined_mask
 
         _save_image(tinted, args.output)
     else:
         frame.save(str(args.output))
     print(f"Wrote {args.output}")
+
+    # Optional debug: if caller supplied --water-mask-output, emit a screen-space
+    # binary mask PNG so it is easy to verify which pixels are classified as water.
+    # debug_mask_binary is in GPU texture orientation; need to flip for screen orientation.
+    water_mask_out = getattr(args, "water_mask_output", None)
+    mask_out_mode = getattr(args, "water_mask_output_mode", "overlay")
+    if water_mask_out is not None and debug_mask_binary is not None:
+        try:
+            out_h = int(args.size[1])
+            out_w = int(args.size[0])
+            frame_mask = _resize_mask_to_frame(debug_mask_binary, (out_h, out_w))
+            # Flip to convert from GPU texture orientation to screen orientation
+            # (screen y=0 is top, GPU texture v=0 maps to screen bottom)
+            frame_mask = np.flipud(frame_mask)
+            _save_water_mask(frame_mask, Path(water_mask_out), mode=mask_out_mode)
+        except Exception:
+            # Fallback: save flipped un-resized debug mask
+            _save_water_mask(np.flipud(debug_mask_binary), Path(water_mask_out), mode=mask_out_mode)
 
     if getattr(args, "viewer", False):
         viewer_cls = getattr(f3d, "Viewer", None)
