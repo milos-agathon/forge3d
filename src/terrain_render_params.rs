@@ -258,6 +258,39 @@ impl Default for ReflectionSettingsNative {
     }
 }
 
+/// P6: Micro-detail settings for close-range surface enhancement
+/// When enabled = false, micro-detail is disabled (no-op for P5 compatibility)
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct DetailSettingsNative {
+    /// Enable micro-detail enhancement
+    pub enabled: bool,
+    /// World-space repeat interval for detail (default 2.0 meters)
+    pub detail_scale: f32,
+    /// Detail normal blending strength (0.0-1.0)
+    pub normal_strength: f32,
+    /// Albedo brightness noise amplitude (±percentage)
+    pub albedo_noise: f32,
+    /// Distance at which detail begins fading (world units)
+    pub fade_start: f32,
+    /// Distance at which detail is fully faded (world units)
+    pub fade_end: f32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for DetailSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,     // Disabled by default (P5 compatibility)
+            detail_scale: 2.0,
+            normal_strength: 0.3,
+            albedo_noise: 0.1,
+            fade_start: 50.0,
+            fade_end: 200.0,
+        }
+    }
+}
+
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
 pub struct DecodedTerrainSettings {
@@ -270,6 +303,7 @@ pub struct DecodedTerrainSettings {
     pub shadow: ShadowSettingsNative,
     pub fog: FogSettingsNative,
     pub reflection: ReflectionSettingsNative,
+    pub detail: DetailSettingsNative,
 }
 
 #[cfg(feature = "extension-module")]
@@ -696,6 +730,26 @@ impl TerrainRenderParams {
             ReflectionSettingsNative::default()
         };
 
+        // P6: Extract detail settings (defaults to disabled for P5 compatibility)
+        let detail_native = if let Ok(det) = params.getattr("detail") {
+            let enabled: bool = det.getattr("enabled").and_then(|v| v.extract()).unwrap_or(false);
+            let detail_scale: f32 = det.getattr("detail_scale").and_then(|v| v.extract()).unwrap_or(2.0);
+            let normal_strength: f32 = det.getattr("normal_strength").and_then(|v| v.extract()).unwrap_or(0.3);
+            let albedo_noise: f32 = det.getattr("albedo_noise").and_then(|v| v.extract()).unwrap_or(0.1);
+            let fade_start: f32 = det.getattr("fade_start").and_then(|v| v.extract()).unwrap_or(50.0);
+            let fade_end: f32 = det.getattr("fade_end").and_then(|v| v.extract()).unwrap_or(200.0);
+            DetailSettingsNative {
+                enabled,
+                detail_scale,
+                normal_strength,
+                albedo_noise,
+                fade_start,
+                fade_end,
+            }
+        } else {
+            DetailSettingsNative::default()
+        };
+
         let decoded = DecodedTerrainSettings {
             light: LightSettingsNative {
                 direction,
@@ -710,6 +764,7 @@ impl TerrainRenderParams {
             shadow: shadow_native,
             fog: fog_native,
             reflection: reflection_native,
+            detail: detail_native,
         };
 
         let overlays = extract_overlays(params.getattr("overlays")?.as_gil_ref())?;

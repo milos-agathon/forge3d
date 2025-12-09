@@ -162,6 +162,41 @@ class ReflectionSettings:
 
 
 @dataclass
+class DetailSettings:
+    """P6: Micro-detail configuration for close-range surface enhancement.
+    
+    When enabled=False, micro-detail is disabled (no-op for P5 compatibility).
+    Adds triplanar detail normals and procedural albedo noise that fade
+    with distance to prevent LOD popping and shimmer.
+    
+    detail_scale: World-space repeat interval for detail normals (default 2.0 meters).
+    normal_strength: Strength of detail normal perturbation (0.0-1.0).
+    albedo_noise: Brightness variation amplitude (±percentage, e.g., 0.1 = ±10%).
+    fade_start: Distance at which detail begins fading (world units).
+    fade_end: Distance at which detail is fully faded out (world units).
+    """
+
+    enabled: bool = False  # Disabled by default (P5 compatibility)
+    detail_scale: float = 2.0  # 2 meter repeat interval
+    normal_strength: float = 0.3  # Detail normal blending strength
+    albedo_noise: float = 0.1  # ±10% brightness variation
+    fade_start: float = 50.0  # Start fading at 50 units
+    fade_end: float = 200.0  # Fully faded at 200 units
+
+    def __post_init__(self) -> None:
+        if self.detail_scale <= 0.0:
+            raise ValueError("detail_scale must be > 0")
+        if not 0.0 <= self.normal_strength <= 1.0:
+            raise ValueError("normal_strength must be in [0, 1]")
+        if not 0.0 <= self.albedo_noise <= 0.5:
+            raise ValueError("albedo_noise must be in [0, 0.5]")
+        if self.fade_start < 0.0:
+            raise ValueError("fade_start must be >= 0")
+        if self.fade_end <= self.fade_start:
+            raise ValueError("fade_end must be > fade_start")
+
+
+@dataclass
 class TriplanarSettings:
     """Triplanar texture mapping configuration."""
 
@@ -323,6 +358,8 @@ class TerrainRenderParams:
     reflection: Optional[ReflectionSettings] = None
     # P5: AO weight/multiplier (0.0 = no AO effect, 1.0 = full AO). Default 0.0 for P4 compatibility.
     ao_weight: float = 0.0
+    # P6: Micro-detail (defaults to disabled for P5 compatibility)
+    detail: Optional[DetailSettings] = None
 
     def __post_init__(self) -> None:
         # Default fog to disabled if not provided
@@ -331,6 +368,9 @@ class TerrainRenderParams:
         # Default reflection to disabled if not provided
         if self.reflection is None:
             self.reflection = ReflectionSettings()
+        # Default detail to disabled if not provided
+        if self.detail is None:
+            self.detail = DetailSettings()
         width, height = self.size_px
         if width < 64 or height < 64:
             raise ValueError("size_px must be >= 64x64")
@@ -455,6 +495,7 @@ def make_terrain_params_config(
     fog: Optional[FogSettings] = None,
     reflection: Optional[ReflectionSettings] = None,
     ao_weight: float = 0.0,
+    detail: Optional[DetailSettings] = None,
 ) -> TerrainRenderParams:
     light_color = [1.0, 1.0, 1.0]
     if sun_color is not None:
@@ -576,6 +617,7 @@ def make_terrain_params_config(
         fog=fog,
         reflection=reflection,
         ao_weight=ao_weight,
+        detail=detail,
     )
 
 
@@ -585,6 +627,7 @@ __all__ = [
     "ShadowSettings",
     "FogSettings",
     "ReflectionSettings",
+    "DetailSettings",
     "TriplanarSettings",
     "PomSettings",
     "LodSettings",

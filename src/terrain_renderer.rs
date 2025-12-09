@@ -128,6 +128,9 @@ struct OverlayUniforms {
     params1: [f32; 4], // blend_mode, debug_mode, albedo_mode, colormap_strength
     params2: [f32; 4], // gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale
     params3: [f32; 4], // P5: ao_weight, ao_fallback_enabled, pad, pad
+    // P6: Micro-detail parameters
+    params4: [f32; 4], // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
+    params5: [f32; 4], // detail_fade_start, detail_fade_end, pad, pad
 }
 
 impl OverlayUniforms {
@@ -139,6 +142,9 @@ impl OverlayUniforms {
             params2: [2.2, 1.0, 1.0, 1.0],
             // P5: ao_weight=0.0 (no AO effect), ao_fallback_enabled=0.0, pad, pad
             params3: [0.0, 0.0, 0.0, 0.0],
+            // P6: detail disabled by default (P5 compatibility)
+            params4: [0.0, 2.0, 0.3, 0.1],  // enabled=0, scale=2.0, normal_strength=0.3, albedo_noise=0.1
+            params5: [50.0, 200.0, 0.0, 0.0], // fade_start=50, fade_end=200
         }
     }
 }
@@ -3597,12 +3603,25 @@ impl TerrainScene {
         // P5: Enable AO fallback if coarse AO is computed (set externally, default disabled)
         let ao_fallback_enabled = if self.coarse_ao_view.is_some() { 1.0 } else { 0.0 };
 
+        // P6: Get detail settings from decoded params (default disabled for P5 compatibility)
+        let decoded = params.decoded();
+        let detail = &decoded.detail;
+        let detail_enabled = if detail.enabled { 1.0 } else { 0.0 };
+        let detail_scale = detail.detail_scale.max(0.1);
+        let detail_normal_strength = detail.normal_strength.clamp(0.0, 1.0);
+        let detail_albedo_noise = detail.albedo_noise.clamp(0.0, 0.5);
+        let detail_fade_start = detail.fade_start.max(0.0);
+        let detail_fade_end = detail.fade_end.max(detail_fade_start + 1.0);
+
         let mut binding = OverlayBinding {
             uniform: OverlayUniforms {
                 params0: [0.0; 4],
                 params1: [0.0, debug_mode_f, albedo_mode_f, colormap_strength],
                 params2: [gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale],
                 params3: [ao_weight, ao_fallback_enabled, 0.0, 0.0],
+                // P6: Detail parameters
+                params4: [detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise],
+                params5: [detail_fade_start, detail_fade_end, 0.0, 0.0],
             },
             lut: None,
         };

@@ -133,6 +133,9 @@ struct OverlayUniforms {
     params1 : vec4<f32>, // blend_mode, debug_mode, albedo_mode, colormap_strength
     params2 : vec4<f32>, // gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale
     params3 : vec4<f32>, // P5: ao_weight, ao_fallback_enabled, pad, pad
+    // P6: Micro-detail parameters
+    params4 : vec4<f32>, // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
+    params5 : vec4<f32>, // detail_fade_start, detail_fade_end, pad, pad
 };
 
 struct IblUniforms {
@@ -909,6 +912,148 @@ fn build_tbn(normal : vec3<f32>) -> mat3x3<f32> {
     return mat3x3<f32>(tangent, bitangent, normal);
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// P6: Micro-Detail Functions
+// Add close-range surface detail without LOD popping:
+// - Triplanar detail normals (2m repeat) blended via RNM with distance fade
+// - Procedural albedo brightness noise (±10%) using stable world-space coords
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Simple hash function for procedural noise (stable, no texture needed)
+fn hash31(p: vec3<f32>) -> f32 {
+    var p3 = fract(p * 0.1031);
+    p3 = p3 + dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+/// 3D value noise for smooth procedural patterns
+fn value_noise(p: vec3<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    // Smooth interpolation
+    let u = f * f * (3.0 - 2.0 * f);
+    
+    // 8 corner samples
+    let n000 = hash31(i + vec3<f32>(0.0, 0.0, 0.0));
+    let n100 = hash31(i + vec3<f32>(1.0, 0.0, 0.0));
+    let n010 = hash31(i + vec3<f32>(0.0, 1.0, 0.0));
+    let n110 = hash31(i + vec3<f32>(1.0, 1.0, 0.0));
+    let n001 = hash31(i + vec3<f32>(0.0, 0.0, 1.0));
+    let n101 = hash31(i + vec3<f32>(1.0, 0.0, 1.0));
+    let n011 = hash31(i + vec3<f32>(0.0, 1.0, 1.0));
+    let n111 = hash31(i + vec3<f32>(1.0, 1.0, 1.0));
+    
+    // Trilinear interpolation
+    let x0 = mix(n000, n100, u.x);
+    let x1 = mix(n010, n110, u.x);
+    let x2 = mix(n001, n101, u.x);
+    let x3 = mix(n011, n111, u.x);
+    let y0 = mix(x0, x1, u.y);
+    let y1 = mix(x2, x3, u.y);
+    return mix(y0, y1, u.z);
+}
+
+/// Generate procedural detail normal in tangent space using gradient noise
+/// Returns a tangent-space normal that can be blended with the base normal
+fn procedural_detail_normal(world_pos: vec3<f32>, scale: f32) -> vec3<f32> {
+    let p = world_pos * scale;
+    
+    // Sample noise at offset positions to compute gradient
+    let eps = 0.1;
+    let nx = value_noise(p + vec3<f32>(eps, 0.0, 0.0)) - value_noise(p - vec3<f32>(eps, 0.0, 0.0));
+    let ny = value_noise(p + vec3<f32>(0.0, eps, 0.0)) - value_noise(p - vec3<f32>(0.0, eps, 0.0));
+    let nz = value_noise(p + vec3<f32>(0.0, 0.0, eps)) - value_noise(p - vec3<f32>(0.0, 0.0, eps));
+    
+    // Convert gradient to tangent-space normal perturbation
+    // Scale controls how strong the perturbation is
+    let gradient = vec3<f32>(nx, ny, nz) * 2.0;
+    
+    // Return as tangent-space normal (z=1 is unperturbed up)
+    return normalize(vec3<f32>(gradient.x, gradient.z, 1.0));
+}
+
+/// Reoriented Normal Mapping (RNM) blend for combining detail normals
+/// This method properly reorients the detail normal based on the base normal
+/// Reference: "Blending in Detail" by Colin Barré-Brisebois & Stephen Hill
+fn blend_rnm(base_n: vec3<f32>, detail_n: vec3<f32>) -> vec3<f32> {
+    // Reorient detail normal based on base normal
+    // This gives better results than simple linear blending
+    let t = base_n + vec3<f32>(0.0, 0.0, 1.0);
+    let u = detail_n * vec3<f32>(-1.0, -1.0, 1.0);
+    return normalize(t * dot(t, u) - u * t.z);
+}
+
+/// Calculate distance fade factor for micro-detail
+/// Returns 1.0 at close range (full detail), 0.0 at far range (no detail)
+fn calculate_detail_fade(view_distance: f32, fade_start: f32, fade_end: f32) -> f32 {
+    if (view_distance <= fade_start) {
+        return 1.0;
+    }
+    if (view_distance >= fade_end) {
+        return 0.0;
+    }
+    // Smooth hermite interpolation for artifact-free transition
+    let t = (view_distance - fade_start) / (fade_end - fade_start);
+    return 1.0 - t * t * (3.0 - 2.0 * t);
+}
+
+/// Generate procedural albedo brightness noise
+/// Returns a multiplier around 1.0 (e.g., 0.9 to 1.1 for 10% noise)
+fn procedural_albedo_noise(world_pos: vec3<f32>, noise_amplitude: f32) -> f32 {
+    // Use a different frequency than detail normals to avoid correlation
+    let noise_scale = 0.7; // World-space frequency for albedo noise
+    let noise = value_noise(world_pos * noise_scale);
+    // Map [0,1] noise to [-amplitude, +amplitude] and add to 1.0
+    return 1.0 + (noise - 0.5) * 2.0 * noise_amplitude;
+}
+
+/// Apply micro-detail to normal
+/// Blends procedural detail normal with base using RNM, with distance fade
+fn apply_detail_normal(
+    base_normal: vec3<f32>,
+    world_pos: vec3<f32>,
+    view_distance: f32,
+    detail_scale: f32,
+    detail_strength: f32,
+    fade_start: f32,
+    fade_end: f32,
+) -> vec3<f32> {
+    // Early out if no detail contribution
+    let fade = calculate_detail_fade(view_distance, fade_start, fade_end);
+    if (fade <= 0.0 || detail_strength <= 0.0) {
+        return base_normal;
+    }
+    
+    // Generate triplanar detail normal using procedural noise
+    // Sample from three axes and blend by base normal weights
+    let weights = compute_triplanar_weights(base_normal, 4.0);
+    
+    // Detail UVs from world position
+    let uv_scale = 1.0 / detail_scale;
+    let detail_x = procedural_detail_normal(vec3<f32>(0.0, world_pos.y, world_pos.z) * uv_scale, 1.0);
+    let detail_y = procedural_detail_normal(vec3<f32>(world_pos.x, 0.0, world_pos.z) * uv_scale, 1.0);
+    let detail_z = procedural_detail_normal(vec3<f32>(world_pos.x, world_pos.y, 0.0) * uv_scale, 1.0);
+    
+    // Blend triplanar detail normals
+    let blended_detail = normalize(
+        detail_x * weights.x + 
+        detail_y * weights.y + 
+        detail_z * weights.z
+    );
+    
+    // Build TBN from base normal
+    let tbn = build_tbn(base_normal);
+    
+    // Transform detail normal to world space
+    let detail_world = normalize(tbn * blended_detail);
+    
+    // RNM blend with strength and fade
+    let effective_strength = detail_strength * fade;
+    let blended = blend_rnm(base_normal, mix(vec3<f32>(0.0, 0.0, 1.0), blended_detail, effective_strength));
+    
+    return normalize(tbn * blended);
+}
+
 fn rotate_y(v : vec3<f32>, sin_theta : f32, cos_theta : f32) -> vec3<f32> {
     return vec3<f32>(
         v.x * cos_theta + v.z * sin_theta,
@@ -1651,6 +1796,32 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // Build perturbed normal (Y is up)
         shading_normal = normalize(vec3<f32>(wave_dx, 1.0, wave_dy));
     }
+    
+    // ──────────────────────────────────────────────────────────────────────────
+    // P6: Micro-Detail Application (terrain only, not water)
+    // Adds close-range surface detail: detail normals via RNM and albedo noise
+    // When detail_enabled = false (params4.x < 0.5), this is a no-op
+    // ──────────────────────────────────────────────────────────────────────────
+    let view_distance = length(camera_pos - input.world_position);
+    let detail_enabled = u_overlay.params4.x > 0.5;
+    let detail_scale = max(u_overlay.params4.y, 0.1);
+    let detail_normal_strength = clamp(u_overlay.params4.z, 0.0, 1.0);
+    let detail_albedo_noise_amp = clamp(u_overlay.params4.w, 0.0, 0.5);
+    let detail_fade_start = max(u_overlay.params5.x, 0.0);
+    let detail_fade_end = max(u_overlay.params5.y, detail_fade_start + 1.0);
+    
+    if (detail_enabled && !is_water) {
+        // Apply detail normal via RNM blend with distance fade
+        shading_normal = apply_detail_normal(
+            shading_normal,
+            input.world_position,
+            view_distance,
+            detail_scale,
+            detail_normal_strength,
+            detail_fade_start,
+            detail_fade_end
+        );
+    }
 
     // ──────────────────────────────────────────────────────────────────────────
     // Colormap/Overlay System with Debug Modes
@@ -1712,6 +1883,17 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     }
 
     albedo = clamp(final_albedo, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(1.0, 1.0, 1.0));
+    
+    // P6: Apply procedural albedo brightness noise (terrain only)
+    // Adds ±noise_amplitude variation using stable world-space coordinates with distance fade
+    if (detail_enabled && !is_water && detail_albedo_noise_amp > 0.0) {
+        let albedo_fade = calculate_detail_fade(view_distance, detail_fade_start, detail_fade_end);
+        if (albedo_fade > 0.0) {
+            let noise_mult = procedural_albedo_noise(input.world_position, detail_albedo_noise_amp * albedo_fade);
+            albedo = clamp(albedo * noise_mult, vec3<f32>(0.0), vec3<f32>(1.0));
+        }
+    }
+    
     occlusion = clamp(occlusion, u_shading.clamp2.x, u_shading.clamp2.y);
     
     // P3: Track base_roughness (for diffuse) and specular_roughness (Toksvig-adjusted)
