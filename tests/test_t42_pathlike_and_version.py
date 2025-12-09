@@ -18,4 +18,4 @@ def test_renderer_render_triangle_png_accepts_pathlike(tmp_path):
 
 def test_version_export():
     assert hasattr(f3d, "__version__")
-    assert f3d.__version__ == "0.88.0"
+    assert f3d.__version__ == "0.94.0"

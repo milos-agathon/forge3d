@@ -382,7 +382,7 @@ from .helpers.frame_dump import (
 )
 
 # Version information
-__version__ = "0.88.0"
+__version__ = "0.94.0"
 # Alias for convenience: allow `forge3d.version` in addition to `forge3d.__version__`
 version = __version__
 _CURRENT_PALETTE = "viridis"

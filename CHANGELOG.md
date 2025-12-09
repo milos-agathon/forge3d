@@ -1,4 +1,52 @@
 # Changelog
+## [0.94.0] - P6 Micro-Detail
+
+### Added
+- **P6 — Micro-Detail**
+  - Triplanar detail normal sampling (2 m repeat) blended via RNM with distance-based fade to avoid LOD popping.
+  - Procedural albedo brightness noise (±10%) in stable world-space coordinates for close-range variation.
+  - Validation artifacts: `phase_p6.png`, `phase_p6_diff.png`, `p6_run.log`, `p6_result.json` with shimmer checks and fade distances.
+
+## [0.93.0] - P5 Ambient Occlusion Enhancement
+
+### Added
+- **P5 — Ambient Occlusion Enhancement**
+  - Debug mode 28 outputs the raw SSAO buffer for verification.
+  - Coarse horizon AO precomputed from the heightmap, bound as an optional multiplier with default weight 0 (no-op by default).
+  - Validation artifacts: `phase_p5.png`, `p5_run.log`, `p5_result.json` confirming SSAO presence and AO fallback path.
+
+## [0.92.0] - P4 Water Planar Reflections
+
+### Added
+- **P4 — Water Planar Reflections**
+  - Planar reflection render pass with mirrored camera, clip plane, and half-resolution target.
+  - Shader sampling with wave-based distortion plus Fresnel mixing; shore attenuation reduces wave intensity near land.
+  - Validation artifacts: `phase_p4.png`, `phase_p4_diff.png`, `p4_run.log`, `p4_result.json` logging clip plane, resolution, and wave params.
+
+## [0.91.0] - P3 Normal Anti-Aliasing Fix
+
+### Added
+- **P3 — Normal Anti-Aliasing Fix**
+  - Normal-variance mipchain generated at heightmap upload; Toksvig-style roughness adjustment applied to specular only.
+  - Roughness floors lowered to 0.25 for land and 0.02 for water with clamping for stability; water branch unchanged.
+  - Validation artifacts: `phase_p3.png`, `p3_run.log`, `p3_result.json` with energy histograms and roughness floor confirmation; debug modes 23–25 preserved.
+
+## [0.90.0] - P2 Atmospheric Depth
+
+### Added
+- **P2 — Atmospheric Depth**
+  - Height-based fog pipeline with uniform struct and bind group entries; applied after PBR and before tonemap.
+  - CLI parameters `--fog-density`, `--fog-height-falloff`, `--fog-inscatter` (all default 0) keep baseline identical when fog is off.
+  - Validation artifacts: `phase_p2.png`, `phase_p2_diff.png`, `p2_run.log`, `p2_result.json` including fog-on notes and SSIM vs P1 with fog off.
+
+## [0.89.0] - P1 Cascaded Shadows
+
+### Added
+- **P1 — Cascaded Shadows**
+  - Single source of truth for `TERRAIN_USE_SHADOWS` with real CSM resources bound in `TerrainRenderer` (group 3); defaults to one cascade if params missing.
+  - Cascade splits config `[50, 200, 800, 3000]` behind a toggle plus optional PCSS light-size parameter retaining prior hard-shadow behavior by default.
+  - Compile-time debug overlay for cascade boundaries and validation artifacts: `phase_p1.png`, `phase_p1_diff.png`, `p1_run.log`, `p1_result.json` with SSIM and shadow config logs.
+
 ## [0.88.0] - P7 Python UX Polish
 
 ### Added

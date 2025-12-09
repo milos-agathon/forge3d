@@ -16,7 +16,7 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 0.88.0 — high-level rendering presets (studio_pbr, outdoor_sun, toon_viz), Renderer.apply_preset() API, CLI --preset flag, and example galleries for lighting/shadows/IBL comparisons.
+Current release: 0.94.0 — micro-detail upgrade with triplanar detail normals, distance-faded RNM blending, and procedural albedo noise for stable close-range variation.
 
 ## Installation
 
