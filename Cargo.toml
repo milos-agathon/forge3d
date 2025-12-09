@@ -84,44 +84,12 @@ path = "bench/upload_policies/policies.rs"
 required-features = ["async_readback"]
 
 [[example]]
-name = "p5_dump_gbuffer"
-path = "examples/p5_dump_gbuffer.rs"
-
-[[example]]
-name = "p5_1_generate"
-path = "examples/p5_1_generate.rs"
-
-[[example]]
-name = "p5_ao_export"
-path = "examples/p5_ao_export.rs"
-
-[[example]]
-name = "p5_1_dump"
-path = "examples/p5_1_dump.rs"
-
-[[example]]
-name = "p5_ssgi_generate"
-path = "examples/p5_ssgi_generate.rs"
-
-[[example]]
-name = "p5_ssr_generate"
-path = "examples/p5_ssr_generate.rs"
-
-[[example]]
-name = "p5_ssr_glossy"
-path = "examples/p5_ssr_glossy.rs"
-
-[[example]]
-name = "p5_ssr_thickness_ablation"
-path = "examples/p5_ssr_thickness_ablation.rs"
-
-[[example]]
-name = "p5_gi_stack_ablation"
-path = "examples/p5_gi_stack_ablation.rs"
-
-[[example]]
 name = "gi_showcase"
 path = "examples/gi_showcase.rs"
+
+[[example]]
+name = "interactive_viewer"
+path = "examples/interactive_viewer.rs"
 
 [profile.release]
 codegen-units = 1

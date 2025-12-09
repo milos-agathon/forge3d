@@ -282,7 +282,7 @@ def assess_tone_mapping_quality(ldr_data):
 
 ### WGSL Tone Mapping Shader
 
-The pipeline uses a WGSL shader (`shaders/postprocess_tonemap.wgsl`) for GPU tone mapping:
+The pipeline uses a WGSL shader (`src/shaders/postprocess_tonemap.wgsl`) for GPU tone mapping:
 
 ```wgsl
 struct TonemapUniforms {

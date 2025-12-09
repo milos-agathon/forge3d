@@ -238,7 +238,7 @@ impl SsaoResources {
     ) -> Result<Self, String> {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ssao-compute"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/ssao.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/ssao.wgsl").into()),
         });
 
         // Match ssao.wgsl shader bindings:
@@ -428,7 +428,7 @@ impl SsaoResources {
         });
 
         // Create empty layout for group 0 (and reuse for lower groups when shader expects higher indices)
-        let empty_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let _empty_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("empty_bind_group_layout"),
             entries: &[],
         });

@@ -165,6 +165,7 @@ pub struct SamplingSettingsNative {
 /// Shadow settings extracted from Python ShadowSettings dataclass
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct ShadowSettingsNative {
     pub enabled: bool,
     pub technique: String,

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::p5::ssr::SsrScenePreset;
 use anyhow::{ensure, Context, Result};
 use std::path::Path;
@@ -350,7 +352,7 @@ pub fn compute_undershoot_metric(
     // First pass: discover and directly accumulate over pixels where the
     // too-thin SSR deviates more from the reference than the baseline does.
     let w = width as usize;
-    let h = height as usize;
+    let _h = height as usize;
     const IMPROVEMENT_THRESH: f32 = 2.0 * EPSILON;
 
     let mut sum_before_dyn = 0.0f64;

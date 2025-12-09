@@ -188,7 +188,7 @@ pub fn write_glossy_png(preset: &SsrScenePreset, output: &Path) -> anyhow::Resul
         pixels[idx + 3] = 255;
     };
 
-    let mut blend_pixel = |pixels: &mut [u8], x: u32, y: u32, color: [f32; 3], alpha: f32| {
+    let blend_pixel = |pixels: &mut [u8], x: u32, y: u32, color: [f32; 3], alpha: f32| {
         if x >= width || y >= height {
             return;
         }

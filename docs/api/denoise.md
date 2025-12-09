@@ -12,7 +12,7 @@ It uses albedo, normal, and depth as guides to preserve edges while reducing noi
 ## API
 
 ```python
-from forge3d import atrous_denoise
+from forge3d.denoise import atrous_denoise
 
 denoised = atrous_denoise(
     color,                    # float32 (H, W, 3)

@@ -537,7 +537,7 @@ impl CsmRenderer {
 
     /// Get WGSL shader source for CSM
     pub fn shader_source() -> &'static str {
-        include_str!("../../shaders/shadows.wgsl")
+        include_str!("../shaders/shadows.wgsl")
     }
 
     /// Enable/disable debug visualization

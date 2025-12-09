@@ -4,12 +4,22 @@
 // - Handles input events (mouse, keyboard)
 // - Renders frames at 60 FPS
 // - Orbit and FPS camera modes
+#![allow(dead_code)]
 
 pub mod camera_controller;
+pub mod hud;
+pub mod image_analysis;
 
 use crate::cli::args::GiVizMode;
+use hud::{
+    push_number as hud_push_number,
+    push_text_3x5 as hud_push_text_3x5,
+};
+use image_analysis::{
+    compute_max_delta_e, compute_ssim, delta_e_lab, mean_abs_diff, read_texture_rgba16_to_rgb_f32,
+    rgba16_to_luma, srgb_triplet_to_linear,
+};
 use crate::core::gpu_timing::{create_default_config as create_gpu_timing_config, GpuTimingManager};
-use crate::core::hdr::{apply_cpu_tone_mapping, ToneMappingOperator};
 use crate::core::ibl::{IBLQuality, IBLRenderer};
 use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
 use crate::core::shadows::{CameraFrustum, CsmConfig, CsmShadowMap};
@@ -21,7 +31,7 @@ use crate::passes::ssr::SsrStats;
 use crate::render::params::SsrParams;
 use crate::renderer::readback::read_texture_tight;
 use crate::util::image_write;
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, bail};
 use camera_controller::{CameraController, CameraMode};
 use glam::{Mat3, Mat4, Vec2, Vec3};
 use half::f16;
@@ -54,25 +64,6 @@ const VIEWER_SNAPSHOT_MAX_MEGAPIXELS: f32 = 16.0;
 const P5_SSGI_DIFFUSE_SCALE: f32 = 0.5;
 const P5_SSGI_CORNELL_WARMUP_FRAMES: u32 = 64;
 
-// ------------------------------
-// HUD seven-seg numeric helpers
-// ------------------------------
-fn hud_push_rect(
-    inst: &mut Vec<crate::core::text_overlay::TextInstance>,
-    x0: f32,
-    y0: f32,
-    x1: f32,
-    y1: f32,
-    color: [f32; 4],
-) {
-    inst.push(crate::core::text_overlay::TextInstance {
-        rect_min: [x0, y0],
-        rect_max: [x1, y1],
-        uv_min: [0.0, 0.0],
-        uv_max: [1.0, 1.0],
-        color,
-    });
-}
 
 fn build_ssr_albedo_texture(preset: &SsrScenePreset, size: u32) -> Vec<u8> {
     let dim = size.max(1);
@@ -160,200 +151,6 @@ impl Viewer {
         self.queue
             .write_buffer(&self.fog_shadow_matrix, 0, bytemuck::bytes_of(&mat));
     }
-}
-
-// ------------------------------
-// HUD tiny 3x5 block text helpers (A-Z subset)
-// ------------------------------
-fn hud_push_char_3x5(
-    inst: &mut Vec<crate::core::text_overlay::TextInstance>,
-    x: f32,
-    y: f32,
-    scale: f32,
-    ch: char,
-    color: [f32; 4],
-) -> f32 {
-    let cell = 2.0 * scale; // pixel size
-    let spacing = 1.0 * scale; // inter-char spacing
-    let pat: Option<[&str; 5]> = match ch.to_ascii_uppercase() {
-        'A' => Some([" X ", "X X", "XXX", "X X", "X X"]),
-        'B' => Some(["XX ", "X X", "XX ", "X X", "XX "]),
-        'C' => Some([" XX", "X  ", "X  ", "X  ", " XX"]),
-        'D' => Some(["XX ", "X X", "X X", "X X", "XX "]),
-        'E' => Some(["XXX", "X  ", "XX ", "X  ", "XXX"]),
-        'F' => Some(["XXX", "X  ", "XX ", "X  ", "X  "]),
-        'G' => Some([" XX", "X  ", "X X", "X X", " XX"]),
-        'H' => Some(["X X", "X X", "XXX", "X X", "X X"]),
-        'K' => Some(["X X", "XX ", "X  ", "XX ", "X X"]),
-        'L' => Some(["X  ", "X  ", "X  ", "X  ", "XXX"]),
-        'N' => Some(["X X", "XX ", "X X", "X X", "X X"]),
-        'O' => Some(["XXX", "X X", "X X", "X X", "XXX"]),
-        'P' => Some(["XX ", "X X", "XX ", "X  ", "X  "]),
-        'R' => Some(["XX ", "X X", "XX ", "X X", "X X"]),
-        'S' => Some([" XX", "X  ", " XX", "  X", "XX "]),
-        'T' => Some(["XXX", " X ", " X ", " X ", " X "]),
-        'U' => Some(["X X", "X X", "X X", "X X", "XXX"]),
-        'Y' => Some(["X X", "X X", " X ", " X ", " X "]),
-        _ => None,
-    };
-    if let Some(rows) = pat {
-        for (r, row) in rows.iter().enumerate() {
-            for (c, ch2) in row.chars().enumerate() {
-                if ch2 == 'X' {
-                    let x0 = x + c as f32 * cell;
-                    let y0 = y + r as f32 * cell;
-                    hud_push_rect(inst, x0, y0, x0 + cell, y0 + cell, color);
-                }
-            }
-        }
-    }
-    3.0 * cell + spacing
-}
-
-fn hud_push_text_3x5(
-    inst: &mut Vec<crate::core::text_overlay::TextInstance>,
-    mut x: f32,
-    y: f32,
-    scale: f32,
-    text: &str,
-    color: [f32; 4],
-) -> f32 {
-    for ch in text.chars() {
-        if ch == ' ' {
-            x += 2.0 * scale;
-            continue;
-        }
-        x += hud_push_char_3x5(inst, x, y, scale, ch, color);
-    }
-    x
-}
-
-fn hud_push_digit(
-    inst: &mut Vec<crate::core::text_overlay::TextInstance>,
-    x: f32,
-    y: f32,
-    scale: f32,
-    ch: char,
-    color: [f32; 4],
-) -> f32 {
-    // 7-segment layout (a..g), plus dot segment 'dp'
-    //  --a--
-    // |     |
-    // f     b
-    // |     |
-    //  --g--
-    // |     |
-    // e     c
-    // |     |
-    //  --d--   . dp
-    let thick = 2.0 * scale;
-    let w = 10.0 * scale; // char width
-    let h = 18.0 * scale; // char height
-    let mut seg = |a: bool, b: bool, c: bool, d: bool, e: bool, f: bool, g: bool, dp: bool| {
-        if a {
-            hud_push_rect(inst, x + thick, y, x + w - thick, y + thick, color);
-        }
-        if b {
-            hud_push_rect(
-                inst,
-                x + w - thick,
-                y + thick,
-                x + w,
-                y + h / 2.0 - thick,
-                color,
-            );
-        }
-        if c {
-            hud_push_rect(
-                inst,
-                x + w - thick,
-                y + h / 2.0 + thick,
-                x + w,
-                y + h - thick,
-                color,
-            );
-        }
-        if d {
-            hud_push_rect(inst, x + thick, y + h - thick, x + w - thick, y + h, color);
-        }
-        if e {
-            hud_push_rect(
-                inst,
-                x,
-                y + h / 2.0 + thick,
-                x + thick,
-                y + h - thick,
-                color,
-            );
-        }
-        if f {
-            hud_push_rect(inst, x, y + thick, x + thick, y + h / 2.0 - thick, color);
-        }
-        if g {
-            hud_push_rect(
-                inst,
-                x + thick,
-                y + h / 2.0 - thick / 2.0,
-                x + w - thick,
-                y + h / 2.0 + thick / 2.0,
-                color,
-            );
-        }
-        if dp {
-            hud_push_rect(
-                inst,
-                x + w + thick * 0.5,
-                y + h - thick * 1.5,
-                x + w + thick * 1.5,
-                y + h - thick * 0.5,
-                color,
-            );
-        }
-    };
-    match ch {
-        '0' => seg(true, true, true, true, true, true, false, false),
-        '1' => seg(false, true, true, false, false, false, false, false),
-        '2' => seg(true, true, false, true, true, false, true, false),
-        '3' => seg(true, true, true, true, false, false, true, false),
-        '4' => seg(false, true, true, false, false, true, true, false),
-        '5' => seg(true, false, true, true, false, true, true, false),
-        '6' => seg(true, false, true, true, true, true, true, false),
-        '7' => seg(true, true, true, false, false, false, false, false),
-        '8' => seg(true, true, true, true, true, true, true, false),
-        '9' => seg(true, true, true, true, false, true, true, false),
-        '-' => {
-            // center segment only
-            seg(false, false, false, false, false, false, true, false);
-        }
-        '.' => {
-            seg(false, false, false, false, false, false, false, true);
-        }
-        _ => {}
-    }
-    w + 4.0 * scale // advance including small spacing
-}
-
-fn hud_push_number(
-    inst: &mut Vec<crate::core::text_overlay::TextInstance>,
-    mut x: f32,
-    y: f32,
-    scale: f32,
-    value: f32,
-    digits: usize,
-    frac: usize,
-    color: [f32; 4],
-) -> f32 {
-    let s = format!("{val:.prec$}", val = value, prec = frac);
-    // Optionally truncate/limit total characters
-    let mut count = 0usize;
-    for ch in s.chars() {
-        if count >= digits + 1 {
-            break;
-        }
-        x += hud_push_digit(inst, x, y, scale, ch, color);
-        count += 1;
-    }
-    x
 }
 
 #[repr(C, align(16))]
@@ -1306,7 +1103,7 @@ impl Viewer {
                 .copy_from_slice(&on_bytes[src_off..src_off + row_stride]);
         }
 
-        let mut write_buf: Vec<u8>;
+        let write_buf: Vec<u8>;
         let (final_w, final_h, data_ref): (u32, u32, &[u8]) = {
             let px = (out_w as u64 as f64) * (out_h as u64 as f64);
             let max_px = (P52_MAX_MEGAPIXELS * 1_000_000.0) as f64;
@@ -1614,7 +1411,7 @@ impl Viewer {
                 .copy_from_slice(&accum_bytes[y * (w as usize) * 4..(y + 1) * (w as usize) * 4]);
         }
 
-        let mut write_buf: Vec<u8>;
+        let write_buf: Vec<u8>;
         let (final_w, final_h, data_ref): (u32, u32, &[u8]) = {
             let px = (out_w as u64 as f64) * (out_h as u64 as f64);
             let max_px = (P52_MAX_MEGAPIXELS * 1_000_000.0) as f64;
@@ -4843,7 +4640,7 @@ impl Viewer {
                     self.geom_bind_group.as_ref().unwrap()
                 }
             };
-            let layout = self.geom_bind_group_layout.as_ref().unwrap();
+            let _layout = self.geom_bind_group_layout.as_ref().unwrap();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewer.geom"),
                 color_attachments: &[
@@ -6434,7 +6231,7 @@ impl Viewer {
             return src.to_vec();
         }
         let s_w = src_w as usize;
-        let s_h = src_h as usize;
+        let _s_h = src_h as usize;
         let d_w = dst_w as usize;
         let d_h = dst_h as usize;
         let mut out = vec![0u8; d_w * d_h * 4];
@@ -6991,7 +6788,7 @@ impl Viewer {
     }
 
     fn capture_p51_cornell_split(&mut self) -> anyhow::Result<()> {
-        use anyhow::{bail, Context};
+        use anyhow::Context;
         use std::fs;
         let out_dir = std::path::Path::new("reports/p5");
         fs::create_dir_all(out_dir)?;
@@ -7066,7 +6863,7 @@ impl Viewer {
         let out_h = h;
         let max_px = (P51_MAX_MEGAPIXELS * 1_000_000.0) as f64;
         let px = (out_w as u64 as f64) * (out_h as u64 as f64);
-        let mut write_buf: Vec<u8>;
+        let write_buf: Vec<u8>;
         let (final_w, final_h, data_ref): (u32, u32, &[u8]) = if px > max_px {
             let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
             let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
@@ -7139,7 +6936,7 @@ impl Viewer {
     }
 
     fn reexecute_ssao_with(&mut self, technique: u32) -> anyhow::Result<()> {
-        use anyhow::Context;
+        
         if let Some(ref mut gi) = self.gi {
             // Ensure SSAO is enabled so AO AOVs are allocated
             if !gi.is_enabled(crate::core::screen_space_effects::ScreenSpaceEffect::SSAO) {
@@ -7165,7 +6962,7 @@ impl Viewer {
     }
 
     fn capture_p51_ao_grid(&mut self) -> anyhow::Result<()> {
-        use anyhow::{bail, Context};
+        use anyhow::Context;
         use std::fs;
         let out_dir = std::path::Path::new("reports/p5");
         fs::create_dir_all(out_dir)?;
@@ -7286,7 +7083,7 @@ impl Viewer {
         let out_h = grid_h as u32;
         let max_px = (P51_MAX_MEGAPIXELS * 1_000_000.0) as f64;
         let px = (out_w as u64 as f64) * (out_h as u64 as f64);
-        let mut write_buf: Vec<u8>;
+        let write_buf: Vec<u8>;
         let (final_w, final_h, data_ref): (u32, u32, &[u8]) = if px > max_px {
             let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
             let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
@@ -7466,7 +7263,7 @@ impl Viewer {
         let out_h = grid_h as u32;
         let max_px = (P51_MAX_MEGAPIXELS * 1_000_000.0) as f64;
         let px = (out_w as u64 as f64) * (out_h as u64 as f64);
-        let mut write_buf: Vec<u8>;
+        let write_buf: Vec<u8>;
         let (final_w, final_h, data_ref): (u32, u32, &[u8]) = if px > max_px {
             let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
             let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
@@ -7781,7 +7578,7 @@ impl Viewer {
     }
 
     fn capture_p53_ssr_thickness_ablation(&mut self) -> anyhow::Result<()> {
-        use anyhow::{bail, Context};
+        use anyhow::bail;
         use std::fs;
 
         const OUTPUT_NAME: &str = "p5_ssr_thickness_ablation.png";
@@ -7800,7 +7597,7 @@ impl Viewer {
             self.sync_ssr_params_to_gi();
         }
 
-        let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
+        let _far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
         let capture_w = self.config.width.max(1);
         let capture_h = self.config.height.max(1);
         let original_thickness = self.ssr_params.ssr_thickness;
@@ -8465,229 +8262,6 @@ impl Viewer {
         })?;
 
         Ok(())
-    }
-}
-
-fn rgba16_to_luma(bytes: &[u8]) -> Vec<f32> {
-    let mut out = Vec::with_capacity(bytes.len() / 8);
-    for chunk in bytes.chunks_exact(8) {
-        let r = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
-        let g = f16::from_le_bytes([chunk[2], chunk[3]]).to_f32();
-        let b = f16::from_le_bytes([chunk[4], chunk[5]]).to_f32();
-        let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        out.push(luma);
-    }
-    out
-}
-
-fn read_texture_rgba16_to_rgb_f32(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    tex: &wgpu::Texture,
-    dims: (u32, u32),
-) -> anyhow::Result<Vec<[f32; 3]>> {
-    use anyhow::Context;
-    let (w, h) = dims;
-    let bytes = read_texture_tight(device, queue, tex, (w, h), wgpu::TextureFormat::Rgba16Float)
-        .context("read RGBA16F texture")?;
-    let mut out = vec![[0.0f32; 3]; (w as usize) * (h as usize)];
-    for (i, rgb) in out.iter_mut().enumerate() {
-        let off = i * 8;
-        let r = f16::from_le_bytes([bytes[off], bytes[off + 1]]).to_f32();
-        let g = f16::from_le_bytes([bytes[off + 2], bytes[off + 3]]).to_f32();
-        let b = f16::from_le_bytes([bytes[off + 4], bytes[off + 5]]).to_f32();
-        rgb[0] = r;
-        rgb[1] = g;
-        rgb[2] = b;
-    }
-    Ok(out)
-}
-
-fn compute_max_delta_e(a: &[u8], b: &[u8]) -> f32 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-    let mut max_de = 0.0f32;
-    for (chunk_a, chunk_b) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
-        let ra = f16::from_le_bytes([chunk_a[0], chunk_a[1]]).to_f32();
-        let ga = f16::from_le_bytes([chunk_a[2], chunk_a[3]]).to_f32();
-        let ba = f16::from_le_bytes([chunk_a[4], chunk_a[5]]).to_f32();
-
-        let rb = f16::from_le_bytes([chunk_b[0], chunk_b[1]]).to_f32();
-        let gb = f16::from_le_bytes([chunk_b[2], chunk_b[3]]).to_f32();
-        let bb = f16::from_le_bytes([chunk_b[4], chunk_b[5]]).to_f32();
-
-        let (l1, a1, b1) = rgb_to_lab(ra, ga, ba);
-        let (l2, a2, b2) = rgb_to_lab(rb, gb, bb);
-        let delta = ((l1 - l2).powi(2) + (a1 - a2).powi(2) + (b1 - b2).powi(2)).sqrt();
-        if delta > max_de {
-            max_de = delta;
-        }
-    }
-    max_de
-}
-
-fn mean_abs_diff(a: &[u8], b: &[u8]) -> f32 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-    let mut sum = 0.0f32;
-    for (&xa, &xb) in a.iter().zip(b.iter()) {
-        let da = xa as f32 / 255.0;
-        let db = xb as f32 / 255.0;
-        sum += (da - db).abs();
-    }
-    sum / (a.len() as f32)
-}
-
-fn srgb_u8_to_linear(channel: u8) -> f32 {
-    let c = channel as f32 / 255.0;
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-fn srgb_triplet_to_linear(px: &[u8]) -> [f32; 3] {
-    [
-        srgb_u8_to_linear(px[0]),
-        srgb_u8_to_linear(px[1]),
-        srgb_u8_to_linear(px[2]),
-    ]
-}
-
-fn delta_e_lab(rgb_a: [f32; 3], rgb_b: [f32; 3]) -> f32 {
-    let (l1, a1, b1) = rgb_to_lab(rgb_a[0], rgb_a[1], rgb_a[2]);
-    let (l2, a2, b2) = rgb_to_lab(rgb_b[0], rgb_b[1], rgb_b[2]);
-    ((l1 - l2).powi(2) + (a1 - a2).powi(2) + (b1 - b2).powi(2)).sqrt()
-}
-
-fn compute_undershoot_fraction(
-    preset: &SsrScenePreset,
-    reference: &[u8],
-    ssr: &[u8],
-    width: u32,
-    height: u32,
-) -> f32 {
-    if reference.len() < (width * height * 4) as usize || ssr.len() < (width * height * 4) as usize
-    {
-        return 0.0;
-    }
-    let floor_y = (preset.floor.start_y.clamp(0.0, 1.0) * height as f32).round() as u32;
-    let roi_y0 = floor_y.min(height.saturating_sub(1));
-    let roi_y1 = ((floor_y as f32 + 0.15 * height as f32).round() as u32).min(height);
-    let roi_x0 = {
-        let x0f = (preset
-            .spheres
-            .first()
-            .map(|s| s.offset_x)
-            .unwrap_or(0.1)
-            .clamp(0.0, 1.0)
-            * width as f32)
-            .round();
-        x0f.max(0.0).min((width.saturating_sub(1)) as f32) as u32
-    };
-    let roi_x1 = {
-        let x1f = (preset
-            .spheres
-            .last()
-            .map(|s| s.offset_x)
-            .unwrap_or(0.85)
-            .clamp(0.0, 1.0)
-            * width as f32)
-            .round();
-        x1f.max(0.0).min(width as f32) as u32
-    };
-
-    let w = width as usize;
-    let mut count = 0u32;
-    let mut undershoot = 0u32;
-    let eps = 0.01f32;
-    for y in roi_y0..roi_y1 {
-        for x in roi_x0..roi_x1 {
-            let idx = ((y as usize * w + x as usize) * 4) as usize;
-            let rl = srgb_u8_to_linear(reference[idx]) * 0.2126
-                + srgb_u8_to_linear(reference[idx + 1]) * 0.7152
-                + srgb_u8_to_linear(reference[idx + 2]) * 0.0722;
-            let sl = srgb_u8_to_linear(ssr[idx]) * 0.2126
-                + srgb_u8_to_linear(ssr[idx + 1]) * 0.7152
-                + srgb_u8_to_linear(ssr[idx + 2]) * 0.0722;
-            if sl > rl + eps {
-                undershoot += 1;
-            }
-            count += 1;
-        }
-    }
-    if count == 0 {
-        0.0
-    } else {
-        (undershoot as f32 / count as f32).clamp(0.0, 1.0)
-    }
-}
-
-fn rgb_to_lab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
-    // Assume linear sRGB inputs in [0,1]
-    let x = 0.412_456_4 * r + 0.357_576_1 * g + 0.180_437_5 * b;
-    let y = 0.212_672_9 * r + 0.715_152_2 * g + 0.072_175 * b;
-    let z = 0.019_333_9 * r + 0.119_192 * g + 0.950_304_1 * b;
-
-    let xn = 0.950_47;
-    let yn = 1.0;
-    let zn = 1.088_83;
-
-    let fx = lab_pivot(x / xn);
-    let fy = lab_pivot(y / yn);
-    let fz = lab_pivot(z / zn);
-
-    let l = (116.0 * fy - 16.0).clamp(0.0, 100.0);
-    let a = 500.0 * (fx - fy);
-    let b = 200.0 * (fy - fz);
-    (l, a, b)
-}
-
-fn lab_pivot(t: f32) -> f32 {
-    const EPSILON: f32 = 0.008856;
-    const KAPPA: f32 = 903.3;
-    if t > EPSILON {
-        t.cbrt()
-    } else {
-        (KAPPA * t + 16.0) / 116.0
-    }
-}
-
-fn compute_ssim(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() || a.is_empty() {
-        return 1.0;
-    }
-    let n = a.len() as f32;
-    let mean_a = a.iter().copied().sum::<f32>() / n;
-    let mean_b = b.iter().copied().sum::<f32>() / n;
-
-    let mut var_a = 0.0f32;
-    let mut var_b = 0.0f32;
-    let mut cov = 0.0f32;
-    for (&xa, &xb) in a.iter().zip(b.iter()) {
-        var_a += (xa - mean_a).powi(2);
-        var_b += (xb - mean_b).powi(2);
-        cov += (xa - mean_a) * (xb - mean_b);
-    }
-    if n > 1.0 {
-        var_a /= n - 1.0;
-        var_b /= n - 1.0;
-        cov /= n - 1.0;
-    }
-
-    const L: f32 = 1.0;
-    const C1: f32 = 0.0001; // (0.01 * L)^2 with L=1
-    const C2: f32 = 0.0009; // (0.03 * L)^2 with L=1
-
-    let numerator = (2.0 * mean_a * mean_b + C1) * (2.0 * cov + C2);
-    let denominator = (mean_a.powi(2) + mean_b.powi(2) + C1) * (var_a + var_b + C2);
-    if denominator.abs() < f32::EPSILON {
-        1.0
-    } else {
-        (numerator / denominator).clamp(-1.0, 1.0)
     }
 }
 

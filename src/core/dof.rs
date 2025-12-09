@@ -226,7 +226,7 @@ impl DofRenderer {
         // Load shader and create pipelines
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("dof_compute_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/dof.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/dof.wgsl").into()),
         });
 
         // Create bind group layout
@@ -552,7 +552,7 @@ impl DofRenderer {
 
     /// Get WGSL shader source
     pub fn shader_source() -> &'static str {
-        include_str!("../../shaders/dof.wgsl")
+        include_str!("../shaders/dof.wgsl")
     }
 }
 

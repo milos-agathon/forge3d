@@ -3080,7 +3080,7 @@ fn open_viewer(
     snapshot_height: Option<u32>,
     initial_commands: Option<Vec<String>>,
 ) -> PyResult<()> {
-    use crate::viewer::{run_viewer, set_initial_commands, set_initial_terrain_config, ViewerConfig};
+    use crate::viewer::{run_viewer, set_initial_commands, ViewerConfig};
 
     // Argument validation mirroring the Python wrapper
     if obj_path.is_some() && gltf_path.is_some() {
@@ -3442,7 +3442,7 @@ fn render_brdf_tile_impl<'py>(
         );
     }
 
-    let mut wi3_debug_mode = wi3_debug_mode;
+    let wi3_debug_mode = wi3_debug_mode;
     let mut wi3_debug_roughness = wi3_debug_roughness;
     if wi3_debug_mode != 0 && wi3_debug_roughness <= 0.0 {
         wi3_debug_roughness = roughness;

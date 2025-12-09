@@ -11,11 +11,15 @@ pub const DEFAULT_REPORT_DIR: &str = "reports/p5";
 const META_FILE_NAME: &str = "p5_meta.json";
 
 const SSR_HIT_RATE_MIN: f32 = 0.005;
+#[allow(dead_code)]
 const SSR_MISS_RATIO_MAX: f32 = 50.0; // Relaxed for now, not main focus
 const SSR_EDGE_STREAKS_MAX: u32 = 2;
+#[allow(dead_code)]
 const SSR_REF_DIFF_MAX: f32 = 0.10; // Relaxed for now
+#[allow(dead_code)]
 const SSR_STRIPE_MIN_VALUE: f32 = 0.02;
 const SSR_STRIPE_MONO_SLACK: f32 = 1e-3;
+#[allow(dead_code)]
 const SSR_STRIPE_MEAN_REL_EPS: f32 = 1.0; // Relaxed for now
 const SSR_MIN_MISS_RGB: f32 = 2.0 / 255.0; // Relaxed
 const SSR_MAX_DELTA_E_MISS: f32 = 2.0;

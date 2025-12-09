@@ -711,7 +711,7 @@ The example generates visual output showing each bundle type and provides detail
 
 ### GPU Shader Support
 
-Render bundles are supported by specialized shaders in `src/shaders/bundles.wgsl`:
+Render bundles use the standard instanced rendering shaders:
 
 - **Instanced shaders**: Handle per-instance transforms and colors
 - **UI shaders**: Screen-space rendering with transparency

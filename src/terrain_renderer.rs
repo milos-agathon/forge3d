@@ -1,5 +1,6 @@
 // src/terrain_renderer.rs
 //! TerrainRenderer - GPU pipeline for PBR+POM terrain rendering
+#![allow(deprecated)] // PyO3 GilRefs API deprecation - to be migrated to Bound API
 //!
 //! Implements a minimal-but-correct terrain rendering pipeline:
 //! - Heightmap upload (numpy → R32Float texture)
@@ -23,7 +24,6 @@ use std::sync::{Arc, Mutex};
 use wgpu::util::DeviceExt;
 use wgpu::TextureFormatFeatureFlags;
 
-use crate::core::shadow_mapping::{CsmCascadeData, CsmUniforms};
 use crate::lighting::types::{Light, LightType};
 use crate::lighting::LightBuffer;
 use crate::terrain_render_params::{AddressModeNative, FilterModeNative};
@@ -33,6 +33,7 @@ use crate::terrain_render_params::{AddressModeNative, FilterModeNative};
 /// Owns the WGPU pipeline state for the PBR+POM terrain path and is free of
 /// any PyO3 attributes so it can be reused by the interactive viewer and
 /// other Rust callers.
+#[allow(dead_code)]
 pub struct TerrainScene {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
@@ -95,6 +96,7 @@ pub struct TerrainRenderer {
 
 /// Noop shadow resources for terrain_pbr_pom pipeline
 /// Provides dummy shadow bind group at index 3 when shadows are not used
+#[allow(dead_code)]
 struct NoopShadow {
     _csm_uniform_buffer: wgpu::Buffer,
     _shadow_maps_texture: wgpu::Texture,
@@ -134,6 +136,7 @@ struct OverlayUniforms {
 }
 
 impl OverlayUniforms {
+    #[allow(dead_code)]
     fn disabled() -> Self {
         Self {
             params0: [0.0; 4],
@@ -611,6 +614,7 @@ impl TerrainRenderer {
     ///         {"type": "point", "pos": [0, 10, 0], "intensity": 10, "range": 50}
     ///     ])
     #[pyo3(signature = (lights))]
+    #[allow(deprecated)]
     fn set_lights(&self, py: Python, lights: &PyAny) -> PyResult<()> {
         use pyo3::types::PyList;
 
@@ -2110,8 +2114,8 @@ impl TerrainScene {
         height_exag: f32,
         height_min: f32,
         height_max: f32,
-        view_matrix: glam::Mat4,
-        proj_matrix: glam::Mat4,
+        _view_matrix: glam::Mat4,
+        _proj_matrix: glam::Mat4,
         sun_direction: glam::Vec3,
         near_plane: f32,
         far_plane: f32,
@@ -2141,7 +2145,7 @@ impl TerrainScene {
         // Solution: Normalize heights to match XY scale for shadow calculations.
         // The shadow depth shader must also use this same normalization.
         let half_spacing = terrain_spacing * 0.5;
-        let height_range = (height_max - height_min).max(1.0);
+        let _height_range = (height_max - height_min).max(1.0);
         
         // Normalize terrain Z to [0, 1] range, then scale by height_exag for visual effect
         // This gives Z range of [0, height_exag], which is comparable to XY range [-0.5, 0.5]

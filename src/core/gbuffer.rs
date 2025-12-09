@@ -8,7 +8,6 @@
 //!   - `material_texture`: `Rgba8Unorm` with diffuse/base color in `rgb` and
 //!                         metallic factor in `a` (both in [0,1])
 
-use crate::core::mipmap::calculate_mip_levels;
 use crate::error::RenderResult;
 use wgpu::*;
 

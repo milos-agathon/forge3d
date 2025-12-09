@@ -45,7 +45,7 @@ impl MomentGenerationPass {
         // Load shader
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("moment_generation_shader"),
-            source: ShaderSource::Wgsl(include_str!("../../shaders/moment_generation.wgsl").into()),
+            source: ShaderSource::Wgsl(include_str!("../shaders/moment_generation.wgsl").into()),
         });
 
         // Create bind group layout

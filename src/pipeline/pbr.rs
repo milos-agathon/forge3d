@@ -150,7 +150,7 @@ pub fn tone_map_color(color: [f32; 3], config: ToneMappingConfig) -> [f32; 3] {
 
 /// Provide WGSL source for the tone mapping pass used by shaders
 pub fn tone_map_shader_source() -> &'static str {
-    include_str!("../../shaders/tone_map.wgsl")
+    include_str!("../shaders/tone_map.wgsl")
 }
 
 /// PBR texture set for a material
@@ -211,6 +211,7 @@ fn compute_normal_matrix(model: Mat4) -> Mat4 {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct PbrIblResources {
     irradiance_texture: Texture,
     irradiance_view: TextureView,
@@ -968,7 +969,7 @@ impl PbrPipelineWithShadows {
 
     /// P1-06: Advance light buffer frame counter and refresh bind group
     /// Call this at the start of each frame before rendering
-    pub fn advance_light_frame(&mut self, device: &Device) {
+    pub fn advance_light_frame(&mut self, _device: &Device) {
         // Advance to next triple-buffered index
         self.light_buffer.next_frame();
 
@@ -1279,12 +1280,12 @@ impl PbrPipelineWithShadows {
 
         // Remap shadows from group(2) to group(3) to allow IBL at group(2) per P4 spec
         let shadows_source =
-            include_str!("../../shaders/shadows.wgsl").replace("@group(2)", "@group(3)");
+            include_str!("../shaders/shadows.wgsl").replace("@group(2)", "@group(3)");
 
         let shader_source = format!(
             "{}\n{}",
             shadows_source,
-            include_str!("../../shaders/pbr.wgsl")
+            include_str!("../shaders/pbr.wgsl")
         );
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1703,5 +1704,5 @@ pub enum CsmQualityPreset {
 
 /// Get WGSL source for CSM integration
 pub fn csm_shader_source() -> &'static str {
-    include_str!("../../shaders/csm.wgsl")
+    include_str!("../shaders/csm.wgsl")
 }

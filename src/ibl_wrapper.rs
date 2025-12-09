@@ -346,7 +346,7 @@ impl IBL {
 
         // M7: Enforce IBL VRAM cap with degrade order
         let mut base_face = self.base_resolution.max(32);
-        let mut spec_face = quality_to_use.specular_size().max(32);
+        let spec_face = quality_to_use.specular_size().max(32);
         let mut spec_mips = quality_to_use.specular_mip_levels().max(1);
         let mut irr_face = quality_to_use.irradiance_size().max(32);
         let mut brdf_size = quality_to_use.brdf_size().max(16);

@@ -190,7 +190,7 @@ impl LightBuffer {
 
         // Initialize count buffer with zero lights for default bind group
         let seed = r2_sample(0);
-        let count_data = [
+        let _count_data = [
             0u32, // light_count = 0
             0u32, // frame_index = 0
             seed[0].to_bits(),

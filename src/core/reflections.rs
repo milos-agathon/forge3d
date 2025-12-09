@@ -465,7 +465,7 @@ impl PlanarReflectionRenderer {
 
     /// Get WGSL shader source
     pub fn shader_source() -> &'static str {
-        include_str!("../../shaders/planar_reflections.wgsl")
+        include_str!("../shaders/planar_reflections.wgsl")
     }
 }
 

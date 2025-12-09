@@ -201,7 +201,7 @@ impl CloudShadowRenderer {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cloud_shadow_compute_shader"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/cloud_shadows.wgsl").into(),
+                include_str!("../shaders/cloud_shadows.wgsl").into(),
             ),
         });
 
@@ -468,7 +468,7 @@ impl CloudShadowRenderer {
 
     /// Get WGSL shader source
     pub fn shader_source() -> &'static str {
-        include_str!("../../shaders/cloud_shadows.wgsl")
+        include_str!("../shaders/cloud_shadows.wgsl")
     }
 }
 

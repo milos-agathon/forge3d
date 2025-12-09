@@ -118,9 +118,9 @@ struct CsmUniforms {
 @group(1) @binding(3) var irradiance_sampler: sampler;
 ```
 
-### 5. Render Bundles Pipeline (`bundles.wgsl`)
+### 5. Render Bundles Pipeline
 
-**Purpose**: Efficient multi-object rendering with shared state
+**Purpose**: Efficient multi-object rendering with shared state (uses instanced shaders)
 
 #### Standard Bundle Layout
 ```wgsl

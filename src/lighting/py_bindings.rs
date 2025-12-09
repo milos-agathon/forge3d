@@ -186,7 +186,7 @@ impl PyLight {
 /// - `area_extent`: [width, height] (area_rect)
 /// - `radius`: float (area_disk, area_sphere)
 #[cfg(feature = "extension-module")]
-pub fn parse_light_dict(py: Python, dict: &PyAny) -> PyResult<Light> {
+pub fn parse_light_dict(_py: Python, dict: &PyAny) -> PyResult<Light> {
     use pyo3::types::PyDict;
 
     let dict = dict

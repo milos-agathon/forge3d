@@ -74,7 +74,7 @@ impl HzbPyramid {
 
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("p5.hzb.build.shader"),
-            source: ShaderSource::Wgsl(include_str!("../../shaders/hzb_build.wgsl").into()),
+            source: ShaderSource::Wgsl(include_str!("../shaders/hzb_build.wgsl").into()),
         });
 
         // Group 0: depth copy (depth texture -> r32f storage). We use textureLoad on depth (no sampler).
@@ -177,6 +177,7 @@ impl HzbPyramid {
         })
     }
 
+    #[allow(dead_code)]
     fn ensure_size(&mut self, device: &Device, width: u32, height: u32) {
         if self.width == width && self.height == height {
             return;
@@ -514,6 +515,7 @@ impl Default for CameraParams {
 }
 
 /// SSAO renderer
+#[allow(dead_code)]
 pub struct SsaoRenderer {
     settings: SsaoSettings,
     settings_buffer: Buffer,
@@ -585,7 +587,7 @@ impl SsaoRenderer {
         device: &Device,
         width: u32,
         height: u32,
-        material_format: TextureFormat,
+        _material_format: TextureFormat,
     ) -> RenderResult<Self> {
         let mut settings = SsaoSettings::default();
         settings.inv_resolution = [1.0 / width as f32, 1.0 / height as f32];
@@ -964,13 +966,13 @@ impl SsaoRenderer {
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
 
-        let _composite_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let _ssr_composite_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("p5.ssr.composite.params"),
             contents: bytemuck::cast_slice(&[1.0, 0.0, 0.0, 0.0]),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
 
-        let composite_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let _ssao_composite_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ssao.comp.uniform"),
             contents: bytemuck::cast_slice(&[1.0, 0.0, 0.0, 0.0]),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
@@ -2243,6 +2245,7 @@ impl ScreenSpaceEffectsManager {
 }
 
 /// SSGI renderer
+#[allow(dead_code)]
 pub struct SsgiRenderer {
     settings: SsgiSettings,
     settings_buffer: Buffer,
@@ -3534,6 +3537,7 @@ impl SsgiRenderer {
     }
 }
 
+#[allow(dead_code)]
 pub struct SsrRenderer {
     settings: SsrSettings,
     settings_buffer: Buffer,

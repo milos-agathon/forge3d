@@ -54,7 +54,7 @@ impl GpuExtrusion {
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("vf.Vector.Extrusion.Shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shaders/extrusion.wgsl"
+                "../shaders/extrusion.wgsl"
             ))),
         });
 
