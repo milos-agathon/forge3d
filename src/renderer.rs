@@ -1,15 +1,17 @@
-// src/renderer.rs
-// Renderer module utilities exposed to Python bindings
-// Exists to host shared rendering helpers available to extension callers
-// RELEVANT FILES: src/renderer/readback.rs, src/terrain_renderer.rs, src/lib.rs, python/forge3d/__init__.py
-// T02-BEGIN:dem-stats
+//! Renderer module utilities exposed to Python bindings.
+//!
+//! Hosts shared rendering helpers including terrain metadata and readback operations.
+
 pub mod readback;
 
-use crate::terrain_stats;
+use crate::terrain::stats as terrain_stats;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-// Terrain metadata structure to hold height range
+/// Minimum height separation to prevent division by zero in normalization.
+const MIN_HEIGHT_EPSILON: f32 = 1e-5;
+
+/// Terrain metadata holding the height normalization range.
 pub struct TerrainMeta {
     pub h_min: f32,
     pub h_max: f32,
@@ -24,13 +26,14 @@ impl Default for TerrainMeta {
     }
 }
 
-// This would be included in the main Renderer struct
 impl TerrainMeta {
-    /// Called from `add_terrain` after validation.
+    /// Compute and store the height range from heightmap data.
+    ///
+    /// Uses percentile clamping (1st–99th) for robustness against outliers.
     pub fn compute_and_store_h_range(&mut self, heights: &[f32]) {
         let (h_min, h_max) = terrain_stats::min_max(heights, true);
         self.h_min = h_min;
-        self.h_max = h_max.max(h_min + 1e-5); // avoid div/0
+        self.h_max = h_max.max(h_min + MIN_HEIGHT_EPSILON);
     }
 
     /// Override the height normalization range used for color & lighting.
@@ -47,4 +50,3 @@ impl TerrainMeta {
         Ok(())
     }
 }
-// T02-END:dem-stats

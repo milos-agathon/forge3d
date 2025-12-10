@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 #![allow(deprecated)]
 #[cfg(feature = "extension-module")]
-use crate::device_caps::DeviceCaps;
+use crate::core::device_caps::DeviceCaps;
 use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "extension-module")]
 use numpy::{
@@ -817,7 +817,7 @@ impl Scene {
     ) -> PyResult<Self> {
         let grid = grid.unwrap_or(128).max(2);
         // Use shared GPU context
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
 
         let sample_count = 1;
         let (color, color_view) = create_color_texture(&g.device, width, height);
@@ -958,7 +958,7 @@ impl Scene {
             });
             // Row padding to WebGPU's required alignment for height>1.
             let row_bytes = w * 4;
-            let padded_bpr = crate::gpu::align_copy_bpr(row_bytes);
+            let padded_bpr = crate::core::gpu::align_copy_bpr(row_bytes);
             let src_vals: [f32; 4] = [0.00, 0.25, 0.50, 0.75]; // row-major: [[0.00, 0.25],[0.50, 0.75]]
             let src_bytes: &[u8] = bytemuck::cast_slice(&src_vals);
             let mut padded = vec![0u8; (padded_bpr * h) as usize];
@@ -1236,7 +1236,7 @@ impl Scene {
             .scene
             .globals
             .to_uniforms(self.scene.view, self.scene.proj);
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         g.queue
             .write_buffer(&self.ubo, 0, bytemuck::bytes_of(&uniforms));
         self.last_uniforms = uniforms;
@@ -1257,7 +1257,7 @@ impl Scene {
             pyo3::exceptions::PyRuntimeError::new_err("height must be C-contiguous float32[H,W]")
         })?;
 
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let tex = g.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("scene-height-r32f"),
             size: wgpu::Extent3d {
@@ -1275,7 +1275,7 @@ impl Scene {
         // WebGPU requires bytes_per_row to be COPY_BYTES_PER_ROW_ALIGNMENT aligned when height > 1.
         // Build a temporary padded buffer: each row (w*4 bytes) is copied into a padded stride.
         let row_bytes = w * 4;
-        let padded_bpr = crate::gpu::align_copy_bpr(row_bytes);
+        let padded_bpr = crate::core::gpu::align_copy_bpr(row_bytes);
         let src_bytes: &[u8] = bytemuck::cast_slice::<f32, u8>(data);
         let mut padded = vec![0u8; (padded_bpr * h) as usize];
         for y in 0..(h as usize) {
@@ -1347,7 +1347,7 @@ impl Scene {
 
     #[pyo3(text_signature = "(, radius, intensity, bias=0.025)")]
     pub fn set_ssao_parameters(&mut self, radius: f32, intensity: f32, bias: f32) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         self.ssao.set_params(radius, intensity, bias, &g.queue);
         Ok(())
     }
@@ -1370,7 +1370,7 @@ impl Scene {
     /// `Scene.render_rgba()` on the same frame (row-major, C-contiguous).
     #[pyo3(text_signature = "($self, path)")]
     pub fn render_png(&mut self, path: PathBuf) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let mut encoder = g
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1561,7 +1561,7 @@ impl Scene {
                 // E2/E1: Bind per-tile group at index 3
                 rp.set_bind_group(3, &self.bg3_tile, &[]);
 
-                let max_groups = crate::gpu::ctx().device.limits().max_bind_groups;
+                let max_groups = crate::core::gpu::ctx().device.limits().max_bind_groups;
                 // B7: Cloud shadows at group 4 when available and supported
                 if max_groups >= 6 {
                     // Use actual cloud shadow bind group if available, otherwise use dummy
@@ -1588,7 +1588,7 @@ impl Scene {
             // D11: Render 3D text meshes (before overlays)
             if self.text3d_enabled {
                 if let Some(ref mut tm) = self.text3d_renderer {
-                    let g = crate::gpu::ctx();
+                    let g = crate::core::gpu::ctx();
                     tm.set_view_proj(self.scene.view, self.scene.proj);
                     tm.upload_uniforms(&g.queue);
                     for inst in &self.text3d_instances {
@@ -1617,7 +1617,7 @@ impl Scene {
             if self.text_overlay_enabled {
                 if let Some(ref mut tr) = self.text_overlay_renderer {
                     // Upload uniforms and instances before drawing
-                    let g = crate::gpu::ctx();
+                    let g = crate::core::gpu::ctx();
                     tr.set_resolution(self.width, self.height);
                     tr.set_alpha(self.text_overlay_alpha);
                     tr.set_enabled(true);
@@ -1663,7 +1663,7 @@ impl Scene {
         // Readback -> PNG (same as TerrainSpike)
         let bpp = 4u32;
         let unpadded = self.width * bpp;
-        let padded = crate::gpu::align_copy_bpr(unpadded);
+        let padded = crate::core::gpu::align_copy_bpr(unpadded);
         let size = (padded * self.height) as wgpu::BufferAddress;
         let readback = g.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scene-readback"),
@@ -1723,7 +1723,7 @@ impl Scene {
         py: pyo3::Python<'py>,
     ) -> pyo3::PyResult<pyo3::Bound<'py, numpy::PyArray3<u8>>> {
         // Encode a frame exactly like render_png(), then return (H,W,4) u8
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let mut encoder = g
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1819,7 +1819,7 @@ impl Scene {
             // Readback identical to the standard path
             let bpp = 4u32;
             let unpadded = self.width * bpp;
-            let padded = crate::gpu::align_copy_bpr(unpadded);
+            let padded = crate::core::gpu::align_copy_bpr(unpadded);
             let size = (padded * self.height) as wgpu::BufferAddress;
 
             let readback = g.device.create_buffer(&wgpu::BufferDescriptor {
@@ -2033,7 +2033,7 @@ impl Scene {
 
                 // E2/E1: Bind per-tile group at index 3
                 rp.set_bind_group(3, &self.bg3_tile, &[]);
-                let max_groups = crate::gpu::ctx().device.limits().max_bind_groups;
+                let max_groups = crate::core::gpu::ctx().device.limits().max_bind_groups;
                 // B7: Cloud shadows at group 4 when available and supported
                 if max_groups >= 6 {
                     // Use actual cloud shadow bind group if available, otherwise use dummy
@@ -2082,7 +2082,7 @@ impl Scene {
         // Readback -> unpadded RGBA bytes
         let bpp = 4u32;
         let unpadded = self.width * bpp;
-        let padded = crate::gpu::align_copy_bpr(unpadded);
+        let padded = crate::core::gpu::align_copy_bpr(unpadded);
         let size = (padded * self.height) as wgpu::BufferAddress;
 
         let readback = g.device.create_buffer(&wgpu::BufferDescriptor {
@@ -2206,7 +2206,7 @@ impl Scene {
             }
         };
 
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let mut renderer =
             crate::core::reflections::PlanarReflectionRenderer::new(&g.device, quality_enum);
 
@@ -2237,7 +2237,7 @@ impl Scene {
         self.reflections_enabled = false;
         if let Some(ref mut renderer) = self.reflection_renderer {
             renderer.set_enabled(false);
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             renderer.upload_uniforms(&g.queue);
         }
     }
@@ -2263,7 +2263,7 @@ impl Scene {
         let point_v = glam::Vec3::new(point.0, point.1, point.2);
         let size_v = glam::Vec3::new(size.0, size.1, size.2);
         renderer.set_reflection_plane(normal_v, point_v, size_v);
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         renderer.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -2281,7 +2281,7 @@ impl Scene {
             ));
         };
         renderer.set_intensity(intensity);
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         renderer.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -2304,7 +2304,7 @@ impl Scene {
             ));
         };
         renderer.set_fresnel_power(power);
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         renderer.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -2327,7 +2327,7 @@ impl Scene {
             ));
         };
         renderer.set_distance_fade(start, end);
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         renderer.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -2350,7 +2350,7 @@ impl Scene {
             ));
         };
         renderer.set_debug_mode(mode);
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         renderer.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -2388,7 +2388,7 @@ impl Scene {
             }
         };
 
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let renderer =
             crate::core::dof::DofRenderer::new(&g.device, self.width, self.height, quality_enum);
 
@@ -2579,7 +2579,7 @@ impl Scene {
             }
         };
 
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let renderer =
             crate::core::cloud_shadows::CloudShadowRenderer::new(&g.device, quality_enum);
 
@@ -2620,7 +2620,7 @@ impl Scene {
         }
         if let Some(ref mut renderer) = self.cloud_renderer {
             renderer.set_scale(scale);
-            renderer.upload_uniforms(&crate::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
             updated = true;
         }
         if updated {
@@ -2641,7 +2641,7 @@ impl Scene {
         }
         if let Some(ref mut renderer) = self.cloud_renderer {
             renderer.set_density(density);
-            renderer.upload_uniforms(&crate::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
             updated = true;
         }
         if updated {
@@ -2662,7 +2662,7 @@ impl Scene {
         }
         if let Some(ref mut renderer) = self.cloud_renderer {
             renderer.set_coverage(coverage);
-            renderer.upload_uniforms(&crate::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
             updated = true;
         }
         if updated {
@@ -2708,7 +2708,7 @@ impl Scene {
         if let Some(ref mut renderer) = self.cloud_renderer {
             let dir_vec = glam::Vec2::new(direction.cos(), direction.sin());
             renderer.set_wind(dir_vec, strength);
-            renderer.upload_uniforms(&crate::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
             updated = true;
         }
         if updated {
@@ -2731,7 +2731,7 @@ impl Scene {
         if let Some(ref mut renderer) = self.cloud_renderer {
             let wind_vec = glam::Vec2::new(x, y);
             renderer.set_wind(wind_vec, strength);
-            renderer.upload_uniforms(&crate::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
             updated = true;
         }
         if updated {
@@ -2785,7 +2785,7 @@ impl Scene {
                 }
             };
             renderer.set_animation_preset(preset_enum);
-            renderer.upload_uniforms(&crate::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
             updated = true;
         }
         if updated {
@@ -2806,7 +2806,7 @@ impl Scene {
         }
         if let Some(ref mut renderer) = self.cloud_renderer {
             renderer.update(delta_time);
-            renderer.upload_uniforms(&crate::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
             updated = true;
         }
         if updated {
@@ -2868,7 +2868,7 @@ impl Scene {
             }
         };
 
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let mut renderer = crate::core::clouds::CloudRenderer::new(
             &g.device,
             wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -3025,7 +3025,7 @@ impl Scene {
     // B10: Ground Plane (Raster) API
     #[pyo3(text_signature = "($self)")]
     pub fn enable_ground_plane(&mut self) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let renderer = crate::core::ground_plane::GroundPlaneRenderer::new(
             &g.device,
             wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -3184,12 +3184,12 @@ impl Scene {
         if let Some(ref mut renderer) = self.ground_plane_renderer {
             let params = match preset {
                 "engineering" => {
-                    crate::core::ground_plane::GroundPlaneRenderer::create_engineering_grid()
+                    crate::core::ground_plane::GroundPlaneParams::engineering_grid()
                 }
                 "architectural" => {
-                    crate::core::ground_plane::GroundPlaneRenderer::create_architectural_grid()
+                    crate::core::ground_plane::GroundPlaneParams::architectural_grid()
                 }
-                "simple" => crate::core::ground_plane::GroundPlaneRenderer::create_simple_ground(),
+                "simple" => crate::core::ground_plane::GroundPlaneParams::simple_ground(),
                 _ => {
                     return Err(pyo3::exceptions::PyValueError::new_err(
                         "Preset must be one of: 'engineering', 'architectural', 'simple'",
@@ -3219,7 +3219,7 @@ impl Scene {
     // B11: Water Surface Color Toggle API
     #[pyo3(text_signature = "($self)")]
     pub fn enable_water_surface(&mut self) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let renderer = crate::core::water_surface::WaterSurfaceRenderer::new(
             &g.device,
             wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -3510,7 +3510,7 @@ impl Scene {
             };
 
         if let Some(ref mut renderer) = self.water_surface_renderer {
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             renderer.upload_water_mask(&g.device, &g.queue, &data_vec_u8, width, height);
             Ok(())
         } else {
@@ -3541,7 +3541,7 @@ impl Scene {
     // B12: Soft Light Radius (Raster) API
     #[pyo3(text_signature = "($self)")]
     pub fn enable_soft_light_radius(&mut self) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let renderer = crate::core::soft_light_radius::SoftLightRadiusRenderer::new(&g.device);
 
         self.soft_light_radius_renderer = Some(renderer);
@@ -3727,7 +3727,7 @@ impl Scene {
     // B13: Point & Spot Lights (Realtime) API
     #[pyo3(text_signature = "($self, max_lights=32)")]
     pub fn enable_point_spot_lights(&mut self, max_lights: Option<usize>) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let max_lights = max_lights.unwrap_or(32);
         let renderer =
             crate::core::point_spot_lights::PointSpotLightRenderer::new(&g.device, max_lights);
@@ -4146,7 +4146,7 @@ impl Scene {
     // B14: Rect Area Lights (LTC) API
     #[pyo3(text_signature = "($self, max_lights=16)")]
     pub fn enable_ltc_rect_area_lights(&mut self, max_lights: Option<usize>) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let max_lights = max_lights.unwrap_or(16);
 
         let renderer = crate::core::ltc_area_lights::LTCRectAreaLightRenderer::new(
@@ -4354,7 +4354,7 @@ impl Scene {
     // B15: Image-Based Lighting (IBL) Polish API
     #[pyo3(text_signature = "($self, quality='medium')")]
     pub fn enable_ibl(&mut self, quality: Option<&str>) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
 
         let quality_enum = match quality.unwrap_or("medium") {
             "low" => crate::core::ibl::IBLQuality::Low,
@@ -4410,7 +4410,7 @@ impl Scene {
             renderer.set_quality(quality_enum);
 
             // Regenerate IBL textures with new quality
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             renderer
                 .initialize(&g.device, &g.queue)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
@@ -4431,7 +4431,7 @@ impl Scene {
         height: u32,
     ) -> PyResult<()> {
         if let Some(ref mut renderer) = self.ibl_renderer {
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             renderer
                 .load_environment_map(&g.device, &g.queue, &hdr_data, width, height)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
@@ -4452,7 +4452,7 @@ impl Scene {
     #[pyo3(text_signature = "($self)")]
     pub fn generate_ibl_textures(&mut self) -> PyResult<()> {
         if let Some(ref mut renderer) = self.ibl_renderer {
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
 
             // Regenerate irradiance map
             renderer
@@ -4604,7 +4604,7 @@ impl Scene {
         mode: Option<&str>,
         quality: Option<&str>,
     ) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
 
         // Parse mode
         let oit_mode = match mode {
@@ -4755,7 +4755,7 @@ impl Scene {
             Ok(renderer.is_dual_source_supported())
         } else {
             // Check hardware support without creating renderer
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             let test_renderer = crate::core::dual_source_oit::DualSourceOITRenderer::new(
                 &g.device,
                 256,
@@ -4821,7 +4821,7 @@ impl Scene {
         };
         self.overlay_enabled = true;
         ov.set_enabled(true);
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         ov.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -4835,7 +4835,7 @@ impl Scene {
         };
         self.overlay_enabled = false;
         ov.set_enabled(false);
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         ov.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -4848,7 +4848,7 @@ impl Scene {
             ));
         };
         ov.set_overlay_alpha(alpha);
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         ov.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -4863,10 +4863,10 @@ impl Scene {
         ov.set_altitude_enabled(enabled);
         // Ensure height view is bound
         if let Some(ref hv) = self.height_view {
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             ov.recreate_bind_group(&g.device, None, Some(hv), None);
         }
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         ov.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -4901,7 +4901,7 @@ impl Scene {
                 "Overlay renderer not available",
             ));
         };
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         // Prepare RGBA data with row padding to COPY_BYTES_PER_ROW_ALIGNMENT
         let mut rgba: Vec<u8>;
         if c == 3 {
@@ -4923,7 +4923,7 @@ impl Scene {
             rgba = data; // already RGBA
         }
         let row_bytes = w * 4;
-        let padded_bpr = crate::gpu::align_copy_bpr(row_bytes);
+        let padded_bpr = crate::core::gpu::align_copy_bpr(row_bytes);
         let mut padded = vec![0u8; (padded_bpr * h) as usize];
         for y in 0..h as usize {
             let s = y * row_bytes as usize;
@@ -4982,7 +4982,7 @@ impl Scene {
         self.text_overlay_enabled = true;
         if let Some(ref mut tr) = self.text_overlay_renderer {
             tr.set_enabled(true);
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             tr.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -4993,7 +4993,7 @@ impl Scene {
         self.text_overlay_enabled = false;
         if let Some(ref mut tr) = self.text_overlay_renderer {
             tr.set_enabled(false);
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             tr.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -5004,7 +5004,7 @@ impl Scene {
         self.text_overlay_alpha = alpha.clamp(0.0, 1.0);
         if let Some(ref mut tr) = self.text_overlay_renderer {
             tr.set_alpha(self.text_overlay_alpha);
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             tr.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -5117,7 +5117,7 @@ impl Scene {
                 "Expected numpy uint8 array HxWxC",
             ));
         };
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         // Convert to RGBA8
         let mut rgba: Vec<u8> = Vec::with_capacity((h * w * 4) as usize);
         if c == 4 {
@@ -5141,7 +5141,7 @@ impl Scene {
             }
         }
         let row_bytes = w * 4;
-        let padded_bpr = crate::gpu::align_copy_bpr(row_bytes);
+        let padded_bpr = crate::core::gpu::align_copy_bpr(row_bytes);
         let mut padded = vec![0u8; (padded_bpr * h) as usize];
         for y in 0..h as usize {
             let s = y * row_bytes as usize;
@@ -5247,7 +5247,7 @@ impl Scene {
         }
 
         // Create GPU texture and upload
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let tex = g.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("scene-overlay-rgba8"),
             size: wgpu::Extent3d {
@@ -5263,7 +5263,7 @@ impl Scene {
             view_formats: &[],
         });
         let row_bytes = w * 4;
-        let padded_bpr = crate::gpu::align_copy_bpr(row_bytes);
+        let padded_bpr = crate::core::gpu::align_copy_bpr(row_bytes);
         let mut padded = vec![0u8; (padded_bpr * h) as usize];
         for y in 0..h as usize {
             let s = y * row_bytes as usize;
@@ -5320,7 +5320,7 @@ impl Scene {
     pub fn disable_overlay(&mut self) -> PyResult<()> {
         if let Some(ref mut ov) = self.overlay_renderer {
             ov.set_enabled(false);
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             ov.upload_uniforms(&g.queue);
         }
         self.overlay_enabled = false;
@@ -5332,7 +5332,7 @@ impl Scene {
         if let Some(ref mut ov) = self.overlay_renderer {
             ov.set_overlay_alpha(alpha);
             ov.set_enabled(true);
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             ov.upload_uniforms(&g.queue);
         }
         self.overlay_enabled = true;
@@ -5346,7 +5346,7 @@ impl Scene {
             if let Some(a) = alpha {
                 ov.set_altitude_alpha(a);
             }
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             ov.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -5356,7 +5356,7 @@ impl Scene {
     pub fn disable_altitude_overlay(&mut self) -> PyResult<()> {
         if let Some(ref mut ov) = self.overlay_renderer {
             ov.set_altitude_enabled(false);
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             ov.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -5378,7 +5378,7 @@ impl Scene {
     pub fn set_altitude_overlay_alpha(&mut self, alpha: f32) -> PyResult<()> {
         if let Some(ref mut ov) = self.overlay_renderer {
             ov.set_altitude_alpha(alpha);
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             ov.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -5404,7 +5404,7 @@ impl Scene {
             let cb = b.unwrap_or(0.0);
             let ca = a.unwrap_or(0.75);
             ov.set_contour_color(cr, cg, cb, ca);
-            let gctx = crate::gpu::ctx();
+            let gctx = crate::core::gpu::ctx();
             ov.upload_uniforms(&gctx.queue);
         }
         Ok(())
@@ -5414,7 +5414,7 @@ impl Scene {
     pub fn disable_gpu_contours(&mut self) -> PyResult<()> {
         if let Some(ref mut ov) = self.overlay_renderer {
             ov.set_contours_enabled(false);
-            let g = crate::gpu::ctx();
+            let g = crate::core::gpu::ctx();
             ov.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -5503,7 +5503,7 @@ impl Scene {
                 })?;
 
         // Upload to GPU
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let vsize = (verts.len() * std::mem::size_of::<crate::core::text_mesh::VertexPN>()) as u64;
         let isize = (inds.len() * std::mem::size_of::<u32>()) as u64;
         let vbuf = g.device.create_buffer(&wgpu::BufferDescriptor {
@@ -5688,7 +5688,7 @@ impl Scene {
             ));
         }
 
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
 
         // Build vertices (position, normal)
         #[cfg(feature = "enable-gpu-instancing")]
@@ -5816,7 +5816,7 @@ impl Scene {
                 "transforms must have shape (K,16) row-major 4x4",
             ));
         }
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let ni = trs.shape()[0];
         let mut packed: Vec<f32> = Vec::with_capacity(ni * 16);
         for i in 0..ni {
@@ -5981,7 +5981,7 @@ impl Scene {
             return Ok(());
         };
 
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
 
         if !self.reflections_enabled {
             renderer.set_enabled(false);
@@ -6023,7 +6023,7 @@ impl Scene {
             rp.set_bind_group(1, &self.bg1_height, &[]);
             rp.set_bind_group(2, &self.bg2_lut, &[]);
             rp.set_bind_group(3, &self.bg3_tile, &[]);
-            let max_groups = crate::gpu::ctx().device.limits().max_bind_groups;
+            let max_groups = crate::core::gpu::ctx().device.limits().max_bind_groups;
             if max_groups >= 6 {
                 // Use actual cloud shadow bind group if available, otherwise use dummy
                 let cloud_bg = self
@@ -6061,7 +6061,7 @@ impl Scene {
         };
 
         // Create bind group with color and depth textures
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
 
         // Ensure we have depth texture for DOF calculations
         let Some(ref depth_view) = self.depth_view else {
@@ -6108,7 +6108,7 @@ impl Scene {
             return Ok(()); // Early return if no cloud shadow renderer
         };
 
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
 
         // Create bind group for cloud shadow generation if needed
         if cloud_renderer.bind_group.is_none() {
@@ -6155,7 +6155,7 @@ impl Scene {
     }
 
     fn rebuild_msaa_state(&mut self) -> Result<(), String> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let depth_format = if self.sample_count > 1 {
             Some(wgpu::TextureFormat::Depth32Float)
         } else {
@@ -6283,7 +6283,7 @@ impl Scene {
             return Ok(());
         };
 
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         renderer.prepare_frame(&g.device, &g.queue)?;
         renderer.set_camera(view_proj, camera_pos);
         renderer.set_sky_params(sky_color, sun_dir, sun_intensity);

@@ -4,7 +4,7 @@
 //! relationships with automatic transform inheritance.
 
 use crate::core::matrix_stack::MatrixStack;
-use crate::error::{RenderError, RenderResult};
+use super::error::{RenderError, RenderResult};
 use glam::{Mat4, Quat, Vec3};
 use std::collections::{HashMap, HashSet};
 

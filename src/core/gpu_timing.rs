@@ -4,7 +4,7 @@
 //! Supports RenderDoc, Nsight Graphics, and RGP markers with configurable
 //! timestamp collection for minimal overhead.
 
-use crate::error::{RenderError, RenderResult};
+use super::error::{RenderError, RenderResult};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use wgpu::*;

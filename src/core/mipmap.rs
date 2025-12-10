@@ -2,7 +2,7 @@
 //!
 //! Provides CPU-based mipmap generation with box filtering and optional gamma correction.
 
-use crate::error::{RenderError, RenderResult};
+use super::error::{RenderError, RenderResult};
 
 /// Represents a single mipmap level
 #[derive(Debug, Clone)]

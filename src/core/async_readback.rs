@@ -4,7 +4,7 @@
 //! for improved performance in scenarios with frequent readbacks.
 
 use crate::core::memory_tracker::global_tracker;
-use crate::error::RenderError;
+use super::error::RenderError;
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};

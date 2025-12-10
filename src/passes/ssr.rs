@@ -3,7 +3,7 @@
 
 use crate::core::gbuffer::GBuffer;
 use crate::core::screen_space_effects::{CameraParams, SsrRenderer, SsrSettings};
-use crate::error::RenderResult;
+use crate::core::error::RenderResult;
 use wgpu::{CommandEncoder, Device, Queue, TextureView};
 
 pub use crate::core::screen_space_effects::SsrStats;

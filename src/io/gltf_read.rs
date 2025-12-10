@@ -1,44 +1,34 @@
-// src/io/gltf_read.rs
-// Minimal glTF 2.0 importer: loads first mesh primitive as MeshBuffers.
-// Supports embedded (data URI) and external buffers via gltf::import.
+//! Minimal glTF 2.0 mesh importer.
+//!
+//! Loads the first mesh primitive as [`MeshBuffers`]. Supports both embedded
+//! (data URI) and external buffer references via `gltf::import`.
 
-use crate::error::RenderError;
+use crate::core::error::RenderError;
 use crate::geometry::MeshBuffers;
 
+/// Import a glTF file and extract the first mesh primitive.
+///
+/// # Arguments
+/// - `path`: Path to a `.gltf` or `.glb` file.
+///
+/// # Returns
+/// A [`MeshBuffers`] containing positions, normals, UVs, and indices.
+///
+/// # Errors
+/// Returns an error if the file cannot be read or contains no mesh primitives.
 pub fn import_gltf_to_mesh(path: &str) -> Result<MeshBuffers, RenderError> {
     let (doc, buffers, _images) = gltf::import(path).map_err(|e| RenderError::io(e.to_string()))?;
 
-    // Find first mesh primitive
     let mut out = MeshBuffers::new();
+
     'outer: for mesh in doc.meshes() {
         for prim in mesh.primitives() {
-            let reader = prim.reader(|buffer| {
-                let idx = buffer.index();
-                buffers.get(idx).map(|d| d.0.as_slice())
-            });
+            let reader = prim.reader(|buffer| buffers.get(buffer.index()).map(|d| d.0.as_slice()));
 
-            // Positions
-            if let Some(positions) = reader.read_positions() {
-                out.positions = positions.map(|p| [p[0], p[1], p[2]]).collect();
-            }
-            // Normals
-            if let Some(normals) = reader.read_normals() {
-                out.normals = normals.map(|n| [n[0], n[1], n[2]]).collect();
-            }
-            // UV0
-            if let Some(tex0) = reader.read_tex_coords(0) {
-                out.uvs = tex0.into_f32().map(|uv| [uv[0], uv[1]]).collect();
-            }
-            // Indices
-            if let Some(indices) = reader.read_indices() {
-                out.indices = indices.into_u32().collect();
-            } else {
-                // No indices: build a trivial triangle list if length divisible by 3
-                let n = out.positions.len();
-                if n % 3 == 0 {
-                    out.indices = (0u32..(n as u32)).collect();
-                }
-            }
+            read_positions(&reader, &mut out);
+            read_normals(&reader, &mut out);
+            read_uvs(&reader, &mut out);
+            read_or_generate_indices(&reader, &mut out);
 
             break 'outer;
         }
@@ -49,7 +39,55 @@ pub fn import_gltf_to_mesh(path: &str) -> Result<MeshBuffers, RenderError> {
             "glTF contains no mesh primitives".into(),
         ));
     }
+
     Ok(out)
+}
+
+/// Extract position data from a primitive reader.
+fn read_positions<'a, 's, F>(reader: &gltf::mesh::Reader<'a, 's, F>, out: &mut MeshBuffers)
+where
+    F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'s [u8]>,
+{
+    if let Some(positions) = reader.read_positions() {
+        out.positions = positions.collect();
+    }
+}
+
+/// Extract normal data from a primitive reader.
+fn read_normals<'a, 's, F>(reader: &gltf::mesh::Reader<'a, 's, F>, out: &mut MeshBuffers)
+where
+    F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'s [u8]>,
+{
+    if let Some(normals) = reader.read_normals() {
+        out.normals = normals.collect();
+    }
+}
+
+/// Extract UV coordinates from a primitive reader.
+fn read_uvs<'a, 's, F>(reader: &gltf::mesh::Reader<'a, 's, F>, out: &mut MeshBuffers)
+where
+    F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'s [u8]>,
+{
+    if let Some(tex0) = reader.read_tex_coords(0) {
+        out.uvs = tex0.into_f32().collect();
+    }
+}
+
+/// Extract indices or generate trivial indices if not present.
+fn read_or_generate_indices<'a, 's, F>(
+    reader: &gltf::mesh::Reader<'a, 's, F>,
+    out: &mut MeshBuffers,
+) where
+    F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'s [u8]>,
+{
+    if let Some(indices) = reader.read_indices() {
+        out.indices = indices.into_u32().collect();
+    } else {
+        let vertex_count = out.positions.len();
+        if vertex_count % 3 == 0 {
+            out.indices = (0u32..(vertex_count as u32)).collect();
+        }
+    }
 }
 
 #[cfg(feature = "extension-module")]

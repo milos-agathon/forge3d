@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use crate::error::RenderError;
+use crate::core::error::RenderError;
 use crate::io::obj_read::ObjMaterial;
 
 #[cfg(feature = "extension-module")]

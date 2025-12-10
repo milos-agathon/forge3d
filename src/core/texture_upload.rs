@@ -4,8 +4,8 @@
 //! with proper memory budget checking and alignment handling.
 
 use crate::core::memory_tracker::global_tracker;
-use crate::error::{RenderError, RenderResult};
-use crate::gpu::ctx;
+use super::error::{RenderError, RenderResult};
+use super::gpu::ctx;
 use std::num::NonZeroU32;
 
 /// Configuration for HDR texture creation

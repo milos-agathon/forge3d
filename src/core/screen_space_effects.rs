@@ -5,7 +5,7 @@
 
 use crate::core::gbuffer::{GBuffer, GBufferConfig};
 use crate::core::gpu_timing::GpuTimingManager;
-use crate::error::{RenderError, RenderResult};
+use super::error::{RenderError, RenderResult};
 use crate::render::params::SsrParams;
 use futures_intrusive::channel::shared::oneshot_channel;
 use pollster::block_on;

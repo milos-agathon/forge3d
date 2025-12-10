@@ -2,6 +2,14 @@
 //!
 //! Contains foundational types and systems for the renderer.
 
+// Foundational modules
+pub mod context;
+pub mod device_caps;
+pub mod error;
+pub mod gpu;
+#[cfg(feature = "extension-module")]
+pub mod session;
+
 pub mod framegraph; // Legacy compatibility layer
 pub mod gpu_types;
 pub mod memory_tracker;
@@ -21,6 +29,7 @@ pub mod bloom;
 pub mod compressed_textures; // O3: Compressed texture pipeline
 pub mod feedback_buffer; // O4: GPU feedback buffer for tile visibility
 pub mod texture_format; // O3: Texture format registry and detection
+pub mod texture_format_defs; // O3: Texture format definitions
 pub mod tile_cache;
 pub mod virtual_texture; // O4: Virtual texture streaming system // O4: LRU tile cache for virtual textures
 
@@ -117,11 +126,16 @@ pub mod overlays;
 // D: Text overlay (native)
 pub mod text_overlay;
 
+// Overlay layer for terrain rendering
+#[cfg(feature = "extension-module")]
+pub mod overlay_layer;
+
 // D11: 3D Text Mesh (native)
 pub mod text_mesh;
 
 // N4: Render bundles
 pub mod render_bundles;
+pub mod render_bundles_types;
 
 // O1: Staging buffer rings with fence synchronization
 #[cfg(feature = "enable-staging-rings")]

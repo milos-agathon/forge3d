@@ -2,7 +2,7 @@
 //! CPU and GPU paths for efficient large-scale vector rendering
 
 use crate::core::gpu_timing::GpuTimingManager;
-use crate::error::RenderError;
+use crate::core::error::RenderError;
 use crate::vector::batch::{Frustum, PrimitiveType, AABB};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn test_vertex_count_for_types() {
-        let renderer = IndirectRenderer::new(&crate::gpu::create_device_for_test()).unwrap();
+        let renderer = IndirectRenderer::new(&crate::core::gpu::create_device_for_test()).unwrap();
 
         assert_eq!(renderer.get_vertex_count_for_type(0), 3); // Triangle
         assert_eq!(renderer.get_vertex_count_for_type(1), 4); // Quad
@@ -582,7 +582,7 @@ mod tests {
 
     #[test]
     fn test_cpu_culling_distance() {
-        let renderer = IndirectRenderer::new(&crate::gpu::create_device_for_test()).unwrap();
+        let renderer = IndirectRenderer::new(&crate::core::gpu::create_device_for_test()).unwrap();
 
         let instance = CullableInstance {
             aabb_min: [-1.0, -1.0, -1.0],

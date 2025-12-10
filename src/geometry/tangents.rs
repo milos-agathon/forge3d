@@ -1,8 +1,22 @@
-// src/geometry/tangents.rs
-// Tangent generation (simple per-triangle accumulation, similar to Lengyel method)
+//! Tangent space generation for normal mapping.
+//!
+//! Implements per-triangle tangent accumulation similar to the Lengyel method,
+//! with Gram-Schmidt orthogonalization and handedness computation.
 
 use super::MeshBuffers;
 
+/// Minimum determinant threshold for valid UV mapping.
+const UV_DETERMINANT_EPSILON: f32 = 1e-12;
+
+/// Minimum tangent length for normalization.
+const TANGENT_LENGTH_EPSILON: f32 = 1e-20;
+
+/// Generate tangent vectors for a mesh.
+///
+/// Returns a `Vec<[f32; 4]>` where `xyz` is the tangent direction and `w` is
+/// the handedness (+1 or -1) for bitangent reconstruction: `B = cross(N, T) * w`.
+///
+/// Falls back to `[1, 0, 0, 1]` (X-axis tangent) when UVs are missing or degenerate.
 pub fn generate_tangents(mesh: &MeshBuffers) -> Vec<[f32; 4]> {
     let n_verts = mesh.positions.len();
     let mut tan1 = vec![[0.0f32; 3]; n_verts];
@@ -39,8 +53,8 @@ pub fn generate_tangents(mesh: &MeshBuffers) -> Vec<[f32; 4]> {
         let t2 = uv2[1] - uv0[1];
 
         let denom = s1 * t2 - s2 * t1;
-        if denom.abs() < 1e-12 {
-            continue; // degenerate UV mapping
+        if denom.abs() < UV_DETERMINANT_EPSILON {
+            continue; // Degenerate UV mapping
         }
         let r = 1.0 / denom;
         let tx = (t2 * x1 - t1 * x2) * r;
@@ -74,16 +88,18 @@ pub fn generate_tangents(mesh: &MeshBuffers) -> Vec<[f32; 4]> {
         let mut ty = t[1] - n[1] * dot_nt;
         let mut tz = t[2] - n[2] * dot_nt;
         let len = (tx * tx + ty * ty + tz * tz).sqrt();
-        if len > 1e-20 {
+        if len > TANGENT_LENGTH_EPSILON {
             tx /= len;
             ty /= len;
             tz /= len;
         } else {
+            // Fallback to X-axis tangent
             tx = 1.0;
             ty = 0.0;
             tz = 0.0;
         }
-        // Handedness
+
+        // Compute handedness for bitangent reconstruction
         let cx = n[1] * tx - n[2] * ty; // cross(n, t).x (partial)
         let cy = n[2] * tx - n[0] * tz; // not exact but we only need sign of dot with bitangent
         let cz = n[0] * ty - n[1] * tx;

@@ -1,18 +1,21 @@
-// src/geometry/mod.rs
-// Geometry module hub providing mesh utilities and shared data structures
-// Exists to centralize generation, validation, and welding logic for workstream F
-// RELEVANT FILES:src/geometry/extrude.rs,src/geometry/primitives.rs,src/geometry/validate.rs,src/geometry/weld.rs
-
-//! Core geometry utilities for Workstream F phase 1.
+//! Core geometry utilities for mesh generation, validation, and processing.
+//!
+//! Provides shared data structures ([`MeshBuffers`]) and operations for:
+//! - Primitive generation (planes, spheres, cylinders, etc.)
+//! - Polygon extrusion
+//! - Mesh validation and welding
+//! - Coordinate transforms
 
 mod curves;
 mod displacement;
 mod extrude;
+pub mod grid;
 mod primitives;
 mod subdivision;
 mod tangents;
 mod thick_polyline;
 mod transform;
+pub mod transforms;
 mod validate;
 mod weld;
 
@@ -141,47 +144,54 @@ pub(crate) fn mesh_to_python<'py>(py: Python<'py>, mesh: &MeshBuffers) -> PyResu
     Ok(dict.into_py(py))
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Python array conversion helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Convert fixed-size arrays to nested Vecs for PyArray2 construction.
 #[cfg(feature = "extension-module")]
-fn to_vec3(data: &[[f32; 3]]) -> Vec<Vec<f32>> {
-    data.iter().map(|row| row.to_vec()).collect()
+mod array_convert {
+    use super::*;
+
+    pub fn to_vec2(data: &[[f32; 2]]) -> Vec<Vec<f32>> {
+        data.iter().map(|row| row.to_vec()).collect()
+    }
+
+    pub fn to_vec3(data: &[[f32; 3]]) -> Vec<Vec<f32>> {
+        data.iter().map(|row| row.to_vec()).collect()
+    }
+
+    pub fn to_vec4(data: &[[f32; 4]]) -> Vec<Vec<f32>> {
+        data.iter().map(|row| row.to_vec()).collect()
+    }
+
+    pub fn read_vec2(array: PyReadonlyArray2<'_, f32>) -> Vec<[f32; 2]> {
+        array
+            .as_array()
+            .outer_iter()
+            .map(|row| [row[0], row[1]])
+            .collect()
+    }
+
+    pub fn read_vec3(array: PyReadonlyArray2<'_, f32>) -> Vec<[f32; 3]> {
+        array
+            .as_array()
+            .outer_iter()
+            .map(|row| [row[0], row[1], row[2]])
+            .collect()
+    }
+
+    pub fn read_vec4(array: PyReadonlyArray2<'_, f32>) -> Vec<[f32; 4]> {
+        array
+            .as_array()
+            .outer_iter()
+            .map(|row| [row[0], row[1], row[2], row[3]])
+            .collect()
+    }
 }
 
 #[cfg(feature = "extension-module")]
-fn to_vec2(data: &[[f32; 2]]) -> Vec<Vec<f32>> {
-    data.iter().map(|row| row.to_vec()).collect()
-}
-
-#[cfg(feature = "extension-module")]
-fn to_vec4(data: &[[f32; 4]]) -> Vec<Vec<f32>> {
-    data.iter().map(|row| row.to_vec()).collect()
-}
-
-#[cfg(feature = "extension-module")]
-fn read_vec3_array(array: PyReadonlyArray2<'_, f32>) -> Vec<[f32; 3]> {
-    array
-        .as_array()
-        .outer_iter()
-        .map(|row| [row[0], row[1], row[2]])
-        .collect()
-}
-
-#[cfg(feature = "extension-module")]
-fn read_vec2_array(array: PyReadonlyArray2<'_, f32>) -> Vec<[f32; 2]> {
-    array
-        .as_array()
-        .outer_iter()
-        .map(|row| [row[0], row[1]])
-        .collect()
-}
-
-#[cfg(feature = "extension-module")]
-fn read_vec4_array(array: PyReadonlyArray2<'_, f32>) -> Vec<[f32; 4]> {
-    array
-        .as_array()
-        .outer_iter()
-        .map(|row| [row[0], row[1], row[2], row[3]])
-        .collect()
-}
+use array_convert::{read_vec2, read_vec3, read_vec4, to_vec2, to_vec3, to_vec4};
 
 #[cfg(feature = "extension-module")]
 pub(crate) fn mesh_from_python(mesh: &Bound<'_, PyDict>) -> PyResult<MeshBuffers> {
@@ -194,7 +204,7 @@ pub(crate) fn mesh_from_python(mesh: &Bound<'_, PyDict>) -> PyResult<MeshBuffers
             "positions array must have shape (N, 3)",
         ));
     }
-    let positions = read_vec3_array(positions_array);
+    let positions = read_vec3(positions_array);
 
     let normals = match mesh.get_item("normals")? {
         Some(value) if !value.is_none() => {
@@ -204,7 +214,7 @@ pub(crate) fn mesh_from_python(mesh: &Bound<'_, PyDict>) -> PyResult<MeshBuffers
                     "normals array must have shape (N, 3)",
                 ));
             }
-            read_vec3_array(array)
+            read_vec3(array)
         }
         _ => Vec::new(),
     };
@@ -215,7 +225,7 @@ pub(crate) fn mesh_from_python(mesh: &Bound<'_, PyDict>) -> PyResult<MeshBuffers
             if array.shape()[1] != 2 {
                 return Err(PyValueError::new_err("uvs array must have shape (N, 2)"));
             }
-            read_vec2_array(array)
+            read_vec2(array)
         }
         _ => Vec::new(),
     };
@@ -228,7 +238,7 @@ pub(crate) fn mesh_from_python(mesh: &Bound<'_, PyDict>) -> PyResult<MeshBuffers
                     "tangents array must have shape (N, 4)",
                 ));
             }
-            read_vec4_array(array)
+            read_vec4(array)
         }
         _ => Vec::new(),
     };

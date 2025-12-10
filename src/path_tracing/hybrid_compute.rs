@@ -8,8 +8,8 @@ use bytemuck::{Pod, Zeroable};
 use half::f16;
 use wgpu::util::DeviceExt;
 
-use crate::error::RenderError;
-use crate::gpu::{align_copy_bpr, ctx};
+use crate::core::error::RenderError;
+use crate::core::gpu::{align_copy_bpr, ctx};
 use crate::path_tracing::aov::{AovFrames, AovKind};
 use crate::path_tracing::compute::{Sphere, Uniforms};
 use crate::sdf::HybridScene;

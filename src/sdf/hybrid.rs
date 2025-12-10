@@ -2,25 +2,15 @@
 // Hybrid traversal combining SDF raymarching with BVH mesh traversal
 // Provides unified intersection testing for both analytic SDFs and polygonal meshes
 
-// src/sdf/hybrid.rs
-// Hybrid traversal combining SDF raymarching with BVH mesh traversal
-// Provides unified intersection testing for both analytic SDFs and polygonal meshes
-// RELEVANT FILES:src/path_tracing/hybrid_compute.rs,src/gpu/mod.rs,src/accel/mod.rs
-
 use once_cell::sync::OnceCell;
-use wgpu::Buffer;
 
 use crate::accel::BvhHandle;
-use crate::error::RenderError;
-use crate::gpu::ctx;
-// Note: Vertex type simplified for core functionality
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-#[repr(C)]
-pub struct Vertex {
-    pub position: [f32; 3],
-    pub _pad: f32,
-}
+use crate::core::error::RenderError;
+use crate::core::gpu::ctx;
 use crate::sdf::SdfScene;
+
+// Re-export types from hybrid_types
+pub use super::hybrid_types::{HybridHitResult, HybridMetrics, MeshBuffers, Ray, SdfBuffers, Vertex};
 
 /// Hybrid scene containing both SDF and mesh geometry
 #[derive(Debug)]
@@ -39,29 +29,7 @@ pub struct HybridScene {
     pub mesh_buffers: Option<MeshBuffers>,
 }
 
-/// GPU buffers for SDF data
-#[derive(Debug)]
-pub struct SdfBuffers {
-    pub primitives_buffer: Buffer,
-    pub nodes_buffer: Buffer,
-    pub primitive_count: u32,
-    pub node_count: u32,
-}
-
-/// GPU buffers for mesh data
-#[derive(Debug)]
-pub struct MeshBuffers {
-    pub vertices_buffer: Buffer,
-    pub indices_buffer: Buffer,
-    pub bvh_buffer: Buffer,
-    pub vertex_count: u32,
-    pub index_count: u32,
-    pub bvh_node_count: u32,
-}
-
-// Provide a process‑lifetime dummy storage buffer to satisfy bind group layout
-// requirements when SDF or mesh buffers are not yet available. This avoids
-// returning entries that borrow a stack‑allocated buffer.
+/// Provide a process-lifetime dummy storage buffer for bind group layout requirements
 fn dummy_storage_buffer() -> &'static wgpu::Buffer {
     static DUMMY: OnceCell<wgpu::Buffer> = OnceCell::new();
     DUMMY.get_or_init(|| {
@@ -72,36 +40,6 @@ fn dummy_storage_buffer() -> &'static wgpu::Buffer {
             mapped_at_creation: false,
         })
     })
-}
-
-/// Hybrid intersection result containing both SDF and mesh data
-#[derive(Clone, Copy, Debug)]
-pub struct HybridHitResult {
-    /// Distance from ray origin
-    pub t: f32,
-    /// Hit point in world space
-    pub point: glam::Vec3,
-    /// Surface normal at hit point
-    pub normal: glam::Vec3,
-    /// Material ID
-    pub material_id: u32,
-    /// Intersection type (0 = mesh, 1 = SDF)
-    pub hit_type: u32,
-    /// Whether any intersection occurred
-    pub hit: bool,
-    /// For mesh hits: triangle index and barycentric coordinates
-    pub triangle_info: Option<(u32, glam::Vec2)>,
-    /// For SDF hits: signed distance at surface
-    pub sdf_distance: Option<f32>,
-}
-
-/// Ray representation for hybrid traversal
-#[derive(Clone, Copy, Debug)]
-pub struct Ray {
-    pub origin: glam::Vec3,
-    pub direction: glam::Vec3,
-    pub tmin: f32,
-    pub tmax: f32,
 }
 
 impl HybridScene {
@@ -475,46 +413,6 @@ impl Default for HybridScene {
     }
 }
 
-/// Performance metrics for hybrid traversal
-#[derive(Clone, Copy, Debug, Default)]
-pub struct HybridMetrics {
-    /// Number of SDF raymarching steps
-    pub sdf_steps: u32,
-    /// Number of BVH nodes traversed
-    pub bvh_nodes_visited: u32,
-    /// Number of triangle tests performed
-    pub triangle_tests: u32,
-    /// Total rays cast
-    pub total_rays: u32,
-    /// Rays that hit SDF geometry
-    pub sdf_hits: u32,
-    /// Rays that hit mesh geometry
-    pub mesh_hits: u32,
-}
-
-impl HybridMetrics {
-    /// Calculate performance overhead compared to mesh-only rendering
-    pub fn performance_overhead(&self) -> f32 {
-        if self.total_rays == 0 {
-            return 0.0;
-        }
-
-        // Estimate cost: SDF steps are more expensive than BVH traversal
-        let sdf_cost = self.sdf_steps as f32 * 2.0; // SDF evaluation is ~2x cost of BVH node test
-        let bvh_cost = self.bvh_nodes_visited as f32;
-        let triangle_cost = self.triangle_tests as f32 * 3.0; // Triangle tests are expensive
-
-        let total_cost = sdf_cost + bvh_cost + triangle_cost;
-        let mesh_only_cost = self.bvh_nodes_visited as f32 + self.triangle_tests as f32 * 3.0;
-
-        if mesh_only_cost == 0.0 {
-            return if total_cost > 0.0 { f32::INFINITY } else { 0.0 };
-        }
-
-        (total_cost - mesh_only_cost) / mesh_only_cost
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -546,7 +444,6 @@ mod tests {
 
         let hybrid = HybridScene::sdf_only(sdf_scene);
 
-        // Test ray that should hit the sphere
         let ray = Ray {
             origin: Vec3::ZERO,
             direction: Vec3::new(0.0, 0.0, -1.0),
@@ -558,17 +455,5 @@ mod tests {
         assert!(result.hit, "Ray should hit the sphere");
         assert_eq!(result.hit_type, 1, "Should be SDF hit");
         assert_eq!(result.material_id, 1, "Should have correct material ID");
-    }
-
-    #[test]
-    fn test_performance_metrics() {
-        let mut metrics = HybridMetrics::default();
-        metrics.total_rays = 100;
-        metrics.sdf_steps = 500;
-        metrics.bvh_nodes_visited = 200;
-        metrics.triangle_tests = 50;
-
-        let overhead = metrics.performance_overhead();
-        assert!(overhead >= 0.0, "Overhead should be non-negative");
     }
 }

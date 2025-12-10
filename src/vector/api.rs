@@ -9,7 +9,7 @@
 //! `PyReadonlyArray2<'py, T>` (owned pyo3 handles). Do not use `&PyReadonlyArray2<T>`
 //! in #[pyfunction] signatures—pyo3 cannot extract references from Python call sites.
 
-use crate::error::RenderError;
+use crate::core::error::RenderError;
 use glam::Vec2;
 use numpy::{PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::prelude::*;

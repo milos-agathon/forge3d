@@ -14,6 +14,7 @@ Code is not going away; bad code destroys productivity; clean code is about read
 
 ### Must do
 
+* New files must not have more than 300 lines of code. If they do, split them into multiple files.
 * Treat **cleanliness as a professional obligation**, not a luxury.
 * Recognize that **bad code’s cost compounds**: every messy decision today slows you more tomorrow.
 * Remember we **read far more than we write**:

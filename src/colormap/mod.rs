@@ -3,6 +3,12 @@
 //! - Embedded 256×1 PNG bytes via `include_bytes!`
 //! - Small helpers (enum mapping + PyO3 error)
 
+// PyO3 colormap wrapper for height-based 1D lookup tables
+#[cfg(feature = "extension-module")]
+pub mod colormap1d;
+#[cfg(feature = "extension-module")]
+pub use colormap1d::Colormap1D;
+
 /// Built-in colormap names (case-sensitive).
 pub static SUPPORTED: [&str; 3] = ["viridis", "magma", "terrain"];
 

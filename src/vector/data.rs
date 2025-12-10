@@ -1,7 +1,7 @@
 //! H3: Packed data contracts
 //! Reuse packed formats to limit Python overhead and ensure validation
 
-use crate::error::RenderError;
+use crate::core::error::RenderError;
 use glam::Vec2;
 use std::mem;
 

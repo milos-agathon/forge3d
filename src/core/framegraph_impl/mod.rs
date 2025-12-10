@@ -6,7 +6,7 @@
 pub mod barriers;
 pub mod types;
 
-use crate::error::{RenderError, RenderResult};
+use super::error::{RenderError, RenderResult};
 use std::collections::HashMap;
 
 use barriers::BarrierPlanner;

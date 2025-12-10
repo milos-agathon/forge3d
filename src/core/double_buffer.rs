@@ -5,7 +5,7 @@
 //! triple-buffering (N=3) strategies.
 
 use crate::core::memory_tracker::ResourceRegistry;
-use crate::error::RenderError;
+use super::error::RenderError;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device, Queue};
 
 /// Configuration for double-buffering strategy

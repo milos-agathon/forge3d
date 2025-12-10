@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use crate::error::RenderError;
+use crate::core::error::RenderError;
 use crate::geometry::MeshBuffers;
 
 /// Material definition parsed from an accompanying MTL file.

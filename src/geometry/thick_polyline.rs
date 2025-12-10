@@ -1,8 +1,15 @@
-// src/geometry/thick_polyline.rs
-// Thick 3D polylines (F3): builds a ribbon with constant world-space width and optional depth offset
-// For pixel-constant width, provide a world-space width computed by the caller based on camera scale.
+//! Thick 3D polyline generation.
+//!
+//! Builds ribbon geometry with constant world-space width and optional depth offset
+//! for Z-fighting mitigation when overlaying on other geometry.
 
 use super::{curves, MeshBuffers};
+
+/// Default miter limit for sharp corner clamping.
+const DEFAULT_MITER_LIMIT: f32 = 4.0;
+
+/// Default join style for polyline corners.
+const DEFAULT_JOIN_STYLE: &str = "miter";
 
 /// Generate a thick 3D polyline as a ribbon with constant world-space width.
 ///
@@ -42,6 +49,7 @@ use numpy::{PyReadonlyArray2, PyUntypedArrayMethods};
 #[cfg(feature = "extension-module")]
 use pyo3::{exceptions::PyValueError, prelude::*};
 
+/// Python binding for thick polyline generation.
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 pub fn geometry_generate_thick_polyline_py(
@@ -58,14 +66,17 @@ pub fn geometry_generate_thick_polyline_py(
     if !width_world.is_finite() || width_world <= 0.0 {
         return Err(PyValueError::new_err("width_world must be positive finite"));
     }
+
     let pts: Vec<[f32; 3]> = path
         .as_array()
         .outer_iter()
         .map(|row| [row[0], row[1], row[2]])
         .collect();
-    let style = join_style.unwrap_or("miter");
-    let limit = miter_limit.unwrap_or(4.0);
-    let zoff = depth_offset.unwrap_or(0.0);
-    let mesh = generate_thick_polyline(&pts, width_world, zoff, style, limit);
+
+    let style = join_style.unwrap_or(DEFAULT_JOIN_STYLE);
+    let limit = miter_limit.unwrap_or(DEFAULT_MITER_LIMIT);
+    let z_offset = depth_offset.unwrap_or(0.0);
+
+    let mesh = generate_thick_polyline(&pts, width_world, z_offset, style, limit);
     super::mesh_to_python(py, &mesh)
 }

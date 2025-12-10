@@ -44,6 +44,26 @@ pub use analysis::{
 };
 // B13/B14-END:analysis-mod
 
+// Terrain camera helpers (orbit camera, view-proj)
+pub mod camera;
+pub use camera::{build_view_proj, orbit_camera};
+
+// DEM elevation statistics (min/max, percentile)
+pub mod stats;
+pub use stats::min_max;
+
+// PyO3 terrain render parameter wrapper
+#[cfg(feature = "extension-module")]
+pub mod render_params;
+#[cfg(feature = "extension-module")]
+pub use render_params::{AddressModeNative, FilterModeNative, TerrainRenderParams};
+
+// TerrainRenderer - GPU pipeline for PBR+POM terrain rendering
+#[cfg(feature = "extension-module")]
+pub mod renderer;
+#[cfg(feature = "extension-module")]
+pub use renderer::{TerrainRenderer, TerrainScene as TerrainRendererScene};
+
 use numpy::IntoPyArray;
 use pyo3::prelude::*;
 use std::collections::HashSet;

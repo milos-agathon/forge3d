@@ -3,7 +3,7 @@
 //! Provides push/pop semantics for managing transformation hierarchies,
 //! commonly used in scene graph rendering and nested coordinate systems.
 
-use crate::error::{RenderError, RenderResult};
+use super::error::{RenderError, RenderResult};
 use glam::Mat4;
 
 /// Matrix stack for hierarchical transformation management

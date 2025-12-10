@@ -3,6 +3,7 @@
 // This module provides analytic SDF primitives and constructive solid geometry operations
 
 pub mod hybrid;
+pub mod hybrid_types;
 pub mod operations;
 pub mod primitives;
 
@@ -16,7 +17,8 @@ pub use primitives::{
 
 pub use operations::{CsgNode, CsgOperation, CsgResult, CsgTree};
 
-pub use hybrid::{HybridHitResult, HybridMetrics, HybridScene, Ray as HybridRay};
+pub use hybrid::HybridScene;
+pub use hybrid_types::{HybridHitResult, HybridMetrics, Ray as HybridRay};
 
 /// SDF scene containing primitives and CSG tree
 #[derive(Clone, Debug)]

@@ -5,7 +5,7 @@
 //! alignment and provides RAII allocation management.
 
 use crate::core::memory_tracker::ResourceRegistry;
-use crate::error::RenderError;
+use super::error::RenderError;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use wgpu::{Buffer, BufferAddress, BufferDescriptor, BufferUsages, Device};

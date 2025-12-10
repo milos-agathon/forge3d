@@ -3,8 +3,8 @@
 //! Provides systematic creation of sampler configurations for all combinations
 //! of address modes, filters, and mipmap filters.
 
-use crate::error::{RenderError, RenderResult};
-use crate::gpu::ctx;
+use super::error::{RenderError, RenderResult};
+use super::gpu::ctx;
 use std::collections::HashMap;
 
 /// Address mode options for texture sampling

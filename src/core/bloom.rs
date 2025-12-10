@@ -5,7 +5,7 @@
 
 use crate::core::gpu_timing::GpuTimingManager;
 use crate::core::postfx::{PostFxConfig, PostFxEffect, PostFxResourcePool};
-use crate::error::{RenderError, RenderResult};
+use super::error::{RenderError, RenderResult};
 use std::borrow::Cow;
 use wgpu::*;
 

@@ -3,7 +3,17 @@
 // Implements light types, BRDFs, shadows, and IBL for terrain rendering
 // RELEVANT FILES: src/shaders/lighting.wgsl, examples/terrain_demo.py
 
+// Focused submodules (refactored from types.rs)
+pub mod atmospherics;
+pub mod light;
+pub mod material;
+pub mod screen_space;
+pub mod shadow;
+
+// Core modules
 pub mod ibl_cache;
+#[cfg(feature = "extension-module")]
+pub mod ibl_wrapper;
 pub mod light_buffer;
 pub mod shadow_map;
 pub mod types;

@@ -26,7 +26,7 @@ use pyo3::{
 
 // C1/C3/C5/C6/C7: Additional imports for PyO3 functions
 #[cfg(feature = "extension-module")]
-use crate::context as engine_context;
+use crate::core::context as engine_context;
 #[cfg(feature = "extension-module")]
 use crate::core::async_compute::{
     AsyncComputeConfig as AcConfig, AsyncComputeScheduler as AcScheduler,
@@ -42,7 +42,7 @@ use crate::core::multi_thread::{
     CopyTask as MtCopyTask, MultiThreadConfig as MtConfig, MultiThreadRecorder as MtRecorder,
 };
 #[cfg(feature = "extension-module")]
-use crate::device_caps::DeviceCaps;
+use crate::core::device_caps::DeviceCaps;
 #[cfg(feature = "extension-module")]
 use crate::renderer::readback::read_texture_tight;
 #[cfg(feature = "extension-module")]
@@ -91,7 +91,7 @@ impl PyScreenSpaceGI {
     #[new]
     #[pyo3(signature = (width=1280, height=720))]
     pub fn new(width: u32, height: u32) -> PyResult<Self> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let manager = crate::core::screen_space_effects::ScreenSpaceEffectsManager::new(
             g.device.as_ref(),
             width,
@@ -107,7 +107,7 @@ impl PyScreenSpaceGI {
 
     /// Enable SSAO
     pub fn enable_ssao(&mut self) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         self.manager
             .enable_effect(
                 g.device.as_ref(),
@@ -118,7 +118,7 @@ impl PyScreenSpaceGI {
 
     /// Enable SSGI
     pub fn enable_ssgi(&mut self) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         self.manager
             .enable_effect(
                 g.device.as_ref(),
@@ -129,7 +129,7 @@ impl PyScreenSpaceGI {
 
     /// Enable SSR
     pub fn enable_ssr(&mut self) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         self.manager
             .enable_effect(
                 g.device.as_ref(),
@@ -153,7 +153,7 @@ impl PyScreenSpaceGI {
 
     /// Resize underlying GBuffer to a new size
     pub fn resize(&mut self, width: u32, height: u32) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         self.manager
             .gbuffer_mut()
             .resize(g.device.as_ref(), width, height)
@@ -165,7 +165,7 @@ impl PyScreenSpaceGI {
 
     /// Execute enabled GI passes for the current frame
     pub fn execute(&mut self) -> PyResult<()> {
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let mut encoder = g
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -291,7 +291,7 @@ impl Frame {
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 fn render_debug_pattern_frame(py: Python<'_>, width: u32, height: u32) -> PyResult<Py<Frame>> {
-    let ctx = crate::gpu::ctx();
+    let ctx = crate::core::gpu::ctx();
     let texture = crate::util::debug_pattern::render_debug_pattern(
         ctx.device.as_ref(),
         ctx.queue.as_ref(),
@@ -359,46 +359,29 @@ pub mod accel;
 pub mod camera;
 pub mod cli;
 pub mod colormap;
-mod colormap1d;
-pub mod context;
 pub mod converters; // Geometry converters (e.g., MultipolygonZ -> OBJ)
 pub mod core;
-pub mod device_caps;
-pub mod error;
 pub mod external_image;
 pub mod formats;
 pub mod geometry;
-pub mod gpu;
-pub mod grid;
-mod ibl_wrapper;
 pub mod import; // Importers: OSM buildings, etc.
 pub mod io; // IO: OBJ/PLY/glTF readers/writers
 pub mod lighting; // P0: Production-ready lighting stack (lights, BRDFs, shadows, IBL)
 pub mod loaders;
-mod material_set;
 pub mod mesh;
 pub mod offscreen; // P7: Offscreen PBR harness for BRDF galleries and CI goldens
-mod overlay_layer;
 pub mod path_tracing;
 pub mod pipeline;
 pub mod render; // Rendering utilities (instancing)
 pub mod renderer;
 pub mod scene;
 pub mod sdf; // New SDF module
-mod session;
 pub mod shadows; // Shadow mapping implementations
 pub mod terrain;
-mod terrain_camera;
-#[cfg(feature = "extension-module")]
-mod terrain_render_params;
-#[cfg(feature = "extension-module")]
-mod terrain_renderer;
-pub mod terrain_stats;
 pub mod uv; // UV unwrap helpers (planar, spherical)
 pub mod textures {}
 pub mod p5;
 pub mod passes;
-pub mod transforms;
 pub mod util;
 pub mod vector;
 pub mod viewer; // Interactive windowed viewer (Workstream I1) // P5.2: render passes wrappers
@@ -432,7 +415,7 @@ pub use core::soft_light_radius::{
 pub use core::water_surface::{
     WaterSurfaceMode, WaterSurfaceParams, WaterSurfaceRenderer, WaterSurfaceUniforms,
 };
-pub use error::RenderError;
+pub use core::error::RenderError;
 pub use lighting::LightBuffer;
 pub use path_tracing::{TracerEngine, TracerParams};
 pub use render::params::{
@@ -489,7 +472,7 @@ fn vector_render_polygons_fill_py(
     use numpy::PyArray1;
 
     // Acquire device/queue from global context
-    let g = crate::gpu::ctx();
+    let g = crate::core::gpu::ctx();
     let device = std::sync::Arc::clone(&g.device);
     let queue = std::sync::Arc::clone(&g.queue);
 
@@ -885,7 +868,7 @@ fn vector_render_oit_py(
         }
 
         // Acquire device/queue
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let device = std::sync::Arc::clone(&g.device);
         let queue = std::sync::Arc::clone(&g.queue);
 
@@ -1128,7 +1111,7 @@ fn vector_render_pick_map_py(
     }
 
     // Device
-    let g = crate::gpu::ctx();
+    let g = crate::core::gpu::ctx();
     let device = std::sync::Arc::clone(&g.device);
     let queue = std::sync::Arc::clone(&g.queue);
 
@@ -1410,7 +1393,7 @@ fn vector_render_oit_and_pick_py(
         }
 
         // Acquire device/queue
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let device = std::sync::Arc::clone(&g.device);
         let queue = std::sync::Arc::clone(&g.queue);
 
@@ -1775,7 +1758,7 @@ fn vector_oit_and_pick_demo(py: Python<'_>, width: u32, height: u32) -> PyResult
         use numpy::PyArray1;
 
         // Acquire GPU device/queue
-        let g = crate::gpu::ctx();
+        let g = crate::core::gpu::ctx();
         let device = std::sync::Arc::clone(&g.device);
         let queue = std::sync::Arc::clone(&g.queue);
 
@@ -2791,7 +2774,7 @@ fn c5_build_framegraph_report(py: Python<'_>) -> PyResult<Py<PyDict>> {
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 fn c6_mt_record_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
-    let g = crate::gpu::ctx();
+    let g = crate::core::gpu::ctx();
     let device = Arc::clone(&g.device);
     let queue = Arc::clone(&g.queue);
 
@@ -2846,7 +2829,7 @@ fn c6_mt_record_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 fn c7_async_compute_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
-    let g = crate::gpu::ctx();
+    let g = crate::core::gpu::ctx();
     let device = Arc::clone(&g.device);
     let queue = Arc::clone(&g.queue);
 
@@ -3455,7 +3438,7 @@ fn render_brdf_tile_impl<'py>(
     };
 
     // Get GPU context
-    let ctx = crate::gpu::ctx();
+    let ctx = crate::core::gpu::ctx();
 
     // Call offscreen renderer
     let buffer = crate::offscreen::brdf_tile::render_brdf_tile_with_overrides(
@@ -3907,23 +3890,23 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?)?;
 
     // Transform utilities
-    m.add_function(wrap_pyfunction!(crate::transforms::translate, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::transforms::rotate_x, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::transforms::rotate_y, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::transforms::rotate_z, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::transforms::scale, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::transforms::scale_uniform, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::transforms::compose_trs, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::transforms::look_at_transform, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::transforms::multiply_matrices, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::transforms::invert_matrix, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::transforms::translate, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::transforms::rotate_x, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::transforms::rotate_y, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::transforms::rotate_z, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::transforms::scale, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::transforms::scale_uniform, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::transforms::compose_trs, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::transforms::look_at_transform, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::transforms::multiply_matrices, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::transforms::invert_matrix, m)?)?;
     m.add_function(wrap_pyfunction!(
-        crate::transforms::compute_normal_matrix,
+        crate::geometry::transforms::compute_normal_matrix,
         m
     )?)?;
 
     // Grid generator
-    m.add_function(wrap_pyfunction!(crate::grid::grid_generate, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geometry::grid::grid_generate, m)?)?;
     // Path tracing (GPU MVP)
     m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
     // P7-05: Offscreen BRDF tile renderer
@@ -3931,13 +3914,13 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(render_brdf_tile_overrides, m)?)?;
 
     // Add main classes
-    m.add_class::<crate::session::Session>()?;
-    m.add_class::<crate::colormap1d::Colormap1D>()?;
-    m.add_class::<crate::overlay_layer::OverlayLayer>()?;
-    m.add_class::<crate::terrain_render_params::TerrainRenderParams>()?;
-    m.add_class::<crate::terrain_renderer::TerrainRenderer>()?;
-    m.add_class::<crate::material_set::MaterialSet>()?;
-    m.add_class::<crate::ibl_wrapper::IBL>()?;
+    m.add_class::<crate::core::session::Session>()?;
+    m.add_class::<crate::colormap::colormap1d::Colormap1D>()?;
+    m.add_class::<crate::core::overlay_layer::OverlayLayer>()?;
+    m.add_class::<crate::terrain::render_params::TerrainRenderParams>()?;
+    m.add_class::<crate::terrain::renderer::TerrainRenderer>()?;
+    m.add_class::<crate::render::material_set::MaterialSet>()?;
+    m.add_class::<crate::lighting::ibl_wrapper::IBL>()?;
     m.add_class::<crate::scene::Scene>()?;
     // Expose TerrainSpike (E2/E3) to Python
     m.add_class::<crate::terrain::TerrainSpike>()?;

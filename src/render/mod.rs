@@ -6,6 +6,8 @@
 
 pub mod colormap;
 pub mod instancing;
+#[cfg(feature = "extension-module")]
+pub mod material_set;
 pub mod memory_budget;
 #[cfg(feature = "enable-gpu-instancing")]
 pub mod mesh_instanced;

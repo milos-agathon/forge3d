@@ -8,7 +8,7 @@
 //!   - `material_texture`: `Rgba8Unorm` with diffuse/base color in `rgb` and
 //!                         metallic factor in `a` (both in [0,1])
 
-use crate::error::RenderResult;
+use super::error::RenderResult;
 use wgpu::*;
 
 /// GBuffer configuration

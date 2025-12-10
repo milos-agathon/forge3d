@@ -1,14 +1,16 @@
-//! H8,H7,H9: Anti-aliased line rendering with instanced segment expansion
-//! GPU-based line segment expansion for smooth anti-aliased lines
+//! Anti-aliased line rendering with GPU-based instanced segment expansion.
+//!
+//! Supports configurable line caps (butt, round, square) and joins (miter, bevel, round)
+//! with smooth anti-aliasing via shader-based quad expansion.
 
-use crate::error::RenderError;
+use crate::core::error::RenderError;
 use crate::vector::api::PolylineDef;
 use crate::vector::layer::Layer;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec2;
 use wgpu::util::DeviceExt;
 
-/// H9: Line cap styles
+/// Line cap styles for polyline endpoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineCap {
     /// Square cap ending exactly at vertex
@@ -19,7 +21,7 @@ pub enum LineCap {
     Square = 2,
 }
 
-/// H9: Line join styles
+/// Line join styles for polyline vertices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineJoin {
     /// Sharp miter join with limit
@@ -30,46 +32,64 @@ pub enum LineJoin {
     Round = 2,
 }
 
-/// Anti-aliased line renderer with GPU expansion
+/// Anti-aliased line renderer with GPU-based quad expansion.
+///
+/// Uses instanced rendering where each line segment expands to a screen-aligned quad
+/// in the vertex shader, with anti-aliasing computed in the fragment shader.
 pub struct LineRenderer {
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: Option<wgpu::Buffer>,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     vertex_capacity: usize,
-    // H5: Picking resources
+    // Picking resources for object selection
     pick_pipeline: wgpu::RenderPipeline,
     pick_uniform_buffer: wgpu::Buffer,
     pick_bind_group: wgpu::BindGroup,
-    // H4: Weighted OIT pipeline (MRT)
+    // Weighted OIT pipeline (MRT) for transparency
     oit_pipeline: wgpu::RenderPipeline,
 }
 
-/// Line rendering uniforms with H9 caps/joins support
+/// GPU uniform buffer for line rendering parameters.
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct LineUniform {
-    transform: [[f32; 4]; 4], // View-projection matrix
-    stroke_color: [f32; 4],   // RGBA stroke color
-    stroke_width: f32,        // Line width in world units
-    _pad0: f32,               // Align viewport_size to 8-byte boundary (std140/std430)
-    viewport_size: [f32; 2],  // Viewport dimensions for AA
-    miter_limit: f32,         // H9: Miter limit for joins
-    cap_style: u32,           // H9: LineCap as u32
-    join_style: u32,          // H9: LineJoin as u32
-    _pad1: [f32; 5],          // Tail padding to reach 128-byte std140 size
+    /// View-projection transform matrix.
+    transform: [[f32; 4]; 4],
+    /// RGBA stroke color.
+    stroke_color: [f32; 4],
+    /// Line width in world units.
+    stroke_width: f32,
+    /// Padding for std140 alignment.
+    _pad0: f32,
+    /// Viewport dimensions for anti-aliasing calculations.
+    viewport_size: [f32; 2],
+    /// Miter limit for sharp corner clamping.
+    miter_limit: f32,
+    /// Line cap style (see [`LineCap`]).
+    cap_style: u32,
+    /// Line join style (see [`LineJoin`]).
+    join_style: u32,
+    /// Tail padding to reach 128-byte std140 size.
+    _pad1: [f32; 5],
 }
 
-/// Line segment instance data for GPU expansion
+/// Per-segment instance data for GPU line expansion.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct LineInstance {
-    pub start_pos: [f32; 2], // Segment start position
-    pub end_pos: [f32; 2],   // Segment end position
-    pub width: f32,          // Line width in world units
-    pub color: [f32; 4],     // RGBA color
-    pub miter_limit: f32,    // Miter limit for joins
-    pub _pad: [f32; 2],      // Alignment padding
+    /// Segment start position in world space.
+    pub start_pos: [f32; 2],
+    /// Segment end position in world space.
+    pub end_pos: [f32; 2],
+    /// Line width in world units.
+    pub width: f32,
+    /// RGBA stroke color.
+    pub color: [f32; 4],
+    /// Miter limit for sharp corner clamping.
+    pub miter_limit: f32,
+    /// Alignment padding.
+    pub _pad: [f32; 2],
 }
 
 impl LineRenderer {
@@ -689,7 +709,7 @@ mod tests {
 
     #[test]
     fn test_pack_simple_polyline() {
-        let device = crate::gpu::create_device_for_test();
+        let device = crate::core::gpu::create_device_for_test();
         let renderer = LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let polyline = PolylineDef {
@@ -714,7 +734,7 @@ mod tests {
 
     #[test]
     fn test_skip_degenerate_segments() {
-        let device = crate::gpu::create_device_for_test();
+        let device = crate::core::gpu::create_device_for_test();
         let renderer = LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let polyline = PolylineDef {
@@ -753,7 +773,7 @@ mod tests {
 
     #[test]
     fn test_reject_short_polyline() {
-        let device = crate::gpu::create_device_for_test();
+        let device = crate::core::gpu::create_device_for_test();
         let renderer = LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let short_line = PolylineDef {

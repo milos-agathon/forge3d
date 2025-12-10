@@ -2,7 +2,7 @@
 //!
 //! Supports loading Radiance HDR images with RLE compression and RGBe → linear RGB32F conversion.
 
-use crate::error::{RenderError, RenderResult};
+use crate::core::error::{RenderError, RenderResult};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;

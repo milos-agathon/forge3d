@@ -159,7 +159,7 @@ pub fn geometry_instance_mesh_gpu_render_py(
     let indices: Vec<u32> = base.indices.clone();
 
     // GPU context
-    let g = crate::gpu::ctx();
+    let g = crate::core::gpu::ctx();
     let color_format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let depth_format = Some(wgpu::TextureFormat::Depth32Float);
 
@@ -268,7 +268,7 @@ pub fn geometry_instance_mesh_gpu_render_py(
 
     // Readback
     let row_bytes = (width * 4) as u32;
-    let padded_bpr = crate::gpu::align_copy_bpr(row_bytes);
+    let padded_bpr = crate::core::gpu::align_copy_bpr(row_bytes);
     let output_size = (padded_bpr * height) as u64;
     let readback = g.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("instanced_readback"),

@@ -1,7 +1,7 @@
 //! H5: Polygon fill pipeline with winding order and hole support
 //! GPU tessellation with proper sRGB target rendering
 
-use crate::error::RenderError;
+use crate::core::error::RenderError;
 use crate::vector::api::PolygonDef;
 use crate::vector::data::{validate_polygon_vertices, PackedPolygon, PolygonVertex};
 use crate::vector::layer::Layer;
@@ -425,7 +425,7 @@ mod tests {
 
     #[test]
     fn test_tessellate_simple_triangle() {
-        let device = crate::gpu::create_device_for_test();
+        let device = crate::core::gpu::create_device_for_test();
         let renderer = PolygonRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let triangle = PolygonDef {
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_tessellate_polygon_with_hole() {
-        let device = crate::gpu::create_device_for_test();
+        let device = crate::core::gpu::create_device_for_test();
         let renderer = PolygonRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let polygon_with_hole = PolygonDef {
@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn test_reject_degenerate_polygon() {
-        let device = crate::gpu::create_device_for_test();
+        let device = crate::core::gpu::create_device_for_test();
         let renderer = PolygonRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let degenerate = PolygonDef {

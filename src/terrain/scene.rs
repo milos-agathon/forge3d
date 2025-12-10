@@ -4,4 +4,4 @@
 // and other Rust code without pulling in PyO3.
 
 #[cfg(feature = "extension-module")]
-pub use crate::terrain_renderer::TerrainScene;
+pub use super::renderer::TerrainScene;
