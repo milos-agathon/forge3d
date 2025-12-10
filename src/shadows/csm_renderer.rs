@@ -4,7 +4,7 @@
 
 use super::cascade_math::{
     calculate_cascade_splits, calculate_frustum_corners, calculate_light_space_bounds,
-    calculate_unclipped_cascade_splits, snap_bounds_to_texel_grid,
+    snap_bounds_to_texel_grid,
 };
 use super::csm_types::{CascadeStatistics, CsmConfig, CsmUniforms, ShadowCascade};
 use glam::{Mat4, Vec3, Vec4};

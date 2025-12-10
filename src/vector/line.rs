@@ -6,31 +6,20 @@
 use crate::core::error::RenderError;
 use crate::vector::api::PolylineDef;
 use crate::vector::layer::Layer;
-use bytemuck::{Pod, Zeroable};
-use glam::Vec2;
 use wgpu::util::DeviceExt;
 
-/// Line cap styles for polyline endpoints.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LineCap {
-    /// Square cap ending exactly at vertex
-    Butt = 0,
-    /// Rounded cap extending beyond vertex
-    Round = 1,
-    /// Square cap extending beyond vertex
-    Square = 2,
-}
+// Re-export types from line_types module
+pub use super::line_types::{LineCap, LineInstance, LineJoin, LineUniform};
 
-/// Line join styles for polyline vertices.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LineJoin {
-    /// Sharp miter join with limit
-    Miter = 0,
-    /// Beveled join (flat cut)
-    Bevel = 1,
-    /// Rounded join
-    Round = 2,
-}
+// Import pipeline creation helpers
+use super::line_pipeline::{
+    create_oit_pipeline, create_pick_bind_group, create_pick_bind_group_layout,
+    create_pick_pipeline, create_pick_uniform_buffer, create_pipeline_layout,
+    create_render_pipeline, create_uniform_bind_group, create_uniform_bind_group_layout,
+};
+
+// Re-export helper function
+pub use super::line_helpers::calculate_line_joins;
 
 /// Anti-aliased line renderer with GPU-based quad expansion.
 ///
@@ -48,48 +37,6 @@ pub struct LineRenderer {
     pick_bind_group: wgpu::BindGroup,
     // Weighted OIT pipeline (MRT) for transparency
     oit_pipeline: wgpu::RenderPipeline,
-}
-
-/// GPU uniform buffer for line rendering parameters.
-#[repr(C, align(16))]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-struct LineUniform {
-    /// View-projection transform matrix.
-    transform: [[f32; 4]; 4],
-    /// RGBA stroke color.
-    stroke_color: [f32; 4],
-    /// Line width in world units.
-    stroke_width: f32,
-    /// Padding for std140 alignment.
-    _pad0: f32,
-    /// Viewport dimensions for anti-aliasing calculations.
-    viewport_size: [f32; 2],
-    /// Miter limit for sharp corner clamping.
-    miter_limit: f32,
-    /// Line cap style (see [`LineCap`]).
-    cap_style: u32,
-    /// Line join style (see [`LineJoin`]).
-    join_style: u32,
-    /// Tail padding to reach 128-byte std140 size.
-    _pad1: [f32; 5],
-}
-
-/// Per-segment instance data for GPU line expansion.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-pub struct LineInstance {
-    /// Segment start position in world space.
-    pub start_pos: [f32; 2],
-    /// Segment end position in world space.
-    pub end_pos: [f32; 2],
-    /// Line width in world units.
-    pub width: f32,
-    /// RGBA stroke color.
-    pub color: [f32; 4],
-    /// Miter limit for sharp corner clamping.
-    pub miter_limit: f32,
-    /// Alignment padding.
-    pub _pad: [f32; 2],
 }
 
 impl LineRenderer {
@@ -113,328 +60,29 @@ impl LineRenderer {
             mapped_at_creation: false,
         });
 
-        // Create bind group layout
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("vf.Vector.Line.BindGroupLayout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
+        // Create bind group layout and bind group
+        let bind_group_layout = create_uniform_bind_group_layout(device);
+        let bind_group = create_uniform_bind_group(device, &bind_group_layout, &uniform_buffer);
 
-        // Create bind group
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("vf.Vector.Line.BindGroup"),
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
-        });
+        // Create pipeline layout and render pipeline
+        let pipeline_layout = create_pipeline_layout(device, &bind_group_layout);
+        let render_pipeline = create_render_pipeline(device, &shader, &pipeline_layout, target_format);
 
-        // Create pipeline layout
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("vf.Vector.Line.PipelineLayout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        // H5: Picking resources
+        let pick_bind_group_layout = create_pick_bind_group_layout(device);
+        let pick_uniform_buffer = create_pick_uniform_buffer(device);
+        let pick_bind_group = create_pick_bind_group(
+            device,
+            &pick_bind_group_layout,
+            &uniform_buffer,
+            &pick_uniform_buffer,
+        );
+        let pick_pipeline_layout = create_pipeline_layout(device, &pick_bind_group_layout);
+        let pick_pipeline = create_pick_pipeline(device, &shader, &pick_pipeline_layout);
 
-        // Create render pipeline with instanced rendering
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vf.Vector.Line.Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[
-                    // Per-instance line segment data
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<LineInstance>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &[
-                            // start_pos
-                            wgpu::VertexAttribute {
-                                offset: 0,
-                                shader_location: 0,
-                                format: wgpu::VertexFormat::Float32x2,
-                            },
-                            // end_pos
-                            wgpu::VertexAttribute {
-                                offset: 8,
-                                shader_location: 1,
-                                format: wgpu::VertexFormat::Float32x2,
-                            },
-                            // width
-                            wgpu::VertexAttribute {
-                                offset: 16,
-                                shader_location: 2,
-                                format: wgpu::VertexFormat::Float32,
-                            },
-                            // color
-                            wgpu::VertexAttribute {
-                                offset: 20,
-                                shader_location: 3,
-                                format: wgpu::VertexFormat::Float32x4,
-                            },
-                            // miter_limit (+ padding)
-                            wgpu::VertexAttribute {
-                                offset: 36,
-                                shader_location: 4,
-                                format: wgpu::VertexFormat::Float32,
-                            },
-                        ],
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
-
-        // H5: Picking bind group layout (binding 0 uniform, binding 3 pick uniform)
-        let pick_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("vf.Vector.Line.PickBindGroupLayout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        // H5: Picking uniform buffer (u32 + padding)
-        let pick_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Line.PickUniform"),
-            size: 16,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // H5: Picking bind group
-        let pick_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("vf.Vector.Line.PickBindGroup"),
-            layout: &pick_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: pick_uniform_buffer.as_entire_binding(),
-                },
-            ],
-        });
-
-        // H5: Picking pipeline
-        let pick_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("vf.Vector.Line.PickPipelineLayout"),
-            bind_group_layouts: &[&pick_bind_group_layout],
-            push_constant_ranges: &[],
-        });
-        let pick_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vf.Vector.Line.PickPipeline"),
-            layout: Some(&pick_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<LineInstance>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            offset: 0,
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 8,
-                            shader_location: 1,
-                            format: wgpu::VertexFormat::Float32x2,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 16,
-                            shader_location: 2,
-                            format: wgpu::VertexFormat::Float32,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 20,
-                            shader_location: 3,
-                            format: wgpu::VertexFormat::Float32x4,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 36,
-                            shader_location: 4,
-                            format: wgpu::VertexFormat::Float32,
-                        },
-                    ],
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_pick",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::R32Uint,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
-
-        // H4: OIT pipeline with MRT (Rgba16Float + R16Float)
-        let oit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("vf.Vector.Line.OITPipelineLayout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
-        let oit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vf.Vector.Line.OITPipeline"),
-            layout: Some(&oit_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<LineInstance>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            offset: 0,
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 8,
-                            shader_location: 1,
-                            format: wgpu::VertexFormat::Float32x2,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 16,
-                            shader_location: 2,
-                            format: wgpu::VertexFormat::Float32,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 20,
-                            shader_location: 3,
-                            format: wgpu::VertexFormat::Float32x4,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 36,
-                            shader_location: 4,
-                            format: wgpu::VertexFormat::Float32,
-                        },
-                    ],
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_oit",
-                targets: &[
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba16Float,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::One,
-                                dst_factor: wgpu::BlendFactor::One,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                            alpha: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::One,
-                                dst_factor: wgpu::BlendFactor::One,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                        }),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::R16Float,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::Zero,
-                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                            alpha: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::Zero,
-                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                        }),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                ],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Always,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
+        // H4: OIT pipeline
+        let oit_pipeline_layout = create_pipeline_layout(device, &bind_group_layout);
+        let oit_pipeline = create_oit_pipeline(device, &shader, &oit_pipeline_layout);
 
         Ok(Self {
             render_pipeline,
@@ -660,132 +308,3 @@ impl LineRenderer {
     }
 }
 
-/// Calculate line join points for smooth connections
-pub fn calculate_line_joins(path: &[Vec2], width: f32) -> Vec<Vec2> {
-    if path.len() < 2 {
-        return Vec::new();
-    }
-
-    let mut joins = Vec::with_capacity(path.len());
-    let half_width = width * 0.5;
-
-    for i in 0..path.len() {
-        if i == 0 || i == path.len() - 1 {
-            // Endpoints don't need join calculation
-            joins.push(path[i]);
-            continue;
-        }
-
-        let prev = path[i - 1];
-        let curr = path[i];
-        let next = path[i + 1];
-
-        // Calculate join normal
-        let seg1 = (curr - prev).normalize_or_zero();
-        let seg2 = (next - curr).normalize_or_zero();
-        let join_normal = (seg1 + seg2).normalize_or_zero();
-
-        // Calculate miter offset
-        let miter_dot = seg1.dot(join_normal);
-        let miter_length = if miter_dot.abs() > 0.01 {
-            half_width / miter_dot
-        } else {
-            half_width
-        };
-
-        // Apply miter limit
-        let limited_length = miter_length.min(half_width * 4.0);
-        joins.push(curr + join_normal.perp() * limited_length);
-    }
-
-    joins
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::vector::api::VectorStyle;
-    use glam::Vec2;
-
-    #[test]
-    fn test_pack_simple_polyline() {
-        let device = crate::core::gpu::create_device_for_test();
-        let renderer = LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
-
-        let polyline = PolylineDef {
-            path: vec![
-                Vec2::new(0.0, 0.0),
-                Vec2::new(1.0, 1.0),
-                Vec2::new(2.0, 0.0),
-            ],
-            style: VectorStyle {
-                stroke_width: 2.0,
-                stroke_color: [1.0, 0.0, 0.0, 1.0],
-                ..Default::default()
-            },
-        };
-
-        let instances = renderer.pack_polylines(&[polyline]).unwrap();
-
-        assert_eq!(instances.len(), 2); // 3 points = 2 segments
-        assert_eq!(instances[0].width, 2.0);
-        assert_eq!(instances[0].color, [1.0, 0.0, 0.0, 1.0]);
-    }
-
-    #[test]
-    fn test_skip_degenerate_segments() {
-        let device = crate::core::gpu::create_device_for_test();
-        let renderer = LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
-
-        let polyline = PolylineDef {
-            path: vec![
-                Vec2::new(0.0, 0.0),
-                Vec2::new(0.0, 0.0), // Duplicate point
-                Vec2::new(1.0, 1.0),
-            ],
-            style: VectorStyle::default(),
-        };
-
-        let instances = renderer.pack_polylines(&[polyline]).unwrap();
-
-        // Should skip the degenerate segment
-        assert_eq!(instances.len(), 1);
-    }
-
-    #[test]
-    fn test_line_joins() {
-        let path = vec![
-            Vec2::new(0.0, 0.0),
-            Vec2::new(1.0, 0.0),
-            Vec2::new(1.0, 1.0),
-        ];
-
-        let joins = calculate_line_joins(&path, 1.0);
-        assert_eq!(joins.len(), 3);
-
-        // First and last points should remain unchanged
-        assert_eq!(joins[0], path[0]);
-        assert_eq!(joins[2], path[2]);
-
-        // Middle point should be offset for smooth join
-        assert_ne!(joins[1], path[1]);
-    }
-
-    #[test]
-    fn test_reject_short_polyline() {
-        let device = crate::core::gpu::create_device_for_test();
-        let renderer = LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
-
-        let short_line = PolylineDef {
-            path: vec![Vec2::new(0.0, 0.0)], // Only 1 point
-            style: VectorStyle::default(),
-        };
-
-        let result = renderer.pack_polylines(&[short_line]);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("at least 2 points"));
-    }
-}

@@ -3,16 +3,22 @@
 // Exists to centralize GPU/CPU shadow utilities shared across bindings and pipelines
 // RELEVANT FILES: shaders/shadows.wgsl, python/forge3d/lighting.py, tests/test_b4_csm.py
 
-pub mod csm;
+mod cascade_math;
+mod csm_depth_control;
+mod csm_renderer;
+mod csm_types;
+
 pub mod manager;
 pub mod moment_pass;
 pub mod state;
 
-pub use csm::{
-    detect_peter_panning, CascadeStatistics, CsmConfig, CsmRenderer, CsmUniforms, ShadowCascade,
-};
+// Re-export CSM types from split modules
+pub use cascade_math::detect_peter_panning;
+pub use csm_renderer::CsmRenderer;
+pub use csm_types::{CascadeStatistics, CsmConfig, CsmUniforms, ShadowCascade};
+
 pub use manager::{ShadowManager, ShadowManagerConfig};
 pub use moment_pass::{create_moment_storage_view, MomentGenerationPass};
 
 // Re-export common shadow types and utilities
-pub use csm::CsmRenderer as CascadedShadowMaps;
+pub use csm_renderer::CsmRenderer as CascadedShadowMaps;
