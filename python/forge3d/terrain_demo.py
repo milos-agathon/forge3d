@@ -16,6 +16,7 @@ from .terrain_params import (
     ShadowSettings as TerrainShadowSettings,
     FogSettings as TerrainFogSettings,
     ReflectionSettings as TerrainReflectionSettings,
+    TriplanarSettings,
     load_height_curve_lut,
     make_terrain_params_config,
 )
@@ -289,6 +290,7 @@ def _build_params(
     shadow_config=None,  # Optional ShadowParams from CLI
     fog_config=None,  # P2: Optional FogSettings from CLI
     reflection_config=None,  # P4: Optional ReflectionSettings from CLI
+    triplanar_config=None,  # P5-N: Optional TriplanarSettings for normal_strength
 ):
     overlays = [
         f3d.OverlayLayer.from_colormap1d(
@@ -343,6 +345,7 @@ def _build_params(
         overlays=overlays,
         fog=fog_config,  # P2: Pass fog config (None = disabled)
         reflection=reflection_config,  # P4: Pass reflection config (None = disabled)
+        triplanar=triplanar_config,  # P5-N: Pass triplanar config for normal_strength
     )
 
     if pom_enabled is not None:
@@ -557,9 +560,16 @@ def run(args: Any) -> int:
         custom_size=int(getattr(args, "colormap_size", 256)),
     )
 
+    # P5-N: Get normal_strength from CLI (default 1.0, range 0.25-4.0)
+    normal_strength = float(getattr(args, "normal_strength", 1.0))
+    triplanar_config = TriplanarSettings(
+        scale=6.0,
+        blend_sharpness=4.0,
+        normal_strength=normal_strength,
+    )
     materials = f3d.MaterialSet.terrain_default(
         triplanar_scale=6.0,
-        normal_strength=1.0,
+        normal_strength=1.0,  # MaterialSet normal_strength is for PBR textures, not terrain normals
         blend_sharpness=4.0,
     )
 
@@ -666,6 +676,7 @@ def run(args: Any) -> int:
         shadow_config=renderer_config.shadows,  # Pass CLI shadow config
         fog_config=fog_config,  # P2: Pass fog config
         reflection_config=reflection_config,  # P4: Pass reflection config
+        triplanar_config=triplanar_config,  # P5-N: Pass triplanar config for normal_strength
     )
 
     renderer = f3d.TerrainRenderer(sess)

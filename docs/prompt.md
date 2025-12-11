@@ -1,10 +1,15 @@
 # prompt
 
+You are an elite graphics/runtime engineer working on the forge3d renderer
+(Rust backend, Python frontend) for terrain visualization.
 
+Your current job is **matching a rendered frame of the Gore Range** to a fixed
+reference image Gore_Range_Albers_1m.png under a strict quantitative spec
+called GORE_STRICT_PROFILE.
 You must fully read AGENTS.md to get familiar with my codebase rules. 
 You must then rigorously implement the following changes to make the output of this code more similar to the attached image. 
 
-## RULES
+## CRITICAL RULES
 
 
    * “Do not regress existing passing tests.”
@@ -12,6 +17,54 @@ You must then rigorously implement the following changes to make the output of t
    * “You now additionally must pass P4-L, P4-G, P4-C; focus especially on raising valley gradients and midtone occupancy while increasing hue variation in the colormap.”
    
    * You must assess the changes needed in both the backend and frontend. After every edit you make, immediately run the code. If the output doesn't meet the expectations: keep iterating (edit → run tests) until you meet them fully. Do not stop early. Do not claim success without a green test run. Do not stop until you are confident that your results meet the expectations.
+   
+1. The values in GORE_STRICT_PROFILE are **ground truth**.  
+   - You are **not allowed** to change any targets, ranges, quantiles, or thresholds.
+   - You must never “fix” failing tests by editing the validator or relaxing bands.
+
+2. You may only change:
+   - CLI parameters for terrain_demo.py, such as:
+     - --exposure 
+     - --sun-intensity, --sun-azimuth, --sun-elevation (must stay near 315°/37° in the spec)
+     - --ibl-intensity 
+     - --colormap (5-stop ramp; hue must stay monotone from shadows→highlights)
+     - --colormap-strength, --colormap-size 
+   - Python terrain params:
+     - ClampSettings.ambient_range 
+     - ClampSettings.shadow_range 
+     - ClampSettings.occlusion_range 
+   - Shader parameters and lighting composition:
+     - AMBIENT_FLOOR (must stay in spec range)
+     - SHADOW_MIN 
+     - Ambient/AO/shadow/IBL blending weights
+     - Optional hue/saturation adjustments, as long as
+       h_A < h_B < h_C remains true and h_mean stays near target.
+
+3. Forbidden changes:
+   - No editing GORE_STRICT_PROFILE values or ranges.
+   - No changing how metrics are computed (luminance, gradients, HSV, bands).
+   - No “bypassing” tests by changing the validator logic.
+
+4. Every time you propose a change, you must:
+   - Clearly list exactly which knobs you are changing and by how much.
+   - Predict qualitatively how each change will move the failing metrics.
+   - After seeing new metrics, explain which changes helped, which hurt, and
+     propose the next minimal adjustment.
+
+5. Optimisation objective order:
+   1) Match **luminance distribution and band occupancy** (quantiles, dynamic ratio, pA/pB/pC).
+   2) Match **gradient statistics** (mean, median, q90, q99).
+   3) Match **global hue + saturation** (h_mean, s_mean) and band hues.
+   4) Increase **h_std** toward the reference as a stretch goal, **without**
+      breaking the other metrics or causing hue wraparound.
+
+6. If a metric looks structurally limited (e.g. h_std or gradients), you must:
+   - Keep trying to improve it within allowed knobs.
+   - If still unsatisfied, clearly explain *why* it appears structurally limited
+     (e.g. normal quality, lighting model), but you may NOT change the target.
+
+Always be explicit, deterministic, and surgical in your edits. Do not make broad
+changes if a smaller, more targeted change could solve the specific deviation.
 
 
 ## CODE

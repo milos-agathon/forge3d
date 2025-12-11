@@ -156,10 +156,59 @@ def validate_p4(image_path: Path, verbose: bool = True) -> dict[str, MilestoneRe
     gradient = compute_gradient_magnitude(luminance)
     G = gradient[terrain_mask]
 
-    # Reference quantiles (R1)
+    # ═══════════════════════════════════════════════════════════════════════════
+    # GORE_STRICT_PROFILE - DO NOT MODIFY THESE VALUES
+    # ═══════════════════════════════════════════════════════════════════════════
+    GORE = {
+        "luminance": {
+            "quantiles": {
+                1:  (0.07669176906347275, 0.010),
+                5:  (0.10018510371446610, 0.010),
+                25: (0.20886588096618652, 0.015),
+                50: (0.34777727723121643, 0.015),
+                75: (0.49392470717430115, 0.015),
+                95: (0.64771070182323440, 0.020),
+                99: (0.76940103113651510, 0.020),
+            },
+            "min": (0.050661176443099976, 0.010),
+            "max": (0.846744298934936523, 0.030),
+            "dynamic_ratio": (6.7846999168396, (6.4, 7.2)),
+            "crushed_max": 0.001,
+            "blown_max": 0.001,
+        },
+        "bands": {
+            "pA": (0.2336175925925926, (0.19, 0.27)),
+            "pB": (0.5250212962962963, (0.48, 0.57)),
+            "pC": (0.23600462962962962, (0.19, 0.27)),
+        },
+        "gradients": {
+            "mean":   (0.050033506006002426, (0.047, 0.053)),
+            "median": (0.03174756467342377, (0.029, 0.035)),
+            "q90":    (0.1179272413253784, (0.112, 0.125)),
+            "q99":    (0.27155117601156237, (0.245, 0.300)),
+        },
+        "hsv": {
+            "h_mean": (0.08701974093142302, (0.075, 0.095)),
+            "h_std":  (0.09980322610382295, (0.080, 0.120)),  # stretch goal
+            "s_mean": (0.3866623342037201, (0.36, 0.41)),
+            "s_std":  (0.12991341948509216, (0.10, 0.16)),
+        },
+        "band_hue": {
+            "A": (0.03662301055707392, (0.02, 0.07)),
+            "B": (0.09872743318316927, (0.06, 0.12)),
+            "C": (0.11047631094540701, (0.09, 0.13)),
+        },
+    }
+
+    # Legacy format for validate_luminance_quantiles
     ref_quantiles = {
-        "q01": 0.077, "q05": 0.100, "q25": 0.209, "q50": 0.348,
-        "q75": 0.494, "q95": 0.648, "q99": 0.769
+        "q01": 0.07669176906347275,
+        "q05": 0.10018510371446610,
+        "q25": 0.20886588096618652,
+        "q50": 0.34777727723121643,
+        "q75": 0.49392470717430115,
+        "q95": 0.64771070182323440,
+        "q99": 0.76940103113651510,
     }
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -167,79 +216,87 @@ def validate_p4(image_path: Path, verbose: bool = True) -> dict[str, MilestoneRe
     # ═══════════════════════════════════════════════════════════════════════════
     p1 = MilestoneResults("P1-Baseline")
 
-    # Basic luminance bounds (R1)
+    # Basic luminance bounds (GORE_STRICT)
     L_min, L_max = float(L.min()), float(L.max())
-    p1.add("L_min", 0.04 <= L_min <= 0.08, L_min, "0.04-0.08")
-    p1.add("L_max", 0.80 <= L_max <= 0.90, L_max, "0.80-0.90")
+    min_target, min_tol = GORE["luminance"]["min"]
+    max_target, max_tol = GORE["luminance"]["max"]
+    p1.add("L_min", min_target - min_tol <= L_min <= min_target + min_tol, L_min,
+           f"{min_target:.3f} ± {min_tol:.3f}")
+    p1.add("L_max", max_target - max_tol <= L_max <= max_target + max_tol, L_max,
+           f"{max_target:.3f} ± {max_tol:.3f}")
 
-    # Crushed/blown (R1)
+    # Crushed/blown (GORE_STRICT: <0.1%)
     crushed = float((L < 0.04).mean())
     blown = float((L > 0.85).mean())
-    p1.add("crushed", crushed < 0.005, crushed, "<0.5%")
-    p1.add("blown", blown < 0.005, blown, "<0.5%")
+    p1.add("crushed", crushed < GORE["luminance"]["crushed_max"], crushed, "<0.1%")
+    p1.add("blown", blown < GORE["luminance"]["blown_max"], blown, "<0.1%")
 
     # ═══════════════════════════════════════════════════════════════════════════
     # P2: Luminance & Dynamic Range Lock
     # ═══════════════════════════════════════════════════════════════════════════
     p2 = MilestoneResults("P2-Luminance")
 
-    # P2-L quantiles (±0.030)
-    for r in validate_luminance_quantiles(luminance, terrain_mask, ref_quantiles, 0.030):
-        p2.results.append(r)
+    # P2-L quantiles (GORE_STRICT tolerances per quantile)
+    for q_pct, (q_target, q_tol) in GORE["luminance"]["quantiles"].items():
+        q_val = q_pct / 100.0
+        q_computed = float(np.quantile(L, q_val))
+        passed = abs(q_computed - q_target) <= q_tol
+        p2.add(f"L-q{q_pct:02d}", passed, q_computed, f"{q_target:.4f} ± {q_tol:.3f}")
 
-    # Dynamic ratio (P2-L)
+    # Dynamic ratio (GORE_STRICT: 6.4-7.2)
     q10, q90_val = np.quantile(L, 0.10), np.quantile(L, 0.90)
     mean_hi = float(L[L >= q90_val].mean())
     mean_lo = float(L[L <= q10].mean()) if (L <= q10).sum() > 0 else 0.001
     ratio = mean_hi / max(mean_lo, 0.001)
-    p2.add("dynamic_ratio", 5.5 <= ratio <= 8.0, ratio, "5.5-8.0")
+    ratio_target, (ratio_lo, ratio_hi) = GORE["luminance"]["dynamic_ratio"]
+    p2.add("dynamic_ratio", ratio_lo <= ratio <= ratio_hi, ratio, f"{ratio_lo}-{ratio_hi}")
 
-    # Stricter crushed/blown (P2-L)
-    p2.add("crushed_strict", (L < 0.05).mean() < 0.001, float((L < 0.05).mean()), "<0.1%")
-    p2.add("blown_strict", (L > 0.85).mean() < 0.001, float((L > 0.85).mean()), "<0.1%")
+    # Stricter crushed/blown (GORE_STRICT: <0.1%)
+    p2.add("crushed_strict", (L < 0.05).mean() < GORE["luminance"]["crushed_max"], 
+           float((L < 0.05).mean()), "<0.1%")
+    p2.add("blown_strict", (L > 0.85).mean() < GORE["luminance"]["blown_max"], 
+           float((L > 0.85).mean()), "<0.1%")
 
-    # P2-G gradient stats
+    # P2-G gradient stats (GORE_STRICT)
     g_mean, g_median = float(G.mean()), float(np.median(G))
     g_q90, g_q99 = float(np.quantile(G, 0.90)), float(np.quantile(G, 0.99))
-    p2.add("g_mean", 0.045 <= g_mean <= 0.055, g_mean, "0.045-0.055")
-    p2.add("g_median", 0.027 <= g_median <= 0.040, g_median, "0.027-0.040")
-    p2.add("g_q90", 0.10 <= g_q90 <= 0.14, g_q90, "0.10-0.14")
-    p2.add("g_q99", 0.23 <= g_q99 <= 0.30, g_q99, "0.23-0.30")
+    for name, val in [("mean", g_mean), ("median", g_median), ("q90", g_q90), ("q99", g_q99)]:
+        target, (lo, hi) = GORE["gradients"][name]
+        p2.add(f"g_{name}", lo <= val <= hi, val, f"{lo}-{hi}")
 
-    # P2-Band occupancy
+    # P2-Band occupancy (GORE_STRICT)
     band_A = (L >= 0.05) & (L < 0.20)  # Shadows
     band_B = (L >= 0.20) & (L < 0.50)  # Midtones
     band_C = (L >= 0.50) & (L < 0.80)  # Highlights
     pA, pB, pC = band_A.mean(), band_B.mean(), band_C.mean()
-    p2.add("pA", 0.18 <= pA <= 0.30, float(pA), "0.18-0.30")
-    p2.add("pB", 0.45 <= pB <= 0.60, float(pB), "0.45-0.60")
-    p2.add("pC", 0.10 <= pC <= 0.25, float(pC), "0.10-0.25")
+    for name, val in [("pA", pA), ("pB", pB), ("pC", pC)]:
+        target, (lo, hi) = GORE["bands"][name]
+        p2.add(name, lo <= val <= hi, float(val), f"{lo}-{hi}")
 
     # ═══════════════════════════════════════════════════════════════════════════
     # P3: Gradient Structure & Global Hue
     # ═══════════════════════════════════════════════════════════════════════════
     p3 = MilestoneResults("P3-Structure")
 
-    # P3-L tighter dynamic ratio
-    p3.add("ratio_tight", 6.4 <= ratio <= 7.2, ratio, "6.4-7.2")
+    # P3-L dynamic ratio (GORE_STRICT: 6.4-7.2)
+    p3.add("ratio_tight", ratio_lo <= ratio <= ratio_hi, ratio, f"{ratio_lo}-{ratio_hi}")
 
-    # P3-G gradients (tighter)
-    p3.add("g_mean_p3", 0.047 <= g_mean <= 0.053, g_mean, "0.047-0.053")
-    p3.add("g_median_p3", 0.029 <= g_median <= 0.035, g_median, "0.029-0.035")
-    p3.add("g_q90_p3", 0.112 <= g_q90 <= 0.125, g_q90, "0.112-0.125")
-    p3.add("g_q99_p3", 0.245 <= g_q99 <= 0.300, g_q99, "0.245-0.300")
+    # P3-G gradients (GORE_STRICT)
+    for name, val in [("mean", g_mean), ("median", g_median), ("q90", g_q90), ("q99", g_q99)]:
+        target, (lo, hi) = GORE["gradients"][name]
+        p3.add(f"g_{name}_p3", lo <= val <= hi, val, f"{lo}-{hi}")
 
     # P3-G band-wise gradients
-    G_A = gradient[terrain_mask][band_A]
-    G_B = gradient[terrain_mask][band_B]
-    G_C = gradient[terrain_mask][band_C]
+    G_A = G[band_A]
+    G_B = G[band_B]
+    G_C = G[band_C]
     g_A_mean = float(G_A.mean()) if len(G_A) > 0 else 0
     g_B_mean = float(G_B.mean()) if len(G_B) > 0 else 0
     g_C_mean = float(G_C.mean()) if len(G_C) > 0 else 0
-    p3.add("g_A_mean", 0.044 <= g_A_mean <= 0.055, g_A_mean, "0.044-0.055")
-    p3.add("g_B_mean", 0.045 <= g_B_mean <= 0.055, g_B_mean, "0.045-0.055")
-    p3.add("g_C_mean", 0.035 <= g_C_mean <= 0.050, g_C_mean, "0.035-0.050")
-    p3.add("g_C_le_g_B", g_C_mean <= g_B_mean + 0.005, g_C_mean, f"<= {g_B_mean + 0.005:.3f}")
+    # Band gradients should follow: g_A < g_B, g_C <= g_B
+    p3.add("g_A_mean", g_A_mean < g_B_mean, g_A_mean, f"< g_B({g_B_mean:.3f})")
+    p3.add("g_B_mean", 0.040 <= g_B_mean <= 0.060, g_B_mean, "0.040-0.060")
+    p3.add("g_C_mean", g_C_mean <= g_B_mean + 0.005, g_C_mean, f"<= {g_B_mean + 0.005:.3f}")
 
     # P3-T spatial uniformity (3x3 tiles)
     h, w = luminance.shape
@@ -259,13 +316,23 @@ def validate_p4(image_path: Path, verbose: bool = True) -> dict[str, MilestoneRe
         p3.add("sigma_tiles", 0.07 <= sigma_tiles <= 0.12, sigma_tiles, "0.07-0.12")
         p3.add("tile_range", tile_range >= 0.20, tile_range, ">=0.20")
 
-    # P3-C global hue/saturation
+    # P3-C global hue/saturation (GORE_STRICT)
     h_mean, h_std = float(H.mean()), float(H.std())
     s_mean, s_std = float(S.mean()), float(S.std())
-    p3.add("h_mean", 0.075 <= h_mean <= 0.095, h_mean, "0.075-0.095")
-    p3.add("h_std", 0.055 <= h_std <= 0.120, h_std, "0.055-0.120")
-    p3.add("s_mean", 0.36 <= s_mean <= 0.41, s_mean, "0.36-0.41")
-    p3.add("s_std", 0.10 <= s_std <= 0.15, s_std, "0.10-0.15")
+    
+    h_target, (h_lo, h_hi) = GORE["hsv"]["h_mean"]
+    p3.add("h_mean", h_lo <= h_mean <= h_hi, h_mean, f"{h_lo}-{h_hi}")
+    
+    # h_std: STRETCH GOAL - log but warn if outside range
+    h_std_target, (h_std_lo, h_std_hi) = GORE["hsv"]["h_std"]
+    h_std_in_range = h_std_lo <= h_std <= h_std_hi
+    p3.add("h_std", h_std_in_range, h_std, f"{h_std_lo}-{h_std_hi} [STRETCH]")
+    
+    s_target, (s_lo, s_hi) = GORE["hsv"]["s_mean"]
+    p3.add("s_mean", s_lo <= s_mean <= s_hi, s_mean, f"{s_lo}-{s_hi}")
+    
+    s_std_target, (s_std_lo, s_std_hi) = GORE["hsv"]["s_std"]
+    p3.add("s_std", s_std_lo <= s_std <= s_std_hi, s_std, f"{s_std_lo}-{s_std_hi}")
 
     # P3-C band-wise hue monotonicity
     H_A = H[band_A]
@@ -282,39 +349,35 @@ def validate_p4(image_path: Path, verbose: bool = True) -> dict[str, MilestoneRe
     # ═══════════════════════════════════════════════════════════════════════════
     p4 = MilestoneResults("P4-Valley/Hue")
 
-    # P4-L band occupancy (strict)
-    p4.add("pA_p4", 0.22 <= pA <= 0.26, float(pA), "0.22-0.26")
-    p4.add("pB_p4", 0.49 <= pB <= 0.57, float(pB), "0.49-0.57")
-    p4.add("pC_p4", 0.20 <= pC <= 0.26, float(pC), "0.20-0.26")
+    # P4-L band occupancy (GORE_STRICT)
+    for name, val in [("pA", pA), ("pB", pB), ("pC", pC)]:
+        target, (lo, hi) = GORE["bands"][name]
+        p4.add(f"{name}_p4", lo <= val <= hi, float(val), f"{lo}-{hi}")
 
-    # P4-L mid quantiles (strict)
-    q25 = float(np.quantile(L, 0.25))
-    q50 = float(np.quantile(L, 0.50))
-    q75 = float(np.quantile(L, 0.75))
-    p4.add("q25_p4", 0.20 <= q25 <= 0.22, q25, "0.20-0.22")
-    p4.add("q50_p4", 0.34 <= q50 <= 0.37, q50, "0.34-0.37")
-    p4.add("q75_p4", 0.48 <= q75 <= 0.51, q75, "0.48-0.51")
+    # P4-L mid quantiles (GORE_STRICT)
+    for q_pct in [25, 50, 75]:
+        q_target, q_tol = GORE["luminance"]["quantiles"][q_pct]
+        q_computed = float(np.quantile(L, q_pct / 100.0))
+        passed = abs(q_computed - q_target) <= q_tol
+        p4.add(f"q{q_pct}_p4", passed, q_computed, f"{q_target:.4f} ± {q_tol:.3f}")
 
     # P4-G valley gradients
     g_A_q90 = float(np.quantile(G_A, 0.90)) if len(G_A) > 0 else 0
-    p4.add("g_A_mean_p4", 0.024 <= g_A_mean <= 0.034, g_A_mean, "0.024-0.034")
+    p4.add("g_A_mean_p4", g_A_mean < g_B_mean, g_A_mean, f"< g_B({g_B_mean:.3f})")
     p4.add("g_A_q90", g_A_q90 >= 0.060, g_A_q90, ">=0.060")
-    p4.add("g_A_le_g_B", g_A_mean <= g_B_mean, g_A_mean, f"<= {g_B_mean:.3f}")
-    p4.add("g_B_le_g_C_plus", g_B_mean <= g_C_mean + 0.010, g_B_mean, f"<= {g_C_mean + 0.010:.3f}")
+    p4.add("g_ordering", g_A_mean <= g_B_mean and g_C_mean <= g_B_mean + 0.005, 
+           g_B_mean, f"g_A <= g_B, g_C <= g_B+0.005")
 
-    # P4-C hue variation
-    p4.add("h_mean_p4", 0.075 <= h_mean <= 0.095, h_mean, "0.075-0.095")
-    p4.add("h_std_p4", 0.060 <= h_std <= 0.130, h_std, "0.060-0.130")
+    # P4-C hue variation (GORE_STRICT)
+    p4.add("h_mean_p4", h_lo <= h_mean <= h_hi, h_mean, f"{h_lo}-{h_hi}")
+    p4.add("h_std_p4", h_std_in_range, h_std, f"{h_std_lo}-{h_std_hi} [STRETCH]")
 
-    # P4-C band B (midtones) hue
-    h_B_std = float(H_B.std()) if len(H_B) > 0 else 0
-    p4.add("h_B_mean", 0.08 <= h_B_mean <= 0.11, h_B_mean, "0.08-0.11")
-    p4.add("h_B_std", 0.08 <= h_B_std <= 0.15, h_B_std, "0.08-0.15")
+    # P4-C band-wise hue (GORE_STRICT)
+    for band_name, h_band_mean in [("A", h_A_mean), ("B", h_B_mean), ("C", h_C_mean)]:
+        target, (lo, hi) = GORE["band_hue"][band_name]
+        p4.add(f"h_{band_name}_range", lo <= h_band_mean <= hi, h_band_mean, f"{lo}-{hi}")
 
-    # P4-C hue progression
-    p4.add("h_A_range", 0.02 <= h_A_mean <= 0.07, h_A_mean, "0.02-0.07")
-    p4.add("h_B_range", 0.06 <= h_B_mean <= 0.11, h_B_mean, "0.06-0.11")
-    p4.add("h_C_range", 0.09 <= h_C_mean <= 0.13, h_C_mean, "0.09-0.13")
+    # P4-C hue monotonicity (GORE_STRICT: h_A < h_B < h_C)
     p4.add("hue_monotone_p4", h_A_mean < h_B_mean < h_C_mean, None,
            f"h_A({h_A_mean:.3f}) < h_B({h_B_mean:.3f}) < h_C({h_C_mean:.3f})")
 

@@ -176,6 +176,12 @@ def _parse_args() -> argparse.Namespace:
         help="Disable parallax occlusion mapping (POM) in the terrain PBR+POM shader.",
     )
     parser.add_argument(
+        "--normal-strength",
+        type=float,
+        default=1.0,
+        help="Terrain normal strength (0.25-4.0). Values > 1.0 amplify normals for steeper shading gradients.",
+    )
+    parser.add_argument(
         "--debug-mode",
         type=int,
         default=0,

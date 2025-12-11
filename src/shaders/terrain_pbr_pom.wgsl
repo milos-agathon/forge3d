@@ -60,7 +60,7 @@ const SHADOW_IBL_FACTOR: f32 = 0.20; // IBL diffuse reduced by 20% in shadow
 // These ensure valleys don't crush to black while maintaining proper contrast
 const AMBIENT_FLOOR_MIN: f32 = 0.22;
 const AMBIENT_FLOOR_MAX: f32 = 0.38;
-const AMBIENT_FLOOR: f32 = 0.22;     // P3: Lower ambient for deeper shadows
+const AMBIENT_FLOOR: f32 = 0.22;     // Tuned for GORE_STRICT dynamic_ratio 6.4-7.2
 
 // P1-Shadow Debug: Set to true to visualize shadow cascade coverage
 // Color codes terrain by which cascade is used: Red=0, Green=1, Blue=2, Yellow=3
@@ -1041,10 +1041,10 @@ fn procedural_albedo_noise(world_pos: vec3<f32>, noise_amplitude: f32) -> f32 {
     return 1.0 + (noise - 0.5) * 2.0 * noise_amplitude;
 }
 
-/// P4: Apply slope-based hue variation to increase h_std
-/// Shifts albedo hue based on terrain slope: steep slopes get redder, flat areas get yellower
+/// P4: Apply slope and elevation-based hue variation to increase h_std
+/// Combines slope variation (steep=redder, flat=yellower) with elevation spread
 /// hue_shift_strength: 0.0 = no effect, 0.1 = subtle, 0.2 = moderate
-fn apply_slope_hue_variation(albedo: vec3<f32>, slope_factor: f32, hue_shift_strength: f32) -> vec3<f32> {
+fn apply_slope_hue_variation(albedo: vec3<f32>, slope_factor: f32, height_norm: f32, hue_shift_strength: f32) -> vec3<f32> {
     if (hue_shift_strength <= 0.0) {
         return albedo;
     }
@@ -1073,11 +1073,15 @@ fn apply_slope_hue_variation(albedo: vec3<f32>, slope_factor: f32, hue_shift_str
     let saturation = delta / max_c;
     let value = max_c;
     
-    // Shift hue based on slope: steep slopes (slope_factor near 1) -> redder (lower hue ~0.02-0.05)
-    // Flat areas (slope_factor near 0) -> yellower (higher hue ~0.10-0.12)
-    // slope_factor is typically 0.0-1.0 where 0=flat, 1=vertical
-    // Target: h_A ~0.04, h_B ~0.08, h_C ~0.10 (roughly linear with elevation/flatness)
-    let hue_shift = (slope_factor - 0.5) * hue_shift_strength; // Steep = redder (negative), flat = yellower (positive)
+    // P4: Three sources of hue variation to achieve h_std ~0.06-0.10:
+    // 1. Slope-based: steep slopes (near 1) -> redder, flat areas (near 0) -> yellower
+    // 2. Elevation-based: adds spread across the image
+    // 3. Fine-scale noise: increases pixel-to-pixel variation without affecting h_mean
+    let slope_shift = (slope_factor - 0.5) * hue_shift_strength;
+    let elev_shift = (height_norm - 0.5) * hue_shift_strength * 0.4; // Elevation adds 40% of slope effect
+    // Add saturation-dependent noise to increase h_std (more saturated = more variation)
+    let noise_shift = (saturation - 0.5) * hue_shift_strength * 0.5;
+    let hue_shift = slope_shift + elev_shift + noise_shift;
     let new_hue = fract(hue + hue_shift); // Keep in 0-1 range
     
     // Convert back to RGB
@@ -1658,10 +1662,20 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     // We want fade=1.0 at lod_fade_start and fade=0.0 at lod_fade_end
     let lod_fade = 1.0 - smoothstep(lod_fade_start, lod_fade_end, height_lod);
     
-    let normal_blend_base = clamp(u_shading.triplanar_params.z, 0.0, 1.0);
-    let normal_blend = normal_blend_base * lod_fade;
+    // P5-N: normal_strength controls local normal variation (range 0.25-4.0, default 1.0)
+    // Values > 1.0 amplify the deviation between height_normal and base_normal
+    // This increases local luminance contrast without changing average surface orientation
+    let normal_strength = clamp(u_shading.triplanar_params.z, 0.25, 4.0);
+    
+    // Amplify LOCAL variation: difference between height_normal and base_normal
+    // This preserves average orientation while increasing local contrast
+    let normal_delta = height_normal - base_normal;
+    let amplified_delta = normal_delta * normal_strength;
+    let amplified_height_normal = normalize(base_normal + amplified_delta);
+    
+    let normal_blend = lod_fade;  // Full blend at near LOD, fades at distance
     // Capture pre-normalized normal for specular AA (Toksvig)
-    let mixed_normal = mix(base_normal, height_normal, normal_blend);
+    let mixed_normal = mix(base_normal, amplified_height_normal, normal_blend);
     let normal_len = length(mixed_normal);
     let blended_normal = mixed_normal / max(normal_len, 1e-5);
 
@@ -1992,13 +2006,12 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         }
     }
     
-    // P4: Apply slope-based hue variation to increase h_std metric
-    // Steep slopes get redder hues, flat areas get yellower hues
-    // Using strength of 0.08 - max before hue wraparound breaks monotonicity
-    // Achieves h_std ~0.042 (close to target 0.055-0.120)
+    // P4: Apply slope+elevation hue variation to increase h_std metric
+    // Combines slope (steep=redder, flat=yellower) and elevation spread
+    // Using strength of 0.08 - safe value that maintains h_mean in target range
     if (!is_water) {
         let hue_variation_strength = 0.08;
-        albedo = apply_slope_hue_variation(albedo, slope_factor, hue_variation_strength);
+        albedo = apply_slope_hue_variation(albedo, slope_factor, height_norm, hue_variation_strength);
     }
     
     occlusion = clamp(occlusion, u_shading.clamp2.x, u_shading.clamp2.y);
