@@ -291,6 +291,7 @@ def _build_params(
     fog_config=None,  # P2: Optional FogSettings from CLI
     reflection_config=None,  # P4: Optional ReflectionSettings from CLI
     triplanar_config=None,  # P5-N: Optional TriplanarSettings for normal_strength
+    lambert_contrast: float = 0.0,  # P5-L: Lambert contrast curve strength
 ):
     overlays = [
         f3d.OverlayLayer.from_colormap1d(
@@ -346,6 +347,7 @@ def _build_params(
         fog=fog_config,  # P2: Pass fog config (None = disabled)
         reflection=reflection_config,  # P4: Pass reflection config (None = disabled)
         triplanar=triplanar_config,  # P5-N: Pass triplanar config for normal_strength
+        lambert_contrast=lambert_contrast,  # P5-L: Pass lambert contrast
     )
 
     if pom_enabled is not None:
@@ -677,6 +679,7 @@ def run(args: Any) -> int:
         fog_config=fog_config,  # P2: Pass fog config
         reflection_config=reflection_config,  # P4: Pass reflection config
         triplanar_config=triplanar_config,  # P5-N: Pass triplanar config for normal_strength
+        lambert_contrast=float(getattr(args, "lambert_contrast", 0.0)),  # P5-L
     )
 
     renderer = f3d.TerrainRenderer(sess)

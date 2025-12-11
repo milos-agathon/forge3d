@@ -367,6 +367,8 @@ pub struct TerrainRenderParams {
     pub height_curve_mode: String,
     pub height_curve_strength: f32,
     pub height_curve_power: f32,
+    /// P5-L: Lambert contrast parameter [0,1] for gradient enhancement
+    pub lambert_contrast: f32,
     pub height_curve_lut: Option<Arc<Vec<f32>>>,
     pub overlays: Vec<Py<crate::core::overlay_layer::OverlayLayer>>,
     light: Py<PyAny>,
@@ -494,6 +496,14 @@ impl TerrainRenderParams {
                 "height_curve_power must be greater than zero",
             ));
         }
+
+        // P5-L: Lambert contrast parameter [0,1] for gradient enhancement
+        let lambert_contrast = params
+            .getattr("lambert_contrast")
+            .ok()
+            .and_then(|v| v.extract::<f32>().ok())
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0);
 
         let height_curve_lut: Option<Arc<Vec<f32>>> = if height_curve_mode == "lut" {
             let raw_lut = params.getattr("height_curve_lut")?;
@@ -790,6 +800,7 @@ impl TerrainRenderParams {
             height_curve_mode,
             height_curve_strength,
             height_curve_power,
+            lambert_contrast,
             height_curve_lut,
             overlays,
             light: light.unbind(),
@@ -899,6 +910,12 @@ impl TerrainRenderParams {
     #[getter]
     pub fn height_curve_power(&self) -> f32 {
         self.height_curve_power
+    }
+
+    /// P5-L: Lambert contrast parameter [0,1] for gradient enhancement
+    #[getter]
+    pub fn lambert_contrast(&self) -> f32 {
+        self.lambert_contrast
     }
 
     #[getter]

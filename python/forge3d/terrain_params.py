@@ -352,6 +352,8 @@ class TerrainRenderParams:
     height_curve_strength: float = 0.0
     height_curve_power: float = 1.0
     height_curve_lut: Optional[np.ndarray] = None
+    # P5-L: Lambert contrast parameter [0,1] for gradient enhancement
+    lambert_contrast: float = 0.0
     # P2: Atmospheric fog (defaults to disabled for P1 compatibility)
     fog: Optional[FogSettings] = None
     # P4: Water planar reflections (defaults to disabled for P3 compatibility)
@@ -485,6 +487,7 @@ def make_terrain_params_config(
     height_curve_strength: float = 0.0,
     height_curve_power: float = 1.0,
     height_curve_lut: Optional[np.ndarray] = None,
+    lambert_contrast: float = 0.0,  # P5-L: Lambert contrast [0,1]
     shadows: Optional[ShadowSettings] = None,
     triplanar: Optional[TriplanarSettings] = None,
     pom: Optional[PomSettings] = None,
@@ -614,6 +617,7 @@ def make_terrain_params_config(
         height_curve_strength=height_curve_strength,
         height_curve_power=height_curve_power,
         height_curve_lut=height_curve_lut,
+        lambert_contrast=lambert_contrast,
         fog=fog,
         reflection=reflection,
         ao_weight=ao_weight,

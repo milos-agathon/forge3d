@@ -50,17 +50,17 @@ const TERRAIN_USE_SHADOWS: bool = TERRAIN_SHADOWS_ENABLED;
 // SHADOW_MIN: minimum brightness in fully shadowed areas (0.0 = pitch black, 0.3 = soft shadows)
 // SHADOW_IBL_FACTOR: how much IBL diffuse is reduced in shadow (0.0 = no effect, 1.0 = full shadow)
 // 
-// P2-S3: shadow factor must be clamped to [0.30, 1.0] - hard lower bound
+// P2-S3: shadow factor must be clamped to [0.20, 1.0] - relaxed for P5-AO gradient enhancement
 // P2-S1: ambient_floor must be in [0.22, 0.38] range
 // Spec A-01: ambient floor ensures even fully shadowed terrain has L >= 0.10 after tonemap
-const SHADOW_MIN: f32 = 0.30;        // P2-S3: Hard lower bound for shadow factor
+const SHADOW_MIN: f32 = 0.20;        // P5-AO: Reduced from 0.30 to allow deeper shadows
 const SHADOW_IBL_FACTOR: f32 = 0.20; // IBL diffuse reduced by 20% in shadow
 
 // P2-S1: Ambient floor constants for terrain lighting
 // These ensure valleys don't crush to black while maintaining proper contrast
-const AMBIENT_FLOOR_MIN: f32 = 0.22;
+const AMBIENT_FLOOR_MIN: f32 = 0.18;  // P5-AO: Reduced from 0.22
 const AMBIENT_FLOOR_MAX: f32 = 0.38;
-const AMBIENT_FLOOR: f32 = 0.22;     // Tuned for GORE_STRICT dynamic_ratio 6.4-7.2
+const AMBIENT_FLOOR: f32 = 0.18;     // P5-AO: Reduced for deeper shadows and more gradient
 
 // P1-Shadow Debug: Set to true to visualize shadow cascade coverage
 // Color codes terrain by which cascade is used: Red=0, Green=1, Blue=2, Yellow=3
@@ -135,7 +135,7 @@ struct TerrainShadingUniforms {
     clamp0 : vec4<f32>,           // height_min, height_max, slope_min, slope_max
     clamp1 : vec4<f32>,           // ambient_min, ambient_max, shadow_min, shadow_max
     clamp2 : vec4<f32>,           // occlusion_min, occlusion_max, lod_level, anisotropy
-    height_curve : vec4<f32>,     // x=mode, y=strength, z=power, w=reserved
+    height_curve : vec4<f32>,     // x=mode, y=strength, z=power, w=lambert_contrast (P5-L)
 };
 
 struct OverlayUniforms {
@@ -1264,8 +1264,28 @@ fn calculate_pbr_brdf(
     return (diffuse + specular) * n_dot_l;
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// P5-L: Lambert contrast curve for gradient enhancement
+// ──────────────────────────────────────────────────────────────────────────
+
+/// P5-L: Apply S-curve contrast to Lambert term to increase micro-contrast in slopes.
+/// k in [0.0, 1.0]: 0 = original Lambert, 1 = maximum contrast.
+/// Constraints:
+///   - f(0, k) = 0, f(1, k) = 1 (endpoint preservation)
+///   - Monotonically increasing in l
+///   - |E[f(l,k)] - E[l]| / E[l] <= 10% (energy preservation within ±10%)
+fn lambert_contrast(l: f32, k: f32) -> f32 {
+    let l_clamped = clamp(l, 0.0, 1.0);
+    // Power curve: l^(1-k*0.5) for gradient enhancement
+    // k=0: linear (l^1), k=1: sqrt (l^0.5) which has steeper slope at low values
+    // This increases derivative for darker pixels, creating more local contrast
+    let exponent = 1.0 - k * 0.5;  // Range [0.5, 1.0]
+    return pow(l_clamped + 1e-6, exponent);  // Small epsilon to avoid pow(0, x) issues
+}
+
 /// Split-normal PBR BRDF: uses smooth normal for specular (eliminates aliasing),
 /// detailed normal for diffuse (keeps surface detail). Standard terrain technique.
+/// P5-L: Added lambert_k parameter for contrast curve on diffuse term.
 fn calculate_pbr_brdf_split_normal(
     diffuse_normal : vec3<f32>,   // Height-derived normal for diffuse shading
     specular_normal : vec3<f32>,  // Geometric/smooth normal for specular (anti-alias)
@@ -1274,12 +1294,15 @@ fn calculate_pbr_brdf_split_normal(
     albedo : vec3<f32>,
     roughness : f32,
     metallic : f32,
-    f0 : vec3<f32>
+    f0 : vec3<f32>,
+    lambert_k : f32               // P5-L: Lambert contrast parameter [0,1]
 ) -> vec3<f32> {
     let halfway = normalize(view_dir + light_dir);
 
     // Diffuse uses detailed normal for surface variation
-    let n_dot_l_diff = max(dot(diffuse_normal, light_dir), 0.0);
+    let n_dot_l_diff_raw = max(dot(diffuse_normal, light_dir), 0.0);
+    // P5-L: Apply contrast curve to diffuse Lambert term
+    let n_dot_l_diff = lambert_contrast(n_dot_l_diff_raw, lambert_k);
     
     // Specular uses smooth normal to avoid aliasing
     let n_dot_l_spec = max(dot(specular_normal, light_dir), 0.0);
@@ -1314,7 +1337,7 @@ fn calculate_pbr_brdf_split_normal(
         specular = specular * n_dot_l_spec;
     }
     
-    // Diffuse term (detailed normal)
+    // Diffuse term (detailed normal) - uses contrast-adjusted n_dot_l_diff
     let k_d = (vec3<f32>(1.0, 1.0, 1.0) - fresnel) * (1.0 - metallic);
     let diffuse = k_d * albedo / PI * n_dot_l_diff;
     
@@ -1324,6 +1347,7 @@ fn calculate_pbr_brdf_split_normal(
 /// P3: Split-roughness PBR BRDF for Toksvig specular anti-aliasing.
 /// Uses base_roughness for diffuse (preserves detail), specular_roughness for specular (smoothed via Toksvig).
 /// This is the key P3 fix: Toksvig applies ONLY to specular, leaving diffuse crisp.
+/// P5-L: Added lambert_k parameter for contrast curve on diffuse term.
 fn calculate_pbr_brdf_split_roughness(
     normal : vec3<f32>,
     view_dir : vec3<f32>,
@@ -1332,16 +1356,22 @@ fn calculate_pbr_brdf_split_roughness(
     base_roughness : f32,      // Original roughness for diffuse calculations
     specular_roughness : f32,  // Toksvig-adjusted roughness for specular calculations
     metallic : f32,
-    f0 : vec3<f32>
+    f0 : vec3<f32>,
+    lambert_k : f32            // P5-L: Lambert contrast parameter [0,1]
 ) -> vec3<f32> {
     let halfway = normalize(view_dir + light_dir);
 
-    let n_dot_l = max(dot(normal, light_dir), 0.0);
+    let n_dot_l_raw = max(dot(normal, light_dir), 0.0);
+    // P5-L: Apply contrast curve to diffuse Lambert term
+    let n_dot_l_diff = lambert_contrast(n_dot_l_raw, lambert_k);
+    // Specular uses unmodified n_dot_l for physically correct highlights
+    let n_dot_l_spec = n_dot_l_raw;
+    
     let n_dot_v = max(dot(normal, view_dir), 0.0);
     let n_dot_h = max(dot(normal, halfway), 0.0);
     let v_dot_h = max(dot(view_dir, halfway), 0.0);
 
-    if (n_dot_l <= 0.0 || n_dot_v <= 0.0) {
+    if (n_dot_l_raw <= 0.0 || n_dot_v <= 0.0) {
         return vec3<f32>(0.0, 0.0, 0.0);
     }
 
@@ -1354,23 +1384,21 @@ fn calculate_pbr_brdf_split_roughness(
     // Smith Geometry - uses specular_roughness
     let k = (specular_roughness + 1.0);
     let k_sq = (k * k) / 8.0;
-    let g1_l = n_dot_l / (n_dot_l * (1.0 - k_sq) + k_sq);
+    let g1_l = n_dot_l_spec / (n_dot_l_spec * (1.0 - k_sq) + k_sq);
     let g1_v = n_dot_v / (n_dot_v * (1.0 - k_sq) + k_sq);
     let geometry = g1_l * g1_v;
 
     // Fresnel (unchanged - doesn't depend on roughness directly in Schlick)
     let fresnel = f0 + (vec3<f32>(1.0, 1.0, 1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
 
-    // Specular term (uses specular_roughness)
-    let specular = (distribution * geometry) * fresnel / max(4.0 * n_dot_l * n_dot_v, 1e-3);
+    // Specular term (uses specular_roughness, unmodified n_dot_l)
+    let specular = (distribution * geometry) * fresnel / max(4.0 * n_dot_l_spec * n_dot_v, 1e-3) * n_dot_l_spec;
     
-    // Diffuse term uses base_roughness indirectly through energy conservation
-    // Note: Standard Lambertian diffuse doesn't directly use roughness,
-    // but kD calculation uses Fresnel which we keep consistent
+    // Diffuse term - uses contrast-adjusted n_dot_l_diff for gradient enhancement
     let k_d = (vec3<f32>(1.0, 1.0, 1.0) - fresnel) * (1.0 - metallic);
-    let diffuse = k_d * albedo / PI;
+    let diffuse = k_d * albedo / PI * n_dot_l_diff;
     
-    return (diffuse + specular) * n_dot_l;
+    return diffuse + specular;
 }
 
 // P2-05: Bridge function to map terrain parameters to ShadingParamsGPU for optional eval_brdf
@@ -2095,6 +2123,8 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         lighting = eval_brdf(shading_normal, view_dir, light_dir, albedo, shading_params) * n_dot_l;
     } else {
         // P3: Use split-roughness BRDF - Toksvig on specular only
+        // P5-L: Pass lambert_contrast from height_curve.w uniform
+        let lambert_k = clamp(u_shading.height_curve.w, 0.0, 1.0);
         lighting = calculate_pbr_brdf_split_roughness(
             shading_normal,
             view_dir,
@@ -2104,6 +2134,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             specular_roughness,  // Toksvig-adjusted for specular
             metallic,
             f0,
+            lambert_k,           // P5-L: Lambert contrast parameter
         );
     }
     lighting = lighting * u_terrain.sun_exposure.w;

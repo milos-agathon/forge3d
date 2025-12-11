@@ -182,6 +182,12 @@ def _parse_args() -> argparse.Namespace:
         help="Terrain normal strength (0.25-4.0). Values > 1.0 amplify normals for steeper shading gradients.",
     )
     parser.add_argument(
+        "--lambert-contrast",
+        type=float,
+        default=0.0,
+        help="P5-L: Lambert contrast curve strength (0.0-1.0). Higher values increase micro-contrast in slopes.",
+    )
+    parser.add_argument(
         "--debug-mode",
         type=int,
         default=0,

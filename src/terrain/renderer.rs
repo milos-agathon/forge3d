@@ -4012,7 +4012,9 @@ impl TerrainScene {
         };
         let strength = params.height_curve_strength.clamp(0.0, 1.0);
         let power = params.height_curve_power.max(0.01);
-        uniforms.extend_from_slice(&[mode_f, strength, power, 0.0]);
+        // P5-L: Lambert contrast parameter in height_curve.w
+        let lambert_k = params.lambert_contrast.clamp(0.0, 1.0);
+        uniforms.extend_from_slice(&[mode_f, strength, power, lambert_k]);
 
         Ok(uniforms)
     }
