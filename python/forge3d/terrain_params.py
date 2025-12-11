@@ -567,9 +567,9 @@ def make_terrain_params_config(
         clamp = ClampSettings(
             height_range=(float(domain[0]), float(domain[1])),
             slope_range=(0.04, 1.0),
-            ambient_range=(0.0, 1.0),
-            shadow_range=(0.0, 1.0),
-            occlusion_range=(0.0, 1.0),
+            ambient_range=(0.22, 0.38),  # P2-S1: ambient floor in [0.22, 0.38]
+            shadow_range=(0.30, 1.0),    # P2-S3: shadow factor in [0.30, 1.0]
+            occlusion_range=(0.65, 1.0), # P2-S2: AO capped at 35% darkening (min 0.65)
         )
 
     if overlays is None:

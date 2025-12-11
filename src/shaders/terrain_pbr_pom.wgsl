@@ -50,11 +50,17 @@ const TERRAIN_USE_SHADOWS: bool = TERRAIN_SHADOWS_ENABLED;
 // SHADOW_MIN: minimum brightness in fully shadowed areas (0.0 = pitch black, 0.3 = soft shadows)
 // SHADOW_IBL_FACTOR: how much IBL diffuse is reduced in shadow (0.0 = no effect, 1.0 = full shadow)
 // 
-// NOTE: SHADOW_MIN should be very low to avoid colored sun light bleeding into shadows.
-// Real shadows should be dominated by ambient/IBL light (neutral sky color), not direct sun.
-// With high SHADOW_MIN, shadows get tinted by the sun color (looks unnatural with pink/orange sun).
-const SHADOW_MIN: f32 = 0.001;       // Shadows darken to 0.1% of direct light (deep dramatic shadows)
-const SHADOW_IBL_FACTOR: f32 = 0.70; // IBL diffuse reduced by 70% in shadow (darker ambient for drama)
+// P2-S3: shadow factor must be clamped to [0.30, 1.0] - hard lower bound
+// P2-S1: ambient_floor must be in [0.22, 0.38] range
+// Spec A-01: ambient floor ensures even fully shadowed terrain has L >= 0.10 after tonemap
+const SHADOW_MIN: f32 = 0.30;        // P2-S3: Hard lower bound for shadow factor
+const SHADOW_IBL_FACTOR: f32 = 0.20; // IBL diffuse reduced by 20% in shadow
+
+// P2-S1: Ambient floor constants for terrain lighting
+// These ensure valleys don't crush to black while maintaining proper contrast
+const AMBIENT_FLOOR_MIN: f32 = 0.22;
+const AMBIENT_FLOOR_MAX: f32 = 0.38;
+const AMBIENT_FLOOR: f32 = 0.22;     // P3: Lower ambient for deeper shadows
 
 // P1-Shadow Debug: Set to true to visualize shadow cascade coverage
 // Color codes terrain by which cascade is used: Red=0, Green=1, Blue=2, Yellow=3
@@ -1781,12 +1787,12 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         let max_depth = 3.0; // Visual depth scaling
         let transmittance = exp(-absorption * water_depth_value * max_depth);
         
-        // Deep water color - vibrant saturated blue for clear lake identification
-        // Reference: bright blue like #0066CC = vec3(0.0, 0.4, 0.8) in linear
-        let deep_water_color = vec3<f32>(0.0, 0.35, 0.85);
+        // Deep water color - saturated blue matching reference image
+        // Reference shows bright blue lake - boost saturation significantly
+        let deep_water_color = vec3<f32>(0.05, 0.45, 0.95);
         
-        // Shallow water near shore - lighter cyan-blue
-        let shallow_color = vec3<f32>(0.15, 0.45, 0.75);
+        // Shallow water near shore - cyan-blue tint
+        let shallow_color = vec3<f32>(0.1, 0.5, 0.85);
         
         // Blend based on depth - this gives visible shoreline gradient
         let underwater_color = mix(shallow_color, deep_water_color, water_depth_value);
@@ -1794,10 +1800,10 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // Water albedo - vibrant blue that shows through reflections
         albedo = underwater_color;
         
-        // Scatter contribution - stronger to ensure blue color is visible
-        // Even with IBL reflections, the water should read as blue
+        // Scatter contribution - very strong to ensure blue dominates over gray IBL
+        // Reference image shows saturated blue lake, not gray reflections
         // water_depth_value: 0=shore (more bottom visible), 1=deep (less bottom visible)
-        water_scatter = underwater_color * (1.0 - water_depth_value * 0.5) * 0.4;
+        water_scatter = underwater_color * (1.0 - water_depth_value * 0.3) * 1.2;
         
         // Directional wind-driven waves (dominant wind direction + secondary)
         // Creates coherent wave patterns that read as water, not noise
@@ -2584,59 +2590,77 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
                 );
             }
             
-            // Combine: reflections + specular, attenuated by depth
-            let reflective = (combined_reflection + sun_spec) * depth_atten;
+            // Combine: minimal reflections to let blue water color dominate
+            // Reference image shows saturated blue lake - prioritize underwater color
+            let reflective = (combined_reflection * 0.1 + sun_spec * 0.5) * depth_atten;
             
-            // Water color: reflections + scatter + base albedo
-            // Increased albedo contribution (0.5) to ensure vibrant blue shows through
-            shaded = reflective + water_scatter * 3.0 + albedo * 0.5;
+            // Water color: force blue to dominate over gray IBL
+            // Direct blue contribution scaled by exposure-appropriate factor
+            let blue_water = vec3<f32>(0.15, 0.45, 0.85); // Saturated blue
+            shaded = reflective * 0.3 + blue_water * 0.8 + water_scatter * 2.0;
             
         } else {
-            // Regular terrain: direct + IBL + minimal ambient fill
+            // ══════════════════════════════════════════════════════════════════════
+            // P2-S4: Terrain Lighting Composition (structure locked per spec)
+            // ══════════════════════════════════════════════════════════════════════
             // 
-            // The ambient term is scaled down to preserve colormap fidelity while still
-            // providing some fill light in areas with low IBL contribution.
-            // 
-            // Old formula caused washout: ambient + direct + IBL (where ambient was 100%)
-            // New formula: 8% ambient + direct + IBL (prevents over-brightening and preserves colormap)
+            // P2-S1: ambient_floor must be in [0.22, 0.38] range
+            // P2-S2: AO must be clamped to min 0.65 (max 35% darkening)
+            // P2-S3: Shadow factor must be clamped to [0.30, 1.0]
+            // P2-L2: Dynamic range (valleys vs ridges) should be 5.8-7.8
             //
-            // The 0.08 factor was chosen to:
-            // 1. Preserve some slope-based ambient variation
-            // 2. Avoid complete darkness in areas with weak IBL
-            // 3. Minimize IBL color bleeding into colormap
+            // Reference quantiles: q5=0.10, q50=0.35, q95=0.65
             
-            let shading_slope = 1.0 - abs(shading_normal.y);
-            let ambient_strength = mix(u_shading.clamp1.x, u_shading.clamp1.y, shading_slope);
-            // Scale ambient to 8% to minimize IBL color bleeding (was 15%)
-            let ambient = albedo * ambient_strength * shadow_factor * 0.08;
-            let direct_mult = mix(0.65, 1.0, occlusion);
-            let direct = lighting * direct_mult;
+            // Compute lambert term for hillshade-like appearance
+            let n_dot_l_terrain = max(dot(shading_normal, light_dir), 0.0);
+            
+            // P2-S4: diffuse_raw = mix(ambient_floor, 1.0, lambert)
+            // This ensures even backfacing surfaces get ambient_floor illumination
+            let diffuse_raw = mix(AMBIENT_FLOOR, 1.0, n_dot_l_terrain);
             
             // P5: Apply AO multiplier from coarse heightmap AO or SSAO
-            // ao_weight (params3.x): 0.0 = no AO effect, 1.0 = full AO
-            // When ao_weight is 0, this is a no-op preserving P4 output
+            // P2-S2: AO must be clamped to min 0.65 (max 35% darkening)
             let ao_weight = u_overlay.params3.x;
-            var ao_factor = 1.0;
+            var ao_clamped = 1.0;
             if (ao_weight > 0.0) {
-                // Sample AO from debug texture (coarse heightmap AO or SSAO)
                 let ao_uv = clamp(input.tex_coord, vec2<f32>(0.0), vec2<f32>(1.0));
                 let ao_sample = textureSampleLevel(ao_debug_tex, ao_debug_samp, ao_uv, 0.0).r;
-                // Interpolate between 1.0 (no AO) and ao_sample based on ao_weight
-                ao_factor = mix(1.0, ao_sample, ao_weight);
+                ao_clamped = mix(1.0, max(ao_sample, 0.65), ao_weight);
             }
+            // Also apply POM occlusion with same clamp
+            ao_clamped = ao_clamped * max(occlusion, 0.65);
             
-            // Apply AO to ambient and IBL diffuse (indirect lighting)
-            // IBL diffuse already includes albedo tinting via kD * base_color * irradiance
-            // Keep direct specular unaffected for energy conservation
-            // 
-            // Reduce IBL diffuse for flat/sky-facing normals to preserve colormap fidelity
-            // Flat terrain picks up too much environment color, drowning out the colormap
-            let normal_up_factor = abs(shading_normal.z); // Z-up: flat = high, steep = low
-            let ibl_diffuse_weight = mix(0.5, 0.15, normal_up_factor); // Steep: 50%, Flat: 15%
-            let warm_bias = vec3<f32>(1.08, 0.95, 0.88); // Warm shift to counteract cool environment
+            // P2-S3: Shadow factor clamped to [0.30, 1.0]
+            // Use the already-mapped shadow value from CSM
+            let shadow_clamped = max(shadow_factor, 0.30);
+            
+            // P3-S1: Compute combined shadow/AO attenuation
+            // Direct product for full contrast range (no sqrt compression)
+            // P3 requires lf_max/lf_min >= 4.5
+            let ao_shadow_factor = ao_clamped * shadow_clamped; // Range [0.195, 1.0]
+            let diffuse_lit = diffuse_raw * ao_shadow_factor;
+            
+            // P3-S1: IBL term adds minimal fill light
+            // Reduced to allow deeper shadows while preventing pitch-black
+            let warm_bias = vec3<f32>(1.08, 1.0, 0.92);
             let ibl_diffuse_biased = ibl_split.diffuse * warm_bias;
-            let ao_affected_ibl = ibl_diffuse_biased * u_ibl.intensity * ibl_occlusion * shadow_factor * ao_factor * ibl_diffuse_weight + ibl_split.specular * u_ibl.intensity * ibl_occlusion;
-            shaded = ambient * ao_factor + direct + ao_affected_ibl;
+            let ibl_diffuse_factor = length(ibl_diffuse_biased) * u_ibl.intensity;
+            let ibl_term = ibl_diffuse_factor * AMBIENT_FLOOR * 0.35;
+            
+            // P2-S4: lighting_factor = diffuse_lit + ibl_term
+            let lighting_factor = diffuse_lit + ibl_term;
+            
+            // Apply lighting factor to albedo
+            // Spec H-03: Lighting modulates brightness, not colormap lookup
+            let lit_albedo = albedo * lighting_factor;
+            
+            // Add specular contribution (capped at 25% per P2-S4)
+            // Specular for terrain must not exceed 25% of total RGB
+            let spec_contrib = ibl_split.specular * u_ibl.intensity * 0.12;
+            let spec_capped = min(spec_contrib, albedo * 0.20);
+            
+            // Final terrain shading
+            shaded = lit_albedo + spec_capped;
         }
         
         let exposure = max(u_shading.light_params.w, 0.0);

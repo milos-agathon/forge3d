@@ -1547,6 +1547,7 @@ impl TerrainScene {
         let lighting_ibl = include_str!("../shaders/lighting_ibl.wgsl");
 
         // Load main terrain shader and strip includes
+        // Shader version: 2024-01-water-blue-fix
         let terrain_raw = include_str!("../shaders/terrain_pbr_pom.wgsl");
         let terrain = strip_includes(terrain_raw);
 
