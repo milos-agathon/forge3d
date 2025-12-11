@@ -6,14 +6,12 @@ You must then rigorously implement the following changes to make the output of t
 
 ## RULES
 
-1. Keep your existing **P2 + P3 validated harness**.
-2. Add these **P4 tests** (L1–L2, G1–G2, C1–C3) as **additional acceptance checks**.
-3. Tell the model explicitly:
 
    * “Do not regress existing passing tests.”
+   
    * “You now additionally must pass P4-L, P4-G, P4-C; focus especially on raising valley gradients and midtone occupancy while increasing hue variation in the colormap.”
-
-You must assess the changes needed in both the backend and frontend. After every edit you make, immediately run the code. If the output doesn't meet the expectations: keep iterating (edit → run tests) until you meet them fully. Do not stop early. Do not claim success without a green test run. Do not stop until you are confident that your results meet the expectations.
+   
+   * You must assess the changes needed in both the backend and frontend. After every edit you make, immediately run the code. If the output doesn't meet the expectations: keep iterating (edit → run tests) until you meet them fully. Do not stop early. Do not claim success without a green test run. Do not stop until you are confident that your results meet the expectations.
 
 
 ## CODE
@@ -37,375 +35,333 @@ You must run this code as you make changes
 
 ## OBJECTIVE
 
-This document consolidates all current milestones and requirement layers for
-matching `terrain_csm.png` to the reference `Gore_Range_Albers_1m.png`.
+Here’s a cleaner, self-contained markdown you can drop straight into the repo as your terrain-matching milestone spec.
 
-The pipeline is:
+````markdown
+# forge3d – Gore Range Terrain Matching Milestones
 
-- **Base requirements:** `R0–R8`
-- **Milestone P1:** Baseline reproduction & sanity checks
-- **Milestone P2:** Luminance & dynamic-range locking
-- **Milestone P3:** Gradient / spatial-structure & global hue
-- **Milestone P4:** Valley structure, midtones, and hue variation
+Target: make `terrain_csm.png` statistically and visually match  
+`Gore_Range_Albers_1m.png` (ignoring water) under tight, testable constraints.
 
-All metrics apply **only to terrain pixels (non-water)**.
+Milestones build on each other:
+
+- **R0–R8**: Global base requirements (always in force).
+- **P1**: Baseline reproduction.
+- **P2**: Luminance & dynamic range lock.
+- **P3**: Gradient structure & spatial variation.
+- **P4**: Valley structure, midtones & hue variation.
 
 ---
 
-## 0. Base Requirements – R0–R8
-
-These are *global* constraints that must hold for all milestones P1–P4.
+## R0–R8 – Global Base Requirements (Always On)
 
 ### R0 – Non-Water Mask
 
-- Use DEM/land mask + blue dominance to exclude water:
-  - `nonwater = land_mask & not(water_like)`.
+- Build a `nonwater` mask from DEM/land mask + blue dominance; exclude water.
 - All metrics below are computed only on `nonwater`.
 
 ### R1 – Luminance & Tone Curve
 
-- Luminance `L = 0.2126R + 0.7152G + 0.0722B` in consistent (linear or sRGB) space.
-- Terrain luminance bounds:
+- Luminance: `L = 0.2126R + 0.7152G + 0.0722B` (consistent space).
+- Bounds (terrain):
   - `0.04 ≤ L_min ≤ 0.08`
   - `0.80 ≤ L_max ≤ 0.90`
-- Quantile targets (±0.03 unless overridden by P2–P4):
+- Reference quantiles (terrain):
 
-  | q   | ref value |
-  |-----|-----------|
-  | q01 | 0.077     |
-  | q05 | 0.100     |
-  | q25 | 0.209     |
-  | q50 | 0.348     |
-  | q75 | 0.494     |
-  | q95 | 0.648     |
-  | q99 | 0.769     |
+  | q   | value |
+  |-----|-------|
+  | 1%  | 0.077 |
+  | 5%  | 0.100 |
+  | 25% | 0.209 |
+  | 50% | 0.348 |
+  | 75% | 0.494 |
+  | 95% | 0.648 |
+  | 99% | 0.769 |
 
 - Crushed/blown limits:
-  - `< 0.5%` of pixels with `L < 0.04`.
-  - `< 0.5%` of pixels with `L > 0.85`.
+  - `< 0.5%` pixels with `L < 0.04`.
+  - `< 0.5%` pixels with `L > 0.85`.
 
-### R2 – Local Contrast & Terrain Detail
+### R2 – Local Contrast & Gradient
 
-- Gradient magnitude `g` of `L` (forward differences).
-- Reference stats (terrain):
+- Gradient on L:
 
-  - `mean(g_ref) ≈ 0.050`
-  - `median(g_ref) ≈ 0.032`
-  - `q90(g_ref) ≈ 0.118`
-  - `q99(g_ref) ≈ 0.272`
+  ```python
+  gx[:,1:] = L[:,1:] - L[:,:-1]
+  gy[1:,:] = L[1:,:] - L[:-1,:]
+  g = np.sqrt(gx*gx + gy*gy)
+````
 
-- Target bands (±15% around reference) unless tightened by P2/P3.
+* Reference (terrain):
 
-### R3 – Global Color Statistics
+  * `mean(g_ref) ≈ 0.050`
+  * `median(g_ref) ≈ 0.032`
+  * `q90(g_ref) ≈ 0.118`
+  * `q99(g_ref) ≈ 0.272`
 
-- Convert terrain pixels to HSV.
-- Reference (terrain):
+### R3 – Global Color (HSV)
 
-  - `h_mean_ref ≈ 0.087` (warm tan, ~25°)
-  - `h_std_ref ≈ 0.100`
-  - `s_mean_ref ≈ 0.387`
-  - `s_std_ref ≈ 0.130`
+* Reference (terrain):
 
-- No strong magenta / purple:  
-  fraction of pixels with `h ∈ [0.70,0.95]` and `s > 0.20` ≤ 1%.
+  * `h_mean_ref ≈ 0.087` (warm tan)
+  * `h_std_ref ≈ 0.100`
+  * `s_mean_ref ≈ 0.387`
+  * `s_std_ref ≈ 0.130`
+* Strong magenta suppressed:
+  fraction with `h ∈ [0.70,0.95]` & `s > 0.20` ≤ 1%.
 
-### R4 – Color by Luminance Band
+### R4 – Color vs Luminance Bands
 
 Bands:
 
-- A: `0.05 ≤ L < 0.20` (shadows)
-- B: `0.20 ≤ L < 0.50` (midtones)
-- C: `0.50 ≤ L < 0.80` (highlights)
+* A: `0.05 ≤ L < 0.20` (shadows)
+* B: `0.20 ≤ L < 0.50` (midtones)
+* C: `0.50 ≤ L < 0.80` (highlights)
 
-Reference pattern:
+Constraints:
 
-- Shadows: saturated, slightly red-brown.
-- Midtones: earthy tan/rose.
-- Highlights: paler, less saturated warm tan.
+* Saturation decreases from A → C.
+* Mean hue increases from A → C:
 
-Monotone hue progression: `mean(h_A) < mean(h_B) < mean(h_C)`.
+  `mean(h_A) < mean(h_B) < mean(h_C)`.
 
 ### R5 – Hypsometric Ramp
 
-- Single continuous 1D ramp; no discrete steps.
-- Small elevation step `Δz = 1/2048` must produce:
+* Single continuous 1D RGB ramp; no visible steps.
+
+* For elevation step `Δz = 1/2048`:
 
   `max(|ΔR|,|ΔG|,|ΔB|) ≤ 5/255`.
 
-- Anchor colors (approx, sampled from ramp, *not* shaded image):
+* Anchor colors (ramp, not shaded):
 
-  - `z ≈ 0.2` → olive-tan.
-  - `z ≈ 0.5` → muted warm brown/rose.
-  - `z ≈ 0.9` → pale warm tan (not white).
+  * `z ≈ 0.2`: olive-tan.
+  * `z ≈ 0.5`: muted rose-brown.
+  * `z ≈ 0.9`: pale warm tan (not white).
 
-### R6 – Direct Lighting & Ambient Composition
+### R6 – Lighting Composition
 
-- Sun direction: azimuth `315° ± 5°`, elevation `37° ± 5°`.
-- `lambert = max(dot(N, L_dir), 0.0)`.
-- Ambient floor in shader: `0.22 ≤ ambient_floor ≤ 0.38`.
-- AO clamp: `ao = max(ao, 0.65)` (≤ 35% darkening).
-- Shadows: `shadow = clamp(shadow, 0.30, 1.0)`.
-- Specular contribution for terrain ≤ 25% of total RGB per pixel.
+* Sun: azimuth `315° ± 5°`, elevation `37° ± 5°`.
+* `lambert = max(dot(N, L_dir), 0.0)`.
+* Ambient floor in shader: `0.22 ≤ ambient_floor ≤ 0.38`.
+* AO clamp: `ao = max(ao, 0.65)`.
+* Shadow factor: `shadow = clamp(shadow, 0.30, 1.0)`.
+* Specular for terrain ≤ 25% of total RGB.
 
-### R7 – CSM Shadow Quality
+Canonical lighting structure:
 
-- No pure-black shadows: shadowed terrain `L ≥ 0.08`, `<0.5%` below `0.04`.
-- Penumbra width: 2–6 px from fully lit to fully shadowed.
-- No visible cascade seams (no long straight steps in `shadow`).
-- Depth bias tuned to avoid acne & “Peter Panning” (>1 px separation).
+```glsl
+float diffuse_raw = mix(ambient_floor, 1.0, lambert);
+float diffuse_lit = diffuse_raw * max(ao, 0.65) * clamp(shadow, 0.30, 1.0);
+float ibl_term    = ibl_diffuse_factor * ambient_floor;
+float lighting_factor = diffuse_lit + ibl_term;
+```
 
-### R8 – Camera & Projection
+### R7 – CSM Quality
 
-- Vertical exaggeration within ±10% of reference.
-- Perspective FOV ≤ 25°, or orthographic.
+* No pure-black shadows: terrain `L ≥ 0.08`, `< 0.5%` below `0.04`.
+* Penumbra width: 2–6 px transition.
+* No visible cascade seams (large, straight shadow jumps).
+* Depth bias tuned: no acne, ≤1 px “Peter Panning”.
+
+### R8 – Camera / Projection
+
+* Vertical exaggeration ±10% of reference.
+* Perspective FOV ≤ 25° (or orthographic).
 
 ---
 
-## Milestone P1 – Baseline Gore Range Reproduction
+## Milestone P1 – Baseline Reproduction
 
-> **Goal:** Reproduce a visually plausible Gore Range terrain render with correct camera, basic hillshade, and color ramp, without enforcing tight statistical matching.
-
-### Inputs
-
-- DEM: `assets/Gore_Range_Albers_1m.tif`
-- HDR: `brown_photostudio_02_4k.hdr` (or equivalent).
-- Command-line interface for `terrain_demo.py`.
+**Goal:** Reproduce a plausible Gore Range render (framing, basic hillshade, color ramp) that satisfies structural R0–R8.
 
 ### Tasks
 
-- [ ] Implement non-water mask (R0).
-- [ ] Set camera, DEM, z-scale, and FOV to match reference framing (R8).
-- [ ] Implement basic lighting (sun direction ~NW, ambient, AO, shadows) (R6, R7).
-- [ ] Implement hypsometric ramp with approximate earthy tan-brown-beige colors (R5).
-- [ ] Ensure 16-bit/8-bit export with correct sRGB conversion (R1).
+* Wire DEM, camera, z-scale, and FOV to match reference framing.
+* Implement sun + ambient + AO + CSM shadows in the form above.
+* Implement an earthy tan–brown–beige hypsometric ramp.
+* Export correct sRGB PNG with no banding or obvious artifacts.
+* Implement non-water mask for all metrics.
 
-### Acceptance Criteria
+### Acceptance
 
-- [ ] Image visually recognizes as the same area as `Gore_Range_Albers_1m.png`.
-- [ ] All **structural** R0–R8 constraints satisfied in “loose” bands:
-  - No pure black/white terrain pixels.
-  - Correct sun direction by inspection.
-  - Water masked out of metrics.
-- [ ] P1 validation script passes (basic histogram sanity, camera match, no obvious artifacting).
+* P1 validation script passes:
+
+  * Correct extent & camera (within tolerance).
+  * No crushed/blown terrain.
+  * Sun direction visually from NW.
+  * R0–R8 structural checks OK.
 
 ---
 
-## Milestone P2 – Luminance & Dynamic-Range Lock
+## Milestone P2 – Luminance & Dynamic Range Lock
 
-> **Goal:** Make the luminance distribution of `terrain_csm.png` statistically match the reference (shadows, mids, highlights) while preserving R0–R8.
+**Goal:** Match terrain luminance distribution and dynamic range to reference.
 
-### Additional Requirements (P2)
+### Extra Constraints (on top of R0–R8)
 
-#### P2-L – Luminance Quantiles & Dynamic Range
+**P2-L – Quantiles & Dynamic Ratio**
 
-- Precise quantile matching (terrain only):
+For each `q ∈ {1,5,25,50,75,95,99}` with reference `q_ref`:
 
-  For `q ∈ {1,5,25,50,75,95,99}` with reference `q_ref`:
+```text
+|q - q_ref| ≤ 0.030
+```
 
-  - `|q - q_ref| ≤ 0.030`.
+Dynamic ratio:
 
-- Dynamic ratio:
-
-  ```python
-  q10 = quantile(L, 0.10)
-  q90 = quantile(L, 0.90)
-  ratio = mean(L[L>=q90]) / mean(L[L<=q10])
-````
+```python
+q10 = quantile(L, 0.10)
+q90 = quantile(L, 0.90)
+ratio = mean(L[L>=q90]) / mean(L[L<=q10])
+```
 
 * `5.5 ≤ ratio ≤ 8.0`.
 
-* Crushed/blown terrain:
+Crushed/blown terrain:
 
-  * `< 0.1%` pixels with `L < 0.05`.
-  * `< 0.1%` pixels with `L > 0.85`.
+* `< 0.1%` pixels with `L < 0.05`.
+* `< 0.1%` pixels with `L > 0.85`.
 
-#### P2-G – Gradient Distribution (Global)
+**P2-Band – Luminance Bands**
 
-* Gradient stats must lie within:
+Band occupancy:
 
-  * `0.045 ≤ mean(g) ≤ 0.055`
-  * `0.027 ≤ median(g) ≤ 0.040`
-  * `0.10 ≤ q90(g) ≤ 0.14`
-  * `0.23 ≤ q99(g) ≤ 0.30`
+* `0.18 ≤ pA ≤ 0.30`
+* `0.45 ≤ pB ≤ 0.60`
+* `0.10 ≤ pC ≤ 0.25`
 
-#### P2-Band – Luminance Bands
+**P2-G – Gradients (Global)**
 
-* Fractions per band:
+* `0.045 ≤ mean(g)   ≤ 0.055`
+* `0.027 ≤ median(g) ≤ 0.040`
+* `0.10 ≤ q90(g)     ≤ 0.14`
+* `0.23 ≤ q99(g)     ≤ 0.30`
 
-  * Band A: `0.18 ≤ pA ≤ 0.30`
-  * Band B: `0.45 ≤ pB ≤ 0.60`
-  * Band C: `0.10 ≤ pC ≤ 0.25`
+### Acceptance
 
-#### P2-Shader Guards
-
-* Ambient floor, AO clamp, shadow floor, and lighting composition must follow R6/R7 + structural form:
-
-  ```glsl
-  float diffuse_raw = mix(ambient_floor, 1.0, lambert);
-  float diffuse_lit = diffuse_raw * max(ao, 0.65) * clamp(shadow, 0.30, 1.0);
-  float ibl_term    = ibl_diffuse_factor * ambient_floor;
-  float lighting_factor = diffuse_lit + ibl_term;
-  ```
-
-### Acceptance Criteria
-
-* [ ] All P1 tests pass.
-* [ ] P2-L, P2-G, P2-Band constraints pass.
-* [ ] No regression on R0–R8.
+* All P1 tests pass.
+* All P2-L, P2-Band, P2-G tests pass.
 
 ---
 
 ## Milestone P3 – Gradient Structure, Spatial Variation & Global Hue
 
-> **Goal:** Match the *texture* of terrain (ridge/valley detail) and global color statistics, avoiding “flat beige fog”.
+**Goal:** Match terrain texture (ridges/valleys), spatial brightness patterns, and global color stats.
 
-### Additional Requirements (P3)
+### Extra Constraints
 
-#### P3-L – tightened quantiles & band occupancy
+**P3-L – Tightened Quantiles & Bands**
 
-* Same reference quantiles, but stricter bounds (e.g. ±0.01–0.02); dynamic ratio:
-
-  * `6.4 ≤ ratio ≤ 7.2`.
-
+* Dynamic ratio: `6.4 ≤ ratio ≤ 7.2`.
 * Bands:
 
-  ```text
-  0.18 ≤ pA ≤ 0.30
-  0.45 ≤ pB ≤ 0.60
-  0.18 ≤ pC ≤ 0.30
-  ```
+  * `0.18 ≤ pA ≤ 0.30`
+  * `0.45 ≤ pB ≤ 0.60`
+  * `0.18 ≤ pC ≤ 0.30`
 
-#### P3-G – Gradients (Global)
+**P3-G – Gradients**
 
-* Global targets:
+* Global:
 
-  ```text
-  0.047 ≤ mean(g)   ≤ 0.053
-  0.029 ≤ median(g) ≤ 0.035
-  0.112 ≤ q90(g)    ≤ 0.125
-  0.245 ≤ q99(g)    ≤ 0.300
-  ```
+  * `0.047 ≤ mean(g)   ≤ 0.053`
+  * `0.029 ≤ median(g) ≤ 0.035`
+  * `0.112 ≤ q90(g)    ≤ 0.125`
+  * `0.245 ≤ q99(g)    ≤ 0.300`
 
 * Band-wise:
 
-  ```text
-  0.045 ≤ mean(g_B) ≤ 0.055
-  0.044 ≤ mean(g_A) ≤ 0.055
-  0.035 ≤ mean(g_C) ≤ 0.050
-  mean(g_C) ≤ mean(g_B) + 0.005
-  ```
+  * `0.045 ≤ mean(g_B) ≤ 0.055`
+  * `0.044 ≤ mean(g_A) ≤ 0.055`
+  * `0.035 ≤ mean(g_C) ≤ 0.050`
+  * `mean(g_C) ≤ mean(g_B) + 0.005`
 
-#### P3-T – Spatial Uniformity (3×3 tiles)
+**P3-T – 3×3 Tile Spatial Stats**
 
-* Split terrain into 3×3 tiles; compute median luminance per tile (`m_i`).
+Split terrain into 3×3 tiles; let `m_i` be median `L` per tile.
 
-  ```text
-  0.32 ≤ μ_tiles ≤ 0.40
-  0.07 ≤ σ_tiles ≤ 0.12
-  (m_max - m_min) ≥ 0.20
-  ```
+* `0.32 ≤ mean(m_i) ≤ 0.40`
+* `0.07 ≤ std(m_i)  ≤ 0.12`
+* `max(m_i) - min(m_i) ≥ 0.20`
 
-#### P3-C – Global Hue & Saturation
+**P3-C – Global Hue & Saturation**
 
-* Global HSV (terrain):
+* `0.075 ≤ h_mean ≤ 0.095`
+* `0.055 ≤ h_std  ≤ 0.120`
+* `0.36 ≤ s_mean ≤ 0.41`
+* `0.10 ≤ s_std  ≤ 0.15`
 
-  ```text
-  0.075 ≤ h_mean ≤ 0.095
-  0.055 ≤ h_std  ≤ 0.120
-  0.36 ≤ s_mean ≤ 0.41
-  0.10 ≤ s_std  ≤ 0.15
-  ```
+Plus R4 bandwise hue progression.
 
-* Bandwise hue/sat with monotone `mean(h_A) < mean(h_B) < mean(h_C)`.
+### Acceptance
 
-### Acceptance Criteria
-
-* [ ] All P1 + P2 tests pass.
-* [ ] All P3-L, P3-G, P3-T, P3-C constraints satisfied.
-* [ ] Visual inspection: no uniform fog, clearly articulated ridges and valleys.
+* P1 + P2 tests pass.
+* All P3-L, P3-G, P3-T, P3-C tests pass.
 
 ---
 
-## Milestone P4 – Valley Structure, Midtones & Hue Variation
+## Milestone P4 – Valleys, Midtones & Hue Variation
 
-> **Goal:** Fix remaining mismatches: valley gradients, midtone occupancy, and hue variation in the colormap (avoid “single warm tint” look).
+**Goal:** Fix remaining mismatches: valley gradients, midtone occupancy, and hue variation (avoid “single warm tint”).
 
-### Additional Requirements (P4)
+### Extra Constraints
 
-#### P4-L – Band Occupancy & Mid Quantiles (Strict)
+**P4-L – Band Occupancy & Mid Quantiles (Strict)**
 
-* Bands:
+Bands:
 
-  ```text
-  0.22 ≤ pA ≤ 0.26
-  0.49 ≤ pB ≤ 0.57
-  0.20 ≤ pC ≤ 0.26
-  ```
+* `0.22 ≤ pA ≤ 0.26`
+* `0.49 ≤ pB ≤ 0.57`
+* `0.20 ≤ pC ≤ 0.26`
 
-* Mid quantiles:
+Mid quantiles:
 
-  ```text
-  0.20 ≤ q25 ≤ 0.22
-  0.34 ≤ q50 ≤ 0.37
-  0.48 ≤ q75 ≤ 0.51
-  ```
+* `0.20 ≤ q25 ≤ 0.22`
+* `0.34 ≤ q50 ≤ 0.37`
+* `0.48 ≤ q75 ≤ 0.51`
 
-#### P4-G – Valley Gradients
+**P4-G – Valley Gradients**
 
-* For Band A (`0.05 ≤ L < 0.20`):
+On Band A (`0.05 ≤ L < 0.20`):
 
-  ```text
-  0.024 ≤ mean(g_A) ≤ 0.034
-  q90(g_A) ≥ 0.060
-  ```
+* `0.024 ≤ mean(g_A) ≤ 0.034`
+* `q90(g_A) ≥ 0.060`
 
-* Band relationships:
+Band relationships:
 
-  ```text
-  mean(g_A) ≤ mean(g_B)
-  mean(g_B) ≤ mean(g_C) + 0.010
-  ```
+* `mean(g_A) ≤ mean(g_B)`
+* `mean(g_B) ≤ mean(g_C) + 0.010`
 
-#### P4-C – Hue Variation & Progression
+**P4-C – Hue Variation & Progression**
 
-* Global hue:
+Global:
 
-  ```text
-  0.075 ≤ h_mean ≤ 0.095
-  0.060 ≤ h_std  ≤ 0.130
-  ```
+* `0.075 ≤ h_mean ≤ 0.095`
+* `0.060 ≤ h_std  ≤ 0.130`
 
-* Band B (midtones):
+Band B (midtones):
 
-  ```text
-  0.08 ≤ mean(h_B) ≤ 0.11
-  0.08 ≤ std(h_B)  ≤ 0.15
-  ```
+* `0.08 ≤ mean(h_B) ≤ 0.11`
+* `0.08 ≤ std(h_B)  ≤ 0.15`
 
-* Hue progression by band:
+Bandwise means:
 
-  ```text
-  0.02 ≤ mean(h_A) ≤ 0.07
-  0.06 ≤ mean(h_B) ≤ 0.11
-  0.09 ≤ mean(h_C) ≤ 0.13
-  mean(h_A) < mean(h_B) < mean(h_C)
-  ```
+* `0.02 ≤ mean(h_A) ≤ 0.07`
+* `0.06 ≤ mean(h_B) ≤ 0.11`
+* `0.09 ≤ mean(h_C) ≤ 0.13`
+* `mean(h_A) < mean(h_B) < mean(h_C)`
 
-### Acceptance Criteria
+### Acceptance
 
-* [ ] All P1, P2, P3 tests pass (no regressions).
-* [ ] All P4-L, P4-G, P4-C constraints pass.
-* [ ] Final `terrain_csm.png` is visually and statistically within tolerance of `Gore_Range_Albers_1m.png` for lighting, contrast, and color.
+* All P1–P3 tests pass (no regressions).
+* All P4-L, P4-G, P4-C tests pass.
 
 ---
 
-## Implementation Notes
+## Suggested File Layout
 
-* Each requirement group (R*, P2, P3, P4) should be mapped to concrete tests in a validation harness, e.g.:
-
-  * `validate_R.py` – structural & basic stats (R0–R8).
-  * `validate_P2.py` – luminance & dynamic range.
-  * `validate_P3.py` – gradients, tiles, global hue.
-  * `validate_P4.py` – valley/midtone/hue refinement.
-
-* CI should run all validators after each change to shaders or terrain parameters and fail if any milestone’s tests regress.
+* `tests/validate_R.py`     – R0–R8 base checks.
+* `tests/validate_P2.py`    – luminance & dynamic range.
+* `tests/validate_P3.py`    – gradients, tiles, global hue.
+* `tests/validate_P4.py`    – valleys, midtones, hue variation.
+* `docs/terrain_gore_range_milestones.md` – this spec.
