@@ -1612,6 +1612,8 @@ impl TerrainScene {
             debug_mode: 0,
             peter_panning_offset: 0.0,
             pcss_light_radius: 0.0,
+            cascade_blend_range: 0.0, // No blending needed for noop
+            _padding: [0.0; 3],
         };
         let csm_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain.noop_shadow.csm_uniforms"),
@@ -2410,6 +2412,8 @@ impl TerrainScene {
             debug_mode: csm.debug_mode,
             peter_panning_offset: csm.peter_panning_offset,
             pcss_light_radius: self.shadow_pcss_radius,
+            cascade_blend_range: csm.cascade_blend_range,
+            _padding: [0.0; 3],
         };
         
         // Create buffer with the terrain-compatible uniforms

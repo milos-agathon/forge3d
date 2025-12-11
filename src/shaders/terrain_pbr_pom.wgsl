@@ -49,8 +49,12 @@ const TERRAIN_USE_SHADOWS: bool = TERRAIN_SHADOWS_ENABLED;
 // P1-Shadow: Shadow intensity tuning
 // SHADOW_MIN: minimum brightness in fully shadowed areas (0.0 = pitch black, 0.3 = soft shadows)
 // SHADOW_IBL_FACTOR: how much IBL diffuse is reduced in shadow (0.0 = no effect, 1.0 = full shadow)
-const SHADOW_MIN: f32 = 0.15;        // Shadows darken to 15% of direct light (softer, more natural)
-const SHADOW_IBL_FACTOR: f32 = 0.6;  // IBL diffuse reduced by 60% in shadow (allows some sky bounce)
+// 
+// NOTE: SHADOW_MIN should be very low to avoid colored sun light bleeding into shadows.
+// Real shadows should be dominated by ambient/IBL light (neutral sky color), not direct sun.
+// With high SHADOW_MIN, shadows get tinted by the sun color (looks unnatural with pink/orange sun).
+const SHADOW_MIN: f32 = 0.001;       // Shadows darken to 0.1% of direct light (deep dramatic shadows)
+const SHADOW_IBL_FACTOR: f32 = 0.70; // IBL diffuse reduced by 70% in shadow (darker ambient for drama)
 
 // P1-Shadow Debug: Set to true to visualize shadow cascade coverage
 // Color codes terrain by which cascade is used: Red=0, Green=1, Blue=2, Yellow=3
@@ -255,15 +259,19 @@ struct ShadowCascade {
 struct CsmUniforms {
     light_direction: vec4<f32>,        // 16 bytes, offset 0
     light_view: mat4x4<f32>,           // 64 bytes, offset 16
-    cascades: array<ShadowCascade, 4>, // 320 bytes, offset 80 (4 * 80)
-    cascade_count: u32,                // 4 bytes, offset 400
-    pcf_kernel_size: u32,              // 4 bytes, offset 404
-    depth_bias: f32,                   // 4 bytes, offset 408
-    slope_bias: f32,                   // 4 bytes, offset 412
-    shadow_map_size: f32,              // 4 bytes, offset 416
-    debug_mode: u32,                   // 4 bytes, offset 420
-    peter_panning_offset: f32,         // 4 bytes, offset 424 (needed by shader)
-    pcss_light_radius: f32,            // 4 bytes, offset 428 -> total 432
+    cascades: array<ShadowCascade, 4>, // 576 bytes, offset 80 (4 * 144: 2 mat4x4 + 4 floats each)
+    cascade_count: u32,                // 4 bytes, offset 656
+    pcf_kernel_size: u32,              // 4 bytes, offset 660
+    depth_bias: f32,                   // 4 bytes, offset 664
+    slope_bias: f32,                   // 4 bytes, offset 668
+    shadow_map_size: f32,              // 4 bytes, offset 672
+    debug_mode: u32,                   // 4 bytes, offset 676
+    peter_panning_offset: f32,         // 4 bytes, offset 680
+    pcss_light_radius: f32,            // 4 bytes, offset 684
+    cascade_blend_range: f32,          // 4 bytes, offset 688
+    _padding0: f32,                    // 4 bytes, offset 692
+    _padding1: f32,                    // 4 bytes, offset 696
+    _padding2: f32,                    // 4 bytes, offset 700 -> total 704 bytes
 }
 
 @group(3) @binding(0)
@@ -542,8 +550,28 @@ fn calculate_shadow_terrain(world_pos: vec3<f32>, normal: vec3<f32>, view_depth:
     // Compute from tex_coord since world_pos is incorrectly interpolated for fullscreen triangle
     let shadow_pos = normalize_for_shadow(tex_coord);
     
-    // Sample shadow with PCF
-    return sample_shadow_pcf_terrain(shadow_pos, normal, cascade_idx);
+    // Sample shadow with PCF for current cascade
+    var shadow_factor = sample_shadow_pcf_terrain(shadow_pos, normal, cascade_idx);
+    
+    // Cascade blending: smooth transitions between cascades to avoid visible seams
+    // Only blend if cascade_blend_range > 0 and we're not at the last cascade
+    let blend_range = csm_uniforms.cascade_blend_range;
+    if (blend_range > 0.0 && cascade_idx < csm_uniforms.cascade_count - 1u) {
+        let current_far = csm_uniforms.cascades[cascade_idx].far_distance;
+        let blend_start = current_far * (1.0 - blend_range);
+        
+        // Check if we're in the blend region near cascade boundary
+        if (view_depth > blend_start) {
+            // Sample next cascade
+            let next_shadow = sample_shadow_pcf_terrain(shadow_pos, normal, cascade_idx + 1u);
+            
+            // Blend between cascades based on depth within blend region
+            let blend_factor = (view_depth - blend_start) / (current_far - blend_start);
+            shadow_factor = mix(shadow_factor, next_shadow, blend_factor);
+        }
+    }
+    
+    return shadow_factor;
 }
 
 /// Debug: Get cascade color for visualization
@@ -1753,22 +1781,23 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         let max_depth = 3.0; // Visual depth scaling
         let transmittance = exp(-absorption * water_depth_value * max_depth);
         
-        // Deep water color - obviously blue for clear lake identification
-        let deep_water_color = vec3<f32>(0.0, 0.15, 0.5);
+        // Deep water color - vibrant saturated blue for clear lake identification
+        // Reference: bright blue like #0066CC = vec3(0.0, 0.4, 0.8) in linear
+        let deep_water_color = vec3<f32>(0.0, 0.35, 0.85);
         
-        // Shallow water near shore - lighter but still clearly blue
-        let shallow_color = vec3<f32>(0.1, 0.25, 0.45);
+        // Shallow water near shore - lighter cyan-blue
+        let shallow_color = vec3<f32>(0.15, 0.45, 0.75);
         
         // Blend based on depth - this gives visible shoreline gradient
         let underwater_color = mix(shallow_color, deep_water_color, water_depth_value);
         
-        // Water albedo for the tiny diffuse term (mostly for depth visualization)
+        // Water albedo - vibrant blue that shows through reflections
         albedo = underwater_color;
         
-        // Scatter contribution - VERY subtle, just enough to show depth variation
-        // This should NOT dominate over IBL specular reflection
+        // Scatter contribution - stronger to ensure blue color is visible
+        // Even with IBL reflections, the water should read as blue
         // water_depth_value: 0=shore (more bottom visible), 1=deep (less bottom visible)
-        water_scatter = underwater_color * (1.0 - water_depth_value * 0.9) * 0.1;
+        water_scatter = underwater_color * (1.0 - water_depth_value * 0.5) * 0.4;
         
         // Directional wind-driven waves (dominant wind direction + secondary)
         // Creates coherent wave patterns that read as water, not noise
@@ -2558,15 +2587,28 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             // Combine: reflections + specular, attenuated by depth
             let reflective = (combined_reflection + sun_spec) * depth_atten;
             
-            // Water color based on underwater_color (which should be red for testing)
-            shaded = reflective + water_scatter * 5.0 + albedo * 0.3;
+            // Water color: reflections + scatter + base albedo
+            // Increased albedo contribution (0.5) to ensure vibrant blue shows through
+            shaded = reflective + water_scatter * 3.0 + albedo * 0.5;
             
         } else {
-            // Regular terrain: ambient + direct + IBL
+            // Regular terrain: direct + IBL + minimal ambient fill
+            // 
+            // The ambient term is scaled down to preserve colormap fidelity while still
+            // providing some fill light in areas with low IBL contribution.
+            // 
+            // Old formula caused washout: ambient + direct + IBL (where ambient was 100%)
+            // New formula: 8% ambient + direct + IBL (prevents over-brightening and preserves colormap)
+            //
+            // The 0.08 factor was chosen to:
+            // 1. Preserve some slope-based ambient variation
+            // 2. Avoid complete darkness in areas with weak IBL
+            // 3. Minimize IBL color bleeding into colormap
+            
             let shading_slope = 1.0 - abs(shading_normal.y);
             let ambient_strength = mix(u_shading.clamp1.x, u_shading.clamp1.y, shading_slope);
-            // Apply shadow to ambient as well - shadowed areas receive less ambient light
-            let ambient = albedo * ambient_strength * shadow_factor;
+            // Scale ambient to 8% to minimize IBL color bleeding (was 15%)
+            let ambient = albedo * ambient_strength * shadow_factor * 0.08;
             let direct_mult = mix(0.65, 1.0, occlusion);
             let direct = lighting * direct_mult;
             
@@ -2583,9 +2625,17 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
                 ao_factor = mix(1.0, ao_sample, ao_weight);
             }
             
-            // Apply AO to ambient and indirect (IBL diffuse) lighting
+            // Apply AO to ambient and IBL diffuse (indirect lighting)
+            // IBL diffuse already includes albedo tinting via kD * base_color * irradiance
             // Keep direct specular unaffected for energy conservation
-            let ao_affected_ibl = ibl_split.diffuse * u_ibl.intensity * ibl_occlusion * shadow_factor * ao_factor + ibl_split.specular * u_ibl.intensity * ibl_occlusion;
+            // 
+            // Reduce IBL diffuse for flat/sky-facing normals to preserve colormap fidelity
+            // Flat terrain picks up too much environment color, drowning out the colormap
+            let normal_up_factor = abs(shading_normal.z); // Z-up: flat = high, steep = low
+            let ibl_diffuse_weight = mix(0.5, 0.15, normal_up_factor); // Steep: 50%, Flat: 15%
+            let warm_bias = vec3<f32>(1.08, 0.95, 0.88); // Warm shift to counteract cool environment
+            let ibl_diffuse_biased = ibl_split.diffuse * warm_bias;
+            let ao_affected_ibl = ibl_diffuse_biased * u_ibl.intensity * ibl_occlusion * shadow_factor * ao_factor * ibl_diffuse_weight + ibl_split.specular * u_ibl.intensity * ibl_occlusion;
             shaded = ambient * ao_factor + direct + ao_affected_ibl;
         }
         

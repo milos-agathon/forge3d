@@ -9,6 +9,42 @@
 pub mod camera_controller;
 pub mod hud;
 pub mod image_analysis;
+mod viewer_analysis;
+mod viewer_cmd_parse;
+mod viewer_config;
+mod viewer_constants;
+mod viewer_enums;
+mod viewer_image_utils;
+mod viewer_p5;
+mod viewer_render_helpers;
+mod viewer_ssr_scene;
+mod viewer_types;
+
+// Re-export public items
+pub use viewer_config::{set_initial_commands, ViewerConfig};
+#[cfg(feature = "extension-module")]
+pub use viewer_config::set_initial_terrain_config;
+
+use viewer_analysis::{gradient_energy, mean_luma_region};
+use viewer_config::{FpsCounter, INITIAL_CMDS};
+use viewer_constants::{
+    LIT_WGSL_VERSION, P51_MAX_MEGAPIXELS, P52_MAX_MEGAPIXELS, P5_SSGI_CORNELL_WARMUP_FRAMES,
+    P5_SSGI_DIFFUSE_SCALE, VIEWER_SNAPSHOT_MAX_MEGAPIXELS,
+};
+#[cfg(feature = "extension-module")]
+use viewer_config::INITIAL_TERRAIN_CONFIG;
+// viewer_cmd_parse::parse_command_string available for future refactoring of run_viewer
+use viewer_enums::{parse_gi_viz_mode_token, CaptureKind, FogMode, ViewerCmd, VizMode};
+use viewer_image_utils::{
+    add_debug_noise_rgba8, downscale_rgba8_bilinear,
+    flatten_rgba8_to_mean_luma, luma_std_rgba8,
+};
+use viewer_render_helpers::render_view_to_rgba8_ex;
+use viewer_ssr_scene::{build_ssr_albedo_texture, build_ssr_scene_mesh};
+use viewer_types::{
+    FogCameraUniforms, FogUpsampleParamsStd140, P51CornellSceneState, PackedVertex, SceneMesh,
+    SkyUniforms, VolumetricUniformsStd140,
+};
 
 use crate::cli::args::GiVizMode;
 use hud::{
@@ -23,7 +59,7 @@ use crate::core::gpu_timing::{create_default_config as create_gpu_timing_config,
 use crate::core::ibl::{IBLQuality, IBLRenderer};
 use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
 use crate::core::shadows::{CameraFrustum, CsmConfig, CsmShadowMap};
-use crate::geometry::{generate_plane, generate_sphere, MeshBuffers};
+// geometry imports moved to viewer_ssr_scene.rs
 use crate::p5::meta::{self as p5_meta, build_ssr_meta, SsrMetaInput};
 use crate::p5::{ssr, ssr::SsrScenePreset, ssr_analysis};
 use crate::passes::gi::{GiCompositeParams, GiPass};
@@ -33,14 +69,14 @@ use crate::renderer::readback::read_texture_tight;
 use crate::util::image_write;
 use anyhow::{anyhow, bail};
 use camera_controller::{CameraController, CameraMode};
-use glam::{Mat3, Mat4, Vec2, Vec3};
+use glam::{Mat4, Vec3};
 use half::f16;
 use serde_json::json;
 use std::collections::VecDeque;
 use std::io::BufRead;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use wgpu::util::DeviceExt;
 use wgpu::{Adapter, Device, Instance, Queue, Surface, SurfaceConfiguration};
 use winit::{
@@ -52,89 +88,10 @@ use winit::{
 };
 // once_cell imported via path for INITIAL_CMDS; no direct use import needed
 
-// Quick sanity-check version for viewer lit WGSL
-const LIT_WGSL_VERSION: u32 = 2;
-// Limit for P5.1 capture outputs (in megapixels). Images larger than this will be downscaled.
-const P51_MAX_MEGAPIXELS: f32 = 2.0;
-const P52_MAX_MEGAPIXELS: f32 = 2.0;
-// Soft limit for interactive viewer snapshots (in megapixels). User-provided snapshot
-// overrides will be clamped to this size to keep memory usage within budget while
-// still allowing high-resolution captures (e.g. 4K).
-const VIEWER_SNAPSHOT_MAX_MEGAPIXELS: f32 = 16.0;
-const P5_SSGI_DIFFUSE_SCALE: f32 = 0.5;
-const P5_SSGI_CORNELL_WARMUP_FRAMES: u32 = 64;
+// Constants moved to viewer_constants.rs
 
 
-fn build_ssr_albedo_texture(preset: &SsrScenePreset, size: u32) -> Vec<u8> {
-    let dim = size.max(1);
-    let mut pixels = vec![0u8; (dim * dim * 4) as usize];
-
-    let lerp3 = |a: [f32; 3], b: [f32; 3], t: f32| -> [f32; 3] {
-        [
-            a[0] + (b[0] - a[0]) * t,
-            a[1] + (b[1] - a[1]) * t,
-            a[2] + (b[2] - a[2]) * t,
-        ]
-    };
-
-    let to_u8 = |v: f32| -> u8 { (v.clamp(0.0, 1.0) * 255.0).round() as u8 };
-
-    let horizon = (preset.floor_horizon.clamp(0.0, 1.0) * dim as f32)
-        .round()
-        .clamp(0.0, (dim - 1) as f32) as u32;
-
-    for y in 0..dim {
-        let color = if y < horizon {
-            let denom = horizon.max(1);
-            let t = (y as f32 / denom as f32).powf(0.9).clamp(0.0, 1.0);
-            lerp3(preset.background_top, preset.background_bottom, t)
-        } else {
-            let denom = (dim - horizon).max(1);
-            let t = ((y - horizon) as f32 / denom as f32).clamp(0.0, 1.0);
-            lerp3(preset.floor.color_top, preset.floor.color_bottom, t)
-        };
-        for x in 0..dim {
-            let idx = ((y * dim + x) * 4) as usize;
-            pixels[idx] = to_u8(color[0]);
-            pixels[idx + 1] = to_u8(color[1]);
-            pixels[idx + 2] = to_u8(color[2]);
-            pixels[idx + 3] = 255;
-        }
-    }
-
-    let stripe_center = preset.stripe.center_y * dim as f32;
-    let stripe_half = (preset.stripe.half_thickness * dim as f32).max(1.0);
-    for y in 0..dim {
-        let dy = ((y as f32 - stripe_center) / stripe_half).abs();
-        if dy < 1.0 {
-            let alpha = (1.0 - dy).powf(2.0) * preset.stripe.glow_strength;
-            let glow = lerp3(
-                preset.stripe.inner_color,
-                preset.stripe.outer_color,
-                (y as f32 / dim as f32).clamp(0.0, 1.0),
-            );
-            for x in 0..dim {
-                let idx = ((y * dim + x) * 4) as usize;
-                let dst = [
-                    pixels[idx] as f32 / 255.0,
-                    pixels[idx + 1] as f32 / 255.0,
-                    pixels[idx + 2] as f32 / 255.0,
-                ];
-                let inv = 1.0 - alpha;
-                let mixed = [
-                    dst[0] * inv + glow[0] * alpha,
-                    dst[1] * inv + glow[1] * alpha,
-                    dst[2] * inv + glow[2] * alpha,
-                ];
-                pixels[idx] = to_u8(mixed[0]);
-                pixels[idx + 1] = to_u8(mixed[1]);
-                pixels[idx + 2] = to_u8(mixed[2]);
-            }
-        }
-    }
-
-    pixels
-}
+// build_ssr_albedo_texture moved to viewer_ssr_scene.rs
 
 impl Viewer {
     /// Override fog shadow map with a constant depth value.
@@ -153,270 +110,11 @@ impl Viewer {
     }
 }
 
-#[repr(C, align(16))]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct SkyUniforms {
-    // Vec4 #1
-    sun_direction: [f32; 3],
-    turbidity: f32,
-    // Vec4 #2
-    ground_albedo: f32,
-    model: u32, // 0=Preetham, 1=Hosek-Wilkie
-    sun_intensity: f32,
-    exposure: f32,
-    // Vec4 #3 padding
-    _pad: [f32; 4],
-}
+// Types moved to viewer_types.rs (including P51CornellSceneState)
 
-// Std140-compatible packed layout for VolumetricUniforms used for GPU uniform buffer writes
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct VolumetricUniformsStd140 {
-    // row 0
-    density: f32,
-    height_falloff: f32,
-    phase_g: f32,
-    max_steps: u32,
-    // row 1 (pad to align following vec3 to 16-byte boundary)
-    start_distance: f32,
-    max_distance: f32,
-    _pad_a0: f32,
-    _pad_a1: f32,
-    // row 2
-    scattering_color: [f32; 3],
-    absorption: f32,
-    // row 3
-    sun_direction: [f32; 3],
-    sun_intensity: f32,
-    // row 4
-    ambient_color: [f32; 3],
-    temporal_alpha: f32,
-    // row 5
-    use_shadows: u32,
-    jitter_strength: f32,
-    frame_index: u32,
-    _pad0: u32,
-}
+// build_ssr_scene_mesh moved to viewer_ssr_scene.rs
 
-// P6: Volumetric fog uniforms matching shaders/volumetric.wgsl (std140-like packing)
-#[repr(C, align(16))]
-#[allow(dead_code)]
-#[derive(Clone, Copy)]
-struct VolumetricUniforms {
-    // row 0
-    density: f32,
-    height_falloff: f32,
-    phase_g: f32,
-    max_steps: u32,
-    // row 1
-    start_distance: f32,
-    max_distance: f32,
-    scattering_color: [f32; 3],
-    absorption: f32,
-    // row 2
-    sun_direction: [f32; 3],
-    sun_intensity: f32,
-    // row 3
-    ambient_color: [f32; 3],
-    temporal_alpha: f32,
-    // row 4
-    use_shadows: u32,
-    jitter_strength: f32,
-    frame_index: u32,
-    _pad0: u32,
-    // Explicit padding to eliminate trailing struct padding for Pod
-    _pad1: u32,
-    _pad2: u32,
-}
-
-#[repr(C, align(16))]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct FogCameraUniforms {
-    view: [[f32; 4]; 4],
-    proj: [[f32; 4]; 4],
-    inv_view: [[f32; 4]; 4],
-    inv_proj: [[f32; 4]; 4],
-    view_proj: [[f32; 4]; 4],
-    eye_position: [f32; 3],
-    near: f32,
-    far: f32,
-    _pad: [f32; 3],
-}
-
-// Std140-compatible upsample params for fog_upsample.wgsl
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct FogUpsampleParamsStd140 {
-    sigma: f32,
-    use_bilateral: u32,
-    _pad: [f32; 2],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct PackedVertex {
-    position: [f32; 3],
-    normal: [f32; 3],
-    uv: [f32; 2],
-    rough_metal: [f32; 2],
-}
-
-#[derive(Default)]
-struct SceneMesh {
-    vertices: Vec<PackedVertex>,
-    indices: Vec<u32>,
-}
-
-impl SceneMesh {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn push_vertex(
-        &mut self,
-        position: Vec3,
-        normal: Vec3,
-        uv: Vec2,
-        roughness: f32,
-        metallic: f32,
-    ) -> u32 {
-        let idx = self.vertices.len() as u32;
-        self.vertices.push(PackedVertex {
-            position: position.to_array(),
-            normal: normal.normalize_or_zero().to_array(),
-            uv: uv.to_array(),
-            rough_metal: [roughness, metallic],
-        });
-        idx
-    }
-
-    fn extend_with_mesh(
-        &mut self,
-        mesh: &MeshBuffers,
-        transform: Mat4,
-        roughness: f32,
-        metallic: f32,
-    ) {
-        let base = self.vertices.len() as u32;
-        let normal_matrix = Mat3::from_mat4(transform).inverse().transpose();
-        for i in 0..mesh.positions.len() {
-            let pos = Vec3::from_array(mesh.positions[i]);
-            let pos_w = (transform * pos.extend(1.0)).truncate();
-            let normal_src = if mesh.normals.len() == mesh.positions.len() {
-                Vec3::from_array(mesh.normals[i])
-            } else {
-                Vec3::Y
-            };
-            let normal_w = (normal_matrix * normal_src).normalize_or_zero();
-            let uv = if mesh.uvs.len() == mesh.positions.len() {
-                Vec2::from_array(mesh.uvs[i])
-            } else {
-                Vec2::ZERO
-            };
-            self.vertices.push(PackedVertex {
-                position: pos_w.to_array(),
-                normal: normal_w.to_array(),
-                uv: uv.to_array(),
-                rough_metal: [roughness, metallic],
-            });
-        }
-        for &idx in &mesh.indices {
-            self.indices.push(base + idx);
-        }
-    }
-}
-
-struct P51CornellSceneState {
-    geom_vb: Option<wgpu::Buffer>,
-    geom_ib: Option<wgpu::Buffer>,
-    geom_index_count: u32,
-    sky_enabled: bool,
-    fog_enabled: bool,
-    viz_mode: VizMode,
-    gi_viz_mode: GiVizMode,
-    camera_mode: CameraMode,
-    camera_eye: Vec3,
-    camera_target: Vec3,
-}
-
-fn build_ssr_scene_mesh(preset: &SsrScenePreset) -> SceneMesh {
-    let mut scene = SceneMesh::new();
-
-    // Floor plane
-    const FLOOR_WIDTH: f32 = 8.0;
-    const FLOOR_DEPTH: f32 = 6.0;
-    const FLOOR_Y: f32 = -1.0;
-    let floor_mesh = generate_plane(32, 32);
-    let floor_transform = Mat4::from_translation(Vec3::new(0.0, FLOOR_Y, 0.0))
-        * Mat4::from_scale(Vec3::new(FLOOR_WIDTH * 0.5, 1.0, FLOOR_DEPTH * 0.5));
-    scene.extend_with_mesh(&floor_mesh, floor_transform, 0.35, 0.0);
-
-    // No extra back wall geometry; only floor + spheres per M2 visual acceptance
-
-    // Glossy spheres
-    const SPHERE_RINGS: u32 = 48;
-    const SPHERE_SEGMENTS: u32 = 64;
-    for (i, sphere) in preset.spheres.iter().enumerate() {
-        let mesh = generate_sphere(SPHERE_RINGS, SPHERE_SEGMENTS, 1.0);
-        let x = (sphere.offset_x - 0.5) * 6.0;
-        let y = sphere.center_y * 3.0;
-        let z = 0.5 + (i as f32) * 0.01;
-        let radius = (sphere.radius * 3.0).max(0.05);
-        let transform =
-            Mat4::from_translation(Vec3::new(x, y, z)) * Mat4::from_scale(Vec3::splat(radius));
-        scene.extend_with_mesh(&mesh, transform, sphere.roughness, 0.0);
-    }
-
-    scene
-}
-
-#[derive(Clone)]
-pub struct ViewerConfig {
-    pub width: u32,
-    pub height: u32,
-    pub title: String,
-    pub vsync: bool,
-    pub fov_deg: f32,
-    pub znear: f32,
-    pub zfar: f32,
-    pub snapshot_width: Option<u32>,
-    pub snapshot_height: Option<u32>,
-}
-
-// Global initial commands for viewer (set by CLI parser in example)
-static INITIAL_CMDS: once_cell::sync::OnceCell<Vec<String>> = once_cell::sync::OnceCell::new();
-
-pub fn set_initial_commands(cmds: Vec<String>) {
-    let _ = INITIAL_CMDS.set(cmds);
-}
-
-// Optional initial terrain configuration (set by open_terrain_viewer via lib.rs).
-// We keep this behind the extension-module feature since it is only used by the
-// Python-facing entrypoint.
-#[cfg(feature = "extension-module")]
-static INITIAL_TERRAIN_CONFIG: once_cell::sync::OnceCell<crate::render::params::RendererConfig> =
-    once_cell::sync::OnceCell::new();
-
-#[cfg(feature = "extension-module")]
-pub fn set_initial_terrain_config(cfg: crate::render::params::RendererConfig) {
-    let _ = INITIAL_TERRAIN_CONFIG.set(cfg);
-}
-
-impl Default for ViewerConfig {
-    fn default() -> Self {
-        Self {
-            width: 1024,
-            height: 768,
-            title: "forge3d Interactive Viewer".to_string(),
-            vsync: true,
-            fov_deg: 45.0,
-            znear: 0.1,
-            zfar: 1000.0,
-	        snapshot_width: None,
-	        snapshot_height: None,
-        }
-    }
-}
+// ViewerConfig and statics moved to viewer_config.rs
 pub struct Viewer {
     window: Arc<Window>,
     surface: Surface<'static>,
@@ -611,38 +309,7 @@ pub struct Viewer {
     ssr_scene_preset: Option<SsrScenePreset>,
 }
 
-struct FpsCounter {
-    frames: u32,
-    last_report: Instant,
-    current_fps: f32,
-}
-
-impl FpsCounter {
-    fn new() -> Self {
-        Self {
-            frames: 0,
-            last_report: Instant::now(),
-            current_fps: 0.0,
-        }
-    }
-
-    fn tick(&mut self) -> Option<f32> {
-        self.frames += 1;
-        let elapsed = self.last_report.elapsed();
-        if elapsed >= Duration::from_secs(1) {
-            self.current_fps = self.frames as f32 / elapsed.as_secs_f32();
-            self.frames = 0;
-            self.last_report = Instant::now();
-            Some(self.current_fps)
-        } else {
-            None
-        }
-    }
-
-    fn fps(&self) -> f32 {
-        self.current_fps
-    }
-}
+// FpsCounter moved to viewer_config.rs
 
 impl Viewer {
     #[cfg(feature = "extension-module")]
@@ -943,536 +610,20 @@ impl Viewer {
         Ok(())
     }
     // Compute mean luma in a region of an RGBA8 buffer
-    fn mean_luma_region(buf: &Vec<u8>, w: u32, h: u32, x0: u32, y0: u32, rw: u32, rh: u32) -> f32 {
-        let (w, h) = (w as usize, h as usize);
-        let (x0, y0, rw, rh) = (x0 as usize, y0 as usize, rw as usize, rh as usize);
-        let mut sum = 0.0f64;
-        let mut count = 0usize;
-        for y in y0..(y0 + rh).min(h) {
-            for x in x0..(x0 + rw).min(w) {
-                let i = (y * w + x) * 4;
-                let r = buf[i] as f32;
-                let g = buf[i + 1] as f32;
-                let b = buf[i + 2] as f32;
-                let l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                sum += (l / 255.0) as f64;
-                count += 1;
-            }
-        }
-        if count == 0 {
-            0.0
-        } else {
-            (sum / count as f64) as f32
-        }
-    }
-
-    // Compute variance of luma over entire RGBA8 image
-    fn variance_luma(buf: &Vec<u8>, w: u32, h: u32) -> f32 {
-        let (w, h) = (w as usize, h as usize);
-        let n = (w * h).max(1);
-        let mut sum = 0.0f64;
-        let mut sum2 = 0.0f64;
-        for i in (0..(n * 4)).step_by(4) {
-            let r = buf[i] as f32;
-            let g = buf[i + 1] as f32;
-            let b = buf[i + 2] as f32;
-            let l = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0;
-            sum += l as f64;
-            sum2 += (l * l) as f64;
-        }
-        let mean = sum / n as f64;
-        let var = (sum2 / n as f64) - mean * mean;
-        var.max(0.0) as f32
-    }
-
-    // Simple Sobel-like gradient energy (used for blur effectiveness metric)
-    fn gradient_energy(buf: &Vec<u8>, w: u32, h: u32) -> f32 {
-        if w < 2 || h < 2 {
-            return 0.0;
-        }
-        let (w_usize, h_usize) = (w as usize, h as usize);
-        let mut energy = 0.0f64;
-        let mut samples = 0usize;
-        for y in 0..(h_usize.saturating_sub(1)) {
-            for x in 0..(w_usize.saturating_sub(1)) {
-                let idx = (y * w_usize + x) * 4;
-                let l = (0.2126 * buf[idx] as f32
-                    + 0.7152 * buf[idx + 1] as f32
-                    + 0.0722 * buf[idx + 2] as f32)
-                    / 255.0;
-                let idx_x = (y * w_usize + (x + 1)) * 4;
-                let lx = (0.2126 * buf[idx_x] as f32
-                    + 0.7152 * buf[idx_x + 1] as f32
-                    + 0.0722 * buf[idx_x + 2] as f32)
-                    / 255.0;
-                let idx_y = ((y + 1) * w_usize + x) * 4;
-                let ly = (0.2126 * buf[idx_y] as f32
-                    + 0.7152 * buf[idx_y + 1] as f32
-                    + 0.0722 * buf[idx_y + 2] as f32)
-                    / 255.0;
-                let dx = lx - l;
-                let dy = ly - l;
-                energy += (dx * dx + dy * dy) as f64;
-                samples += 1;
-            }
-        }
-        if samples == 0 {
-            0.0
-        } else {
-            (energy / samples as f64) as f32
-        }
-    }
+    // Analysis functions moved to viewer_analysis.rs
 
     // Write or update p5_meta.json with provided patcher
-    fn write_p5_meta<F: FnOnce(&mut std::collections::BTreeMap<String, serde_json::Value>)>(
+    pub(crate) fn write_p5_meta<F: FnOnce(&mut std::collections::BTreeMap<String, serde_json::Value>)>(
         &self,
         patch: F,
     ) -> anyhow::Result<()> {
         p5_meta::write_p5_meta(Path::new("reports/p5"), patch)
     }
 
-    fn capture_p52_ssgi_cornell(&mut self) -> anyhow::Result<()> {
-        use anyhow::Context;
-        use std::fs;
-        let out_dir = std::path::Path::new("reports/p5");
-        fs::create_dir_all(out_dir)?;
+    // capture_p52_ssgi_cornell moved to viewer_p5.rs
+    // capture_p52_ssgi_temporal moved to viewer_p5.rs
 
-        // Reuse the P5.1 Cornell box scene so SSGI captures are rendered
-        // against the same geometry and camera framing as the AO artifacts.
-        let state = self.setup_p51_cornell_scene()?;
-        // Ensure GBuffer/depth are populated for the Cornell geometry before
-        // we start toggling SSGI on/off.
-        self.render_geometry_to_gbuffer_once()?;
-
-        let capture_w = self.config.width.max(1);
-        let capture_h = self.config.height.max(1);
-        let capture_is_srgb = matches!(
-            self.config.format,
-            wgpu::TextureFormat::Rgba8UnormSrgb | wgpu::TextureFormat::Bgra8UnormSrgb
-        );
-
-        let was_enabled = {
-            let gi = self.gi.as_ref().context("GI manager not available")?;
-            gi.is_enabled(SSE::SSGI)
-        };
-        if !was_enabled {
-            let gi = self.gi.as_mut().context("GI manager not available")?;
-            gi.enable_effect(&self.device, SSE::SSGI)?;
-        }
-
-        let original_settings = {
-            let gi = self.gi.as_ref().context("GI manager not available")?;
-            gi.ssgi_settings().context("SSGI settings unavailable")?
-        };
-
-        {
-            let gi = self.gi.as_mut().context("GI manager not available")?;
-            gi.disable_effect(SSE::SSGI);
-        }
-        self.reexecute_gi(None)?;
-        let off_bytes = self.capture_material_rgba8()?;
-
-        {
-            let gi = self.gi.as_mut().context("GI manager not available")?;
-            gi.enable_effect(&self.device, SSE::SSGI)?;
-            gi.update_ssgi_settings(&self.queue, |s| {
-                *s = original_settings;
-            });
-            gi.ssgi_reset_history(&self.device, &self.queue)?;
-            // Task 2: Set SSGI diffuse intensity factor for compositing
-            // This scalar controls how much SSGI radiance is added to diffuse lighting
-            // Tuned to achieve 5-12% bounce on neutral walls adjacent to colored walls
-            gi.set_ssgi_composite_intensity(&self.queue, P5_SSGI_DIFFUSE_SCALE);
-        }
-        for _ in 0..P5_SSGI_CORNELL_WARMUP_FRAMES {
-            self.reexecute_gi(None)?;
-        }
-        let on_bytes = self.capture_material_rgba8()?;
-
-        // Combine split image
-        let out_w = capture_w * 2;
-        let out_h = capture_h;
-        let mut combined = vec![0u8; (out_w * out_h * 4) as usize];
-        let row_stride = (capture_w as usize) * 4;
-        for y in 0..(capture_h as usize) {
-            let dst_off = y * (out_w as usize) * 4;
-            let src_off = y * row_stride;
-            combined[dst_off..dst_off + row_stride]
-                .copy_from_slice(&off_bytes[src_off..src_off + row_stride]);
-            combined[dst_off + row_stride..dst_off + row_stride * 2]
-                .copy_from_slice(&on_bytes[src_off..src_off + row_stride]);
-        }
-
-        let write_buf: Vec<u8>;
-        let (final_w, final_h, data_ref): (u32, u32, &[u8]) = {
-            let px = (out_w as u64 as f64) * (out_h as u64 as f64);
-            let max_px = (P52_MAX_MEGAPIXELS * 1_000_000.0) as f64;
-            if px > max_px {
-                let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
-                let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
-                let dh = (out_h as f64 * scale).floor().max(1.0) as u32;
-                write_buf = Self::downscale_rgba8_bilinear(&combined, out_w, out_h, dw, dh);
-                (dw, dh, &write_buf)
-            } else {
-                (out_w, out_h, &combined)
-            }
-        };
-        crate::util::image_write::write_png_rgba8_small(
-            &out_dir.join("p5_ssgi_cornell.png"),
-            data_ref,
-            final_w,
-            final_h,
-        )?;
-        if final_w != out_w || final_h != out_h {
-            println!(
-                "[P5.2] downscaled SSGI Cornell capture to {}x{} (from {}x{})",
-                final_w, final_h, out_w, out_h
-            );
-        }
-        println!("[P5] Wrote reports/p5/p5_ssgi_cornell.png");
-
-        // Metrics: miss ratio & avg steps
-        let (miss_ratio, avg_steps) = {
-            let (hit_bytes, dims) = self.read_ssgi_hit_bytes()?;
-            let step_len = {
-                let s = original_settings;
-                let steps = s.num_steps.max(1) as f32;
-                s.step_size.max(s.radius / steps)
-            };
-            let mut miss = 0u64;
-            let mut hit = 0u64;
-            let mut step_acc = 0.0f64;
-            for i in 0..(dims.0 * dims.1) as usize {
-                let off = i * 8;
-                let dist = f16::from_le_bytes([hit_bytes[off + 4], hit_bytes[off + 5]]).to_f32();
-                let mask = f16::from_le_bytes([hit_bytes[off + 6], hit_bytes[off + 7]]).to_f32();
-                if mask >= 0.5 {
-                    hit += 1;
-                    let steps = if step_len > 0.0 { dist / step_len } else { 0.0 };
-                    step_acc += steps as f64;
-                } else {
-                    miss += 1;
-                }
-            }
-            let total = (dims.0 as u64) * (dims.1 as u64);
-            let miss_ratio = if total > 0 {
-                miss as f32 / total as f32
-            } else {
-                0.0
-            };
-            let avg_steps = if hit > 0 {
-                (step_acc / hit as f64) as f32
-            } else {
-                0.0
-            };
-            (miss_ratio, avg_steps)
-        };
-
-        // Timings
-        let (trace_ms, shade_ms, temporal_ms, upsample_ms) = {
-            let gi = self.gi.as_ref().context("GI manager not available")?;
-            gi.ssgi_timings_ms().unwrap_or((0.0, 0.0, 0.0, 0.0))
-        };
-
-        // Task 1: Wall bounce measurement - ROI-based luminance calculation
-        // Define hard-coded ROIs for neutral wall regions adjacent to red and green walls
-        // Cornell box: red wall on left (x=-1), green on right (x=1), neutral walls elsewhere
-        // Back wall (z=1) is neutral and should receive bounce from both red and green walls
-        // ROIs are defined for 1920x1080 base resolution and scaled for other resolutions
-        // ROI_R_NEUTRAL: neutral back wall region near the red wall (left side of back wall)
-        // ROI_G_NEUTRAL: neutral back wall region near the green wall (right side of back wall)
-        // These ROIs avoid the checker cube, edges, and specular highlights
-        const ROI_R_NEUTRAL_BASE: (u32, u32, u32, u32) = (750, 360, 930, 560); // centered patch facing red wall
-        const ROI_G_NEUTRAL_BASE: (u32, u32, u32, u32) = (950, 360, 1130, 560); // centered patch facing green wall
-        const BASE_WIDTH: u32 = 1920;
-        const BASE_HEIGHT: u32 = 1080;
-
-        // Scale ROIs to match current resolution
-        let roi_red = {
-            let (x0_base, y0_base, x1_base, y1_base) = ROI_R_NEUTRAL_BASE;
-            let x0 = (x0_base as f32 * capture_w as f32 / BASE_WIDTH as f32) as u32;
-            let y0 = (y0_base as f32 * capture_h as f32 / BASE_HEIGHT as f32) as u32;
-            let x1 = (x1_base as f32 * capture_w as f32 / BASE_WIDTH as f32) as u32;
-            let y1 = (y1_base as f32 * capture_h as f32 / BASE_HEIGHT as f32) as u32;
-            (x0, y0, x1, y1)
-        };
-        let roi_green = {
-            let (x0_base, y0_base, x1_base, y1_base) = ROI_G_NEUTRAL_BASE;
-            let x0 = (x0_base as f32 * capture_w as f32 / BASE_WIDTH as f32) as u32;
-            let y0 = (y0_base as f32 * capture_h as f32 / BASE_HEIGHT as f32) as u32;
-            let x1 = (x1_base as f32 * capture_w as f32 / BASE_WIDTH as f32) as u32;
-            let y1 = (y1_base as f32 * capture_h as f32 / BASE_HEIGHT as f32) as u32;
-            (x0, y0, x1, y1)
-        };
-
-        // Compute luminance for ROIs in SSGI OFF and ON frames
-        // Use linear luminance from final rendered color (post-GI, pre-tone-mapping)
-        // Convert from sRGB if needed so bounce math happens in linear space
-        let compute_roi_luminance = |bytes: &[u8], roi: (u32, u32, u32, u32)| -> f32 {
-            let (x0, y0, x1, y1) = roi;
-            let mut sum_luma = 0.0f64;
-            let mut count = 0u32;
-            let width = capture_w;
-            let height = capture_h;
-            let srgb = capture_is_srgb;
-            let x_start = x0.min(width);
-            let x_end = x1.min(width);
-            let y_start = y0.min(height);
-            let y_end = y1.min(height);
-            let to_linear = |channel: u8| -> f32 {
-                let c = channel as f32 / 255.0;
-                if srgb {
-                    if c <= 0.04045 {
-                        c / 12.92
-                    } else {
-                        ((c + 0.055) / 1.055).powf(2.4)
-                    }
-                } else {
-                    c
-                }
-            };
-            for y in y_start..y_end {
-                for x in x_start..x_end {
-                    let idx = ((y * width + x) * 4) as usize;
-                    if idx + 3 < bytes.len() {
-                        let r = to_linear(bytes[idx]);
-                        let g = to_linear(bytes[idx + 1]);
-                        let b = to_linear(bytes[idx + 2]);
-                        // Compute linear luminance: L = 0.2126*R + 0.7152*G + 0.0722*B
-                        let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                        sum_luma += luma as f64;
-                        count += 1;
-                    }
-                }
-            }
-            if count > 0 {
-                (sum_luma / count as f64) as f32
-            } else {
-                0.0
-            }
-        };
-
-        let l_r_off = compute_roi_luminance(&off_bytes, roi_red);
-        let l_r_on = compute_roi_luminance(&on_bytes, roi_red);
-        let l_g_off = compute_roi_luminance(&off_bytes, roi_green);
-        let l_g_on = compute_roi_luminance(&on_bytes, roi_green);
-
-        let bounce_red_pct = (l_r_on - l_r_off) / l_r_off.max(1e-6);
-        let bounce_green_pct = (l_g_on - l_g_off) / l_g_off.max(1e-6);
-
-        // Task 2: ΔE fallback (steps=0) – verify steps=0 SSGI outputs pure diffuse IBL
-        // Render with steps=0 twice and compare - they should be identical (pure IBL, no temporal variance)
-        let max_delta_e = {
-            // First render with steps=0 (should output pure diffuse IBL)
-            {
-                let gi = self.gi.as_mut().context("GI manager not available")?;
-                gi.enable_effect(&self.device, SSE::SSGI)?;
-                gi.update_ssgi_settings(&self.queue, |s| {
-                    s.num_steps = 0;
-                    s.step_size = original_settings.step_size;
-                    s.temporal_alpha = 0.0;
-                    s.intensity = 1.0; // Ensure intensity doesn't affect pure IBL
-                });
-                gi.ssgi_reset_history(&self.device, &self.queue)?;
-            }
-            self.reexecute_gi(None)?;
-            let first_bytes = self.read_ssgi_filtered_bytes()?.0;
-
-            // Second render with steps=0 (should be identical)
-            self.reexecute_gi(None)?;
-            let second_bytes = self.read_ssgi_filtered_bytes()?.0;
-
-            compute_max_delta_e(&second_bytes, &first_bytes)
-        };
-
-        // Restore SSGI settings, composite intensity, and effect enablement
-        {
-            let gi = self.gi.as_mut().context("GI manager not available")?;
-            gi.update_ssgi_settings(&self.queue, |s| {
-                *s = original_settings;
-            });
-            // Reset composite intensity to default (1.0)
-            gi.set_ssgi_composite_intensity(&self.queue, 1.0);
-            if !was_enabled {
-                gi.disable_effect(SSE::SSGI);
-            }
-        }
-
-        self.write_p5_meta(|meta| {
-            meta.insert(
-                "ssgi".to_string(),
-                json!({
-                    "miss_ratio": miss_ratio,
-                    "avg_steps": avg_steps,
-                    "accumulation_alpha": original_settings.temporal_alpha,
-                    "perf_ms": {
-                        "trace_ms": trace_ms,
-                        "shade_ms": shade_ms,
-                        "temporal_ms": temporal_ms,
-                        "upsample_ms": upsample_ms,
-                        "total_ssgi_ms": trace_ms + shade_ms + temporal_ms + upsample_ms,
-                    },
-                    "max_delta_e": max_delta_e,
-                }),
-            );
-            // Task 1: Store bounce metrics
-            meta.insert(
-                "ssgi_bounce".to_string(),
-                json!({
-                    "red_pct": bounce_red_pct,
-                    "green_pct": bounce_green_pct,
-                }),
-            );
-        })?;
-        // Restore the previous viewer scene/camera so subsequent captures or
-        // interactive use continue from the original state.
-        self.restore_p51_cornell_scene(state);
-
-        Ok(())
-    }
-
-    fn capture_p52_ssgi_temporal(&mut self) -> anyhow::Result<()> {
-        use anyhow::Context;
-        use std::fs;
-        let out_dir = std::path::Path::new("reports/p5");
-        fs::create_dir_all(out_dir)?;
-
-        // Use the same Cornell box setup as P5.1 so the temporal comparison
-        // runs on the canonical test scene.
-        let state = self.setup_p51_cornell_scene()?;
-        self.render_geometry_to_gbuffer_once()?;
-
-        let (w, h) = (self.config.width.max(1), self.config.height.max(1));
-
-        let was_enabled = {
-            let gi = self.gi.as_ref().context("GI manager not available")?;
-            gi.is_enabled(SSE::SSGI)
-        };
-        if !was_enabled {
-            let gi = self.gi.as_mut().context("GI manager not available")?;
-            gi.enable_effect(&self.device, SSE::SSGI)?;
-        }
-
-        let original_settings = {
-            let gi = self.gi.as_ref().context("GI manager not available")?;
-            gi.ssgi_settings().context("SSGI settings unavailable")?
-        };
-
-        {
-            let gi = self.gi.as_mut().context("GI manager not available")?;
-            gi.set_ssgi_composite_intensity(&self.queue, P5_SSGI_DIFFUSE_SCALE);
-        }
-
-        {
-            let gi = self.gi.as_mut().context("GI manager not available")?;
-            gi.update_ssgi_settings(&self.queue, |s| {
-                s.temporal_alpha = 0.0;
-            });
-            gi.ssgi_reset_history(&self.device, &self.queue)?;
-        }
-        self.reexecute_gi(None)?;
-        let single_bytes = self.capture_material_rgba8()?;
-
-        {
-            let gi = self.gi.as_mut().context("GI manager not available")?;
-            gi.update_ssgi_settings(&self.queue, |s| {
-                *s = original_settings;
-            });
-            gi.ssgi_reset_history(&self.device, &self.queue)?;
-        }
-
-        let mut frame8_luma = Vec::new();
-        let mut frame9_luma = Vec::new();
-
-        for frame in 0..16 {
-            self.reexecute_gi(None)?;
-            if frame == 7 || frame == 8 {
-                let (bytes, _) = self.read_ssgi_filtered_bytes()?;
-                let luma = rgba16_to_luma(&bytes);
-                if frame == 7 {
-                    frame8_luma = luma;
-                } else {
-                    frame9_luma = luma;
-                }
-            }
-        }
-
-        let accum_bytes = self.capture_material_rgba8()?;
-
-        // Combine side-by-side
-        let out_w = w * 2;
-        let out_h = h;
-        let mut combined = vec![0u8; (out_w * out_h * 4) as usize];
-        for y in 0..h as usize {
-            let dst_off = y * (out_w as usize) * 4;
-            combined[dst_off..dst_off + (w as usize * 4)]
-                .copy_from_slice(&single_bytes[y * (w as usize) * 4..(y + 1) * (w as usize) * 4]);
-            combined[dst_off + (w as usize * 4)..dst_off + (w as usize * 8)]
-                .copy_from_slice(&accum_bytes[y * (w as usize) * 4..(y + 1) * (w as usize) * 4]);
-        }
-
-        let write_buf: Vec<u8>;
-        let (final_w, final_h, data_ref): (u32, u32, &[u8]) = {
-            let px = (out_w as u64 as f64) * (out_h as u64 as f64);
-            let max_px = (P52_MAX_MEGAPIXELS * 1_000_000.0) as f64;
-            if px > max_px {
-                let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
-                let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
-                let dh = (out_h as f64 * scale).floor().max(1.0) as u32;
-                write_buf = Self::downscale_rgba8_bilinear(&combined, out_w, out_h, dw, dh);
-                (dw, dh, &write_buf)
-            } else {
-                (out_w, out_h, &combined)
-            }
-        };
-        crate::util::image_write::write_png_rgba8_small(
-            &out_dir.join("p5_ssgi_temporal_compare.png"),
-            data_ref,
-            final_w,
-            final_h,
-        )?;
-        if final_w != out_w || final_h != out_h {
-            println!(
-                "[P5.2] downscaled SSGI temporal capture to {}x{} (from {}x{})",
-                final_w, final_h, out_w, out_h
-            );
-        }
-        println!("[P5] Wrote reports/p5/p5_ssgi_temporal_compare.png");
-
-        let ssim = if !frame8_luma.is_empty() && frame8_luma.len() == frame9_luma.len() {
-            compute_ssim(&frame8_luma, &frame9_luma)
-        } else {
-            1.0
-        };
-
-        self.write_p5_meta(|meta| {
-            let entry = meta.entry("ssgi_temporal".to_string()).or_insert(json!({}));
-            if let Some(obj) = entry.as_object_mut() {
-                obj.insert("ssim_frame8_9".to_string(), json!(ssim));
-                obj.insert("accumulation_frames".to_string(), json!(16));
-            }
-        })?;
-        // Restore settings
-        {
-            let gi = self.gi.as_mut().context("GI manager not available")?;
-            gi.update_ssgi_settings(&self.queue, |s| {
-                *s = original_settings;
-            });
-            gi.ssgi_reset_history(&self.device, &self.queue)?;
-            gi.set_ssgi_composite_intensity(&self.queue, 1.0);
-        }
-        if !was_enabled {
-            if let Some(ref mut gi) = self.gi {
-                gi.disable_effect(SSE::SSGI);
-            }
-        }
-        // Restore the original viewer scene/camera state.
-        self.restore_p51_cornell_scene(state);
-
-        Ok(())
-    }
-
-    fn reexecute_gi(&mut self, ssr_stats: Option<&mut SsrStats>) -> anyhow::Result<()> {
+    pub(crate) fn reexecute_gi(&mut self, ssr_stats: Option<&mut SsrStats>) -> anyhow::Result<()> {
         use anyhow::Context;
         let depth_view = self.z_view.as_ref().context("Depth view unavailable")?;
         if let Some(ref mut gi) = self.gi {
@@ -1735,13 +886,13 @@ impl Viewer {
         Ok(())
     }
 
-    fn sync_ssr_params_to_gi(&mut self) {
+    pub(crate) fn sync_ssr_params_to_gi(&mut self) {
         if let Some(ref mut gi) = self.gi {
             gi.set_ssr_params(&self.queue, &self.ssr_params);
         }
     }
 
-    fn capture_material_rgba8(&self) -> anyhow::Result<Vec<u8>> {
+    pub(crate) fn capture_material_rgba8(&self) -> anyhow::Result<Vec<u8>> {
         use anyhow::Context;
         let gi = self.gi.as_ref().context("GI manager not available")?;
         let far = self.viz_depth_max_override.unwrap_or(self.view_config.zfar);
@@ -1751,7 +902,7 @@ impl Viewer {
             } else {
                 &self.fog_zero_view
             };
-            Self::render_view_to_rgba8_ex(
+            render_view_to_rgba8_ex(
                 &self.device,
                 &self.queue,
                 comp_pl,
@@ -1772,7 +923,7 @@ impl Viewer {
         })
     }
 
-    fn with_comp_pipeline<T>(
+    pub(crate) fn with_comp_pipeline<T>(
         &self,
         f: impl FnOnce(&wgpu::RenderPipeline, &wgpu::BindGroupLayout) -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
@@ -1784,7 +935,7 @@ impl Viewer {
         f(comp_pl, comp_bgl)
     }
 
-    fn read_ssgi_filtered_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
+    pub(crate) fn read_ssgi_filtered_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
         use anyhow::Context;
         let gi = self.gi.as_ref().context("GI manager not available")?;
         let dims = gi
@@ -1804,7 +955,7 @@ impl Viewer {
         Ok((bytes, dims))
     }
 
-    fn read_ssgi_hit_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
+    pub(crate) fn read_ssgi_hit_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
         use anyhow::Context;
         let gi = self.gi.as_ref().context("GI manager not available")?;
         let dims = gi
@@ -1828,7 +979,7 @@ impl Viewer {
         &self.gi_output_hdr_view
     }
 
-    fn read_gi_output_hdr_rgb(&self) -> anyhow::Result<(Vec<[f32; 3]>, (u32, u32))> {
+    pub(crate) fn read_gi_output_hdr_rgb(&self) -> anyhow::Result<(Vec<[f32; 3]>, (u32, u32))> {
         use anyhow::Context;
         let gi = self.gi.as_ref().context("GI manager not available")?;
         let dims = gi.gbuffer().dimensions();
@@ -1836,7 +987,7 @@ impl Viewer {
         Ok((data, dims))
     }
 
-    fn read_gi_baseline_hdr_rgb(&self) -> anyhow::Result<(Vec<[f32; 3]>, (u32, u32))> {
+    pub(crate) fn read_gi_baseline_hdr_rgb(&self) -> anyhow::Result<(Vec<[f32; 3]>, (u32, u32))> {
         use anyhow::Context;
         let gi = self.gi.as_ref().context("GI manager not available")?;
         let dims = gi.gbuffer().dimensions();
@@ -1844,7 +995,7 @@ impl Viewer {
         Ok((data, dims))
     }
 
-    fn read_ssr_hit_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
+    pub(crate) fn read_ssr_hit_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
         use anyhow::Context;
         let gi = self.gi.as_ref().context("GI manager not available")?;
         let tex = gi
@@ -6093,301 +5244,8 @@ impl Viewer {
     }
 
     // ---------- P5.1 capture helpers ----------
-    fn render_view_to_rgba8_ex(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        comp_pl: &wgpu::RenderPipeline,
-        comp_bgl: &wgpu::BindGroupLayout,
-        sky_view: &wgpu::TextureView,
-        depth_view: &wgpu::TextureView,
-        fog_view: &wgpu::TextureView,
-        surface_format: wgpu::TextureFormat,
-        width: u32,
-        height: u32,
-        far: f32,
-        src_view: &wgpu::TextureView,
-        mode: u32,
-    ) -> anyhow::Result<Vec<u8>> {
-        use anyhow::Context;
-        // Uniform for mode and far
-        let params: [f32; 4] = [mode as f32, far, 0.0, 0.0];
-        let ub = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("p51.comp.params"),
-            contents: bytemuck::cast_slice(&params),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        // Sampler
-        let comp_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("p51.comp.sampler"),
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-        // Bind group
-        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("p51.comp.bg"),
-            layout: comp_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(src_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&comp_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: ub.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(sky_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(depth_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::TextureView(fog_view),
-                },
-            ],
-        });
-        // Offscreen texture
-        let tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("p51.offscreen"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: surface_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("p51.comp.encoder"),
-        });
-        {
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("p51.comp.pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.0,
-                            g: 0.0,
-                            b: 0.0,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            pass.set_pipeline(comp_pl);
-            pass.set_bind_group(0, &bg, &[]);
-            pass.draw(0..3, 0..1);
-        }
-        queue.submit(std::iter::once(enc.finish()));
-        // Read back and format
-        let mut data = read_texture_tight(device, queue, &tex, (width, height), surface_format)
-            .context("read back offscreen")?;
-        match surface_format {
-            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
-                for px in data.chunks_exact_mut(4) {
-                    px.swap(0, 2);
-                }
-            }
-            _ => {}
-        }
-        for px in data.chunks_exact_mut(4) {
-            px[3] = 255;
-        }
-        Ok(data)
-    }
-
-    // Simple bilinear downscale for tightly-packed RGBA8 buffers
-    fn downscale_rgba8_bilinear(
-        src: &[u8],
-        src_w: u32,
-        src_h: u32,
-        dst_w: u32,
-        dst_h: u32,
-    ) -> Vec<u8> {
-        if dst_w == 0 || dst_h == 0 {
-            return Vec::new();
-        }
-        if src_w == dst_w && src_h == dst_h {
-            return src.to_vec();
-        }
-        let s_w = src_w as usize;
-        let _s_h = src_h as usize;
-        let d_w = dst_w as usize;
-        let d_h = dst_h as usize;
-        let mut out = vec![0u8; d_w * d_h * 4];
-        let scale_x = src_w as f32 / dst_w as f32;
-        let scale_y = src_h as f32 / dst_h as f32;
-        for dy in 0..d_h {
-            let sy = (dy as f32 + 0.5) * scale_y - 0.5;
-            let y0 = sy.floor().max(0.0) as i32;
-            let y1 = (y0 + 1).min(src_h as i32 - 1);
-            let wy = (sy - y0 as f32).clamp(0.0, 1.0);
-            for dx in 0..d_w {
-                let sx = (dx as f32 + 0.5) * scale_x - 0.5;
-                let x0 = sx.floor().max(0.0) as i32;
-                let x1 = (x0 + 1).min(src_w as i32 - 1);
-                let wx = (sx - x0 as f32).clamp(0.0, 1.0);
-                let i00 = ((y0 as usize) * s_w + (x0 as usize)) * 4;
-                let i10 = ((y0 as usize) * s_w + (x1 as usize)) * 4;
-                let i01 = ((y1 as usize) * s_w + (x0 as usize)) * 4;
-                let i11 = ((y1 as usize) * s_w + (x1 as usize)) * 4;
-                let o = (dy * d_w + dx) * 4;
-                for c in 0..4 {
-                    let p00 = src[i00 + c] as f32;
-                    let p10 = src[i10 + c] as f32;
-                    let p01 = src[i01 + c] as f32;
-                    let p11 = src[i11 + c] as f32;
-                    let top = p00 * (1.0 - wx) + p10 * wx;
-                    let bot = p01 * (1.0 - wx) + p11 * wx;
-                    let val = top * (1.0 - wy) + bot * wy;
-                    out[o + c] = val.round().clamp(0.0, 255.0) as u8;
-                }
-            }
-        }
-        out
-    }
-
-    fn luma_std_rgba8(buf: &[u8], w: u32, h: u32) -> f32 {
-        let w_us = w as usize;
-        let h_us = h as usize;
-        if w_us == 0 || h_us == 0 {
-            return 0.0;
-        }
-        let mut sum = 0.0f64;
-        let mut sum2 = 0.0f64;
-        let mut count = 0u64;
-        for y in 0..h_us {
-            for x in 0..w_us {
-                let idx = (y * w_us + x) * 4;
-                let r = buf[idx] as f64;
-                let g = buf[idx + 1] as f64;
-                let b = buf[idx + 2] as f64;
-                let l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                sum += l;
-                sum2 += l * l;
-                count += 1;
-            }
-        }
-        if count == 0 {
-            return 0.0;
-        }
-        let n = count as f64;
-        let mean = sum / n;
-        let var = (sum2 / n) - mean * mean;
-        var.max(0.0).sqrt() as f32 / 255.0
-    }
-
-    fn add_debug_noise_rgba8(buf: &mut [u8], w: u32, h: u32, seed: u32) {
-        let w_us = w as usize;
-        let h_us = h as usize;
-        if w_us == 0 || h_us == 0 {
-            return;
-        }
-        for y in 0..h_us {
-            for x in 0..w_us {
-                let idx = (y * w_us + x) * 4;
-                let mut s = seed
-                    ^ (x as u32).wrapping_mul(73856093)
-                    ^ (y as u32).wrapping_mul(19349663);
-                s = s.wrapping_mul(1664525).wrapping_add(1013904223);
-                let jitter = ((s >> 24) as i8) as i32;
-                let amp = 12i32;
-                let delta = (jitter % (amp * 2 + 1)) - amp;
-                for c in 0..3 {
-                    let v = buf[idx + c] as i32 + delta;
-                    buf[idx + c] = v.clamp(0, 255) as u8;
-                }
-            }
-        }
-    }
-
-    fn flatten_rgba8_to_mean_luma(src: &[u8], w: u32, h: u32) -> Vec<u8> {
-        let w_us = w as usize;
-        let h_us = h as usize;
-        let mut out = vec![0u8; (w_us * h_us * 4) as usize];
-        if w_us == 0 || h_us == 0 {
-            return out;
-        }
-        let mut sum = 0.0f64;
-        let mut count = 0u64;
-        for y in 0..h_us {
-            for x in 0..w_us {
-                let idx = (y * w_us + x) * 4;
-                let r = src[idx] as f64;
-                let g = src[idx + 1] as f64;
-                let b = src[idx + 2] as f64;
-                let l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                sum += l;
-                count += 1;
-            }
-        }
-        let mean = if count > 0 {
-            (sum / count as f64).round().clamp(0.0, 255.0) as u8
-        } else {
-            0u8
-        };
-        for y in 0..h_us {
-            for x in 0..w_us {
-                let idx = (y * w_us + x) * 4;
-                out[idx] = mean;
-                out[idx + 1] = mean;
-                out[idx + 2] = mean;
-                out[idx + 3] = src[idx + 3];
-            }
-        }
-        out
-    }
-
-    fn blur_rgba8_box3x3(src: &[u8], w: u32, h: u32) -> Vec<u8> {
-        let w_us = w as usize;
-        let h_us = h as usize;
-        let mut out = vec![0u8; (w_us * h_us * 4) as usize];
-        if w_us == 0 || h_us == 0 {
-            return out;
-        }
-        for y in 0..h_us {
-            for x in 0..w_us {
-                let idx = (y * w_us + x) * 4;
-                // Preserve alpha from source
-                out[idx + 3] = src[idx + 3];
-                for c in 0..3 {
-                    let mut sum: u32 = 0;
-                    let mut count: u32 = 0;
-                    for dy in -1i32..=1 {
-                        let yy = (y as i32 + dy).clamp(0, (h_us - 1) as i32) as usize;
-                        for dx in -1i32..=1 {
-                            let xx = (x as i32 + dx).clamp(0, (w_us - 1) as i32) as usize;
-                            let si = (yy * w_us + xx) * 4 + c;
-                            sum += src[si] as u32;
-                            count += 1;
-                        }
-                    }
-                    out[idx + c] = (sum / count) as u8;
-                }
-            }
-        }
-        out
-    }
+    // render_view_to_rgba8_ex moved to viewer_render_helpers.rs
+    // Image utility functions moved to viewer_image_utils.rs
 
     fn capture_gi_output_tonemapped_rgba8(&self) -> anyhow::Result<Vec<u8>> {
         use anyhow::Context;
@@ -6406,7 +5264,7 @@ impl Viewer {
             } else {
                 &self.fog_zero_view
             };
-            Self::render_view_to_rgba8_ex(
+            render_view_to_rgba8_ex(
                 &self.device,
                 &self.queue,
                 comp_pl,
@@ -6424,7 +5282,7 @@ impl Viewer {
         })
     }
 
-    fn render_geometry_to_gbuffer_once(&mut self) -> anyhow::Result<()> {
+    pub(crate) fn render_geometry_to_gbuffer_once(&mut self) -> anyhow::Result<()> {
         // Lightweight geometry pass that fills the GI GBuffer and depth buffer
         // using the current geometry VB/IB and camera.
 
@@ -6626,7 +5484,7 @@ impl Viewer {
         Ok(())
     }
 
-    fn setup_p51_cornell_scene(&mut self) -> anyhow::Result<P51CornellSceneState> {
+    pub(crate) fn setup_p51_cornell_scene(&mut self) -> anyhow::Result<P51CornellSceneState> {
         use anyhow::{bail, Context};
         use std::path::Path;
 
@@ -6764,7 +5622,7 @@ impl Viewer {
         Ok(prev)
     }
 
-    fn restore_p51_cornell_scene(&mut self, prev: P51CornellSceneState) {
+    pub(crate) fn restore_p51_cornell_scene(&mut self, prev: P51CornellSceneState) {
         self.geom_vb = prev.geom_vb;
         self.geom_ib = prev.geom_ib;
         self.geom_index_count = prev.geom_index_count;
@@ -6806,7 +5664,7 @@ impl Viewer {
                 } else {
                     &self.fog_zero_view
                 };
-                Self::render_view_to_rgba8_ex(
+                render_view_to_rgba8_ex(
                     &self.device,
                     &self.queue,
                     comp_pl,
@@ -6831,7 +5689,7 @@ impl Viewer {
                 } else {
                     &self.fog_zero_view
                 };
-                Self::render_view_to_rgba8_ex(
+                render_view_to_rgba8_ex(
                     &self.device,
                     &self.queue,
                     comp_pl,
@@ -6868,7 +5726,7 @@ impl Viewer {
             let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
             let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
             let dh = (out_h as f64 * scale).floor().max(1.0) as u32;
-            write_buf = Self::downscale_rgba8_bilinear(&out, out_w, out_h, dw, dh);
+            write_buf = downscale_rgba8_bilinear(&out, out_w, out_h, dw, dh);
             (dw, dh, &write_buf)
         } else {
             (out_w, out_h, &out)
@@ -6988,7 +5846,7 @@ impl Viewer {
                     &self.fog_zero_view
                 };
                 let mut raw_b = self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                    Self::render_view_to_rgba8_ex(
+                    render_view_to_rgba8_ex(
                         &self.device,
                         &self.queue,
                         comp_pl,
@@ -7004,9 +5862,9 @@ impl Viewer {
                         3,
                     )
                 })?;
-                Self::add_debug_noise_rgba8(&mut raw_b, w, h, *tech);
+                add_debug_noise_rgba8(&mut raw_b, w, h, *tech);
                 let blur_v_b = self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                    Self::render_view_to_rgba8_ex(
+                    render_view_to_rgba8_ex(
                         &self.device,
                         &self.queue,
                         comp_pl,
@@ -7023,7 +5881,7 @@ impl Viewer {
                     )
                 })?;
                 let temporal_b = self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                    Self::render_view_to_rgba8_ex(
+                    render_view_to_rgba8_ex(
                         &self.device,
                         &self.queue,
                         comp_pl,
@@ -7039,8 +5897,8 @@ impl Viewer {
                         3,
                     )
                 })?;
-                let blur_b = Self::flatten_rgba8_to_mean_luma(&blur_v_b, w, h);
-                let temporal_b_cpu = Self::flatten_rgba8_to_mean_luma(&temporal_b, w, h);
+                let blur_b = flatten_rgba8_to_mean_luma(&blur_v_b, w, h);
+                let temporal_b_cpu = flatten_rgba8_to_mean_luma(&temporal_b, w, h);
                 (raw_b, blur_b, temporal_b_cpu)
             };
             tiles.push(raw_bytes);
@@ -7053,9 +5911,9 @@ impl Viewer {
             let raw = &tiles[row * 3 + 0];
             let blur = &tiles[row * 3 + 1];
             let res = &tiles[row * 3 + 2];
-            let s_raw = Self::luma_std_rgba8(raw, w, h);
-            let s_blur = Self::luma_std_rgba8(blur, w, h);
-            let s_res = Self::luma_std_rgba8(res, w, h);
+            let s_raw = luma_std_rgba8(raw, w, h);
+            let s_blur = luma_std_rgba8(blur, w, h);
+            let s_res = luma_std_rgba8(res, w, h);
             eprintln!(
                 "[P5.1 AoGrid] row {} std_raw={:.6} std_blur={:.6} std_res={:.6}",
                 row, s_raw, s_blur, s_res
@@ -7088,7 +5946,7 @@ impl Viewer {
             let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
             let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
             let dh = (out_h as f64 * scale).floor().max(1.0) as u32;
-            write_buf = Self::downscale_rgba8_bilinear(&out, out_w, out_h, dw, dh);
+            write_buf = downscale_rgba8_bilinear(&out, out_w, out_h, dw, dh);
             (dw, dh, &write_buf)
         } else {
             (out_w, out_h, &out)
@@ -7121,8 +5979,8 @@ impl Viewer {
             let corner_x0 = 0usize;
             let corner_y0 = 0usize;
             let mean_center =
-                Self::mean_luma_region(res, w, h, cx0 as u32, cy0 as u32, rx as u32, ry as u32);
-            let mean_corner = Self::mean_luma_region(
+                mean_luma_region(res, w, h, cx0 as u32, cy0 as u32, rx as u32, ry as u32);
+            let mean_corner = mean_luma_region(
                 res,
                 w,
                 h,
@@ -7132,8 +5990,8 @@ impl Viewer {
                 ry as u32,
             );
             // Gradient energy reduction from raw -> blur
-            let grad_raw = Self::gradient_energy(raw, w, h);
-            let grad_blur = Self::gradient_energy(blur, w, h);
+            let grad_raw = gradient_energy(raw, w, h);
+            let grad_blur = gradient_energy(blur, w, h);
             let reduction = if grad_raw > 1e-6 {
                 (1.0 - (grad_blur / grad_raw)).clamp(0.0, 1.0)
             } else {
@@ -7222,7 +6080,7 @@ impl Viewer {
                     } else {
                         &self.fog_zero_view
                     };
-                    Self::render_view_to_rgba8_ex(
+                    render_view_to_rgba8_ex(
                         &self.device,
                         &self.queue,
                         comp_pl,
@@ -7268,7 +6126,7 @@ impl Viewer {
             let scale = (max_px / px).sqrt().clamp(0.0, 1.0);
             let dw = (out_w as f64 * scale).floor().max(1.0) as u32;
             let dh = (out_h as f64 * scale).floor().max(1.0) as u32;
-            write_buf = Self::downscale_rgba8_bilinear(&out, out_w, out_h, dw, dh);
+            write_buf = downscale_rgba8_bilinear(&out, out_w, out_h, dw, dh);
             (dw, dh, &write_buf)
         } else {
             (out_w, out_h, &out)
@@ -7338,7 +6196,7 @@ impl Viewer {
                     } else {
                         &self.fog_zero_view
                     };
-                    Self::render_view_to_rgba8_ex(
+                    render_view_to_rgba8_ex(
                         &self.device,
                         &self.queue,
                         comp_pl,
@@ -7377,7 +6235,7 @@ impl Viewer {
                         } else {
                             &self.fog_zero_view
                         };
-                        Self::render_view_to_rgba8_ex(
+                        render_view_to_rgba8_ex(
                             &self.device,
                             &self.queue,
                             comp_pl,
@@ -7421,7 +6279,7 @@ impl Viewer {
                     } else {
                         &self.fog_zero_view
                     };
-                    Self::render_view_to_rgba8_ex(
+                    render_view_to_rgba8_ex(
                         &self.device,
                         &self.queue,
                         comp_pl,
@@ -8265,189 +7123,7 @@ impl Viewer {
     }
 }
 
-// Simple command interface event type carried by the winit EventLoop
-#[derive(Debug, Clone)]
-enum ViewerCmd {
-    GiToggle(&'static str, bool), // ("ssao"|"ssgi"|"ssr", on)
-    SetGiSeed(u32),
-    Snapshot(Option<String>),
-    DumpGbuffer, // P5: dump normals/material/depth HZB mips + meta
-    Quit,
-    LoadObj(String),
-    LoadGltf(String),
-    SetViz(String),
-    SetGiViz(GiVizMode),
-    QueryGiViz,
-    LoadSsrPreset,
-    LoadIbl(String),
-    IblToggle(bool),
-    IblIntensity(f32),
-    IblRotate(f32),
-    IblCache(Option<String>),
-    IblRes(u32),
-    #[allow(dead_code)]
-    SetSsaoRadius(f32),
-    #[allow(dead_code)]
-    SetSsaoIntensity(f32),
-    #[allow(dead_code)]
-    SetSsaoBias(f32),
-    #[allow(dead_code)]
-    SetSsgiSteps(u32),
-    #[allow(dead_code)]
-    SetSsgiRadius(f32),
-    SetSsrMaxSteps(u32),
-    SetSsrThickness(f32),
-    #[allow(dead_code)]
-    SetSsgiHalf(bool),
-    #[allow(dead_code)]
-    SetSsgiTemporalAlpha(f32),
-    #[allow(dead_code)]
-    SetSsgiTemporalEnabled(bool),
-    #[allow(dead_code)]
-    SetAoTemporalAlpha(f32), // new: AO temporal alpha
-    // SSAO-specific controls
-    #[allow(dead_code)]
-    SetSsaoSamples(u32),
-    #[allow(dead_code)]
-    SetSsaoDirections(u32),
-    #[allow(dead_code)]
-    SetSsaoTemporalAlpha(f32), // alias of SetAoTemporalAlpha
-    #[allow(dead_code)]
-    SetSsaoTemporalEnabled(bool),
-    #[allow(dead_code)]
-    SetSsaoTechnique(u32),
-    #[allow(dead_code)]
-    SetVizDepthMax(f32),
-    #[allow(dead_code)]
-    SetFov(f32),
-    #[allow(dead_code)]
-    SetCamLookAt {
-        eye: [f32; 3],
-        target: [f32; 3],
-        up: [f32; 3],
-    },
-    #[allow(dead_code)]
-    SetSize(u32, u32),
-    #[allow(dead_code)]
-    SetSsaoComposite(bool),
-    #[allow(dead_code)]
-    SetSsaoCompositeMul(f32),
-    // AO blur toggle
-    #[allow(dead_code)]
-    SetAoBlur(bool),
-    // GI query commands (bare colon commands for echoing state)
-    QuerySsaoRadius,
-    QuerySsaoIntensity,
-    QuerySsaoBias,
-    QuerySsaoSamples,
-    QuerySsaoDirections,
-    QuerySsaoTemporalAlpha,
-    QuerySsaoTemporalEnabled,
-    QuerySsaoBlur,
-    QuerySsaoComposite,
-    QuerySsaoMul,
-    QuerySsaoTechnique,
-    QuerySsgiSteps,
-    QuerySsgiRadius,
-    QuerySsgiHalf,
-    QuerySsgiTemporalAlpha,
-    QuerySsgiTemporalEnabled,
-    QuerySsgiEdges,
-    QuerySsgiUpsampleSigmaDepth,
-    QuerySsgiUpsampleSigmaNormal,
-    QuerySsrEnable,
-    QuerySsrMaxSteps,
-    QuerySsrThickness,
-    QueryGiAoWeight,
-    QueryGiSsgiWeight,
-    QueryGiSsrWeight,
-    // SSGI edge-aware upsample controls
-    #[allow(dead_code)]
-    SetSsgiEdges(bool),
-    #[allow(dead_code)]
-    SetSsgiUpsampleSigmaDepth(f32),
-    #[allow(dead_code)]
-    SetSsgiUpsampleSigmaNormal(f32),
-    // Lit viz controls
-    SetGiAoWeight(f32),
-    SetGiSsgiWeight(f32),
-    SetGiSsrWeight(f32),
-    SetLitSun(f32),
-    SetLitIbl(f32),
-    SetLitBrdf(u32),
-    SetLitRough(f32),
-    SetLitDebug(u32),
-    // Sky controls
-    SkyToggle(bool),
-    SkySetModel(u32), // 0=Preetham,1=Hosek-Wilkie
-    SkySetTurbidity(f32),
-    SkySetGround(f32),
-    SkySetExposure(f32),
-    SkySetSunIntensity(f32),
-    // Fog controls
-    FogToggle(bool),
-    FogSetDensity(f32),
-    FogSetG(f32),
-    FogSetSteps(u32),
-    FogSetShadow(bool),
-    FogSetTemporal(f32),
-    SetFogMode(u32),
-    FogPreset(u32),
-    // P6-10 half-res upsample controls
-    FogHalf(bool),
-    FogEdges(bool),
-    FogUpsigma(f32),
-    HudToggle(bool),
-    // P5.1: AO artifact captures
-    CaptureP51Cornell,
-    CaptureP51Grid,
-    CaptureP51Sweep,
-    CaptureP52SsgiCornell,
-    CaptureP52SsgiTemporal,
-    CaptureP53SsrGlossy,
-    CaptureP53SsrThickness,
-    CaptureP54GiStack,
-    QueryGiSeed,
-    GiStatus,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VizMode {
-    Material,
-    Normal,
-    Depth,
-    Gi,
-    Lit,
-}
-
-fn parse_gi_viz_mode_token(tok: &str) -> Option<GiVizMode> {
-    match tok {
-        "none" => Some(GiVizMode::None),
-        "composite" => Some(GiVizMode::Composite),
-        "ao" => Some(GiVizMode::Ao),
-        "ssgi" => Some(GiVizMode::Ssgi),
-        "ssr" => Some(GiVizMode::Ssr),
-        _ => None,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FogMode {
-    Raymarch,
-    Froxels,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CaptureKind {
-    P51CornellSplit,
-    P51AoGrid,
-    P51ParamSweep,
-    P52SsgiCornell,
-    P52SsgiTemporal,
-    P53SsrGlossy,
-    P53SsrThickness,
-    P54GiStack,
-}
+// Enums and ViewerCmd moved to viewer_enums.rs
 
 impl Viewer {
     fn handle_cmd(&mut self, cmd: ViewerCmd) {
@@ -9258,6 +7934,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
     );
 
     // Collect initial commands provided by example CLI
+    // Note: parse_command_string is available for future simplification of this block
     let mut pending_cmds: Vec<ViewerCmd> = Vec::new();
     if let Some(cmds) = INITIAL_CMDS.get() {
         for raw in cmds.iter() {

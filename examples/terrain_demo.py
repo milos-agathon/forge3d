@@ -171,49 +171,6 @@ def _parse_args() -> argparse.Namespace:
         help="Print light buffer debug info after setting lights (P1-09).",
     )
     parser.add_argument(
-        "--water-detect",
-        action="store_true",
-        help="Detect water from DEM and tint water bodies in the main output.",
-    )
-    parser.add_argument(
-        "--water-level",
-        type=float,
-        default=0.08,
-        help="Normalized water height in [0,1] relative to inferred DEM domain. Lower = stricter detection.",
-    )
-    parser.add_argument(
-        "--water-slope",
-        type=float,
-        default=0.015,
-        help="Slope threshold in normalized units for water detection. Lower = stricter (flatter areas only).",
-    )
-    parser.add_argument(
-        "--water-mask-output",
-        type=Path,
-        help="Optional debug PNG showing the detected water mask.",
-    )
-    parser.add_argument(
-        "--water-mask-output-mode",
-        type=str,
-        choices=["binary", "overlay"],
-        default="overlay",
-        help=(
-            "Format for --water-mask-output: 'binary' for pure 0/255 grayscale "
-            "(good for analysis), 'overlay' for colored RGBA (good for visual inspection)."
-        ),
-    )
-    parser.add_argument(
-        "--water-material",
-        type=str,
-        choices=["none", "overlay", "pbr"],
-        default="overlay",
-        help=(
-            "Water rendering mode when --water-detect is enabled: "
-            "'none' (no highlight), 'overlay' (2D tint, default), or 'pbr' "
-            "(GPU PBR water using the terrain shader)."
-        ),
-    )
-    parser.add_argument(
         "--pom-disabled",
         action="store_true",
         help="Disable parallax occlusion mapping (POM) in the terrain PBR+POM shader.",

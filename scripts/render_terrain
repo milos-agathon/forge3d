@@ -29,15 +29,36 @@ python examples/terrain_demo.py \
   --dem assets/Gore_Range_Albers_1m.tif \
   --hdr assets/hdri/brown_photostudio_02_4k.hdr \
   --size 1920 1080 --render-scale 1 --msaa 8 \
-  --ibl-res 1024 --ibl-intensity 0.9 \
+  --ibl-res 1024 --ibl-intensity 0.5 \
   --cam-radius 1400 --cam-phi 135 --cam-theta 35 \
-  --exposure 0.6 --sun-azimuth 135 --sun-elevation 15 \
-  --sun-intensity 0.1 --sun-color 1.0 0.5 0.9 \
+  --exposure 0.95 --sun-azimuth 135 --sun-elevation 15 \
+  --sun-intensity 0.35 --sun-color 1.0 0.72 0.85 \
   --gi ibl,ssao --sky hdri \
-  --albedo-mode mix --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
-  --colormap-strength 0.6 --colormap-interpolate --colormap-size 1024 \
+  --albedo-mode colormap \
+  --colormap "#dcd098,#c07848,#b85565,#301815" \
+  --colormap-strength 1.0 --colormap-interpolate --colormap-size 1024 \
   --shadows csm --cascades 4 --shadow-map-res 4096 \
   --output examples/output/terrain_csm.png --overwrite
+
+  You must fully read AGENTS.md to get familiar with my codebase rules. You must rigorously assess the attached image and how we can make something similar (excluding water detection!) in terms of light, shadows, angles, colors, etc.,
+  when running the following command:
+  
+  python examples/terrain_demo.py \
+  --dem assets/Gore_Range_Albers_1m.tif \
+  --hdr assets/hdri/brown_photostudio_02_4k.hdr \
+  --size 1920 1080 --render-scale 1 --msaa 8 \
+  --ibl-res 1024 --ibl-intensity 0.5 \
+  --cam-radius 1400 --cam-phi 135 --cam-theta 35 \
+  --exposure 0.95 --sun-azimuth 135 --sun-elevation 15 \
+  --sun-intensity 0.35 --sun-color 1.0 0.72 0.85 \
+  --gi ibl,ssao --sky hdri \
+  --albedo-mode colormap \
+  --colormap "#dcd098,#c07848,#b85565,#301815" \
+  --colormap-strength 1.0 --colormap-interpolate --colormap-size 1024 \
+  --shadows csm --cascades 4 --shadow-map-res 4096 \
+  --output examples/output/terrain_csm.png --overwrite
+
+You must assess the changes needed in both the backend and frontend. After every edit you make, immediately run the code. If the output doesn't meet the expectations: keep iterating (edit → run tests) until you meet them fully. Do not stop early. Do not claim success without a green test run. Do not stop until you are confident that your results meet the expectations.
 
 # no shadows
   python examples/terrain_demo.py \
@@ -52,7 +73,7 @@ python examples/terrain_demo.py \
   --albedo-mode mix --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
   --colormap-strength 0.6 --colormap-interpolate --colormap-size 512 \
   --shadows none --cascades 4 --shadow-map-res 4096 \
-  --output examples/output/terrain_p1_none.png --overwrite
+  --output examples/output/terrain_no_shadows.png --overwrite
 
 
 # ============================================================================
@@ -73,7 +94,7 @@ python examples/terrain_demo.py \
   --albedo-mode mix --colormap "#d0c087,#b27a43,#e26c6b,#3a2921" \
   --colormap-strength 0.6 --colormap-interpolate --colormap-size 512 \
   --shadows csm --cascades 4 --shadow-map-res 4096 \
-  --output examples/output/terrain_p2_nofog.png --overwrite
+  --output examples/output/terrain_nofog.png --overwrite
 
 
 # ============================================================================
@@ -100,4 +121,4 @@ python examples/terrain_demo.py \
   --fog-density 0.2 \
   --fog-height-falloff 0.002 \
   --fog-inscatter "0.7,0.78,0.88" \
-  --output examples/output/terrain_p2_fog.png --overwrite
+  --output examples/output/terrain_fog.png --overwrite

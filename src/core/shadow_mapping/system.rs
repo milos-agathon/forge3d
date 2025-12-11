@@ -195,6 +195,8 @@ impl ShadowMapping {
                 debug_mode: self.config.debug_mode,
                 peter_panning_offset: 0.001, // Default peter-panning offset
                 pcss_light_radius: 0.0,
+                cascade_blend_range: 0.1, // 10% blend at cascade boundaries
+                _padding: [0.0; 3],
             };
 
             queue.write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));

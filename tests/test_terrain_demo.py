@@ -254,7 +254,8 @@ def test_terrain_demo_synthetic_render(tmp_path: Path) -> None:
     assert unique_rgb >= 256, f"Expected at least 256 unique colors, found {unique_rgb}"
 
     luminance = _mean_luminance(pixels)
-    assert 0.25 <= luminance <= 0.85, f"Mean luminance {luminance:.3f} outside [0.25, 0.85]"
+    # Lower bound reduced to 0.15 to accommodate deeper shadows for dramatic terrain lighting
+    assert 0.15 <= luminance <= 0.85, f"Mean luminance {luminance:.3f} outside [0.15, 0.85]"
 
 
 def _build_params() -> TerrainRenderParamsConfig:

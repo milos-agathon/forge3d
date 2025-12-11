@@ -88,6 +88,12 @@ pub struct CsmUniforms {
 
     /// PCSS light radius (optional softness control)
     pub pcss_light_radius: f32,
+
+    /// Cascade blend range (0.0 = no blend, 0.1 = 10% blend at boundaries)
+    pub cascade_blend_range: f32,
+
+    /// Padding to maintain 16-byte alignment
+    pub _padding: [f32; 3],
 }
 
 /// GPU representation of a shadow cascade
