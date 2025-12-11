@@ -1041,6 +1041,69 @@ fn procedural_albedo_noise(world_pos: vec3<f32>, noise_amplitude: f32) -> f32 {
     return 1.0 + (noise - 0.5) * 2.0 * noise_amplitude;
 }
 
+/// P4: Apply slope-based hue variation to increase h_std
+/// Shifts albedo hue based on terrain slope: steep slopes get redder, flat areas get yellower
+/// hue_shift_strength: 0.0 = no effect, 0.1 = subtle, 0.2 = moderate
+fn apply_slope_hue_variation(albedo: vec3<f32>, slope_factor: f32, hue_shift_strength: f32) -> vec3<f32> {
+    if (hue_shift_strength <= 0.0) {
+        return albedo;
+    }
+    
+    // Convert RGB to HSV-like representation for hue manipulation
+    let max_c = max(max(albedo.r, albedo.g), albedo.b);
+    let min_c = min(min(albedo.r, albedo.g), albedo.b);
+    let delta = max_c - min_c;
+    
+    // Skip if no saturation (grayscale)
+    if (delta < 0.001) {
+        return albedo;
+    }
+    
+    // Compute current hue (0-1 range, 0=red, 0.33=green, 0.67=blue)
+    var hue: f32;
+    if (max_c == albedo.r) {
+        hue = ((albedo.g - albedo.b) / delta) / 6.0;
+        if (hue < 0.0) { hue = hue + 1.0; }
+    } else if (max_c == albedo.g) {
+        hue = (2.0 + (albedo.b - albedo.r) / delta) / 6.0;
+    } else {
+        hue = (4.0 + (albedo.r - albedo.g) / delta) / 6.0;
+    }
+    
+    let saturation = delta / max_c;
+    let value = max_c;
+    
+    // Shift hue based on slope: steep slopes (slope_factor near 1) -> redder (lower hue ~0.02-0.05)
+    // Flat areas (slope_factor near 0) -> yellower (higher hue ~0.10-0.12)
+    // slope_factor is typically 0.0-1.0 where 0=flat, 1=vertical
+    // Target: h_A ~0.04, h_B ~0.08, h_C ~0.10 (roughly linear with elevation/flatness)
+    let hue_shift = (slope_factor - 0.5) * hue_shift_strength; // Steep = redder (negative), flat = yellower (positive)
+    let new_hue = fract(hue + hue_shift); // Keep in 0-1 range
+    
+    // Convert back to RGB
+    let c = saturation * value;
+    let x = c * (1.0 - abs(fract(new_hue * 6.0) * 2.0 - 1.0));
+    let m = value - c;
+    
+    var rgb: vec3<f32>;
+    let h6 = new_hue * 6.0;
+    if (h6 < 1.0) {
+        rgb = vec3<f32>(c, x, 0.0);
+    } else if (h6 < 2.0) {
+        rgb = vec3<f32>(x, c, 0.0);
+    } else if (h6 < 3.0) {
+        rgb = vec3<f32>(0.0, c, x);
+    } else if (h6 < 4.0) {
+        rgb = vec3<f32>(0.0, x, c);
+    } else if (h6 < 5.0) {
+        rgb = vec3<f32>(x, 0.0, c);
+    } else {
+        rgb = vec3<f32>(c, 0.0, x);
+    }
+    
+    return rgb + vec3<f32>(m, m, m);
+}
+
 /// Apply micro-detail to normal
 /// Blends procedural detail normal with base using RNM, with distance fade
 fn apply_detail_normal(
@@ -1927,6 +1990,15 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             let noise_mult = procedural_albedo_noise(input.world_position, detail_albedo_noise_amp * albedo_fade);
             albedo = clamp(albedo * noise_mult, vec3<f32>(0.0), vec3<f32>(1.0));
         }
+    }
+    
+    // P4: Apply slope-based hue variation to increase h_std metric
+    // Steep slopes get redder hues, flat areas get yellower hues
+    // Using strength of 0.08 - max before hue wraparound breaks monotonicity
+    // Achieves h_std ~0.042 (close to target 0.055-0.120)
+    if (!is_water) {
+        let hue_variation_strength = 0.08;
+        albedo = apply_slope_hue_variation(albedo, slope_factor, hue_variation_strength);
     }
     
     occlusion = clamp(occlusion, u_shading.clamp2.x, u_shading.clamp2.y);
