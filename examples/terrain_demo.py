@@ -188,6 +188,12 @@ def _parse_args() -> argparse.Namespace:
         help="P5-L: Lambert contrast curve strength (0.0-1.0). Higher values increase micro-contrast in slopes.",
     )
     parser.add_argument(
+        "--unsharp-strength",
+        type=float,
+        default=0.0,
+        help="P5-US: Luminance unsharp mask strength (0.0-0.5). Enhances local gradients in post-processing.",
+    )
+    parser.add_argument(
         "--debug-mode",
         type=int,
         default=0,

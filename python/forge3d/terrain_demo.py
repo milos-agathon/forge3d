@@ -372,6 +372,86 @@ def _save_image(img, path: Path) -> None:
             print("  Warning: Saved as .npy (no PNG writer available)")
 
 
+def _apply_luminance_unsharp(frame, strength: float, sigma: float = 1.0):
+    """P5-US: Apply luminance unsharp mask for gradient enhancement.
+    
+    Enhances local contrast by boosting high-frequency luminance detail.
+    Works on the luminance channel only to preserve color relationships.
+    
+    Args:
+        frame: Rendered frame (forge3d.Frame or numpy array)
+        strength: Unsharp strength k in [0.1, 0.5]. Higher = more contrast.
+        sigma: Gaussian blur sigma (default 1.0 pixel)
+    
+    Returns:
+        Modified frame with enhanced gradients
+    """
+    from scipy.ndimage import gaussian_filter
+    
+    # Get numpy array from frame
+    if hasattr(frame, "to_numpy"):
+        img = frame.to_numpy()
+    elif hasattr(frame, "__array__"):
+        img = np.asarray(frame)
+    else:
+        img = frame
+    
+    # Convert to float [0,1] if needed
+    if img.dtype == np.uint8:
+        img = img.astype(np.float32) / 255.0
+        was_uint8 = True
+    else:
+        img = img.astype(np.float32)
+        was_uint8 = False
+    
+    # Extract RGB (ignore alpha if present)
+    rgb = img[..., :3]
+    alpha = img[..., 3:4] if img.shape[-1] == 4 else None
+    
+    # Convert to luminance (Rec. 709)
+    luma = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
+    
+    # Unsharp mask: L_out = L + k * (L - blur(L))
+    # P5-US: Protect shadows from crushing (scale effect by sqrt(luma))
+    blurred = gaussian_filter(luma, sigma=sigma)
+    detail = luma - blurred
+    shadow_protect = np.sqrt(np.maximum(luma, 0.01))
+    luma_enhanced = np.clip(luma + strength * detail * shadow_protect, 0.0, 1.0)
+    
+    # Scale RGB to match new luminance (preserve color ratios)
+    # Avoid division by zero
+    luma_safe = np.maximum(luma, 1e-6)
+    scale = luma_enhanced / luma_safe
+    rgb_enhanced = np.clip(rgb * scale[..., np.newaxis], 0.0, 1.0)
+    
+    # Reconstruct with alpha
+    if alpha is not None:
+        result = np.concatenate([rgb_enhanced, alpha], axis=-1)
+    else:
+        result = rgb_enhanced
+    
+    # Convert back to uint8 if needed
+    if was_uint8:
+        result = (result * 255.0).astype(np.uint8)
+    
+    # Wrap back in Frame if needed
+    if hasattr(frame, "from_numpy"):
+        return frame.from_numpy(result)
+    elif hasattr(f3d, "Frame"):
+        return f3d.Frame.from_numpy(result)
+    else:
+        # Return a simple wrapper that has .save()
+        class _FrameWrapper:
+            def __init__(self, data):
+                self._data = data
+            def save(self, path):
+                from PIL import Image
+                if self._data.dtype != np.uint8:
+                    self._data = (self._data * 255).astype(np.uint8)
+                Image.fromarray(self._data).save(path)
+        return _FrameWrapper(result)
+
+
 def render_sunrise_to_noon_sequence(
     *,
     dem_path: Path,
@@ -736,6 +816,11 @@ def run(args: Any) -> int:
         heightmap=heightmap_array,
         target=None,
     )
+
+    # P5-US: Apply luminance unsharp mask for gradient enhancement
+    unsharp_strength = float(getattr(args, "unsharp_strength", 0.0))
+    if unsharp_strength > 0.0:
+        frame = _apply_luminance_unsharp(frame, unsharp_strength)
 
     frame.save(str(args.output))
     print(f"Wrote {args.output}")
