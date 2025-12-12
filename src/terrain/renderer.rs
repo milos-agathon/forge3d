@@ -55,6 +55,9 @@ pub struct TerrainScene {
     ao_debug_view: Option<wgpu::TextureView>,
     coarse_ao_texture: Option<wgpu::Texture>,
     coarse_ao_view: Option<wgpu::TextureView>,
+    // P6: Detail normal texture for DEM-derived detail normals (fallback = neutral normal)
+    detail_normal_fallback_view: wgpu::TextureView,
+    detail_normal_sampler: wgpu::Sampler,
     height_curve_lut_sampler: wgpu::Sampler,
     color_format: wgpu::TextureFormat,
     // P1-08: Light buffer for multi-light support
@@ -132,7 +135,7 @@ struct OverlayUniforms {
     params3: [f32; 4], // P5: ao_weight, ao_fallback_enabled, pad, pad
     // P6: Micro-detail parameters
     params4: [f32; 4], // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
-    params5: [f32; 4], // detail_fade_start, detail_fade_end, pad, pad
+    params5: [f32; 4], // detail_fade_start, detail_fade_end, output_srgb_eotf (P6.1), pad
 }
 
 impl OverlayUniforms {
@@ -879,6 +882,24 @@ impl TerrainScene {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                     count: None,
                 },
+                // @binding(14): P6 detail normal texture (tangent-space normal map)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 14,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // @binding(15): P6 detail normal sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 15,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
 
@@ -1036,6 +1057,57 @@ impl TerrainScene {
         );
         let water_mask_fallback_view =
             water_mask_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // P6: Detail normal fallback texture (1x1 neutral normal: RGB 128,128,255)
+        // This represents a flat tangent-space normal (0,0,1) encoded as [0.5, 0.5, 1.0]
+        let detail_normal_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.detail_normal_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        // Neutral normal (0,0,1) encoded as RGBA (128, 128, 255, 255)
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &detail_normal_fallback_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[128u8, 128u8, 255u8, 255u8],
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let detail_normal_fallback_view =
+            detail_normal_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // P6: Detail normal sampler (linear filtering, clamp-to-edge to avoid seams)
+        let detail_normal_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain.detail_normal.sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
 
         // P5: AO debug fallback texture (1x1 white)
         let ao_debug_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -1280,6 +1352,9 @@ impl TerrainScene {
             ao_debug_view: None,
             coarse_ao_texture: None,
             coarse_ao_view: None,
+            // P6: Detail normal texture and sampler
+            detail_normal_fallback_view,
+            detail_normal_sampler,
             height_curve_lut_sampler,
             color_format,
             light_buffer: Arc::new(Mutex::new(light_buffer)),
@@ -3064,6 +3139,16 @@ impl TerrainScene {
                     binding: 13,
                     resource: wgpu::BindingResource::Sampler(&self.ao_debug_sampler),
                 },
+                // P6: Detail normal texture (fallback = neutral normal)
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: wgpu::BindingResource::TextureView(&self.detail_normal_fallback_view),
+                },
+                // P6: Detail normal sampler
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: wgpu::BindingResource::Sampler(&self.detail_normal_sampler),
+                },
             ],
         });
 
@@ -3562,11 +3647,11 @@ impl TerrainScene {
             .ok()
             .and_then(|s| s.parse::<i32>().ok())
             .unwrap_or(0);
-        // Allow modes 0-28 and 100-113
+        // Allow modes 0-32 (Sprint 1 added 30-32) and 100-113
         let debug_mode_f = if debug_mode >= 100 && debug_mode <= 113 {
             debug_mode as f32
         } else {
-            debug_mode.clamp(0, 28) as f32
+            debug_mode.clamp(0, 32) as f32
         };
         // Log debug mode for diagnosis
         if debug_mode != 0 {
@@ -3622,15 +3707,18 @@ impl TerrainScene {
         let detail_fade_start = detail.fade_start.max(0.0);
         let detail_fade_end = detail.fade_end.max(detail_fade_start + 1.0);
 
+        // P6.1: Output encoding mode (0.0 = pow-gamma legacy, 1.0 = exact sRGB EOTF)
+        let output_srgb_eotf = if params.output_srgb_eotf { 1.0 } else { 0.0 };
+
         let mut binding = OverlayBinding {
             uniform: OverlayUniforms {
                 params0: [0.0; 4],
                 params1: [0.0, debug_mode_f, albedo_mode_f, colormap_strength],
                 params2: [gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale],
                 params3: [ao_weight, ao_fallback_enabled, 0.0, 0.0],
-                // P6: Detail parameters
+                // P6: Detail parameters + P6.1: output_srgb_eotf
                 params4: [detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise],
-                params5: [detail_fade_start, detail_fade_end, 0.0, 0.0],
+                params5: [detail_fade_start, detail_fade_end, output_srgb_eotf, 0.0],
             },
             lut: None,
         };
@@ -3975,10 +4063,12 @@ impl TerrainScene {
             decoded.lod.lod0_bias,
         ]);
 
+        // light_params: rgb = light color * intensity, w = exposure
+        let light_intensity = decoded.light.intensity;
         uniforms.extend_from_slice(&[
-            decoded.light.color[0],
-            decoded.light.color[1],
-            decoded.light.color[2],
+            decoded.light.color[0] * light_intensity,
+            decoded.light.color[1] * light_intensity,
+            decoded.light.color[2] * light_intensity,
             params.exposure,
         ]);
 

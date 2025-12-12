@@ -369,6 +369,10 @@ pub struct TerrainRenderParams {
     pub height_curve_power: f32,
     /// P5-L: Lambert contrast parameter [0,1] for gradient enhancement
     pub lambert_contrast: f32,
+    /// P6.1: Use Rgba8UnormSrgb for colormap texture (correct color space sampling)
+    pub colormap_srgb: bool,
+    /// P6.1: Use exact linear_to_srgb() instead of pow-gamma for output encoding
+    pub output_srgb_eotf: bool,
     pub height_curve_lut: Option<Arc<Vec<f32>>>,
     pub overlays: Vec<Py<crate::core::overlay_layer::OverlayLayer>>,
     light: Py<PyAny>,
@@ -504,6 +508,18 @@ impl TerrainRenderParams {
             .and_then(|v| v.extract::<f32>().ok())
             .unwrap_or(0.0)
             .clamp(0.0, 1.0);
+
+        // P6.1: Color space correctness toggles (default false for P5 compatibility)
+        let colormap_srgb = params
+            .getattr("colormap_srgb")
+            .ok()
+            .and_then(|v| v.extract::<bool>().ok())
+            .unwrap_or(false);
+        let output_srgb_eotf = params
+            .getattr("output_srgb_eotf")
+            .ok()
+            .and_then(|v| v.extract::<bool>().ok())
+            .unwrap_or(false);
 
         let height_curve_lut: Option<Arc<Vec<f32>>> = if height_curve_mode == "lut" {
             let raw_lut = params.getattr("height_curve_lut")?;
@@ -801,6 +817,8 @@ impl TerrainRenderParams {
             height_curve_strength,
             height_curve_power,
             lambert_contrast,
+            colormap_srgb,
+            output_srgb_eotf,
             height_curve_lut,
             overlays,
             light: light.unbind(),
@@ -916,6 +934,18 @@ impl TerrainRenderParams {
     #[getter]
     pub fn lambert_contrast(&self) -> f32 {
         self.lambert_contrast
+    }
+
+    /// P6.1: Use Rgba8UnormSrgb for colormap texture (correct color space sampling)
+    #[getter]
+    pub fn colormap_srgb(&self) -> bool {
+        self.colormap_srgb
+    }
+
+    /// P6.1: Use exact linear_to_srgb() instead of pow-gamma for output encoding
+    #[getter]
+    pub fn output_srgb_eotf(&self) -> bool {
+        self.output_srgb_eotf
     }
 
     #[getter]

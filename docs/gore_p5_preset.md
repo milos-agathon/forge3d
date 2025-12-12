@@ -32,7 +32,7 @@ python examples/terrain_demo.py \
   --shadows csm --cascades 4 --shadow-map-res 4096 \
   --normal-strength 2.0 \
   --unsharp-strength 0.4 \
-  --output examples/output/terrain_csm.png
+  --output examples/output/terrain_csm.png --overwrite
 ```
 
 ## Shader Constants

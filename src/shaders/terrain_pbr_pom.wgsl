@@ -115,6 +115,10 @@ const DBG_FLAKE_HEIGHT_LOD: u32 = 26u;      // Visualize computed height LOD
 const DBG_FLAKE_NORMAL_BLEND: u32 = 27u;    // Visualize effective normal_blend after LOD fade
 // P5: Raw SSAO visualization
 const DBG_RAW_SSAO: u32 = 28u;
+// Sprint 1: Shadow-field diagnostic modes
+const DBG_NDOTL: u32 = 30u;           // N·L (lambert term) as grayscale
+const DBG_SHADOW_FACTOR: u32 = 31u;   // Shadow visibility factor as grayscale
+const DBG_PRE_TONEMAP: u32 = 32u;     // Final color before tonemapping (linear, clamped for display)
 
 struct TerrainUniforms {
     view : mat4x4<f32>,
@@ -145,7 +149,7 @@ struct OverlayUniforms {
     params3 : vec4<f32>, // P5: ao_weight, ao_fallback_enabled, pad, pad
     // P6: Micro-detail parameters
     params4 : vec4<f32>, // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
-    params5 : vec4<f32>, // detail_fade_start, detail_fade_end, pad, pad
+    params5 : vec4<f32>, // detail_fade_start, detail_fade_end, output_srgb_eotf, pad
 };
 
 struct IblUniforms {
@@ -197,6 +201,16 @@ var ao_debug_tex : texture_2d<f32>;
 
 @group(0) @binding(13)
 var ao_debug_samp : sampler;
+
+// P6: Detail normal texture (DEM-derived tangent-space normal map)
+// Fallback = neutral normal (RGB 128,128,255 = flat normal in tangent space)
+// Channel mapping: R=X, G=Y, B=Z (OpenGL convention)
+// Encoding: [0,255] -> [-1,1] per channel
+@group(0) @binding(14)
+var detail_normal_tex : texture_2d<f32>;
+
+@group(0) @binding(15)
+var detail_normal_samp : sampler;
 
 // P1-06: Light buffer bindings (@group(1))
 struct Light {
@@ -821,6 +835,88 @@ fn calculate_normal_lod_aware(uv: vec2<f32>) -> vec3<f32> {
     return normalize(vec3<f32>(-dx / world_texel.x, vertical_scale, -dy / world_texel.y));
 }
 
+/// Sprint 2: Multi-scale height normal for enhanced edge visibility.
+/// Samples height at multiple LOD levels and blends for multi-octave detail.
+fn calculate_normal_multiscale(uv: vec2<f32>) -> vec3<f32> {
+    let lod_info = compute_height_lod(uv);
+    let base_lod = lod_info.lod;
+    let texel_uv = lod_info.texel_uv;
+    let spacing = u_terrain.spacing_h_exag.x;
+    let vertical_scale = max(u_terrain.spacing_h_exag.z * 0.5, 1e-3);
+    
+    var combined_dx = 0.0;
+    var combined_dy = 0.0;
+    let total_weight = 1.75;
+    
+    // Octave 0: Fine detail (weight 1.0)
+    {
+        let oct_lod = base_lod;
+        let oct_texel = texel_uv;
+        let off_x = vec2<f32>(oct_texel.x, 0.0);
+        let off_y = vec2<f32>(0.0, oct_texel.y);
+        let tl = sample_height_geom_level(uv - off_x - off_y, oct_lod);
+        let t  = sample_height_geom_level(uv - off_y, oct_lod);
+        let tr = sample_height_geom_level(uv + off_x - off_y, oct_lod);
+        let l  = sample_height_geom_level(uv - off_x, oct_lod);
+        let r  = sample_height_geom_level(uv + off_x, oct_lod);
+        let bl = sample_height_geom_level(uv - off_x + off_y, oct_lod);
+        let b  = sample_height_geom_level(uv + off_y, oct_lod);
+        let br = sample_height_geom_level(uv + off_x + off_y, oct_lod);
+        let dx = (tr + 2.0 * r + br) - (tl + 2.0 * l + bl);
+        let dy = (bl + 2.0 * b + br) - (tl + 2.0 * t + tr);
+        let world_texel = oct_texel * spacing;
+        combined_dx += (dx / world_texel.x) * 1.0;
+        combined_dy += (dy / world_texel.y) * 1.0;
+    }
+    
+    // Octave 1: Medium detail (weight 0.5)
+    {
+        let oct_lod = base_lod + 1.0;
+        let oct_texel = texel_uv * 2.0;
+        let off_x = vec2<f32>(oct_texel.x, 0.0);
+        let off_y = vec2<f32>(0.0, oct_texel.y);
+        let tl = sample_height_geom_level(uv - off_x - off_y, oct_lod);
+        let t  = sample_height_geom_level(uv - off_y, oct_lod);
+        let tr = sample_height_geom_level(uv + off_x - off_y, oct_lod);
+        let l  = sample_height_geom_level(uv - off_x, oct_lod);
+        let r  = sample_height_geom_level(uv + off_x, oct_lod);
+        let bl = sample_height_geom_level(uv - off_x + off_y, oct_lod);
+        let b  = sample_height_geom_level(uv + off_y, oct_lod);
+        let br = sample_height_geom_level(uv + off_x + off_y, oct_lod);
+        let dx = (tr + 2.0 * r + br) - (tl + 2.0 * l + bl);
+        let dy = (bl + 2.0 * b + br) - (tl + 2.0 * t + tr);
+        let world_texel = oct_texel * spacing;
+        combined_dx += (dx / world_texel.x) * 0.5;
+        combined_dy += (dy / world_texel.y) * 0.5;
+    }
+    
+    // Octave 2: Coarse detail (weight 0.25)
+    {
+        let oct_lod = base_lod + 2.0;
+        let oct_texel = texel_uv * 4.0;
+        let off_x = vec2<f32>(oct_texel.x, 0.0);
+        let off_y = vec2<f32>(0.0, oct_texel.y);
+        let tl = sample_height_geom_level(uv - off_x - off_y, oct_lod);
+        let t  = sample_height_geom_level(uv - off_y, oct_lod);
+        let tr = sample_height_geom_level(uv + off_x - off_y, oct_lod);
+        let l  = sample_height_geom_level(uv - off_x, oct_lod);
+        let r  = sample_height_geom_level(uv + off_x, oct_lod);
+        let bl = sample_height_geom_level(uv - off_x + off_y, oct_lod);
+        let b  = sample_height_geom_level(uv + off_y, oct_lod);
+        let br = sample_height_geom_level(uv + off_x + off_y, oct_lod);
+        let dx = (tr + 2.0 * r + br) - (tl + 2.0 * l + bl);
+        let dy = (bl + 2.0 * b + br) - (tl + 2.0 * t + tr);
+        let world_texel = oct_texel * spacing;
+        combined_dx += (dx / world_texel.x) * 0.25;
+        combined_dy += (dy / world_texel.y) * 0.25;
+    }
+    
+    combined_dx /= total_weight;
+    combined_dy /= total_weight;
+    
+    return normalize(vec3<f32>(-combined_dx, vertical_scale, -combined_dy));
+}
+
 /// Calculate normal from height map using Sobel filter (LEGACY - not LOD-aware).
 /// Kept for A/B comparison during flake diagnosis.
 fn calculate_normal(uv : vec2<f32>, texel_size : vec2<f32>) -> vec3<f32> {
@@ -1108,8 +1204,26 @@ fn apply_slope_hue_variation(albedo: vec3<f32>, slope_factor: f32, height_norm: 
     return rgb + vec3<f32>(m, m, m);
 }
 
+/// Sample DEM-derived detail normal from texture
+/// P6 Gradient Match: Uses tangent-space normal map derived from DEM residual
+/// UV: uses terrain UV (same as heightmap UV)
+/// Returns tangent-space normal decoded from RGB [0,1] -> [-1,1]
+fn sample_dem_detail_normal(uv: vec2<f32>) -> vec3<f32> {
+    // Sample the detail normal texture
+    let sample = textureSample(detail_normal_tex, detail_normal_samp, uv);
+    // Decode from [0,1] to [-1,1] per channel (tangent space: R=X, G=Y, B=Z)
+    let decoded = sample.rgb * 2.0 - 1.0;
+    // Ensure valid normal (avoid NaN from zero-length vectors)
+    let length_sq = dot(decoded, decoded);
+    if (length_sq < 0.0001) {
+        return vec3<f32>(0.0, 0.0, 1.0); // Neutral normal
+    }
+    return normalize(decoded);
+}
+
 /// Apply micro-detail to normal
 /// Blends procedural detail normal with base using RNM, with distance fade
+/// P6: Also samples from DEM-derived detail normal texture when available
 fn apply_detail_normal(
     base_normal: vec3<f32>,
     world_pos: vec3<f32>,
@@ -1151,6 +1265,44 @@ fn apply_detail_normal(
     // RNM blend with strength and fade
     let effective_strength = detail_strength * fade;
     let blended = blend_rnm(base_normal, mix(vec3<f32>(0.0, 0.0, 1.0), blended_detail, effective_strength));
+    
+    return normalize(tbn * blended);
+}
+
+/// P6: Apply DEM-derived detail normal to geometric normal
+/// Uses the detail_normal_tex texture which contains tangent-space normals
+/// derived from high-frequency DEM residual (original - gaussian_blur)
+/// UV: terrain UV (0-1 across terrain extent)
+fn apply_dem_detail_normal(
+    base_normal: vec3<f32>,
+    terrain_uv: vec2<f32>,
+    view_distance: f32,
+    detail_strength: f32,
+    fade_start: f32,
+    fade_end: f32,
+) -> vec3<f32> {
+    // Early out if no detail contribution
+    let fade = calculate_detail_fade(view_distance, fade_start, fade_end);
+    if (fade <= 0.0 || detail_strength <= 0.0) {
+        return base_normal;
+    }
+    
+    // Sample DEM-derived detail normal from texture
+    let detail_tangent = sample_dem_detail_normal(terrain_uv);
+    
+    // Check if this is a neutral normal (fallback texture or no detail)
+    // Neutral normal = (0, 0, 1) in tangent space, encoded as (0.5, 0.5, 1.0)
+    let is_neutral = abs(detail_tangent.x) < 0.01 && abs(detail_tangent.y) < 0.01 && detail_tangent.z > 0.99;
+    if (is_neutral) {
+        return base_normal;
+    }
+    
+    // Build TBN from base normal
+    let tbn = build_tbn(base_normal);
+    
+    // Apply RNM blend with strength and fade
+    let effective_strength = detail_strength * fade;
+    let blended = blend_rnm(base_normal, mix(vec3<f32>(0.0, 0.0, 1.0), detail_tangent, effective_strength));
     
     return normalize(tbn * blended);
 }
@@ -1442,6 +1594,32 @@ fn tonemap_aces(color : vec3<f32>) -> vec3<f32> {
     return clamp(a / b, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(1.0, 1.0, 1.0));
 }
 
+// Filmic tonemap with stronger highlight compression and lifted shadows
+// Based on Hable/Uncharted2 curve with terrain-tuned parameters
+fn tonemap_filmic_terrain(color: vec3<f32>) -> vec3<f32> {
+    // Filmic curve parameters tuned for terrain:
+    // - Strong shoulder for highlight compression (D1 fix)
+    // - Lifted toe for readable shadow detail (D1 fix)
+    // - Neutral midtone response
+    let A = 0.22;  // Shoulder strength
+    let B = 0.30;  // Linear strength  
+    let C = 0.10;  // Linear angle
+    let D = 0.20;  // Toe strength
+    let E = 0.01;  // Toe numerator
+    let F = 0.30;  // Toe denominator
+    let W = 11.2;  // Linear white point
+    
+    // Apply curve: ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F)) - E/F
+    let x = max(color, vec3<f32>(0.0));
+    let curve = ((x * (A * x + vec3<f32>(C * B)) + vec3<f32>(D * E)) / 
+                 (x * (A * x + vec3<f32>(B)) + vec3<f32>(D * F))) - vec3<f32>(E / F);
+    
+    // White scale for proper normalization
+    let white_curve = ((W * (A * W + C * B) + D * E) / (W * (A * W + B) + D * F)) - E / F;
+    
+    return clamp(curve / white_curve, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 // Check for NaN/Inf (debug helper for catching bad data)
 fn is_finite_f32(x: f32) -> bool {
     // NaN != NaN, and Inf comparisons fail
@@ -1660,6 +1838,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     let height_lod = lod_info.lod;
     
     // LOD-aware height normal (Milestone 2: fixes flakes from mip mismatch)
+    // Sprint 2 note: Multi-scale approach didn't improve edge ratio
     let height_normal_lod = calculate_normal_lod_aware(uv);
     
     // Legacy height normal for comparison (not LOD-aware)
@@ -2616,6 +2795,39 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         let front_dir = vec3<f32>(0.0, 0.0, -1.0);
         let irr_front = textureSampleLevel(envIrradiance, envSampler, front_dir, 0.0).rgb;
         final_color = debug_water_prefilt_raw(is_water, irr_front);
+    } else if (debug_mode == DBG_NDOTL) {
+        // ── SPRINT 1 MODE 30: N·L (Lambert term) ──
+        // Shows raw lambert term as grayscale for shadow-field diagnosis.
+        // White = sun-facing, Black = shadow-facing.
+        // ROI_A should show moderate gray, ROI_B should show brighter values.
+        let ndotl_terrain = max(dot(shading_normal, light_dir), 0.0);
+        out.color = vec4<f32>(vec3<f32>(ndotl_terrain), 1.0);
+        return out;
+    } else if (debug_mode == DBG_SHADOW_FACTOR) {
+        // ── SPRINT 1 MODE 31: Shadow Factor ──
+        // Shows CSM shadow visibility as grayscale.
+        // White = fully lit, Black = fully shadowed.
+        // If ROI_A is too dark here, shadows are over-aggressive.
+        out.color = vec4<f32>(vec3<f32>(shadow_factor), 1.0);
+        return out;
+    } else if (debug_mode == DBG_PRE_TONEMAP) {
+        // ── SPRINT 1 MODE 32: Pre-Tonemap Linear Color ──
+        // Shows final linear color before tonemapping (clamped for display).
+        // Useful for diagnosing tonemap compression issues.
+        // Compute terrain shading inline for this debug mode
+        let ndotl_dbg = max(dot(shading_normal, light_dir), 0.0);
+        let sun_int_dbg = length(u_shading.light_params.rgb);
+        let ambient_dbg = 0.18;
+        let sun_peak_dbg = 0.42;
+        let base_diff_dbg = ambient_dbg + (sun_peak_dbg - ambient_dbg) * ndotl_dbg * sun_int_dbg;
+        let ao_shadow_dbg = max(shadow_factor, 0.30) * max(occlusion, 0.65);
+        let lit_dbg = base_diff_dbg * ao_shadow_dbg;
+        let pre_tonemap = albedo * (lit_dbg + AMBIENT_FLOOR * 0.35);
+        let exposure_dbg = max(u_shading.light_params.w, 0.0);
+        let exposed_dbg = pre_tonemap * exposure_dbg;
+        // Clamp to [0,1] for display (values >1 show as white)
+        out.color = vec4<f32>(clamp(exposed_dbg, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+        return out;
     } else {
         // Normal PBR shading path
         var shaded = vec3<f32>(0.0);
@@ -2730,9 +2942,44 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             // Compute lambert term for hillshade-like appearance
             let n_dot_l_terrain = max(dot(shading_normal, light_dir), 0.0);
             
-            // P2-S4: diffuse_raw = mix(ambient_floor, 1.0, lambert)
-            // This ensures even backfacing surfaces get ambient_floor illumination
-            let diffuse_raw = mix(AMBIENT_FLOOR, 1.0, n_dot_l_terrain);
+            // Style Match Fix: Compress dynamic range while preserving local contrast
+            // Reference has compressed highlights (D1) and readable shadow detail
+            let sun_intensity = length(u_shading.light_params.rgb);
+            
+            // Sprint 1 Fix: N.L-dependent ambient lift for shadow-facing areas
+            // Iter 2: ROI_A=-0.062 (too dark), ROI_B=+0.096 (good)
+            // Need more shadow lift without raising highlights
+            let ambient_shadow = 0.32;  // Raise shadow ambient more
+            let ambient_lit = 0.10;     // Keep lit ambient low
+            let sun_peak = 0.36;        // Keep highlights compressed
+            
+            // Interpolate ambient: high when shadow-facing, low when sun-facing
+            let ambient_interp = mix(ambient_shadow, ambient_lit, n_dot_l_terrain);
+            
+            // Sun contribution adds on top of ambient
+            let sun_contrib = (sun_peak - ambient_lit) * n_dot_l_terrain * sun_intensity;
+            let base_diffuse = ambient_interp + sun_contrib;
+            
+            // Sprint 2: Edge energy fix - need edge ratio 0.88+ (currently 0.26-0.41)
+            // Use ADDITIVE edge enhancement based on height-derived slope variation
+            // The shading_normal already encodes terrain microstructure from height map
+            
+            // Compute slope steepness from normal (deviation from up vector)
+            let slope_steepness = 1.0 - abs(shading_normal.y);  // 0=flat, 1=vertical
+            
+            // Edge detection via normal screen-space derivatives
+            let dndx = dpdx(shading_normal);
+            let dndy = dpdy(shading_normal);
+            let normal_gradient = length(dndx) + length(dndy);
+            
+            // Strong edge signal: combines slope steepness with local variation
+            let edge_signal = slope_steepness * 0.3 + normal_gradient * 15.0;
+            
+            // Additive edge term (not multiplicative) for stronger visible edges
+            // This creates brightness variation independent of base diffuse
+            let edge_bright = clamp(edge_signal * (n_dot_l_terrain + 0.3), 0.0, 0.25);
+            let edge_dark = clamp(edge_signal * (1.0 - n_dot_l_terrain) * 0.5, 0.0, 0.15);
+            let diffuse_raw = base_diffuse + edge_bright - edge_dark;
             
             // P5: Apply AO multiplier from coarse heightmap AO or SSAO
             // P2-S2: AO must be clamped to min 0.65 (max 35% darkening)
@@ -2758,8 +3005,8 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             
             // P3-S1: IBL term adds minimal fill light
             // Reduced to allow deeper shadows while preventing pitch-black
-            let warm_bias = vec3<f32>(1.08, 1.0, 0.92);
-            let ibl_diffuse_biased = ibl_split.diffuse * warm_bias;
+            // D2 fix: Remove warm bias - reference has cooler neutrality
+            let ibl_diffuse_biased = ibl_split.diffuse;
             let ibl_diffuse_factor = length(ibl_diffuse_biased) * u_ibl.intensity;
             let ibl_term = ibl_diffuse_factor * AMBIENT_FLOOR * 0.35;
             
@@ -2786,8 +3033,9 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // When fog_density = 0, this is a no-op preserving P1 output
         shaded = apply_atmospheric_fog(shaded, input.world_position, camera_pos);
         
-        // Use ACES tonemapping for better highlight preservation than Reinhard
-        let tonemapped = tonemap_aces(shaded);
+        // Use filmic tonemapping for better highlight compression (D1 fix)
+        // Filmic curve compresses highlights more aggressively than ACES
+        let tonemapped = tonemap_filmic_terrain(shaded);
         final_color = tonemapped;
     }
 
@@ -2889,14 +3137,24 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Gamma Correction
+    // Output Encoding (P6.1: Color Space Correctness)
     // ──────────────────────────────────────────────────────────────────────────
-    // Apply gamma correction if render target is Rgba8Unorm (not sRGB)
-    // The gamma parameter is passed from Rust
-    let gamma = max(u_overlay.params2.x, 0.1);
-    let gamma_corrected = gamma_correct(final_color, gamma);
+    // Render target is Rgba8Unorm (linear). We must encode for sRGB display.
+    // P6.1: output_srgb_eotf selects between:
+    //   - false (P5 legacy): pow-gamma approximation via gamma_correct()
+    //   - true (P6 correct): exact piecewise linear_to_srgb() EOTF
+    let output_srgb_eotf = u_overlay.params5.z > 0.5;
+    var encoded_color: vec3<f32>;
+    if (output_srgb_eotf) {
+        // P6: Exact sRGB EOTF - clamp to [0,1] first, then apply exact curve
+        encoded_color = linear_to_srgb(clamp(final_color, vec3<f32>(0.0), vec3<f32>(1.0)));
+    } else {
+        // P5 legacy: pow-gamma approximation
+        let gamma = max(u_overlay.params2.x, 0.1);
+        encoded_color = gamma_correct(final_color, gamma);
+    }
 
-    out.color = vec4<f32>(gamma_corrected, 1.0);
+    out.color = vec4<f32>(encoded_color, 1.0);
     return out;
 }
 

@@ -1,0 +1,24 @@
+{
+    "name": "P6 Gore Detail Normals",
+    "description": "P6.1 color-correct output - exact sRGB EOTF, sRGB-correct colormap sampling",
+    "version": "6.1",
+    "cli_params": {
+        "colormap_srgb": true,
+        "output_srgb_eotf": true,
+        "detail_strength": 0.5,
+        "unsharp_strength": 0.0,
+        "shadows": "csm",
+        "cascades": 3,
+        "gi": ["ibl"],
+        "exposure": 1.0,
+        "ibl_intensity": 1.0,
+        "sun_intensity": 3.0,
+        "sun_azimuth": 135.0,
+        "sun_elevation": 35.0,
+        "colormap": "viridis",
+        "colormap_strength": 0.5,
+        "albedo_mode": "mix",
+        "normal_strength": 1.0,
+        "lambert_contrast": 0.0
+    }
+}

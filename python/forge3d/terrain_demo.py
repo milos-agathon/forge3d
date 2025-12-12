@@ -292,6 +292,8 @@ def _build_params(
     reflection_config=None,  # P4: Optional ReflectionSettings from CLI
     triplanar_config=None,  # P5-N: Optional TriplanarSettings for normal_strength
     lambert_contrast: float = 0.0,  # P5-L: Lambert contrast curve strength
+    colormap_srgb: bool = False,  # P6.1: Use Rgba8UnormSrgb for colormap texture
+    output_srgb_eotf: bool = False,  # P6.1: Use exact linear_to_srgb() output encoding
 ):
     overlays = [
         f3d.OverlayLayer.from_colormap1d(
@@ -349,6 +351,10 @@ def _build_params(
         triplanar=triplanar_config,  # P5-N: Pass triplanar config for normal_strength
         lambert_contrast=lambert_contrast,  # P5-L: Pass lambert contrast
     )
+    
+    # P6.1: Set color space correctness toggles
+    config.colormap_srgb = colormap_srgb
+    config.output_srgb_eotf = output_srgb_eotf
 
     if pom_enabled is not None:
         try:
@@ -372,21 +378,23 @@ def _save_image(img, path: Path) -> None:
             print("  Warning: Saved as .npy (no PNG writer available)")
 
 
-def _apply_luminance_unsharp(frame, strength: float, sigma: float = 1.0):
+def _apply_luminance_unsharp(frame, strength: float, sigma: float = 2.5):
     """P5-US: Apply luminance unsharp mask for gradient enhancement.
     
     Enhances local contrast by boosting high-frequency luminance detail.
     Works on the luminance channel only to preserve color relationships.
     
+    Style Match Fix: Use multi-scale unsharp for terrain texture visibility.
+    
     Args:
         frame: Rendered frame (forge3d.Frame or numpy array)
-        strength: Unsharp strength k in [0.1, 0.5]. Higher = more contrast.
-        sigma: Gaussian blur sigma (default 1.0 pixel)
+        strength: Unsharp strength k in [0.1, 1.0]. Higher = more contrast.
+        sigma: Gaussian blur sigma (default 2.5 pixel for terrain detail)
     
     Returns:
         Modified frame with enhanced gradients
     """
-    from scipy.ndimage import gaussian_filter
+    from scipy.ndimage import gaussian_filter, sobel
     
     # Get numpy array from frame
     if hasattr(frame, "to_numpy"):
@@ -411,12 +419,23 @@ def _apply_luminance_unsharp(frame, strength: float, sigma: float = 1.0):
     # Convert to luminance (Rec. 709)
     luma = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
     
-    # Unsharp mask: L_out = L + k * (L - blur(L))
-    # P5-US: Protect shadows from crushing (scale effect by sqrt(luma))
-    blurred = gaussian_filter(luma, sigma=sigma)
-    detail = luma - blurred
-    shadow_protect = np.sqrt(np.maximum(luma, 0.01))
-    luma_enhanced = np.clip(luma + strength * detail * shadow_protect, 0.0, 1.0)
+    # Style Match: Multi-scale unsharp for terrain microstructure
+    # Fine scale (sigma=1.5) captures micro-ridges
+    # Coarse scale (sigma=4.0) captures macro-terrain features
+    blurred_fine = gaussian_filter(luma, sigma=1.5)
+    blurred_coarse = gaussian_filter(luma, sigma=4.0)
+    
+    detail_fine = luma - blurred_fine
+    detail_coarse = luma - blurred_coarse
+    
+    # Combine multi-scale detail (fine gets more weight for terrain texture)
+    combined_detail = detail_fine * 0.7 + detail_coarse * 0.3
+    
+    # Moderate shadow protection (less aggressive to allow shadow detail)
+    shadow_protect = np.power(np.maximum(luma, 0.05), 0.3)
+    
+    # Apply stronger unsharp for terrain edge visibility
+    luma_enhanced = np.clip(luma + strength * 2.0 * combined_detail * shadow_protect, 0.0, 1.0)
     
     # Scale RGB to match new luminance (preserve color ratios)
     # Avoid division by zero
@@ -731,6 +750,44 @@ def run(args: Any) -> int:
             water_plane_height=reflection_plane_height,
         )
 
+    # P6: Parse detail normal parameters from CLI
+    render_mode = getattr(args, "render", None)
+    detail_normal_path = getattr(args, "detail_normals", None)
+    detail_strength = float(getattr(args, "detail_strength", 0.0) or 0.0)
+    detail_sigma_px = float(getattr(args, "detail_sigma_px", 3.0) or 3.0)
+    
+    # P6 render mode preset: auto-generate detail normals if not provided
+    if render_mode == "p6":
+        if detail_normal_path is None:
+            # Auto-generate detail normals from DEM
+            generated_path = Path("assets/generated") / f"detail_normal_sigma{detail_sigma_px:.1f}.png"
+            if not generated_path.exists():
+                print(f"[P6] Generating detail normal map (sigma={detail_sigma_px} px)...")
+                import subprocess
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(Path(__file__).parent.parent.parent / "tools" / "detail_normals.py"),
+                        "--dem", str(args.dem),
+                        "--sigma-px", str(detail_sigma_px),
+                        "--output", str(generated_path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    print(f"[P6] Warning: Failed to generate detail normals: {result.stderr}")
+                else:
+                    print(f"[P6] Generated: {generated_path}")
+            detail_normal_path = generated_path
+        # P6 preset: enable detail normals with default strength
+        if detail_strength <= 0.0:
+            detail_strength = 0.5  # P6 default strength
+    
+    # Log P6 detail normal configuration
+    if detail_normal_path is not None and detail_strength > 0.0:
+        print(f"[P6] Detail normals: {detail_normal_path} (strength={detail_strength:.2f})")
+
     params = _build_params(
         size=(int(args.size[0]), int(args.size[1])),
         render_scale=float(args.render_scale),
@@ -760,6 +817,8 @@ def run(args: Any) -> int:
         reflection_config=reflection_config,  # P4: Pass reflection config
         triplanar_config=triplanar_config,  # P5-N: Pass triplanar config for normal_strength
         lambert_contrast=float(getattr(args, "lambert_contrast", 0.0)),  # P5-L
+        colormap_srgb=bool(getattr(args, "colormap_srgb", False)),  # P6.1
+        output_srgb_eotf=bool(getattr(args, "output_srgb_eotf", False)),  # P6.1
     )
 
     renderer = f3d.TerrainRenderer(sess)
@@ -819,6 +878,16 @@ def run(args: Any) -> int:
 
     # P5-US: Apply luminance unsharp mask for gradient enhancement
     unsharp_strength = float(getattr(args, "unsharp_strength", 0.0))
+    # P6: Check render mode preset for unsharp override
+    render_mode = getattr(args, "render", None)
+    if render_mode == "p5":
+        # P5 preset: may use unsharp for gradients (legacy behavior)
+        pass
+    elif render_mode == "p6":
+        # P6 preset: detail normals handle gradients, disable unsharp
+        # (P6 must meet gradient targets without unsharp)
+        unsharp_strength = 0.0
+    
     if unsharp_strength > 0.0:
         frame = _apply_luminance_unsharp(frame, unsharp_strength)
 

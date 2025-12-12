@@ -9,6 +9,7 @@ is preserved.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,80 @@ def _build_renderer_config(args: argparse.Namespace):
     """
 
     return _impl._build_renderer_config(args)
+
+
+def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit: set[str] | None = None) -> None:
+    """Apply JSON preset file parameters to args namespace.
+    
+    CLI arguments take precedence over preset values (for overrides like --unsharp-strength 0.0).
+    
+    Args:
+        args: Parsed arguments namespace
+        preset_path: Path to JSON preset file
+        cli_explicit: Set of arg names that were explicitly set on CLI (these won't be overwritten)
+    """
+    if cli_explicit is None:
+        cli_explicit = set()
+    
+    with open(preset_path) as f:
+        preset = json.load(f)
+    
+    cli_params = preset.get("cli_params", {})
+    
+    # Map preset keys to args attribute names (and CLI flag names for detection)
+    param_map = {
+        "dem": ("dem", "--dem"), "hdr": ("hdr", "--hdr"), 
+        "size": ("size", "--size"), "msaa": ("msaa", "--msaa"),
+        "z_scale": ("z_scale", "--z-scale"), "cam_radius": ("cam_radius", "--cam-radius"),
+        "cam_phi": ("cam_phi", "--cam-phi"), "cam_theta": ("cam_theta", "--cam-theta"),
+        "exposure": ("exposure", "--exposure"), "ibl_intensity": ("ibl_intensity", "--ibl-intensity"),
+        "sun_intensity": ("sun_intensity", "--sun-intensity"),
+        "gi": ("gi", "--gi"),
+        "sun_azimuth": ("sun_azimuth", "--sun-azimuth"), "sun_elevation": ("sun_elevation", "--sun-elevation"),
+        "shadows": ("shadows", "--shadows"), "cascades": ("cascades", "--cascades"),
+        "colormap": ("colormap", "--colormap"), "colormap_strength": ("colormap_strength", "--colormap-strength"),
+        "albedo_mode": ("albedo_mode", "--albedo-mode"), "normal_strength": ("normal_strength", "--normal-strength"),
+        "lambert_contrast": ("lambert_contrast", "--lambert-contrast"), "unsharp_strength": ("unsharp_strength", "--unsharp-strength"),
+        "detail_strength": ("detail_strength", "--detail-strength"), "detail_sigma_px": ("detail_sigma_px", "--detail-sigma-px"),
+        # P6.1: Color space correctness toggles
+        "colormap_srgb": ("colormap_srgb", "--colormap-srgb"),
+        "output_srgb_eotf": ("output_srgb_eotf", "--output-srgb-eotf"),
+    }
+    
+    # Get the project root for resolving relative paths
+    project_root = Path(__file__).parent.parent
+    
+    for preset_key, (arg_name, cli_flag) in param_map.items():
+        if preset_key not in cli_params:
+            continue
+        
+        # Skip if this arg was explicitly set on CLI
+        if arg_name in cli_explicit:
+            continue
+            
+        val = cli_params[preset_key]
+        
+        # Handle path types
+        if preset_key in ("dem", "hdr"):
+            val = project_root / val
+        elif preset_key == "size":
+            val = tuple(val)
+        elif preset_key == "gi":
+            # gi is a list like ["ibl"], convert to comma-separated string
+            if isinstance(val, list):
+                val = ",".join(val)
+        
+        # Set the value
+        setattr(args, arg_name, val)
+    
+    # Handle detail_normals section
+    detail_normals = preset.get("detail_normals", {})
+    if detail_normals.get("enabled", False):
+        detail_path = detail_normals.get("detail_normal_path")
+        if detail_path:
+            args.detail_normals = project_root / detail_path
+        if "detail_strength" in detail_normals:
+            args.detail_strength = detail_normals["detail_strength"]
 
 
 def _parse_args() -> argparse.Namespace:
@@ -225,6 +300,44 @@ def _parse_args() -> argparse.Namespace:
         default="1.0,1.0,1.0",
         help="Fog inscatter color as comma-separated RGB (0-1 range). Default: '1.0,1.0,1.0' (white).",
     )
+    # P6: Detail normal map parameters (Gradient Match)
+    parser.add_argument(
+        "--detail-normals",
+        type=Path,
+        default=None,
+        help="Path to DEM-derived detail normal map texture for P6 Gradient Match.",
+    )
+    parser.add_argument(
+        "--detail-strength",
+        type=float,
+        default=0.0,
+        help="P6: Detail normal blending strength (0.0-1.0). 0.0 = disabled (default).",
+    )
+    parser.add_argument(
+        "--detail-sigma-px",
+        type=float,
+        default=3.0,
+        help="P6: Gaussian sigma used to generate detail normals (for metadata).",
+    )
+    # P6: Render mode for validator
+    parser.add_argument(
+        "--render",
+        type=str,
+        choices=["p5", "p6"],
+        default=None,
+        help="Render mode preset: 'p5' (P5.0 baseline) or 'p6' (P6 Gradient Match with detail normals).",
+    )
+    # P6.1: Color space correctness toggles
+    parser.add_argument(
+        "--colormap-srgb",
+        action="store_true",
+        help="P6.1: Use sRGB-correct colormap sampling (Rgba8UnormSrgb texture format).",
+    )
+    parser.add_argument(
+        "--output-srgb-eotf",
+        action="store_true",
+        help="P6.1: Use exact linear_to_srgb() for output encoding instead of pow-gamma.",
+    )
 
     return parser.parse_args()
 
@@ -237,6 +350,43 @@ def main() -> int:
     """
 
     args = _parse_args()
+
+    # Handle JSON preset file (--preset path/to/preset.json)
+    if args.preset and (args.preset.endswith('.json') or '/' in args.preset or '\\' in args.preset):
+        preset_path = Path(args.preset)
+        project_root = Path(__file__).parent.parent
+        if not preset_path.is_absolute():
+            preset_path = project_root / preset_path
+        if not preset_path.exists():
+            raise SystemExit(f"Error: Preset file not found: {preset_path}")
+        print(f"[PRESET] Loading JSON preset: {preset_path}")
+        
+        # Detect which args were explicitly set on CLI (so they override preset)
+        cli_explicit = set()
+        cli_flag_to_arg = {
+            "--exposure": "exposure", "--ibl-intensity": "ibl_intensity",
+            "--gi": "gi",
+            "--sun-azimuth": "sun_azimuth", "--sun-elevation": "sun_elevation",
+            "--sun-intensity": "sun_intensity", "--z-scale": "z_scale",
+            "--cam-radius": "cam_radius", "--cam-phi": "cam_phi", "--cam-theta": "cam_theta",
+            "--unsharp-strength": "unsharp_strength", "--detail-strength": "detail_strength",
+            "--colormap-strength": "colormap_strength", "--normal-strength": "normal_strength",
+            "--lambert-contrast": "lambert_contrast", "--msaa": "msaa",
+            "--shadows": "shadows", "--cascades": "cascades",
+            "--albedo-mode": "albedo_mode", "--colormap": "colormap",
+            # P6.1: Color space correctness toggles
+            "--colormap-srgb": "colormap_srgb", "--output-srgb-eotf": "output_srgb_eotf",
+        }
+        import sys
+        for flag, arg_name in cli_flag_to_arg.items():
+            if flag in sys.argv:
+                cli_explicit.add(arg_name)
+        
+        _apply_json_preset(args, preset_path, cli_explicit)
+        args.preset = None  # Clear so it doesn't interfere with high-level preset logic
+        
+        # Log resolved GI modes after preset application
+        print(f"[GI] modes={args.gi}")
 
     # Basic validation for a few key numeric flags (delegating the rest).
     if not 0.0 <= args.colormap_strength <= 1.0:

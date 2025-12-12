@@ -169,6 +169,12 @@ class DetailSettings:
     Adds triplanar detail normals and procedural albedo noise that fade
     with distance to prevent LOD popping and shimmer.
     
+    P6 Gradient Match extension:
+    - detail_normal_path: Path to DEM-derived detail normal texture (optional).
+      When provided, samples from texture instead of procedural normals.
+    - detail_sigma_px: Gaussian sigma used to generate detail normals (for metadata).
+    - detail_strength: Blending strength for DEM-derived detail normals (0.0-1.0).
+    
     detail_scale: World-space repeat interval for detail normals (default 2.0 meters).
     normal_strength: Strength of detail normal perturbation (0.0-1.0).
     albedo_noise: Brightness variation amplitude (±percentage, e.g., 0.1 = ±10%).
@@ -182,6 +188,10 @@ class DetailSettings:
     albedo_noise: float = 0.1  # ±10% brightness variation
     fade_start: float = 50.0  # Start fading at 50 units
     fade_end: float = 200.0  # Fully faded at 200 units
+    # P6 Gradient Match: DEM-derived detail normal map
+    detail_normal_path: Optional[str] = None  # Path to detail normal texture
+    detail_sigma_px: float = 3.0  # Gaussian sigma used to generate detail normals
+    detail_strength: float = 0.0  # DEM-derived detail normal strength (0=off)
 
     def __post_init__(self) -> None:
         if self.detail_scale <= 0.0:
@@ -194,6 +204,10 @@ class DetailSettings:
             raise ValueError("fade_start must be >= 0")
         if self.fade_end <= self.fade_start:
             raise ValueError("fade_end must be > fade_start")
+        if self.detail_sigma_px <= 0.0:
+            raise ValueError("detail_sigma_px must be > 0")
+        if not 0.0 <= self.detail_strength <= 1.0:
+            raise ValueError("detail_strength must be in [0, 1]")
 
 
 @dataclass
@@ -362,6 +376,9 @@ class TerrainRenderParams:
     ao_weight: float = 0.0
     # P6: Micro-detail (defaults to disabled for P5 compatibility)
     detail: Optional[DetailSettings] = None
+    # P6.1: Color space correctness toggles (defaults to False for P5 compatibility)
+    colormap_srgb: bool = False  # Use Rgba8UnormSrgb for colormap texture (correct sampling)
+    output_srgb_eotf: bool = False  # Use exact linear_to_srgb() instead of pow-gamma
 
     def __post_init__(self) -> None:
         # Default fog to disabled if not provided
