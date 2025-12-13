@@ -70,6 +70,8 @@ pub struct TerrainScene {
     shadow_depth_bind_group_layout: wgpu::BindGroupLayout,
     shadow_bind_group_layout: wgpu::BindGroupLayout,
     shadow_pcss_radius: f32,
+    /// P6.2: Shadow technique for terrain shader (0=Hard, 1=PCF, 2=PCSS)
+    shadow_technique: u32,
     // P2: Fog bind group layout and buffer
     fog_bind_group_layout: wgpu::BindGroupLayout,
     fog_uniform_buffer: wgpu::Buffer,
@@ -1364,6 +1366,7 @@ impl TerrainScene {
             shadow_depth_bind_group_layout,
             shadow_bind_group_layout,
             shadow_pcss_radius: 0.0,
+            shadow_technique: 1, // Default to PCF
             // P2: Fog bind group layout and buffer
             fog_bind_group_layout,
             fog_uniform_buffer,
@@ -1689,7 +1692,8 @@ impl TerrainScene {
             peter_panning_offset: 0.0,
             pcss_light_radius: 0.0,
             cascade_blend_range: 0.0, // No blending needed for noop
-            _padding: [0.0; 3],
+            technique: 1, // Default to PCF
+            _padding: [0.0; 2],
         };
         let csm_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain.noop_shadow.csm_uniforms"),
@@ -2489,7 +2493,9 @@ impl TerrainScene {
             peter_panning_offset: csm.peter_panning_offset,
             pcss_light_radius: self.shadow_pcss_radius,
             cascade_blend_range: csm.cascade_blend_range,
-            _padding: [0.0; 3],
+            // P6.2: Shadow technique (kept for future use, dispatch now uses pcf_kernel_size)
+            technique: self.shadow_technique,
+            _padding: [0.0; 2],
         };
         
         // Create buffer with the terrain-compatible uniforms
@@ -3010,11 +3016,44 @@ impl TerrainScene {
         self.csm_renderer.config.peter_panning_offset = shadow_settings.normal_bias;
         self.csm_renderer.config.pcf_kernel_size =
             if self.shadow_pcss_radius > 0.0 { 3 } else { 1 };
+
+        // P6.2: Map technique string to ShadowTechnique enum and set in uniforms
+        // This is critical for the WGSL shader to select the correct shadow sampling path
+        use crate::lighting::types::ShadowTechnique;
+        let technique_enum = match shadow_settings.technique.to_uppercase().as_str() {
+            "HARD" => ShadowTechnique::Hard,
+            "PCF" => ShadowTechnique::PCF,
+            "PCSS" => ShadowTechnique::PCSS,
+            "VSM" => ShadowTechnique::VSM,
+            "EVSM" => ShadowTechnique::EVSM,
+            "MSM" => ShadowTechnique::MSM,
+            "CSM" => ShadowTechnique::CSM,
+            _ => ShadowTechnique::PCF, // Default fallback
+        };
+        self.csm_renderer.uniforms.technique = technique_enum.as_u32();
+        // P6.2: Store technique directly in TerrainScene for reliable passing to shader
+        self.shadow_technique = technique_enum.as_u32();
+        // Set PCF kernel size based on technique (hard=1, others=3 for soft edges)
+        // IMPORTANT: Must set config.pcf_kernel_size because render_shadow_depth_passes
+        // copies config.pcf_kernel_size to uniforms.pcf_kernel_size
+        let pcf_kernel = match technique_enum {
+            ShadowTechnique::Hard => 1,
+            ShadowTechnique::PCSS => 5, // Larger kernel for PCSS
+            _ => 3,
+        };
+        self.csm_renderer.config.pcf_kernel_size = pcf_kernel;
+        // Set PCSS technique parameters
+        self.csm_renderer.uniforms.technique_params = [
+            shadow_settings.softness * 10.0,      // pcss_blocker_radius
+            shadow_settings.softness * 20.0,      // pcss_filter_radius  
+            0.0005,                                // moment_bias
+            shadow_settings.pcss_light_radius.max(0.5), // light_size
+        ];
         
         log::info!(
             target: "terrain.shadow",
-            "Shadow CLI params: enabled={}, technique={}, cascades={}, resolution={}, max_dist={:.0}, pcss_radius={:.4}",
-            shadow_settings.enabled, shadow_settings.technique, shadow_settings.cascades,
+            "Shadow CLI params: enabled={}, technique={} (id={}), cascades={}, resolution={}, max_dist={:.0}, pcss_radius={:.4}",
+            shadow_settings.enabled, shadow_settings.technique, technique_enum.as_u32(), shadow_settings.cascades,
             shadow_settings.resolution, shadow_settings.max_distance, self.shadow_pcss_radius
         );
         log::info!(

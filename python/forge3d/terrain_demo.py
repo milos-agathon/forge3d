@@ -170,6 +170,37 @@ def _parse_volumetric_spec(spec: str) -> dict[str, Any]:
     return out
 
 
+def _make_terrain_shadow_settings(shadow_config) -> TerrainShadowSettings:
+    """Create ShadowSettings for terrain rendering with early validation.
+    
+    Validates that the requested technique is actually implemented in the
+    terrain_pbr_pom.wgsl shader. VSM/EVSM/MSM are recognized by config but
+    NOT implemented (moment_maps binding exists but is never sampled).
+    
+    Raises:
+        ValueError: If technique is VSM/EVSM/MSM (not implemented for terrain)
+    """
+    settings = TerrainShadowSettings(
+        enabled=shadow_config.enabled if shadow_config else True,
+        technique=shadow_config.technique.upper() if shadow_config else "PCSS",
+        resolution=shadow_config.map_size if shadow_config else 4096,
+        cascades=shadow_config.cascades if shadow_config else 3,
+        max_distance=4000.0,
+        softness=shadow_config.light_size if shadow_config else 1.5,
+        intensity=0.8,
+        slope_scale_bias=0.001,
+        depth_bias=shadow_config.moment_bias if shadow_config else 0.0005,
+        normal_bias=0.0002,
+        min_variance=1e-4,
+        light_bleed_reduction=0.5,
+        evsm_exponent=40.0,
+        fade_start=1.0,
+    )
+    # Validate that technique is implemented in terrain shader
+    settings.validate_for_terrain()
+    return settings
+
+
 def _build_colormap(
     domain: tuple[float, float],
     colormap_name: str = "viridis",
@@ -327,24 +358,7 @@ def _build_params(
         height_curve_strength=height_curve_strength,
         height_curve_power=height_curve_power,
         height_curve_lut=height_curve_lut,
-        shadows=TerrainShadowSettings(
-            enabled=shadow_config.enabled if shadow_config else True,
-            technique=shadow_config.technique.upper() if shadow_config else "PCSS",
-            resolution=shadow_config.map_size if shadow_config else 4096,
-            cascades=shadow_config.cascades if shadow_config else 3,
-            max_distance=4000.0,  # TODO: add to ShadowParams
-            softness=shadow_config.light_size if shadow_config else 1.5,
-            intensity=0.8,
-            # Shadow bias values - these must be small (0.0001-0.01) for proper depth comparison
-            # Larger values cause all fragments to appear lit (no shadows)
-            slope_scale_bias=0.001,  # Slope-scaled bias for grazing angles
-            depth_bias=shadow_config.moment_bias if shadow_config else 0.0005,  # Base depth bias
-            normal_bias=0.0002,  # Peter-panning offset (bias along normal)
-            min_variance=1e-4,
-            light_bleed_reduction=0.5,
-            evsm_exponent=40.0,
-            fade_start=1.0,
-        ),
+        shadows=_make_terrain_shadow_settings(shadow_config),
         overlays=overlays,
         fog=fog_config,  # P2: Pass fog config (None = disabled)
         reflection=reflection_config,  # P4: Pass reflection config (None = disabled)
@@ -787,6 +801,10 @@ def run(args: Any) -> int:
     # Log P6 detail normal configuration
     if detail_normal_path is not None and detail_strength > 0.0:
         print(f"[P6] Detail normals: {detail_normal_path} (strength={detail_strength:.2f})")
+
+    # Log shadow technique selection (P6.2 acceptance criterion B)
+    shadow_cfg = renderer_config.shadows
+    print(f"[SHADOW] technique={shadow_cfg.technique.upper()}, cascades={shadow_cfg.cascades}, res={shadow_cfg.map_size}")
 
     params = _build_params(
         size=(int(args.size[0]), int(args.size[1])),

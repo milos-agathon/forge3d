@@ -225,7 +225,16 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--brdf", type=str, help="Shading BRDF model name.")
     parser.add_argument("--preset", type=str, help="High-level preset (studio_pbr, outdoor_sun, toon_viz).")
-    parser.add_argument("--shadows", type=str, help="Shadow technique (none, hard, pcf, pcss, vsm, evsm, msm, csm). 'none' disables shadows for P0 baseline.")
+    parser.add_argument(
+        "--shadows",
+        type=str,
+        help=(
+            "Shadow technique for terrain rendering. "
+            "Supported: none, hard, pcf, pcss, csm. "
+            "NOT supported: vsm, evsm, msm (moment-based shadows not implemented in terrain shader). "
+            "'none' disables shadows."
+        ),
+    )
     parser.add_argument("--shadow-map-res", dest="shadow_map_res", type=int, help="Shadow map resolution.")
     parser.add_argument("--cascades", type=int, help="Cascade count for cascaded shadow maps.")
     parser.add_argument("--pcss-blocker-radius", dest="pcss_blocker_radius", type=float, help="PCSS blocker radius.")

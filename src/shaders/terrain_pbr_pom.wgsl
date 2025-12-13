@@ -119,6 +119,7 @@ const DBG_RAW_SSAO: u32 = 28u;
 const DBG_NDOTL: u32 = 30u;           // N·L (lambert term) as grayscale
 const DBG_SHADOW_FACTOR: u32 = 31u;   // Shadow visibility factor as grayscale
 const DBG_PRE_TONEMAP: u32 = 32u;     // Final color before tonemapping (linear, clamped for display)
+const DBG_SHADOW_TECHNIQUE: u32 = 33u; // P6.2: Show shadow technique as color (Red=HARD, Green=PCF, Blue=PCSS)
 
 struct TerrainUniforms {
     view : mat4x4<f32>,
@@ -289,9 +290,9 @@ struct CsmUniforms {
     peter_panning_offset: f32,         // 4 bytes, offset 680
     pcss_light_radius: f32,            // 4 bytes, offset 684
     cascade_blend_range: f32,          // 4 bytes, offset 688
-    _padding0: f32,                    // 4 bytes, offset 692
-    _padding1: f32,                    // 4 bytes, offset 696
-    _padding2: f32,                    // 4 bytes, offset 700 -> total 704 bytes
+    // P6.2: Shadow technique selection (Hard=0, PCF=1, PCSS=2)
+    technique: u32,                    // 4 bytes, offset 692
+    _padding: vec2<f32>,               // 8 bytes, offset 696 -> total 704 bytes (16-byte aligned)
 }
 
 @group(3) @binding(0)
@@ -502,10 +503,27 @@ fn sample_shadow_pcf_terrain(
         + csm_uniforms.peter_panning_offset;
     let compare_depth = depth_01 - bias;
     
-    // PCF/PCSS shadow sampling (kernel size driven by uniforms)
-    let kernel_size = i32(max(csm_uniforms.pcf_kernel_size, 1u));
+    // P6.2: Shadow technique dispatch based on pcf_kernel_size
+    // pcf_kernel_size=1: HARD (single sample), =3: PCF (3x3), >=5: PCSS (5x5+)
+    let kernel_size = i32(csm_uniforms.pcf_kernel_size);
+    
+    // HARD shadows (kernel_size <= 1): single sample, no filtering
+    if (kernel_size <= 1) {
+        return textureSampleCompare(
+            shadow_maps,
+            shadow_sampler,
+            shadow_coords,
+            i32(cascade_idx),
+            compare_depth
+        );
+    }
+    
+    // PCF/PCSS: kernel-based filtering
+    // Larger kernel = softer shadows (PCSS effect)
+    let filter_scale = max(csm_uniforms.pcss_light_radius, 1.0);
+    
     let radius = kernel_size / 2;
-    let texel_size = cascade.texel_size * max(csm_uniforms.pcss_light_radius, 1.0);
+    let texel_size = cascade.texel_size * filter_scale;
     var shadow_sum = 0.0;
     for (var y = -radius; y <= radius; y = y + 1) {
         for (var x = -radius; x <= radius; x = x + 1) {

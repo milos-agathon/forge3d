@@ -51,7 +51,7 @@ class ShadowSettings:
     """Shadow mapping configuration."""
 
     enabled: bool
-    technique: str  # "PCSS", "ESM", "EVSM", "PCF"
+    technique: str  # "HARD", "PCF", "PCSS", "CSM" (terrain-supported); VSM/EVSM/MSM not implemented
     resolution: int
     cascades: int
     max_distance: float
@@ -67,11 +67,30 @@ class ShadowSettings:
     # Optional PCSS light radius (world units). Defaults to hard shadows when zero.
     pcss_light_radius: float = 0.0
 
+    # Shadow technique constants matching Rust ShadowTechnique enum
+    # ALL_TECHNIQUES: Full set recognized by config layer (for forward compatibility)
+    ALL_TECHNIQUES = {"NONE", "HARD", "PCF", "PCSS", "VSM", "EVSM", "MSM", "CSM"}
+    # TERRAIN_SUPPORTED_TECHNIQUES: Actually implemented in terrain_pbr_pom.wgsl
+    # VSM/EVSM/MSM require moment-map sampling which is NOT implemented in terrain shader
+    TERRAIN_SUPPORTED_TECHNIQUES = {"NONE", "HARD", "PCF", "PCSS", "CSM"}
+    # Alias for backwards compatibility
+    SUPPORTED_TECHNIQUES = ALL_TECHNIQUES
+    # Memory budget: 512 MiB host-visible heap (AGENTS.md constraint)
+    MAX_SHADOW_MEMORY_BYTES = 512 * 1024 * 1024
+
     def __post_init__(self) -> None:
-        # P0: "NONE" disables shadows entirely
-        valid = {"NONE", "PCSS", "ESM", "EVSM", "PCF", "CSM"}
-        if self.technique not in valid:
-            raise ValueError(f"Invalid technique: {self.technique}")
+        # Normalize technique to uppercase for consistent validation
+        self.technique = self.technique.upper()
+        
+        # Validate technique against full set first (catch typos)
+        if self.technique not in self.ALL_TECHNIQUES:
+            supported_list = ", ".join(sorted(self.ALL_TECHNIQUES - {"NONE"}))
+            raise ValueError(
+                f"Unsupported shadow technique: {self.technique!r}. "
+                f"Supported techniques: {supported_list}. "
+                f"Use 'NONE' to disable shadows."
+            )
+        
         # When technique is NONE, shadows are disabled
         if self.technique == "NONE":
             self.enabled = False
@@ -103,6 +122,46 @@ class ShadowSettings:
 
         if self.evsm_exponent <= 0.0:
             raise ValueError("evsm_exponent must be > 0")
+
+        # Memory budget check (AGENTS.md: ≤512 MiB host-visible heap)
+        mem_bytes = self._estimate_memory_bytes()
+        if mem_bytes > self.MAX_SHADOW_MEMORY_BYTES:
+            mem_mib = mem_bytes / (1024 * 1024)
+            max_mib = self.MAX_SHADOW_MEMORY_BYTES / (1024 * 1024)
+            raise ValueError(
+                f"Shadow resources exceed memory budget: {mem_mib:.1f} MiB > {max_mib:.0f} MiB. "
+                f"Reduce resolution ({self.resolution}) or cascades ({self.cascades})."
+            )
+
+    def _estimate_memory_bytes(self) -> int:
+        """Estimate GPU memory for shadow resources."""
+        pixels = self.resolution * self.resolution * self.cascades
+        depth_bytes = pixels * 4  # Depth32Float
+        # Moment maps for VSM/EVSM/MSM techniques
+        if self.technique == "VSM":
+            moment_bytes = pixels * 8  # 2 channels * 4 bytes
+        elif self.technique in {"EVSM", "MSM"}:
+            moment_bytes = pixels * 16  # 4 channels * 4 bytes
+        else:
+            moment_bytes = 0
+        return depth_bytes + moment_bytes
+
+    def validate_for_terrain(self) -> None:
+        """Validate that this shadow technique is implemented in the terrain pipeline.
+        
+        Raises ValueError with a clear message if the technique is not supported.
+        VSM/EVSM/MSM are recognized by the config layer but NOT implemented in
+        terrain_pbr_pom.wgsl (moment_maps binding exists but is never sampled).
+        """
+        if self.technique not in self.TERRAIN_SUPPORTED_TECHNIQUES:
+            unsupported = {"VSM", "EVSM", "MSM"}
+            terrain_list = ", ".join(sorted(self.TERRAIN_SUPPORTED_TECHNIQUES - {"NONE"}))
+            raise ValueError(
+                f"Shadow technique {self.technique!r} is not implemented for terrain rendering. "
+                f"The terrain shader does not support variance/moment-based shadows (VSM/EVSM/MSM). "
+                f"Terrain-supported techniques: {terrain_list}. "
+                f"Use 'NONE' to disable shadows."
+            )
 
 
 @dataclass
