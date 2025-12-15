@@ -268,6 +268,7 @@ def _build_params() -> TerrainRenderParamsConfig:
     return TerrainRenderParamsConfig(
         size_px=(256, 256),
         render_scale=1.0,
+        terrain_span=2.0,
         msaa_samples=1,
         z_scale=1.0,
         cam_target=[0.0, 0.0, 0.0],

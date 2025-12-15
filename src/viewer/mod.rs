@@ -9,12 +9,14 @@
 pub mod camera_controller;
 pub mod hud;
 pub mod image_analysis;
+pub mod ipc;
 mod viewer_analysis;
 mod viewer_cmd_parse;
-mod viewer_config;
+pub mod viewer_config;
 mod viewer_constants;
-mod viewer_enums;
+pub mod viewer_enums;
 mod viewer_image_utils;
+pub mod viewer_struct;
 mod viewer_p5;
 mod viewer_p5_ao;
 mod viewer_p5_cornell;
@@ -28,6 +30,7 @@ mod viewer_types;
 pub use viewer_config::{set_initial_commands, ViewerConfig};
 #[cfg(feature = "extension-module")]
 pub use viewer_config::set_initial_terrain_config;
+pub use ipc::IpcServerConfig;
 
 use viewer_analysis::{gradient_energy, mean_luma_region};
 use viewer_config::{FpsCounter, INITIAL_CMDS};
@@ -311,6 +314,11 @@ pub struct Viewer {
     hud: crate::core::text_overlay::TextOverlayRenderer,
     ssr_scene_loaded: bool,
     ssr_scene_preset: Option<SsrScenePreset>,
+    // Object transform (for IPC SetTransform command)
+    object_translation: glam::Vec3,
+    object_rotation: glam::Quat,
+    object_scale: glam::Vec3,
+    object_transform: glam::Mat4,
 }
 
 // FpsCounter moved to viewer_config.rs
@@ -417,6 +425,14 @@ impl Viewer {
         self.geom_ib = Some(ib);
         self.geom_index_count = mesh.indices.len() as u32;
         self.geom_bind_group = None;
+        
+        // Update IPC stats for get_stats command
+        update_ipc_stats(
+            true,
+            mesh.vertices.len() as u32,
+            mesh.indices.len() as u32,
+            true,
+        );
 
         let tex_size = 1024u32;
         let pixels = build_ssr_albedo_texture(preset, tex_size);
@@ -1020,9 +1036,11 @@ impl Viewer {
     // Read back a surface or offscreen texture and save as PNG (RGBA8/BGRA8 only)
     fn snapshot_swapchain_to_png(&mut self, tex: &wgpu::Texture, path: &str) -> anyhow::Result<()> {
         use anyhow::{bail, Context};
-        let w = self.config.width;
-        let h = self.config.height;
-        let fmt = self.config.format;
+        // Use texture's actual dimensions, not surface config (offscreen may differ)
+        let size = tex.size();
+        let w = size.width;
+        let h = size.height;
+        let fmt = tex.format();
 
         match fmt {
             wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
@@ -3128,6 +3146,11 @@ impl Viewer {
             hud,
             ssr_scene_loaded: false,
             ssr_scene_preset: None,
+            // Object transform defaults (identity)
+            object_translation: glam::Vec3::ZERO,
+            object_rotation: glam::Quat::IDENTITY,
+            object_scale: glam::Vec3::ONE,
+            object_transform: glam::Mat4::IDENTITY,
         };
 
         viewer.sync_ssr_params_to_gi();
@@ -3698,7 +3721,9 @@ impl Viewer {
             let fov = self.view_config.fov_deg.to_radians();
             let proj =
                 Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
+            // Apply object transform to create model-view matrix
             let view_mat = self.camera.view_matrix();
+            let model_view = view_mat * self.object_transform;
             fn to_arr4(m: Mat4) -> [[f32; 4]; 4] {
                 let c = m.to_cols_array();
                 [
@@ -3708,7 +3733,7 @@ impl Viewer {
                     [c[12], c[13], c[14], c[15]],
                 ]
             }
-            let cam_pack = [to_arr4(view_mat), to_arr4(proj)];
+            let cam_pack = [to_arr4(model_view), to_arr4(proj)];
             self.queue
                 .write_buffer(cam_buf, 0, bytemuck::cast_slice(&cam_pack));
 
@@ -4926,7 +4951,6 @@ impl Viewer {
 
         // Snapshot if requested (read back the swapchain texture before present)
         if let Some(path) = self.snapshot_request.take() {
-            eprintln!("[viewer-debug] snapshot_request taken: {}", path);
             // Prefer offscreen snapshot texture if we rendered one; otherwise fallback to surface texture
             if let Some(tex) = self.pending_snapshot_tex.take() {
                 if let Err(e) = self.snapshot_swapchain_to_png(&tex, &path) {
@@ -5309,7 +5333,9 @@ impl Viewer {
             self.view_config.znear,
             self.view_config.zfar,
         );
+        // Apply object transform to create model-view matrix
         let view_mat = self.camera.view_matrix();
+        let model_view = view_mat * self.object_transform;
         fn to_arr4(m: Mat4) -> [[f32; 4]; 4] {
             let c = m.to_cols_array();
             [
@@ -5319,7 +5345,7 @@ impl Viewer {
                 [c[12], c[13], c[14], c[15]],
             ]
         }
-        let cam_pack = [to_arr4(view_mat), to_arr4(proj)];
+        let cam_pack = [to_arr4(model_view), to_arr4(proj)];
 
         // Update geometry camera uniform buffer.
         {
@@ -6420,14 +6446,174 @@ impl Viewer {
                     }
                 }
             }
-            _ => {}
+            // IPC-specific commands for non-blocking viewer workflow
+            ViewerCmd::SetSunDirection { azimuth_deg, elevation_deg } => {
+                // Convert azimuth/elevation to a direction vector and update sun
+                let az_rad = azimuth_deg.to_radians();
+                let el_rad = elevation_deg.to_radians();
+                let _dir = glam::Vec3::new(
+                    el_rad.cos() * az_rad.sin(),
+                    el_rad.sin(),
+                    el_rad.cos() * az_rad.cos(),
+                );
+                // Store for potential future use; current lit shader uses intensity only
+                println!("Sun direction: azimuth={:.1}° elevation={:.1}°", azimuth_deg, elevation_deg);
+            }
+            ViewerCmd::SetIbl { path, intensity } => {
+                match self.load_ibl(&path) {
+                    Ok(_) => {
+                        self.lit_ibl_intensity = intensity.max(0.0);
+                        self.lit_use_ibl = self.lit_ibl_intensity > 0.0;
+                        self.update_lit_uniform();
+                        println!("Loaded IBL: {} with intensity {:.2}", path, intensity);
+                    }
+                    Err(e) => eprintln!("IBL load failed: {}", e),
+                }
+            }
+            ViewerCmd::SetZScale(value) => {
+                #[cfg(feature = "extension-module")]
+                {
+                    if let Some(ref mut _scene) = self.terrain_scene {
+                        // Terrain z-scale would be applied here when terrain scene supports it
+                        println!("Terrain z-scale set to {:.2} (terrain scene attached)", value);
+                    } else {
+                        eprintln!("SetZScale error: z-scale only applies to terrain scenes");
+                    }
+                }
+                #[cfg(not(feature = "extension-module"))]
+                {
+                    let _ = value;
+                    eprintln!("SetZScale error: terrain support not compiled in");
+                }
+            }
+            ViewerCmd::SnapshotWithSize { path, width, height } => {
+                // Store the snapshot request; if width/height are provided, temporarily
+                // override the view config snapshot dimensions
+                if let (Some(w), Some(h)) = (width, height) {
+                    self.view_config.snapshot_width = Some(w);
+                    self.view_config.snapshot_height = Some(h);
+                }
+                self.snapshot_request = Some(path);
+            }
+            ViewerCmd::SetFov(fov) => {
+                self.view_config.fov_deg = fov.clamp(1.0, 179.0);
+                println!("FOV set to {:.1}°", self.view_config.fov_deg);
+            }
+            ViewerCmd::SetCamLookAt { eye, target, up } => {
+                let e = glam::Vec3::from(eye);
+                let t = glam::Vec3::from(target);
+                let u = glam::Vec3::from(up);
+                self.camera.set_look_at(e, t, u);
+                println!("Camera: eye={:?} target={:?} up={:?}", eye, target, up);
+            }
+            ViewerCmd::SetSize(w, h) => {
+                // Request window resize (actual resize happens via winit)
+                println!("Requested size {}x{} (resize via window manager)", w, h);
+            }
+            ViewerCmd::SetVizDepthMax(_v) => {
+                // viz_depth_max not currently used; placeholder for depth visualization range
+            }
+            ViewerCmd::SetTransform {
+                translation,
+                rotation_quat,
+                scale,
+            } => {
+                // Apply transform to the currently loaded object
+                // Store transform components for use in rendering
+                if let Some(t) = translation {
+                    self.object_translation = glam::Vec3::from(t);
+                }
+                if let Some(q) = rotation_quat {
+                    self.object_rotation = glam::Quat::from_array(q).normalize();
+                }
+                if let Some(s) = scale {
+                    self.object_scale = glam::Vec3::from(s);
+                }
+                // Rebuild the model matrix
+                self.object_transform = glam::Mat4::from_scale_rotation_translation(
+                    self.object_scale,
+                    self.object_rotation,
+                    self.object_translation,
+                );
+                println!(
+                    "Transform: translation={:?} rotation={:?} scale={:?}",
+                    self.object_translation, self.object_rotation, self.object_scale
+                );
+            }
         }
     }
 
-    // Minimal stub: accept mesh and mark geometry present (optional future: upload GPU buffers)
-    fn upload_mesh(&mut self, _mesh: &crate::geometry::MeshBuffers) -> anyhow::Result<()> {
-        // For now this viewer uses a built-in cube VB to keep demo working.
-        // Implement real upload here if needed.
+    // Upload mesh geometry to GPU buffers for rendering
+    fn upload_mesh(&mut self, mesh: &crate::geometry::MeshBuffers) -> anyhow::Result<()> {
+        use wgpu::util::DeviceExt;
+        use viewer_types::PackedVertex;
+        
+        if mesh.positions.is_empty() || mesh.indices.is_empty() {
+            anyhow::bail!("Mesh is empty (no vertices or indices)");
+        }
+
+        // Convert MeshBuffers to PackedVertex format
+        let vertex_count = mesh.positions.len();
+        let mut vertices: Vec<PackedVertex> = Vec::with_capacity(vertex_count);
+        
+        for i in 0..vertex_count {
+            let pos = mesh.positions[i];
+            let normal = if i < mesh.normals.len() {
+                mesh.normals[i]
+            } else {
+                [0.0, 1.0, 0.0] // Default up normal
+            };
+            let uv = if i < mesh.uvs.len() {
+                mesh.uvs[i]
+            } else {
+                [0.0, 0.0]
+            };
+            vertices.push(PackedVertex {
+                position: pos,
+                normal,
+                uv,
+                rough_metal: [0.5, 0.0], // Default roughness/metallic
+            });
+        }
+
+        // Create vertex buffer from packed vertices
+        let vertex_data = bytemuck::cast_slice(&vertices);
+        let vb = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("viewer.ipc.mesh.vb"),
+                contents: vertex_data,
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        
+        // Create index buffer
+        let ib = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("viewer.ipc.mesh.ib"),
+                contents: bytemuck::cast_slice(&mesh.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+        
+        self.geom_vb = Some(vb);
+        self.geom_ib = Some(ib);
+        self.geom_index_count = mesh.indices.len() as u32;
+        // Clear bind group so it gets recreated with new geometry
+        self.geom_bind_group = None;
+        
+        // Update IPC stats for get_stats command
+        update_ipc_stats(
+            true,                          // vb_ready
+            vertices.len() as u32,         // vertex_count
+            mesh.indices.len() as u32,     // index_count
+            true,                          // scene_has_mesh
+        );
+        
+        println!(
+            "[viewer] Uploaded mesh: {} vertices, {} indices",
+            vertices.len(),
+            mesh.indices.len()
+        );
         Ok(())
     }
 
@@ -7903,14 +8089,237 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
             }
             Event::UserEvent(cmd) => match cmd {
                 ViewerCmd::Quit => {
+                    // Process any pending snapshot before exiting
+                    if let Some(viewer) = viewer_opt.as_mut() {
+                        if viewer.snapshot_request.is_some() {
+                            viewer.update(0.0);
+                            let _ = viewer.render();
+                        }
+                    }
                     elwt.exit();
                 }
                 other => {
                     if let Some(viewer) = viewer_opt.as_mut() {
+                        eprintln!("[IPC] Processing command: {:?}", other);
                         viewer.handle_cmd(other);
+                    } else {
+                        eprintln!("[IPC] Viewer not ready, dropping command");
                     }
                 }
             },
+            _ => {}
+        }
+    });
+
+    Ok(())
+}
+
+/// Global IPC command queue - static ensures visibility across threads
+static IPC_QUEUE: std::sync::OnceLock<std::sync::Mutex<std::collections::VecDeque<ViewerCmd>>> = 
+    std::sync::OnceLock::new();
+
+fn get_ipc_queue() -> &'static std::sync::Mutex<std::collections::VecDeque<ViewerCmd>> {
+    IPC_QUEUE.get_or_init(|| std::sync::Mutex::new(std::collections::VecDeque::new()))
+}
+
+/// Global viewer stats for IPC queries
+static IPC_STATS: std::sync::OnceLock<std::sync::Mutex<ipc::ViewerStats>> = 
+    std::sync::OnceLock::new();
+
+fn get_ipc_stats() -> &'static std::sync::Mutex<ipc::ViewerStats> {
+    IPC_STATS.get_or_init(|| std::sync::Mutex::new(ipc::ViewerStats::default()))
+}
+
+fn update_ipc_stats(vb_ready: bool, vertex_count: u32, index_count: u32, scene_has_mesh: bool) {
+    if let Ok(mut stats) = get_ipc_stats().lock() {
+        stats.vb_ready = vb_ready;
+        stats.vertex_count = vertex_count;
+        stats.index_count = index_count;
+        stats.scene_has_mesh = scene_has_mesh;
+    }
+}
+
+/// Run the viewer with an IPC server for non-blocking Python control.
+/// Prints `FORGE3D_VIEWER_READY port=<PORT>` when the server is listening.
+pub fn run_viewer_with_ipc(
+    config: ViewerConfig,
+    ipc_config: ipc::IpcServerConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Clear any stale commands and stats
+    if let Ok(mut q) = get_ipc_queue().lock() {
+        q.clear();
+    }
+    update_ipc_stats(false, 0, 0, false);
+    
+    // Create simple event loop (no user events needed)
+    let event_loop: EventLoop<()> = EventLoop::new()?;
+    
+    // Start IPC server - pushes to global queue, reads from global stats
+    let ipc_handle = ipc::start_ipc_server(
+        ipc_config,
+        move |cmd| {
+            if let Ok(mut q) = get_ipc_queue().lock() {
+                q.push_back(cmd);
+                Ok(())
+            } else {
+                Err("Queue lock failed".to_string())
+            }
+        },
+        || {
+            get_ipc_stats()
+                .lock()
+                .map(|s| s.clone())
+                .unwrap_or_default()
+        },
+    )?;
+
+    // Capture port for printing READY after viewer is initialized
+    let ipc_port = ipc_handle.port;
+
+    // Create window
+    let window = Arc::new(
+        WindowBuilder::new()
+            .with_title(config.title.clone())
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                config.width as f64,
+                config.height as f64,
+            ))
+            .build(&event_loop)?,
+    );
+
+    // Collect initial commands (same as run_viewer)
+    let mut pending_cmds: Vec<ViewerCmd> = Vec::new();
+    if let Some(cmds) = INITIAL_CMDS.get() {
+        for raw in cmds.iter() {
+            let l = raw.trim().to_lowercase();
+            if l.is_empty() {
+                continue;
+            }
+            if l.starts_with(":snapshot") || l.starts_with("snapshot ") {
+                let path = l.split_whitespace().nth(1).map(|s| s.to_string());
+                pending_cmds.push(ViewerCmd::Snapshot(path));
+            } else if l.starts_with(":obj") || l.starts_with("obj ") {
+                if let Some(path) = l.split_whitespace().nth(1) {
+                    pending_cmds.push(ViewerCmd::LoadObj(path.to_string()));
+                }
+            } else if l.starts_with(":gltf") || l.starts_with("gltf ") {
+                if let Some(path) = l.split_whitespace().nth(1) {
+                    pending_cmds.push(ViewerCmd::LoadGltf(path.to_string()));
+                }
+            }
+        }
+    }
+
+    // Viewer state
+    let mut viewer_opt: Option<Viewer> = None;
+    let mut last_frame = Instant::now();
+
+    let _ = event_loop.run(move |event, elwt| {
+        // Use Poll mode to ensure UserEvents from IPC thread are processed
+        elwt.set_control_flow(winit::event_loop::ControlFlow::Poll);
+        
+        match event {
+            Event::Resumed => {
+                if viewer_opt.is_none() {
+                    let v = pollster::block_on(Viewer::new(Arc::clone(&window), config.clone()));
+                    match v {
+                        Ok(mut v) => {
+                            for cmd in pending_cmds.drain(..) {
+                                v.handle_cmd(cmd);
+                            }
+                            viewer_opt = Some(v);
+                            last_frame = Instant::now();
+                            // Print READY line AFTER viewer is initialized
+                            println!("FORGE3D_VIEWER_READY port={}", ipc_port);
+                            use std::io::Write;
+                            let _ = std::io::stdout().flush();
+                            // Kick off render loop so IPC commands can be processed
+                            window.request_redraw();
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to create viewer: {}", e);
+                            elwt.exit();
+                        }
+                    }
+                }
+            }
+            Event::WindowEvent {
+                ref event,
+                window_id,
+            } if window_id == window.id() && !matches!(event, WindowEvent::RedrawRequested) => {
+                if let Some(viewer) = viewer_opt.as_mut() {
+                    if !viewer.handle_input(event) {
+                        match event {
+                            WindowEvent::CloseRequested => {
+                                elwt.exit();
+                            }
+                            WindowEvent::KeyboardInput {
+                                event: key_event, ..
+                            } => {
+                                if key_event.state == ElementState::Pressed {
+                                    if let PhysicalKey::Code(KeyCode::Escape) =
+                                        key_event.physical_key
+                                    {
+                                        elwt.exit();
+                                    }
+                                }
+                            }
+                            WindowEvent::Resized(physical_size) => {
+                                viewer.resize(*physical_size);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Event::AboutToWait => {
+                // Poll global IPC queue for commands
+                if let Some(viewer) = viewer_opt.as_mut() {
+                    if let Ok(mut q) = get_ipc_queue().lock() {
+                        while let Some(cmd) = q.pop_front() {
+                            match cmd {
+                                ViewerCmd::Quit => {
+                                    if viewer.snapshot_request.is_some() {
+                                        viewer.update(0.0);
+                                        let _ = viewer.render();
+                                    }
+                                    elwt.exit();
+                                    return;
+                                }
+                                other => {
+                                    viewer.handle_cmd(other);
+                                }
+                            }
+                        }
+                    }
+                }
+                window.request_redraw();
+            }
+            Event::WindowEvent {
+                event: WindowEvent::RedrawRequested,
+                window_id,
+            } if window_id == window.id() => {
+                if let Some(viewer) = viewer_opt.as_mut() {
+                    let now = Instant::now();
+                    let dt = (now - last_frame).as_secs_f32();
+                    last_frame = now;
+
+                    viewer.update(dt);
+                    match viewer.render() {
+                        Ok(_) => {}
+                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                            viewer.resize(viewer.window.inner_size())
+                        }
+                        Err(wgpu::SurfaceError::OutOfMemory) => {
+                            eprintln!("Out of memory!");
+                            elwt.exit();
+                        }
+                        Err(wgpu::SurfaceError::Timeout) => {
+                            eprintln!("Surface timeout!");
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     });

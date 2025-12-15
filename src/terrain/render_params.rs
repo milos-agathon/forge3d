@@ -349,6 +349,7 @@ fn parse_address_mode(value: &str, field: &str) -> PyResult<AddressModeNative> {
 pub struct TerrainRenderParams {
     pub size_px: (u32, u32),
     pub render_scale: f32,
+    pub terrain_span: f32,
     pub msaa_samples: u32,
     pub z_scale: f32,
     pub cam_target: [f32; 3],
@@ -373,6 +374,10 @@ pub struct TerrainRenderParams {
     pub colormap_srgb: bool,
     /// P6.1: Use exact linear_to_srgb() instead of pow-gamma for output encoding
     pub output_srgb_eotf: bool,
+    /// P7: Camera projection mode ("screen" = fullscreen triangle, "mesh" = perspective grid)
+    pub camera_mode: String,
+    /// P7: Debug mode for projection probes (0=normal, 40=view-depth, 41=NDC depth, 42=view-pos XYZ)
+    pub debug_mode: u32,
     pub height_curve_lut: Option<Arc<Vec<f32>>>,
     pub overlays: Vec<Py<crate::core::overlay_layer::OverlayLayer>>,
     light: Py<PyAny>,
@@ -396,6 +401,8 @@ impl TerrainRenderParams {
         let size_px = tuple_to_u32_pair(params.getattr("size_px")?.as_gil_ref(), "size_px")?;
         let render_scale =
             to_finite_f32(params.getattr("render_scale")?.as_gil_ref(), "render_scale")?;
+        let terrain_span =
+            to_finite_f32(params.getattr("terrain_span")?.as_gil_ref(), "terrain_span")?;
         let msaa_samples: u32 = params
             .getattr("msaa_samples")?
             .extract::<u32>()
@@ -408,6 +415,9 @@ impl TerrainRenderParams {
         }
         if render_scale <= 0.0 {
             return Err(PyValueError::new_err("render_scale must be positive"));
+        }
+        if terrain_span <= 0.0 {
+            return Err(PyValueError::new_err("terrain_span must be positive"));
         }
         if z_scale <= 0.0 {
             return Err(PyValueError::new_err("z_scale must be positive"));
@@ -520,6 +530,20 @@ impl TerrainRenderParams {
             .ok()
             .and_then(|v| v.extract::<bool>().ok())
             .unwrap_or(false);
+
+        // P7: Camera projection mode ("screen" = fullscreen triangle, "mesh" = perspective grid)
+        let camera_mode = params
+            .getattr("camera_mode")
+            .ok()
+            .and_then(|v| v.extract::<String>().ok())
+            .unwrap_or_else(|| "screen".to_string());
+
+        // P7: Debug mode for projection probes
+        let debug_mode = params
+            .getattr("debug_mode")
+            .ok()
+            .and_then(|v| v.extract::<u32>().ok())
+            .unwrap_or(0);
 
         let height_curve_lut: Option<Arc<Vec<f32>>> = if height_curve_mode == "lut" {
             let raw_lut = params.getattr("height_curve_lut")?;
@@ -799,6 +823,7 @@ impl TerrainRenderParams {
         Ok(Self {
             size_px,
             render_scale,
+            terrain_span,
             msaa_samples,
             z_scale,
             cam_target,
@@ -819,6 +844,8 @@ impl TerrainRenderParams {
             lambert_contrast,
             colormap_srgb,
             output_srgb_eotf,
+            camera_mode,
+            debug_mode,
             height_curve_lut,
             overlays,
             light: light.unbind(),

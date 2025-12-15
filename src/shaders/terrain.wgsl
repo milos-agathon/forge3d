@@ -302,9 +302,10 @@ fn fs_main(in: VsOut) -> FsOut {
   let h_down = sample_height_with_fallback(uv_tile, vec2<f32>(0.0, -texel.y), in.xz, spacing, use_fallback);
   let h_up = sample_height_with_fallback(uv_tile, vec2<f32>(0.0, texel.y), in.xz, spacing, use_fallback);
 
-  let spacing_step = max(spacing, 1e-5);
-  let grad_x = ((h_right - h_left) * exaggeration) / (2.0 * spacing_step);
-  let grad_z = ((h_up - h_down) * exaggeration) / (2.0 * spacing_step);
+  let spacing_step_x = max(spacing * texel.x, 1e-5);
+  let spacing_step_z = max(spacing * texel.y, 1e-5);
+  let grad_x = ((h_right - h_left) * exaggeration) / (2.0 * spacing_step_x);
+  let grad_z = ((h_up - h_down) * exaggeration) / (2.0 * spacing_step_z);
   let normal_ws = normalize(vec3<f32>(-grad_x, 1.0, -grad_z));
 
   let t = clamp(0.5 + in.height / (2.0 * h_range), 0.0, 1.0);

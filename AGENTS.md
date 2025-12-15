@@ -53,6 +53,49 @@ Clean code is readable, predictable and easy to change. Bad code compounds costs
 
 ## 3. Design, testing, and AI assistance
 
+### 3.0 AI Evidence & Stop-Conditions
+
+1. **No “DONE/PASS” without pasted command output.** Every checklist item must include the raw terminal output block.
+2. **Always include a “Remaining checklist” section** at the end of every report; any unchecked item blocks “done”.
+3. **Never add new scripts/tools/logging** unless the task explicitly asks—or you first justify it as unavoidable and minimal.
+4. **Treat presets as schema-bound**: before editing, print/quote the exact preset keys read by the loader and where they’re parsed.
+5. **For any new CLI flag**: update *all three* (argparse definition, preset param_map, CLI override precedence map) or explain why not.
+6. **Boolean flags require explicit precedence semantics**: define how `--flag`, `--no-flag`, defaults, and preset values interact.
+7. **A/B tests must specify**: identical scene, identical camera, identical preset baseline, *only one variable changed*.
+8. **IBL/GI validation requires a “forced impact” scene**: if delta is near-zero, create a test case where GI must change output (e.g., kill sun, boost IBL, or use controlled material).
+9. **Logs are not proof of effect.** Require numeric deltas (ROI metrics, histogram, luminance stats) or pixel diffs.
+10. **Whenever you modify shader branching**, add a runtime “feature bit” readback or visible debug mode (only if requested) to prove branch execution.
+11. **Do not cite line numbers as proof** unless you paste the relevant snippet from the current tree.
+12. **Warnings policy**: if cargo produces warnings, state whether any are new; if new, fix or justify explicitly.
+13. **Regression policy**: define the canonical verification suite (exact commands) and run all of it before concluding.
+14. **Add a test when you fix a bug** (esp. precedence bugs): unit test or integration test that fails on the old behavior.
+15. **Preserve baselines by construction**: new features default off; presets pin old behavior; comparisons must include the pinned preset.
+16. **Don’t “handwave minimal impact.”** If a feature is claimed to work, provide at least one case where it measurably changes output.
+17. **Separate “config honored” vs “render changed”** as two different acceptance checks.
+18. **Document assumptions**: if anything is assumed (adapter support, sRGB format selection, etc.), list it + how to verify.
+19. **Edits must be minimal and attributable**: prefer one layer at a time; if multiple layers change, explain the dependency forcing it.
+20. **Always end with “What remains / risks”** even when everything is green (e.g., “no automated test yet for X”, “GI delta small in this scene”).
+21. **No “root cause found” without a falsifiable hypothesis + disproof of alternatives.** Provide (a) hypothesis, (b) minimal experiment, (c) result, (d) what it rules out. If any of these is missing, stop.
+22. **Do not generalize from a single scene.** If a rendering feature seems to have “no effect,” you must add a *forced-edge/forced-impact* scene that amplifies the expected difference (e.g., hard shadow edge, occluder silhouette). Otherwise, stop.
+23. **Never “fix” by changing product meaning.** Do not remove/rename user-facing modes (e.g., `vsm/evsm/msm/csm`) unless the task explicitly instructs it. If you believe removal is necessary, stop and produce a decision memo with tradeoffs and a migration plan.
+24. **Shadow terminology must be explicit.** Distinguish **pipeline** vs **filter** vs **technique** (e.g., “CSM pipeline + PCF filter”). Any ambiguity in code/CLI/help must be resolved with clear naming and docs.
+25. **Uniform-layout changes require hard proof.** If you touch a Rust↔WGSL uniform, you must provide: (a) Rust `size_of` + `align_of`, (b) WGSL struct snippet, (c) `offset_of!` table for all fields used by shader, and (d) at least one runtime wire-test proving the shader reads the intended value.
+26. **Shader-compile provenance is mandatory.** When shader edits are involved, include a “wire test” (sentinel-driven visible output) plus the exact rebuild/install commands and their raw output. If you cannot prove the new shader is in the built extension, stop.
+27. **Do not introduce debug modes as permanent API surface.** Debug toggles must be (a) behind an existing debug flag mechanism, (b) default-off, (c) documented as temporary, and (d) removed or guarded before final merge unless explicitly requested.
+28. **No “hash-only” conclusions for perceptual claims.** If claiming “looks flatter / more dramatic,” you must back it with at least one numeric perceptual proxy: edge-width histogram on shadow boundaries, ROI gradient magnitude stats, or pixel-diff heatmap summary. Hashes alone are insufficient.
+29. **Camera semantics must be printed, not assumed.** For any camera issue (phi/theta/fov), print computed `eye`, `target`, `up`, and derived basis vectors (or matrix) for at least 2 settings, and show that only the intended variable changed.
+30. **Perspective vs orthographic claims require a geometry probe.** Provide a lighting-independent probe render (e.g., view-space depth visualization) demonstrating FOV/theta changes in *geometry*, not just shading. Without this probe, stop.
+31. **Reference matching must be parameterized.** When comparing to Blender/reference images, provide a mapping table: coordinate system, FOV, camera elevation, azimuth, exposure/tonemap, sun direction, units (meters/world scale). If you cannot map parameters, stop and state what is unknown.
+32. **Do not “explain away” user observations with heuristics.** E.g., “camera-sun alignment causes flatness” is not acceptable unless you show an A/B where only alignment changes and the specific missing effect appears/disappears.
+33. **Avoid scope creep via “helpful” new features.** Do not add new rendering paths (mesh mode, ray reconstruction, etc.) unless asked. If you believe it’s required, provide a strict minimal-change plan and stop before implementing until the plan is acknowledged in the task.
+34. **Respect the frozen default behavior.** Any new path must be opt-in with defaults unchanged, and must include a pinned preset demonstrating the old behavior. If you changed defaults inadvertently, stop and revert.
+35. **No silent fallback behavior.** If a requested technique is not implemented end-to-end, error early with a clear message that includes: what is missing (format/passes/blur), where it would be implemented, and what to use instead.
+36. **Tests must prove the *user-facing* promise.** If the promise is “technique changes shadows,” add an integration test that renders a forced-edge scene and asserts a non-trivial difference between techniques. Unit tests of parsing/validation do not satisfy this.
+37. **Stop on contradictory evidence.** If an experiment contradicts your hypothesis (e.g., hardcoded shader return doesn’t change output), you must stop, summarize the contradiction, and propose the next smallest diagnostic step—no large refactors.
+38. **No “it’s cached” without evidence.** If you claim caching/build reuse, you must show build logs or timestamps proving the artifact didn’t rebuild, then show the fix that forces rebuild. Otherwise, do not mention caching as cause.
+39. **Do not change CLI value sets casually.** If you change accepted values (e.g., `--shadows csm`), you must: update help text, presets, docs, and tests in one commit, and provide a migration note. If not, stop.
+40. **Explicit deliverables for every decision.** When a decision is made (remove feature vs implement), list concrete deliverables: files, functions, tests, acceptance renders, and stop-conditions. If you can’t enumerate deliverables, stop.
+
 ### 3.1 Test-driven practices
 
 * **TDD and TCR:** Embrace test-driven development (write a failing test → make it pass → refactor) and Test & Commit or Revert (small changes must keep the main branch green). Work in small, reversible increments.

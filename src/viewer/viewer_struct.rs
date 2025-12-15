@@ -12,13 +12,14 @@ use winit::keyboard::KeyCode;
 use winit::window::Window;
 
 use crate::cli::args::GiVizMode;
+use crate::core::gpu_timing::GpuTimingManager;
 use crate::core::ibl::IBLRenderer;
-use crate::core::screen_space_effects::{GpuTimingManager, ScreenSpaceEffectsManager};
+use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 use crate::core::shadows::{CsmConfig, CsmShadowMap};
 use crate::core::text_overlay::TextOverlayRenderer;
 use crate::p5::ssr::SsrScenePreset;
-use crate::renderer::params::GiPass;
-use crate::renderer::ssr::SsrParams;
+use crate::passes::gi::GiPass;
+use crate::render::params::SsrParams;
 
 use super::camera_controller::CameraController;
 use super::viewer_config::{FpsCounter, ViewerConfig};
@@ -216,4 +217,9 @@ pub struct Viewer {
     pub(crate) hud: TextOverlayRenderer,
     pub(crate) ssr_scene_loaded: bool,
     pub(crate) ssr_scene_preset: Option<SsrScenePreset>,
+    // Object transform (for IPC SetTransform command)
+    pub(crate) object_translation: glam::Vec3,
+    pub(crate) object_rotation: glam::Quat,
+    pub(crate) object_scale: glam::Vec3,
+    pub(crate) object_transform: glam::Mat4,
 }

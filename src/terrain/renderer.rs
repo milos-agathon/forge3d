@@ -2963,9 +2963,7 @@ impl TerrainScene {
 
         // Terrain parameters for shadow rendering
         // CRITICAL: Shadow shader terrain extent must match main shader exactly!
-        // Main shader: world_xy = (uv - 0.5) * spacing where spacing = u_terrain.spacing_h_exag.x = 1.0
-        // So main terrain is a 1x1 unit square centered at origin (-0.5 to 0.5)
-        let terrain_spacing = 1.0; // Must match main shader!
+        let terrain_spacing = params.terrain_span.max(1e-3); // world span used by main shader
         let height_exag = params.z_scale;
         // Get height bounds from clamp settings
         let height_min = decoded.clamp.height_range.0;
@@ -3019,16 +3017,21 @@ impl TerrainScene {
 
         // P6.2: Map technique string to ShadowTechnique enum and set in uniforms
         // This is critical for the WGSL shader to select the correct shadow sampling path
+        // Supported techniques: HARD (0), PCF (1), PCSS (2)
+        // Note: VSM/EVSM/MSM/CSM are rejected at Python validation layer
         use crate::lighting::types::ShadowTechnique;
         let technique_enum = match shadow_settings.technique.to_uppercase().as_str() {
-            "HARD" => ShadowTechnique::Hard,
-            "PCF" => ShadowTechnique::PCF,
-            "PCSS" => ShadowTechnique::PCSS,
-            "VSM" => ShadowTechnique::VSM,
-            "EVSM" => ShadowTechnique::EVSM,
-            "MSM" => ShadowTechnique::MSM,
-            "CSM" => ShadowTechnique::CSM,
-            _ => ShadowTechnique::PCF, // Default fallback
+            "HARD" => ShadowTechnique::Hard,  // 0 - single sample, hard edges
+            "PCF" => ShadowTechnique::PCF,    // 1 - 3x3 kernel, soft edges
+            "PCSS" => ShadowTechnique::PCSS,  // 2 - 5x5 kernel with light radius scaling
+            _ => {
+                log::warn!(
+                    target: "terrain.shadow",
+                    "Unknown shadow technique '{}', defaulting to PCF",
+                    shadow_settings.technique
+                );
+                ShadowTechnique::PCF
+            }
         };
         self.csm_renderer.uniforms.technique = technique_enum.as_u32();
         // P6.2: Store technique directly in TerrainScene for reliable passing to shader
@@ -3396,7 +3399,14 @@ impl TerrainScene {
                 pass.set_bind_group(3, shadow_bind_group, &[]);
                 pass.set_bind_group(4, &fog_bind_group, &[]);
                 pass.set_bind_group(5, &reflection_pass_water_bind_group, &[]);
-                pass.draw(0..3, 0..1);
+                // P7: Vertex count depends on camera mode
+                let vertex_count = if params.camera_mode.to_lowercase() == "mesh" {
+                    let grid_size: u32 = 64;
+                    6 * (grid_size - 1) * (grid_size - 1)
+                } else {
+                    3
+                };
+                pass.draw(0..vertex_count, 0..1);
             }
             
             drop(light_buffer_guard);
@@ -3527,7 +3537,17 @@ impl TerrainScene {
                 // P4: Bind water reflection bind group at index 5
                 pass.set_bind_group(5, &water_reflection_bind_group, &[]);
 
-                pass.draw(0..3, 0..1);
+                // P7: Vertex count depends on camera mode
+                // Screen mode: 3 vertices (fullscreen triangle)
+                // Mesh mode: 6 * (grid_size-1)^2 vertices (triangle list for grid mesh)
+                let vertex_count = if params.camera_mode.to_lowercase() == "mesh" {
+                    let grid_size: u32 = 64;
+                    let quads = (grid_size - 1) * (grid_size - 1);
+                    6 * quads // 2 triangles per quad, 3 vertices per triangle
+                } else {
+                    3 // fullscreen triangle
+                };
+                pass.draw(0..vertex_count, 0..1);
             }
             drop(light_buffer_guard);
         }
@@ -3682,19 +3702,28 @@ impl TerrainScene {
         // 23 = no specular (diffuse only), 24 = no height normal, 25 = ddxddy normal, 26 = height LOD, 27 = normal blend
         // 100 = binary water classification, 101 = shore-distance scalar, 102 = IBL spec isolated
         // 110 = pure red sanity check, 111 = spec -Z, 112 = spec +X, 113 = irr -Z
-        let debug_mode = std::env::var("VF_COLOR_DEBUG_MODE")
+        // P7: 40-42 = projection probe modes (40=view-depth, 41=NDC depth, 42=view-pos XYZ)
+        // Priority: params.debug_mode (CLI) > VF_COLOR_DEBUG_MODE (env var)
+        let env_debug_mode = std::env::var("VF_COLOR_DEBUG_MODE")
             .ok()
             .and_then(|s| s.parse::<i32>().ok())
             .unwrap_or(0);
-        // Allow modes 0-32 (Sprint 1 added 30-32) and 100-113
+        let debug_mode = if params.debug_mode > 0 {
+            params.debug_mode as i32
+        } else {
+            env_debug_mode
+        };
+        // Allow modes 0-42 (P7 added 40-42 for projection probes) and 100-113
         let debug_mode_f = if debug_mode >= 100 && debug_mode <= 113 {
             debug_mode as f32
+        } else if debug_mode >= 40 && debug_mode <= 42 {
+            debug_mode as f32  // P7: Projection probe modes
         } else {
-            debug_mode.clamp(0, 32) as f32
+            debug_mode.clamp(0, 33) as f32
         };
         // Log debug mode for diagnosis
         if debug_mode != 0 {
-            info!("VF_COLOR_DEBUG_MODE: raw={}, resolved={}", debug_mode, debug_mode_f);
+            info!("debug_mode: params={}, env={}, resolved={}", params.debug_mode, env_debug_mode, debug_mode_f);
         }
         
         // Get roughness multiplier from environment variable (default 1.0)
@@ -3979,10 +4008,21 @@ impl TerrainScene {
         ]);
 
         // spacing_h_exag: (spacing_x, spacing_y, height_exag, render_scale)
-        uniforms.extend_from_slice(&[1.0, 1.0, params.z_scale, params.render_scale]);
+        // For mesh mode, scale terrain to be visible at camera distance
+        // Screen mode uses 1.0 (normalized), mesh mode scales with camera radius
+        let is_mesh_mode = params.camera_mode.to_lowercase() == "mesh";
+        let spacing = if is_mesh_mode {
+            params.terrain_span.max(1e-3)
+        } else {
+            1.0
+        };
+        uniforms.extend_from_slice(&[spacing, spacing, params.z_scale, params.render_scale]);
 
-        // pad_tail
-        uniforms.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
+        // camera_mode_params: (camera_mode, grid_size, unused, unused)
+        // camera_mode: 0 = screen (fullscreen triangle), 1 = mesh (perspective grid)
+        let camera_mode = if is_mesh_mode { 1.0 } else { 0.0 };
+        let grid_size = 64.0; // 64x64 grid for mesh mode
+        uniforms.extend_from_slice(&[camera_mode, grid_size, 0.0, 0.0]);
 
         Ok(uniforms)
     }
@@ -4010,10 +4050,20 @@ impl TerrainScene {
         ]);
 
         // spacing_h_exag: (spacing_x, spacing_y, height_exag, render_scale)
-        uniforms.extend_from_slice(&[1.0, 1.0, params.z_scale, params.render_scale]);
+        // For mesh mode, scale terrain to be visible at camera distance
+        let is_mesh_mode = params.camera_mode.to_lowercase() == "mesh";
+        let spacing = if is_mesh_mode {
+            params.terrain_span.max(1e-3)
+        } else {
+            1.0
+        };
+        uniforms.extend_from_slice(&[spacing, spacing, params.z_scale, params.render_scale]);
 
-        // pad_tail
-        uniforms.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
+        // camera_mode_params: (camera_mode, grid_size, unused, unused)
+        // camera_mode: 0 = screen (fullscreen triangle), 1 = mesh (perspective grid)
+        let camera_mode = if is_mesh_mode { 1.0 } else { 0.0 };
+        let grid_size = 64.0; // 64x64 grid for mesh mode
+        uniforms.extend_from_slice(&[camera_mode, grid_size, 0.0, 0.0]);
 
         uniforms
     }

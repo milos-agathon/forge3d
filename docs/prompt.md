@@ -1,281 +1,224 @@
-You are acting as a **principal real-time rendering engineer** (Rust + WGSL + WebGPU/wgpu + Python). You are working in the `forge3d` repo and MUST implement the next milestone while preserving the **frozen production default**.
+You are acting as a **principal real-time rendering engineer** (Rust + WGSL + WebGPU/wgpu + Python) working in the `forge3d` repo. You MUST fix the remaining unmet requirements while preserving the frozen production default.
 
 ## CRITICAL RULES
 
-* You must fully read **AGENTS.md** to get familiar with my codebase rules.
-* **Do not regress existing passing tests.**
-* After every edit you make: **run the relevant command(s)** (build/tests/render/validator). If output doesn’t meet expectations: keep iterating (edit → run → measure) until it does. **Do not stop early.**
-* **Do NOT modify thresholds** in `GORE_STRICT_PROFILE` or any validation ranges to make tests pass.
-* Preserve **P5.0 behavior and output characteristics** as a **selectable preset**.
-* The **P5.0 CLI command** must still render and the **P5.0 metrics must remain ≥ current** (no regressions).
-* Any new feature must be:
-
-  * **Off by default** (unless explicitly part of P6 preset).
-  * **Backwards compatible** with existing CLI/API/config.
-* Avoid hand-waving: every change must map to a concrete file/function/struct/uniform/shader code path.
-* Performance: do not add **>10% GPU frame cost** at 1920×1080 relative to P5.0 baseline (measure and report).
-
-# INPUT ARTIFACTS (AUTHORITATIVE)
-
-1. `docs/gore_p5_preset.md` is the source of truth.
-
-* P5.0 remains production default until P6 passes.
-* Do not relax `GORE_STRICT_PROFILE`. Gradient targets are “truth from Gore”.
-* Ignore water in all future requirements and validations (water detection/color is non-goal).
-
-2. **Style-match harness**: `style_match_eval_v2.py` (provided) is the authoritative comparator for ROIs and exclusions.
-
-* ROIs are defined in canonical 1920×1080 and scaled to working res.
-* Top-right exclusion must be excluded from **all** region metrics.
-* Water is a non-goal; do not try to “fix” water appearance. (Masking in validator may still be required per below.)
-
-# TARGET MILESTONE
-
-## P6.1 – Color Space Correctness + Output Encoding (Engine + Shader)
-
-**Goal:** Fix two known correctness bugs that currently block matching:
-
-1. **Colormap sampling uses linear format but receives sRGB bytes** (wrong luminance/chroma + wrong interpolation space).
-2. **Final output uses pow-gamma** in the main path instead of exact **sRGB EOTF**.
-
-### HARD ACCEPTANCE (MUST ALL PASS)
-
-A) **P5.0 preset must not regress**:
-
-* All existing P1–P5 tests remain green.
-* P5.0 renders successfully with the historical look.
-* P5.0 validator metrics must remain **≥ current** (no regressions).
-
-B) **P6 preset must enable corrected behavior**:
-
-* P6 uses **sRGB-correct colormap sampling**.
-* P6 uses **exact `linear_to_srgb()`** at final output (NOT pow-gamma), while the render target remains `Rgba8Unorm` (linear).
-
-C) **No test relaxation** anywhere.
-
-D) Water is excluded from **metric computations**:
-
-* If validator includes water pixels in gradient/color/luma, implement masking there.
-* Do not “fix” water rendering.
-
-E) Performance:
-
-* P6 corrected path must not cost **>10%** GPU frame time vs P5 at 1920×1080.
-
-# REQUIRED APPROACH (YOU MUST IMPLEMENT THIS)
-
-## 1) Colormap color space fix (P6 only, P5 preserved)
-
-**Problem statement (known):**
-
-* Colormap texture currently created as `wgpu::TextureFormat::Rgba8Unorm` (linear).
-* Hex colors are parsed as raw sRGB bytes and uploaded without sRGB→linear conversion.
-
-**Required implementation:**
-
-* Add a **new, explicit toggle** in terrain params/config that selects colormap sampling color space:
-
-  * `colormap_srgb: bool` (or equivalent name)
-  * Default **false** so P5 remains unchanged.
-  * P6 preset sets it to **true**.
-
-**When `colormap_srgb=true`:**
-
-* Create the colormap texture as `wgpu::TextureFormat::Rgba8UnormSrgb`.
-* Keep hex parsing as raw sRGB bytes (correct for sRGB texture upload).
-* Ensure shader sampling yields **linear** colors automatically (wgpu sRGB sampling semantics).
-
-**When `colormap_srgb=false`:**
-
-* Preserve legacy behavior exactly (linear format with raw bytes).
-
-## 2) Final output encoding fix: keep `Rgba8Unorm` target, use exact `linear_to_srgb()` (P6 only, P5 preserved)
-
-**Problem statement (known):**
-
-* Main shading path currently outputs using pow-gamma (`gamma_correct()`), not exact sRGB.
-
-**Required implementation:**
-
-* Add a **new explicit toggle** in terrain params/config:
-
-  * `output_srgb_eotf: bool` (or similar)
-  * Default **false** (P5 legacy).
-  * P6 preset sets **true**.
-
-**When `output_srgb_eotf=true`:**
-
-* Replace the final `gamma_correct(final_color, gamma)` step with exact:
-
-  * `linear_to_srgb(clamp(final_color, 0..∞))` then clamp to 0..1 for output
-* Keep render target: `wgpu::TextureFormat::Rgba8Unorm` (LINEAR).
-* Do not apply both `linear_to_srgb()` and `gamma_correct()`; it must be **one** encode step.
-
-**When `output_srgb_eotf=false`:**
-
-* Preserve P5 legacy behavior (pow-gamma).
-
-**Note:** Keep `--gamma` functional for legacy mode, but in P6 encode mode it should either:
-
-* be ignored with a warning, or
-* apply only as a post artistic grade (document clearly).
-  Prefer simplest: **ignore gamma when `output_srgb_eotf=true`**, and log a one-line warning.
-
-## 3) Plumbing (Rust + Python) and presets
-
-* Add config fields in `python/forge3d/terrain_params.py` for:
-
-  * `colormap_srgb`
-  * `output_srgb_eotf`
-* Add CLI flags in `examples/terrain_demo.py`:
-
-  * `--colormap-srgb` (store_true; default false)
-  * `--output-srgb-eotf` (store_true; default false)
-* Propagate through Rust render params → uniform / pipeline creation:
-
-  * `colormap_srgb` affects colormap texture format (creation path).
-  * `output_srgb_eotf` affects shader output encoding path (uniform boolean or specialization constant).
-* Must be backwards compatible.
-
-## 4) Validation + reporting
-
-* Run:
-
-  * P5 preset render + validator
-  * P6 preset render + validator
-  * Style match harness (v2) against reference for both outputs (for tracking; not replacing strict validator)
-* Do not modify thresholds.
-
-# SPECIFIC FILE-LEVEL DELIVERABLES (MANDATORY)
-
-You must produce all of the following:
-
-## 1) Code changes
-
-* `python/forge3d/terrain_params.py`
-
-  * Add `colormap_srgb: bool`
-  * Add `output_srgb_eotf: bool`
-  * Ensure serialization/deserialization and defaults (false) are stable.
-
-* `examples/terrain_demo.py`
-
-  * Add CLI flags:
-
-    * `--colormap-srgb`
-    * `--output-srgb-eotf`
-  * Wire end-to-end.
-
-* `src/terrain/mod.rs` (or exact module where the colormap texture is created)
-
-  * Implement dual texture format creation:
-
-    * `Rgba8Unorm` for legacy (P5)
-    * `Rgba8UnormSrgb` for corrected (P6)
-
-* `src/terrain/renderer.rs`
-
-  * Keep terrain color target format as:
-
-    * `wgpu::TextureFormat::Rgba8Unorm`
-  * Add params propagation for the two toggles.
-
-* `src/shaders/terrain_pbr_pom.wgsl`
-
-  * Ensure `linear_to_srgb()` exists and is used in the **main output path only when enabled**.
-  * Add a uniform bool (or packed int) to select encoding mode:
-
-    * legacy pow-gamma vs exact sRGB EOTF.
-  * Keep debug paths intact; do not break water debug modes.
-
-* `tests/validate_terrain_p4.py` (or strict validator used by `GORE_STRICT_PROFILE`)
-
-  * If water pixels contaminate metrics: implement masking in metric computation.
-  * Do not relax thresholds.
-
-## 2) Presets
-
-* `presets/p5_gore_shader_only.json`
-
-  * Must set:
-
-    * `colormap_srgb=false`
-    * `output_srgb_eotf=false`
-  * Must preserve historical output characteristics.
-
-* `presets/p6_gore_detail_normals.json` (or your current P6 preset file)
-
-  * Must set:
-
-    * `colormap_srgb=true`
-    * `output_srgb_eotf=true`
-  * Keep other P6 params unchanged unless required by correctness.
-
-## 3) Reports / artifacts
-
-* `reports/p5/p5_terrain_csm.png` (P5 preset render)
-* `reports/p6/p6_terrain_csm.png` (P6 preset render)
-* `reports/p6/p6_meta.json`
-
-  * Must include:
-
-    * git commit hash (if available)
-    * exact CLI commands executed
-    * the two toggles values
-    * measured timings (frame/render time)
-    * validator metrics output
-    * style-match v2 metrics JSON path(s) and key ROI summary numbers (SSIM/ΔE/edge ratios)
-
-# VALIDATION REQUIREMENTS (MANDATORY)
-
-You must ensure these commands work (copy-paste):
-
-```bash
-python -m tests.validate_terrain_p4 --profile GORE_STRICT_PROFILE --render p5
-python -m tests.validate_terrain_p4 --profile GORE_STRICT_PROFILE --render p6
-```
-
-And additionally run style-match tracking:
-
-```bash
-python style_match_eval_v2.py --ref assets/Gore_Range_Albers_1m.png --cand reports/p5/p5_terrain_csm.png --outdir reports/p5/style_match
-python style_match_eval_v2.py --ref assets/Gore_Range_Albers_1m.png --cand reports/p6/p6_terrain_csm.png --outdir reports/p6/style_match
-```
-
-* `--render p5` must use P5 preset and PASS all P5 metrics (no regressions).
-* `--render p6` must pass the strict profile (and water masked out if necessary).
-* Water must be excluded from metric computations for both modes.
-
-# IMPLEMENTATION RULES
-
-* Determinism: fixed seeds where relevant.
-* No silent fallbacks: if a required asset/preset is missing, fail with a clear message.
-* Do not change default behavior: **new toggles default false**.
-* Keep the performance budget.
-
-# OUTPUT FORMAT (WHAT YOU MUST RETURN)
-
-Return a single response with these sections in order:
-
-1. **Plan (Checklist)** — concrete steps (no vague items).
-2. **Files Changed** — exact paths + what changed (brief but specific).
-3. **Commands to Run** — copy-pastable commands for:
-
-   * rendering P5 + P6
-   * running validation
-   * running style_match_eval_v2 comparisons
-4. **Acceptance Evidence** — table with:
-
-   * P5 validator metrics (key ones from doc)
-   * P6 validator metrics (key ones)
-   * GPU timing comparison (P5 vs P6)
-   * PASS/FAIL per acceptance item A–E
-5. **Notes / Risks** — only real risks, and how you mitigated them.
-
-If anything fails, you must:
-
-* explain the failure precisely,
-* propose the smallest corrective diff,
-* and keep P5.0 intact.
+* You must fully read AGENTS.md to learn repo rules.
+* Do not regress existing passing tests.
+* After every edit: **run tests** and **re-render all required evidence images in the same session**. No “generated earlier” exceptions.
+* Do NOT modify thresholds in any strict validation profiles to “make tests pass”.
+* Preserve existing behavior as the default unless a new opt-in flag/mode is introduced.
+* No handwaving: provide concrete diffs, exact files/lines, and reproducible commands with raw output.
 
 ---
+
+## CONTEXT (WHAT IS ALREADY MET — MUST KEEP)
+
+These must remain true:
+
+1. HARD / PCF / PCSS are wired end-to-end and produce different output (hash/pixel-diff tests exist).
+2. CLI no longer crashes for shadow technique values.
+3. [SHADOW] technique=... logging exists.
+4. Tests are green.
+5. Decisions already taken and implemented: **S2 (fail-fast VSM/EVSM/MSM)** and **P1 (mesh-based perspective heightfield)**.
+
+Do not break any of the above.
+
+---
+
+## WHAT IS STILL NOT ACCEPTED (THE REAL GAP)
+
+Your current evidence **does not prove** the user’s real issue is solved:
+
+* The user’s “Rainier looks flat” complaint is about the **actual Rainier scene**, not the synthetic step DEM.
+* Shadow-technique evidence currently leans on **step_dem.tif** because Rainier “still looks similar across techniques” — that is precisely what we must fix (or explain with concrete, measured evidence).
+* Evidence discipline is incomplete: any required probe images must be freshly regenerated and the md5/diff tooling must be fully reproducible (no placeholder “md5/diff script” line).
+
+This milestone is not done until Rainier relief is clearly non-flat **under low-angle lighting** and we can prove it reproducibly.
+
+---
+
+## OBJECTIVE (DO NOT MISINTERPRET)
+
+The renderer must produce **Blender-like relief** on the **Rainier** terrain under **low sun elevation (< 30°)** while honoring the user’s camera controls (theta/phi/fov) and without relying on “sun = camera + 90°” heuristics.
+
+You must **find and fix root causes**, not recommend different angles.
+
+---
+
+## NON-NEGOTIABLE INVESTIGATION TASKS (DO THESE FIRST)
+
+### I0) Confirm the Rainier scene is actually using mesh perspective mode
+
+**Deliverable I0:** In the Rainier preset and CLI path, prove (via log + config dump) that the Rainier render is using the mesh/perspective mode you added — not silently falling back to screen-mode/fullscreen reconstruction.
+
+* Add a single debug log line (guarded by `FORGE3D_DEBUG_CAMERA=1`) that prints:
+
+  * `render_mode` (screen vs mesh) and the exact code path taken
+  * camera eye/target, derived `view_dir` (normalized)
+  * raw CLI values used (phi/theta/fov)
+  * sun azimuth/elevation, derived `sun_dir` (normalized)
+  * `dot(view_dir, sun_dir)`
+  * DEM texel size (dx, dy) + elevation scale used in normal/mesh generation
+
+### I1) Audit unit/scale correctness for Rainier DEM
+
+Flat relief is often caused by **XY/Z unit mismatch** (degrees treated as meters, wrong texel size, wrong z-scale, wrong height normalization).
+
+**Deliverable I1:** Identify and fix (if needed) at least one of the following (with code references):
+
+* degrees vs meters mismatch
+* swapped dx/dy
+* radians/degrees mixup in camera or sun math
+* incorrect normal derivation scale (slope too small → normals near-up → flat shading)
+* mesh height scale not matching world XY scale
+
+If Rainier DEM is geographic (lat/lon), you MUST either:
+
+* (Preferred) enforce/auto-reproject to a projected CRS for shading/mesh scale, OR
+* implement a correct meters-per-degree approximation based on latitude and use it consistently.
+
+No silent behavior: warn/error clearly.
+
+### I2) Add a Rainier-only relief metric (measured, not vibes)
+
+Add a small deterministic analysis script that quantifies “relief” from an image **without manual judgment**.
+
+**Deliverable I2:** Add `tools/relief_metric.py` (or similar) that outputs:
+
+* luminance stddev over non-background pixels
+* edge/gradient magnitude percentiles (e.g., p50/p90)
+* optional “shadowed pixel ratio” if you have a shadow factor buffer in debug mode
+
+This tool must take `--input <png>` and print a stable, parseable summary.
+
+---
+
+## IMPLEMENTATION REQUIREMENTS (STRICT)
+
+### R1 — Rainier must show real relief under low sun elevation
+
+You must produce a Rainier preset output that is obviously non-flat **without** “sun = camera + 90°” logic.
+
+**Deliverable R1A (Preset):** Update or create:
+
+* `presets/rainier_relief_low_sun.json` (or equivalent)
+
+  * explicit `sun_elevation_deg` in **[10°, 25°]**
+  * camera theta/phi/fov that is clearly perspective (not top-down)
+  * explicitly uses mesh/perspective mode (no ambiguity)
+  * add a comment block explaining the intent and constraints (low sun, no heuristic offset)
+
+**Deliverable R1B (Output):**
+
+* `examples/out/rainier_relief_low_sun.png`
+
+**Acceptance (Measured):**
+
+* `tools/relief_metric.py` must report:
+
+  * luminance stddev ≥ a threshold you justify from baselines (and you must include baseline numbers)
+  * edge magnitude p90 ≥ threshold
+* You must provide the baseline measurements for:
+
+  * the previous “flat” Rainier render
+  * the new “relief” Rainier render
+    so we can see objective improvement.
+
+### R2 — Shadow techniques must be meaningfully different on Rainier (not just step DEM)
+
+If Rainier still looks “similar”, you must either:
+
+* fix it (preferred), OR
+* prove via quantitative evidence why it is physically expected in that configuration and adjust the Rainier preset so differences become visible **without breaking defaults**.
+
+**Deliverable R2A (Outputs):**
+Render the *same Rainier scene* with:
+
+* `examples/out/rainier_shadow_hard.png`
+* `examples/out/rainier_shadow_pcf.png`
+* `examples/out/rainier_shadow_pcss.png`
+
+**Acceptance:**
+
+* md5 hashes must differ
+* pixel-diff counts must be non-zero and above a tiny floor (to avoid “1 pixel differs” flukes)
+
+### R3 — Keep step DEM, but demote it to tests-only evidence
+
+Step DEM is fine for deterministic tests, but it cannot be the primary justification for the user-facing Rainier fix.
+
+**Deliverable R3:**
+
+* If `step_dem.tif` is required for tests, it must be:
+
+  * either generated deterministically by a script checked into `tools/` and produced during tests, OR
+  * checked into an appropriate test asset location (not `examples/out/`)
+* `examples/out/` must not be treated as a source-controlled dependency unless AGENTS.md explicitly allows it.
+
+### R4 — Evidence reproducibility: no placeholders, no “generated earlier”
+
+You must re-render **all** required evidence images in this session and include raw outputs.
+
+**Deliverables R4:**
+
+1. A committed script `tools/md5_and_diff.py` (or similar) that:
+
+   * prints md5 for each image
+   * prints pixel-diff counts for specified pairs
+2. In your final report, include:
+
+   * the exact command lines used
+   * the raw stdout of md5/diff script
+   * the raw stdout of `python -m pytest -q`
+
+---
+
+## REQUIRED EVIDENCE OUTPUTS (MUST BE FRESHLY GENERATED)
+
+### E1 — Geometry probes (lighting-independent; regenerate all)
+
+* probe_fov30.png, probe_fov60.png, probe_fov90.png
+* probe_theta25.png, probe_theta75.png
+* probe_phi0.png, probe_phi90.png
+
+### E2 — Rainier relief (this is the real user problem)
+
+* rainier_relief_low_sun.png
+
+### E3 — Rainier shadow technique sanity
+
+* rainier_shadow_hard.png, rainier_shadow_pcf.png, rainier_shadow_pcss.png
+
+### E4 — Optional but strongly recommended (diagnostic)
+
+* rainier_depth_probe.png (Rainier using the geometry-only depth/debug mode)
+
+---
+
+## ACCEPTANCE CRITERIA (MUST ALL PASS)
+
+1. Rainier preset uses mesh/perspective mode (proven via debug log).
+2. Rainier low-sun render is measurably higher-relief than prior baseline (relief metric tool output included).
+3. Rainier HARD/PCF/PCSS outputs differ (md5 + pixel diffs).
+4. All geometry probes are regenerated in this session and still differ as required.
+5. VSM/EVSM/MSM remain fail-fast with clear error (no regressions).
+6. `python -m pytest -q` passes.
+
+---
+
+## OUTPUT FORMAT (STRICT)
+
+Return:
+
+1. A short “What was wrong” section (max 6 bullets, each bullet must cite file/line or value).
+2. A short plan (max 10 bullets).
+3. List of edited files.
+4. Exact commands run (every render + metrics + tests).
+5. Raw output blocks:
+
+   * relief metric output (baseline + new)
+   * md5 + pixel-diff output
+   * pytest output
+6. Final test results summary.
+
+No extra commentary.

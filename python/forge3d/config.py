@@ -62,16 +62,36 @@ _BRDF_MODELS: Dict[str, str] = {
     "kajiya-kay": "hair",
 }
 
+# Supported shadow techniques for terrain rendering
+# Note: VSM/EVSM/MSM require moment-based shadow maps not implemented for terrain
 _SHADOW_TECHNIQUES: Dict[str, str] = {
     "none": "none",  # P0: Disable shadows entirely
-    "hard": "hard",
-    "pcf": "pcf",
-    "pcss": "pcss",
-    "vsm": "vsm",
-    "evsm": "evsm",
-    "msm": "msm",
-    "csm": "csm",
+    "hard": "hard",  # Single-sample, hard-edged shadows
+    "pcf": "pcf",    # Percentage-closer filtering (soft edges)
+    "pcss": "pcss",  # Percentage-closer soft shadows (variable penumbra)
 }
+
+# Unsupported techniques that require moment-based shadow maps
+_UNSUPPORTED_SHADOW_TECHNIQUES: set = {"vsm", "evsm", "msm", "csm"}
+
+def validate_shadow_technique(technique: str) -> str:
+    """Validate shadow technique and provide clear error for unsupported ones."""
+    key = _normalize_key(technique)
+    if key in _UNSUPPORTED_SHADOW_TECHNIQUES:
+        supported = ", ".join(sorted(_SHADOW_TECHNIQUES.keys()))
+        if key == "csm":
+            raise ValueError(
+                f"Shadow technique 'csm' is not a valid filter option. "
+                f"CSM (Cascaded Shadow Maps) is the underlying pipeline used by all techniques. "
+                f"Use --shadows with one of: {supported}"
+            )
+        else:
+            raise ValueError(
+                f"Shadow technique '{technique}' is not implemented for terrain rendering. "
+                f"VSM/EVSM/MSM require moment-based shadow map formats not yet supported. "
+                f"Supported techniques: {supported}"
+            )
+    return _normalize_choice(technique, _SHADOW_TECHNIQUES, "shadow technique")
 
 _GI_MODES: Dict[str, str] = {
     "none": "none",
@@ -425,7 +445,7 @@ class ShadowParams:
         if "enabled" in data:
             base.enabled = bool(data["enabled"])
         if "technique" in data:
-            base.technique = _normalize_choice(data["technique"], _SHADOW_TECHNIQUES, "shadow technique")
+            base.technique = validate_shadow_technique(data["technique"])
             # P0: 'none' technique means shadows disabled
             if base.technique == "none":
                 base.enabled = False
@@ -446,7 +466,9 @@ class ShadowParams:
         return base
 
     def requires_moments(self) -> bool:
-        return self.technique in {"vsm", "evsm", "msm"}
+        # Note: VSM/EVSM/MSM are not supported for terrain rendering
+        # This method returns False for all supported techniques
+        return False
 
     def atlas_memory_bytes(self) -> int:
         bpp = 8 if self.requires_moments() else 4

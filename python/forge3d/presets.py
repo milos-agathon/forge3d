@@ -103,7 +103,7 @@ def outdoor_sun() -> Dict[str, Any]:
         },
         "shadows": {
             "enabled": True,
-            "technique": "csm",
+            "technique": "pcf",  # PCF is the standard soft shadow filter on CSM pipeline
             "map_size": 2048,
             "cascades": 3,  # Valid range [2,4] for CSM; pick 3 for balance
         },
@@ -146,6 +146,113 @@ def toon_viz() -> Dict[str, Any]:
     }
 
 
+def rainier_showcase() -> Dict[str, Any]:
+    """Terrain showcase preset optimized for dramatic mountain lighting.
+    
+    Designed to avoid the "flat Rainier" problem by:
+    - Offsetting sun azimuth ~90° from typical camera angles for cross-lighting
+    - Using lower sun elevation (25°) for longer shadows
+    - Reducing IBL intensity to 0.3 to let shadows dominate
+    - Increasing sun intensity to 4.0 to compensate for reduced fill
+    - Using 4 CSM cascades at high resolution for detailed shadows
+    
+    Best paired with camera phi around 30-60° (sun at 135° creates ~75-105° offset).
+    """
+    return {
+        "lighting": {
+            "exposure": 1.0,
+            "lights": [
+                # Sun direction: azimuth ~135°, elevation 25° for long shadows
+                # Direction vector for sun at (az=135°, el=25°): 
+                # x = cos(25°)*sin(135°) ≈ 0.64
+                # y = sin(25°) ≈ 0.42  
+                # z = cos(25°)*cos(135°) ≈ -0.64
+                _dir_light(direction=(0.64, 0.42, -0.64), intensity=4.0, color=(1.0, 0.95, 0.90)),
+            ],
+        },
+        "shading": {
+            "brdf": "cooktorrance-ggx",
+            "roughness": 0.6,
+            "metallic": 0.0,
+            "normal_maps": True,
+        },
+        "shadows": {
+            "enabled": True,
+            "technique": "pcss",  # PCSS for variable penumbra shadows
+            "map_size": 4096,
+            "cascades": 4,
+        },
+        "gi": {
+            "modes": ["ibl"],  # Enable IBL but at reduced intensity
+        },
+        "atmosphere": {
+            "enabled": True,
+            "sky": "hdri",
+        },
+        # Note: IBL intensity should be set via CLI --ibl-intensity 0.3
+        # Sun/camera angles should be set via CLI for flexibility
+    }
+
+
+def rainier_relief() -> Dict[str, Any]:
+    """Rainier relief preset: low sun + perspective mesh for strong terrain relief.
+    
+    Constraints:
+    1. Sun elevation is low (18 deg < 30) for long shadows.
+    2. Camera defaults to a perspective mesh view (theta 65 deg, phi 45 deg, fov 55).
+    3. No implicit sun-camera offsets; angles are honored as provided.
+    4. Relief comes from low-angle sun plus high-resolution PCSS shadows.
+    """
+    import math
+
+    sun_az_rad = math.radians(225.0)
+    sun_el_rad = math.radians(18.0)
+    sun_x = math.cos(sun_el_rad) * math.sin(sun_az_rad)
+    sun_y = math.sin(sun_el_rad)
+    sun_z = math.cos(sun_el_rad) * math.cos(sun_az_rad)
+
+    return {
+        "lighting": {
+            "exposure": 1.2,
+            "lights": [
+                _dir_light(
+                    direction=(sun_x, sun_y, sun_z),
+                    intensity=5.0,
+                    color=(1.0, 0.92, 0.85),
+                ),
+            ],
+        },
+        "shading": {
+            "brdf": "cooktorrance-ggx",
+            "roughness": 0.55,
+            "metallic": 0.0,
+            "normal_maps": True,
+        },
+        "shadows": {
+            "enabled": True,
+            "technique": "pcss",
+            "map_size": 4096,
+            "cascades": 4,
+            "light_size": 2.0,
+        },
+        "gi": {
+            "modes": ["ibl"],
+        },
+        "atmosphere": {
+            "enabled": True,
+            "sky": "hdri",
+        },
+        # Recommended camera defaults applied by terrain_demo when preset is selected.
+        "cli_params": {
+            "camera_mode": "mesh",
+            "cam_theta": 65.0,
+            "cam_phi": 45.0,
+            "cam_fov": 55.0,
+        },
+    }
+
+
+
 # -----------------------------------------------------------------------------
 # Registry and lookup helpers
 # -----------------------------------------------------------------------------
@@ -154,6 +261,8 @@ _PRESETS: Dict[str, Callable[[], Dict[str, Any]]] = {
     "studiopbr": studio_pbr,
     "outdoorsun": outdoor_sun,
     "toonviz": toon_viz,
+    "rainiershowcase": rainier_showcase,
+    "rainierrelief": rainier_relief,
 }
 
 _ALIASES: Dict[str, str] = {
@@ -162,6 +271,11 @@ _ALIASES: Dict[str, str] = {
     "sun": "outdoorsun",
     "outdoor": "outdoorsun",
     "toon": "toonviz",
+    "rainier": "rainiershowcase",
+    "showcase": "rainiershowcase",
+    "terrain": "rainiershowcase",
+    "relief": "rainierrelief",
+    "lowangle": "rainierrelief",
 }
 
 
@@ -193,6 +307,8 @@ __all__ = [
     "studio_pbr",
     "outdoor_sun",
     "toon_viz",
+    "rainier_showcase",
+    "rainier_relief",
     "available",
     "get",
 ]

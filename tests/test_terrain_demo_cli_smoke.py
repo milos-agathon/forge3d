@@ -29,7 +29,7 @@ def test_terrain_demo_preset_cli_smoke() -> None:
         light=[],
         exposure=1.0,
         brdf="cooktorrance-ggx",
-        shadows="csm",
+        shadows="pcf",
         shadow_map_res=None,
         cascades=4,
         pcss_blocker_radius=None,
@@ -47,7 +47,7 @@ def test_terrain_demo_preset_cli_smoke() -> None:
 
     # Expectations identical to acceptance test
     assert cfg.shading.brdf == "cooktorrance-ggx"
-    assert cfg.shadows.technique == "csm"
+    assert cfg.shadows.technique == "pcf"
     assert cfg.shadows.cascades == 4
     assert cfg.atmosphere.sky == "hosek-wilkie"
     assert cfg.atmosphere.hdr_path == "assets/sky.hdr"

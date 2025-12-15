@@ -35,6 +35,11 @@ DEFAULT_HDR = Path("assets/snow_field_4k.hdr")
 DEFAULT_OUTPUT = Path("examples/out/terrain_demo.png")
 DEFAULT_SIZE = (1920, 1080)
 DEFAULT_DOMAIN = (200.0, 2200.0)
+DEFAULT_CAM_RADIUS = 1000.0
+DEFAULT_CAM_PHI = 135.0
+DEFAULT_CAM_THETA = 45.0
+DEFAULT_CAM_FOV = 55.0
+DEFAULT_CAMERA_MODE = "screen"
 DEFAULT_COLORMAP_STOPS: Sequence[tuple[float, str]] = (
     (200.0, "#00aa00"),   # Low elevation: Vibrant green (valleys)
     (800.0, "#80ff00"),   # Mid-low: Bright lime (foothills)
@@ -56,6 +61,52 @@ def _require_attributes(attr_names: Iterable[str]) -> None:
         )
 
 
+def _normalize_preset_name(name: str) -> str:
+    return "".join(c for c in str(name).strip().lower() if c not in {"-", "_", " ", "."})
+
+
+def check_camera_sun_alignment(
+    cam_phi_deg: float,
+    cam_theta_deg: float,
+    sun_azimuth_deg: float,
+    sun_elevation_deg: float,
+) -> float:
+    """Check alignment between camera view direction and sun direction.
+    
+    Returns the dot product of view and light directions.
+    Values > 0.7 indicate the sun is nearly behind the camera, causing flat lighting.
+    Values < 0.3 indicate good cross-lighting for dramatic shadows.
+    
+    Args:
+        cam_phi_deg: Camera azimuth angle in degrees
+        cam_theta_deg: Camera elevation angle in degrees  
+        sun_azimuth_deg: Sun azimuth angle in degrees
+        sun_elevation_deg: Sun elevation angle in degrees
+        
+    Returns:
+        Dot product in range [-1, 1]. Higher = more aligned = flatter lighting.
+    """
+    # Convert to radians
+    cam_phi = math.radians(cam_phi_deg)
+    cam_theta = math.radians(cam_theta_deg)
+    sun_az = math.radians(sun_azimuth_deg)
+    sun_el = math.radians(sun_elevation_deg)
+    
+    # Camera view direction (from camera toward scene center)
+    view_x = math.cos(cam_theta) * math.cos(cam_phi)
+    view_y = math.sin(cam_theta)
+    view_z = math.cos(cam_theta) * math.sin(cam_phi)
+    
+    # Sun light direction (direction light comes FROM)
+    light_x = math.cos(sun_el) * math.sin(sun_az)
+    light_y = math.sin(sun_el)
+    light_z = math.cos(sun_el) * math.cos(sun_az)
+    
+    # Dot product
+    dot = view_x * light_x + view_y * light_y + view_z * light_z
+    return dot
+
+
 def _load_dem(path: Path):
     dem = _io.load_dem(str(path), fill_nodata_values=True)
     data = getattr(dem, "data", None)
@@ -64,6 +115,49 @@ def _load_dem(path: Path):
     # Match legacy terrain_demo orientation
     dem.data = np.flipud(np.asarray(data, dtype=np.float32)).copy()
     return dem
+
+
+def _dem_spacing_info(dem: Any) -> tuple[float, float, float, str]:
+    """Return (dx_m, dy_m, terrain_span, note) for logging and scaling."""
+    res = getattr(dem, "resolution", (1.0, 1.0)) or (1.0, 1.0)
+    try:
+        dx_raw = float(res[0] or 1.0)
+        dy_raw = float(res[1] or 1.0)
+    except Exception:
+        dx_raw, dy_raw = 1.0, 1.0
+
+    crs = getattr(dem, "crs", None)
+    bounds = getattr(dem, "bounds", None)
+    is_geographic = False
+    if crs:
+        crs_str = str(crs).lower()
+        if "4326" in crs_str or "wgs84" in crs_str:
+            is_geographic = True
+
+    dx_m, dy_m = dx_raw, dy_raw
+    spacing_note = "projected/unspecified"
+    if is_geographic:
+        lat_deg = 0.0
+        if bounds and len(bounds) == 4:
+            try:
+                lat_deg = 0.5 * (float(bounds[1]) + float(bounds[3]))
+            except Exception:
+                lat_deg = 0.0
+        lat_rad = math.radians(lat_deg)
+        # Approx meters per degree using a common ellipsoid approximation
+        meters_per_deg_lat = 111132.92 - 559.82 * math.cos(2 * lat_rad) + 1.175 * math.cos(4 * lat_rad)
+        meters_per_deg_lon = 111412.84 * math.cos(lat_rad) - 93.5 * math.cos(3 * lat_rad)
+        dx_m = dx_raw * meters_per_deg_lon
+        dy_m = dy_raw * meters_per_deg_lat
+        spacing_note = f"geographic(lat={lat_deg:.3f})"
+
+    dx_m = max(dx_m, 1e-6)
+    dy_m = max(dy_m, 1e-6)
+    h, w = np.asarray(dem.data).shape[:2]
+    span_x = dx_m * float(w)
+    span_y = dy_m * float(h)
+    terrain_span = float(max(span_x, span_y))
+    return dx_m, dy_m, terrain_span, spacing_note
 
 
 def _build_renderer_config(args: Any):
@@ -100,7 +194,8 @@ def _build_renderer_config(args: Any):
         try:
             from . import presets as _presets
 
-            preset_map = _presets.get(str(args.preset))
+            preset_map = dict(_presets.get(str(args.preset)))
+            preset_map.pop("cli_params", None)
         except Exception as exc:  # pragma: no cover - defensive
             raise SystemExit(f"Unknown or unavailable preset '{args.preset}': {exc}")
         return load_renderer_config(preset_map, overrides)
@@ -297,6 +392,7 @@ def _build_colormap(
 def _build_params(
     size: tuple[int, int],
     render_scale: float,
+    terrain_span: float,
     msaa: int,
     z_scale: float,
     exposure: float,
@@ -314,6 +410,10 @@ def _build_params(
     cam_radius: float = 1200.0,
     cam_phi_deg: float = 135.0,
     cam_theta_deg: float = 45.0,
+    fov_y_deg: float = 55.0,
+    camera_mode: str = "screen",
+    debug_mode: int = 0,
+    clip: tuple[float, float] | None = None,
     height_curve_mode: str = "linear",
     height_curve_strength: float = 0.0,
     height_curve_power: float = 1.0,
@@ -354,6 +454,11 @@ def _build_params(
         cam_radius=cam_radius,
         cam_phi_deg=cam_phi_deg,
         cam_theta_deg=cam_theta_deg,
+        fov_y_deg=fov_y_deg,
+        terrain_span=terrain_span,
+        camera_mode=camera_mode,
+        debug_mode=debug_mode,
+        clip=clip,
         height_curve_mode=height_curve_mode,
         height_curve_strength=height_curve_strength,
         height_curve_power=height_curve_power,
@@ -485,6 +590,26 @@ def _apply_luminance_unsharp(frame, strength: float, sigma: float = 2.5):
         return _FrameWrapper(result)
 
 
+def _apply_preset_cli_defaults(args: Any) -> None:
+    """Apply preset-specific camera defaults for perspective relief presets."""
+    preset_name = getattr(args, "preset", None)
+    if not preset_name:
+        return
+
+    key = _normalize_preset_name(preset_name)
+    if key != "rainierrelief":
+        return
+
+    if getattr(args, "camera_mode", DEFAULT_CAMERA_MODE) == DEFAULT_CAMERA_MODE:
+        args.camera_mode = "mesh"
+    if float(getattr(args, "cam_theta", DEFAULT_CAM_THETA)) == DEFAULT_CAM_THETA:
+        args.cam_theta = 65.0
+    if float(getattr(args, "cam_phi", DEFAULT_CAM_PHI)) == DEFAULT_CAM_PHI:
+        args.cam_phi = 45.0
+    if float(getattr(args, "cam_fov", DEFAULT_CAM_FOV)) == DEFAULT_CAM_FOV:
+        args.cam_fov = 55.0
+
+
 def render_sunrise_to_noon_sequence(
     *,
     dem_path: Path,
@@ -572,9 +697,11 @@ def render_sunrise_to_noon_sequence(
 
         if use_native and sess is not None and renderer_native is not None and materials is not None and ibl is not None:
             ibl_enabled = "ibl" in cfg.gi.modes
+            clip_far = max(6000.0, terrain_span * 1.5)
             params = _build_params(
                 size=(width, height),
                 render_scale=1.0,
+                terrain_span=terrain_span,
                 msaa=1,
                 z_scale=1.0,
                 exposure=float(cfg.lighting.exposure),
@@ -586,6 +713,7 @@ def render_sunrise_to_noon_sequence(
                 light_azimuth_deg=azimuth_deg,
                 light_elevation_deg=elev,
                 shadow_config=cfg.shadows,  # Pass shadow config from renderer config
+                clip=(0.1, clip_far),
             )
 
             # Native binding currently expects a non-None IBL handle; turning IBL on/off
@@ -640,6 +768,8 @@ def run(args: Any) -> int:
         )
     )
 
+    _apply_preset_cli_defaults(args)
+
     renderer_config = _build_renderer_config(args)
 
     if args.output.exists() and not getattr(args, "overwrite", False):
@@ -652,6 +782,7 @@ def run(args: Any) -> int:
     sess = f3d.Session(window=bool(getattr(args, "window", False)))
 
     dem = _load_dem(args.dem)
+    dem_dx_m, dem_dy_m, terrain_span, spacing_note = _dem_spacing_info(dem)
     heightmap_array = dem.data
 
     if getattr(args, "colormap_domain", None) is not None:
@@ -666,6 +797,9 @@ def run(args: Any) -> int:
         fallback=(float(domain_meta[0]), float(domain_meta[1])),
     )
     domain = (float(domain[0]), float(domain[1]))
+    print(
+        f"[DEM] spacing_m=({dem_dx_m:.3f},{dem_dy_m:.3f}) span={terrain_span:.2f} source={spacing_note}"
+    )
 
     colormap = _build_colormap(
         domain,
@@ -723,6 +857,51 @@ def run(args: Any) -> int:
     sun_elevation_deg = float(args.sun_elevation) if getattr(args, "sun_elevation", None) is not None else 35.0
     sun_intensity = float(args.sun_intensity) if getattr(args, "sun_intensity", None) is not None else 3.0
     sun_color = tuple(args.sun_color) if getattr(args, "sun_color", None) is not None else None
+
+    # Check for camera-sun alignment that causes flat lighting
+    cam_phi_deg = float(args.cam_phi)
+    cam_theta_deg = float(args.cam_theta)
+    fov_y_deg = float(args.cam_fov)
+    
+    # PHASE 0: Debug camera logging (FORGE3D_DEBUG_CAMERA=1)
+    # Proves whether the engine is honoring the requested low-angle lighting and camera orientation.
+    # cam_theta is polar angle from +Y axis: theta=0 = top-down, theta=90 = horizon
+    # elevation_above_horizon = 90 - theta
+    # camera_pitch = elevation (angle looking up from horizon)
+    if os.environ.get("FORGE3D_DEBUG_CAMERA") == "1":
+        cam_radius = float(args.cam_radius)
+        theta_rad = math.radians(cam_theta_deg)
+        phi_rad = math.radians(cam_phi_deg)
+        eye_x = cam_radius * math.sin(theta_rad) * math.cos(phi_rad)
+        eye_y = cam_radius * math.cos(theta_rad)
+        eye_z = cam_radius * math.sin(theta_rad) * math.sin(phi_rad)
+        view_len = math.sqrt(eye_x**2 + eye_y**2 + eye_z**2) or 1.0
+        view_dir = (-eye_x / view_len, -eye_y / view_len, -eye_z / view_len)
+        sun_dir = _sun_direction_from_angles(sun_azimuth_deg, sun_elevation_deg)
+        view_light_dot = view_dir[0] * sun_dir[0] + view_dir[1] * sun_dir[1] + view_dir[2] * sun_dir[2]
+        render_mode = str(getattr(args, "camera_mode", DEFAULT_CAMERA_MODE)).lower()
+        render_path = "mesh_perspective_grid" if render_mode == "mesh" else "screen_fullscreen_triangle"
+        print(
+            "[FORGE3D_DEBUG_CAMERA]"
+            f" render_mode={render_mode} path={render_path}"
+            f" eye=({eye_x:.2f},{eye_y:.2f},{eye_z:.2f}) target=(0.0,0.0,0.0)"
+            f" view_dir=({view_dir[0]:.4f},{view_dir[1]:.4f},{view_dir[2]:.4f})"
+            f" sun_dir=({sun_dir[0]:.4f},{sun_dir[1]:.4f},{sun_dir[2]:.4f})"
+            f" dot={view_light_dot:.4f}"
+            f" cli_phi_deg={cam_phi_deg:.2f} cli_theta_deg={cam_theta_deg:.2f} cli_fov_y_deg={fov_y_deg:.2f}"
+            f" sun_azimuth_deg={sun_azimuth_deg:.2f} sun_elevation_deg={sun_elevation_deg:.2f}"
+            f" dem_texel_m=({dem_dx_m:.3f},{dem_dy_m:.3f}) terrain_span={terrain_span:.2f}"
+            f" z_scale={float(args.z_scale):.3f} spacing_note={spacing_note}"
+        )
+
+    alignment_dot = check_camera_sun_alignment(
+        cam_phi_deg, cam_theta_deg, sun_azimuth_deg, sun_elevation_deg
+    )
+    if alignment_dot > 0.85:
+        print(
+            f"[WARNING] Sun is nearly aligned with camera (dot={alignment_dot:.2f}). "
+            f"Shadows will appear flat. Adjust sun or camera angles to introduce cross-lighting."
+        )
 
     # P2: Parse fog parameters from CLI
     fog_density = float(getattr(args, "fog_density", 0.0) or 0.0)
@@ -806,9 +985,11 @@ def run(args: Any) -> int:
     shadow_cfg = renderer_config.shadows
     print(f"[SHADOW] technique={shadow_cfg.technique.upper()}, cascades={shadow_cfg.cascades}, res={shadow_cfg.map_size}")
 
+    clip_far = max(6000.0, terrain_span * 1.5)
     params = _build_params(
         size=(int(args.size[0]), int(args.size[1])),
         render_scale=float(args.render_scale),
+        terrain_span=terrain_span,
         msaa=int(args.msaa),
         z_scale=float(args.z_scale),
         exposure=float(renderer_config.lighting.exposure),
@@ -826,6 +1007,10 @@ def run(args: Any) -> int:
         cam_radius=float(args.cam_radius),
         cam_phi_deg=float(args.cam_phi),
         cam_theta_deg=float(args.cam_theta),
+        fov_y_deg=float(args.cam_fov),
+        camera_mode=str(getattr(args, "camera_mode", "screen")),
+        debug_mode=int(getattr(args, "debug_mode", 0)),
+        clip=(0.1, clip_far),
         height_curve_mode=str(args.height_curve_mode),
         height_curve_strength=float(args.height_curve_strength),
         height_curve_power=float(args.height_curve_power),

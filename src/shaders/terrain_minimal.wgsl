@@ -90,9 +90,10 @@ fn fs_main(in: VsOut) -> FsOut {
   let h_right = textureSampleLevel(height_tex, height_samp, clamp(uv_tile + vec2<f32>(texel.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
   let h_down = textureSampleLevel(height_tex, height_samp, clamp(uv_tile + vec2<f32>(0.0, -texel.y), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
   let h_up = textureSampleLevel(height_tex, height_samp, clamp(uv_tile + vec2<f32>(0.0, texel.y), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-  let spacing_step = max(spacing, 1e-5);
-  let grad_x = ((h_right - h_left) * globals.spacing_h_exag_pad.z) / (2.0 * spacing_step);
-  let grad_z = ((h_up - h_down) * globals.spacing_h_exag_pad.z) / (2.0 * spacing_step);
+  let spacing_step_x = max(spacing * texel.x, 1e-5);
+  let spacing_step_z = max(spacing * texel.y, 1e-5);
+  let grad_x = ((h_right - h_left) * globals.spacing_h_exag_pad.z) / (2.0 * spacing_step_x);
+  let grad_z = ((h_up - h_down) * globals.spacing_h_exag_pad.z) / (2.0 * spacing_step_z);
   let normal_ws = normalize(vec3<f32>(-grad_x, 1.0, -grad_z));
   let palette_index = globals.spacing_h_exag_pad.w;
   let v_coord = (palette_index + 0.5) / vec2<f32>(textureDimensions(lut_tex, 0)).y;

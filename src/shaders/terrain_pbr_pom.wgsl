@@ -120,13 +120,18 @@ const DBG_NDOTL: u32 = 30u;           // N·L (lambert term) as grayscale
 const DBG_SHADOW_FACTOR: u32 = 31u;   // Shadow visibility factor as grayscale
 const DBG_PRE_TONEMAP: u32 = 32u;     // Final color before tonemapping (linear, clamped for display)
 const DBG_SHADOW_TECHNIQUE: u32 = 33u; // P6.2: Show shadow technique as color (Red=HARD, Green=PCF, Blue=PCSS)
+// P7: Projection probe modes for perspective verification (lighting-independent)
+const DBG_VIEW_DEPTH: u32 = 40u;      // View-space depth as grayscale (changes with FOV/theta if perspective works)
+const DBG_NDC_DEPTH: u32 = 41u;       // NDC depth (clip.z/clip.w) as grayscale
+const DBG_VIEW_POS_XYZ: u32 = 42u;    // View-space position encoded as RGB (normalized to [0,1])
 
 struct TerrainUniforms {
     view : mat4x4<f32>,
     proj : mat4x4<f32>,
     sun_exposure : vec4<f32>,
     spacing_h_exag : vec4<f32>,
-    pad_tail : vec4<f32>,
+    // x=camera_mode (0=screen, 1=mesh), y=grid_size (for mesh mode), z=unused, w=unused
+    camera_mode_params : vec4<f32>,
 };
 
 struct TerrainShadingUniforms {
@@ -503,12 +508,14 @@ fn sample_shadow_pcf_terrain(
         + csm_uniforms.peter_panning_offset;
     let compare_depth = depth_01 - bias;
     
-    // P6.2: Shadow technique dispatch based on pcf_kernel_size
-    // pcf_kernel_size=1: HARD (single sample), =3: PCF (3x3), >=5: PCSS (5x5+)
-    let kernel_size = i32(csm_uniforms.pcf_kernel_size);
+    // P6.2: Shadow technique dispatch based on technique uniform
+    // technique=0: HARD (single sample, hard edges)
+    // technique=1: PCF (3x3 kernel, soft edges)
+    // technique=2: PCSS (5x5+ kernel with light radius scaling, variable penumbra)
+    let technique = csm_uniforms.technique;
     
-    // HARD shadows (kernel_size <= 1): single sample, no filtering
-    if (kernel_size <= 1) {
+    // HARD shadows (technique=0): single sample, no filtering
+    if (technique == 0u) {
         return textureSampleCompare(
             shadow_maps,
             shadow_sampler,
@@ -518,16 +525,42 @@ fn sample_shadow_pcf_terrain(
         );
     }
     
-    // PCF/PCSS: kernel-based filtering
-    // Larger kernel = softer shadows (PCSS effect)
-    let filter_scale = max(csm_uniforms.pcss_light_radius, 1.0);
+    // PCF (technique=1): 3x3 kernel for soft edges
+    if (technique == 1u) {
+        let kernel_size = 3;
+        let radius = 1;
+        // Use UV-space texel size: 1.0 / shadow_map_size
+        // shadow_coords are in [0,1] UV space, so we need UV-space offsets
+        let texel_size_uv = 1.0 / max(csm_uniforms.shadow_map_size, 1.0);
+        var shadow_sum = 0.0;
+        for (var y = -radius; y <= radius; y = y + 1) {
+            for (var x = -radius; x <= radius; x = x + 1) {
+                let offset = vec2<f32>(f32(x), f32(y)) * texel_size_uv;
+                let sample_coords = shadow_coords + offset;
+                let depth_sample = textureSampleCompare(
+                    shadow_maps,
+                    shadow_sampler,
+                    sample_coords,
+                    i32(cascade_idx),
+                    compare_depth
+                );
+                shadow_sum = shadow_sum + depth_sample;
+            }
+        }
+        return shadow_sum / 9.0;
+    }
     
-    let radius = kernel_size / 2;
-    let texel_size = cascade.texel_size * filter_scale;
+    // PCSS (technique=2): larger kernel with light radius scaling for variable penumbra
+    // Uses pcss_light_radius to scale the filter based on blocker distance approximation
+    let pcss_kernel_size = 5;
+    let pcss_radius = 2;
+    let filter_scale = max(csm_uniforms.pcss_light_radius, 1.0);
+    // Use UV-space texel size scaled by light radius for penumbra effect
+    let texel_size_uv = (1.0 / max(csm_uniforms.shadow_map_size, 1.0)) * filter_scale;
     var shadow_sum = 0.0;
-    for (var y = -radius; y <= radius; y = y + 1) {
-        for (var x = -radius; x <= radius; x = x + 1) {
-            let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
+    for (var y = -pcss_radius; y <= pcss_radius; y = y + 1) {
+        for (var x = -pcss_radius; x <= pcss_radius; x = x + 1) {
+            let offset = vec2<f32>(f32(x), f32(y)) * texel_size_uv;
             let sample_coords = shadow_coords + offset;
             let depth_sample = textureSampleCompare(
                 shadow_maps,
@@ -539,9 +572,7 @@ fn sample_shadow_pcf_terrain(
             shadow_sum = shadow_sum + depth_sample;
         }
     }
-
-    let kernel_area = f32(kernel_size * kernel_size);
-    return shadow_sum / kernel_area;
+    return shadow_sum / 25.0;
 }
 
 /// Normalize world position for shadow calculations
@@ -742,22 +773,68 @@ fn calculate_texel_size() -> vec2<f32> {
     );
 }
 
-/// Vertex shader generates fullscreen triangle without vertex buffers
+/// Vertex shader for terrain rendering.
+/// Supports two modes controlled by camera_mode_params.x:
+/// - Mode 0 (screen): Fullscreen triangle with orthographic screen coverage (default, preserves legacy behavior)
+/// - Mode 1 (mesh): Grid mesh with perspective-correct view*proj transformation
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
     var out : VertexOutput;
 
-    // Generate fullscreen triangle covering [-1,1] NDC space
-    // vertex 0: (-1, -1) -> UV (0, 0)
-    // vertex 1: ( 3, -1) -> UV (2, 0)
-    // vertex 2: (-1,  3) -> UV (0, 2)
-    let uv_x = f32((vertex_id << 1u) & 2u);
-    let uv_y = f32(vertex_id & 2u);
-    let uv = vec2<f32>(uv_x, uv_y);
-
-    let ndc_x = uv_x * 2.0 - 1.0;
-    let ndc_y = uv_y * 2.0 - 1.0;
-    out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
+    let camera_mode = u32(u_terrain.camera_mode_params.x);
+    let grid_size = u32(max(u_terrain.camera_mode_params.y, 64.0));
+    
+    var uv : vec2<f32>;
+    
+    if (camera_mode == 1u) {
+        // MESH MODE: Use grid coordinates for perspective-correct terrain rendering
+        // Generate triangle mesh from vertex_id
+        // For a grid_size x grid_size grid, we have (grid_size-1)^2 quads, each with 2 triangles
+        // Each triangle has 3 vertices, so total vertices = 6 * (grid_size-1)^2
+        let quads_per_row = grid_size - 1u;
+        let vertices_per_quad = 6u; // 2 triangles * 3 vertices
+        
+        // Compute which quad and which vertex within the quad
+        let quad_idx = vertex_id / vertices_per_quad;
+        let vert_in_quad = vertex_id % vertices_per_quad;
+        
+        // Quad position in grid
+        let quad_x = quad_idx % quads_per_row;
+        let quad_y = quad_idx / quads_per_row;
+        
+        // Vertex offsets for the two triangles in a quad:
+        // Counter-clockwise winding in screen space after view*proj transform
+        // (wgpu default front_face is CCW, we cull Back faces)
+        // Triangle 0: (0,0), (1,0), (1,1)  -> vertices 0,1,2
+        // Triangle 1: (0,0), (1,1), (0,1)  -> vertices 3,4,5
+        var offset_x: u32;
+        var offset_y: u32;
+        switch (vert_in_quad) {
+            case 0u: { offset_x = 0u; offset_y = 0u; } // Tri 0, corner 0
+            case 1u: { offset_x = 1u; offset_y = 0u; } // Tri 0, corner 1
+            case 2u: { offset_x = 1u; offset_y = 1u; } // Tri 0, corner 2
+            case 3u: { offset_x = 0u; offset_y = 0u; } // Tri 1, corner 0
+            case 4u: { offset_x = 1u; offset_y = 1u; } // Tri 1, corner 1
+            default: { offset_x = 0u; offset_y = 1u; } // Tri 1, corner 2 (case 5u)
+        }
+        
+        let grid_x = quad_x + offset_x;
+        let grid_y = quad_y + offset_y;
+        
+        // UV coordinates [0,1] from grid position
+        uv = vec2<f32>(
+            f32(grid_x) / f32(grid_size - 1u),
+            f32(grid_y) / f32(grid_size - 1u)
+        );
+    } else {
+        // SCREEN MODE: Fullscreen triangle (legacy orthographic-style rendering)
+        // vertex 0: (-1, -1) -> UV (0, 0)
+        // vertex 1: ( 3, -1) -> UV (2, 0)
+        // vertex 2: (-1,  3) -> UV (0, 2)
+        let uv_x = f32((vertex_id << 1u) & 2u);
+        let uv_y = f32(vertex_id & 2u);
+        uv = vec2<f32>(uv_x, uv_y);
+    }
 
     // Reconstruct world position from UV coordinates
     // The terrain is centered at origin with spacing defining the XY extent
@@ -768,16 +845,37 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
     let world_xy = (uv - vec2<f32>(0.5, 0.5)) * spacing;
 
     // Sample height from heightmap (use textureSampleLevel for vertex shader)
-    let h_raw = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let h_raw = textureSampleLevel(height_tex, height_samp, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
     let h_disp = h_min + apply_height_curve01(t_geom) * (h_max - h_min);
-    let world_z = h_disp * h_exag;
-
-    out.world_position = vec3<f32>(world_xy.x, world_xy.y, world_z);
-    out.world_normal = vec3<f32>(0.0, 1.0, 0.0); // Default up, will be recalculated in fragment shader
-    out.tex_coord = uv;
+    
+    // For mesh mode: center terrain vertically around Z=0 so camera at origin can see it
+    // For screen mode: keep original height for fragment shader compatibility
+    let h_center = (h_min + h_max) * 0.5;
+    let world_z_centered = (h_disp - h_center) * h_exag;
+    let world_z_original = h_disp * h_exag;
+    
+    // Use centered Z for mesh mode clip position, but keep original for world_position
+    // (world_position is used for lighting which expects real elevation)
+    let world_pos = vec3<f32>(world_xy.x, world_xy.y, world_z_original);
+    out.world_position = world_pos;
+    out.world_normal = vec3<f32>(0.0, 0.0, 1.0); // Z-up, recalculated in fragment shader
+    out.tex_coord = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    
+    if (camera_mode == 1u) {
+        // MESH MODE: Apply view and projection matrices for proper perspective
+        // Use centered Z for clip position so terrain is visible from camera at origin
+        let mesh_world_pos = vec3<f32>(world_xy.x, world_xy.y, world_z_centered);
+        out.clip_position = u_terrain.proj * u_terrain.view * vec4<f32>(mesh_world_pos, 1.0);
+    } else {
+        // SCREEN MODE: Fixed NDC clip positions (fullscreen triangle)
+        let ndc_x = uv.x * 2.0 - 1.0;
+        let ndc_y = uv.y * 2.0 - 1.0;
+        out.clip_position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
+    }
+    
     return out;
 }
 
@@ -2759,6 +2857,48 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // ── MODE 27: Effective Normal Blend Visualization ──
         // Grayscale ramp from normal_blend (already distinct)
         out.color = vec4<f32>(vec3<f32>(normal_blend), 1.0);
+        return out;
+    } else if (debug_mode == DBG_VIEW_DEPTH) {
+        // MODE 40: View-Space Depth (Projection Probe)
+        // Outputs view-space depth as grayscale. Theta/phi change the camera ray origin,
+        // so this varies with camera orientation. Use DBG_NDC_DEPTH (41) for FOV checks.
+        let view_pos = u_terrain.view * vec4<f32>(input.world_position, 1.0);
+        let view_z = -view_pos.z; // Negate because view space looks down -Z
+        // Normalize to reasonable range (assume terrain within 0-2000 units from camera)
+        let depth_normalized = clamp(view_z / 2000.0, 0.0, 1.0);
+        out.color = vec4<f32>(vec3<f32>(depth_normalized), 1.0);
+        return out;
+    } else if (debug_mode == DBG_NDC_DEPTH) {
+        // MODE 41: NDC Depth (Projection Probe)
+        // Outputs clip.z/clip.w as grayscale. FOV changes the projection matrix and
+        // therefore this value, even for identical geometry and camera position.
+        let clip_pos = u_terrain.proj * u_terrain.view * vec4<f32>(input.world_position, 1.0);
+        let ndc_z = clip_pos.z / clip_pos.w;
+        // NDC depth is in [0,1] for wgpu/WebGPU
+        out.color = vec4<f32>(vec3<f32>(ndc_z), 1.0);
+        return out;
+    } else if (debug_mode == DBG_SHADOW_TECHNIQUE) {
+        // MODE 33: Shadow Technique Visualization
+        // Red = HARD (0), Green = PCF (1), Blue = PCSS (2)
+        // This proves what technique value the shader is receiving from the uniform buffer.
+        let tech = csm_uniforms.technique;
+        var tech_color = vec3<f32>(1.0, 0.0, 1.0); // Magenta = unknown
+        if (tech == 0u) {
+            tech_color = vec3<f32>(1.0, 0.0, 0.0); // Red = HARD
+        } else if (tech == 1u) {
+            tech_color = vec3<f32>(0.0, 1.0, 0.0); // Green = PCF
+        } else if (tech == 2u) {
+            tech_color = vec3<f32>(0.0, 0.0, 1.0); // Blue = PCSS
+        }
+        out.color = vec4<f32>(tech_color, 1.0);
+        return out;
+    } else if (debug_mode == DBG_VIEW_POS_XYZ) {
+        // ── MODE 42: View-Space Position as RGB (Projection Probe) ──
+        // Encodes view-space XYZ as RGB. Dramatically changes with camera orientation.
+        let view_pos = u_terrain.view * vec4<f32>(input.world_position, 1.0);
+        // Normalize to [-1000, 1000] range -> [0, 1] for visualization
+        let pos_normalized = (view_pos.xyz / 1000.0 + 1.0) * 0.5;
+        out.color = vec4<f32>(clamp(pos_normalized, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
         return out;
     } else if (debug_mode == 100u) {
         // DBG_WATER_BINARY: Unambiguous binary water classification

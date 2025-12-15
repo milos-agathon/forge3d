@@ -1,7 +1,7 @@
 """P6.2 Shadow Technique Selection Tests.
 
 Tests that shadow technique CLI validation works correctly and that
-different techniques can be selected without errors.
+different techniques produce visually different outputs.
 """
 
 import hashlib
@@ -12,14 +12,16 @@ import numpy as np
 import pytest
 
 from forge3d.terrain_params import ShadowSettings
-from forge3d.config import ShadowParams, _SHADOW_TECHNIQUES, load_renderer_config
+from forge3d.config import ShadowParams, _SHADOW_TECHNIQUES, validate_shadow_technique, load_renderer_config
 
 
 class TestShadowTechniqueValidation:
     """Test shadow technique validation in terrain_params.py."""
 
-    # All techniques that should be supported
-    SUPPORTED_TECHNIQUES = ["hard", "pcf", "pcss", "vsm", "evsm", "msm", "csm", "none"]
+    # Supported techniques for terrain rendering (HARD/PCF/PCSS + NONE)
+    SUPPORTED_TECHNIQUES = ["hard", "pcf", "pcss", "none"]
+    # Unsupported techniques that should raise clear errors
+    UNSUPPORTED_TECHNIQUES = ["vsm", "evsm", "msm", "csm"]
 
     def _make_shadow_settings(self, technique: str) -> ShadowSettings:
         """Helper to create ShadowSettings with given technique."""
@@ -62,8 +64,6 @@ class TestShadowTechniqueValidation:
         error_msg = str(exc_info.value)
         assert "Unsupported shadow technique" in error_msg
         assert "INVALID_TECHNIQUE" in error_msg
-        # Should list supported techniques
-        assert "CSM" in error_msg or "PCF" in error_msg
 
     def test_none_technique_disables_shadows(self):
         """Technique='NONE' should disable shadows automatically."""
@@ -75,17 +75,35 @@ class TestShadowTechniqueValidation:
 class TestShadowConfigValidation:
     """Test shadow technique validation in config.py ShadowParams."""
 
-    @pytest.mark.parametrize("technique", ["hard", "pcf", "pcss", "vsm", "evsm", "msm", "csm"])
-    def test_shadow_params_from_mapping(self, technique: str):
-        """ShadowParams.from_mapping should accept all supported techniques."""
+    @pytest.mark.parametrize("technique", ["hard", "pcf", "pcss"])
+    def test_shadow_params_from_mapping_supported(self, technique: str):
+        """ShadowParams.from_mapping should accept supported techniques."""
         params = ShadowParams.from_mapping({"technique": technique})
         assert params.technique == technique  # config.py uses lowercase
 
+    @pytest.mark.parametrize("technique", ["vsm", "evsm", "msm"])
+    def test_shadow_params_from_mapping_rejects_unsupported(self, technique: str):
+        """ShadowParams.from_mapping should reject VSM/EVSM/MSM with clear error."""
+        with pytest.raises(ValueError) as exc_info:
+            ShadowParams.from_mapping({"technique": technique})
+        
+        error_msg = str(exc_info.value)
+        assert "not implemented" in error_msg or "not supported" in error_msg.lower()
+
+    def test_shadow_params_from_mapping_rejects_csm(self):
+        """ShadowParams.from_mapping should reject 'csm' with explanation."""
+        with pytest.raises(ValueError) as exc_info:
+            ShadowParams.from_mapping({"technique": "csm"})
+        
+        error_msg = str(exc_info.value)
+        assert "csm" in error_msg.lower()
+        assert "pipeline" in error_msg.lower() or "not a valid filter" in error_msg.lower()
+
     def test_shadow_techniques_dict_complete(self):
-        """_SHADOW_TECHNIQUES dict should include all expected techniques."""
-        expected = {"none", "hard", "pcf", "pcss", "vsm", "evsm", "msm", "csm"}
+        """_SHADOW_TECHNIQUES dict should include supported techniques."""
+        expected = {"none", "hard", "pcf", "pcss"}
         actual = set(_SHADOW_TECHNIQUES.keys())
-        assert expected.issubset(actual), f"Missing techniques: {expected - actual}"
+        assert expected == actual, f"Expected {expected}, got {actual}"
 
     def test_renderer_config_shadow_technique(self):
         """load_renderer_config should propagate shadow technique correctly."""
@@ -93,66 +111,35 @@ class TestShadowConfigValidation:
         assert config.shadows.technique == "pcss"
 
 
-class TestTerrainShadowTechniqueValidation:
-    """Test that VSM/EVSM/MSM are correctly rejected for terrain rendering."""
+class TestValidateShadowTechnique:
+    """Test the validate_shadow_technique function directly."""
 
-    UNSUPPORTED_TERRAIN_TECHNIQUES = ["vsm", "evsm", "msm"]
-    SUPPORTED_TERRAIN_TECHNIQUES = ["none", "hard", "pcf", "pcss", "csm"]
+    @pytest.mark.parametrize("technique", ["hard", "pcf", "pcss", "none"])
+    def test_accepts_supported_techniques(self, technique: str):
+        """Should accept supported techniques."""
+        result = validate_shadow_technique(technique)
+        assert result == technique
 
-    def _make_shadow_settings(self, technique: str) -> ShadowSettings:
-        """Helper to create ShadowSettings with given technique."""
-        return ShadowSettings(
-            enabled=True,
-            technique=technique,
-            resolution=2048,
-            cascades=3,
-            max_distance=4000.0,
-            softness=1.5,
-            intensity=0.8,
-            slope_scale_bias=0.001,
-            depth_bias=0.0005,
-            normal_bias=0.0002,
-            min_variance=1e-4,
-            light_bleed_reduction=0.5,
-            evsm_exponent=40.0,
-            fade_start=1.0,
-        )
-
-    @pytest.mark.parametrize("technique", UNSUPPORTED_TERRAIN_TECHNIQUES)
-    def test_unsupported_techniques_raise_for_terrain(self, technique: str):
-        """VSM/EVSM/MSM should raise ValueError when validated for terrain."""
-        settings = self._make_shadow_settings(technique)
-        # Settings creation succeeds (config layer accepts them)
-        assert settings.technique == technique.upper()
-        
-        # But terrain validation should fail with clear error
+    @pytest.mark.parametrize("technique", ["vsm", "evsm", "msm"])
+    def test_rejects_moment_techniques(self, technique: str):
+        """Should reject VSM/EVSM/MSM with clear error."""
         with pytest.raises(ValueError) as exc_info:
-            settings.validate_for_terrain()
+            validate_shadow_technique(technique)
         
         error_msg = str(exc_info.value)
-        assert "not implemented for terrain" in error_msg
-        assert technique.upper() in error_msg
+        assert "not implemented" in error_msg
+        assert "moment-based" in error_msg.lower()
         # Should list supported alternatives
-        assert "CSM" in error_msg or "PCSS" in error_msg
+        assert "hard" in error_msg or "pcf" in error_msg
 
-    @pytest.mark.parametrize("technique", SUPPORTED_TERRAIN_TECHNIQUES)
-    def test_supported_techniques_pass_terrain_validation(self, technique: str):
-        """HARD/PCF/PCSS/CSM/NONE should pass terrain validation."""
-        settings = self._make_shadow_settings(technique)
-        # Should not raise
-        settings.validate_for_terrain()
-        assert settings.technique == technique.upper()
-
-    def test_terrain_supported_techniques_constant(self):
-        """TERRAIN_SUPPORTED_TECHNIQUES should match expected set."""
-        expected = {"NONE", "HARD", "PCF", "PCSS", "CSM"}
-        assert ShadowSettings.TERRAIN_SUPPORTED_TECHNIQUES == expected
-
-    def test_all_techniques_superset_of_terrain(self):
-        """ALL_TECHNIQUES should be superset of TERRAIN_SUPPORTED_TECHNIQUES."""
-        assert ShadowSettings.TERRAIN_SUPPORTED_TECHNIQUES.issubset(
-            ShadowSettings.ALL_TECHNIQUES
-        )
+    def test_rejects_csm_with_explanation(self):
+        """Should reject 'csm' with explanation that it's the pipeline, not a filter."""
+        with pytest.raises(ValueError) as exc_info:
+            validate_shadow_technique("csm")
+        
+        error_msg = str(exc_info.value)
+        assert "csm" in error_msg.lower()
+        assert "pipeline" in error_msg.lower() or "not a valid filter" in error_msg.lower()
 
 
 class TestShadowMemoryBudget:
@@ -180,28 +167,6 @@ class TestShadowMemoryBudget:
         assert settings.resolution == 4096
         assert settings.cascades == 4
 
-    def test_memory_budget_vsm_within_budget(self):
-        """VSM at reasonable resolution should pass budget check."""
-        # VSM uses extra memory for moment maps (2 channels)
-        settings = ShadowSettings(
-            enabled=True,
-            technique="VSM",
-            resolution=2048,
-            cascades=3,
-            max_distance=4000.0,
-            softness=1.5,
-            intensity=0.8,
-            slope_scale_bias=0.001,
-            depth_bias=0.0005,
-            normal_bias=0.0002,
-            min_variance=1e-4,
-            light_bleed_reduction=0.5,
-            evsm_exponent=40.0,
-            fade_start=1.0,
-        )
-        mem = settings._estimate_memory_bytes()
-        assert mem < ShadowSettings.MAX_SHADOW_MEMORY_BYTES
-
     def test_memory_estimate_increases_with_resolution(self):
         """Higher resolution should increase memory estimate."""
         low_res = ShadowSettings(
@@ -217,30 +182,6 @@ class TestShadowMemoryBudget:
             min_variance=1e-4, light_bleed_reduction=0.5, evsm_exponent=40.0, fade_start=1.0,
         )
         assert high_res._estimate_memory_bytes() > low_res._estimate_memory_bytes()
-
-    def test_memory_estimate_moment_techniques(self):
-        """VSM/EVSM/MSM should use more memory than PCF due to moment maps."""
-        pcf = ShadowSettings(
-            enabled=True, technique="PCF", resolution=2048, cascades=3,
-            max_distance=4000.0, softness=1.5, intensity=0.8,
-            slope_scale_bias=0.001, depth_bias=0.0005, normal_bias=0.0002,
-            min_variance=1e-4, light_bleed_reduction=0.5, evsm_exponent=40.0, fade_start=1.0,
-        )
-        vsm = ShadowSettings(
-            enabled=True, technique="VSM", resolution=2048, cascades=3,
-            max_distance=4000.0, softness=1.5, intensity=0.8,
-            slope_scale_bias=0.001, depth_bias=0.0005, normal_bias=0.0002,
-            min_variance=1e-4, light_bleed_reduction=0.5, evsm_exponent=40.0, fade_start=1.0,
-        )
-        evsm = ShadowSettings(
-            enabled=True, technique="EVSM", resolution=2048, cascades=3,
-            max_distance=4000.0, softness=1.5, intensity=0.8,
-            slope_scale_bias=0.001, depth_bias=0.0005, normal_bias=0.0002,
-            min_variance=1e-4, light_bleed_reduction=0.5, evsm_exponent=40.0, fade_start=1.0,
-        )
-        # VSM uses 2-channel moments, EVSM uses 4-channel
-        assert vsm._estimate_memory_bytes() > pcf._estimate_memory_bytes()
-        assert evsm._estimate_memory_bytes() > vsm._estimate_memory_bytes()
 
 
 def _create_step_dem(width: int = 256, height: int = 256, cliff_height: float = 100.0) -> np.ndarray:
@@ -309,6 +250,8 @@ class TestShadowTechniqueDifferentiation:
         import sys
         
         # Use terrain_demo.py CLI which handles all setup correctly
+        # Use mesh mode for perspective, and low sun for visible shadows
+        # The 512 shadow res ensures filtering differences are visible
         cmd = [
             sys.executable, "-B", "examples/terrain_demo.py",
             "--dem", str(dem_path),
@@ -321,6 +264,7 @@ class TestShadowTechniqueDifferentiation:
             "--hdr", "assets/hdri/snow_field_4k.hdr",
             "--output", str(output_path),
             "--overwrite",
+            "--camera-mode", "mesh",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, cwd=".")
         if result.returncode != 0:

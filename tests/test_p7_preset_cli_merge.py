@@ -18,9 +18,10 @@ from forge3d.config import load_renderer_config
     "overrides",
     [
         {
-            # Mirrors: --brdf cooktorrance-ggx --shadows csm --cascades 4 --hdr assets/sky.hdr
+            # Mirrors: --brdf cooktorrance-ggx --shadows pcf --cascades 4 --hdr assets/sky.hdr
+            # Note: 'csm' is the underlying pipeline, not a filter option. Use pcf/pcss/hard.
             "brdf": "cooktorrance-ggx",
-            "shadows": "csm",
+            "shadows": "pcf",
             "cascades": 4,
             "hdr": "assets/sky.hdr",
         }
@@ -34,7 +35,7 @@ def test_p7_outdoor_sun_cli_overrides_merge(overrides: dict) -> None:
     assert cfg.shading.brdf == "cooktorrance-ggx"
 
     # Shadows technique and cascades applied
-    assert cfg.shadows.technique == "csm"
+    assert cfg.shadows.technique == "pcf"
     assert cfg.shadows.cascades == 4
 
     # Atmosphere retains the preset sky model and accepts HDR override

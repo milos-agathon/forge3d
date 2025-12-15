@@ -1,0 +1,20 @@
+{
+    "name": "rainier_showcase",
+    "description": "Dramatic mountain terrain lighting preset - sun offset from camera by 90° with reduced IBL fill for strong relief and shadows",
+    "cli_params": {
+        "sun_azimuth": 45,
+        "sun_elevation": 25,
+        "sun_intensity": 4.0,
+        "ibl_intensity": 0.2,
+        "exposure": 1.2,
+        "cam_phi": 135,
+        "cam_theta": 55,
+        "cam_radius": 1200,
+        "cam_fov": 55,
+        "z_scale": 1.0,
+        "shadows": "pcf",
+        "cascades": 2,
+        "msaa": 4
+    },
+    "notes": "Sun azimuth (45°) is offset ~90° from camera phi (135°) to create dramatic side-lighting that emphasizes terrain relief. IBL is reduced to 0.2 to prevent shadow fill. cam_theta=55 gives 35° elevation above horizon for a low-angle view."
+}

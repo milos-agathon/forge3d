@@ -139,6 +139,28 @@ pub enum ViewerCmd {
     CaptureP54GiStack,
     QueryGiSeed,
     GiStatus,
+    // IPC-specific commands for non-blocking viewer workflow
+    /// Set sun direction (azimuth/elevation in degrees)
+    SetSunDirection {
+        azimuth_deg: f32,
+        elevation_deg: f32,
+    },
+    /// Set IBL with path and intensity
+    SetIbl { path: String, intensity: f32 },
+    /// Set terrain z-scale (height exaggeration)
+    SetZScale(f32),
+    /// Snapshot with explicit width/height override
+    SnapshotWithSize {
+        path: String,
+        width: Option<u32>,
+        height: Option<u32>,
+    },
+    /// Set object transform (translation, rotation quaternion, scale)
+    SetTransform {
+        translation: Option<[f32; 3]>,
+        rotation_quat: Option<[f32; 4]>,
+        scale: Option<[f32; 3]>,
+    },
 }
 
 /// Visualization mode for viewer output

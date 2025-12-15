@@ -69,10 +69,11 @@ class ShadowSettings:
 
     # Shadow technique constants matching Rust ShadowTechnique enum
     # ALL_TECHNIQUES: Full set recognized by config layer (for forward compatibility)
-    ALL_TECHNIQUES = {"NONE", "HARD", "PCF", "PCSS", "VSM", "EVSM", "MSM", "CSM"}
+    ALL_TECHNIQUES = {"NONE", "HARD", "PCF", "PCSS", "VSM", "EVSM", "MSM"}
     # TERRAIN_SUPPORTED_TECHNIQUES: Actually implemented in terrain_pbr_pom.wgsl
     # VSM/EVSM/MSM require moment-map sampling which is NOT implemented in terrain shader
-    TERRAIN_SUPPORTED_TECHNIQUES = {"NONE", "HARD", "PCF", "PCSS", "CSM"}
+    # Note: CSM is the pipeline, not a filter - use HARD/PCF/PCSS as the technique
+    TERRAIN_SUPPORTED_TECHNIQUES = {"NONE", "HARD", "PCF", "PCSS"}
     # Alias for backwards compatibility
     SUPPORTED_TECHNIQUES = ALL_TECHNIQUES
     # Memory budget: 512 MiB host-visible heap (AGENTS.md constraint)
@@ -399,6 +400,8 @@ class TerrainRenderParams:
 
     size_px: Tuple[int, int]
     render_scale: float
+    # Physical span of the terrain in world units. Used to scale UVs to world XY.
+    terrain_span: float
     msaa_samples: int
     z_scale: float
     cam_target: List[float]
@@ -438,6 +441,10 @@ class TerrainRenderParams:
     # P6.1: Color space correctness toggles (defaults to False for P5 compatibility)
     colormap_srgb: bool = False  # Use Rgba8UnormSrgb for colormap texture (correct sampling)
     output_srgb_eotf: bool = False  # Use exact linear_to_srgb() instead of pow-gamma
+    # P7: Camera projection mode ("screen" = fullscreen triangle, "mesh" = perspective grid)
+    camera_mode: str = "screen"
+    # P7: Debug mode for projection probes (0=normal, 40=view-depth, 41=NDC depth, 42=view-pos XYZ)
+    debug_mode: int = 0
 
     def __post_init__(self) -> None:
         # Default fog to disabled if not provided
@@ -455,6 +462,9 @@ class TerrainRenderParams:
 
         if width > 8192 or height > 8192:
             raise ValueError("size_px must be <= 8192x8192")
+
+        if self.terrain_span <= 0.0:
+            raise ValueError("terrain_span must be > 0")
 
         if not 0.25 <= self.render_scale <= 4.0:
             raise ValueError("render_scale must be 0.25-4.0")
@@ -544,6 +554,7 @@ def make_terrain_params_config(
     *,
     size_px: Tuple[int, int],
     render_scale: float,
+    terrain_span: float,
     msaa_samples: int,
     z_scale: float,
     exposure: float,
@@ -559,6 +570,10 @@ def make_terrain_params_config(
     cam_radius: float = 1200.0,
     cam_phi_deg: float = 135.0,
     cam_theta_deg: float = 45.0,
+    fov_y_deg: float = 55.0,
+    camera_mode: str = "screen",  # "screen" (fullscreen triangle) or "mesh" (perspective grid)
+    debug_mode: int = 0,  # 0=normal, 40=view-depth probe, 41=NDC depth, 42=view-pos XYZ
+    clip: Optional[Tuple[float, float]] = None,
     height_curve_mode: str = "linear",
     height_curve_strength: float = 0.0,
     height_curve_power: float = 1.0,
@@ -654,9 +669,13 @@ def make_terrain_params_config(
     if overlays is None:
         overlays = []
 
+    if clip is None:
+        clip = (0.1, 6000.0)
+
     return TerrainRenderParams(
         size_px=size_px,
         render_scale=render_scale,
+        terrain_span=float(terrain_span),
         msaa_samples=msaa_samples,
         z_scale=z_scale,
         cam_target=[0.0, 0.0, 0.0],
@@ -664,8 +683,8 @@ def make_terrain_params_config(
         cam_phi_deg=float(cam_phi_deg),
         cam_theta_deg=float(cam_theta_deg),
         cam_gamma_deg=0.0,
-        fov_y_deg=55.0,
-        clip=(0.1, 6000.0),
+        fov_y_deg=float(fov_y_deg),
+        clip=clip,
         light=LightSettings(
             light_type="Directional",
             azimuth_deg=float(light_azimuth_deg),
@@ -698,6 +717,8 @@ def make_terrain_params_config(
         reflection=reflection,
         ao_weight=ao_weight,
         detail=detail,
+        camera_mode=str(camera_mode),
+        debug_mode=int(debug_mode),
     )
 
 

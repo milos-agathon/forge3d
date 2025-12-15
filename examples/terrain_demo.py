@@ -59,6 +59,7 @@ def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit
         "size": ("size", "--size"), "msaa": ("msaa", "--msaa"),
         "z_scale": ("z_scale", "--z-scale"), "cam_radius": ("cam_radius", "--cam-radius"),
         "cam_phi": ("cam_phi", "--cam-phi"), "cam_theta": ("cam_theta", "--cam-theta"),
+        "cam_fov": ("cam_fov", "--cam-fov"),
         "exposure": ("exposure", "--exposure"), "ibl_intensity": ("ibl_intensity", "--ibl-intensity"),
         "sun_intensity": ("sun_intensity", "--sun-intensity"),
         "gi": ("gi", "--gi"),
@@ -135,9 +136,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--render-scale", type=float, default=1.0, help="Internal render scale multiplier.")
     parser.add_argument("--msaa", type=int, default=4, help="MSAA sample count.")
     parser.add_argument("--z-scale", dest="z_scale", type=float, default=2.0, help="Vertical exaggeration factor.")
-    parser.add_argument("--cam-radius", type=float, default=1000.0, help="Camera radius from target point.")
-    parser.add_argument("--cam-phi", type=float, default=135.0, help="Camera azimuth angle in degrees.")
-    parser.add_argument("--cam-theta", type=float, default=45.0, help="Camera elevation angle in degrees.")
+    parser.add_argument("--cam-radius", type=float, default=_impl.DEFAULT_CAM_RADIUS, help="Camera radius from target point.")
+    parser.add_argument("--cam-phi", type=float, default=_impl.DEFAULT_CAM_PHI, help="Camera azimuth angle in degrees.")
+    parser.add_argument("--cam-theta", type=float, default=_impl.DEFAULT_CAM_THETA, help="Camera polar angle from +Y axis (0=top-down, 90=horizon). Elevation = 90 - theta.")
+    parser.add_argument("--cam-fov", type=float, default=_impl.DEFAULT_CAM_FOV, help="Camera vertical field of view in degrees.")
+    parser.add_argument(
+        "--camera-mode", type=str, default=_impl.DEFAULT_CAMERA_MODE, choices=["screen", "mesh"],
+        help="Camera projection mode: 'screen' (default, fullscreen triangle) or 'mesh' (perspective grid mesh)."
+    )
     parser.add_argument("--exposure", type=float, default=1.0, help="ACES exposure multiplier.")
     parser.add_argument("--sun-azimuth", type=float, help="Sun azimuth angle in degrees.")
     parser.add_argument("--sun-elevation", type=float, help="Sun elevation angle in degrees.")
@@ -224,14 +230,19 @@ def _parse_args() -> argparse.Namespace:
         help="Lighting override in key=value form (repeatable).",
     )
     parser.add_argument("--brdf", type=str, help="Shading BRDF model name.")
-    parser.add_argument("--preset", type=str, help="High-level preset (studio_pbr, outdoor_sun, toon_viz).")
+    parser.add_argument(
+        "--preset",
+        type=str,
+        help="High-level preset (studio_pbr, outdoor_sun, toon_viz, rainier_showcase, rainier_relief).",
+    )
     parser.add_argument(
         "--shadows",
         type=str,
+        choices=["none", "hard", "pcf", "pcss"],
         help=(
             "Shadow technique for terrain rendering. "
-            "Supported: none, hard, pcf, pcss, csm. "
-            "NOT supported: vsm, evsm, msm (moment-based shadows not implemented in terrain shader). "
+            "Supported: none, hard, pcf, pcss. "
+            "NOT supported: vsm, evsm, msm, csm (moment-based shadows not implemented for terrain). "
             "'none' disables shadows."
         ),
     )
@@ -287,6 +298,7 @@ def _parse_args() -> argparse.Namespace:
             "7=diffuse only, 8=specular only, 9=Fresnel, 10=N.V, 11=roughness, 12=energy, "
             "13=linear combined, 14=linear diffuse, 15=linear specular, 16=recomp error, 17=SpecAA sparkle, "
             "18=POM offset magnitude (grayscale), 19=SpecAA sigma², 20=SpecAA sparkle sigma², "
+            "40=view-depth probe (perspective test), 41=NDC depth probe, 42=view-space XYZ probe, "
             "100=water binary (blue/gray), 101=shore-distance falsecolor, 102=IBL spec isolated."
         ),
     )
