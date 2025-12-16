@@ -210,8 +210,8 @@ fn test_brdf_tile_readback_png_compatible() {
     let result = render_brdf_tile_offscreen(
         &device,
         &queue,
-        4,               // GGX
-        0.5,             // roughness
+        4,   // GGX
+        0.5, // roughness
         width,
         height,
         false,           // ndf_only

@@ -1,10 +1,10 @@
+use super::types::*;
 use crate::core::error::RenderError;
 use crate::vector::api::PointDef;
 use crate::vector::data::{validate_point_instances, PointInstance};
 use crate::vector::layer::Layer;
-use glam::Vec2;
 use bytemuck;
-use super::types::*;
+use glam::Vec2;
 
 /// Instanced point renderer with H20,H21,H22 enhancements
 pub struct PointRenderer {

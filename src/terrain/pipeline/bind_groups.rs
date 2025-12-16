@@ -58,7 +58,12 @@ pub fn make_bg_tile(
 }
 
 /// Bind group for height texture/sampler
-pub fn make_bg_height(pipeline: &TerrainPipeline, device: &Device, view: &TextureView, samp: &Sampler) -> BindGroup {
+pub fn make_bg_height(
+    pipeline: &TerrainPipeline,
+    device: &Device,
+    view: &TextureView,
+    samp: &Sampler,
+) -> BindGroup {
     device.create_bind_group(&BindGroupDescriptor {
         label: Some("vf.Terrain.bg.height"),
         layout: &pipeline.bgl_height,
@@ -75,7 +80,12 @@ pub fn make_bg_height(pipeline: &TerrainPipeline, device: &Device, view: &Textur
     })
 }
 
-pub fn make_bg_lut(pipeline: &TerrainPipeline, device: &Device, view: &TextureView, samp: &Sampler) -> BindGroup {
+pub fn make_bg_lut(
+    pipeline: &TerrainPipeline,
+    device: &Device,
+    view: &TextureView,
+    samp: &Sampler,
+) -> BindGroup {
     device.create_bind_group(&BindGroupDescriptor {
         label: Some("vf.Terrain.bg.lut"),
         layout: &pipeline.bgl_lut,

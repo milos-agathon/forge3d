@@ -3,9 +3,9 @@
 //! Provides GPU-accelerated screen-space techniques for ambient occlusion,
 //! global illumination, and reflections.
 
+use super::error::{RenderError, RenderResult};
 use crate::core::gbuffer::{GBuffer, GBufferConfig};
 use crate::core::gpu_timing::GpuTimingManager;
-use super::error::{RenderError, RenderResult};
 use crate::render::params::SsrParams;
 use futures_intrusive::channel::shared::oneshot_channel;
 use pollster::block_on;
@@ -1918,12 +1918,7 @@ impl ScreenSpaceEffectsManager {
         self.last_hzb_ms
     }
 
-    pub fn set_gi_seed(
-        &mut self,
-        device: &Device,
-        queue: &Queue,
-        seed: u32,
-    ) -> RenderResult<()> {
+    pub fn set_gi_seed(&mut self, device: &Device, queue: &Queue, seed: u32) -> RenderResult<()> {
         if let Some(ref mut ssao) = self.ssao_renderer {
             ssao.set_seed(queue, seed);
         }

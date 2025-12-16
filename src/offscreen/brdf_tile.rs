@@ -10,8 +10,8 @@ use wgpu::util::DeviceExt;
 mod math;
 mod params;
 use math::{create_look_at_matrix, create_perspective_matrix, identity_matrix};
-use params::{normalize_light_dir, DEFAULT_LIGHT_DIR};
 pub use params::BrdfTileOverrides;
+use params::{normalize_light_dir, DEFAULT_LIGHT_DIR};
 
 /// Render a BRDF tile offscreen and return tight RGBA8 buffer.
 ///

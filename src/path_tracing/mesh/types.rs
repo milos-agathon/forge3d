@@ -1,6 +1,6 @@
 use crate::accel::cpu_bvh::{Aabb, BuildStats};
-use wgpu::Buffer;
 use bytemuck::{Pod, Zeroable};
+use wgpu::Buffer;
 
 /// GPU-compatible vertex layout (matches WGSL Vertex struct)
 #[repr(C)]

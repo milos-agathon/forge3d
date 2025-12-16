@@ -3,8 +3,8 @@
 //! Provides asynchronous texture readback with optional double-buffering
 //! for improved performance in scenarios with frequent readbacks.
 
-use crate::core::memory_tracker::global_tracker;
 use super::error::RenderError;
+use crate::core::memory_tracker::global_tracker;
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};

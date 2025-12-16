@@ -1,8 +1,8 @@
 use std::env;
 
 use crate::cli::args::GiCliConfig;
-use crate::viewer::{run_viewer, run_viewer_with_ipc, set_initial_commands, ViewerConfig};
 use crate::viewer::ipc::IpcServerConfig;
+use crate::viewer::{run_viewer, run_viewer_with_ipc, set_initial_commands, ViewerConfig};
 
 fn gi_cli_config_to_commands(cfg: &GiCliConfig) -> Vec<String> {
     cfg.to_commands()
@@ -230,7 +230,7 @@ pub fn run_interactive_viewer_cli() -> Result<(), Box<dyn std::error::Error>> {
     let all_args_again: Vec<String> = env::args().skip(1).collect();
     let mut ipc_host: Option<String> = None;
     let mut ipc_port: Option<u16> = None;
-    
+
     let mut args_iter = all_args_again.iter();
     while let Some(arg) = args_iter.next() {
         match arg.as_str() {
@@ -243,7 +243,6 @@ pub fn run_interactive_viewer_cli() -> Result<(), Box<dyn std::error::Error>> {
             _ => {}
         }
     }
-    
 
     // Use a sensible default viewer configuration; size and FOV can be
     // overridden via initial commands derived from the CLI.

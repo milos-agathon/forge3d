@@ -2,7 +2,7 @@
 // Python array conversion helpers for geometry module
 // RELEVANT FILES: python/forge3d/geometry.py
 
-use numpy::{PyReadonlyArray2};
+use numpy::PyReadonlyArray2;
 
 /// Convert fixed-size arrays to nested Vecs for PyArray2 construction.
 

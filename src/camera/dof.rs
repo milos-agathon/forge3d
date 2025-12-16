@@ -3,7 +3,9 @@
 //! Provides DOF parameter creation, f-stop conversions, hyperfocal distance,
 //! and circle of confusion calculations for physically-based camera rendering.
 
-use crate::camera::validation::{validate_aperture, validate_focal_length, validate_focus_distance};
+use crate::camera::validation::{
+    validate_aperture, validate_focal_length, validate_focus_distance,
+};
 use crate::core::dof::CameraDofParams;
 use pyo3::prelude::*;
 

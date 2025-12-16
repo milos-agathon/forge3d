@@ -73,11 +73,7 @@ pub fn enforce_memory_budget(config: &mut ShadowManagerConfig) {
 /// Note: VSM technically only needs 2 channels (mean, variance), but we use Rgba32Float
 /// for all moment techniques to simplify the implementation and allow future extensions.
 /// Does not account for texture padding/alignment; actual GPU usage may be slightly higher.
-fn estimate_memory_bytes(
-    map_resolution: u32,
-    cascades: u32,
-    technique: ShadowTechnique,
-) -> u64 {
+fn estimate_memory_bytes(map_resolution: u32, cascades: u32, technique: ShadowTechnique) -> u64 {
     let res = map_resolution as u64;
     let casc = cascades as u64;
 

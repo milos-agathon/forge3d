@@ -26,8 +26,19 @@ pub struct RenderBundleBuilder {
 }
 
 impl RenderBundleBuilder {
-    pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, config: RenderBundleConfig) -> Self {
-        Self { device, queue, config, buffers: Vec::new(), textures: Vec::new(), bind_groups: Vec::new() }
+    pub fn new(
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        config: RenderBundleConfig,
+    ) -> Self {
+        Self {
+            device,
+            queue,
+            config,
+            buffers: Vec::new(),
+            textures: Vec::new(),
+            bind_groups: Vec::new(),
+        }
     }
 
     pub fn add_vertex_buffer(&mut self, data: &[u8], label: Option<&str>) -> u32 {
@@ -39,13 +50,21 @@ impl RenderBundleBuilder {
     }
 
     pub fn add_uniform_buffer(&mut self, data: &[u8], label: Option<&str>) -> u32 {
-        self.add_buffer(data, label, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST)
+        self.add_buffer(
+            data,
+            label,
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        )
     }
 
     fn add_buffer(&mut self, data: &[u8], label: Option<&str>, usage: wgpu::BufferUsages) -> u32 {
-        let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label, contents: data, usage,
-        });
+        let buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label,
+                contents: data,
+                usage,
+            });
         let slot = self.buffers.len() as u32;
         self.buffers.push(buffer);
         slot
@@ -67,9 +86,15 @@ impl RenderBundleBuilder {
         slot
     }
 
-    pub fn create_bind_group(&mut self, layout: &wgpu::BindGroupLayout, entries: &[wgpu::BindGroupEntry]) -> u32 {
+    pub fn create_bind_group(
+        &mut self,
+        layout: &wgpu::BindGroupLayout,
+        entries: &[wgpu::BindGroupEntry],
+    ) -> u32 {
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None, layout, entries,
+            label: None,
+            layout,
+            entries,
         });
         let slot = self.bind_groups.len() as u32;
         self.bind_groups.push(bind_group);
@@ -78,28 +103,50 @@ impl RenderBundleBuilder {
 
     pub fn build(self, render_pipeline: &wgpu::RenderPipeline) -> CompiledRenderBundle {
         let start_time = std::time::Instant::now();
-        let mut bundle_encoder = self.device.create_render_bundle_encoder(&wgpu::RenderBundleEncoderDescriptor {
-            label: self.config.label.as_deref(),
-            color_formats: &[Some(self.config.color_format)],
-            depth_stencil: self.config.depth_format.map(|format| wgpu::RenderBundleDepthStencil {
-                format, depth_read_only: false, stencil_read_only: false,
-            }),
-            sample_count: self.config.sample_count,
-            multiview: None,
-        });
+        let mut bundle_encoder =
+            self.device
+                .create_render_bundle_encoder(&wgpu::RenderBundleEncoderDescriptor {
+                    label: self.config.label.as_deref(),
+                    color_formats: &[Some(self.config.color_format)],
+                    depth_stencil: self.config.depth_format.map(|format| {
+                        wgpu::RenderBundleDepthStencil {
+                            format,
+                            depth_read_only: false,
+                            stencil_read_only: false,
+                        }
+                    }),
+                    sample_count: self.config.sample_count,
+                    multiview: None,
+                });
         bundle_encoder.set_pipeline(render_pipeline);
 
-        let mut stats = BundleStats { draw_call_count: self.config.draw_calls.len() as u32, ..Default::default() };
+        let mut stats = BundleStats {
+            draw_call_count: self.config.draw_calls.len() as u32,
+            ..Default::default()
+        };
         self.encode_draw_calls(&mut bundle_encoder, &mut stats);
-        let bundle = bundle_encoder.finish(&wgpu::RenderBundleDescriptor { label: self.config.label.as_deref() });
+        let bundle = bundle_encoder.finish(&wgpu::RenderBundleDescriptor {
+            label: self.config.label.as_deref(),
+        });
 
         stats.memory_usage = self.calculate_memory_usage();
         stats.compile_time_ms = start_time.elapsed().as_secs_f32() * 1000.0;
 
-        CompiledRenderBundle { bundle, config: self.config, buffers: self.buffers, textures: self.textures, bind_groups: self.bind_groups, stats }
+        CompiledRenderBundle {
+            bundle,
+            config: self.config,
+            buffers: self.buffers,
+            textures: self.textures,
+            bind_groups: self.bind_groups,
+            stats,
+        }
     }
 
-    fn encode_draw_calls<'a>(&'a self, encoder: &mut wgpu::RenderBundleEncoder<'a>, stats: &mut BundleStats) {
+    fn encode_draw_calls<'a>(
+        &'a self,
+        encoder: &mut wgpu::RenderBundleEncoder<'a>,
+        stats: &mut BundleStats,
+    ) {
         for draw_call in &self.config.draw_calls {
             if let Some(vb) = self.buffers.get(draw_call.vertex_buffer_slot as usize) {
                 encoder.set_vertex_buffer(0, vb.slice(..));
@@ -115,7 +162,8 @@ impl RenderBundleBuilder {
                 }
             }
             let range = draw_call.offset..draw_call.offset + draw_call.count;
-            let instances = draw_call.first_instance..draw_call.first_instance + draw_call.instance_count;
+            let instances =
+                draw_call.first_instance..draw_call.first_instance + draw_call.instance_count;
             if draw_call.index_buffer_slot.is_some() {
                 encoder.draw_indexed(range, 0, instances);
                 stats.total_triangles += draw_call.count / 3 * draw_call.instance_count;
@@ -128,17 +176,21 @@ impl RenderBundleBuilder {
 
     fn calculate_memory_usage(&self) -> u64 {
         let buf_mem: u64 = self.buffers.iter().map(|b| b.size()).sum();
-        let tex_mem: u64 = self.textures.iter().map(|t| {
-            let e = t.size();
-            let px = match t.format() {
-                wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Bgra8Unorm => 4,
-                wgpu::TextureFormat::Rgba16Float => 8,
-                wgpu::TextureFormat::Rgba32Float => 16,
-                wgpu::TextureFormat::Depth32Float => 4,
-                _ => 4,
-            };
-            (e.width * e.height * e.depth_or_array_layers) as u64 * px
-        }).sum();
+        let tex_mem: u64 = self
+            .textures
+            .iter()
+            .map(|t| {
+                let e = t.size();
+                let px = match t.format() {
+                    wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Bgra8Unorm => 4,
+                    wgpu::TextureFormat::Rgba16Float => 8,
+                    wgpu::TextureFormat::Rgba32Float => 16,
+                    wgpu::TextureFormat::Depth32Float => 4,
+                    _ => 4,
+                };
+                (e.width * e.height * e.depth_or_array_layers) as u64 * px
+            })
+            .sum();
         buf_mem + tex_mem
     }
 }
@@ -153,7 +205,12 @@ pub struct RenderBundleManager {
 
 impl RenderBundleManager {
     pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) -> Self {
-        Self { device, queue, bundles: HashMap::new(), execution_stats: HashMap::new() }
+        Self {
+            device,
+            queue,
+            bundles: HashMap::new(),
+            execution_stats: HashMap::new(),
+        }
     }
 
     pub fn add_bundle(&mut self, name: String, bundle: CompiledRenderBundle) {
@@ -161,27 +218,48 @@ impl RenderBundleManager {
         self.execution_stats.insert(name, Vec::new());
     }
 
-    pub fn create_bundle(&mut self, name: String, config: RenderBundleConfig, pipeline: &wgpu::RenderPipeline) -> Result<(), String> {
+    pub fn create_bundle(
+        &mut self,
+        name: String,
+        config: RenderBundleConfig,
+        pipeline: &wgpu::RenderPipeline,
+    ) -> Result<(), String> {
         let builder = RenderBundleBuilder::new(self.device.clone(), self.queue.clone(), config);
         self.add_bundle(name, builder.build(pipeline));
         Ok(())
     }
 
-    pub fn execute_bundle<'a>(&'a mut self, pass: &mut wgpu::RenderPass<'a>, name: &str) -> Result<(), String> {
+    pub fn execute_bundle<'a>(
+        &'a mut self,
+        pass: &mut wgpu::RenderPass<'a>,
+        name: &str,
+    ) -> Result<(), String> {
         let start = std::time::Instant::now();
-        let bundle = self.bundles.get_mut(name).ok_or_else(|| format!("Bundle '{}' not found", name))?;
+        let bundle = self
+            .bundles
+            .get_mut(name)
+            .ok_or_else(|| format!("Bundle '{}' not found", name))?;
         pass.execute_bundles([&bundle.bundle]);
         let exec_time = start.elapsed().as_secs_f32() * 1000.0;
         bundle.stats.execution_time_ms = exec_time;
         let times = self.execution_stats.get_mut(name).unwrap();
         times.push(exec_time);
-        if times.len() > 100 { times.remove(0); }
+        if times.len() > 100 {
+            times.remove(0);
+        }
         Ok(())
     }
 
-    pub fn execute_bundles<'a>(&'a mut self, pass: &mut wgpu::RenderPass<'a>, names: &[&str]) -> Result<(), String> {
+    pub fn execute_bundles<'a>(
+        &'a mut self,
+        pass: &mut wgpu::RenderPass<'a>,
+        names: &[&str],
+    ) -> Result<(), String> {
         for &name in names {
-            let b = self.bundles.get(name).ok_or_else(|| format!("Bundle '{}' not found", name))?;
+            let b = self
+                .bundles
+                .get(name)
+                .ok_or_else(|| format!("Bundle '{}' not found", name))?;
             pass.execute_bundles([&b.bundle]);
         }
         Ok(())
@@ -191,18 +269,25 @@ impl RenderBundleManager {
         self.bundles.get(name).map(|b| &b.stats)
     }
 
-    pub fn get_bundle_names(&self) -> Vec<&String> { self.bundles.keys().collect() }
+    pub fn get_bundle_names(&self) -> Vec<&String> {
+        self.bundles.keys().collect()
+    }
 
     pub fn get_performance_stats(&self, name: &str) -> Option<BundlePerformanceStats> {
         let times = self.execution_stats.get(name)?;
-        if times.is_empty() { return None; }
+        if times.is_empty() {
+            return None;
+        }
         let avg = times.iter().sum::<f32>() / times.len() as f32;
         let min = times.iter().copied().fold(f32::INFINITY, f32::min);
         let max = times.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let variance = times.iter().map(|&t| (t - avg).powi(2)).sum::<f32>() / times.len() as f32;
         Some(BundlePerformanceStats {
-            avg_execution_time_ms: avg, min_execution_time_ms: min, max_execution_time_ms: max,
-            std_dev_ms: variance.sqrt(), sample_count: times.len(),
+            avg_execution_time_ms: avg,
+            min_execution_time_ms: min,
+            max_execution_time_ms: max,
+            std_dev_ms: variance.sqrt(),
+            sample_count: times.len(),
         })
     }
 
@@ -211,7 +296,14 @@ impl RenderBundleManager {
         self.bundles.remove(name).is_some()
     }
 
-    pub fn clear(&mut self) { self.bundles.clear(); self.execution_stats.clear(); }
-    pub fn get_total_memory_usage(&self) -> u64 { self.bundles.values().map(|b| b.stats.memory_usage).sum() }
-    pub fn bundle_count(&self) -> usize { self.bundles.len() }
+    pub fn clear(&mut self) {
+        self.bundles.clear();
+        self.execution_stats.clear();
+    }
+    pub fn get_total_memory_usage(&self) -> u64 {
+        self.bundles.values().map(|b| b.stats.memory_usage).sum()
+    }
+    pub fn bundle_count(&self) -> usize {
+        self.bundles.len()
+    }
 }

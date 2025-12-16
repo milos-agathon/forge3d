@@ -74,18 +74,36 @@ impl Default for SSAOSettings {
 
 impl SSAOSettings {
     pub fn ssao(radius: f32, intensity: f32) -> Self {
-        Self { radius, intensity, technique: 0, ..Default::default() }
+        Self {
+            radius,
+            intensity,
+            technique: 0,
+            ..Default::default()
+        }
     }
 
     pub fn gtao(radius: f32, intensity: f32) -> Self {
-        Self { radius, intensity, technique: 1, ..Default::default() }
+        Self {
+            radius,
+            intensity,
+            technique: 1,
+            ..Default::default()
+        }
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.radius <= 0.0 || self.radius > 100.0 { return Err("radius must be in (0, 100]"); }
-        if self.intensity < 0.0 || self.intensity > 5.0 { return Err("intensity must be in [0, 5]"); }
-        if self.sample_count == 0 || self.sample_count > 64 { return Err("sample_count must be in [1, 64]"); }
-        if self.technique > 1 { return Err("technique must be 0 (SSAO) or 1 (GTAO)"); }
+        if self.radius <= 0.0 || self.radius > 100.0 {
+            return Err("radius must be in (0, 100]");
+        }
+        if self.intensity < 0.0 || self.intensity > 5.0 {
+            return Err("intensity must be in [0, 5]");
+        }
+        if self.sample_count == 0 || self.sample_count > 64 {
+            return Err("sample_count must be in [1, 64]");
+        }
+        if self.technique > 1 {
+            return Err("technique must be 0 (SSAO) or 1 (GTAO)");
+        }
         Ok(())
     }
 }
@@ -122,13 +140,23 @@ impl Default for SSGISettings {
 
 impl SSGISettings {
     pub fn new(ray_radius: f32, intensity: f32) -> Self {
-        Self { ray_radius, intensity, ..Default::default() }
+        Self {
+            ray_radius,
+            intensity,
+            ..Default::default()
+        }
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.ray_steps == 0 || self.ray_steps > 128 { return Err("ray_steps must be in [1, 128]"); }
-        if self.ray_radius <= 0.0 || self.ray_radius > 1000.0 { return Err("ray_radius must be in (0, 1000]"); }
-        if self.intensity < 0.0 || self.intensity > 10.0 { return Err("intensity must be in [0, 10]"); }
+        if self.ray_steps == 0 || self.ray_steps > 128 {
+            return Err("ray_steps must be in [1, 128]");
+        }
+        if self.ray_radius <= 0.0 || self.ray_radius > 1000.0 {
+            return Err("ray_radius must be in (0, 1000]");
+        }
+        if self.intensity < 0.0 || self.intensity > 10.0 {
+            return Err("intensity must be in [0, 10]");
+        }
         Ok(())
     }
 }
@@ -165,13 +193,23 @@ impl Default for SSRSettings {
 
 impl SSRSettings {
     pub fn new(max_distance: f32, intensity: f32) -> Self {
-        Self { max_distance, intensity, ..Default::default() }
+        Self {
+            max_distance,
+            intensity,
+            ..Default::default()
+        }
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.max_steps == 0 || self.max_steps > 256 { return Err("max_steps must be in [1, 256]"); }
-        if self.max_distance <= 0.0 || self.max_distance > 1000.0 { return Err("max_distance must be in (0, 1000]"); }
-        if self.intensity < 0.0 || self.intensity > 10.0 { return Err("intensity must be in [0, 10]"); }
+        if self.max_steps == 0 || self.max_steps > 256 {
+            return Err("max_steps must be in [1, 256]");
+        }
+        if self.max_distance <= 0.0 || self.max_distance > 1000.0 {
+            return Err("max_distance must be in (0, 1000]");
+        }
+        if self.intensity < 0.0 || self.intensity > 10.0 {
+            return Err("intensity must be in [0, 10]");
+        }
         Ok(())
     }
 }
@@ -186,24 +224,40 @@ pub struct ScreenSpaceSettings {
 
 impl Default for ScreenSpaceSettings {
     fn default() -> Self {
-        Self { ssao: None, ssgi: None, ssr: None }
+        Self {
+            ssao: None,
+            ssgi: None,
+            ssr: None,
+        }
     }
 }
 
 impl ScreenSpaceSettings {
     pub fn with_ssao(radius: f32, intensity: f32) -> Self {
-        Self { ssao: Some(SSAOSettings::ssao(radius, intensity)), ..Default::default() }
+        Self {
+            ssao: Some(SSAOSettings::ssao(radius, intensity)),
+            ..Default::default()
+        }
     }
 
     pub fn with_gtao(radius: f32, intensity: f32) -> Self {
-        Self { ssao: Some(SSAOSettings::gtao(radius, intensity)), ..Default::default() }
+        Self {
+            ssao: Some(SSAOSettings::gtao(radius, intensity)),
+            ..Default::default()
+        }
     }
 
     pub fn with_ssgi(ray_radius: f32, intensity: f32) -> Self {
-        Self { ssgi: Some(SSGISettings::new(ray_radius, intensity)), ..Default::default() }
+        Self {
+            ssgi: Some(SSGISettings::new(ray_radius, intensity)),
+            ..Default::default()
+        }
     }
 
     pub fn with_ssr(max_distance: f32, intensity: f32) -> Self {
-        Self { ssr: Some(SSRSettings::new(max_distance, intensity)), ..Default::default() }
+        Self {
+            ssr: Some(SSRSettings::new(max_distance, intensity)),
+            ..Default::default()
+        }
     }
 }

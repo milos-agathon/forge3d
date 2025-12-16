@@ -29,6 +29,16 @@ pub struct SsrScenePreset {
     pub floor: FloorPreset,
     #[serde(default = "SsrScenePreset::default_spheres")]
     pub spheres: Vec<SpherePreset>,
+    #[serde(default = "SsrScenePreset::default_camera_distance")]
+    pub camera_distance: f32,
+    #[serde(default = "SsrScenePreset::default_camera_height")]
+    pub camera_height: f32,
+    #[serde(default = "SsrScenePreset::default_stripe_count")]
+    pub stripe_count: u32,
+    #[serde(default = "SsrScenePreset::default_stripe_bright_intensity")]
+    pub stripe_bright_intensity: f32,
+    #[serde(default = "SsrScenePreset::default_stripe_dark_intensity")]
+    pub stripe_dark_intensity: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -149,6 +159,26 @@ impl SsrScenePreset {
             })
             .collect()
     }
+
+    fn default_camera_distance() -> f32 {
+        3.0
+    }
+
+    fn default_camera_height() -> f32 {
+        1.0
+    }
+
+    fn default_stripe_count() -> u32 {
+        8
+    }
+
+    fn default_stripe_bright_intensity() -> f32 {
+        0.9
+    }
+
+    fn default_stripe_dark_intensity() -> f32 {
+        0.1
+    }
 }
 
 impl Default for SsrScenePreset {
@@ -164,6 +194,11 @@ impl Default for SsrScenePreset {
             stripe: Self::default_stripe(),
             floor: Self::default_floor(),
             spheres: Self::default_spheres(),
+            camera_distance: Self::default_camera_distance(),
+            camera_height: Self::default_camera_height(),
+            stripe_count: Self::default_stripe_count(),
+            stripe_bright_intensity: Self::default_stripe_bright_intensity(),
+            stripe_dark_intensity: Self::default_stripe_dark_intensity(),
         }
     }
 }

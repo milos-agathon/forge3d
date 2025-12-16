@@ -1,8 +1,8 @@
 //! H17,H19: Indirect drawing and GPU culling
 //! CPU and GPU paths for efficient large-scale vector rendering
 
-use crate::core::gpu_timing::GpuTimingManager;
 use crate::core::error::RenderError;
+use crate::core::gpu_timing::GpuTimingManager;
 use crate::vector::batch::{Frustum, PrimitiveType, AABB};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};

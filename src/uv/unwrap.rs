@@ -1,4 +1,5 @@
 //! UV Unwrap helpers (F10): planar and spherical projections.
+#![allow(dead_code)]
 
 use crate::geometry::MeshBuffers;
 #[cfg(feature = "extension-module")]

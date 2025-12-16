@@ -39,7 +39,10 @@ impl TextureFormatInfo {
             TextureUseCase::Albedo => true,
             TextureUseCase::Normal => {
                 !self.is_compressed
-                    || matches!(self.format, TextureFormat::Bc5RgUnorm | TextureFormat::Bc5RgSnorm)
+                    || matches!(
+                        self.format,
+                        TextureFormat::Bc5RgUnorm | TextureFormat::Bc5RgSnorm
+                    )
             }
             TextureUseCase::Height => !self.is_srgb && self.supports_linear,
             TextureUseCase::HDR => matches!(
@@ -182,9 +185,10 @@ fn find_best_format(
 fn is_quality_acceptable(format: TextureFormat, quality: CompressionQuality) -> bool {
     match quality {
         CompressionQuality::Fast => true,
-        CompressionQuality::Normal => {
-            !matches!(format, TextureFormat::Bc1RgbaUnorm | TextureFormat::Etc2Rgb8Unorm)
-        }
+        CompressionQuality::Normal => !matches!(
+            format,
+            TextureFormat::Bc1RgbaUnorm | TextureFormat::Etc2Rgb8Unorm
+        ),
         CompressionQuality::High => matches!(
             format,
             TextureFormat::Bc7RgbaUnorm | TextureFormat::Bc6hRgbUfloat | TextureFormat::Bc5RgUnorm
@@ -238,15 +242,23 @@ mod tests {
     #[test]
     fn test_format_registry_creation() {
         let registry = TextureFormatRegistry::new();
-        assert!(registry.get_format_info(TextureFormat::Rgba8Unorm).is_some());
-        assert!(registry.get_format_info(TextureFormat::Bc1RgbaUnorm).is_some());
-        assert!(registry.get_format_info(TextureFormat::Etc2Rgb8Unorm).is_some());
+        assert!(registry
+            .get_format_info(TextureFormat::Rgba8Unorm)
+            .is_some());
+        assert!(registry
+            .get_format_info(TextureFormat::Bc1RgbaUnorm)
+            .is_some());
+        assert!(registry
+            .get_format_info(TextureFormat::Etc2Rgb8Unorm)
+            .is_some());
     }
 
     #[test]
     fn test_compressed_size_calculation() {
         let registry = TextureFormatRegistry::new();
-        let bc1_info = registry.get_format_info(TextureFormat::Bc1RgbaUnorm).unwrap();
+        let bc1_info = registry
+            .get_format_info(TextureFormat::Bc1RgbaUnorm)
+            .unwrap();
         assert_eq!(bc1_info.calculate_size(16, 16), 4 * 4 * 8);
         let rgba8_info = registry.get_format_info(TextureFormat::Rgba8Unorm).unwrap();
         assert_eq!(rgba8_info.calculate_size(16, 16), 16 * 16 * 4);
@@ -270,14 +282,25 @@ mod tests {
     #[test]
     fn test_format_family_detection() {
         let registry = TextureFormatRegistry::new();
-        assert_eq!(registry.get_format_family(TextureFormat::Bc1RgbaUnorm), "BC");
-        assert_eq!(registry.get_format_family(TextureFormat::Etc2Rgb8Unorm), "ETC2");
-        assert_eq!(registry.get_format_family(TextureFormat::Rgba8Unorm), "Uncompressed");
+        assert_eq!(
+            registry.get_format_family(TextureFormat::Bc1RgbaUnorm),
+            "BC"
+        );
+        assert_eq!(
+            registry.get_format_family(TextureFormat::Etc2Rgb8Unorm),
+            "ETC2"
+        );
+        assert_eq!(
+            registry.get_format_family(TextureFormat::Rgba8Unorm),
+            "Uncompressed"
+        );
     }
 
     #[test]
     fn test_global_registry_access() {
         let registry = global_format_registry();
-        assert!(registry.get_format_info(TextureFormat::Rgba8Unorm).is_some());
+        assert!(registry
+            .get_format_info(TextureFormat::Rgba8Unorm)
+            .is_some());
     }
 }

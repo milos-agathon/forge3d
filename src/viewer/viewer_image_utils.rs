@@ -93,9 +93,8 @@ pub fn add_debug_noise_rgba8(buf: &mut [u8], w: u32, h: u32, seed: u32) {
     for y in 0..h_us {
         for x in 0..w_us {
             let idx = (y * w_us + x) * 4;
-            let mut s = seed
-                ^ (x as u32).wrapping_mul(73856093)
-                ^ (y as u32).wrapping_mul(19349663);
+            let mut s =
+                seed ^ (x as u32).wrapping_mul(73856093) ^ (y as u32).wrapping_mul(19349663);
             s = s.wrapping_mul(1664525).wrapping_add(1013904223);
             let jitter = ((s >> 24) as i8) as i32;
             let amp = 12i32;

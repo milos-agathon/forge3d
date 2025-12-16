@@ -218,6 +218,5 @@ impl Default for RendererConfig {
     }
 }
 
-
 #[cfg(test)]
 mod tests;

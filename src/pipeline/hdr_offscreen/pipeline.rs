@@ -148,7 +148,9 @@ impl HdrOffscreenPipeline {
         // Create tonemap pipeline
         let tonemap_shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("tonemap_shader"),
-            source: ShaderSource::Wgsl(include_str!("../../shaders/postprocess_tonemap.wgsl").into()),
+            source: ShaderSource::Wgsl(
+                include_str!("../../shaders/postprocess_tonemap.wgsl").into(),
+            ),
         });
 
         // Create bind group layout

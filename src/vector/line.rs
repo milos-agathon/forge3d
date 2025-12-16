@@ -66,7 +66,8 @@ impl LineRenderer {
 
         // Create pipeline layout and render pipeline
         let pipeline_layout = create_pipeline_layout(device, &bind_group_layout);
-        let render_pipeline = create_render_pipeline(device, &shader, &pipeline_layout, target_format);
+        let render_pipeline =
+            create_render_pipeline(device, &shader, &pipeline_layout, target_format);
 
         // H5: Picking resources
         let pick_bind_group_layout = create_pick_bind_group_layout(device);
@@ -307,4 +308,3 @@ impl LineRenderer {
         Layer::Vector
     }
 }
-

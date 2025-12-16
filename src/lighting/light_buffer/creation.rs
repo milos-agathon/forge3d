@@ -1,7 +1,7 @@
+use super::r2::r2_sample;
 use super::types::{LightBuffer, MAX_LIGHTS};
 use crate::lighting::types::Light;
-use wgpu::{Device, Buffer, BufferUsages};
-use super::r2::r2_sample;
+use wgpu::{Buffer, BufferUsages, Device};
 
 impl LightBuffer {
     /// Create a new light buffer manager

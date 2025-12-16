@@ -48,9 +48,9 @@ pub fn calculate_line_joins(path: &[Vec2], width: f32) -> Vec<Vec2> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vector::api::PolylineDef;
     use crate::vector::api::VectorStyle;
     use crate::vector::line::{LineCap, LineJoin, LineRenderer};
-    use crate::vector::api::PolylineDef;
 
     #[test]
     fn test_pack_simple_polyline() {

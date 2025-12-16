@@ -1,5 +1,6 @@
 // src/geometry/curves.rs
 // Curve & Tube primitives (F17)
+#![allow(dead_code)]
 
 use glam::Vec3;
 

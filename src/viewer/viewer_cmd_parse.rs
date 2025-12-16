@@ -69,32 +69,56 @@ pub fn parse_command_string(line: &str) -> Option<Vec<ViewerCmd>> {
 
     // SSAO parameters
     if l.starts_with(":ssao-radius") || l.starts_with("ssao-radius ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsaoRadius(val)]);
         }
     }
     if l.starts_with(":ssao-intensity") || l.starts_with("ssao-intensity ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsaoIntensity(val)]);
         }
     }
     if l.starts_with(":ssao-bias") || l.starts_with("ssao-bias ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsaoBias(val)]);
         }
     }
     if l.starts_with(":ssao-samples") || l.starts_with("ssao-samples ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<u32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsaoSamples(val)]);
         }
     }
     if l.starts_with(":ssao-directions") || l.starts_with("ssao-directions ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<u32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsaoDirections(val)]);
         }
     }
     if l.starts_with(":ssao-temporal-alpha") || l.starts_with("ssao-temporal-alpha ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsaoTemporalAlpha(val)]);
         }
     }
@@ -109,7 +133,10 @@ pub fn parse_command_string(line: &str) -> Option<Vec<ViewerCmd>> {
     }
     if l.starts_with(":ssao-blur") || l.starts_with("ssao-blur ") {
         if let Some(tok) = l.split_whitespace().nth(1) {
-            return Some(vec![ViewerCmd::SetAoBlur(matches!(tok, "on" | "1" | "true"))]);
+            return Some(vec![ViewerCmd::SetAoBlur(matches!(
+                tok,
+                "on" | "1" | "true"
+            ))]);
         }
     }
     if l.starts_with(":ssao-technique") || l.starts_with("ssao-technique ") {
@@ -125,34 +152,56 @@ pub fn parse_command_string(line: &str) -> Option<Vec<ViewerCmd>> {
 
     // AO parameters
     if l.starts_with(":ao-temporal-alpha") || l.starts_with("ao-temporal-alpha ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetAoTemporalAlpha(val)]);
         }
     }
     if l.starts_with(":ao-blur") || l.starts_with("ao-blur ") {
         if let Some(tok) = l.split_whitespace().nth(1) {
-            return Some(vec![ViewerCmd::SetAoBlur(matches!(tok, "on" | "1" | "true"))]);
+            return Some(vec![ViewerCmd::SetAoBlur(matches!(
+                tok,
+                "on" | "1" | "true"
+            ))]);
         }
     }
 
     // SSGI parameters
     if l.starts_with(":ssgi-steps") || l.starts_with("ssgi-steps ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<u32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsgiSteps(val)]);
         }
     }
     if l.starts_with(":ssgi-radius") || l.starts_with("ssgi-radius ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsgiRadius(val)]);
         }
     }
     if l.starts_with(":ssgi-half") || l.starts_with("ssgi-half ") {
         if let Some(tok) = l.split_whitespace().nth(1) {
-            return Some(vec![ViewerCmd::SetSsgiHalf(matches!(tok, "on" | "1" | "true"))]);
+            return Some(vec![ViewerCmd::SetSsgiHalf(matches!(
+                tok,
+                "on" | "1" | "true"
+            ))]);
         }
     }
     if l.starts_with(":ssgi-temporal-alpha") || l.starts_with("ssgi-temporal-alpha ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsgiTemporalAlpha(val)]);
         }
     }
@@ -166,7 +215,10 @@ pub fn parse_command_string(line: &str) -> Option<Vec<ViewerCmd>> {
     }
     if l.starts_with(":ssgi-edges") || l.starts_with("ssgi-edges ") {
         if let Some(tok) = l.split_whitespace().nth(1) {
-            return Some(vec![ViewerCmd::SetSsgiEdges(matches!(tok, "on" | "1" | "true"))]);
+            return Some(vec![ViewerCmd::SetSsgiEdges(matches!(
+                tok,
+                "on" | "1" | "true"
+            ))]);
         }
     }
     if l.starts_with(":ssgi-upsigma")
@@ -174,24 +226,41 @@ pub fn parse_command_string(line: &str) -> Option<Vec<ViewerCmd>> {
         || l.starts_with(":ssgi-upsample-sigma-depth")
         || l.starts_with("ssgi-upsample-sigma-depth ")
     {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsgiUpsampleSigmaDepth(val)]);
         }
     }
-    if l.starts_with(":ssgi-upsample-sigma-normal") || l.starts_with("ssgi-upsample-sigma-normal ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+    if l.starts_with(":ssgi-upsample-sigma-normal") || l.starts_with("ssgi-upsample-sigma-normal ")
+    {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsgiUpsampleSigmaNormal(val)]);
         }
     }
 
     // SSR parameters
     if l.starts_with(":ssr-max-steps") || l.starts_with("ssr-max-steps ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<u32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsrMaxSteps(val)]);
         }
     }
     if l.starts_with(":ssr-thickness") || l.starts_with("ssr-thickness ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetSsrThickness(val)]);
         }
     }
@@ -212,7 +281,11 @@ pub fn parse_command_string(line: &str) -> Option<Vec<ViewerCmd>> {
         }
     }
     if l.starts_with(":viz-depth-max") || l.starts_with("viz-depth-max ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetVizDepthMax(val)]);
         }
     }
@@ -245,7 +318,10 @@ pub fn parse_command_string(line: &str) -> Option<Vec<ViewerCmd>> {
     // HUD toggle
     if l.starts_with(":hud") || l.starts_with("hud ") {
         if let Some(tok) = l.split_whitespace().nth(1) {
-            return Some(vec![ViewerCmd::HudToggle(matches!(tok, "on" | "1" | "true"))]);
+            return Some(vec![ViewerCmd::HudToggle(matches!(
+                tok,
+                "on" | "1" | "true"
+            ))]);
         }
     }
 

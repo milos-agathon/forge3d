@@ -1,5 +1,6 @@
 // src/geometry/displacement.rs
 // Heightmap and procedural displacement with normal recomputation and bounds growth.
+#![allow(dead_code)]
 
 use super::MeshBuffers;
 

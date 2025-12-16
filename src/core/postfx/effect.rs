@@ -1,8 +1,8 @@
-use crate::core::gpu_timing::GpuTimingManager;
-use crate::core::error::RenderResult;
-use wgpu::*;
 use super::config::PostFxConfig;
 use super::resources::PostFxResourcePool;
+use crate::core::error::RenderResult;
+use crate::core::gpu_timing::GpuTimingManager;
+use wgpu::*;
 
 /// Post-processing effect definition
 pub trait PostFxEffect: Send + Sync {

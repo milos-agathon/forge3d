@@ -66,11 +66,21 @@ impl Default for SkySettings {
 
 impl SkySettings {
     pub fn preetham(turbidity: f32, ground_albedo: f32) -> Self {
-        Self { turbidity, ground_albedo, model: SkyModel::Preetham.as_u32(), ..Default::default() }
+        Self {
+            turbidity,
+            ground_albedo,
+            model: SkyModel::Preetham.as_u32(),
+            ..Default::default()
+        }
     }
 
     pub fn hosek_wilkie(turbidity: f32, ground_albedo: f32) -> Self {
-        Self { turbidity, ground_albedo, model: SkyModel::HosekWilkie.as_u32(), ..Default::default() }
+        Self {
+            turbidity,
+            ground_albedo,
+            model: SkyModel::HosekWilkie.as_u32(),
+            ..Default::default()
+        }
     }
 
     pub fn with_sun_angles(mut self, azimuth_deg: f32, elevation_deg: f32) -> Self {
@@ -85,9 +95,15 @@ impl SkySettings {
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.turbidity < 1.0 || self.turbidity > 10.0 { return Err("turbidity must be in [1.0, 10.0]"); }
-        if self.ground_albedo < 0.0 || self.ground_albedo > 1.0 { return Err("ground_albedo must be in [0, 1]"); }
-        if self.sun_intensity < 0.0 || self.sun_intensity > 1000.0 { return Err("sun_intensity must be in [0, 1000]"); }
+        if self.turbidity < 1.0 || self.turbidity > 10.0 {
+            return Err("turbidity must be in [1.0, 10.0]");
+        }
+        if self.ground_albedo < 0.0 || self.ground_albedo > 1.0 {
+            return Err("ground_albedo must be in [0, 1]");
+        }
+        if self.sun_intensity < 0.0 || self.sun_intensity > 1000.0 {
+            return Err("sun_intensity must be in [0, 1000]");
+        }
         Ok(())
     }
 }
@@ -115,7 +131,9 @@ impl VolumetricPhase {
     pub fn from_name(name: &str) -> Option<Self> {
         match name.to_lowercase().as_str() {
             "isotropic" | "iso" => Some(VolumetricPhase::Isotropic),
-            "hg" | "henyey-greenstein" | "henyey_greenstein" => Some(VolumetricPhase::HenyeyGreenstein),
+            "hg" | "henyey-greenstein" | "henyey_greenstein" => {
+                Some(VolumetricPhase::HenyeyGreenstein)
+            }
             _ => None,
         }
     }
@@ -167,19 +185,40 @@ impl Default for VolumetricSettings {
 
 impl VolumetricSettings {
     pub fn with_god_rays(density: f32, phase_g: f32) -> Self {
-        Self { density, phase_g, use_shadows: 1, ..Default::default() }
+        Self {
+            density,
+            phase_g,
+            use_shadows: 1,
+            ..Default::default()
+        }
     }
 
     pub fn uniform_fog(density: f32) -> Self {
-        Self { density, phase_g: 0.0, use_shadows: 0, height_falloff: 0.0, ..Default::default() }
+        Self {
+            density,
+            phase_g: 0.0,
+            use_shadows: 0,
+            height_falloff: 0.0,
+            ..Default::default()
+        }
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.density < 0.0 || self.density > 10.0 { return Err("density must be in [0, 10]"); }
-        if self.height_falloff < 0.0 || self.height_falloff > 10.0 { return Err("height_falloff must be in [0, 10]"); }
-        if self.phase_g < -1.0 || self.phase_g > 1.0 { return Err("phase_g must be in [-1, 1]"); }
-        if self.max_steps == 0 || self.max_steps > 256 { return Err("max_steps must be in [1, 256]"); }
-        if self.start_distance < 0.0 || self.start_distance >= self.max_distance { return Err("start_distance must be in [0, max_distance)"); }
+        if self.density < 0.0 || self.density > 10.0 {
+            return Err("density must be in [0, 10]");
+        }
+        if self.height_falloff < 0.0 || self.height_falloff > 10.0 {
+            return Err("height_falloff must be in [0, 10]");
+        }
+        if self.phase_g < -1.0 || self.phase_g > 1.0 {
+            return Err("phase_g must be in [-1, 1]");
+        }
+        if self.max_steps == 0 || self.max_steps > 256 {
+            return Err("max_steps must be in [1, 256]");
+        }
+        if self.start_distance < 0.0 || self.start_distance >= self.max_distance {
+            return Err("start_distance must be in [0, max_distance)");
+        }
         Ok(())
     }
 
@@ -197,20 +236,34 @@ pub struct AtmosphericsSettings {
 
 impl Default for AtmosphericsSettings {
     fn default() -> Self {
-        Self { sky: None, volumetric: None }
+        Self {
+            sky: None,
+            volumetric: None,
+        }
     }
 }
 
 impl AtmosphericsSettings {
     pub fn with_sky(turbidity: f32, ground_albedo: f32) -> Self {
-        Self { sky: Some(SkySettings::hosek_wilkie(turbidity, ground_albedo)), ..Default::default() }
+        Self {
+            sky: Some(SkySettings::hosek_wilkie(turbidity, ground_albedo)),
+            ..Default::default()
+        }
     }
 
     pub fn with_volumetric(density: f32, phase_g: f32) -> Self {
-        Self { volumetric: Some(VolumetricSettings::with_god_rays(density, phase_g)), ..Default::default() }
+        Self {
+            volumetric: Some(VolumetricSettings::with_god_rays(density, phase_g)),
+            ..Default::default()
+        }
     }
 
-    pub fn full_atmospherics(turbidity: f32, ground_albedo: f32, fog_density: f32, phase_g: f32) -> Self {
+    pub fn full_atmospherics(
+        turbidity: f32,
+        ground_albedo: f32,
+        fog_density: f32,
+        phase_g: f32,
+    ) -> Self {
         Self {
             sky: Some(SkySettings::hosek_wilkie(turbidity, ground_albedo)),
             volumetric: Some(VolumetricSettings::with_god_rays(fog_density, phase_g)),

@@ -77,7 +77,9 @@ fn insert_shader_hashes(meta: &mut BTreeMap<String, Value>) {
     );
     h.insert(
         "filters/bilateral_separable.wgsl".to_string(),
-        sha256_hex(include_str!("../../shaders/filters/bilateral_separable.wgsl")),
+        sha256_hex(include_str!(
+            "../../shaders/filters/bilateral_separable.wgsl"
+        )),
     );
     h.insert(
         "temporal/resolve_ao.wgsl".to_string(),
@@ -111,8 +113,20 @@ pub struct BuiltSsrMeta {
 
 /// Build SSR meta JSON from input data
 pub fn build_ssr_meta(input: SsrMetaInput<'_>) -> BuiltSsrMeta {
-    let (hit_rate, avg_steps, miss_ibl_ratio, trace_ms, shade_ms, fallback_ms, total_ms, num_rays, num_hits, total_steps, num_misses, miss_ibl_samples) =
-        extract_stats_values(input.stats);
+    let (
+        hit_rate,
+        avg_steps,
+        miss_ibl_ratio,
+        trace_ms,
+        shade_ms,
+        fallback_ms,
+        total_ms,
+        num_rays,
+        num_hits,
+        total_steps,
+        num_misses,
+        miss_ibl_samples,
+    ) = extract_stats_values(input.stats);
 
     let status = classify_ssr_status(
         input.stats,
@@ -124,9 +138,16 @@ pub fn build_ssr_meta(input: SsrMetaInput<'_>) -> BuiltSsrMeta {
         input.edge_streaks_gt1px,
     );
 
-    let stripe_analysis = build_stripe_analysis(input.stripe_contrast, input.stripe_contrast_reference);
-    let stripe_contrast_vec: Vec<f32> = input.stripe_contrast.map(|a| a.to_vec()).unwrap_or_default();
-    let stripe_ref_vec: Vec<f32> = input.stripe_contrast_reference.map(|a| a.to_vec()).unwrap_or_default();
+    let stripe_analysis =
+        build_stripe_analysis(input.stripe_contrast, input.stripe_contrast_reference);
+    let stripe_contrast_vec: Vec<f32> = input
+        .stripe_contrast
+        .map(|a| a.to_vec())
+        .unwrap_or_default();
+    let stripe_ref_vec: Vec<f32> = input
+        .stripe_contrast_reference
+        .map(|a| a.to_vec())
+        .unwrap_or_default();
 
     let value = json!({
         "num_rays": num_rays,
@@ -161,7 +182,9 @@ pub fn build_ssr_meta(input: SsrMetaInput<'_>) -> BuiltSsrMeta {
     }
 }
 
-fn extract_stats_values(stats: Option<&SsrStats>) -> (f32, f32, f32, f32, f32, f32, f32, u32, u32, u32, u32, u32) {
+fn extract_stats_values(
+    stats: Option<&SsrStats>,
+) -> (f32, f32, f32, f32, f32, f32, f32, u32, u32, u32, u32, u32) {
     match stats {
         Some(s) => (
             s.hit_rate(),
@@ -183,7 +206,11 @@ fn extract_stats_values(stats: Option<&SsrStats>) -> (f32, f32, f32, f32, f32, f
 
 fn build_stripe_analysis(ssr: Option<&[f32; 9]>, reference: Option<&[f32; 9]>) -> Value {
     if let (Some(ssr), Some(reference)) = (ssr, reference) {
-        let delta: Vec<f32> = ssr.iter().zip(reference.iter()).map(|(s, r)| s - r).collect();
+        let delta: Vec<f32> = ssr
+            .iter()
+            .zip(reference.iter())
+            .map(|(s, r)| s - r)
+            .collect();
         let min_contrast_ref = reference.iter().fold(f32::INFINITY, |a, &b| a.min(b));
         let min_contrast_ssr = ssr.iter().fold(f32::INFINITY, |a, &b| a.min(b));
         json!({

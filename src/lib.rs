@@ -26,12 +26,14 @@ use pyo3::{
 
 // C1/C3/C5/C6/C7: Additional imports for PyO3 functions
 #[cfg(feature = "extension-module")]
-use crate::core::context as engine_context;
-#[cfg(feature = "extension-module")]
 use crate::core::async_compute::{
     AsyncComputeConfig as AcConfig, AsyncComputeScheduler as AcScheduler,
     ComputePassDescriptor as AcPassDesc, DispatchParams as AcDispatch,
 };
+#[cfg(feature = "extension-module")]
+use crate::core::context as engine_context;
+#[cfg(feature = "extension-module")]
+use crate::core::device_caps::DeviceCaps;
 #[cfg(feature = "extension-module")]
 use crate::core::framegraph_impl::{
     FrameGraph as Fg, PassType as FgPassType, ResourceDesc as FgResourceDesc,
@@ -41,8 +43,6 @@ use crate::core::framegraph_impl::{
 use crate::core::multi_thread::{
     CopyTask as MtCopyTask, MultiThreadConfig as MtConfig, MultiThreadRecorder as MtRecorder,
 };
-#[cfg(feature = "extension-module")]
-use crate::core::device_caps::DeviceCaps;
 #[cfg(feature = "extension-module")]
 use crate::renderer::readback::read_texture_tight;
 #[cfg(feature = "extension-module")]
@@ -399,6 +399,7 @@ pub use core::dual_source_oit::{
     DualSourceComposeUniforms, DualSourceOITMode, DualSourceOITQuality, DualSourceOITRenderer,
     DualSourceOITStats, DualSourceOITUniforms,
 };
+pub use core::error::RenderError;
 pub use core::ground_plane::{
     GroundPlaneMode, GroundPlaneParams, GroundPlaneRenderer, GroundPlaneUniforms,
 };
@@ -415,7 +416,6 @@ pub use core::soft_light_radius::{
 pub use core::water_surface::{
     WaterSurfaceMode, WaterSurfaceParams, WaterSurfaceRenderer, WaterSurfaceUniforms,
 };
-pub use core::error::RenderError;
 pub use lighting::LightBuffer;
 pub use path_tracing::{TracerEngine, TracerParams};
 pub use render::params::{
@@ -3160,7 +3160,9 @@ fn open_terrain_viewer(
     snapshot_height: Option<u32>,
     initial_commands: Option<Vec<String>>,
 ) -> PyResult<()> {
-    use crate::viewer::{run_viewer, set_initial_commands, set_initial_terrain_config, ViewerConfig};
+    use crate::viewer::{
+        run_viewer, set_initial_commands, set_initial_terrain_config, ViewerConfig,
+    };
 
     // cfg is currently unused on the Rust side; keep it to preserve the Python API shape.
     let _ = cfg;
@@ -3212,10 +3214,7 @@ fn open_terrain_viewer(
     set_initial_terrain_config(RendererConfig::default());
 
     run_viewer(config).map_err(|e| {
-        pyo3::exceptions::PyRuntimeError::new_err(format!(
-            "Terrain viewer error: {}",
-            e
-        ))
+        pyo3::exceptions::PyRuntimeError::new_err(format!("Terrain viewer error: {}", e))
     })
 }
 
@@ -3895,11 +3894,26 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(crate::geometry::transforms::rotate_y, m)?)?;
     m.add_function(wrap_pyfunction!(crate::geometry::transforms::rotate_z, m)?)?;
     m.add_function(wrap_pyfunction!(crate::geometry::transforms::scale, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::geometry::transforms::scale_uniform, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::geometry::transforms::compose_trs, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::geometry::transforms::look_at_transform, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::geometry::transforms::multiply_matrices, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::geometry::transforms::invert_matrix, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::transforms::scale_uniform,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::transforms::compose_trs,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::transforms::look_at_transform,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::transforms::multiply_matrices,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::transforms::invert_matrix,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(
         crate::geometry::transforms::compute_normal_matrix,
         m

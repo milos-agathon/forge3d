@@ -3,9 +3,9 @@
 //! Provides utilities for creating and uploading RGBA16F and RGBA32F textures
 //! with proper memory budget checking and alignment handling.
 
-use crate::core::memory_tracker::global_tracker;
 use super::error::{RenderError, RenderResult};
 use super::gpu::ctx;
+use crate::core::memory_tracker::global_tracker;
 use std::num::NonZeroU32;
 
 /// Configuration for HDR texture creation

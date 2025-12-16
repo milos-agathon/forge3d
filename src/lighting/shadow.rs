@@ -48,7 +48,10 @@ impl ShadowTechnique {
     }
 
     pub fn requires_moments(&self) -> bool {
-        matches!(self, ShadowTechnique::VSM | ShadowTechnique::EVSM | ShadowTechnique::MSM)
+        matches!(
+            self,
+            ShadowTechnique::VSM | ShadowTechnique::EVSM | ShadowTechnique::MSM
+        )
     }
 
     pub fn channels(&self) -> u32 {
@@ -122,14 +125,31 @@ impl ShadowSettings {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.map_res == 0 { return Err("map_res must be greater than zero".to_string()); }
-        if self.map_res > 4096 { return Err(format!("map_res must be <= 4096, got {}", self.map_res)); }
-        if !self.map_res.is_power_of_two() { return Err(format!("map_res must be power of two, got {}", self.map_res)); }
-        let technique = self.technique_enum().ok_or_else(|| format!("unknown shadow technique id {}", self.tech))?;
+        if self.map_res == 0 {
+            return Err("map_res must be greater than zero".to_string());
+        }
+        if self.map_res > 4096 {
+            return Err(format!("map_res must be <= 4096, got {}", self.map_res));
+        }
+        if !self.map_res.is_power_of_two() {
+            return Err(format!(
+                "map_res must be power of two, got {}",
+                self.map_res
+            ));
+        }
+        let technique = self
+            .technique_enum()
+            .ok_or_else(|| format!("unknown shadow technique id {}", self.tech))?;
         if technique == ShadowTechnique::PCSS {
-            if self.pcss_blocker_radius < 0.0 { return Err("pcss_blocker_radius must be non-negative".to_string()); }
-            if self.pcss_filter_radius < 0.0 { return Err("pcss_filter_radius must be non-negative".to_string()); }
-            if self.light_size <= 0.0 { return Err("light_size must be positive for PCSS".to_string()); }
+            if self.pcss_blocker_radius < 0.0 {
+                return Err("pcss_blocker_radius must be non-negative".to_string());
+            }
+            if self.pcss_filter_radius < 0.0 {
+                return Err("pcss_filter_radius must be non-negative".to_string());
+            }
+            if self.light_size <= 0.0 {
+                return Err("light_size must be positive for PCSS".to_string());
+            }
         }
         if technique.requires_moments() && self.moment_bias <= 0.0 {
             return Err("moment_bias must be positive for moment-based techniques".to_string());

@@ -7,13 +7,13 @@ use serde_json::json;
 use std::fs;
 use std::path::Path;
 
-use super::viewer_analysis::{gradient_energy, mean_luma_region};
-use super::viewer_constants::P51_MAX_MEGAPIXELS;
-use super::viewer_image_utils::{
+use super::super::viewer_analysis::{gradient_energy, mean_luma_region};
+use super::super::viewer_constants::P51_MAX_MEGAPIXELS;
+use super::super::viewer_image_utils::{
     add_debug_noise_rgba8, downscale_rgba8_bilinear, flatten_rgba8_to_mean_luma, luma_std_rgba8,
 };
-use super::viewer_render_helpers::render_view_to_rgba8_ex;
-use super::Viewer;
+use super::super::viewer_render_helpers::render_view_to_rgba8_ex;
+use super::super::Viewer;
 
 impl Viewer {
     pub(crate) fn capture_p51_ao_grid(&mut self) -> anyhow::Result<()> {

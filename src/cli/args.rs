@@ -27,10 +27,7 @@ mod tests {
         ];
         let cfg = GiCliConfig::parse(&args).unwrap();
         assert_eq!(cfg.entries.len(), 1);
-        assert_eq!(
-            cfg.entries[0],
-            GiEntry::Effect(GiEffect::Ssao, Toggle::On)
-        );
+        assert_eq!(cfg.entries[0], GiEntry::Effect(GiEffect::Ssao, Toggle::On));
         assert_eq!(cfg.ssao.radius, Some(0.5));
         assert_eq!(cfg.ssao.intensity, Some(1.0));
     }

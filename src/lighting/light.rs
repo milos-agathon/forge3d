@@ -63,7 +63,12 @@ impl Default for Light {
 }
 
 impl Light {
-    pub fn directional(azimuth_deg: f32, elevation_deg: f32, intensity: f32, color: [f32; 3]) -> Self {
+    pub fn directional(
+        azimuth_deg: f32,
+        elevation_deg: f32,
+        intensity: f32,
+        color: [f32; 3],
+    ) -> Self {
         let az_rad = azimuth_deg.to_radians();
         let el_rad = elevation_deg.to_radians();
         let x = el_rad.cos() * az_rad.sin();
@@ -122,7 +127,10 @@ impl Light {
             _pad2: 0.0,
             dir_ws: direction,
             _pad3: 0.0,
-            cone_cos: [inner_angle_deg.to_radians().cos(), outer_angle_deg.to_radians().cos()],
+            cone_cos: [
+                inner_angle_deg.to_radians().cos(),
+                outer_angle_deg.to_radians().cos(),
+            ],
             area_half: [0.0, 0.0],
         }
     }

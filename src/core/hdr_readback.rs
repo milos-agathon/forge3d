@@ -189,7 +189,8 @@ fn convert_to_floats(
                     let pixel_offset = row_offset + (x * 8) as usize;
 
                     for c in 0..4 {
-                        let half_bytes = [data[pixel_offset + c * 2], data[pixel_offset + c * 2 + 1]];
+                        let half_bytes =
+                            [data[pixel_offset + c * 2], data[pixel_offset + c * 2 + 1]];
                         let half_val = half::f16::from_le_bytes(half_bytes);
                         hdr_data.push(half_val.to_f32());
                     }

@@ -1,8 +1,8 @@
 use super::structs::PointSpotLightRenderer;
-use super::types::PointSpotLightUniforms;
 use super::types::Light;
-use wgpu::{self, util::DeviceExt};
+use super::types::PointSpotLightUniforms;
 use std::collections::HashMap;
+use wgpu::{self, util::DeviceExt};
 
 impl PointSpotLightRenderer {
     pub fn new(device: &wgpu::Device, max_lights: usize) -> Self {

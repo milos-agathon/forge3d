@@ -115,7 +115,13 @@ impl CsmShadowMap {
             );
         }
 
-        let uniforms = build_csm_uniforms(&self.config, &self.light, &self.cascades, light_up, self.debug_mode);
+        let uniforms = build_csm_uniforms(
+            &self.config,
+            &self.light,
+            &self.cascades,
+            light_up,
+            self.debug_mode,
+        );
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
     }
 
@@ -192,7 +198,11 @@ fn calculate_split_distances(config: &CsmConfig, frustum: &CameraFrustum) -> Vec
 
 fn calculate_light_basis(light: &DirectionalLight) -> (Vec3, Vec3) {
     let light_dir = light.direction.normalize();
-    let light_up = if light_dir.dot(Vec3::Y).abs() > 0.99 { Vec3::X } else { Vec3::Y };
+    let light_up = if light_dir.dot(Vec3::Y).abs() > 0.99 {
+        Vec3::X
+    } else {
+        Vec3::Y
+    };
     let light_right = light_dir.cross(light_up).normalize();
     let light_up = light_right.cross(light_dir).normalize();
     (light_up, light_right)
@@ -229,7 +239,12 @@ fn update_single_cascade(
     cascade.texel_size = (max_x - min_x) / config.shadow_map_size as f32;
 }
 
-fn compute_light_space_bounds(corners: &[Vec3; 8], right: Vec3, up: Vec3, dir: Vec3) -> (Vec3, Vec3) {
+fn compute_light_space_bounds(
+    corners: &[Vec3; 8],
+    right: Vec3,
+    up: Vec3,
+    dir: Vec3,
+) -> (Vec3, Vec3) {
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
     for c in corners {
@@ -240,7 +255,11 @@ fn compute_light_space_bounds(corners: &[Vec3; 8], right: Vec3, up: Vec3, dir: V
     (min, max)
 }
 
-fn add_padding_and_snap(min: Vec3, max: Vec3, config: &CsmConfig) -> (f32, f32, f32, f32, f32, f32) {
+fn add_padding_and_snap(
+    min: Vec3,
+    max: Vec3,
+    config: &CsmConfig,
+) -> (f32, f32, f32, f32, f32, f32) {
     let padding = (max.x - min.x).max(max.y - min.y) * 0.05;
     let texel = (max.x - min.x + 2.0 * padding) / config.shadow_map_size as f32;
     let min_x = ((min.x - padding) / texel).floor() * texel;
@@ -251,7 +270,13 @@ fn add_padding_and_snap(min: Vec3, max: Vec3, config: &CsmConfig) -> (f32, f32, 
     (min_x, max_x, min_y, max_y, min_z, max.z)
 }
 
-fn build_csm_uniforms(config: &CsmConfig, light: &DirectionalLight, cascades: &[ShadowCascade], light_up: Vec3, debug_mode: u32) -> CsmUniforms {
+fn build_csm_uniforms(
+    config: &CsmConfig,
+    light: &DirectionalLight,
+    cascades: &[ShadowCascade],
+    light_up: Vec3,
+    debug_mode: u32,
+) -> CsmUniforms {
     let mut cascade_array = [ShadowCascade::zeroed(); 4];
     for (i, c) in cascades.iter().enumerate().take(4) {
         cascade_array[i] = *c;

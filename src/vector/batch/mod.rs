@@ -118,33 +118,48 @@ impl BatchManager {
         self.stats.visible_primitives += poly_stats.0;
         self.stats.culled_primitives += poly_stats.1;
         self.stats.culling_time_ms += poly_stats.2;
-        batches.extend(self.create_batches(
-            visible_polygons.into_iter().map(|(id, _, aabb)| (id, aabb)).collect(),
-            PrimitiveType::Polygon,
-            Layer::Background,
-        ));
+        batches.extend(
+            self.create_batches(
+                visible_polygons
+                    .into_iter()
+                    .map(|(id, _, aabb)| (id, aabb))
+                    .collect(),
+                PrimitiveType::Polygon,
+                Layer::Background,
+            ),
+        );
 
         // Cull and batch lines
         let (visible_lines, line_stats) = cull_primitives(&self.line_data, &self.frustum);
         self.stats.visible_primitives += line_stats.0;
         self.stats.culled_primitives += line_stats.1;
         self.stats.culling_time_ms += line_stats.2;
-        batches.extend(self.create_batches(
-            visible_lines.into_iter().map(|(id, _, aabb)| (id, aabb)).collect(),
-            PrimitiveType::Line,
-            Layer::Vector,
-        ));
+        batches.extend(
+            self.create_batches(
+                visible_lines
+                    .into_iter()
+                    .map(|(id, _, aabb)| (id, aabb))
+                    .collect(),
+                PrimitiveType::Line,
+                Layer::Vector,
+            ),
+        );
 
         // Cull and batch points
         let (visible_points, point_stats) = cull_primitives(&self.point_data, &self.frustum);
         self.stats.visible_primitives += point_stats.0;
         self.stats.culled_primitives += point_stats.1;
         self.stats.culling_time_ms += point_stats.2;
-        batches.extend(self.create_batches(
-            visible_points.into_iter().map(|(id, _, aabb)| (id, aabb)).collect(),
-            PrimitiveType::Point,
-            Layer::Points,
-        ));
+        batches.extend(
+            self.create_batches(
+                visible_points
+                    .into_iter()
+                    .map(|(id, _, aabb)| (id, aabb))
+                    .collect(),
+                PrimitiveType::Point,
+                Layer::Points,
+            ),
+        );
 
         self.stats.draw_calls_after_batching = batches.len();
         self.stats.batching_time_ms = start_time.elapsed().as_secs_f32() * 1000.0;

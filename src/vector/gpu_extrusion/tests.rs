@@ -15,12 +15,12 @@ fn gpu_matches_cpu_for_square() {
     let (cpu_positions, cpu_indices, cpu_normals, cpu_uvs) = extrude_polygon(&polygon, height);
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-    let adapter = match pollster::block_on(
-        instance.request_adapter(&wgpu::RequestAdapterOptions::default()),
-    ) {
-        Some(adapter) => adapter,
-        None => return,
-    };
+    let adapter =
+        match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        {
+            Some(adapter) => adapter,
+            None => return,
+        };
     let (device, queue) =
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
             .unwrap();
@@ -90,8 +90,7 @@ fn gpu_matches_cpu_for_square() {
     output.uvs.unmap();
     output.indices.unmap();
 
-    let cpu_positions_flat: Vec<f32> =
-        cpu_positions.iter().flat_map(|v| [v.x, v.y, v.z]).collect();
+    let cpu_positions_flat: Vec<f32> = cpu_positions.iter().flat_map(|v| [v.x, v.y, v.z]).collect();
     let cpu_normals_flat: Vec<f32> = cpu_normals.iter().flat_map(|n| [n.x, n.y, n.z]).collect();
     let cpu_uvs_flat: Vec<f32> = cpu_uvs.iter().flat_map(|uv| [uv.x, uv.y]).collect();
 

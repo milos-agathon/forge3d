@@ -1,5 +1,5 @@
 use super::structs::PointSpotLightRenderer;
-use super::types::{Light, ShadowQuality, DebugMode};
+use super::types::{DebugMode, Light, ShadowQuality};
 use glam;
 
 impl PointSpotLightRenderer {

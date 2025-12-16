@@ -1,9 +1,9 @@
 //! src/passes/ssr.rs
 //! Thin wrapper for SSR renderer pass used by P5 harness tooling.
 
+use crate::core::error::RenderResult;
 use crate::core::gbuffer::GBuffer;
 use crate::core::screen_space_effects::{CameraParams, SsrRenderer, SsrSettings};
-use crate::core::error::RenderResult;
 use wgpu::{CommandEncoder, Device, Queue, TextureView};
 
 pub use crate::core::screen_space_effects::SsrStats;

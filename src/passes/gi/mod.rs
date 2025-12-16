@@ -12,8 +12,8 @@ pub use params::{GiCompositeParams, GiCompositeParamsStd140};
 use crate::core::error::RenderResult;
 use crate::core::gpu_timing::GpuTimingManager;
 use wgpu::{
-    util::DeviceExt, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindingResource,
-    Buffer, BufferUsages, CommandEncoder, ComputePassDescriptor, ComputePipeline,
+    util::DeviceExt, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindingResource, Buffer,
+    BufferUsages, CommandEncoder, ComputePassDescriptor, ComputePipeline,
     ComputePipelineDescriptor, Device, ShaderModuleDescriptor, ShaderSource, TextureView,
 };
 
@@ -108,21 +108,53 @@ impl GiPass {
             label: Some("p5.gi.composite.bg"),
             layout: &self.bind_group_layout,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(baseline_lighting) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(diffuse_view) },
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(spec_view) },
-                BindGroupEntry { binding: 3, resource: BindingResource::TextureView(ao_view) },
-                BindGroupEntry { binding: 4, resource: BindingResource::TextureView(ssgi_view) },
-                BindGroupEntry { binding: 5, resource: BindingResource::TextureView(ssr_view) },
-                BindGroupEntry { binding: 6, resource: BindingResource::TextureView(normal_view) },
-                BindGroupEntry { binding: 7, resource: BindingResource::TextureView(material_view) },
-                BindGroupEntry { binding: 8, resource: BindingResource::TextureView(output_view) },
-                BindGroupEntry { binding: 9, resource: self.params_buffer.as_entire_binding() },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(baseline_lighting),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(diffuse_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(spec_view),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::TextureView(ao_view),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::TextureView(ssgi_view),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: BindingResource::TextureView(ssr_view),
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: BindingResource::TextureView(normal_view),
+                },
+                BindGroupEntry {
+                    binding: 7,
+                    resource: BindingResource::TextureView(material_view),
+                },
+                BindGroupEntry {
+                    binding: 8,
+                    resource: BindingResource::TextureView(output_view),
+                },
+                BindGroupEntry {
+                    binding: 9,
+                    resource: self.params_buffer.as_entire_binding(),
+                },
             ],
         });
 
         let t0 = std::time::Instant::now();
-        let timing_scope = timing.as_deref_mut().map(|t| t.begin_scope(encoder, "p5.composite"));
+        let timing_scope = timing
+            .as_deref_mut()
+            .map(|t| t.begin_scope(encoder, "p5.composite"));
 
         let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("p5.gi.composite.pass"),
@@ -157,10 +189,22 @@ impl GiPass {
             label: Some("p5.gi.debug.bg"),
             layout: &self.debug_bind_group_layout,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(ao_view) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(ssgi_view) },
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(ssr_view) },
-                BindGroupEntry { binding: 3, resource: BindingResource::TextureView(debug_output_view) },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(ao_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(ssgi_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(ssr_view),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::TextureView(debug_output_view),
+                },
             ],
         });
 
@@ -191,11 +235,13 @@ fn create_compute_pipeline(
     };
     device.create_compute_pipeline(&ComputePipelineDescriptor {
         label: Some(&format!("p5.gi.{}.pipeline", kind)),
-        layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some(&format!("p5.gi.{}.layout", kind)),
-            bind_group_layouts: &[bind_group_layout],
-            push_constant_ranges: &[],
-        })),
+        layout: Some(
+            &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(&format!("p5.gi.{}.layout", kind)),
+                bind_group_layouts: &[bind_group_layout],
+                push_constant_ranges: &[],
+            }),
+        ),
         module: shader,
         entry_point,
     })

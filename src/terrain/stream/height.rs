@@ -1,3 +1,6 @@
+use super::config::MosaicConfig;
+use super::util::{copy_rows_with_padding, padded_bytes_per_row};
+use crate::terrain::tiling::TileId;
 use half::f16;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
@@ -5,9 +8,6 @@ use wgpu::{
     Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, Queue, Sampler, SamplerDescriptor,
     Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
 };
-use crate::terrain::tiling::TileId;
-use super::config::MosaicConfig;
-use super::util::{copy_rows_with_padding, padded_bytes_per_row};
 
 #[derive(Debug)]
 pub struct HeightMosaic {

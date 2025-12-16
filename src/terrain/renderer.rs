@@ -15,8 +15,8 @@
 //! src/terrain_render_params.rs, src/shaders/terrain_pbr_pom.wgsl
 
 use anyhow::{anyhow, Result};
-use log::info;
 use bytemuck::{Pod, Zeroable};
+use log::info;
 use numpy::PyReadonlyArray2;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -24,9 +24,9 @@ use std::sync::{Arc, Mutex};
 use wgpu::util::DeviceExt;
 use wgpu::TextureFormatFeatureFlags;
 
+use super::render_params::{AddressModeNative, FilterModeNative};
 use crate::lighting::types::{Light, LightType};
 use crate::lighting::LightBuffer;
-use super::render_params::{AddressModeNative, FilterModeNative};
 
 /// Reusable GPU terrain scene (M2).
 ///
@@ -180,7 +180,7 @@ impl OverlayUniforms {
             // P5: ao_weight=0.0 (no AO effect), ao_fallback_enabled=0.0, pad, pad
             params3: [0.0, 0.0, 0.0, 0.0],
             // P6: detail disabled by default (P5 compatibility)
-            params4: [0.0, 2.0, 0.3, 0.1],  // enabled=0, scale=2.0, normal_strength=0.3, albedo_noise=0.1
+            params4: [0.0, 2.0, 0.3, 0.1], // enabled=0, scale=2.0, normal_strength=0.3, albedo_noise=0.1
             params5: [50.0, 200.0, 0.0, 0.0], // fade_start=50, fade_end=200
         }
     }
@@ -302,10 +302,7 @@ impl WaterReflectionUniforms {
 
 /// P4: Compute a mirrored view matrix across a horizontal water plane.
 /// The water plane is assumed to be Z-up at height `plane_height` (matching terrain coordinates).
-fn compute_mirrored_view_matrix(
-    view_matrix: [[f32; 4]; 4],
-    plane_height: f32,
-) -> [[f32; 4]; 4] {
+fn compute_mirrored_view_matrix(view_matrix: [[f32; 4]; 4], plane_height: f32) -> [[f32; 4]; 4] {
     // Reflection matrix across plane z = plane_height
     // R = I - 2 * n * n^T where n = (0, 0, 1)
     // This reflects the Z coordinate: z' = 2*h - z
@@ -315,7 +312,7 @@ fn compute_mirrored_view_matrix(
         [0.0, 0.0, -1.0, 2.0 * plane_height],
         [0.0, 0.0, 0.0, 1.0],
     ];
-    
+
     // Mirrored view = view * reflect (apply reflection in world space before view)
     mul_mat4(view_matrix, reflect)
 }
@@ -621,7 +618,9 @@ impl TerrainRenderer {
             session.queue.clone(),
             session.adapter.clone(),
         )
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to create TerrainRenderer: {:#}", e)))?;
+        .map_err(|e| {
+            PyRuntimeError::new_err(format!("Failed to create TerrainRenderer: {:#}", e))
+        })?;
 
         Ok(Self { scene })
     }
@@ -671,11 +670,10 @@ impl TerrainRenderer {
         }
 
         // Update light buffer (shared with TerrainScene)
-        let mut light_buffer = self
-            .scene
-            .light_buffer
-            .lock()
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to lock light buffer: {}", e)))?;
+        let mut light_buffer =
+            self.scene.light_buffer.lock().map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to lock light buffer: {}", e))
+            })?;
 
         light_buffer
             .update(&self.scene.device, &self.scene.queue, &native_lights)
@@ -749,7 +747,10 @@ impl TerrainRenderer {
 
     /// Python repr
     fn __repr__(&self) -> String {
-        format!("TerrainRenderer(features={:?})", self.scene.device.features())
+        format!(
+            "TerrainRenderer(features={:?})",
+            self.scene.device.features()
+        )
     }
 
     /// Get renderer config for debugging (P0-03)
@@ -1195,12 +1196,14 @@ impl TerrainScene {
         });
 
         // P4: Create water reflection bind group layout and resources
-        let water_reflection_bind_group_layout = Self::create_water_reflection_bind_group_layout(device.as_ref());
-        let water_reflection_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain.water_reflection.uniform_buffer"),
-            contents: bytemuck::bytes_of(&WaterReflectionUniforms::disabled()),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let water_reflection_bind_group_layout =
+            Self::create_water_reflection_bind_group_layout(device.as_ref());
+        let water_reflection_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.water_reflection.uniform_buffer"),
+                contents: bytemuck::bytes_of(&WaterReflectionUniforms::disabled()),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
         // P4: Create water reflection texture (half-res as per P4 spec)
         let water_reflection_resolution = 512u32; // Half of typical 1024 render
@@ -1218,7 +1221,8 @@ impl TerrainScene {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-        let water_reflection_view = water_reflection_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let water_reflection_view =
+            water_reflection_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // P4: Create water reflection depth texture
         let water_reflection_depth_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -1235,7 +1239,8 @@ impl TerrainScene {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
-        let water_reflection_depth_view = water_reflection_depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let water_reflection_depth_view =
+            water_reflection_depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // P4: Create water reflection sampler
         let water_reflection_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -1285,9 +1290,8 @@ impl TerrainScene {
                 depth_or_array_layers: 1,
             },
         );
-        let water_reflection_fallback_view = water_reflection_fallback_texture.create_view(
-            &wgpu::TextureViewDescriptor::default(),
-        );
+        let water_reflection_fallback_view =
+            water_reflection_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let pipeline = Self::create_render_pipeline(
             device.as_ref(),
             &bind_group_layout,
@@ -1299,7 +1303,7 @@ impl TerrainScene {
             color_format,
             1,
         );
-        
+
         // P4: Create non-MSAA pipeline for reflection pass (reflection textures always sample_count=1)
         let water_reflection_pipeline = Self::create_render_pipeline(
             device.as_ref(),
@@ -1312,13 +1316,14 @@ impl TerrainScene {
             color_format,
             1, // Always sample_count=1 for reflection pass
         );
-        
+
         let blit_pipeline =
             Self::create_blit_pipeline(device.as_ref(), &blit_bind_group_layout, color_format);
 
         // Create noop shadow resources for bind group at index 3
         // Shadow depth texture is cleared to 1.0 so terrain is fully lit when not using real shadows
-        let noop_shadow = Self::create_noop_shadow(device.as_ref(), queue.as_ref(), &shadow_bind_group_layout)?;
+        let noop_shadow =
+            Self::create_noop_shadow(device.as_ref(), queue.as_ref(), &shadow_bind_group_layout)?;
 
         // P1-Shadow: Create CSM renderer with default configuration
         // These are init-time defaults; per-render params (bias, etc.) are updated in render_internal
@@ -1326,8 +1331,8 @@ impl TerrainScene {
         // Parse debug_mode from FORGE3D_TERRAIN_SHADOW_DEBUG env var
         let shadow_debug_mode = crate::core::shadows::parse_shadow_debug_env();
         let csm_config = crate::shadows::CsmConfig {
-            cascade_count: 4,       // Default, can be overridden by recreating renderer
-            shadow_map_size: 2048,  // Default, can be overridden by recreating renderer
+            cascade_count: 4,      // Default, can be overridden by recreating renderer
+            shadow_map_size: 2048, // Default, can be overridden by recreating renderer
             max_shadow_distance: 3000.0,
             cascade_splits: vec![], // Auto-calculate
             pcf_kernel_size: 3,     // 3x3 PCF for soft shadows
@@ -1350,13 +1355,12 @@ impl TerrainScene {
         let csm_renderer = crate::shadows::CsmRenderer::new(device.as_ref(), csm_config);
 
         // Create shadow depth bind group layout (for terrain shadow rendering)
-        let shadow_depth_bind_group_layout = Self::create_shadow_depth_bind_group_layout(device.as_ref());
-        
+        let shadow_depth_bind_group_layout =
+            Self::create_shadow_depth_bind_group_layout(device.as_ref());
+
         // Create shadow depth pipeline
-        let shadow_depth_pipeline = Self::create_shadow_depth_pipeline(
-            device.as_ref(),
-            &shadow_depth_bind_group_layout,
-        );
+        let shadow_depth_pipeline =
+            Self::create_shadow_depth_pipeline(device.as_ref(), &shadow_depth_bind_group_layout);
 
         let pipeline_cache = PipelineCache {
             sample_count: 1,
@@ -1407,7 +1411,10 @@ impl TerrainScene {
             water_reflection_sampler,
             water_reflection_depth_texture: Mutex::new(water_reflection_depth_texture),
             water_reflection_depth_view: Mutex::new(water_reflection_depth_view),
-            water_reflection_size: Mutex::new((water_reflection_resolution, water_reflection_resolution)),
+            water_reflection_size: Mutex::new((
+                water_reflection_resolution,
+                water_reflection_resolution,
+            )),
             water_reflection_fallback_view,
             water_reflection_pipeline,
             // P0-03: Initialize with default config (no behavior changes)
@@ -1447,19 +1454,19 @@ impl TerrainScene {
         // how much the current pixel is "occluded" by higher neighbors.
         // This is a very coarse approximation but runs on CPU at upload time.
         let mut ao_data = vec![1.0f32; (width * height) as usize];
-        
+
         // Stronger, broader sampling to create a visible coarse AO mask
         let sample_radius = 8i32; // Sample neighbors within this radius
         let height_scale = 10.0f32; // Scale factor for height differences
-        
+
         for y in 0..height as i32 {
             for x in 0..width as i32 {
                 let idx = (y as u32 * width + x as u32) as usize;
                 let center_h = heightmap_data[idx];
-                
+
                 let mut occlusion = 0.0f32;
                 let mut sample_count = 0;
-                
+
                 // Sample in 8 directions
                 for dy in -sample_radius..=sample_radius {
                     for dx in -sample_radius..=sample_radius {
@@ -1483,14 +1490,14 @@ impl TerrainScene {
                         }
                     }
                 }
-                
+
                 if sample_count > 0 {
                     let avg_occlusion = occlusion / sample_count as f32;
                     ao_data[idx] = (1.0 - avg_occlusion.min(0.9)).max(0.01); // Clamp to [0.01, 1.0]
                 }
             }
         }
-        
+
         // Create GPU texture from AO data
         let coarse_ao_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("terrain.coarse_ao"),
@@ -1506,7 +1513,7 @@ impl TerrainScene {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        
+
         self.queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &coarse_ao_texture,
@@ -1526,18 +1533,18 @@ impl TerrainScene {
                 depth_or_array_layers: 1,
             },
         );
-        
+
         let coarse_ao_view = coarse_ao_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        
+
         log::info!(
             target: "terrain.ao",
             "P5: Computed coarse horizon AO from heightmap ({}x{})",
             width, height
         );
-        
+
         self.coarse_ao_texture = Some(coarse_ao_texture);
         self.coarse_ao_view = Some(coarse_ao_view);
-        
+
         Ok(())
     }
 
@@ -1551,20 +1558,22 @@ impl TerrainScene {
     fn ensure_reflection_texture_size(&self, width: u32, height: u32) -> Result<bool> {
         let target_width = (width / 2).max(1);
         let target_height = (height / 2).max(1);
-        
-        let mut size = self.water_reflection_size.lock()
+
+        let mut size = self
+            .water_reflection_size
+            .lock()
             .map_err(|_| anyhow!("water_reflection_size mutex poisoned"))?;
-        
+
         if size.0 == target_width && size.1 == target_height {
             return Ok(false);
         }
-        
+
         log::info!(
             target: "terrain.water_reflection",
             "P4: Recreating reflection textures: {}x{} -> {}x{} (half of {}x{})",
             size.0, size.1, target_width, target_height, width, height
         );
-        
+
         // Create new reflection color texture
         let new_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("terrain.water_reflection.texture"),
@@ -1581,7 +1590,7 @@ impl TerrainScene {
             view_formats: &[],
         });
         let new_view = new_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        
+
         // Create new reflection depth texture
         let new_depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("terrain.water_reflection.depth"),
@@ -1598,23 +1607,31 @@ impl TerrainScene {
             view_formats: &[],
         });
         let new_depth_view = new_depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        
+
         // Update the textures under lock
-        let mut tex = self.water_reflection_texture.lock()
+        let mut tex = self
+            .water_reflection_texture
+            .lock()
             .map_err(|_| anyhow!("water_reflection_texture mutex poisoned"))?;
-        let mut view = self.water_reflection_view.lock()
+        let mut view = self
+            .water_reflection_view
+            .lock()
             .map_err(|_| anyhow!("water_reflection_view mutex poisoned"))?;
-        let mut depth_tex = self.water_reflection_depth_texture.lock()
+        let mut depth_tex = self
+            .water_reflection_depth_texture
+            .lock()
             .map_err(|_| anyhow!("water_reflection_depth_texture mutex poisoned"))?;
-        let mut depth_view = self.water_reflection_depth_view.lock()
+        let mut depth_view = self
+            .water_reflection_depth_view
+            .lock()
             .map_err(|_| anyhow!("water_reflection_depth_view mutex poisoned"))?;
-        
+
         *tex = new_texture;
         *view = new_view;
         *depth_tex = new_depth_texture;
         *depth_view = new_depth_view;
         *size = (target_width, target_height);
-        
+
         Ok(true)
     }
 
@@ -1723,7 +1740,7 @@ impl TerrainScene {
             peter_panning_offset: 0.0,
             pcss_light_radius: 0.0,
             cascade_blend_range: 0.0, // No blending needed for noop
-            technique: 1, // Default to PCF
+            technique: 1,             // Default to PCF
             _padding: [0.0; 2],
         };
         let csm_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2047,12 +2064,12 @@ impl TerrainScene {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("terrain_pbr_pom.pipeline_layout"),
             bind_group_layouts: &[
-                bind_group_layout,                   // @group(0): terrain uniforms/textures (bindings 0-11)
-                light_buffer_layout,                 // @group(1): lights (bindings 3-5)
-                ibl_bind_group_layout,               // @group(2): IBL (bindings 0-4)
-                &shadow_bind_group_layout,           // @group(3): shadows (bindings 0-4)
-                fog_bind_group_layout,               // @group(4): fog (binding 0)
-                water_reflection_bind_group_layout,  // @group(5): water reflections (bindings 0-2)
+                bind_group_layout,         // @group(0): terrain uniforms/textures (bindings 0-11)
+                light_buffer_layout,       // @group(1): lights (bindings 3-5)
+                ibl_bind_group_layout,     // @group(2): IBL (bindings 0-4)
+                &shadow_bind_group_layout, // @group(3): shadows (bindings 0-4)
+                fog_bind_group_layout,     // @group(4): fog (binding 0)
+                water_reflection_bind_group_layout, // @group(5): water reflections (bindings 0-2)
             ],
             push_constant_ranges: &[],
         });
@@ -2137,8 +2154,10 @@ impl TerrainScene {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: Some(
-                            std::num::NonZeroU64::new(std::mem::size_of::<ShadowPassUniforms>() as u64)
-                                .unwrap(),
+                            std::num::NonZeroU64::new(
+                                std::mem::size_of::<ShadowPassUniforms>() as u64
+                            )
+                            .unwrap(),
                         ),
                     },
                     count: None,
@@ -2207,7 +2226,7 @@ impl TerrainScene {
                 depth_compare: wgpu::CompareFunction::Less,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState {
-                    constant: 2, // Constant bias to prevent shadow acne
+                    constant: 2,      // Constant bias to prevent shadow acne
                     slope_scale: 2.0, // Slope-scaled bias
                     clamp: 0.0,
                 },
@@ -2237,10 +2256,10 @@ impl TerrainScene {
         // For terrain shadows, we compute cascades differently than standard CSM.
         // The terrain is a 1x1 unit square in world XY, so we create a single cascade
         // that covers this terrain extent from the light's perspective.
-        
+
         // Light direction (normalized)
         let light_dir = sun_direction.normalize();
-        
+
         // Compute light view matrix (looking down the light direction)
         // IMPORTANT: Terrain uses Z-up coordinate system (world_position.z = height)
         // So light_up should be Z, unless light is nearly vertical along Z
@@ -2249,33 +2268,33 @@ impl TerrainScene {
         } else {
             glam::Vec3::Z // Z-up to match terrain coordinate system
         };
-        
+
         // Terrain bounds in shadow-normalized space
         // CRITICAL: For shadow mapping to work, XY and Z scales must be comparable.
         // The terrain's raw height range (height_min to height_max) is thousands of meters,
         // while XY is only [-0.5, 0.5]. This scale mismatch prevents self-shadowing.
-        // 
+        //
         // Solution: Normalize heights to match XY scale for shadow calculations.
         // The shadow depth shader must also use this same normalization.
         let half_spacing = terrain_spacing * 0.5;
         let _height_range = (height_max - height_min).max(1.0);
-        
+
         // Normalize terrain Z to [0, 1] range, then scale by height_exag for visual effect
         // This gives Z range of [0, height_exag], which is comparable to XY range [-0.5, 0.5]
         let shadow_z_min = 0.0;
         let shadow_z_max = height_exag; // Height range normalized to [0, h_exag]
-        
+
         let terrain_min = glam::Vec3::new(-half_spacing, -half_spacing, shadow_z_min);
         let terrain_max = glam::Vec3::new(half_spacing, half_spacing, shadow_z_max);
         let terrain_center = (terrain_min + terrain_max) * 0.5;
-        
+
         // Position the light camera far behind the terrain CENTROID along the light direction
         // This ensures the terrain is in front of the camera, centered in view
         let terrain_diagonal = (terrain_max - terrain_min).length();
         let light_camera_distance = terrain_diagonal * 2.0;
         let light_camera_pos = terrain_center - light_dir * light_camera_distance;
         let light_view = glam::Mat4::look_to_rh(light_camera_pos, light_dir, light_up);
-        
+
         // Transform terrain corners to light space and compute AABB
         let corners = [
             glam::Vec3::new(terrain_min.x, terrain_min.y, terrain_min.z),
@@ -2287,7 +2306,7 @@ impl TerrainScene {
             glam::Vec3::new(terrain_min.x, terrain_max.y, terrain_max.z),
             glam::Vec3::new(terrain_max.x, terrain_max.y, terrain_max.z),
         ];
-        
+
         let mut light_min = glam::Vec3::splat(f32::MAX);
         let mut light_max = glam::Vec3::splat(f32::MIN);
         for corner in &corners {
@@ -2295,24 +2314,26 @@ impl TerrainScene {
             light_min = light_min.min(light_pos);
             light_max = light_max.max(light_pos);
         }
-        
+
         // Expand bounds significantly to ensure entire terrain is covered
         // Use larger padding to account for perspective distortion in camera view
         let padding = terrain_spacing * 0.3;
         light_min -= glam::Vec3::splat(padding);
         light_max += glam::Vec3::splat(padding);
-        
+
         // Create orthographic projection covering terrain AABB
         // Note: In RH view space, objects in front of camera have NEGATIVE Z
         // orthographic_rh expects positive near/far distances from the camera
         // So we negate and swap to get proper near/far
         let z_padding = terrain_spacing * 0.1;
-        let proj_near = -light_max.z - z_padding;  // Negate and swap (closer = larger negative Z)
-        let proj_far = -light_min.z + z_padding;   // Farther = smaller negative Z
-        
+        let proj_near = -light_max.z - z_padding; // Negate and swap (closer = larger negative Z)
+        let proj_far = -light_min.z + z_padding; // Farther = smaller negative Z
+
         let light_proj = glam::Mat4::orthographic_rh(
-            light_min.x, light_max.x,
-            light_min.y, light_max.y,
+            light_min.x,
+            light_max.x,
+            light_min.y,
+            light_max.y,
             proj_near,
             proj_far,
         );
@@ -2324,12 +2345,7 @@ impl TerrainScene {
             .cascade_count
             .max(1)
             .min(self.csm_renderer.shadow_map_views.len() as u32);
-        let splits = if self
-            .csm_renderer
-            .config
-            .cascade_splits
-            .len()
-            >= cascade_count as usize + 1
+        let splits = if self.csm_renderer.config.cascade_splits.len() >= cascade_count as usize + 1
         {
             self.csm_renderer.config.cascade_splits.clone()
         } else {
@@ -2348,7 +2364,8 @@ impl TerrainScene {
 
         // Update CsmRenderer uniforms directly for terrain shadow
         let light_view_proj = light_proj * light_view;
-        let texel_size = (light_max.x - light_min.x) / self.csm_renderer.config.shadow_map_size as f32;
+        let texel_size =
+            (light_max.x - light_min.x) / self.csm_renderer.config.shadow_map_size as f32;
 
         self.csm_renderer.uniforms.light_direction = [light_dir.x, light_dir.y, light_dir.z, 0.0];
         self.csm_renderer.uniforms.light_view = light_view.to_cols_array();
@@ -2356,7 +2373,8 @@ impl TerrainScene {
         self.csm_renderer.uniforms.pcf_kernel_size = self.csm_renderer.config.pcf_kernel_size;
         self.csm_renderer.uniforms.depth_bias = self.csm_renderer.config.depth_bias;
         self.csm_renderer.uniforms.slope_bias = self.csm_renderer.config.slope_bias;
-        self.csm_renderer.uniforms.shadow_map_size = self.csm_renderer.config.shadow_map_size as f32;
+        self.csm_renderer.uniforms.shadow_map_size =
+            self.csm_renderer.config.shadow_map_size as f32;
         self.csm_renderer.uniforms.peter_panning_offset =
             self.csm_renderer.config.peter_panning_offset;
         self.csm_renderer.uniforms.debug_mode = self.csm_renderer.config.debug_mode;
@@ -2385,7 +2403,7 @@ impl TerrainScene {
         // Render each cascade with the same terrain-aligned projection
         for cascade_idx in 0..cascade_count {
             let cascade = &self.csm_renderer.uniforms.cascades[cascade_idx as usize];
-            
+
             // Use the SAME light_view_proj that was stored in the CSM uniforms
             // This ensures the shadow depth pass uses exactly the same matrix as the main shader
             // DO NOT recompute - use the pre-stored value directly
@@ -2398,7 +2416,7 @@ impl TerrainScene {
                 grid_params: [SHADOW_GRID_RES as f32, 0.0, 0.0, 0.0],
                 height_curve,
             };
-            
+
             let shadow_uniform_buffer =
                 self.device
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2410,7 +2428,10 @@ impl TerrainScene {
             // Create bind group for this cascade pass
             let shadow_depth_bind_group =
                 self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(&format!("terrain.shadow.cascade_{}.bind_group", cascade_idx)),
+                    label: Some(&format!(
+                        "terrain.shadow.cascade_{}.bind_group",
+                        cascade_idx
+                    )),
                     layout: &self.shadow_depth_bind_group_layout,
                     entries: &[
                         wgpu::BindGroupEntry {
@@ -2459,16 +2480,36 @@ impl TerrainScene {
     /// Uses the simpler CsmUniforms struct that the terrain shader expects
     fn create_shadow_bind_group(&self) -> wgpu::BindGroup {
         use crate::core::shadow_mapping::{CsmCascadeData, CsmUniforms};
-        
+
         // Convert CsmRenderer uniforms to the simpler terrain-compatible format
         let csm = &self.csm_renderer.uniforms;
         let terrain_csm_uniforms = CsmUniforms {
             light_direction: csm.light_direction,
             light_view: [
-                [csm.light_view[0], csm.light_view[1], csm.light_view[2], csm.light_view[3]],
-                [csm.light_view[4], csm.light_view[5], csm.light_view[6], csm.light_view[7]],
-                [csm.light_view[8], csm.light_view[9], csm.light_view[10], csm.light_view[11]],
-                [csm.light_view[12], csm.light_view[13], csm.light_view[14], csm.light_view[15]],
+                [
+                    csm.light_view[0],
+                    csm.light_view[1],
+                    csm.light_view[2],
+                    csm.light_view[3],
+                ],
+                [
+                    csm.light_view[4],
+                    csm.light_view[5],
+                    csm.light_view[6],
+                    csm.light_view[7],
+                ],
+                [
+                    csm.light_view[8],
+                    csm.light_view[9],
+                    csm.light_view[10],
+                    csm.light_view[11],
+                ],
+                [
+                    csm.light_view[12],
+                    csm.light_view[13],
+                    csm.light_view[14],
+                    csm.light_view[15],
+                ],
             ],
             cascades: {
                 // Helper to convert [f32; 16] to [[f32; 4]; 4]
@@ -2528,14 +2569,16 @@ impl TerrainScene {
             technique: self.shadow_technique,
             _padding: [0.0; 2],
         };
-        
+
         // Create buffer with the terrain-compatible uniforms
-        let terrain_csm_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain.shadow.csm_uniforms"),
-            contents: bytemuck::bytes_of(&terrain_csm_uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        
+        let terrain_csm_buffer =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("terrain.shadow.csm_uniforms"),
+                    contents: bytemuck::bytes_of(&terrain_csm_uniforms),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+
         // Create full shadow texture view (array view for all cascades)
         let shadow_texture_view = self.csm_renderer.shadow_texture_view();
 
@@ -2954,7 +2997,7 @@ impl TerrainScene {
             readback_sample_count: 1, // internal_texture is always sample_count=1
         };
         assert_msaa_invariants(&invariants, self.color_format)?;
-        
+
         // Drop pipeline_cache lock before shadow rendering (needs &mut self)
         drop(pipeline_cache);
 
@@ -3052,9 +3095,9 @@ impl TerrainScene {
         // Note: VSM/EVSM/MSM/CSM are rejected at Python validation layer
         use crate::lighting::types::ShadowTechnique;
         let technique_enum = match shadow_settings.technique.to_uppercase().as_str() {
-            "HARD" => ShadowTechnique::Hard,  // 0 - single sample, hard edges
-            "PCF" => ShadowTechnique::PCF,    // 1 - 3x3 kernel, soft edges
-            "PCSS" => ShadowTechnique::PCSS,  // 2 - 5x5 kernel with light radius scaling
+            "HARD" => ShadowTechnique::Hard, // 0 - single sample, hard edges
+            "PCF" => ShadowTechnique::PCF,   // 1 - 3x3 kernel, soft edges
+            "PCSS" => ShadowTechnique::PCSS, // 2 - 5x5 kernel with light radius scaling
             _ => {
                 log::warn!(
                     target: "terrain.shadow",
@@ -3078,12 +3121,12 @@ impl TerrainScene {
         self.csm_renderer.config.pcf_kernel_size = pcf_kernel;
         // Set PCSS technique parameters
         self.csm_renderer.uniforms.technique_params = [
-            shadow_settings.softness * 10.0,      // pcss_blocker_radius
-            shadow_settings.softness * 20.0,      // pcss_filter_radius  
-            0.0005,                                // moment_bias
+            shadow_settings.softness * 10.0,            // pcss_blocker_radius
+            shadow_settings.softness * 20.0,            // pcss_filter_radius
+            0.0005,                                     // moment_bias
             shadow_settings.pcss_light_radius.max(0.5), // light_size
         ];
-        
+
         log::info!(
             target: "terrain.shadow",
             "Shadow CLI params: enabled={}, technique={} (id={}), cascades={}, resolution={}, max_dist={:.0}, pcss_radius={:.4}",
@@ -3238,12 +3281,16 @@ impl TerrainScene {
             fog_density: decoded.fog.density,
             fog_height_falloff: decoded.fog.height_falloff,
             fog_base_height,
-            camera_height: eye_y,  // Camera Y position for fog height calculation
+            camera_height: eye_y, // Camera Y position for fog height calculation
             fog_inscatter: decoded.fog.inscatter,
             _padding: 0.0,
         };
-        self.queue.write_buffer(&self.fog_uniform_buffer, 0, bytemuck::bytes_of(&fog_uniforms));
-        
+        self.queue.write_buffer(
+            &self.fog_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&fog_uniforms),
+        );
+
         let fog_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain.fog.bind_group"),
             layout: &self.fog_bind_group_layout,
@@ -3257,31 +3304,31 @@ impl TerrainScene {
         // P4: Water Planar Reflection Pass
         // ──────────────────────────────────────────────────────────────────────────
         let reflection_settings = &decoded.reflection;
-        
+
         // Ensure reflection textures are the correct size (half of internal resolution)
         self.ensure_reflection_texture_size(internal_width, internal_height)?;
-        
+
         // If reflections are enabled, render the reflection pass first
         if reflection_settings.enabled {
             // Compute mirrored view matrix across water plane
             let mirrored_view = {
                 let view_arr: [[f32; 4]; 4] = view_matrix.to_cols_array_2d();
-                let mirrored_arr = compute_mirrored_view_matrix(view_arr, reflection_settings.water_plane_height);
+                let mirrored_arr =
+                    compute_mirrored_view_matrix(view_arr, reflection_settings.water_plane_height);
                 glam::Mat4::from_cols_array_2d(&mirrored_arr)
             };
-            
+
             // Build reflection pass uniforms with mirrored camera
-            let reflection_uniforms = Self::build_uniforms_with_matrices(
-                params, decoded, mirrored_view, proj_matrix,
-            );
-            let reflection_uniform_buffer = self.device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("terrain.reflection.uniform_buffer"),
-                    contents: bytemuck::cast_slice(&reflection_uniforms),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                },
-            );
-            
+            let reflection_uniforms =
+                Self::build_uniforms_with_matrices(params, decoded, mirrored_view, proj_matrix);
+            let reflection_uniform_buffer =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("terrain.reflection.uniform_buffer"),
+                        contents: bytemuck::cast_slice(&reflection_uniforms),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+
             // Create reflection pass bind group (group 0) with mirrored camera
             let reflection_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("terrain.reflection.bind_group"),
@@ -3354,51 +3401,61 @@ impl TerrainScene {
                     },
                 ],
             });
-            
+
             // Create reflection pass water reflection uniforms (with clip plane enabled)
             let reflection_pass_water_uniforms = WaterReflectionUniforms::for_reflection_pass(
                 reflection_settings.water_plane_height,
             );
-            let reflection_pass_water_uniform_buffer = self.device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("terrain.reflection_pass.water_uniform_buffer"),
-                    contents: bytemuck::bytes_of(&reflection_pass_water_uniforms),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                },
-            );
-            
+            let reflection_pass_water_uniform_buffer =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("terrain.reflection_pass.water_uniform_buffer"),
+                        contents: bytemuck::bytes_of(&reflection_pass_water_uniforms),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+
             // Lock reflection view for render target (NOT for sampling - that causes texture conflict)
-            let reflection_view_guard = self.water_reflection_view.lock()
+            let reflection_view_guard = self
+                .water_reflection_view
+                .lock()
                 .map_err(|_| anyhow!("water_reflection_view mutex poisoned"))?;
-            
+
             // Use fallback texture for bind group to avoid texture usage conflict
             // (can't sample from texture being rendered to in same pass)
-            let reflection_pass_water_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("terrain.reflection_pass.water_bind_group"),
-                layout: &self.water_reflection_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: reflection_pass_water_uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        // Use fallback 1x1 texture - we're rendering TO reflection texture, can't sample it
-                        resource: wgpu::BindingResource::TextureView(&self.water_reflection_fallback_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&self.water_reflection_sampler),
-                    },
-                ],
-            });
-            
+            let reflection_pass_water_bind_group =
+                self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("terrain.reflection_pass.water_bind_group"),
+                    layout: &self.water_reflection_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: reflection_pass_water_uniform_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            // Use fallback 1x1 texture - we're rendering TO reflection texture, can't sample it
+                            resource: wgpu::BindingResource::TextureView(
+                                &self.water_reflection_fallback_view,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(
+                                &self.water_reflection_sampler,
+                            ),
+                        },
+                    ],
+                });
+
             // Lock light buffer for reflection pass
-            let light_buffer_guard = self.light_buffer.lock()
+            let light_buffer_guard = self
+                .light_buffer
+                .lock()
                 .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
-            let light_bind_group = light_buffer_guard.bind_group()
+            let light_bind_group = light_buffer_guard
+                .bind_group()
                 .expect("LightBuffer should always provide a bind group");
-            
+
             // P4: Reflection render pass (no depth - fullscreen triangle shader handles depth internally)
             // Uses water_reflection_pipeline (always sample_count=1) to match reflection texture
             {
@@ -3421,7 +3478,7 @@ impl TerrainScene {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-                
+
                 // Use reflection-specific non-MSAA pipeline (sample_count=1)
                 pass.set_pipeline(&self.water_reflection_pipeline);
                 pass.set_bind_group(0, &reflection_bind_group, &[]);
@@ -3439,10 +3496,10 @@ impl TerrainScene {
                 };
                 pass.draw(0..vertex_count, 0..1);
             }
-            
+
             drop(light_buffer_guard);
             drop(reflection_view_guard);
-            
+
             log::info!(
                 target: "terrain.water_reflection",
                 "P4: Rendered reflection pass at {}x{} (plane_height={:.2})",
@@ -3450,16 +3507,17 @@ impl TerrainScene {
                 reflection_settings.water_plane_height
             );
         }
-        
+
         // P4: Create water reflection uniforms for main pass
         // When enabled=false, reflections are disabled (P3 compatibility)
         let water_reflection_uniforms = if reflection_settings.enabled {
             let view_arr: [[f32; 4]; 4] = view_matrix.to_cols_array_2d();
-            let mirrored_view = compute_mirrored_view_matrix(view_arr, reflection_settings.water_plane_height);
+            let mirrored_view =
+                compute_mirrored_view_matrix(view_arr, reflection_settings.water_plane_height);
             let proj_arr: [[f32; 4]; 4] = proj_matrix.to_cols_array_2d();
             let reflection_view_proj = mul_mat4(proj_arr, mirrored_view);
             let resolution_scale = 0.5;
-            
+
             WaterReflectionUniforms::enabled_main_pass(
                 reflection_view_proj,
                 reflection_settings.water_plane_height,
@@ -3480,27 +3538,30 @@ impl TerrainScene {
         );
 
         // Lock reflection view for main pass bind group
-        let reflection_view_guard = self.water_reflection_view.lock()
+        let reflection_view_guard = self
+            .water_reflection_view
+            .lock()
             .map_err(|_| anyhow!("water_reflection_view mutex poisoned"))?;
-        
-        let water_reflection_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("terrain.water_reflection.bind_group"),
-            layout: &self.water_reflection_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.water_reflection_uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&*reflection_view_guard),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.water_reflection_sampler),
-                },
-            ],
-        });
+
+        let water_reflection_bind_group =
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("terrain.water_reflection.bind_group"),
+                layout: &self.water_reflection_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.water_reflection_uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&*reflection_view_guard),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&self.water_reflection_sampler),
+                    },
+                ],
+            });
         drop(reflection_view_guard);
 
         // Re-acquire pipeline lock for main render pass
@@ -3724,7 +3785,7 @@ impl TerrainScene {
         let overlays = params.overlays();
 
         // Get debug mode from environment variable
-        // 0 = normal, 1 = color LUT, 2 = triplanar albedo, 3 = blend LUT+albedo, 
+        // 0 = normal, 1 = color LUT, 2 = triplanar albedo, 3 = blend LUT+albedo,
         // 4 = water mask binary, 5 = raw water mask value, 6 = IBL contribution
         // 7 = PBR diffuse only, 8 = PBR specular only, 9 = Fresnel, 10 = N.V, 11 = roughness, 12 = energy
         // 13 = linear combined, 14 = linear diffuse, 15 = linear specular, 16 = recomp error, 17 = SpecAA sparkle
@@ -3748,15 +3809,18 @@ impl TerrainScene {
         let debug_mode_f = if debug_mode >= 100 && debug_mode <= 113 {
             debug_mode as f32
         } else if debug_mode >= 40 && debug_mode <= 42 {
-            debug_mode as f32  // P7: Projection probe modes
+            debug_mode as f32 // P7: Projection probe modes
         } else {
             debug_mode.clamp(0, 33) as f32
         };
         // Log debug mode for diagnosis
         if debug_mode != 0 {
-            info!("debug_mode: params={}, env={}, resolved={}", params.debug_mode, env_debug_mode, debug_mode_f);
+            info!(
+                "debug_mode: params={}, env={}, resolved={}",
+                params.debug_mode, env_debug_mode, debug_mode_f
+            );
         }
-        
+
         // Get roughness multiplier from environment variable (default 1.0)
         // Used for roughness sweep in PBR proof pack
         let roughness_mult = std::env::var("VF_ROUGHNESS_MULT")
@@ -3794,7 +3858,11 @@ impl TerrainScene {
         // P5: Get AO weight from params (default 0.0 = no effect)
         let ao_weight = params.ao_weight.clamp(0.0, 1.0);
         // P5: Enable AO fallback if coarse AO is computed (set externally, default disabled)
-        let ao_fallback_enabled = if self.coarse_ao_view.is_some() { 1.0 } else { 0.0 };
+        let ao_fallback_enabled = if self.coarse_ao_view.is_some() {
+            1.0
+        } else {
+            0.0
+        };
 
         // P6: Get detail settings from decoded params (default disabled for P5 compatibility)
         let decoded = params.decoded();
@@ -3816,7 +3884,12 @@ impl TerrainScene {
                 params2: [gamma, roughness_mult, spec_aa_enabled, specaa_sigma_scale],
                 params3: [ao_weight, ao_fallback_enabled, 0.0, 0.0],
                 // P6: Detail parameters + P6.1: output_srgb_eotf
-                params4: [detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise],
+                params4: [
+                    detail_enabled,
+                    detail_scale,
+                    detail_normal_strength,
+                    detail_albedo_noise,
+                ],
                 params5: [detail_fade_start, detail_fade_end, output_srgb_eotf, 0.0],
             },
             lut: None,
@@ -4237,7 +4310,7 @@ impl TerrainScene {
     /// This stores the heightmap and creates GPU resources for real-time rendering.
     pub fn load_terrain_for_viewer(&mut self, dem_path: &str) -> Result<()> {
         use std::path::Path;
-        
+
         let path = Path::new(dem_path);
         if !path.exists() {
             return Err(anyhow!("DEM file not found: {}", dem_path));
@@ -4245,19 +4318,20 @@ impl TerrainScene {
 
         // Load GeoTIFF using the existing DEM loading infrastructure
         let (heightmap, width, height, domain) = self.load_geotiff_heightmap(dem_path)?;
-        
+
         // Upload heightmap to GPU
         let heightmap_texture = self.upload_heightmap_texture(width, height, &heightmap)?;
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        
+
         // Create terrain mesh (grid)
         let grid_resolution = 256u32.min(width.min(height));
-        let (vertex_buffer, index_buffer, index_count) = self.create_terrain_mesh(grid_resolution)?;
-        
+        let (vertex_buffer, index_buffer, index_count) =
+            self.create_terrain_mesh(grid_resolution)?;
+
         // Calculate default camera radius based on terrain span
         let terrain_span = (width.max(height) as f32) * 1.0; // Assume 1m spacing
         let cam_radius = terrain_span * 0.8;
-        
+
         self.viewer_heightmap = Some(ViewerTerrainData {
             heightmap,
             dimensions: (width, height),
@@ -4275,30 +4349,33 @@ impl TerrainScene {
             sun_elevation_deg: 35.0,
             sun_intensity: 3.0,
         });
-        
-        println!("[terrain] Loaded {}x{} DEM, domain: {:.1}..{:.1}", 
-            width, height, domain.0, domain.1);
-        
+
+        println!(
+            "[terrain] Loaded {}x{} DEM, domain: {:.1}..{:.1}",
+            width, height, domain.0, domain.1
+        );
+
         Ok(())
     }
 
     /// Load a GeoTIFF heightmap file and return (data, width, height, domain)
     fn load_geotiff_heightmap(&self, path: &str) -> Result<(Vec<f32>, u32, u32, (f32, f32))> {
         use std::fs::File;
-        
+
         // Try to use tiff crate for basic GeoTIFF loading
-        let file = File::open(path)
-            .map_err(|e| anyhow!("Failed to open DEM file: {}", e))?;
-        
+        let file = File::open(path).map_err(|e| anyhow!("Failed to open DEM file: {}", e))?;
+
         let mut decoder = tiff::decoder::Decoder::new(file)
             .map_err(|e| anyhow!("Failed to decode TIFF: {}", e))?;
-        
-        let (width, height) = decoder.dimensions()
+
+        let (width, height) = decoder
+            .dimensions()
             .map_err(|e| anyhow!("Failed to get TIFF dimensions: {}", e))?;
-        
-        let image = decoder.read_image()
+
+        let image = decoder
+            .read_image()
             .map_err(|e| anyhow!("Failed to read TIFF image: {}", e))?;
-        
+
         // Convert to f32 heightmap
         let heightmap: Vec<f32> = match image {
             tiff::decoder::DecodingResult::F32(data) => data,
@@ -4312,7 +4389,7 @@ impl TerrainScene {
             tiff::decoder::DecodingResult::U64(data) => data.iter().map(|&v| v as f32).collect(),
             tiff::decoder::DecodingResult::I64(data) => data.iter().map(|&v| v as f32).collect(),
         };
-        
+
         // Calculate elevation domain
         let mut min_h = f32::MAX;
         let mut max_h = f32::MIN;
@@ -4322,23 +4399,27 @@ impl TerrainScene {
                 max_h = max_h.max(h);
             }
         }
-        
+
         // Handle nodata values (replace with min)
-        let heightmap: Vec<f32> = heightmap.iter().map(|&h| {
-            if h.is_finite() { h } else { min_h }
-        }).collect();
-        
+        let heightmap: Vec<f32> = heightmap
+            .iter()
+            .map(|&h| if h.is_finite() { h } else { min_h })
+            .collect();
+
         Ok((heightmap, width, height, (min_h, max_h)))
     }
 
     /// Create a terrain mesh grid for rendering
-    fn create_terrain_mesh(&self, grid_resolution: u32) -> Result<(wgpu::Buffer, wgpu::Buffer, u32)> {
+    fn create_terrain_mesh(
+        &self,
+        grid_resolution: u32,
+    ) -> Result<(wgpu::Buffer, wgpu::Buffer, u32)> {
         let mut vertices: Vec<f32> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
-        
+
         let grid = grid_resolution as usize;
         let inv_grid = 1.0 / (grid - 1) as f32;
-        
+
         // Generate grid vertices (position XY + UV)
         for y in 0..grid {
             for x in 0..grid {
@@ -4352,7 +4433,7 @@ impl TerrainScene {
                 vertices.push(v);
             }
         }
-        
+
         // Generate triangle indices
         for y in 0..(grid - 1) {
             for x in 0..(grid - 1) {
@@ -4367,19 +4448,23 @@ impl TerrainScene {
                 indices.push(i + grid as u32 + 1);
             }
         }
-        
-        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain.viewer.vertex_buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        
-        let index_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain.viewer.index_buffer"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-        
+
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.viewer.vertex_buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        let index_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.viewer.index_buffer"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+
         Ok((vertex_buffer, index_buffer, indices.len() as u32))
     }
 
@@ -4436,16 +4521,16 @@ impl TerrainScene {
         let phi_rad = terrain.cam_phi_deg.to_radians();
         let theta_rad = terrain.cam_theta_deg.to_radians();
         let radius = terrain.cam_radius;
-        
+
         // Terrain center at origin, camera orbits around it
         let (tw, th) = terrain.dimensions;
         let terrain_center = glam::Vec3::new(0.0, (terrain.domain.0 + terrain.domain.1) * 0.5, 0.0);
-        
+
         let eye_x = terrain_center.x + radius * theta_rad.sin() * phi_rad.cos();
         let eye_y = terrain_center.y + radius * theta_rad.cos();
         let eye_z = terrain_center.z + radius * theta_rad.sin() * phi_rad.sin();
         let eye = glam::Vec3::new(eye_x, eye_y, eye_z);
-        
+
         let view = glam::Mat4::look_at_rh(eye, terrain_center, glam::Vec3::Y);
         let aspect = width as f32 / height as f32;
         let proj = glam::Mat4::perspective_rh(
@@ -4462,21 +4547,22 @@ impl TerrainScene {
             sun_el_rad.cos() * sun_az_rad.sin(),
             sun_el_rad.sin(),
             sun_el_rad.cos() * sun_az_rad.cos(),
-        ).normalize();
+        )
+        .normalize();
 
         // Create simple terrain uniforms
         let h_range = terrain.domain.1 - terrain.domain.0;
         let spacing = (tw.max(th) as f32) / 256.0; // Grid spacing estimate
-        
-        let uniforms = super::TerrainUniforms::new(
-            view, proj, sun_dir, 1.0, spacing, h_range, 1.0
-        );
-        
-        let _uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain.viewer.uniforms"),
-            contents: bytemuck::cast_slice(&[uniforms]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+
+        let uniforms = super::TerrainUniforms::new(view, proj, sun_dir, 1.0, spacing, h_range, 1.0);
+
+        let _uniform_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.viewer.uniforms"),
+                contents: bytemuck::cast_slice(&[uniforms]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
 
         // Create a simple render pass that clears to sky blue and draws terrain grid
         {
@@ -4499,7 +4585,7 @@ impl TerrainScene {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            
+
             // For now, just clear to sky blue to indicate terrain scene is active
             // Full terrain rendering would require the complete PBR pipeline setup
             // which is complex. This serves as a visible indicator that terrain is loaded.

@@ -16,14 +16,28 @@ const RGBA8_CHANNELS: usize = 4;
 ///
 /// Uses compression level 1 with no filtering for maximum encoding speed.
 pub fn write_png_rgba8(path: &Path, data: &[u8], width: u32, height: u32) -> Result<()> {
-    write_png_rgba8_with_settings(path, data, width, height, CompressionType::Fast, FilterType::NoFilter)
+    write_png_rgba8_with_settings(
+        path,
+        data,
+        width,
+        height,
+        CompressionType::Fast,
+        FilterType::NoFilter,
+    )
 }
 
 /// Write PNG with default compression (slower, smaller files).
 ///
 /// Uses default zlib compression with adaptive filtering for better file size.
 pub fn write_png_rgba8_small(path: &Path, data: &[u8], width: u32, height: u32) -> Result<()> {
-    write_png_rgba8_with_settings(path, data, width, height, CompressionType::Default, FilterType::Adaptive)
+    write_png_rgba8_with_settings(
+        path,
+        data,
+        width,
+        height,
+        CompressionType::Default,
+        FilterType::Adaptive,
+    )
 }
 
 /// Core PNG writer with configurable compression and filter settings.

@@ -87,7 +87,16 @@ impl RectAreaLight {
 
     /// Create a simple rectangular area light facing down
     pub fn quad(position: Vec3, width: f32, height: f32, color: Vec3, intensity: f32) -> Self {
-        Self::new(position, Vec3::X, Vec3::Z, width, height, color, intensity, false)
+        Self::new(
+            position,
+            Vec3::X,
+            Vec3::Z,
+            width,
+            height,
+            color,
+            intensity,
+            false,
+        )
     }
 
     /// Update the normal vector from right and up vectors

@@ -14,8 +14,9 @@ pub fn set_initial_commands(cmds: Vec<String>) {
 
 /// Optional initial terrain configuration (set by open_terrain_viewer via lib.rs).
 #[cfg(feature = "extension-module")]
-pub static INITIAL_TERRAIN_CONFIG: once_cell::sync::OnceCell<crate::render::params::RendererConfig> =
-    once_cell::sync::OnceCell::new();
+pub static INITIAL_TERRAIN_CONFIG: once_cell::sync::OnceCell<
+    crate::render::params::RendererConfig,
+> = once_cell::sync::OnceCell::new();
 
 /// Set initial terrain configuration for viewer
 #[cfg(feature = "extension-module")]

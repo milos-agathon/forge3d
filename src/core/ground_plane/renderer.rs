@@ -80,7 +80,9 @@ impl GroundPlaneRenderer {
         // Create shader
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("ground_plane_shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("../../shaders/ground_plane.wgsl"))),
+            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                "../../shaders/ground_plane.wgsl"
+            ))),
         });
 
         // Create pipeline layout

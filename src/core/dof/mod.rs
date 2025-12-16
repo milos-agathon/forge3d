@@ -44,7 +44,11 @@ impl DofRenderer {
 
         let dof_texture = device.create_texture(&TextureDescriptor {
             label: Some("dof_output_texture"),
-            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
@@ -151,7 +155,11 @@ impl DofRenderer {
 
     /// Upload uniform data to GPU.
     pub fn upload_uniforms(&self, queue: &Queue) {
-        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[self.uniforms]));
+        queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[self.uniforms]),
+        );
     }
 
     /// Create bind group for DOF resources.
@@ -168,11 +176,26 @@ impl DofRenderer {
             label: Some("dof_bind_group"),
             layout: &self.gather_pipeline.get_bind_group_layout(0),
             entries: &[
-                BindGroupEntry { binding: 0, resource: self.uniform_buffer.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(color_texture) },
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(depth_texture) },
-                BindGroupEntry { binding: 3, resource: BindingResource::Sampler(&self.sampler) },
-                BindGroupEntry { binding: 4, resource: BindingResource::TextureView(output_view) },
+                BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(color_texture),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(depth_texture),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::Sampler(&self.sampler),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::TextureView(output_view),
+                },
             ],
         });
 
@@ -181,7 +204,9 @@ impl DofRenderer {
 
     /// Dispatch DOF computation.
     pub fn dispatch(&self, encoder: &mut CommandEncoder) {
-        let Some(ref bind_group) = self.bind_group else { return };
+        let Some(ref bind_group) = self.bind_group else {
+            return;
+        };
 
         let workgroup_count_x = (self.uniforms.screen_size[0] as u32 + 7) / 8;
         let workgroup_count_y = (self.uniforms.screen_size[1] as u32 + 7) / 8;
@@ -236,7 +261,11 @@ impl DofRenderer {
 
         self.dof_texture = device.create_texture(&TextureDescriptor {
             label: Some("dof_output_texture"),
-            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
@@ -245,8 +274,12 @@ impl DofRenderer {
             view_formats: &[],
         });
 
-        self.dof_view = self.dof_texture.create_view(&TextureViewDescriptor::default());
-        self.dof_storage_view = self.dof_texture.create_view(&TextureViewDescriptor::default());
+        self.dof_view = self
+            .dof_texture
+            .create_view(&TextureViewDescriptor::default());
+        self.dof_storage_view = self
+            .dof_texture
+            .create_view(&TextureViewDescriptor::default());
         self.bind_group = None;
     }
 
@@ -259,7 +292,8 @@ impl DofRenderer {
             return 0.0;
         }
 
-        let coc = (self.uniforms.aperture * self.uniforms.focal_length * distance_diff) / denominator;
+        let coc =
+            (self.uniforms.aperture * self.uniforms.focal_length * distance_diff) / denominator;
         let coc_pixels = coc * 36.0 * self.uniforms.blur_radius_scale;
         (coc_pixels + self.uniforms.coc_bias).clamp(0.0, self.uniforms.max_blur_radius)
     }

@@ -1,5 +1,5 @@
-mod types;
 mod renderer;
+mod types;
 
-pub use types::{GroundPlaneMode, GroundPlaneParams, GroundPlaneUniforms};
 pub use renderer::GroundPlaneRenderer;
+pub use types::{GroundPlaneMode, GroundPlaneParams, GroundPlaneUniforms};

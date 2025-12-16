@@ -2,6 +2,7 @@
 //!
 //! Implements per-triangle tangent accumulation similar to the Lengyel method,
 //! with Gram-Schmidt orthogonalization and handedness computation.
+#![allow(dead_code)]
 
 use super::MeshBuffers;
 

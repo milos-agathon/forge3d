@@ -218,7 +218,7 @@ pub struct FogSettingsNative {
 impl Default for FogSettingsNative {
     fn default() -> Self {
         Self {
-            density: 0.0,       // Disabled by default (P1 compatibility)
+            density: 0.0, // Disabled by default (P1 compatibility)
             height_falloff: 0.0,
             base_height: 0.0,
             inscatter: [1.0, 1.0, 1.0],
@@ -249,7 +249,7 @@ pub struct ReflectionSettingsNative {
 impl Default for ReflectionSettingsNative {
     fn default() -> Self {
         Self {
-            enabled: false,     // Disabled by default (P3 compatibility)
+            enabled: false, // Disabled by default (P3 compatibility)
             intensity: 0.8,
             fresnel_power: 5.0,
             wave_strength: 0.02,
@@ -282,7 +282,7 @@ pub struct DetailSettingsNative {
 impl Default for DetailSettingsNative {
     fn default() -> Self {
         Self {
-            enabled: false,     // Disabled by default (P5 compatibility)
+            enabled: false, // Disabled by default (P5 compatibility)
             detail_scale: 2.0,
             normal_strength: 0.3,
             albedo_noise: 0.1,
@@ -555,7 +555,10 @@ impl TerrainRenderParams {
                     "height_curve_lut must have length 256 when height_curve_mode='lut'",
                 ));
             }
-            if lut_vec.iter().any(|v| !v.is_finite() || *v < 0.0 || *v > 1.0) {
+            if lut_vec
+                .iter()
+                .any(|v| !v.is_finite() || *v < 0.0 || *v > 1.0)
+            {
                 return Err(PyValueError::new_err(
                     "height_curve_lut values must be finite floats within [0, 1]",
                 ));
@@ -603,9 +606,9 @@ impl TerrainRenderParams {
         // Elevation 0° = horizon, 90° = zenith
         let direction = match light_type.as_str() {
             "Directional" | "directional" => normalize_direction(
-                cos_el * azimuth_rad.cos(),   // X: horizontal component in azimuth direction
-                cos_el * azimuth_rad.sin(),   // Y: horizontal component perpendicular
-                sin_el,                       // Z: vertical component (up for Z-up system)
+                cos_el * azimuth_rad.cos(), // X: horizontal component in azimuth direction
+                cos_el * azimuth_rad.sin(), // Y: horizontal component perpendicular
+                sin_el,                     // Z: vertical component (up for Z-up system)
             ),
             _ => normalize_direction(
                 cos_el * azimuth_rad.cos(),
@@ -714,14 +717,8 @@ impl TerrainRenderParams {
                 .getattr("resolution")?
                 .extract::<i64>()
                 .unwrap_or(2048) as u32,
-            cascades: shadows
-                .getattr("cascades")?
-                .extract::<i64>()
-                .unwrap_or(1) as u32,
-            max_distance: shadows
-                .getattr("max_distance")?
-                .extract()
-                .unwrap_or(3000.0),
+            cascades: shadows.getattr("cascades")?.extract::<i64>().unwrap_or(1) as u32,
+            max_distance: shadows.getattr("max_distance")?.extract().unwrap_or(3000.0),
             softness,
             pcss_light_radius,
             intensity: shadows.getattr("intensity")?.extract().unwrap_or(1.0),
@@ -730,10 +727,7 @@ impl TerrainRenderParams {
                 .extract()
                 .unwrap_or(0.001),
             depth_bias: shadows.getattr("depth_bias")?.extract().unwrap_or(0.0005),
-            normal_bias: shadows
-                .getattr("normal_bias")?
-                .extract()
-                .unwrap_or(0.0002),
+            normal_bias: shadows.getattr("normal_bias")?.extract().unwrap_or(0.0002),
         };
 
         // P2: Extract fog settings (defaults to disabled for P1 compatibility)
@@ -748,9 +742,18 @@ impl TerrainRenderParams {
                 inscatter_vec.get(1).copied().unwrap_or(1.0),
                 inscatter_vec.get(2).copied().unwrap_or(1.0),
             ];
-            let density: f32 = fog.getattr("density").and_then(|v| v.extract()).unwrap_or(0.0);
-            let height_falloff: f32 = fog.getattr("height_falloff").and_then(|v| v.extract()).unwrap_or(0.0);
-            let base_height: f32 = fog.getattr("base_height").and_then(|v| v.extract()).unwrap_or(0.0);
+            let density: f32 = fog
+                .getattr("density")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.0);
+            let height_falloff: f32 = fog
+                .getattr("height_falloff")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.0);
+            let base_height: f32 = fog
+                .getattr("base_height")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.0);
             FogSettingsNative {
                 density,
                 height_falloff,
@@ -763,12 +766,30 @@ impl TerrainRenderParams {
 
         // P4: Extract reflection settings (defaults to disabled for P3 compatibility)
         let reflection_native = if let Ok(refl) = params.getattr("reflection") {
-            let enabled: bool = refl.getattr("enabled").and_then(|v| v.extract()).unwrap_or(false);
-            let intensity: f32 = refl.getattr("intensity").and_then(|v| v.extract()).unwrap_or(0.8);
-            let fresnel_power: f32 = refl.getattr("fresnel_power").and_then(|v| v.extract()).unwrap_or(5.0);
-            let wave_strength: f32 = refl.getattr("wave_strength").and_then(|v| v.extract()).unwrap_or(0.02);
-            let shore_atten_width: f32 = refl.getattr("shore_atten_width").and_then(|v| v.extract()).unwrap_or(0.3);
-            let water_plane_height: f32 = refl.getattr("water_plane_height").and_then(|v| v.extract()).unwrap_or(0.0);
+            let enabled: bool = refl
+                .getattr("enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let intensity: f32 = refl
+                .getattr("intensity")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.8);
+            let fresnel_power: f32 = refl
+                .getattr("fresnel_power")
+                .and_then(|v| v.extract())
+                .unwrap_or(5.0);
+            let wave_strength: f32 = refl
+                .getattr("wave_strength")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.02);
+            let shore_atten_width: f32 = refl
+                .getattr("shore_atten_width")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.3);
+            let water_plane_height: f32 = refl
+                .getattr("water_plane_height")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.0);
             ReflectionSettingsNative {
                 enabled,
                 intensity,
@@ -783,12 +804,30 @@ impl TerrainRenderParams {
 
         // P6: Extract detail settings (defaults to disabled for P5 compatibility)
         let detail_native = if let Ok(det) = params.getattr("detail") {
-            let enabled: bool = det.getattr("enabled").and_then(|v| v.extract()).unwrap_or(false);
-            let detail_scale: f32 = det.getattr("detail_scale").and_then(|v| v.extract()).unwrap_or(2.0);
-            let normal_strength: f32 = det.getattr("normal_strength").and_then(|v| v.extract()).unwrap_or(0.3);
-            let albedo_noise: f32 = det.getattr("albedo_noise").and_then(|v| v.extract()).unwrap_or(0.1);
-            let fade_start: f32 = det.getattr("fade_start").and_then(|v| v.extract()).unwrap_or(50.0);
-            let fade_end: f32 = det.getattr("fade_end").and_then(|v| v.extract()).unwrap_or(200.0);
+            let enabled: bool = det
+                .getattr("enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let detail_scale: f32 = det
+                .getattr("detail_scale")
+                .and_then(|v| v.extract())
+                .unwrap_or(2.0);
+            let normal_strength: f32 = det
+                .getattr("normal_strength")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.3);
+            let albedo_noise: f32 = det
+                .getattr("albedo_noise")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.1);
+            let fade_start: f32 = det
+                .getattr("fade_start")
+                .and_then(|v| v.extract())
+                .unwrap_or(50.0);
+            let fade_end: f32 = det
+                .getattr("fade_end")
+                .and_then(|v| v.extract())
+                .unwrap_or(200.0);
             DetailSettingsNative {
                 enabled,
                 detail_scale,
@@ -989,7 +1028,9 @@ impl TerrainRenderParams {
 
     #[getter]
     pub fn height_curve_lut(&self) -> Option<Vec<f32>> {
-        self.height_curve_lut.as_ref().map(|lut| lut.as_ref().clone())
+        self.height_curve_lut
+            .as_ref()
+            .map(|lut| lut.as_ref().clone())
     }
 
     #[getter]

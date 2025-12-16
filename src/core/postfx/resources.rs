@@ -1,7 +1,7 @@
+use super::config::PostFxResourceDesc;
 use crate::core::error::RenderResult;
 use std::collections::HashMap;
 use wgpu::*;
-use super::config::PostFxResourceDesc;
 
 /// Resource pool for ping-pong and temporal textures
 #[derive(Debug)]

@@ -4,7 +4,11 @@
 
 /// Format a boolean as "on"/"off" for CLI output.
 pub fn format_bool_word(v: bool) -> &'static str {
-    if v { "on" } else { "off" }
+    if v {
+        "on"
+    } else {
+        "off"
+    }
 }
 
 /// Format a float with 6 decimal places for CLI output.

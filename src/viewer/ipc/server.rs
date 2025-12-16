@@ -1,0 +1,171 @@
+// src/viewer/ipc_split/server.rs
+// TCP server for IPC viewer control
+
+use std::io::{BufRead, BufReader, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::mpsc;
+use std::thread;
+
+use super::protocol::{
+    ipc_request_to_viewer_cmd, parse_ipc_request, IpcRequest, IpcResponse, ViewerStats,
+};
+use crate::viewer::viewer_enums::ViewerCmd;
+
+/// IPC server configuration
+pub struct IpcServerConfig {
+    pub host: String,
+    pub port: u16,
+}
+
+impl Default for IpcServerConfig {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 0, // Let OS choose a free port
+        }
+    }
+}
+
+/// Result of starting the IPC server
+pub struct IpcServerHandle {
+    pub port: u16,
+    pub shutdown_tx: mpsc::Sender<()>,
+}
+
+/// Start the IPC server thread that accepts connections and forwards commands
+/// to the viewer via the provided sender.
+///
+/// Returns the actual port the server is listening on (useful when port=0).
+pub fn start_ipc_server<F, G>(
+    config: IpcServerConfig,
+    cmd_sender: F,
+    stats_getter: G,
+) -> std::io::Result<IpcServerHandle>
+where
+    F: Fn(ViewerCmd) -> Result<(), String> + Send + Sync + 'static,
+    G: Fn() -> ViewerStats + Send + Sync + 'static,
+{
+    let addr = format!("{}:{}", config.host, config.port);
+    let listener = TcpListener::bind(&addr)?;
+    let actual_port = listener.local_addr()?.port();
+
+    let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
+
+    // Wrap in Arc for sharing across connections
+    let cmd_sender = std::sync::Arc::new(cmd_sender);
+    let stats_getter = std::sync::Arc::new(stats_getter);
+
+    thread::spawn(move || {
+        // Set non-blocking to allow shutdown check
+        listener
+            .set_nonblocking(true)
+            .expect("Cannot set non-blocking");
+
+        loop {
+            // Check for shutdown signal
+            if shutdown_rx.try_recv().is_ok() {
+                break;
+            }
+
+            match listener.accept() {
+                Ok((stream, _addr)) => {
+                    // Handle connection in a new thread
+                    let cmd_sender_clone = std::sync::Arc::clone(&cmd_sender);
+                    let stats_getter_clone = std::sync::Arc::clone(&stats_getter);
+                    handle_ipc_connection(
+                        stream,
+                        move |cmd| cmd_sender_clone(cmd),
+                        move || stats_getter_clone(),
+                    );
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // No connection yet, sleep briefly
+                    thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(e) => {
+                    eprintln!("[IPC] Accept error: {}", e);
+                }
+            }
+        }
+    });
+
+    Ok(IpcServerHandle {
+        port: actual_port,
+        shutdown_tx,
+    })
+}
+
+/// Handle a single IPC connection (reads NDJSON, sends responses)
+fn handle_ipc_connection<F, G>(stream: TcpStream, cmd_sender: F, stats_getter: G)
+where
+    F: Fn(ViewerCmd) -> Result<(), String>,
+    G: Fn() -> ViewerStats,
+{
+    // Set timeouts to prevent blocking forever
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(300)));
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(30)));
+
+    let mut reader = BufReader::new(stream.try_clone().expect("Failed to clone stream"));
+    let mut writer = stream;
+
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => {
+                // EOF - client closed connection
+                break;
+            }
+            Ok(_) => {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                let response = match parse_ipc_request(trimmed) {
+                    Ok(req) => {
+                        // Handle GetStats specially - it returns data directly
+                        if matches!(req, IpcRequest::GetStats) {
+                            IpcResponse::with_stats(stats_getter())
+                        } else {
+                            match ipc_request_to_viewer_cmd(&req) {
+                                Ok(Some(cmd)) => match cmd_sender(cmd) {
+                                    Ok(()) => IpcResponse::success(),
+                                    Err(e) => IpcResponse::error(e),
+                                },
+                                Ok(None) => {
+                                    // Should not happen - GetStats is handled above
+                                    IpcResponse::error("Internal error: unhandled special request")
+                                }
+                                Err(e) => IpcResponse::error(e),
+                            }
+                        }
+                    }
+                    Err(e) => IpcResponse::error(e),
+                };
+
+                let response_json = serde_json::to_string(&response)
+                    .unwrap_or_else(|_| r#"{"ok":false}"#.to_string());
+                if let Err(e) = writeln!(writer, "{}", response_json) {
+                    eprintln!("[IPC] Write error: {}", e);
+                    break;
+                }
+                if let Err(e) = writer.flush() {
+                    eprintln!("[IPC] Flush error: {}", e);
+                    break;
+                }
+            }
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                // Timeout - continue waiting for more data
+                continue;
+            }
+            Err(e) => {
+                eprintln!("[IPC] Read error: {}", e);
+                break;
+            }
+        }
+    }
+}

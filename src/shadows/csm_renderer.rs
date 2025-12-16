@@ -127,11 +127,8 @@ impl CsmRenderer {
         let near_dist = splits[idx];
         let far_dist = splits[idx + 1];
 
-        let frustum_corners = calculate_frustum_corners(
-            inv_view_proj,
-            near_dist / far_plane,
-            far_dist / far_plane,
-        );
+        let frustum_corners =
+            calculate_frustum_corners(inv_view_proj, near_dist / far_plane, far_dist / far_plane);
 
         let (mut min_bounds, mut max_bounds) =
             calculate_light_space_bounds(&frustum_corners, light_view);
@@ -155,7 +152,13 @@ impl CsmRenderer {
 
         let light_view_proj = light_projection * light_view;
 
-        ShadowCascade::new(near_dist, far_dist, light_projection, light_view_proj, world_units_per_texel)
+        ShadowCascade::new(
+            near_dist,
+            far_dist,
+            light_projection,
+            light_view_proj,
+            world_units_per_texel,
+        )
     }
 
     /// Upload uniform data to GPU
@@ -236,7 +239,11 @@ impl CsmRenderer {
     pub fn get_cascade_info(&self, cascade_idx: usize) -> Option<(f32, f32, f32)> {
         if cascade_idx < self.config.cascade_count as usize {
             let cascade = &self.uniforms.cascades[cascade_idx];
-            Some((cascade.near_distance, cascade.far_distance, cascade.texel_size))
+            Some((
+                cascade.near_distance,
+                cascade.far_distance,
+                cascade.texel_size,
+            ))
         } else {
             None
         }
@@ -272,7 +279,8 @@ impl CsmRenderer {
             cascade_overlaps,
             unclipped_depth_enabled: self.config.enable_unclipped_depth,
             depth_clip_factor: self.config.depth_clip_factor,
-            effective_shadow_distance: self.config.max_shadow_distance * self.config.depth_clip_factor,
+            effective_shadow_distance: self.config.max_shadow_distance
+                * self.config.depth_clip_factor,
         }
     }
 }

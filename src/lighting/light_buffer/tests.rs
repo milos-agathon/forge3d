@@ -1,6 +1,6 @@
+use super::frame::light_type_name;
 use super::*;
 use crate::lighting::types::Light;
-use super::frame::light_type_name;
 
 #[test]
 fn test_light_buffer_memory() {

@@ -1,5 +1,9 @@
 use crate::core::shadow_mapping::CsmUniforms;
-use wgpu::{Device, BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, ShaderStages, BufferBindingType, TextureViewDimension, TextureSampleType, SamplerBindingType};
+use wgpu::{
+    BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType,
+    BufferBindingType, Device, SamplerBindingType, ShaderStages, TextureSampleType,
+    TextureViewDimension,
+};
 
 /// Create default shadow mapping bind group layout
 pub fn create_shadow_bind_group_layout(device: &Device) -> BindGroupLayout {

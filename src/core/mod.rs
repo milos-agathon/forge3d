@@ -76,10 +76,10 @@ pub mod texture_upload;
 pub mod envmap;
 
 // N8: HDR rendering and tone mapping
+pub mod hdr;
 mod hdr_readback;
 mod hdr_tonemapping;
 mod hdr_types;
-pub mod hdr;
 
 // N1: PBR materials
 pub mod material;
@@ -91,9 +91,9 @@ pub mod shadow_mapping;
 pub mod shadows;
 
 // B5: Planar reflections
+pub mod reflections;
 mod reflections_math;
 mod reflections_types;
-pub mod reflections;
 
 // B6: Depth of Field
 pub mod dof;
@@ -117,9 +117,9 @@ pub mod soft_light_radius;
 pub mod point_spot_lights;
 
 // B14: Rect Area Lights (LTC)
+pub mod ltc_area_lights;
 mod ltc_lut;
 mod ltc_types;
-pub mod ltc_area_lights;
 
 // B15: Image-Based Lighting (IBL) Polish
 pub mod ibl;

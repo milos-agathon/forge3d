@@ -124,16 +124,35 @@ pub fn compute_undershoot_metric(
     width: u32,
     height: u32,
 ) -> (f32, f32) {
-    if !validate_pixel_buffers(reference_pixels, baseline_pixels, thin_pixels, width, height) {
+    if !validate_pixel_buffers(
+        reference_pixels,
+        baseline_pixels,
+        thin_pixels,
+        width,
+        height,
+    ) {
         return (0.0, 0.0);
     }
 
-    let result = compute_dynamic_roi_undershoot(reference_pixels, baseline_pixels, thin_pixels, width, height);
+    let result = compute_dynamic_roi_undershoot(
+        reference_pixels,
+        baseline_pixels,
+        thin_pixels,
+        width,
+        height,
+    );
     if let Some((before, after)) = result {
         return (before, after);
     }
 
-    compute_fallback_roi_undershoot(preset, reference_pixels, baseline_pixels, thin_pixels, width, height)
+    compute_fallback_roi_undershoot(
+        preset,
+        reference_pixels,
+        baseline_pixels,
+        thin_pixels,
+        width,
+        height,
+    )
 }
 
 fn validate_pixel_buffers(
@@ -208,16 +227,44 @@ fn compute_fallback_roi_undershoot(
     let roi_y1 = ((floor_y as f32 + 0.15 * height_f).round() as u32).min(height);
 
     let roi_x0 = {
-        let x0f = preset.spheres.first().map(|s| s.offset_x).unwrap_or(0.1).clamp(0.0, 1.0) * width as f32;
+        let x0f = preset
+            .spheres
+            .first()
+            .map(|s| s.offset_x)
+            .unwrap_or(0.1)
+            .clamp(0.0, 1.0)
+            * width as f32;
         x0f.max(0.0).min((width.saturating_sub(1)) as f32) as u32
     };
     let roi_x1 = {
-        let x1f = preset.spheres.last().map(|s| s.offset_x).unwrap_or(0.9).clamp(0.0, 1.0) * width as f32;
+        let x1f = preset
+            .spheres
+            .last()
+            .map(|s| s.offset_x)
+            .unwrap_or(0.9)
+            .clamp(0.0, 1.0)
+            * width as f32;
         x1f.max(0.0).min(width as f32) as u32
     };
 
-    let before = accumulate_mismatch(reference_pixels, baseline_pixels, width, roi_x0, roi_x1, roi_y0, roi_y1);
-    let after = accumulate_mismatch(reference_pixels, thin_pixels, width, roi_x0, roi_x1, roi_y0, roi_y1);
+    let before = accumulate_mismatch(
+        reference_pixels,
+        baseline_pixels,
+        width,
+        roi_x0,
+        roi_x1,
+        roi_y0,
+        roi_y1,
+    );
+    let after = accumulate_mismatch(
+        reference_pixels,
+        thin_pixels,
+        width,
+        roi_x0,
+        roi_x1,
+        roi_y0,
+        roi_y1,
+    );
     (before.max(0.0), after.max(0.0))
 }
 
@@ -253,7 +300,11 @@ fn accumulate_mismatch(
         }
     }
 
-    if count == 0 { 0.0 } else { (sum / count as f64) as f32 }
+    if count == 0 {
+        0.0
+    } else {
+        (sum / count as f64) as f32
+    }
 }
 
 pub fn count_edge_streaks(reference: &[u8], ssr: &[u8], width: u32, height: u32) -> u32 {

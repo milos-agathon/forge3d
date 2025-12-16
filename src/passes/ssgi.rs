@@ -1,9 +1,9 @@
 // src/passes/ssgi.rs
 // P5.2: SSGI pass wrapper that delegates to core::screen_space_effects::SsgiRenderer
 
+use crate::core::error::RenderResult;
 use crate::core::gbuffer::GBuffer;
 use crate::core::screen_space_effects::{CameraParams, SsgiRenderer, SsgiSettings};
-use crate::core::error::RenderResult;
 use wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
 
 pub struct SsgiPass {

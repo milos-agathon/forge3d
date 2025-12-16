@@ -60,7 +60,14 @@ impl TerrainPipeline {
         tile_slot_ubo: &Buffer,
         mosaic_params_ubo: &Buffer,
     ) -> BindGroup {
-        bind_groups::make_bg_tile(self, device, tile_ubo, page_table, tile_slot_ubo, mosaic_params_ubo)
+        bind_groups::make_bg_tile(
+            self,
+            device,
+            tile_ubo,
+            page_table,
+            tile_slot_ubo,
+            mosaic_params_ubo,
+        )
     }
 
     /// Bind group for height texture/sampler

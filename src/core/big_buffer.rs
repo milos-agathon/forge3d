@@ -4,8 +4,8 @@
 //! to reduce bind group churn when rendering many objects. Uses 64-byte
 //! alignment and provides RAII allocation management.
 
-use crate::core::memory_tracker::ResourceRegistry;
 use super::error::RenderError;
+use crate::core::memory_tracker::ResourceRegistry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use wgpu::{Buffer, BufferAddress, BufferDescriptor, BufferUsages, Device};

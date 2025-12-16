@@ -71,10 +71,7 @@ mod tests {
         let identity = Mat4::IDENTITY;
         let frustum = Frustum::from_view_proj_matrix(&identity);
 
-        let aabb = AABB::new(
-            glam::Vec2::new(-0.5, -0.5),
-            glam::Vec2::new(0.5, 0.5),
-        );
+        let aabb = AABB::new(glam::Vec2::new(-0.5, -0.5), glam::Vec2::new(0.5, 0.5));
         assert!(frustum.test_aabb(&aabb));
     }
 }

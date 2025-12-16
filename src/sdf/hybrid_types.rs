@@ -146,12 +146,7 @@ mod tests {
 
     #[test]
     fn test_ray_creation() {
-        let ray = Ray::new(
-            glam::Vec3::ZERO,
-            glam::Vec3::Z,
-            0.001,
-            100.0,
-        );
+        let ray = Ray::new(glam::Vec3::ZERO, glam::Vec3::Z, 0.001, 100.0);
         assert_eq!(ray.origin, glam::Vec3::ZERO);
         assert_eq!(ray.direction, glam::Vec3::Z);
     }

@@ -7,7 +7,9 @@ pub mod shading;
 pub mod shadows;
 
 // Re-export specific types to match original API
-pub use atmosphere::{AtmosphereParams, SkyModel, VolumetricMode, VolumetricParams, VolumetricPhase};
+pub use atmosphere::{
+    AtmosphereParams, SkyModel, VolumetricMode, VolumetricParams, VolumetricPhase,
+};
 pub use config::{ConfigError, RendererConfig};
 pub use gi::{GiMode, GiParams, SsrParams};
 pub use lights::{LightConfig, LightType, LightingParams};

@@ -4,8 +4,8 @@
 //! per-frame uniform/storage buffer updates. Supports double (N=2) and
 //! triple-buffering (N=3) strategies.
 
-use crate::core::memory_tracker::ResourceRegistry;
 use super::error::RenderError;
+use crate::core::memory_tracker::ResourceRegistry;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device, Queue};
 
 /// Configuration for double-buffering strategy

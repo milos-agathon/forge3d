@@ -3,14 +3,16 @@
 // Re-exports types from focused submodules
 
 // Re-export all types from submodules
+pub use crate::lighting::atmospherics::{
+    AtmosphericsSettings, SkyModel, SkySettings, VolumetricPhase, VolumetricSettings,
+};
 pub use crate::lighting::light::{Light, LightType};
 pub use crate::lighting::material::{BrdfModel, MaterialShading, ShadingParamsGPU};
-pub use crate::lighting::shadow::{Atmosphere, GiSettings, GiTechnique, ShadowSettings, ShadowTechnique};
 pub use crate::lighting::screen_space::{
     SSAOSettings, SSGISettings, SSRSettings, ScreenSpaceEffect, ScreenSpaceSettings,
 };
-pub use crate::lighting::atmospherics::{
-    AtmosphericsSettings, SkyModel, SkySettings, VolumetricPhase, VolumetricSettings,
+pub use crate::lighting::shadow::{
+    Atmosphere, GiSettings, GiTechnique, ShadowSettings, ShadowTechnique,
 };
 
 #[cfg(test)]
@@ -105,7 +107,15 @@ mod tests {
 
     #[test]
     fn test_light_spot_cone_precompute() {
-        let light = Light::spot([0.0, 5.0, 0.0], [0.0, -1.0, 0.0], 100.0, 20.0, 35.0, 5.0, [1.0, 1.0, 1.0]);
+        let light = Light::spot(
+            [0.0, 5.0, 0.0],
+            [0.0, -1.0, 0.0],
+            100.0,
+            20.0,
+            35.0,
+            5.0,
+            [1.0, 1.0, 1.0],
+        );
         assert_eq!(light.kind, LightType::Spot.as_u32());
         assert!(light.cone_cos[0] > 0.9 && light.cone_cos[0] < 1.0);
         assert!(light.cone_cos[1] > 0.8 && light.cone_cos[1] < 0.9);
@@ -113,7 +123,14 @@ mod tests {
 
     #[test]
     fn test_light_area_rect_fields() {
-        let light = Light::area_rect([0.0, 10.0, 0.0], [0.0, -1.0, 0.0], 2.5, 1.5, 10.0, [1.0, 1.0, 1.0]);
+        let light = Light::area_rect(
+            [0.0, 10.0, 0.0],
+            [0.0, -1.0, 0.0],
+            2.5,
+            1.5,
+            10.0,
+            [1.0, 1.0, 1.0],
+        );
         assert_eq!(light.kind, LightType::AreaRect.as_u32());
         assert_eq!(light.area_half, [2.5, 1.5]);
     }
@@ -157,7 +174,10 @@ mod tests {
 
     #[test]
     fn test_shadow_memory_budget() {
-        let shadow = ShadowSettings { map_res: 2048, ..Default::default() };
+        let shadow = ShadowSettings {
+            map_res: 2048,
+            ..Default::default()
+        };
         assert_eq!(shadow.memory_budget(), 16 * 1024 * 1024);
     }
 }

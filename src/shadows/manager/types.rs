@@ -1,5 +1,5 @@
-use crate::lighting::types::ShadowTechnique;
 use super::super::CsmConfig;
+use crate::lighting::types::ShadowTechnique;
 
 pub const DEFAULT_MEMORY_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 pub const MIN_SHADOW_RESOLUTION: u32 = 256;

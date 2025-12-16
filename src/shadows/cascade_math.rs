@@ -45,11 +45,7 @@ pub fn detect_peter_panning(
 }
 
 /// Calculate automatic cascade splits using practical split scheme
-pub fn calculate_cascade_splits(
-    cascade_count: u32,
-    near_plane: f32,
-    far_plane: f32,
-) -> Vec<f32> {
+pub fn calculate_cascade_splits(cascade_count: u32, near_plane: f32, far_plane: f32) -> Vec<f32> {
     let mut splits = Vec::with_capacity(cascade_count as usize + 1);
     splits.push(near_plane);
 
@@ -115,10 +111,7 @@ pub fn calculate_unclipped_cascade_splits(
 }
 
 /// Transform frustum corners to light space and calculate AABB bounds
-pub fn calculate_light_space_bounds(
-    frustum_corners: &[Vec3],
-    light_view: Mat4,
-) -> (Vec3, Vec3) {
+pub fn calculate_light_space_bounds(frustum_corners: &[Vec3], light_view: Mat4) -> (Vec3, Vec3) {
     let mut light_space_corners = Vec::new();
     for corner in frustum_corners {
         let light_space_pos = light_view * corner.extend(1.0);

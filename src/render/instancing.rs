@@ -1,6 +1,7 @@
 // src/render/instancing.rs
 // Minimal CPU instancing utility: duplicates a base mesh for each transform.
 // This serves as a portable fallback in environments where GPU instancing may not be available.
+#![allow(dead_code)]
 
 use glam::{Mat3, Mat4, Vec3};
 

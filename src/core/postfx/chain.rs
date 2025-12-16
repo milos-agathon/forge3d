@@ -1,10 +1,10 @@
-use crate::core::async_compute::AsyncComputeConfig;
-use crate::core::gpu_timing::GpuTimingManager;
-use crate::core::error::{RenderError, RenderResult};
-use std::collections::{HashMap, VecDeque};
-use wgpu::*;
 use super::effect::PostFxEffect;
 use super::resources::PostFxResourcePool;
+use crate::core::async_compute::AsyncComputeConfig;
+use crate::core::error::{RenderError, RenderResult};
+use crate::core::gpu_timing::GpuTimingManager;
+use std::collections::{HashMap, VecDeque};
+use wgpu::*;
 
 /// Post-processing effect chain manager
 pub struct PostFxChain {

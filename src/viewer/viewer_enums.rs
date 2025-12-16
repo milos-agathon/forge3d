@@ -146,7 +146,10 @@ pub enum ViewerCmd {
         elevation_deg: f32,
     },
     /// Set IBL with path and intensity
-    SetIbl { path: String, intensity: f32 },
+    SetIbl {
+        path: String,
+        intensity: f32,
+    },
     /// Set terrain z-scale (height exaggeration)
     SetZScale(f32),
     /// Snapshot with explicit width/height override

@@ -2,6 +2,7 @@
 //!
 //! Builds ribbon geometry with constant world-space width and optional depth offset
 //! for Z-fighting mitigation when overlaying on other geometry.
+#![allow(dead_code)]
 
 use super::{curves, MeshBuffers};
 

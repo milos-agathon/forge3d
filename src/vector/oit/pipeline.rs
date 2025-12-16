@@ -6,7 +6,11 @@ pub fn create_accumulation_textures(
     width: u32,
     height: u32,
 ) -> (wgpu::Texture, wgpu::Texture, wgpu::Texture) {
-    let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+    let size = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
 
     let color_buffer = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("vf.Vector.OIT.ColorAccum"),
@@ -105,9 +109,18 @@ pub fn create_compose_pipeline(
         label: Some("vf.Vector.OIT.ComposeBindGroup"),
         layout: &bind_group_layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(color_view) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(reveal_view) },
-            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&sampler) },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(color_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(reveal_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
         ],
     });
 
@@ -120,7 +133,11 @@ pub fn create_compose_pipeline(
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("vf.Vector.OIT.ComposePipeline"),
         layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState { module: &shader, entry_point: "vs_main", buffers: &[] },
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: "vs_main",
+            buffers: &[],
+        },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: "fs_main",

@@ -1,5 +1,6 @@
 // src/geometry/subdivision.rs
 // Triangle subdivision: Loop refinement with crease and boundary preservation (basic)
+#![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};
 

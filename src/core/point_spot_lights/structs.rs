@@ -1,6 +1,6 @@
 use super::types::{Light, PointSpotLightUniforms};
-use wgpu;
 use std::collections::HashMap;
+use wgpu;
 
 /// Core renderer for point and spot lights
 pub struct PointSpotLightRenderer {

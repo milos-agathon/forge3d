@@ -22,8 +22,8 @@ mod upload;
 
 pub use types::{ImageImportConfig, ImageSourceFormat, ImportedTextureInfo};
 
-use crate::core::memory_tracker::global_tracker;
 use crate::core::error::{RenderError, RenderResult};
+use crate::core::memory_tracker::global_tracker;
 use decode::decode_image_file;
 use std::path::Path;
 use upload::{create_texture_for_import, upload_rgba_data_to_texture};

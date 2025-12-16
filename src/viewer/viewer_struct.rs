@@ -38,6 +38,8 @@ pub struct Viewer {
     pub(crate) fps_counter: FpsCounter,
     #[cfg(feature = "extension-module")]
     pub(crate) terrain_scene: Option<crate::terrain::TerrainScene>,
+    // Standalone terrain viewer (no PyO3 dependencies)
+    pub(crate) terrain_viewer: Option<super::terrain::ViewerTerrainScene>,
     // Input state
     pub(crate) keys_pressed: HashSet<KeyCode>,
     pub(crate) shift_pressed: bool,
@@ -66,6 +68,11 @@ pub struct Viewer {
     pub(crate) geom_vb: Option<Buffer>,
     pub(crate) geom_ib: Option<Buffer>,
     pub(crate) geom_index_count: u32,
+    // Store original mesh data for CPU-side transform (workaround for GPU buffer sync issue)
+    pub(crate) original_mesh_positions: Vec<[f32; 3]>,
+    pub(crate) original_mesh_normals: Vec<[f32; 3]>,
+    pub(crate) original_mesh_uvs: Vec<[f32; 2]>,
+    pub(crate) original_mesh_indices: Vec<u32>,
     pub(crate) z_texture: Option<Texture>,
     pub(crate) z_view: Option<TextureView>,
     // Albedo texture for geometry
@@ -222,4 +229,6 @@ pub struct Viewer {
     pub(crate) object_rotation: glam::Quat,
     pub(crate) object_scale: glam::Vec3,
     pub(crate) object_transform: glam::Mat4,
+    // Transform version counter for IPC ack (incremented on each set_transform)
+    pub(crate) transform_version: u64,
 }

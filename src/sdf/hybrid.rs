@@ -10,7 +10,9 @@ use crate::core::gpu::ctx;
 use crate::sdf::SdfScene;
 
 // Re-export types from hybrid_types
-pub use super::hybrid_types::{HybridHitResult, HybridMetrics, MeshBuffers, Ray, SdfBuffers, Vertex};
+pub use super::hybrid_types::{
+    HybridHitResult, HybridMetrics, MeshBuffers, Ray, SdfBuffers, Vertex,
+};
 
 /// Hybrid scene containing both SDF and mesh geometry
 #[derive(Debug)]

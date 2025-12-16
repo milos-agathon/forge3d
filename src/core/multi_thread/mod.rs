@@ -12,8 +12,8 @@ use wgpu::*;
 mod pool;
 mod tasks;
 
-pub use tasks::{ClearTask, CommandTask, CopyTask};
 use pool::ThreadPool;
+pub use tasks::{ClearTask, CommandTask, CopyTask};
 
 /// Handle for a recorded command buffer from a thread
 #[derive(Debug)]

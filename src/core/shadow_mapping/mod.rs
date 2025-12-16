@@ -12,4 +12,3 @@ pub use system::ShadowMapping;
 pub use types::{
     CsmCascadeData, CsmUniforms, PcfQuality, ShadowAtlasInfo, ShadowMappingConfig, ShadowStats,
 };
-

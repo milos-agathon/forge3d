@@ -140,7 +140,12 @@ impl GiCliConfig {
         push_ssao_params(&mut parts, &self.ssao);
         push_ssgi_params(&mut parts, &self.ssgi);
         push_ssr_params(&mut parts, &self.ssr);
-        push_weights(&mut parts, self.ao_weight, self.ssgi_weight, self.ssr_weight);
+        push_weights(
+            &mut parts,
+            self.ao_weight,
+            self.ssgi_weight,
+            self.ssr_weight,
+        );
         if let Some(mode) = self.gi_viz {
             parts.push("--viz-gi".to_string());
             parts.push(mode.as_str().to_string());

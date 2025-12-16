@@ -14,7 +14,6 @@ pub mod mesh;
 pub mod restir;
 pub mod wavefront;
 
-
 /// Parameters for path tracing configuration
 #[derive(Clone, Debug)]
 pub struct TracerParams {

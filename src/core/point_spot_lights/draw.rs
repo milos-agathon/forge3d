@@ -1,6 +1,6 @@
 use super::structs::PointSpotLightRenderer;
-use wgpu;
 use bytemuck;
+use wgpu;
 
 impl PointSpotLightRenderer {
     /// Update uniforms and lights buffers

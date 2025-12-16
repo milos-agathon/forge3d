@@ -1,5 +1,5 @@
 use crate::lighting::types::Light;
-use wgpu::{Buffer, BindGroup, BindGroupLayout};
+use wgpu::{BindGroup, BindGroupLayout, Buffer};
 
 /// Maximum number of lights supported (P1 default)
 pub const MAX_LIGHTS: usize = 16;

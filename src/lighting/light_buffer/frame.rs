@@ -1,7 +1,7 @@
+use super::r2::r2_sample;
 use super::types::{LightBuffer, MAX_LIGHTS};
 use crate::lighting::types::Light;
 use wgpu::Buffer;
-use super::r2::r2_sample;
 
 impl LightBuffer {
     /// Advance to next frame (call once per frame)

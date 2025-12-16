@@ -102,7 +102,10 @@ pub struct CsmUniforms {
 }
 
 // Compile-time assertion: CsmUniforms must be exactly 704 bytes to match WGSL layout
-const _: () = assert!(std::mem::size_of::<CsmUniforms>() == 704, "CsmUniforms size mismatch with WGSL");
+const _: () = assert!(
+    std::mem::size_of::<CsmUniforms>() == 704,
+    "CsmUniforms size mismatch with WGSL"
+);
 
 /// GPU representation of a shadow cascade
 #[repr(C)]
@@ -161,12 +164,15 @@ pub struct ShadowStats {
 }
 
 // Compile-time assertion: CsmCascadeData must be exactly 144 bytes (2 mat4x4 + 4 floats)
-const _: () = assert!(std::mem::size_of::<CsmCascadeData>() == 144, "CsmCascadeData size mismatch with WGSL");
+const _: () = assert!(
+    std::mem::size_of::<CsmCascadeData>() == 144,
+    "CsmCascadeData size mismatch with WGSL"
+);
 
 #[cfg(test)]
 mod layout_lock_tests {
     use super::*;
-    
+
     /// Helper macro to compute field offset without external crates
     macro_rules! offset_of {
         ($type:ty, $field:ident) => {{
@@ -176,19 +182,19 @@ mod layout_lock_tests {
             field_ptr - base_ptr
         }};
     }
-    
+
     #[test]
     fn test_csm_uniforms_size() {
         // WGSL struct expects exactly 704 bytes
         assert_eq!(std::mem::size_of::<CsmUniforms>(), 704);
     }
-    
+
     #[test]
     fn test_csm_cascade_data_size() {
         // WGSL ShadowCascade: 2 mat4x4 (128) + 4 floats (16) = 144 bytes
         assert_eq!(std::mem::size_of::<CsmCascadeData>(), 144);
     }
-    
+
     #[test]
     fn test_csm_uniforms_critical_field_offsets() {
         // These offsets must match WGSL struct layout in terrain_pbr_pom.wgsl:
@@ -198,16 +204,28 @@ mod layout_lock_tests {
         // cascade_count: u32                @ offset 656 (80 + 4*144)
         // pcf_kernel_size: u32              @ offset 660
         // technique: u32                    @ offset 692
-        
-        assert_eq!(offset_of!(CsmUniforms, light_direction), 0, "light_direction offset");
+
+        assert_eq!(
+            offset_of!(CsmUniforms, light_direction),
+            0,
+            "light_direction offset"
+        );
         assert_eq!(offset_of!(CsmUniforms, light_view), 16, "light_view offset");
         assert_eq!(offset_of!(CsmUniforms, cascades), 80, "cascades offset");
-        assert_eq!(offset_of!(CsmUniforms, cascade_count), 656, "cascade_count offset");
-        assert_eq!(offset_of!(CsmUniforms, pcf_kernel_size), 660, "pcf_kernel_size offset");
+        assert_eq!(
+            offset_of!(CsmUniforms, cascade_count),
+            656,
+            "cascade_count offset"
+        );
+        assert_eq!(
+            offset_of!(CsmUniforms, pcf_kernel_size),
+            660,
+            "pcf_kernel_size offset"
+        );
         assert_eq!(offset_of!(CsmUniforms, technique), 692, "technique offset");
         assert_eq!(offset_of!(CsmUniforms, _padding), 696, "_padding offset");
     }
-    
+
     #[test]
     fn test_csm_cascade_data_field_offsets() {
         // WGSL ShadowCascade layout:
@@ -217,12 +235,32 @@ mod layout_lock_tests {
         // far_distance: f32              @ offset 132
         // texel_size: f32                @ offset 136
         // _padding: f32                  @ offset 140
-        
-        assert_eq!(offset_of!(CsmCascadeData, light_projection), 0, "light_projection offset");
-        assert_eq!(offset_of!(CsmCascadeData, light_view_proj), 64, "light_view_proj offset");
-        assert_eq!(offset_of!(CsmCascadeData, near_distance), 128, "near_distance offset");
-        assert_eq!(offset_of!(CsmCascadeData, far_distance), 132, "far_distance offset");
-        assert_eq!(offset_of!(CsmCascadeData, texel_size), 136, "texel_size offset");
+
+        assert_eq!(
+            offset_of!(CsmCascadeData, light_projection),
+            0,
+            "light_projection offset"
+        );
+        assert_eq!(
+            offset_of!(CsmCascadeData, light_view_proj),
+            64,
+            "light_view_proj offset"
+        );
+        assert_eq!(
+            offset_of!(CsmCascadeData, near_distance),
+            128,
+            "near_distance offset"
+        );
+        assert_eq!(
+            offset_of!(CsmCascadeData, far_distance),
+            132,
+            "far_distance offset"
+        );
+        assert_eq!(
+            offset_of!(CsmCascadeData, texel_size),
+            136,
+            "texel_size offset"
+        );
         assert_eq!(offset_of!(CsmCascadeData, _padding), 140, "_padding offset");
     }
 }

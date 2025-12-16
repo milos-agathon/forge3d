@@ -3183,9 +3183,7 @@ impl Scene {
     pub fn set_ground_plane_preset(&mut self, preset: &str) -> PyResult<()> {
         if let Some(ref mut renderer) = self.ground_plane_renderer {
             let params = match preset {
-                "engineering" => {
-                    crate::core::ground_plane::GroundPlaneParams::engineering_grid()
-                }
+                "engineering" => crate::core::ground_plane::GroundPlaneParams::engineering_grid(),
                 "architectural" => {
                     crate::core::ground_plane::GroundPlaneParams::architectural_grid()
                 }

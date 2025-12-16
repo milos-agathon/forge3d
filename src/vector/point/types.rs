@@ -33,8 +33,8 @@ pub struct PointUniform {
     pub enable_clip_w_scaling: u32, // H22: Enable clip.w aware sizing
     pub _pad0: f32,                 // Align depth_range to 8-byte boundary (std140/std430)
     pub depth_range: [f32; 2],      // H22: Near/far planes for clip.w scaling
-    pub shape_mode: u32,            // H2: shape/material mode (0=circle,4=texture,5=sphere impostor)
-    pub lod_threshold: f32,         // H2: pixel-size threshold for LOD
+    pub shape_mode: u32, // H2: shape/material mode (0=circle,4=texture,5=sphere impostor)
+    pub lod_threshold: f32, // H2: pixel-size threshold for LOD
 }
 
 /// H20: Debug rendering mode flags

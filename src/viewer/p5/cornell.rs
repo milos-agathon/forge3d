@@ -7,10 +7,10 @@ use serde_json::json;
 use std::fs;
 use std::path::Path;
 
-use super::viewer_constants::P51_MAX_MEGAPIXELS;
-use super::viewer_image_utils::downscale_rgba8_bilinear;
-use super::viewer_render_helpers::render_view_to_rgba8_ex;
-use super::Viewer;
+use super::super::viewer_constants::P51_MAX_MEGAPIXELS;
+use super::super::viewer_image_utils::downscale_rgba8_bilinear;
+use super::super::viewer_render_helpers::render_view_to_rgba8_ex;
+use super::super::Viewer;
 
 impl Viewer {
     pub(crate) fn capture_p51_cornell_with_scene(&mut self) -> anyhow::Result<()> {

@@ -78,7 +78,7 @@ impl MaterialSet {
         materials.push(
             crate::core::material::PbrMaterial::dielectric(
                 glam::Vec3::new(0.28, 0.26, 0.24), // neutral gray rock
-                0.50,                               // roughness - weathered rock
+                0.50,                              // roughness - weathered rock
             )
             .with_normal_scale(normal_strength * 1.5), // Enhanced normal detail
         );
@@ -89,7 +89,7 @@ impl MaterialSet {
         materials.push(
             crate::core::material::PbrMaterial::dielectric(
                 glam::Vec3::new(0.18, 0.38, 0.10), // saturated green
-                0.85,                               // roughness - very matte (grass is diffuse)
+                0.85,                              // roughness - very matte (grass is diffuse)
             )
             .with_normal_scale(normal_strength * 0.8), // Softer normals for grass
         );
@@ -99,7 +99,7 @@ impl MaterialSet {
         materials.push(
             crate::core::material::PbrMaterial::dielectric(
                 glam::Vec3::new(0.35, 0.25, 0.15), // warm brown dirt
-                0.50,                               // roughness - between rock and grass
+                0.50,                              // roughness - between rock and grass
             )
             .with_normal_scale(normal_strength * 1.2), // Visible soil texture
         );
@@ -111,7 +111,7 @@ impl MaterialSet {
         materials.push(
             crate::core::material::PbrMaterial::dielectric(
                 glam::Vec3::new(0.95, 0.97, 1.0), // bright white-blue snow
-                0.25,                              // roughness - powder snow, still bright
+                0.25,                             // roughness - powder snow, still bright
             )
             .with_normal_scale(normal_strength * 0.3), // Subtle snow surface variation
         );
@@ -544,7 +544,7 @@ impl GpuMaterialSet {
             mag_filter: FilterMode::Linear,
             min_filter: FilterMode::Linear,
             mipmap_filter: FilterMode::Linear,
-            anisotropy_clamp: 16,  // Max anisotropic filtering to reduce triplanar aliasing
+            anisotropy_clamp: 16, // Max anisotropic filtering to reduce triplanar aliasing
             ..Default::default()
         });
 
