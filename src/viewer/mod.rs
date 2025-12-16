@@ -24,6 +24,7 @@ mod viewer_p5_gi;
 mod viewer_p5_ssr;
 mod viewer_render_helpers;
 mod viewer_ssr_scene;
+mod viewer_terrain;
 mod viewer_types;
 
 // Re-export public items
@@ -32,20 +33,14 @@ pub use viewer_config::{set_initial_commands, ViewerConfig};
 pub use viewer_config::set_initial_terrain_config;
 pub use ipc::IpcServerConfig;
 
-use viewer_analysis::{gradient_energy, mean_luma_region};
 use viewer_config::{FpsCounter, INITIAL_CMDS};
 use viewer_constants::{
-    LIT_WGSL_VERSION, P51_MAX_MEGAPIXELS, P52_MAX_MEGAPIXELS, P5_SSGI_CORNELL_WARMUP_FRAMES,
-    P5_SSGI_DIFFUSE_SCALE, VIEWER_SNAPSHOT_MAX_MEGAPIXELS,
+    LIT_WGSL_VERSION, VIEWER_SNAPSHOT_MAX_MEGAPIXELS,
 };
 #[cfg(feature = "extension-module")]
 use viewer_config::INITIAL_TERRAIN_CONFIG;
 // viewer_cmd_parse::parse_command_string available for future refactoring of run_viewer
 use viewer_enums::{parse_gi_viz_mode_token, CaptureKind, FogMode, ViewerCmd, VizMode};
-use viewer_image_utils::{
-    add_debug_noise_rgba8, downscale_rgba8_bilinear,
-    flatten_rgba8_to_mean_luma, luma_std_rgba8,
-};
 use viewer_render_helpers::render_view_to_rgba8_ex;
 use viewer_ssr_scene::{build_ssr_albedo_texture, build_ssr_scene_mesh};
 use viewer_types::{
@@ -58,17 +53,14 @@ use hud::{
     push_number as hud_push_number,
     push_text_3x5 as hud_push_text_3x5,
 };
-use image_analysis::{
-    compute_max_delta_e, compute_ssim, delta_e_lab, mean_abs_diff, read_texture_rgba16_to_rgb_f32,
-    rgba16_to_luma, srgb_triplet_to_linear,
-};
+use image_analysis::read_texture_rgba16_to_rgb_f32;
 use crate::core::gpu_timing::{create_default_config as create_gpu_timing_config, GpuTimingManager};
 use crate::core::ibl::{IBLQuality, IBLRenderer};
 use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
 use crate::core::shadows::{CameraFrustum, CsmConfig, CsmShadowMap};
 // geometry imports moved to viewer_ssr_scene.rs
-use crate::p5::meta::{self as p5_meta, build_ssr_meta, SsrMetaInput};
-use crate::p5::{ssr, ssr::SsrScenePreset, ssr_analysis};
+use crate::p5::meta as p5_meta;
+use crate::p5::ssr::SsrScenePreset;
 use crate::passes::gi::{GiCompositeParams, GiPass};
 use crate::passes::ssr::SsrStats;
 use crate::render::params::SsrParams;
@@ -77,8 +69,6 @@ use crate::util::image_write;
 use anyhow::{anyhow, bail};
 use camera_controller::{CameraController, CameraMode};
 use glam::{Mat4, Vec3};
-use half::f16;
-use serde_json::json;
 use std::collections::VecDeque;
 use std::io::BufRead;
 use std::path::Path;
@@ -135,6 +125,8 @@ pub struct Viewer {
     fps_counter: FpsCounter,
     #[cfg(feature = "extension-module")]
     terrain_scene: Option<crate::terrain::TerrainScene>,
+    // Standalone terrain viewer (no PyO3 dependencies)
+    terrain_viewer: Option<viewer_terrain::ViewerTerrainScene>,
     // Input state
     keys_pressed: std::collections::HashSet<KeyCode>,
     shift_pressed: bool,
@@ -163,6 +155,11 @@ pub struct Viewer {
     geom_vb: Option<wgpu::Buffer>,
     geom_ib: Option<wgpu::Buffer>,
     geom_index_count: u32,
+    // Store original mesh data for CPU-side transform (workaround for GPU buffer sync issue)
+    original_mesh_positions: Vec<[f32; 3]>,
+    original_mesh_normals: Vec<[f32; 3]>,
+    original_mesh_uvs: Vec<[f32; 2]>,
+    original_mesh_indices: Vec<u32>,
     z_texture: Option<wgpu::Texture>,
     z_view: Option<wgpu::TextureView>,
     // Albedo texture for geometry
@@ -319,6 +316,8 @@ pub struct Viewer {
     object_rotation: glam::Quat,
     object_scale: glam::Vec3,
     object_transform: glam::Mat4,
+    // Transform version counter for IPC ack (incremented on each set_transform)
+    transform_version: u64,
 }
 
 // FpsCounter moved to viewer_config.rs
@@ -1349,7 +1348,7 @@ impl Viewer {
                         out.pos = uCam.proj * pos_vs;
                         let nrm_vs = (uCam.view * vec4<f32>(inp.nrm, 0.0)).xyz;
                         out.v_nrm_vs = normalize(nrm_vs);
-                        out.v_depth_vs = -pos_vs.z; // positive view-space depth
+                        out.v_depth_vs = -pos_vs.z;
                         out.v_uv = inp.uv;
                         out.v_rough_metal = inp.rough_metal;
                         return out;
@@ -3000,6 +2999,7 @@ impl Viewer {
             fps_counter: FpsCounter::new(),
             #[cfg(feature = "extension-module")]
             terrain_scene: None,
+            terrain_viewer: None,
             keys_pressed: std::collections::HashSet::new(),
             shift_pressed: false,
             gi,
@@ -3022,6 +3022,10 @@ impl Viewer {
             geom_vb,
             geom_ib: None,
             geom_index_count: 36,
+            original_mesh_positions: Vec::new(),
+            original_mesh_normals: Vec::new(),
+            original_mesh_uvs: Vec::new(),
+            original_mesh_indices: Vec::new(),
             z_texture,
             z_view,
             albedo_texture,
@@ -3151,6 +3155,8 @@ impl Viewer {
             object_rotation: glam::Quat::IDENTITY,
             object_scale: glam::Vec3::ONE,
             object_transform: glam::Mat4::IDENTITY,
+            // Transform version starts at 0 (identity)
+            transform_version: 0,
         };
 
         viewer.sync_ssr_params_to_gi();
@@ -3486,16 +3492,47 @@ impl Viewer {
                 true
             }
             WindowEvent::CursorMoved { position, .. } => {
+                let new_x = position.x as f32;
+                let new_y = position.y as f32;
+                
+                // If terrain viewer is active and mouse is pressed, orbit the terrain camera
+                if self.camera.mouse_pressed {
+                    if let Some(ref mut tv) = self.terrain_viewer {
+                        if tv.has_terrain() {
+                            if let Some((last_x, last_y)) = self.camera.last_mouse_pos {
+                                let dx = new_x - last_x;
+                                let dy = new_y - last_y;
+                                tv.handle_mouse_drag(dx, dy);
+                            }
+                        }
+                    }
+                }
+                
                 self.camera
-                    .handle_mouse_move(position.x as f32, position.y as f32);
+                    .handle_mouse_move(new_x, new_y);
                 true
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let scroll = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => *y,
-                    MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.1,
+                    MouseScrollDelta::LineDelta(x, y) => {
+                        println!("[scroll] LineDelta x={} y={}", x, y);
+                        *y * 3.0
+                    }
+                    MouseScrollDelta::PixelDelta(pos) => {
+                        println!("[scroll] PixelDelta x={} y={}", pos.x, pos.y);
+                        pos.y as f32 * 0.02
+                    }
                 };
-                self.camera.handle_mouse_scroll(scroll);
+                println!("[scroll] final={}", scroll);
+                
+                // If terrain viewer is active, zoom the terrain camera
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    if tv.has_terrain() {
+                        tv.handle_scroll(scroll);
+                    }
+                } else {
+                    self.camera.handle_mouse_scroll(scroll);
+                }
                 true
             }
             _ => false,
@@ -3510,16 +3547,16 @@ impl Viewer {
 
         let speed_mult = if self.shift_pressed { 2.0 } else { 1.0 };
 
-        if self.keys_pressed.contains(&KeyCode::KeyW) {
+        if self.keys_pressed.contains(&KeyCode::KeyW) || self.keys_pressed.contains(&KeyCode::ArrowUp) {
             forward += speed_mult;
         }
-        if self.keys_pressed.contains(&KeyCode::KeyS) {
+        if self.keys_pressed.contains(&KeyCode::KeyS) || self.keys_pressed.contains(&KeyCode::ArrowDown) {
             forward -= speed_mult;
         }
-        if self.keys_pressed.contains(&KeyCode::KeyD) {
+        if self.keys_pressed.contains(&KeyCode::KeyD) || self.keys_pressed.contains(&KeyCode::ArrowRight) {
             right += speed_mult;
         }
-        if self.keys_pressed.contains(&KeyCode::KeyA) {
+        if self.keys_pressed.contains(&KeyCode::KeyA) || self.keys_pressed.contains(&KeyCode::ArrowLeft) {
             right -= speed_mult;
         }
         if self.keys_pressed.contains(&KeyCode::KeyE) {
@@ -3529,7 +3566,15 @@ impl Viewer {
             up -= speed_mult;
         }
 
-        self.camera.update_fps(dt, forward, right, up);
+        // If terrain viewer is active, route input to terrain camera
+        let terrain_active = self.terrain_viewer.as_ref().map_or(false, |tv| tv.has_terrain());
+        if terrain_active {
+            if let Some(ref mut tv) = self.terrain_viewer {
+                tv.handle_keys(forward, right, up);
+            }
+        } else {
+            self.camera.update_fps(dt, forward, right, up);
+        }
 
         // Update GI camera params
         if let Some(ref mut gi) = self.gi {
@@ -3550,10 +3595,12 @@ impl Viewer {
                 ]
             }
             let eye = self.camera.eye();
-            let inv_view = view.inverse();
+            // Apply object transform to view matrix for consistent GI
+            let model_view = view * self.object_transform;
+            let inv_model_view = model_view.inverse();
             let cam = crate::core::screen_space_effects::CameraParams {
-                view_matrix: to_arr4(view),
-                inv_view_matrix: to_arr4(inv_view),
+                view_matrix: to_arr4(model_view),
+                inv_view_matrix: to_arr4(inv_model_view),
                 proj_matrix: to_arr4(proj),
                 inv_proj_matrix: to_arr4(inv_proj),
                 camera_pos: [eye.x, eye.y, eye.z],
@@ -3693,6 +3740,24 @@ impl Viewer {
         let have_vb = self.geom_vb.is_some();
         let have_z = self.z_view.is_some();
         let have_bgl = self.geom_bind_group_layout.is_some();
+        
+        // D1: Log render gate status on every snapshot frame (to file for diagnosis)
+        if self.snapshot_request.is_some() {
+            let msg = format!(
+                "[D1-GATE] frame={} gi={} pipe={} cam={} vb={} z={} bgl={} idx_cnt={} transform_identity={}\n",
+                self.frame_count, have_gi, have_pipe, have_cam, have_vb, have_z, have_bgl, self.geom_index_count,
+                self.object_transform == glam::Mat4::IDENTITY
+            );
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("examples/out/d1_debug.log")
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    f.write_all(msg.as_bytes())
+                });
+        }
+        
         if !(have_gi && have_pipe && have_cam && have_vb && have_z && have_bgl) {
             if !self.debug_logged_render_gate {
                 eprintln!(
@@ -3724,6 +3789,28 @@ impl Viewer {
             // Apply object transform to create model-view matrix
             let view_mat = self.camera.view_matrix();
             let model_view = view_mat * self.object_transform;
+            
+            // D1: Snapshot-time truth instrumentation - log to file
+            if self.snapshot_request.is_some() {
+                let is_identity = self.object_transform == glam::Mat4::IDENTITY;
+                let t = self.object_translation;
+                let s = self.object_scale;
+                let msg = format!(
+                    "[D1-GEOM] frame={} transform_identity={} index_count={} trans=[{:.3},{:.3},{:.3}] scale=[{:.3},{:.3},{:.3}]\n",
+                    self.frame_count,
+                    is_identity,
+                    self.geom_index_count,
+                    t.x, t.y, t.z, s.x, s.y, s.z
+                );
+                let _ = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("examples/out/d1_debug.log")
+                    .and_then(|mut f| {
+                        use std::io::Write;
+                        f.write_all(msg.as_bytes())
+                    });
+            }
             fn to_arr4(m: Mat4) -> [[f32; 4]; 4] {
                 let c = m.to_cols_array();
                 [
@@ -3734,17 +3821,20 @@ impl Viewer {
                 ]
             }
             let cam_pack = [to_arr4(model_view), to_arr4(proj)];
+            // Always write to the camera buffer
             self.queue
                 .write_buffer(cam_buf, 0, bytemuck::cast_slice(&cam_pack));
 
             // Keep GI camera uniforms in sync with this geometry pass so that
             // SSAO/GTAO reconstruction uses the correct view/projection.
+            // IMPORTANT: Use model_view (which includes object_transform) to ensure
+            // GI lighting matches the transformed geometry.
             let inv_proj = proj.inverse();
             let eye = self.camera.eye();
-            let inv_view = view_mat.inverse();
+            let inv_model_view = model_view.inverse();
             let cam = crate::core::screen_space_effects::CameraParams {
-                view_matrix: to_arr4(view_mat),
-                inv_view_matrix: to_arr4(inv_view),
+                view_matrix: to_arr4(model_view),
+                inv_view_matrix: to_arr4(inv_model_view),
                 proj_matrix: to_arr4(proj),
                 inv_proj_matrix: to_arr4(inv_proj),
                 camera_pos: [eye.x, eye.y, eye.z],
@@ -4485,9 +4575,13 @@ impl Viewer {
                         cpass.dispatch_workgroups(gx, gy, 1);
                     }
                 }
+                // When taking snapshot, use raw GBuffer to avoid SSR/SSAO temporal caching issues
+                let use_raw_gbuffer = self.snapshot_request.is_some();
                 let (mode_u32, src_view) = match self.viz_mode {
                     VizMode::Material => {
-                        if let Some(v) = gi.material_with_ssr_view() {
+                        if use_raw_gbuffer {
+                            (0u32, &gi.gbuffer().material_view)
+                        } else if let Some(v) = gi.material_with_ssr_view() {
                             (0u32, v)
                         } else if self.use_ssao_composite {
                             if let Some(v) = gi.material_with_ao_view() {
@@ -4880,17 +4974,44 @@ impl Viewer {
 
         // If we didn't composite anything (GI path unavailable), either let an attached
         // TerrainScene render, or fall back to the purple debug pipeline.
-        #[cfg(feature = "extension-module")]
-        {
-            if let Some(_scene) = &mut self.terrain_scene {
-                // M3: TerrainScene is attached. A future milestone will render the terrain
-                // directly into `view` here; for now we intentionally skip the purple
-                // fallback when a scene is present.
-            } else if !(have_gi && have_pipe && have_cam && have_vb && have_z && have_bgl) {
+        // Helper closure to render fallback with optional snapshot texture
+        let render_fallback = |encoder: &mut wgpu::CommandEncoder,
+                               view: &wgpu::TextureView,
+                               pipeline: &wgpu::RenderPipeline,
+                               device: &wgpu::Device,
+                               config: &wgpu::SurfaceConfiguration,
+                               snapshot_request: &Option<String>,
+                               view_config: &crate::viewer::viewer_config::ViewerConfig|
+         -> Option<wgpu::Texture> {
+            // If snapshot requested, create offscreen texture at requested size
+            let snap_tex = if snapshot_request.is_some() {
+                let (snap_w, snap_h) = if let (Some(w), Some(h)) =
+                    (view_config.snapshot_width, view_config.snapshot_height)
+                {
+                    (w, h)
+                } else {
+                    (config.width, config.height)
+                };
+                let tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("viewer.fallback.snapshot"),
+                    size: wgpu::Extent3d {
+                        width: snap_w,
+                        height: snap_h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: config.format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let snap_view = tex.create_view(&wgpu::TextureViewDescriptor::default());
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("viewer.fallback.pass"),
+                    label: Some("viewer.fallback.pass.snapshot"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
+                        view: &snap_view,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -4906,18 +5027,18 @@ impl Viewer {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-                pass.set_pipeline(&self.fallback_pipeline);
+                pass.set_pipeline(pipeline);
                 pass.draw(0..3, 0..1);
                 drop(pass);
-            }
-        }
-
-        #[cfg(not(feature = "extension-module"))]
-        if !(have_gi && have_pipe && have_cam && have_vb && have_z && have_bgl) {
+                Some(tex)
+            } else {
+                None
+            };
+            // Always render to swapchain view too
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewer.fallback.pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -4933,9 +5054,62 @@ impl Viewer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_pipeline(&self.fallback_pipeline);
+            pass.set_pipeline(pipeline);
             pass.draw(0..3, 0..1);
             drop(pass);
+            snap_tex
+        };
+
+        // Standalone terrain viewer (works without extension-module)
+        let mut terrain_rendered = false;
+        if let Some(ref mut tv) = self.terrain_viewer {
+            if tv.has_terrain() {
+                terrain_rendered = tv.render(&mut encoder, &view, self.config.width, self.config.height);
+            }
+        }
+
+        #[cfg(feature = "extension-module")]
+        if !terrain_rendered {
+            if let Some(ref mut scene) = self.terrain_scene {
+                if scene.has_viewer_terrain() {
+                    terrain_rendered = scene.render_viewer_terrain(
+                        &mut encoder,
+                        &view,
+                        self.config.format,
+                        self.config.width,
+                        self.config.height,
+                    );
+                }
+            }
+        }
+
+        if !terrain_rendered && !(have_gi && have_pipe && have_cam && have_vb && have_z && have_bgl) {
+            if let Some(tex) = render_fallback(
+                &mut encoder,
+                &view,
+                &self.fallback_pipeline,
+                &self.device,
+                &self.config,
+                &self.snapshot_request,
+                &self.view_config,
+            ) {
+                self.pending_snapshot_tex = Some(tex);
+            }
+        }
+
+        #[cfg(any())] // Dead code - kept for reference
+        if !(have_gi && have_pipe && have_cam && have_vb && have_z && have_bgl) {
+            if let Some(tex) = render_fallback(
+                &mut encoder,
+                &view,
+                &self.fallback_pipeline,
+                &self.device,
+                &self.config,
+                &self.snapshot_request,
+                &self.view_config,
+            ) {
+                self.pending_snapshot_tex = Some(tex);
+            }
         }
 
         // Submit rendering
@@ -4953,15 +5127,20 @@ impl Viewer {
         if let Some(path) = self.snapshot_request.take() {
             // Prefer offscreen snapshot texture if we rendered one; otherwise fallback to surface texture
             if let Some(tex) = self.pending_snapshot_tex.take() {
+                let dims = tex.size();
+                println!("[snapshot] Using offscreen tex {}x{}", dims.width, dims.height);
                 if let Err(e) = self.snapshot_swapchain_to_png(&tex, &path) {
                     eprintln!("Snapshot failed: {}", e);
                 } else {
                     println!("Saved snapshot to {}", path);
                 }
-            } else if let Err(e) = self.snapshot_swapchain_to_png(&output.texture, &path) {
-                eprintln!("Snapshot failed: {}", e);
             } else {
-                println!("Saved snapshot to {}", path);
+                println!("[snapshot] Using swapchain texture (no offscreen)");
+                if let Err(e) = self.snapshot_swapchain_to_png(&output.texture, &path) {
+                    eprintln!("Snapshot failed: {}", e);
+                } else {
+                    println!("Saved snapshot to {}", path);
+                }
             }
         }
         output.present();
@@ -5355,15 +5534,15 @@ impl Viewer {
         }
 
         // Keep GI camera uniforms in sync with this geometry pass so SSAO/GTAO
-        // use the same view/projection.
+        // use the same view/projection. Use model_view to include object transform.
         {
             if let Some(ref mut gi_mgr) = self.gi {
                 let inv_proj = proj.inverse();
                 let eye = self.camera.eye();
-                let inv_view = view_mat.inverse();
+                let inv_model_view = model_view.inverse();
                 let cam = crate::core::screen_space_effects::CameraParams {
-                    view_matrix: to_arr4(view_mat),
-                    inv_view_matrix: to_arr4(inv_view),
+                    view_matrix: to_arr4(model_view),
+                    inv_view_matrix: to_arr4(inv_model_view),
                     proj_matrix: to_arr4(proj),
                     inv_proj_matrix: to_arr4(inv_proj),
                     camera_pos: [eye.x, eye.y, eye.z],
@@ -6518,8 +6697,6 @@ impl Viewer {
                 rotation_quat,
                 scale,
             } => {
-                // Apply transform to the currently loaded object
-                // Store transform components for use in rendering
                 if let Some(t) = translation {
                     self.object_translation = glam::Vec3::from(t);
                 }
@@ -6535,10 +6712,145 @@ impl Viewer {
                     self.object_rotation,
                     self.object_translation,
                 );
-                println!(
-                    "Transform: translation={:?} rotation={:?} scale={:?}",
-                    self.object_translation, self.object_rotation, self.object_scale
-                );
+                
+                // CPU-side vertex transform: transform original vertices and re-upload
+                // This ensures the transform is definitely visible in rendered output.
+                if !self.original_mesh_positions.is_empty() {
+                    use viewer_types::PackedVertex;
+                    let vertex_count = self.original_mesh_positions.len();
+                    let mut vertices: Vec<PackedVertex> = Vec::with_capacity(vertex_count);
+                    
+                    for i in 0..vertex_count {
+                        let orig_pos = glam::Vec3::from(self.original_mesh_positions[i]);
+                        let transformed = self.object_transform.transform_point3(orig_pos);
+                        
+                        let orig_nrm = if i < self.original_mesh_normals.len() {
+                            glam::Vec3::from(self.original_mesh_normals[i])
+                        } else {
+                            glam::Vec3::Y
+                        };
+                        // Transform normal (rotation only, no translation)
+                        let rot_mat = glam::Mat3::from_quat(self.object_rotation);
+                        let transformed_nrm = (rot_mat * orig_nrm).normalize();
+                        
+                        let uv = if i < self.original_mesh_uvs.len() {
+                            self.original_mesh_uvs[i]
+                        } else {
+                            [0.0, 0.0]
+                        };
+                        
+                        vertices.push(PackedVertex {
+                            position: transformed.to_array(),
+                            normal: transformed_nrm.to_array(),
+                            uv,
+                            rough_metal: [0.5, 0.0],
+                        });
+                    }
+                    
+                    // Re-upload vertex buffer with transformed data
+                    let vertex_data = bytemuck::cast_slice(&vertices);
+                    let new_vb = self.device.create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
+                            label: Some("viewer.ipc.mesh.vb.transformed"),
+                            contents: vertex_data,
+                            usage: wgpu::BufferUsages::VERTEX,
+                        }
+                    );
+                    self.geom_vb = Some(new_vb);
+                    
+                    // D1: Log CPU transform applied
+                    let msg = format!(
+                        "[D1-CPU-TRANSFORM] frame={} vertices={} trans=[{:.3},{:.3},{:.3}] scale=[{:.3},{:.3},{:.3}]\n",
+                        self.frame_count, vertex_count,
+                        self.object_translation.x, self.object_translation.y, self.object_translation.z,
+                        self.object_scale.x, self.object_scale.y, self.object_scale.z
+                    );
+                    let _ = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("examples/out/d1_debug.log")
+                        .and_then(|mut f| {
+                            use std::io::Write;
+                            f.write_all(msg.as_bytes())
+                        });
+                }
+                
+                // D2: Increment transform version and update IPC stats
+                self.transform_version += 1;
+                let is_identity = self.object_translation == glam::Vec3::ZERO
+                    && self.object_rotation == glam::Quat::IDENTITY
+                    && self.object_scale == glam::Vec3::ONE;
+                update_ipc_transform_stats(self.transform_version, is_identity);
+            }
+            ViewerCmd::LoadTerrain(path) => {
+                // Use standalone terrain viewer (no PyO3 deps)
+                if self.terrain_viewer.is_none() {
+                    match viewer_terrain::ViewerTerrainScene::new(
+                        std::sync::Arc::clone(&self.device),
+                        std::sync::Arc::clone(&self.queue),
+                        self.config.format,
+                    ) {
+                        Ok(scene) => self.terrain_viewer = Some(scene),
+                        Err(e) => {
+                            eprintln!("[terrain] Failed to create viewer: {}", e);
+                            return;
+                        }
+                    }
+                }
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    match tv.load_terrain(&path) {
+                        Ok(()) => println!("[terrain] Loaded: {}", path),
+                        Err(e) => eprintln!("[terrain] Failed to load {}: {}", path, e),
+                    }
+                }
+            }
+            ViewerCmd::SetTerrainCamera { phi_deg, theta_deg, radius, fov_deg } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    tv.set_camera(phi_deg, theta_deg, radius, fov_deg);
+                    println!("[terrain] Camera: phi={:.1}° theta={:.1}° r={:.1} fov={:.1}°", 
+                        phi_deg, theta_deg, radius, fov_deg);
+                }
+            }
+            ViewerCmd::SetTerrainSun { azimuth_deg, elevation_deg, intensity } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    tv.set_sun(azimuth_deg, elevation_deg, intensity);
+                    println!("[terrain] Sun: az={:.1}° el={:.1}° int={:.2}", 
+                        azimuth_deg, elevation_deg, intensity);
+                }
+            }
+            ViewerCmd::SetTerrain {
+                phi, theta, radius, fov,
+                sun_azimuth, sun_elevation, sun_intensity,
+                ambient, zscale, shadow, background, water_level, water_color,
+            } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    // Apply only the parameters that were specified
+                    if let Some(t) = tv.terrain.as_mut() {
+                        if let Some(v) = phi { t.cam_phi_deg = v; }
+                        if let Some(v) = theta { t.cam_theta_deg = v.clamp(5.0, 85.0); }
+                        if let Some(v) = radius { t.cam_radius = v.clamp(100.0, 50000.0); }
+                        if let Some(v) = fov { t.cam_fov_deg = v.clamp(10.0, 120.0); }
+                        if let Some(v) = sun_azimuth { t.sun_azimuth_deg = v; }
+                        if let Some(v) = sun_elevation { t.sun_elevation_deg = v.clamp(-90.0, 90.0); }
+                        if let Some(v) = sun_intensity { t.sun_intensity = v.max(0.0); }
+                        if let Some(v) = ambient { t.ambient = v.clamp(0.0, 1.0); }
+                        if let Some(v) = zscale { t.z_scale = v.max(0.01); }
+                        if let Some(v) = shadow { t.shadow_intensity = v.clamp(0.0, 1.0); }
+                        if let Some(bg) = background { t.background_color = bg; }
+                        if let Some(v) = water_level { t.water_level = v; }
+                        if let Some(wc) = water_color { t.water_color = wc; }
+                    }
+                    if let Some(params) = tv.get_params() {
+                        println!("[terrain] {}", params);
+                    }
+                }
+            }
+            ViewerCmd::GetTerrainParams => {
+                if let Some(ref tv) = self.terrain_viewer {
+                    if let Some(params) = tv.get_params() {
+                        println!("[terrain] {}", params);
+                    }
+                }
             }
         }
     }
@@ -6551,6 +6863,17 @@ impl Viewer {
         if mesh.positions.is_empty() || mesh.indices.is_empty() {
             anyhow::bail!("Mesh is empty (no vertices or indices)");
         }
+
+        // Store original mesh data for CPU-side transform workaround
+        self.original_mesh_positions = mesh.positions.clone();
+        self.original_mesh_normals = mesh.normals.clone();
+        self.original_mesh_uvs = mesh.uvs.clone();
+        self.original_mesh_indices = mesh.indices.clone();
+        // Reset transform when new mesh is loaded
+        self.object_transform = glam::Mat4::IDENTITY;
+        self.object_translation = glam::Vec3::ZERO;
+        self.object_rotation = glam::Quat::IDENTITY;
+        self.object_scale = glam::Vec3::ONE;
 
         // Convert MeshBuffers to PackedVertex format
         let vertex_count = mesh.positions.len();
@@ -8139,6 +8462,13 @@ fn update_ipc_stats(vb_ready: bool, vertex_count: u32, index_count: u32, scene_h
     }
 }
 
+fn update_ipc_transform_stats(transform_version: u64, transform_is_identity: bool) {
+    if let Ok(mut stats) = get_ipc_stats().lock() {
+        stats.transform_version = transform_version;
+        stats.transform_is_identity = transform_is_identity;
+    }
+}
+
 /// Run the viewer with an IPC server for non-blocking Python control.
 /// Prints `FORGE3D_VIEWER_READY port=<PORT>` when the server is listening.
 pub fn run_viewer_with_ipc(
@@ -8215,7 +8545,16 @@ pub fn run_viewer_with_ipc(
     let mut last_frame = Instant::now();
 
     let _ = event_loop.run(move |event, elwt| {
-        // Use Poll mode to ensure UserEvents from IPC thread are processed
+        // ControlFlow::Poll justification for IPC mode:
+        // 1. IPC commands arrive asynchronously from a TCP server thread via IPC_CMD_QUEUE
+        // 2. Poll ensures commands are processed promptly without requiring EventLoopProxy wakeups
+        // 3. The alternative Wait+UserEvent pattern would require:
+        //    - Creating EventLoopProxy before run()
+        //    - Passing proxy to IPC server thread  
+        //    - Calling proxy.send_event() after each queue push (adds latency, complexity)
+        // 4. For an interactive viewer with IPC control, Poll provides responsive command handling
+        //    while the continuous redraw loop (request_redraw in AboutToWait) handles rendering
+        // 5. CPU impact is minimal since AboutToWait yields to the OS scheduler between frames
         elwt.set_control_flow(winit::event_loop::ControlFlow::Poll);
         
         match event {

@@ -62,6 +62,59 @@ pub enum IpcRequest {
     },
     /// Close the viewer
     Close,
+    /// Load terrain DEM file for interactive viewing
+    LoadTerrain { path: String },
+    /// Set terrain camera parameters
+    SetTerrainCamera {
+        #[serde(default = "default_phi")]
+        phi_deg: f32,
+        #[serde(default = "default_theta")]
+        theta_deg: f32,
+        #[serde(default = "default_radius")]
+        radius: f32,
+        #[serde(default = "default_fov")]
+        fov_deg: f32,
+    },
+    /// Set terrain sun parameters
+    SetTerrainSun {
+        #[serde(default = "default_sun_azimuth")]
+        azimuth_deg: f32,
+        #[serde(default = "default_sun_elevation")]
+        elevation_deg: f32,
+        #[serde(default = "default_sun_intensity")]
+        intensity: f32,
+    },
+    /// Set multiple terrain parameters at once (like rayshader::render_camera)
+    SetTerrain {
+        #[serde(default)]
+        phi: Option<f32>,
+        #[serde(default)]
+        theta: Option<f32>,
+        #[serde(default)]
+        radius: Option<f32>,
+        #[serde(default)]
+        fov: Option<f32>,
+        #[serde(default)]
+        sun_azimuth: Option<f32>,
+        #[serde(default)]
+        sun_elevation: Option<f32>,
+        #[serde(default)]
+        sun_intensity: Option<f32>,
+        #[serde(default)]
+        ambient: Option<f32>,
+        #[serde(default)]
+        zscale: Option<f32>,
+        #[serde(default)]
+        shadow: Option<f32>,
+        #[serde(default)]
+        background: Option<[f32; 3]>,
+        #[serde(default)]
+        water_level: Option<f32>,
+        #[serde(default)]
+        water_color: Option<[f32; 3]>,
+    },
+    /// Get current terrain parameters
+    GetTerrainParams,
 }
 
 /// Stats about the currently loaded scene
@@ -75,6 +128,10 @@ pub struct ViewerStats {
     pub index_count: u32,
     /// Whether the scene has any mesh loaded
     pub scene_has_mesh: bool,
+    /// Monotonically increasing transform version (incremented on each set_transform)
+    pub transform_version: u64,
+    /// Whether the current transform is identity (no translation, rotation, or scale applied)
+    pub transform_is_identity: bool,
 }
 
 fn default_up() -> [f32; 3] {
@@ -83,6 +140,34 @@ fn default_up() -> [f32; 3] {
 
 fn default_intensity() -> f32 {
     1.0
+}
+
+fn default_phi() -> f32 {
+    135.0
+}
+
+fn default_theta() -> f32 {
+    45.0
+}
+
+fn default_radius() -> f32 {
+    1000.0
+}
+
+fn default_fov() -> f32 {
+    55.0
+}
+
+fn default_sun_azimuth() -> f32 {
+    135.0
+}
+
+fn default_sun_elevation() -> f32 {
+    35.0
+}
+
+fn default_sun_intensity() -> f32 {
+    3.0
 }
 
 /// IPC response envelope
@@ -166,6 +251,38 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             height: *height,
         })),
         IpcRequest::Close => Ok(Some(ViewerCmd::Quit)),
+        IpcRequest::LoadTerrain { path } => Ok(Some(ViewerCmd::LoadTerrain(path.clone()))),
+        IpcRequest::SetTerrainCamera {
+            phi_deg,
+            theta_deg,
+            radius,
+            fov_deg,
+        } => Ok(Some(ViewerCmd::SetTerrainCamera {
+            phi_deg: *phi_deg,
+            theta_deg: *theta_deg,
+            radius: *radius,
+            fov_deg: *fov_deg,
+        })),
+        IpcRequest::SetTerrainSun {
+            azimuth_deg,
+            elevation_deg,
+            intensity,
+        } => Ok(Some(ViewerCmd::SetTerrainSun {
+            azimuth_deg: *azimuth_deg,
+            elevation_deg: *elevation_deg,
+            intensity: *intensity,
+        })),
+        IpcRequest::SetTerrain {
+            phi, theta, radius, fov,
+            sun_azimuth, sun_elevation, sun_intensity,
+            ambient, zscale, shadow, background, water_level, water_color,
+        } => Ok(Some(ViewerCmd::SetTerrain {
+            phi: *phi, theta: *theta, radius: *radius, fov: *fov,
+            sun_azimuth: *sun_azimuth, sun_elevation: *sun_elevation, sun_intensity: *sun_intensity,
+            ambient: *ambient, zscale: *zscale, shadow: *shadow, background: *background,
+            water_level: *water_level, water_color: *water_color,
+        })),
+        IpcRequest::GetTerrainParams => Ok(Some(ViewerCmd::GetTerrainParams)),
     }
 }
 

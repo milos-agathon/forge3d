@@ -161,6 +161,39 @@ pub enum ViewerCmd {
         rotation_quat: Option<[f32; 4]>,
         scale: Option<[f32; 3]>,
     },
+    /// Load terrain DEM file for interactive viewing
+    LoadTerrain(String),
+    /// Set terrain camera (phi, theta, radius, fov in degrees)
+    SetTerrainCamera {
+        phi_deg: f32,
+        theta_deg: f32,
+        radius: f32,
+        fov_deg: f32,
+    },
+    /// Set terrain sun (azimuth, elevation in degrees, intensity)
+    SetTerrainSun {
+        azimuth_deg: f32,
+        elevation_deg: f32,
+        intensity: f32,
+    },
+    /// Set multiple terrain parameters at once
+    SetTerrain {
+        phi: Option<f32>,
+        theta: Option<f32>,
+        radius: Option<f32>,
+        fov: Option<f32>,
+        sun_azimuth: Option<f32>,
+        sun_elevation: Option<f32>,
+        sun_intensity: Option<f32>,
+        ambient: Option<f32>,
+        zscale: Option<f32>,
+        shadow: Option<f32>,
+        background: Option<[f32; 3]>,
+        water_level: Option<f32>,
+        water_color: Option<[f32; 3]>,
+    },
+    /// Get current terrain parameters
+    GetTerrainParams,
 }
 
 /// Visualization mode for viewer output

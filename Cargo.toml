@@ -54,6 +54,7 @@ winit = "0.29"
 pollster = "0.3"
 bytemuck = { version = "1", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+tiff = "0.9"
 exr = { version = "1.72", optional = true }
 glam = "0.24"
 thiserror = "1"

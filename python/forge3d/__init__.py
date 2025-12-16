@@ -60,6 +60,8 @@ if _NATIVE_MODULE is not None:
         "TerrainRenderer",
         "Light",
         "Atmosphere",
+        "open_viewer",
+        "open_terrain_viewer",
     ):
         if hasattr(_NATIVE_MODULE, _name):
             globals()[_name] = getattr(_NATIVE_MODULE, _name)
@@ -94,6 +96,11 @@ from . import presets
 # -----------------------------------------------------------------------------
 from .render import render_raster, render_polygons, render_raytrace_mesh
 from .path_tracing import PathTracer, make_camera
+
+# -----------------------------------------------------------------------------
+# Interactive Viewer API
+# -----------------------------------------------------------------------------
+from .viewer import open_viewer, open_viewer_async, ViewerHandle
 
 # -----------------------------------------------------------------------------
 # Fallback Renderer class

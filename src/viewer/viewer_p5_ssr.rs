@@ -4,7 +4,6 @@
 
 use anyhow::{bail, Context};
 use half::f16;
-use serde_json::json;
 use std::fs;
 use std::path::Path;
 

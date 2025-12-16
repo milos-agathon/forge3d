@@ -1,174 +1,148 @@
 # Interactive Viewer
 
-> **Status:** Planned for Workstream I, Task I1
+> **Status:** ✅ Implemented
 >
-> **Implementation:** Not yet available
->
-> This page documents the planned interactive windowed viewer for real-time scene exploration.
+> The forge3d interactive viewer provides a windowed application for exploring 3D scenes and terrain in real-time.
 
 ## Overview
 
-The forge3d interactive viewer will provide a windowed application for exploring 3D scenes in real-time with camera controls and visualization settings.
+The interactive viewer supports both general 3D scene viewing and terrain DEM visualization with orbit camera controls, real-time parameter adjustments, and snapshot capture.
 
-## Planned Features
+## Quick Start
 
-### Camera Controls
+### Interactive Terrain Viewer
 
-#### Orbit Camera Mode
-- **Mouse drag** — Rotate camera around target
-- **Mouse scroll** — Zoom in/out
-- **Shift + drag** — Pan camera laterally
+```bash
+# Build the viewer binary
+cargo build --release --bin interactive_viewer
 
-#### FPS Camera Mode
-- **WASD** — Move camera forward/left/backward/right
-- **Mouse look** — Rotate view direction
-- **Q/E** — Move up/down
-- **Shift** — Increase movement speed
-
-### Performance
-
-- **Target:** 60 FPS at 1080p on mid-tier GPU (GTX 1060 / M1)
-- **V-Sync:** Configurable
-- **DPI Scaling:** Automatic high-DPI display support
-
-### Windowing
-
-- **Windowed mode:** Resizable window with title bar
-- **Fullscreen mode:** (planned)
-- **Multi-monitor:** (planned)
-
-## Planned API
-
-### Rust API (planned)
-
-```rust
-use forge3d::viewer::{Viewer, CameraMode};
-
-fn main() {
-    let mut viewer = Viewer::new(1024, 768, "forge3d Viewer").unwrap();
-
-    // Set camera mode
-    viewer.set_camera_mode(CameraMode::Orbit);
-    viewer.set_orbit_target([0.0, 0.0, 0.0]);
-    viewer.set_orbit_distance(10.0);
-
-    // Run event loop
-    viewer.run();
-}
+# Launch with a DEM file
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif
 ```
 
-### Python API (planned)
+### Automatic Snapshot Mode
+
+```bash
+# Render terrain to PNG and exit
+python examples/terrain_viewer_interactive.py --dem path/to/dem.tif --snapshot output.png
+```
+
+## Window Controls
+
+| Input | Action |
+|-------|--------|
+| **Mouse drag** | Orbit camera around terrain |
+| **Scroll wheel** | Zoom in/out |
+| **W/S** or **↑/↓** | Tilt camera up/down |
+| **A/D** or **←/→** | Rotate camera left/right |
+| **Q/E** | Zoom out/in |
+| **Shift** | Faster movement |
+| **Escape** | Close viewer |
+
+## Terminal Commands
+
+While the viewer window is open, you can type commands in the terminal to adjust parameters in real-time (similar to rayshader's `render_camera`):
+
+### Setting Multiple Parameters
+
+```bash
+# Camera controls
+set phi=45 theta=60 radius=2000 fov=55
+
+# Lighting
+set sun_az=135 sun_el=45 intensity=1.5 ambient=0.3
+
+# Terrain rendering
+set zscale=2.0 shadow=0.5
+
+# Background color (RGB 0-1)
+set background=0.2,0.3,0.5
+
+# Water (level in elevation units + color)
+set water=1500 water_color=0.1,0.3,0.5
+
+# Combine any parameters in one command
+set phi=90 theta=30 zscale=1.5 sun_el=60 ambient=0.4
+```
+
+### Other Commands
+
+```bash
+params          # Show current parameters
+snap output.png # Take snapshot
+quit            # Close viewer
+```
+
+## Available Parameters
+
+| Parameter | Description | Range/Default |
+|-----------|-------------|---------------|
+| `phi` | Camera azimuth | degrees (default: 135°) |
+| `theta` | Camera elevation | 5-85° (default: 45°) |
+| `radius` | Camera distance | 100-50000 (auto from DEM) |
+| `fov` | Field of view | 10-120° (default: 55°) |
+| `sun_az` | Sun azimuth | degrees (default: 135°) |
+| `sun_el` | Sun elevation | -90 to 90° (default: 35°) |
+| `intensity` | Sun intensity | ≥0 (default: 1.0) |
+| `ambient` | Ambient light | 0-1 (default: 0.3) |
+| `zscale` | Vertical exaggeration | ≥0.01 (default: 0.3) |
+| `shadow` | Shadow intensity | 0-1 (default: 0.5) |
+| `background` | Sky color RGB | 0-1,0-1,0-1 |
+| `water` | Water level | elevation units |
+| `water_color` | Water RGB | 0-1,0-1,0-1 |
+
+## IPC Protocol
+
+The viewer communicates via JSON over TCP. You can control it programmatically:
 
 ```python
-import forge3d as f3d
+import json
+import socket
 
-# Create interactive viewer
-viewer = f3d.create_interactive_viewer(
-    width=1024,
-    height=768,
-    scene=my_scene,
-    camera_mode="orbit"  # or "fps"
-)
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.connect(("127.0.0.1", port))
 
-# Configure camera
-viewer.set_orbit_target([0.0, 0.0, 0.0])
-viewer.set_orbit_distance(10.0)
+# Send command
+cmd = {"cmd": "set_terrain", "phi": 45, "theta": 60, "zscale": 1.5}
+sock.sendall((json.dumps(cmd) + "\n").encode())
 
-# Run (blocks until window closed)
-viewer.run()
+# Receive response
+response = json.loads(sock.recv(4096).decode())
 ```
 
-## Implementation Roadmap
+### Available IPC Commands
 
-As outlined in the [Workstream I Audit Report](../../reports/audit_I.md):
-
-### Phase 1: Core Viewer (~3-5 days)
-
-1. **`src/viewer/mod.rs`** — winit integration
-   - EventLoop and Window setup
-   - Surface and swapchain configuration
-   - 60 FPS render loop
-   - DPI scaling support
-
-2. **`src/viewer/camera_controller.rs`** — Camera controls
-   - Orbit camera implementation
-   - FPS camera implementation
-   - Input event handling
-
-3. **Example:** `examples/interactive_viewer.rs` or `examples/interactive_viewer_demo.py`
-
-4. **Tests:** Smoke tests and camera delta validation
-
-### Phase 2: Python Bindings (optional, ~1-2 days)
-
-- PyO3 bindings in `python/forge3d/viewer.py`
-- `create_interactive_viewer()` function
-- Python example demonstrating usage
-
-### Phase 3: Documentation & Polish (~1 day)
-
-- Update this page with actual API
-- Add tutorial and examples
-- Platform-specific notes
-
-## Alternatives (Current Workarounds)
-
-Until the interactive viewer is implemented, use these alternatives:
-
-### 1. Offscreen Rendering Loop
-
-```python
-import forge3d as f3d
-
-# Manual camera animation
-for i in range(360):
-    angle = i * (3.14159 / 180.0)
-    eye = [10 * cos(angle), 5, 10 * sin(angle)]
-
-    # Render frame
-    rgba = render_with_camera(eye=eye, target=[0,0,0], up=[0,1,0])
-    f3d.save_png_deterministic(f"frame_{i:04d}.png", rgba)
-```
-
-### 2. External Viewers
-
-Export geometry and view in external tools:
-- **Blender** — Use `f3d.export_obj()` or `f3d.export_gltf()`
-- **MeshLab** — For point clouds and meshes
-
-### 3. Jupyter Notebooks
-
-Use inline visualization for static frames:
-
-```python
-from forge3d.helpers.ipython_display import display_offscreen
-
-display_offscreen(800, 600, scene=my_scene, title="View 1")
-```
+- `load_terrain` — Load DEM file: `{"cmd": "load_terrain", "path": "/path/to/dem.tif"}`
+- `set_terrain` — Set parameters: `{"cmd": "set_terrain", "phi": 45, "zscale": 2.0, ...}`
+- `set_terrain_camera` — Camera only: `{"cmd": "set_terrain_camera", "phi_deg": 45, ...}`
+- `set_terrain_sun` — Sun only: `{"cmd": "set_terrain_sun", "azimuth_deg": 135, ...}`
+- `get_terrain_params` — Get current params: `{"cmd": "get_terrain_params"}`
+- `snapshot` — Capture frame: `{"cmd": "snapshot", "path": "/path/to/output.png"}`
+- `close` — Close viewer: `{"cmd": "close"}`
 
 ## Platform Support
 
-When implemented, the interactive viewer will support:
-
-- ✅ **Windows** — DX12 backend (primary target)
-- ✅ **Linux** — Vulkan backend (X11 and Wayland)
 - ✅ **macOS** — Metal backend
+- ✅ **Linux** — Vulkan backend (X11 and Wayland)
+- ✅ **Windows** — DX12/Vulkan backend
 
-### DPI Scaling
+## Implementation Details
 
-High-DPI displays (Retina, 4K) will be handled automatically via winit's scale_factor API.
+The terrain viewer uses a standalone WGSL shader with:
+- Height-based terrain colormap (green valleys → brown slopes → white peaks)
+- Real-time normal calculation via screen-space derivatives
+- Configurable z-scale for vertical exaggeration
+- Diffuse lighting with shadow intensity control
+- Optional water plane with specular highlights
 
-## Dependencies
+### Source Files
 
-The interactive viewer will require:
-
-- **winit** — Windowing and input (already in [Cargo.toml](../../Cargo.toml#L50))
-- **wgpu** — GPU surface creation
-
-No additional runtime dependencies beyond forge3d's existing stack.
+- `src/viewer/viewer_terrain.rs` — Terrain viewer implementation
+- `src/viewer/mod.rs` — Main viewer with IPC handling
+- `src/viewer/ipc.rs` — IPC protocol definitions
+- `examples/terrain_viewer_interactive.py` — Python launcher script
 
 ## See Also
 
-- [Screenshot Controls](screenshot_controls.md) — Capture frames from viewer (F12 hotkey when viewer implemented)
-- [Offscreen Rendering](../offscreen/index.md) — Headless alternative
-- [Workstream I Audit Report](../../reports/audit_I.md) — Implementation status
+- [Terrain Rendering](../terrain_rendering.rst) — Offscreen terrain rendering API
+- [Terrain Demo Quickstart](../examples/terrain_demo_quickstart.rst) — Programmatic terrain rendering

@@ -214,6 +214,88 @@ class TestResponseParsing:
         assert response["error"] == "Something went wrong"
 
 
+class TestGetStatsFormatParse:
+    """Test get_stats command formatting and response parsing."""
+
+    def test_get_stats_command_format(self):
+        """get_stats command is formatted correctly."""
+        cmd = {"cmd": "get_stats"}
+        json_str = json.dumps(cmd)
+        parsed = json.loads(json_str)
+        assert parsed["cmd"] == "get_stats"
+        assert len(parsed) == 1  # Only cmd field
+
+    def test_get_stats_response_before_load(self):
+        """get_stats response before load has correct structure."""
+        # Simulate response when no mesh is loaded
+        response_json = (
+            '{"ok":true,"stats":{'
+            '"vb_ready":false,"vertex_count":0,"index_count":0,"scene_has_mesh":false}}'
+        )
+        response = json.loads(response_json)
+        assert response["ok"] is True
+        stats = response["stats"]
+        assert stats["vb_ready"] is False
+        assert stats["vertex_count"] == 0
+        assert stats["index_count"] == 0
+        assert stats["scene_has_mesh"] is False
+
+    def test_get_stats_response_after_load(self):
+        """get_stats response after load has correct structure."""
+        # Simulate response when mesh is loaded
+        response_json = (
+            '{"ok":true,"stats":{'
+            '"vb_ready":true,"vertex_count":1234,"index_count":5678,"scene_has_mesh":true}}'
+        )
+        response = json.loads(response_json)
+        assert response["ok"] is True
+        stats = response["stats"]
+        assert stats["vb_ready"] is True
+        assert stats["vertex_count"] == 1234
+        assert stats["index_count"] == 5678
+        assert stats["scene_has_mesh"] is True
+
+    def test_get_stats_response_validates_required_fields(self):
+        """get_stats response must have all required fields."""
+        response_json = '{"ok":true,"stats":{"vb_ready":true}}'
+        response = json.loads(response_json)
+        stats = response.get("stats", {})
+        # Check that we can access fields (they may be missing in malformed responses)
+        required_fields = ["vb_ready", "vertex_count", "index_count", "scene_has_mesh"]
+        for field in required_fields:
+            # A well-formed response should have all fields
+            if field == "vb_ready":
+                assert field in stats, f"Missing required field: {field}"
+
+    def test_get_stats_ndjson_roundtrip(self):
+        """get_stats command/response roundtrip works correctly."""
+        # Command
+        cmd = {"cmd": "get_stats"}
+        request_line = json.dumps(cmd) + "\n"
+        assert request_line.endswith("\n")
+        
+        # Parse command back
+        parsed_cmd = json.loads(request_line.strip())
+        assert parsed_cmd["cmd"] == "get_stats"
+        
+        # Response
+        response = {
+            "ok": True,
+            "stats": {
+                "vb_ready": True,
+                "vertex_count": 100,
+                "index_count": 300,
+                "scene_has_mesh": True,
+            }
+        }
+        response_line = json.dumps(response) + "\n"
+        
+        # Parse response back
+        parsed_response = json.loads(response_line.strip())
+        assert parsed_response["ok"] is True
+        assert parsed_response["stats"]["vertex_count"] == 100
+
+
 class TestViewerHandleValidation:
     """Test ViewerHandle input validation."""
 

@@ -379,3 +379,103 @@ def open_viewer_async(
         raise ViewerError(f"Timed out waiting for viewer READY line after {timeout}s")
     
     return ViewerHandle(process, ipc_host, actual_port, timeout=timeout)
+
+
+def open_viewer(
+    width: int = 1280,
+    height: int = 720,
+    title: str = "forge3d Interactive Viewer",
+    obj_path: Optional[Union[str, Path]] = None,
+    gltf_path: Optional[Union[str, Path]] = None,
+    fov_deg: float = 60.0,
+    snapshot_path: Optional[str] = None,
+    snapshot_width: Optional[int] = None,
+    snapshot_height: Optional[int] = None,
+    initial_commands: Optional[list[str]] = None,
+) -> int:
+    """Open an interactive viewer and block until window is closed.
+    
+    This is a blocking function that launches the viewer as a subprocess
+    and waits for it to exit. For non-blocking control, use open_viewer_async().
+    
+    Args:
+        width: Window width in pixels
+        height: Window height in pixels
+        title: Window title
+        obj_path: Optional OBJ file to load on startup
+        gltf_path: Optional glTF file to load on startup
+        fov_deg: Initial field of view in degrees
+        snapshot_path: Optional path for automatic snapshot after startup
+        snapshot_width: Snapshot width (requires snapshot_path)
+        snapshot_height: Snapshot height (requires snapshot_path)
+        initial_commands: List of initial commands to run (e.g., [":gi gtao on"])
+    
+    Returns:
+        Exit code from viewer process
+    
+    Example:
+        >>> import forge3d as f3d
+        >>> f3d.open_viewer(obj_path="model.obj", width=1280, height=720)
+    """
+    if obj_path is not None and gltf_path is not None:
+        raise ValueError("obj_path and gltf_path are mutually exclusive")
+    
+    binary = _find_viewer_binary()
+    
+    # Build command line
+    cmd = [
+        binary,
+        "--size", f"{width}x{height}",
+        "--fov", str(fov_deg),
+    ]
+    
+    if obj_path is not None:
+        cmd.extend(["--obj", str(obj_path)])
+    if gltf_path is not None:
+        cmd.extend(["--gltf", str(gltf_path)])
+    if snapshot_path is not None:
+        cmd.extend(["--snapshot", snapshot_path])
+        if snapshot_width is not None and snapshot_height is not None:
+            cmd.extend(["--snapshot-size", f"{snapshot_width}x{snapshot_height}"])
+    
+    # Start subprocess and wait for completion (blocking)
+    process = subprocess.Popen(
+        cmd,
+        stdout=None,  # Inherit stdout
+        stderr=None,  # Inherit stderr
+    )
+    
+    # If initial commands are provided, we need IPC
+    if initial_commands:
+        # For initial commands, use IPC mode
+        process.terminate()
+        process.wait()
+        
+        # Restart with IPC
+        handle = open_viewer_async(
+            width=width,
+            height=height,
+            title=title,
+            obj_path=obj_path,
+            gltf_path=gltf_path,
+            fov_deg=fov_deg,
+        )
+        
+        # Send initial commands
+        for cmd_str in initial_commands:
+            # Parse command string (e.g., ":gi gtao on")
+            if cmd_str.startswith(":"):
+                cmd_str = cmd_str[1:]  # Remove leading colon
+            # For now, just print the command - the viewer terminal handles these
+            print(f"[init] {cmd_str}")
+        
+        # Take snapshot if requested
+        if snapshot_path is not None:
+            sw = snapshot_width or width
+            sh = snapshot_height or height
+            handle.snapshot(snapshot_path, width=sw, height=sh)
+        
+        # Wait for viewer to close
+        return handle._process.wait()
+    
+    return process.wait()

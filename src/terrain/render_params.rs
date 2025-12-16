@@ -975,6 +975,18 @@ impl TerrainRenderParams {
         self.output_srgb_eotf
     }
 
+    /// P7: Camera projection mode ("screen" = fullscreen triangle, "mesh" = perspective grid)
+    #[getter]
+    pub fn camera_mode(&self) -> &str {
+        &self.camera_mode
+    }
+
+    /// P7: Debug mode for projection probes (0=normal, 40=view-depth, 41=NDC depth, 42=view-pos XYZ)
+    #[getter]
+    pub fn debug_mode(&self) -> u32 {
+        self.debug_mode
+    }
+
     #[getter]
     pub fn height_curve_lut(&self) -> Option<Vec<f32>> {
         self.height_curve_lut.as_ref().map(|lut| lut.as_ref().clone())
