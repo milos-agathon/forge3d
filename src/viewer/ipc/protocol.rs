@@ -109,6 +109,25 @@ pub enum IpcRequest {
     },
     /// Get current terrain parameters
     GetTerrainParams,
+    /// Configure terrain PBR+POM rendering mode
+    SetTerrainPbr {
+        #[serde(default)]
+        enabled: Option<bool>,
+        #[serde(default)]
+        hdr_path: Option<String>,
+        #[serde(default)]
+        ibl_intensity: Option<f32>,
+        #[serde(default)]
+        shadow_technique: Option<String>,
+        #[serde(default)]
+        shadow_map_res: Option<u32>,
+        #[serde(default)]
+        exposure: Option<f32>,
+        #[serde(default)]
+        msaa: Option<u32>,
+        #[serde(default)]
+        normal_strength: Option<f32>,
+    },
 }
 
 /// Stats about the currently loaded scene
@@ -161,7 +180,7 @@ fn default_sun_elevation() -> f32 {
 }
 
 fn default_sun_intensity() -> f32 {
-    3.0
+    1.0
 }
 
 /// IPC response envelope
@@ -300,5 +319,24 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             water_color: *water_color,
         })),
         IpcRequest::GetTerrainParams => Ok(Some(ViewerCmd::GetTerrainParams)),
+        IpcRequest::SetTerrainPbr {
+            enabled,
+            hdr_path,
+            ibl_intensity,
+            shadow_technique,
+            shadow_map_res,
+            exposure,
+            msaa,
+            normal_strength,
+        } => Ok(Some(ViewerCmd::SetTerrainPbr {
+            enabled: *enabled,
+            hdr_path: hdr_path.clone(),
+            ibl_intensity: *ibl_intensity,
+            shadow_technique: shadow_technique.clone(),
+            shadow_map_res: *shadow_map_res,
+            exposure: *exposure,
+            msaa: *msaa,
+            normal_strength: *normal_strength,
+        })),
     }
 }

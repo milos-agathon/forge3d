@@ -25,16 +25,26 @@ struct VertexOutput {
 @vertex
 fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOutput {
     let dims = vec2<f32>(textureDimensions(heightmap));
-    let texel = vec2<i32>(i32(uv.x * dims.x), i32(uv.y * dims.y));
+    let max_texel = vec2<i32>(i32(dims.x) - 1, i32(dims.y) - 1);
+    let texel = clamp(
+        vec2<i32>(i32(uv.x * f32(dims.x)), i32(uv.y * f32(dims.y))),
+        vec2<i32>(0, 0),
+        max_texel
+    );
     let h = textureLoad(heightmap, texel, 0).r;
     
+    let min_h = u.terrain_params.x;
+    let h_range = u.terrain_params.y;
+    let terrain_width = u.terrain_params.z;
     let z_scale = u.terrain_params.w;
-    let center_h = u.terrain_params.x + u.terrain_params.y * 0.5;
-    let scaled_h = center_h + (h - center_h) * z_scale;
     
-    let world_x = uv.x * u.terrain_params.z;
-    let world_z = uv.y * u.terrain_params.z;
-    let world_y = scaled_h;
+    // Normalize height to 0-1 range, base at Y=0
+    let h_normalized = (h - min_h) / max(h_range, 1.0);
+    // Minimal vertical scale (0.001) creates very thin relief surface
+    let world_y = h_normalized * terrain_width * z_scale * 0.001;
+    
+    let world_x = uv.x * terrain_width;
+    let world_z = uv.y * terrain_width;
     
     var out: VertexOutput;
     out.world_pos = vec3<f32>(world_x, world_y, world_z);

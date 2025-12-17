@@ -13,8 +13,9 @@ pub const P52_MAX_MEGAPIXELS: f32 = 2.0;
 
 /// Soft limit for interactive viewer snapshots (in megapixels).
 /// User-provided snapshot overrides will be clamped to this size to keep
-/// memory usage within budget while still allowing high-resolution captures (e.g. 4K).
-pub const VIEWER_SNAPSHOT_MAX_MEGAPIXELS: f32 = 16.0;
+/// memory usage within budget while still allowing high-resolution captures.
+/// 16k = 16384x16384 = 268 MP, so we allow up to 270 MP.
+pub const VIEWER_SNAPSHOT_MAX_MEGAPIXELS: f32 = 270.0;
 
 /// Diffuse scale factor for P5 SSGI captures
 pub const P5_SSGI_DIFFUSE_SCALE: f32 = 0.5;

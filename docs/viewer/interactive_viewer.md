@@ -16,8 +16,16 @@ The interactive viewer supports both general 3D scene viewing and terrain DEM vi
 # Build the viewer binary
 cargo build --release --bin interactive_viewer
 
-# Launch with a DEM file
+# Launch with a DEM file (4K window by default)
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif
+
+# Enable PBR mode with sun controls
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif \
+    --pbr --sun-azimuth 135 --sun-elevation 45 --sun-intensity 1.0
+
+# Full PBR with HDR environment map
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif \
+    --pbr --hdr assets/snow_field_4k.hdr --exposure 1.0 --msaa 8
 ```
 
 ### Automatic Snapshot Mode
@@ -25,6 +33,10 @@ python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif
 ```bash
 # Render terrain to PNG and exit
 python examples/terrain_viewer_interactive.py --dem path/to/dem.tif --snapshot output.png
+
+# High-resolution snapshot (up to 16K supported)
+python examples/terrain_viewer_interactive.py --dem path/to/dem.tif \
+    --snapshot output.png --width 8192 --height 8192
 ```
 
 ## Window Controls
@@ -65,11 +77,28 @@ set water=1500 water_color=0.1,0.3,0.5
 set phi=90 theta=30 zscale=1.5 sun_el=60 ambient=0.4
 ```
 
+### PBR Mode Commands
+
+```bash
+pbr on                        # Enable PBR rendering
+pbr off                       # Return to legacy mode
+pbr exposure=2.0              # Adjust exposure
+pbr shadows=pcss ibl=1.5      # Shadow technique + IBL intensity
+```
+
+### Snapshots (up to 16K)
+
+```bash
+snap output.png               # Snapshot at window size
+snap output.png 3840x2160     # Snapshot at 4K
+snap output.png 7680x4320     # Snapshot at 8K
+snap output.png 16384x16384   # Snapshot at 16K (max)
+```
+
 ### Other Commands
 
 ```bash
 params          # Show current parameters
-snap output.png # Take snapshot
 quit            # Close viewer
 ```
 
@@ -84,6 +113,9 @@ quit            # Close viewer
 | `sun_az` | Sun azimuth | degrees (default: 135°) |
 | `sun_el` | Sun elevation | -90 to 90° (default: 35°) |
 | `intensity` | Sun intensity | ≥0 (default: 1.0) |
+| `exposure` | PBR exposure | 0.1-5.0 (default: 1.0) |
+| `ibl` | IBL intensity | ≥0 (default: 1.0) |
+| `shadows` | Shadow technique | none/hard/pcf/pcss |
 | `ambient` | Ambient light | 0-1 (default: 0.3) |
 | `zscale` | Vertical exaggeration | ≥0.01 (default: 0.3) |
 | `shadow` | Shadow intensity | 0-1 (default: 0.5) |
@@ -129,11 +161,20 @@ response = json.loads(sock.recv(4096).decode())
 ## Implementation Details
 
 The terrain viewer uses a standalone WGSL shader with:
+- **4K default window** (3840×2160)
+- **Snapshots up to 16K** (16384×16384, 270 megapixels max)
 - Height-based terrain colormap (green valleys → brown slopes → white peaks)
 - Real-time normal calculation via screen-space derivatives
 - Configurable z-scale for vertical exaggeration
 - Diffuse lighting with shadow intensity control
 - Optional water plane with specular highlights
+
+**PBR Mode** adds:
+- Blinn-Phong specular + diffuse lighting
+- Real-time CSM shadows (hard/pcf/pcss)
+- ACES filmic tonemapping
+- Configurable sun azimuth, elevation, intensity
+- HDR environment map support for IBL
 
 ### Source Files
 

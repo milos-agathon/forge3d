@@ -197,6 +197,25 @@ pub enum ViewerCmd {
     },
     /// Get current terrain parameters
     GetTerrainParams,
+    /// Configure terrain PBR+POM rendering mode (opt-in, default off)
+    SetTerrainPbr {
+        /// Enable PBR mode (false = legacy simple shader)
+        enabled: Option<bool>,
+        /// Path to HDR environment map for IBL
+        hdr_path: Option<String>,
+        /// IBL intensity multiplier
+        ibl_intensity: Option<f32>,
+        /// Shadow technique: "none", "hard", "pcf", "pcss"
+        shadow_technique: Option<String>,
+        /// Shadow map resolution (default 2048)
+        shadow_map_res: Option<u32>,
+        /// ACES exposure multiplier
+        exposure: Option<f32>,
+        /// MSAA samples (1, 4, or 8)
+        msaa: Option<u32>,
+        /// Terrain normal strength multiplier
+        normal_strength: Option<f32>,
+    },
 }
 
 /// Visualization mode for viewer output

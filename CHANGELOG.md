@@ -1,4 +1,69 @@
 # Changelog
+## [1.1.0] - Interactive Viewer Documentation & Codebase Polish
+
+### Added
+- **Interactive Viewer Documentation** (`docs/viewer/interactive_viewer.md`)
+  - Comprehensive user guide with quick start examples for terrain viewing and PBR mode.
+  - Terminal command reference: `set` for multi-parameter adjustments (camera, lighting, terrain, water).
+  - PBR mode commands (`pbr on|off`, `pbr exposure=`, `pbr shadows=`).
+  - High-resolution snapshot support up to 16K (16384×16384, 270 megapixels).
+  - IPC protocol documentation with JSON/TCP examples for programmatic control.
+  - Platform support matrix (macOS/Metal, Linux/Vulkan, Windows/DX12).
+
+### Changed
+- Applied rustfmt code formatting across 50+ source files for consistent style.
+- Added 45-file viewer refactoring plan targeting ≤300 LOC per module.
+- Enhanced AGENTS.md with 40 AI evidence and stop-condition rules for quality assurance.
+
+## [1.0.0] - PBR Terrain Viewer Phase 6: Documentation
+
+### Added
+- **Phase 6 — Documentation**
+  - Complete user guide (`docs/pbm_pom_viewer.md`) covering CLI options, interactive commands, API reference, and troubleshooting.
+  - Files modified table documenting all backend (Rust) and frontend (Python) changes.
+  - Known limitations section identifying future work: CSM shadows, IBL cubemaps, POM displacement.
+
+## [0.99.0] - PBR Terrain Viewer Phase 5: End-to-End Testing
+
+### Added
+- **Phase 5 — End-to-End Testing**
+  - Integration test suite (`tests/test_terrain_viewer_pbr.py`) with 5 test cases validating legacy/PBR modes.
+  - Test coverage: legacy mode renders, PBR mode enables, PBR produces different output, exposure affects output, PBR can be disabled.
+  - Pytest-compatible test harness with viewer binary detection.
+
+## [0.98.0] - PBR Terrain Viewer Phase 4: PBR Shader & Pipeline
+
+### Added
+- **Phase 4 — PBR Shader + Pipeline Integration**
+  - PBR WGSL shader (`src/viewer/terrain/shader_pbr.rs`) with Blinn-Phong specular, soft self-shadows, and sky-gradient ambient.
+  - Height-based material zones (vegetation → rock → snow), slope-based rock exposure, roughness variation.
+  - ACES tonemapping, gamma correction, and configurable exposure post-processing.
+  - Dual render path in `src/viewer/terrain/render.rs` for legacy/PBR switching.
+
+## [0.97.0] - PBR Terrain Viewer Phase 3: Python CLI & IPC
+
+### Added
+- **Phase 3 — Python CLI Args + IPC Commands**
+  - CLI options in `examples/terrain_viewer_interactive.py`: `--pbr`, `--exposure`, `--normal-strength`, `--ibl-intensity`, `--shadows`.
+  - Interactive console commands: `pbr on|off`, `pbr exposure=<float>`, `pbr normal=<float>`, `pbr status`.
+  - IPC command routing from Python to Rust viewer process.
+
+## [0.96.0] - PBR Terrain Viewer Phase 2: Config Struct
+
+### Added
+- **Phase 2 — ViewerTerrainPbrConfig Struct**
+  - `ViewerTerrainPbrConfig` Rust struct with fields: enabled, exposure, normal_strength, ibl_intensity, shadow_technique, shadow_map_res, hdr_path, msaa.
+  - Default values: enabled=false (legacy mode), exposure=1.0, normal_strength=1.0, ibl_intensity=1.0.
+  - PBR renderer module (`src/viewer/terrain/pbr_renderer.rs`) with config management.
+
+## [0.95.0] - PBR Terrain Viewer Phase 1: IPC Protocol
+
+### Added
+- **Phase 1 — IPC Protocol + ViewerCmd Extension**
+  - `ViewerCmd::SetTerrainPbr` enum variant in `src/viewer/viewer_enums.rs`.
+  - IPC JSON command `set_terrain_pbr` with optional fields: enabled, exposure, normal_strength, ibl_intensity, shadow_technique.
+  - Protocol mapping in `src/viewer/ipc/protocol.rs` and command handler in `src/viewer/cmd/handler.rs`.
+
 ## [0.94.0] - P6 Micro-Detail
 
 ### Added

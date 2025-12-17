@@ -16,7 +16,7 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 0.94.0 — micro-detail upgrade with triplanar detail normals, distance-faded RNM blending, and procedural albedo noise for stable close-range variation.
+Current release: 1.1.0 — Interactive viewer with real-time terminal commands, PBR mode, and snapshot support up to 16K resolution.
 
 ## Installation
 

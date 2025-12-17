@@ -50,6 +50,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
 
     let mut viewer_opt: Option<Viewer> = None;
     let mut last_frame = Instant::now();
+    let mut pending_scale_factor_resize = false;
 
     let _ = event_loop.run(move |event, elwt| {
         match event {
@@ -92,6 +93,9 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 ref event,
                 window_id,
             } if window_id == window.id() && !matches!(event, WindowEvent::RedrawRequested) => {
+                if matches!(event, WindowEvent::ScaleFactorChanged { .. }) {
+                    pending_scale_factor_resize = true;
+                }
                 if let Some(viewer) = viewer_opt.as_mut() {
                     if !viewer.handle_input(event) {
                         match event {
@@ -125,6 +129,13 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 window_id,
             } if window_id == window.id() => {
                 if let Some(viewer) = viewer_opt.as_mut() {
+                    if pending_scale_factor_resize {
+                        let size = viewer.window.inner_size();
+                        if size.width != viewer.config.width || size.height != viewer.config.height {
+                            viewer.resize(size);
+                        }
+                        pending_scale_factor_resize = false;
+                    }
                     let now = Instant::now();
                     let dt = (now - last_frame).as_secs_f32();
                     last_frame = now;
@@ -230,6 +241,7 @@ pub fn run_viewer_with_ipc(
     // Viewer state
     let mut viewer_opt: Option<Viewer> = None;
     let mut last_frame = Instant::now();
+    let mut pending_scale_factor_resize = false;
 
     let _ = event_loop.run(move |event, elwt| {
         // ControlFlow::Poll for IPC mode - responsive command handling
@@ -264,6 +276,9 @@ pub fn run_viewer_with_ipc(
                 ref event,
                 window_id,
             } if window_id == window.id() && !matches!(event, WindowEvent::RedrawRequested) => {
+                if matches!(event, WindowEvent::ScaleFactorChanged { .. }) {
+                    pending_scale_factor_resize = true;
+                }
                 if let Some(viewer) = viewer_opt.as_mut() {
                     if !viewer.handle_input(event) {
                         match event {
@@ -317,6 +332,13 @@ pub fn run_viewer_with_ipc(
                 window_id,
             } if window_id == window.id() => {
                 if let Some(viewer) = viewer_opt.as_mut() {
+                    if pending_scale_factor_resize {
+                        let size = viewer.window.inner_size();
+                        if size.width != viewer.config.width || size.height != viewer.config.height {
+                            viewer.resize(size);
+                        }
+                        pending_scale_factor_resize = false;
+                    }
                     let now = Instant::now();
                     let dt = (now - last_frame).as_secs_f32();
                     last_frame = now;

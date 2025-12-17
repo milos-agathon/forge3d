@@ -984,6 +984,38 @@ impl Viewer {
                     }
                 }
             }
+            ViewerCmd::SetTerrainPbr {
+                enabled,
+                hdr_path,
+                ibl_intensity,
+                shadow_technique,
+                shadow_map_res,
+                exposure,
+                msaa,
+                normal_strength,
+            } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    tv.pbr_config.apply_updates(
+                        enabled,
+                        hdr_path,
+                        ibl_intensity,
+                        shadow_technique,
+                        shadow_map_res,
+                        exposure,
+                        msaa,
+                        normal_strength,
+                    );
+                    // Initialize PBR pipeline if enabling PBR mode
+                    if tv.pbr_config.enabled && tv.pbr_pipeline.is_none() {
+                        if let Err(e) = tv.init_pbr_pipeline(self.config.format) {
+                            eprintln!("[terrain] Failed to init PBR pipeline: {}", e);
+                        }
+                    }
+                    println!("[terrain] {}", tv.pbr_config.to_display_string());
+                } else {
+                    eprintln!("[terrain] No terrain loaded - load terrain first with load_terrain");
+                }
+            }
         }
     }
 }

@@ -559,11 +559,42 @@ Troubleshooting
 - Verify camera positioning and field of view
 - Use appropriate spacing and exaggeration values
 
+Interactive Terrain Viewer
+--------------------------
+
+For real-time terrain exploration, use the interactive viewer:
+
+.. code-block:: bash
+
+    # Build the viewer binary
+    cargo build --release --bin interactive_viewer
+
+    # Launch with a DEM file (4K window by default)
+    python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif
+
+    # Enable PBR rendering with sun controls
+    python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif \
+        --pbr --sun-azimuth 135 --sun-elevation 45 --sun-intensity 1.0
+
+    # Take high-resolution snapshots (up to 16K)
+    > snap output.png 8192x8192
+
+**Key Features:**
+
+- **4K default window** (3840×2160)
+- **Snapshots up to 16K** (16384×16384)
+- **Sun controls**: ``--sun-azimuth``, ``--sun-elevation``, ``--sun-intensity``
+- **Shadow techniques**: none, hard, pcf, pcss
+- **PBR rendering**: ACES tonemapping, IBL, configurable exposure
+
+See :doc:`pbm_pom_viewer` for full documentation.
+
 Example Applications
 --------------------
 
 See these comprehensive examples:
 
+- ``examples/terrain_viewer_interactive.py`` - Interactive terrain viewer with PBR
 - ``examples/terrain_single_tile.py`` - Basic terrain rendering
 - ``examples/advanced_terrain_shadows_pbr.py`` - Full-featured terrain with lighting
 - ``examples/contour_overlay_demo.py`` - Terrain with topographic overlays

@@ -47,6 +47,13 @@ pub struct ViewerTerrainScene {
     pub(super) depth_view: Option<wgpu::TextureView>,
     pub(super) depth_size: (u32, u32),
     pub terrain: Option<ViewerTerrainData>,
+    /// PBR+POM rendering configuration (opt-in, default off)
+    pub pbr_config: super::pbr_renderer::ViewerTerrainPbrConfig,
+    /// PBR pipeline (created lazily when PBR mode enabled)
+    pub pbr_pipeline: Option<wgpu::RenderPipeline>,
+    pub(super) pbr_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    pub(super) pbr_uniform_buffer: Option<wgpu::Buffer>,
+    pub(super) pbr_bind_group: Option<wgpu::BindGroup>,
 }
 
 impl ViewerTerrainScene {
@@ -159,7 +166,119 @@ impl ViewerTerrainScene {
             depth_view: None,
             depth_size: (0, 0),
             terrain: None,
+            pbr_config: super::pbr_renderer::ViewerTerrainPbrConfig::default(),
+            pbr_pipeline: None,
+            pbr_bind_group_layout: None,
+            pbr_uniform_buffer: None,
+            pbr_bind_group: None,
         })
+    }
+
+    /// Initialize PBR pipeline (called lazily when PBR mode is enabled)
+    pub fn init_pbr_pipeline(&mut self, target_format: wgpu::TextureFormat) -> Result<()> {
+        if self.pbr_pipeline.is_some() {
+            return Ok(()); // Already initialized
+        }
+
+        let pbr_bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain_viewer_pbr.bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+            ],
+        });
+
+        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain_viewer_pbr.shader"),
+            source: wgpu::ShaderSource::Wgsl(super::shader_pbr::TERRAIN_PBR_SHADER.into()),
+        });
+
+        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain_viewer_pbr.pipeline_layout"),
+            bind_group_layouts: &[&pbr_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let pbr_pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("terrain_viewer_pbr.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 16,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 8,
+                            shader_location: 1,
+                        },
+                    ],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
+        self.pbr_pipeline = Some(pbr_pipeline);
+        self.pbr_bind_group_layout = Some(pbr_bind_group_layout);
+        println!("[terrain] PBR pipeline initialized");
+        Ok(())
     }
 
     pub fn load_terrain(&mut self, path: &str) -> Result<()> {
@@ -183,12 +302,17 @@ impl ViewerTerrainScene {
             tiff::decoder::DecodingResult::I64(data) => data.iter().map(|&v| v as f32).collect(),
         };
 
+        // Filter out nodata values (common nodata: -9999, -32768, etc.)
         let (min_h, max_h) = heightmap
             .iter()
-            .filter(|h| h.is_finite())
+            .filter(|h| h.is_finite() && **h > -1000.0 && **h < 10000.0)
             .fold((f32::MAX, f32::MIN), |(min, max), &h| {
                 (min.min(h), max.max(h))
             });
+        
+        // Debug: print height range to diagnose flat terrain issue
+        let h_range = max_h - min_h;
+        println!("[terrain] Height range: {:.1} to {:.1} (range: {:.1})", min_h, max_h, h_range);
 
         let heightmap_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("terrain_viewer.heightmap"),
@@ -226,7 +350,7 @@ impl ViewerTerrainScene {
         );
 
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let grid_res = 256u32.min(width.min(height));
+        let grid_res = 1024u32.min(width.min(height));
         let (vertices, indices) = create_grid_mesh(grid_res);
 
         let vertex_buffer = self
@@ -312,7 +436,7 @@ impl ViewerTerrainScene {
             sun_elevation_deg: 35.0,
             sun_intensity: 1.0,
             ambient: 0.3,
-            z_scale: 0.3,
+            z_scale: 1.0,
             shadow_intensity: 0.5,
             background_color: [0.5, 0.7, 0.9],
             water_level: -999999.0,
