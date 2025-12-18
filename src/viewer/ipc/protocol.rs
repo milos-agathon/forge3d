@@ -127,7 +127,49 @@ pub enum IpcRequest {
         msaa: Option<u32>,
         #[serde(default)]
         normal_strength: Option<f32>,
+        #[serde(default)]
+        height_ao: Option<IpcHeightAoConfig>,
+        #[serde(default)]
+        sun_visibility: Option<IpcSunVisConfig>,
     },
+}
+
+/// Heightfield ray-traced AO configuration (IPC)
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcHeightAoConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub directions: Option<u32>,
+    #[serde(default)]
+    pub steps: Option<u32>,
+    #[serde(default)]
+    pub max_distance: Option<f32>,
+    #[serde(default)]
+    pub strength: Option<f32>,
+    #[serde(default)]
+    pub resolution_scale: Option<f32>,
+}
+
+/// Heightfield ray-traced sun visibility configuration (IPC)
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcSunVisConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub samples: Option<u32>,
+    #[serde(default)]
+    pub steps: Option<u32>,
+    #[serde(default)]
+    pub max_distance: Option<f32>,
+    #[serde(default)]
+    pub softness: Option<f32>,
+    #[serde(default)]
+    pub bias: Option<f32>,
+    #[serde(default)]
+    pub resolution_scale: Option<f32>,
 }
 
 /// Stats about the currently loaded scene
@@ -328,15 +370,43 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             exposure,
             msaa,
             normal_strength,
-        } => Ok(Some(ViewerCmd::SetTerrainPbr {
-            enabled: *enabled,
-            hdr_path: hdr_path.clone(),
-            ibl_intensity: *ibl_intensity,
-            shadow_technique: shadow_technique.clone(),
-            shadow_map_res: *shadow_map_res,
-            exposure: *exposure,
-            msaa: *msaa,
-            normal_strength: *normal_strength,
-        })),
+            height_ao,
+            sun_visibility,
+        } => {
+            use crate::viewer::viewer_enums::{ViewerHeightAoConfig, ViewerSunVisConfig};
+            
+            let height_ao_config = height_ao.as_ref().map(|c| ViewerHeightAoConfig {
+                enabled: c.enabled.unwrap_or(false),
+                directions: c.directions.unwrap_or(6),
+                steps: c.steps.unwrap_or(16),
+                max_distance: c.max_distance.unwrap_or(200.0),
+                strength: c.strength.unwrap_or(1.0),
+                resolution_scale: c.resolution_scale.unwrap_or(0.5),
+            });
+            
+            let sun_vis_config = sun_visibility.as_ref().map(|c| ViewerSunVisConfig {
+                enabled: c.enabled.unwrap_or(false),
+                mode: c.mode.clone().unwrap_or_else(|| "soft".to_string()),
+                samples: c.samples.unwrap_or(4),
+                steps: c.steps.unwrap_or(24),
+                max_distance: c.max_distance.unwrap_or(400.0),
+                softness: c.softness.unwrap_or(1.0),
+                bias: c.bias.unwrap_or(0.01),
+                resolution_scale: c.resolution_scale.unwrap_or(0.5),
+            });
+            
+            Ok(Some(ViewerCmd::SetTerrainPbr {
+                enabled: *enabled,
+                hdr_path: hdr_path.clone(),
+                ibl_intensity: *ibl_intensity,
+                shadow_technique: shadow_technique.clone(),
+                shadow_map_res: *shadow_map_res,
+                exposure: *exposure,
+                msaa: *msaa,
+                normal_strength: *normal_strength,
+                height_ao: height_ao_config,
+                sun_visibility: sun_vis_config,
+            }))
+        },
     }
 }

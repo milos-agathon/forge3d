@@ -222,6 +222,70 @@ class ReflectionSettings:
 
 
 @dataclass
+class HeightAoSettings:
+    """Heightfield ray-traced ambient occlusion configuration.
+    
+    Computes AO by ray-marching the heightfield in multiple directions.
+    When enabled=False, AO is disabled (default for backward compatibility).
+    """
+
+    enabled: bool = False
+    resolution_scale: float = 0.5  # Render at half resolution for performance
+    directions: int = 6  # Number of horizon directions to sample
+    steps: int = 16  # Steps per direction
+    max_distance: float = 200.0  # Max ray distance in world units
+    strength: float = 1.0  # AO intensity multiplier
+    blur: bool = False  # Optional bilateral blur
+
+    def __post_init__(self) -> None:
+        if not 0.1 <= self.resolution_scale <= 1.0:
+            raise ValueError("resolution_scale must be in [0.1, 1.0]")
+        if not 1 <= self.directions <= 16:
+            raise ValueError("directions must be in [1, 16]")
+        if not 1 <= self.steps <= 64:
+            raise ValueError("steps must be in [1, 64]")
+        if self.max_distance <= 0.0:
+            raise ValueError("max_distance must be > 0")
+        if not 0.0 <= self.strength <= 2.0:
+            raise ValueError("strength must be in [0.0, 2.0]")
+
+
+@dataclass
+class SunVisibilitySettings:
+    """Heightfield ray-traced sun visibility / soft shadows configuration.
+    
+    Computes sun visibility by ray-marching toward the sun direction.
+    When enabled=False, sun visibility is disabled (default for backward compatibility).
+    """
+
+    enabled: bool = False
+    mode: str = "hard"  # "hard" or "soft"
+    resolution_scale: float = 0.5  # Render at half resolution for performance
+    samples: int = 4  # Number of jittered samples for soft shadows
+    steps: int = 24  # Steps per ray
+    max_distance: float = 400.0  # Max ray distance in world units
+    softness: float = 1.0  # Penumbra softness multiplier
+    bias: float = 0.01  # Self-shadowing bias
+
+    def __post_init__(self) -> None:
+        valid_modes = {"hard", "soft"}
+        if self.mode not in valid_modes:
+            raise ValueError(f"mode must be one of {valid_modes}, got {self.mode!r}")
+        if not 0.1 <= self.resolution_scale <= 1.0:
+            raise ValueError("resolution_scale must be in [0.1, 1.0]")
+        if not 1 <= self.samples <= 16:
+            raise ValueError("samples must be in [1, 16]")
+        if not 1 <= self.steps <= 64:
+            raise ValueError("steps must be in [1, 64]")
+        if self.max_distance <= 0.0:
+            raise ValueError("max_distance must be > 0")
+        if self.softness < 0.0:
+            raise ValueError("softness must be >= 0")
+        if self.bias < 0.0:
+            raise ValueError("bias must be >= 0")
+
+
+@dataclass
 class DetailSettings:
     """P6: Micro-detail configuration for close-range surface enhancement.
     
@@ -438,6 +502,10 @@ class TerrainRenderParams:
     ao_weight: float = 0.0
     # P6: Micro-detail (defaults to disabled for P5 compatibility)
     detail: Optional[DetailSettings] = None
+    # Heightfield ray-traced AO (defaults to disabled for backward compatibility)
+    height_ao: Optional[HeightAoSettings] = None
+    # Heightfield ray-traced sun visibility (defaults to disabled for backward compatibility)
+    sun_visibility: Optional[SunVisibilitySettings] = None
     # P6.1: Color space correctness toggles (defaults to False for P5 compatibility)
     colormap_srgb: bool = False  # Use Rgba8UnormSrgb for colormap texture (correct sampling)
     output_srgb_eotf: bool = False  # Use exact linear_to_srgb() instead of pow-gamma
@@ -456,6 +524,12 @@ class TerrainRenderParams:
         # Default detail to disabled if not provided
         if self.detail is None:
             self.detail = DetailSettings()
+        # Default height_ao to disabled if not provided
+        if self.height_ao is None:
+            self.height_ao = HeightAoSettings()
+        # Default sun_visibility to disabled if not provided
+        if self.sun_visibility is None:
+            self.sun_visibility = SunVisibilitySettings()
         width, height = self.size_px
         if width < 64 or height < 64:
             raise ValueError("size_px must be >= 64x64")
@@ -590,6 +664,8 @@ def make_terrain_params_config(
     reflection: Optional[ReflectionSettings] = None,
     ao_weight: float = 0.0,
     detail: Optional[DetailSettings] = None,
+    height_ao: Optional[HeightAoSettings] = None,
+    sun_visibility: Optional[SunVisibilitySettings] = None,
 ) -> TerrainRenderParams:
     light_color = [1.0, 1.0, 1.0]
     if sun_color is not None:
@@ -717,6 +793,8 @@ def make_terrain_params_config(
         reflection=reflection,
         ao_weight=ao_weight,
         detail=detail,
+        height_ao=height_ao,
+        sun_visibility=sun_visibility,
         camera_mode=str(camera_mode),
         debug_mode=int(debug_mode),
     )
@@ -728,6 +806,8 @@ __all__ = [
     "ShadowSettings",
     "FogSettings",
     "ReflectionSettings",
+    "HeightAoSettings",
+    "SunVisibilitySettings",
     "DetailSettings",
     "TriplanarSettings",
     "PomSettings",

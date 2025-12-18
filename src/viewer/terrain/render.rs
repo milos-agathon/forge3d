@@ -222,6 +222,9 @@ impl ViewerTerrainScene {
             self.prepare_pbr_bind_group_internal(&pbr_uniforms);
         }
 
+        // Run compute passes for heightfield AO and sun visibility before render
+        self.dispatch_heightfield_compute(encoder, terrain_width, sun_dir);
+        
         // Re-borrow terrain after mutable operations
         let terrain = self.terrain.as_ref().unwrap();
         let depth_view = self.depth_view.as_ref().unwrap();
@@ -281,12 +284,13 @@ impl ViewerTerrainScene {
     /// Prepare PBR bind group with current uniforms (called before render pass)
     /// Gets heightmap_view internally from self.terrain to avoid borrow issues
     fn prepare_pbr_bind_group_internal(&mut self, uniforms: &TerrainPbrUniforms) {
-        let Some(ref layout) = self.pbr_bind_group_layout else {
+        // Ensure fallback texture exists first (before any borrows)
+        self.ensure_fallback_texture();
+        
+        // Early return checks
+        if self.pbr_bind_group_layout.is_none() || self.terrain.is_none() {
             return;
-        };
-        let Some(ref terrain) = self.terrain else {
-            return;
-        };
+        }
 
         // Create or update uniform buffer
         if self.pbr_uniform_buffer.is_none() {
@@ -313,6 +317,13 @@ impl ViewerTerrainScene {
             ..Default::default()
         });
 
+        // Now borrow everything we need
+        let layout = self.pbr_bind_group_layout.as_ref().unwrap();
+        let terrain = self.terrain.as_ref().unwrap();
+        let fallback_view = self.fallback_texture_view.as_ref().unwrap();
+        let ao_view = self.height_ao_view.as_ref().unwrap_or(fallback_view);
+        let sv_view = self.sun_vis_view.as_ref().unwrap_or(fallback_view);
+        
         if let Some(ref buf) = self.pbr_uniform_buffer {
             self.pbr_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("terrain_viewer_pbr.bind_group"),
@@ -330,8 +341,170 @@ impl ViewerTerrainScene {
                         binding: 2,
                         resource: wgpu::BindingResource::Sampler(&sampler),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(ao_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(sv_view),
+                    },
                 ],
             }));
+        }
+    }
+    
+    /// Ensure fallback 1x1 white texture exists for when AO/sun_vis are disabled
+    fn ensure_fallback_texture(&mut self) {
+        if self.fallback_texture.is_some() {
+            return;
+        }
+        
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain_viewer.fallback_texture"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        
+        // Write 1.0 (fully lit / no occlusion)
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&[1.0f32]),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        );
+        
+        self.fallback_texture_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        self.fallback_texture = Some(texture);
+    }
+
+    /// Dispatch compute passes for heightfield AO and sun visibility
+    fn dispatch_heightfield_compute(&mut self, encoder: &mut wgpu::CommandEncoder, terrain_width: f32, sun_dir: glam::Vec3) {
+        let terrain = match self.terrain.as_ref() {
+            Some(t) => t,
+            None => return,
+        };
+        let (width, height) = terrain.dimensions;
+        let h_range = terrain.domain.1 - terrain.domain.0;
+        let z_scale = terrain.z_scale;
+        
+        // Height AO compute pass
+        if self.pbr_config.height_ao.enabled {
+            if let (Some(ref pipeline), Some(ref layout), Some(ref uniform_buf), Some(ref ao_view), Some(ref sampler)) = (
+                &self.height_ao_pipeline,
+                &self.height_ao_bind_group_layout,
+                &self.height_ao_uniform_buffer,
+                &self.height_ao_view,
+                &self.sampler_linear,
+            ) {
+                let ao_width = (width as f32 * self.pbr_config.height_ao.resolution_scale) as u32;
+                let ao_height = (height as f32 * self.pbr_config.height_ao.resolution_scale) as u32;
+                
+                // Update uniforms
+                let uniforms: [f32; 16] = [
+                    self.pbr_config.height_ao.directions as f32,
+                    self.pbr_config.height_ao.steps as f32,
+                    self.pbr_config.height_ao.max_distance,
+                    self.pbr_config.height_ao.strength,
+                    terrain_width / width as f32,
+                    terrain_width / height as f32,
+                    h_range * z_scale,
+                    terrain.domain.0,
+                    ao_width as f32,
+                    ao_height as f32,
+                    width as f32,
+                    height as f32,
+                    0.0, 0.0, 0.0, 0.0,
+                ];
+                self.queue.write_buffer(uniform_buf, 0, bytemuck::cast_slice(&uniforms));
+                
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("terrain_viewer.height_ao_bind_group"),
+                    layout,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: uniform_buf.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&terrain.heightmap_view) },
+                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(sampler) },
+                        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(ao_view) },
+                    ],
+                });
+                
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("terrain_viewer.height_ao_compute"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((ao_width + 7) / 8, (ao_height + 7) / 8, 1);
+            }
+        }
+        
+        // Sun visibility compute pass
+        if self.pbr_config.sun_visibility.enabled {
+            if let (Some(ref pipeline), Some(ref layout), Some(ref uniform_buf), Some(ref sv_view), Some(ref sampler)) = (
+                &self.sun_vis_pipeline,
+                &self.sun_vis_bind_group_layout,
+                &self.sun_vis_uniform_buffer,
+                &self.sun_vis_view,
+                &self.sampler_linear,
+            ) {
+                let sv_width = (width as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
+                let sv_height = (height as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
+                
+                // Update uniforms - sun_dir should point toward sun (negate light direction)
+                let uniforms: [f32; 16] = [
+                    self.pbr_config.sun_visibility.samples as f32,
+                    self.pbr_config.sun_visibility.steps as f32,
+                    self.pbr_config.sun_visibility.max_distance,
+                    self.pbr_config.sun_visibility.softness,
+                    terrain_width / width as f32,
+                    terrain_width / height as f32,
+                    h_range * z_scale,
+                    terrain.domain.0,
+                    sv_width as f32,
+                    sv_height as f32,
+                    width as f32,
+                    height as f32,
+                    sun_dir.x,
+                    sun_dir.y,
+                    sun_dir.z,
+                    self.pbr_config.sun_visibility.bias,
+                ];
+                self.queue.write_buffer(uniform_buf, 0, bytemuck::cast_slice(&uniforms));
+                
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("terrain_viewer.sun_vis_bind_group"),
+                    layout,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: uniform_buf.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&terrain.heightmap_view) },
+                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(sampler) },
+                        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(sv_view) },
+                    ],
+                });
+                
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("terrain_viewer.sun_vis_compute"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups((sv_width + 7) / 8, (sv_height + 7) / 8, 1);
+            }
         }
     }
 }

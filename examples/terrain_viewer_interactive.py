@@ -11,6 +11,11 @@ lighting, and take snapshots when you're happy with the view.
 - **PBR mode** (`--pbr`): Enhanced Blinn-Phong lighting, ACES tonemapping,
   height+slope materials, configurable exposure
 
+**Terrain Effects (PBR mode):**
+
+- **Heightfield AO** (`--height-ao`): Ambient occlusion from terrain geometry
+- **Sun Visibility** (`--sun-vis`): Terrain self-shadowing along sun direction
+
 Usage:
     # Basic usage - load terrain with legacy rendering
     python examples/terrain_viewer_interactive.py --dem assets/Gore_Range_Albers_1m.tif
@@ -23,9 +28,17 @@ Usage:
     python examples/terrain_viewer_interactive.py --dem assets/Gore_Range_Albers_1m.tif \\
         --pbr --exposure 1.5
     
-    # PBR with all options
+    # PBR with heightfield AO (darkens valleys/crevices)
     python examples/terrain_viewer_interactive.py --dem assets/Gore_Range_Albers_1m.tif \\
-        --pbr --exposure 1.2 --normal-strength 1.5 --ibl-intensity 1.0
+        --pbr --height-ao --height-ao-strength 1.0
+    
+    # PBR with sun visibility (terrain self-shadowing)
+    python examples/terrain_viewer_interactive.py --dem assets/Gore_Range_Albers_1m.tif \\
+        --pbr --sun-vis --sun-vis-mode soft --sun-elevation 15
+    
+    # PBR with all terrain effects
+    python examples/terrain_viewer_interactive.py --dem assets/Gore_Range_Albers_1m.tif \\
+        --pbr --height-ao --sun-vis --sun-vis-mode hard --exposure 1.2
     
     # Take automatic snapshot and exit
     python examples/terrain_viewer_interactive.py --dem assets/Gore_Range_Albers_1m.tif \\
@@ -61,9 +74,11 @@ from pathlib import Path
 
 def find_viewer_binary() -> str:
     """Find the interactive_viewer binary."""
+    import platform
+    ext = ".exe" if platform.system() == "Windows" else ""
     candidates = [
-        Path(__file__).parent.parent / "target" / "release" / "interactive_viewer",
-        Path(__file__).parent.parent / "target" / "debug" / "interactive_viewer",
+        Path(__file__).parent.parent / "target" / "release" / f"interactive_viewer{ext}",
+        Path(__file__).parent.parent / "target" / "debug" / f"interactive_viewer{ext}",
     ]
     for c in candidates:
         if c.exists():
@@ -133,6 +148,40 @@ def main() -> int:
                            help="Sun elevation angle in degrees (default: 35.0)")
     sun_group.add_argument("--sun-intensity", type=float, default=1.0,
                            help="Sun light intensity (default: 1.0)")
+    
+    # Heightfield Ray AO options
+    ao_group = parser.add_argument_group("Heightfield AO", "Terrain ambient occlusion from heightfield ray-tracing")
+    ao_group.add_argument("--height-ao", action="store_true",
+                          help="Enable heightfield ray-traced ambient occlusion")
+    ao_group.add_argument("--height-ao-directions", type=int, default=6,
+                          help="Number of ray directions around horizon [4-16] (default: 6)")
+    ao_group.add_argument("--height-ao-steps", type=int, default=16,
+                          help="Ray march steps per direction [8-64] (default: 16)")
+    ao_group.add_argument("--height-ao-distance", type=float, default=200.0,
+                          help="Maximum ray distance in world units (default: 200.0)")
+    ao_group.add_argument("--height-ao-strength", type=float, default=1.0,
+                          help="AO darkening intensity [0.0-2.0] (default: 1.0)")
+    ao_group.add_argument("--height-ao-resolution", type=float, default=0.5,
+                          help="AO texture resolution scale [0.1-1.0] (default: 0.5)")
+    
+    # Sun Visibility options
+    sv_group = parser.add_argument_group("Sun Visibility", "Terrain self-shadowing from heightfield ray-tracing")
+    sv_group.add_argument("--sun-vis", action="store_true",
+                          help="Enable heightfield ray-traced sun visibility")
+    sv_group.add_argument("--sun-vis-mode", choices=["hard", "soft"], default="soft",
+                          help="Shadow mode: hard (binary) or soft (jittered) (default: soft)")
+    sv_group.add_argument("--sun-vis-samples", type=int, default=4,
+                          help="Number of jittered samples for soft shadows [1-16] (default: 4)")
+    sv_group.add_argument("--sun-vis-steps", type=int, default=24,
+                          help="Ray march steps toward sun [8-64] (default: 24)")
+    sv_group.add_argument("--sun-vis-distance", type=float, default=400.0,
+                          help="Maximum ray distance in world units (default: 400.0)")
+    sv_group.add_argument("--sun-vis-softness", type=float, default=1.0,
+                          help="Soft shadow penumbra size [0.0-4.0] (default: 1.0)")
+    sv_group.add_argument("--sun-vis-bias", type=float, default=0.01,
+                          help="Self-shadowing bias to reduce artifacts (default: 0.01)")
+    sv_group.add_argument("--sun-vis-resolution", type=float, default=0.5,
+                          help="Visibility texture resolution scale [0.1-1.0] (default: 0.5)")
     
     args = parser.parse_args()
     
@@ -209,11 +258,41 @@ def main() -> int:
         }
         if args.hdr:
             pbr_cmd["hdr_path"] = str(args.hdr.resolve())
+        
+        # Heightfield Ray AO settings
+        if args.height_ao:
+            pbr_cmd["height_ao"] = {
+                "enabled": True,
+                "directions": args.height_ao_directions,
+                "steps": args.height_ao_steps,
+                "max_distance": args.height_ao_distance,
+                "strength": args.height_ao_strength,
+                "resolution_scale": args.height_ao_resolution,
+            }
+        
+        # Sun Visibility settings
+        if args.sun_vis:
+            pbr_cmd["sun_visibility"] = {
+                "enabled": True,
+                "mode": args.sun_vis_mode,
+                "samples": args.sun_vis_samples,
+                "steps": args.sun_vis_steps,
+                "max_distance": args.sun_vis_distance,
+                "softness": args.sun_vis_softness,
+                "bias": args.sun_vis_bias,
+                "resolution_scale": args.sun_vis_resolution,
+            }
+        
         resp = send_ipc(sock, pbr_cmd)
         if not resp.get("ok"):
             print(f"Warning: PBR config failed: {resp.get('error')}")
         else:
-            print(f"PBR mode enabled: shadows={args.shadows}, exposure={args.exposure}")
+            features = [f"shadows={args.shadows}", f"exposure={args.exposure}"]
+            if args.height_ao:
+                features.append("height_ao=on")
+            if args.sun_vis:
+                features.append(f"sun_vis={args.sun_vis_mode}")
+            print(f"PBR mode enabled: {', '.join(features)}")
     
     # Snapshot mode
     if args.snapshot:

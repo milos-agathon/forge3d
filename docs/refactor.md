@@ -1,31 +1,15 @@
-I'll create a comprehensive refactoring plan for `src/viewer/mod.rs`. Let me start by gathering the required evidence.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # Viewer Mod.rs Refactoring Plan
 
 ## 1. Constraints and Rules Enforced
 
-Based on [AGENTS.md](cci:7://file:///Users/mpopovic3/forge3d/AGENTS.md:0:0-0:0) and `docs/codebase-refactor.md`, the following rules govern this refactoring:
+Based on AGENTS.md and `docs/codebase-refactor.md`, the following rules govern this refactoring:
 
 - **≤300 LOC per file** (excluding license headers) — mandatory split threshold
 - **Refactor safely in tiny steps** — keep a working baseline; verify frequently
 - **No behavior changes** — structural moves only; any semantic change is a separate task
 - **`cargo check` and `cargo test` must pass** after every atomic commit
 - **No broken builds left behind** — rollback if verification fails
-- **Preserve public API** — re-export in [mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0) to maintain Rust and Python compatibility
+- **Preserve public API** — re-export in mod.rs to maintain Rust and Python compatibility
 - **Respect Rust/Python boundary** — core GPU/rendering stays in Rust; Python orchestrates/tests
 - **Single responsibility** — each file/struct has one dominant reason to change
 - **Meaningful names** — use verbs for functions, nouns for data structures
@@ -37,7 +21,7 @@ Based on [AGENTS.md](cci:7://file:///Users/mpopovic3/forge3d/AGENTS.md:0:0-0:0) 
 
 ---
 
-## 2. Inventory of Current [src/viewer/mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0)
+## 2. Inventory of Current src/viewer/mod.rs
 
 ### 2.1 File Statistics
 - **Total lines:** 8,668
@@ -47,16 +31,16 @@ Based on [AGENTS.md](cci:7://file:///Users/mpopovic3/forge3d/AGENTS.md:0:0-0:0) 
 
 | Symbol | Kind | Consumers |
 |--------|------|-----------|
-| [Viewer](cci:2://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:114:0-320:1) | struct | Internal (viewer event loop) |
-| `ViewerConfig` | struct (re-export) | [lib.rs](cci:7://file:///Users/mpopovic3/forge3d/src/lib.rs:0:0-0:0), [cli/interactive_viewer.rs](cci:7://file:///Users/mpopovic3/forge3d/src/cli/interactive_viewer.rs:0:0-0:0), Python |
-| [run_viewer](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1) | fn | [lib.rs](cci:7://file:///Users/mpopovic3/forge3d/src/lib.rs:0:0-0:0), [cli/interactive_viewer.rs](cci:7://file:///Users/mpopovic3/forge3d/src/cli/interactive_viewer.rs:0:0-0:0) |
-| [run_viewer_with_ipc](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:8471:0-8666:1) | fn | [cli/interactive_viewer.rs](cci:7://file:///Users/mpopovic3/forge3d/src/cli/interactive_viewer.rs:0:0-0:0) |
-| `set_initial_commands` | fn | [lib.rs](cci:7://file:///Users/mpopovic3/forge3d/src/lib.rs:0:0-0:0), [cli/interactive_viewer.rs](cci:7://file:///Users/mpopovic3/forge3d/src/cli/interactive_viewer.rs:0:0-0:0) |
-| `set_initial_terrain_config` | fn | [lib.rs](cci:7://file:///Users/mpopovic3/forge3d/src/lib.rs:0:0-0:0) |
+| [Viewer](mod.rs:114:0-320:1) | struct | Internal (viewer event loop) |
+| `ViewerConfig` | struct (re-export) | [lib.rs](lib.rs:0:0-0:0), [cli/interactive_viewer.rs](interactive_viewer.rs:0:0-0:0), Python |
+| [run_viewer](mod.rs:6949:0-8437:1) | fn | [lib.rs](lib.rs:0:0-0:0), [cli/interactive_viewer.rs](interactive_viewer.rs:0:0-0:0) |
+| [run_viewer_with_ipc](mod.rs:8471:0-8666:1) | fn | [cli/interactive_viewer.rs](interactive_viewer.rs:0:0-0:0) |
+| `set_initial_commands` | fn | [lib.rs](lib.rs:0:0-0:0), [cli/interactive_viewer.rs](interactive_viewer.rs:0:0-0:0) |
+| `set_initial_terrain_config` | fn | [lib.rs](lib.rs:0:0-0:0) |
 | `ViewerCmd` | enum (re-export) | IPC, event loop, CLI |
 | `VizMode` | enum (re-export) | Viewer state |
 | `GiVizMode` | enum (re-export) | Viewer state |
-| `IpcServerConfig` | struct (from `ipc` submodule) | [cli/interactive_viewer.rs](cci:7://file:///Users/mpopovic3/forge3d/src/cli/interactive_viewer.rs:0:0-0:0) |
+| `IpcServerConfig` | struct (from `ipc` submodule) | [cli/interactive_viewer.rs](interactive_viewer.rs:0:0-0:0) |
 
 ### 2.3 Major Responsibilities Mixed in mod.rs
 
@@ -64,17 +48,17 @@ Based on [AGENTS.md](cci:7://file:///Users/mpopovic3/forge3d/AGENTS.md:0:0-0:0) 
 |----------------|---------------------|----------|
 | Imports & module declarations | 1-150 | 150 |
 | Uniform/param structs (`SkyUniforms`, `FogCameraUniforms`, `VolumetricUniformsStd140`, etc.) | 150-350 | 200 |
-| [Viewer::new](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:1144:4-3164:5) (device/surface/pipeline init) | 350-3165 | **2,800** |
-| [Viewer::window](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3166:4-3168:5), [resize](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3194:4-3451:5), [update_lit_uniform](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3170:4-3192:5) | 3167-3195 | 30 |
-| [Viewer::resize](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3194:4-3451:5) (texture recreation) | 3195-3452 | 260 |
-| [Viewer::handle_input](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3453:4-3539:5) (keyboard/mouse) | 3454-3540 | 90 |
-| [Viewer::update](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3541:4-3610:5) (camera, GI sync) | 3542-3612 | 70 |
-| [Viewer::render](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3612:4-5222:5) (main render loop) | 3613-5224 | **1,600** |
-| P5 capture helpers ([dump_gbuffer_artifacts](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:5226:4-5450:5), `capture_*`) | 5226-5852 | 630 |
-| [Viewer::handle_cmd](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:5856:4-6855:5) (command dispatch) | 5856-6948 | **1,100** |
-| [upload_mesh](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6857:4-6940:5), [load_albedo_texture](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6942:4-6946:5) | 6858-6948 | 90 |
-| [run_viewer](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1) (event loop entry) | 6950-8438 | **1,500** |
-| [run_viewer_with_ipc](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:8471:0-8666:1) | 8472-8668 | 200 |
+| [Viewer::new](mod.rs:1144:4-3164:5) (device/surface/pipeline init) | 350-3165 | **2,800** |
+| [Viewer::window](mod.rs:3166:4-3168:5), [resize](mod.rs:3194:4-3451:5), [update_lit_uniform](mod.rs:3170:4-3192:5) | 3167-3195 | 30 |
+| [Viewer::resize](mod.rs:3194:4-3451:5) (texture recreation) | 3195-3452 | 260 |
+| [Viewer::handle_input](mod.rs:3453:4-3539:5) (keyboard/mouse) | 3454-3540 | 90 |
+| [Viewer::update](mod.rs:3541:4-3610:5) (camera, GI sync) | 3542-3612 | 70 |
+| [Viewer::render](mod.rs:3612:4-5222:5) (main render loop) | 3613-5224 | **1,600** |
+| P5 capture helpers ([dump_gbuffer_artifacts](mod.rs:5226:4-5450:5), `capture_*`) | 5226-5852 | 630 |
+| [Viewer::handle_cmd](mod.rs:5856:4-6855:5) (command dispatch) | 5856-6948 | **1,100** |
+| [upload_mesh](mod.rs:6857:4-6940:5), [load_albedo_texture](mod.rs:6942:4-6946:5) | 6858-6948 | 90 |
+| [run_viewer](mod.rs:6949:0-8437:1) (event loop entry) | 6950-8438 | **1,500** |
+| [run_viewer_with_ipc](mod.rs:8471:0-8666:1) | 8472-8668 | 200 |
 | IPC queue/stats helpers | 8440-8470 | 30 |
 
 ### 2.4 Embedded WGSL Shaders
@@ -100,40 +84,40 @@ Based on [AGENTS.md](cci:7://file:///Users/mpopovic3/forge3d/AGENTS.md:0:0-0:0) 
 
 | File | Symbols Used |
 |------|--------------|
-| `@/Users/mpopovic3/forge3d/src/lib.rs:3066` | [run_viewer](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1), `set_initial_commands`, `ViewerConfig` |
-| `@/Users/mpopovic3/forge3d/src/lib.rs:3163` | [run_viewer](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1), `set_initial_commands`, `set_initial_terrain_config`, `ViewerConfig` |
-| `@/Users/mpopovic3/forge3d/src/cli/interactive_viewer.rs:4` | [run_viewer](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1), [run_viewer_with_ipc](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:8471:0-8666:1), `set_initial_commands`, `ViewerConfig`, `ipc::IpcServerConfig` |
+| `@/Users/mpopovic3/forge3d/src/lib.rs:3066` | [run_viewer](mod.rs:6949:0-8437:1), `set_initial_commands`, `ViewerConfig` |
+| `@/Users/mpopovic3/forge3d/src/lib.rs:3163` | [run_viewer](mod.rs:6949:0-8437:1), `set_initial_commands`, `set_initial_terrain_config`, `ViewerConfig` |
+| `@/Users/mpopovic3/forge3d/src/cli/interactive_viewer.rs:4` | [run_viewer](mod.rs:6949:0-8437:1), [run_viewer_with_ipc](mod.rs:8471:0-8666:1), `set_initial_commands`, `ViewerConfig`, `ipc::IpcServerConfig` |
 
 ### 3.2 Downstream Dependencies (Existing Viewer Submodules)
 
 | Submodule | Size (bytes) | Est. LOC | Status |
 |-----------|--------------|----------|--------|
-| [camera_controller.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/camera_controller.rs:0:0-0:0) | 8,184 | ~280 | OK |
-| [hud.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/hud.rs:0:0-0:0) | 6,490 | ~220 | OK |
-| [image_analysis.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/image_analysis.rs:0:0-0:0) | 7,788 | ~260 | OK |
-| [ipc.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/ipc.rs:0:0-0:0) | 17,215 | ~580 | **Needs split** |
-| [viewer_analysis.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_analysis.rs:0:0-0:0) | 2,822 | ~95 | OK |
-| [viewer_cmd_parse.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_cmd_parse.rs:0:0-0:0) | 10,471 | ~350 | **Needs split** |
-| [viewer_config.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_config.rs:0:0-0:0) | 2,510 | ~85 | OK |
-| [viewer_constants.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_constants.rs:0:0-0:0) | 932 | ~30 | OK |
-| [viewer_enums.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_enums.rs:0:0-0:0) | 5,998 | ~200 | OK |
-| [viewer_image_utils.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_image_utils.rs:0:0-0:0) | 5,741 | ~190 | OK |
-| [viewer_p5.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_p5.rs:0:0-0:0) | 18,839 | ~630 | **Needs split** |
-| [viewer_p5_ao.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_p5_ao.rs:0:0-0:0) | 14,415 | ~480 | **Needs split** |
-| [viewer_p5_cornell.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_p5_cornell.rs:0:0-0:0) | 8,058 | ~270 | OK |
-| [viewer_p5_gi.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_p5_gi.rs:0:0-0:0) | 19,175 | ~640 | **Needs split** |
-| [viewer_p5_ssr.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_p5_ssr.rs:0:0-0:0) | 14,516 | ~490 | **Needs split** |
-| [viewer_render_helpers.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_render_helpers.rs:0:0-0:0) | 4,543 | ~150 | OK |
-| [viewer_ssr_scene.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_ssr_scene.rs:0:0-0:0) | 4,132 | ~140 | OK |
-| [viewer_struct.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_struct.rs:0:0-0:0) | 9,483 | ~320 | **Needs split** |
-| [viewer_terrain.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_terrain.rs:0:0-0:0) | 25,143 | ~840 | **Needs split** |
-| [viewer_types.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_types.rs:0:0-0:0) | 5,191 | ~175 | OK |
+| [camera_controller.rs](camera_controller.rs:0:0-0:0) | 8,184 | ~280 | OK |
+| [hud.rs](hud.rs:0:0-0:0) | 6,490 | ~220 | OK |
+| [image_analysis.rs](image_analysis.rs:0:0-0:0) | 7,788 | ~260 | OK |
+| [ipc.rs](ipc.rs:0:0-0:0) | 17,215 | ~580 | **Needs split** |
+| [viewer_analysis.rs](viewer_analysis.rs:0:0-0:0) | 2,822 | ~95 | OK |
+| [viewer_cmd_parse.rs](viewer_cmd_parse.rs:0:0-0:0) | 10,471 | ~350 | **Needs split** |
+| [viewer_config.rs](viewer_config.rs:0:0-0:0) | 2,510 | ~85 | OK |
+| [viewer_constants.rs](viewer_constants.rs:0:0-0:0) | 932 | ~30 | OK |
+| [viewer_enums.rs](viewer_enums.rs:0:0-0:0) | 5,998 | ~200 | OK |
+| [viewer_image_utils.rs](viewer_image_utils.rs:0:0-0:0) | 5,741 | ~190 | OK |
+| [viewer_p5.rs](viewer_p5.rs:0:0-0:0) | 18,839 | ~630 | **Needs split** |
+| [viewer_p5_ao.rs](viewer_p5_ao.rs:0:0-0:0) | 14,415 | ~480 | **Needs split** |
+| [viewer_p5_cornell.rs](viewer_p5_cornell.rs:0:0-0:0) | 8,058 | ~270 | OK |
+| [viewer_p5_gi.rs](viewer_p5_gi.rs:0:0-0:0) | 19,175 | ~640 | **Needs split** |
+| [viewer_p5_ssr.rs](viewer_p5_ssr.rs:0:0-0:0) | 14,516 | ~490 | **Needs split** |
+| [viewer_render_helpers.rs](viewer_render_helpers.rs:0:0-0:0) | 4,543 | ~150 | OK |
+| [viewer_ssr_scene.rs](viewer_ssr_scene.rs:0:0-0:0) | 4,132 | ~140 | OK |
+| [viewer_struct.rs](viewer_struct.rs:0:0-0:0) | 9,483 | ~320 | **Needs split** |
+| [viewer_terrain.rs](viewer_terrain.rs:0:0-0:0) | 25,143 | ~840 | **Needs split** |
+| [viewer_types.rs](viewer_types.rs:0:0-0:0) | 5,191 | ~175 | OK |
 
 ### 3.3 Python/CLI Entrypoints
 
-1. **Python `open_3d_viewer()`** → `lib.rs:open_3d_viewer()` → [run_viewer()](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1)
-2. **Python `open_terrain_viewer()`** → `lib.rs:open_terrain_viewer()` → [run_viewer()](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1)
-3. **CLI `cargo run --bin interactive_viewer`** → `cli/interactive_viewer.rs:main()` → [run_viewer()](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1) or [run_viewer_with_ipc()](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:8471:0-8666:1)
+1. **Python `open_3d_viewer()`** → `lib.rs:open_3d_viewer()` → [run_viewer()](mod.rs:6949:0-8437:1)
+2. **Python `open_terrain_viewer()`** → `lib.rs:open_terrain_viewer()` → [run_viewer()](mod.rs:6949:0-8437:1)
+3. **CLI `cargo run --bin interactive_viewer`** → `cli/interactive_viewer.rs:main()` → [run_viewer()](mod.rs:6949:0-8437:1) or [run_viewer_with_ipc()](mod.rs:8471:0-8666:1)
 
 ---
 
@@ -240,46 +224,46 @@ src/viewer/
 
 | Old Location (mod.rs lines) | Content | New File |
 |-----------------------------|---------|----------|
-| 1-50 | Imports | [mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0) (keep minimal) |
-| 51-150 | Module declarations | [mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0) |
+| 1-50 | Imports | [mod.rs](mod.rs:0:0-0:0) (keep minimal) |
+| 51-150 | Module declarations | [mod.rs](mod.rs:0:0-0:0) |
 | 150-350 | Uniform structs | `uniforms.rs` |
-| 350-1200 | [Viewer::new](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:1144:4-3164:5) (device init) | `init/device_init.rs` |
-| 1200-1600 | [Viewer::new](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:1144:4-3164:5) (GBuffer init) | `init/gbuffer_init.rs` |
-| 1600-1800 | [Viewer::new](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:1144:4-3164:5) (lit init) | `init/lit_init.rs` |
-| 1800-2100 | [Viewer::new](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:1144:4-3164:5) (GI init) | `init/gi_init.rs` |
-| 2050-2450 | [Viewer::new](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:1144:4-3164:5) (sky init) | `init/sky_init.rs` |
-| 2450-2970 | [Viewer::new](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:1144:4-3164:5) (fog init) | `init/fog_init.rs` |
-| 2970-3165 | [Viewer::new](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:1144:4-3164:5) (CSM, HUD, final) | `init/csm_init.rs` + `init/mod.rs` |
-| 3167-3195 | [window](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3166:4-3168:5), [update_lit_uniform](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3170:4-3192:5) | `state/render_state.rs` |
-| 3195-3452 | [resize](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3194:4-3451:5) | `state/gpu_state.rs` |
-| 3454-3540 | [handle_input](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3453:4-3539:5) | `input/mod.rs` |
-| 3542-3612 | [update](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3541:4-3610:5) | `render/mod.rs` |
+| 350-1200 | [Viewer::new](mod.rs:1144:4-3164:5) (device init) | `init/device_init.rs` |
+| 1200-1600 | [Viewer::new](mod.rs:1144:4-3164:5) (GBuffer init) | `init/gbuffer_init.rs` |
+| 1600-1800 | [Viewer::new](mod.rs:1144:4-3164:5) (lit init) | `init/lit_init.rs` |
+| 1800-2100 | [Viewer::new](mod.rs:1144:4-3164:5) (GI init) | `init/gi_init.rs` |
+| 2050-2450 | [Viewer::new](mod.rs:1144:4-3164:5) (sky init) | `init/sky_init.rs` |
+| 2450-2970 | [Viewer::new](mod.rs:1144:4-3164:5) (fog init) | `init/fog_init.rs` |
+| 2970-3165 | [Viewer::new](mod.rs:1144:4-3164:5) (CSM, HUD, final) | `init/csm_init.rs` + `init/mod.rs` |
+| 3167-3195 | [window](mod.rs:3166:4-3168:5), [update_lit_uniform](mod.rs:3170:4-3192:5) | `state/render_state.rs` |
+| 3195-3452 | [resize](mod.rs:3194:4-3451:5) | `state/gpu_state.rs` |
+| 3454-3540 | [handle_input](mod.rs:3453:4-3539:5) | `input/mod.rs` |
+| 3542-3612 | [update](mod.rs:3541:4-3610:5) | `render/mod.rs` |
 | 3613-3730 | Sky render | `render/sky_pass.rs` |
 | 3730-3965 | Geometry render | `render/geometry_pass.rs` |
 | 3965-4430 | Fog render | `render/fog_pass.rs` |
 | 4430-4510 | Pre-SSR lit + HZB/GI | `render/gi_pass.rs` |
 | 4510-4785 | Lit compute + composite | `render/lit_pass.rs` + `render/composite_pass.rs` |
 | 4785-5224 | HUD, fallback, present | `render/composite_pass.rs` |
-| 5226-5450 | [dump_gbuffer_artifacts](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:5226:4-5450:5) | `p5/gbuffer_dump.rs` |
+| 5226-5450 | [dump_gbuffer_artifacts](mod.rs:5226:4-5450:5) | `p5/gbuffer_dump.rs` |
 | 5450-5852 | P5.1 Cornell helpers | `p5/cornell.rs` |
-| 5856-6250 | [handle_cmd](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:5856:4-6855:5) (SSAO/GI queries) | `cmd/gi_handlers.rs` |
-| 6250-6500 | [handle_cmd](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:5856:4-6855:5) (sky/fog) | `cmd/sky_fog_handlers.rs` |
-| 6500-6700 | [handle_cmd](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:5856:4-6855:5) (IBL) | `cmd/ibl_handlers.rs` |
-| 6700-6860 | [handle_cmd](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:5856:4-6855:5) (transform, terrain) | `cmd/scene_handlers.rs` |
-| 6858-6948 | [upload_mesh](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6857:4-6940:5), [load_albedo_texture](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6942:4-6946:5) | `state/scene_state.rs` |
-| 6950-7500 | [run_viewer](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1) (pending_cmds parsing) | `event_loop/cmd_parsing.rs` |
-| 7500-8310 | [run_viewer](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1) (stdin thread) | `event_loop/cmd_parsing.rs` |
-| 8310-8438 | [run_viewer](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1) (event loop) | `event_loop/run_viewer.rs` |
+| 5856-6250 | [handle_cmd](mod.rs:5856:4-6855:5) (SSAO/GI queries) | `cmd/gi_handlers.rs` |
+| 6250-6500 | [handle_cmd](mod.rs:5856:4-6855:5) (sky/fog) | `cmd/sky_fog_handlers.rs` |
+| 6500-6700 | [handle_cmd](mod.rs:5856:4-6855:5) (IBL) | `cmd/ibl_handlers.rs` |
+| 6700-6860 | [handle_cmd](mod.rs:5856:4-6855:5) (transform, terrain) | `cmd/scene_handlers.rs` |
+| 6858-6948 | [upload_mesh](mod.rs:6857:4-6940:5), [load_albedo_texture](mod.rs:6942:4-6946:5) | `state/scene_state.rs` |
+| 6950-7500 | [run_viewer](mod.rs:6949:0-8437:1) (pending_cmds parsing) | `event_loop/cmd_parsing.rs` |
+| 7500-8310 | [run_viewer](mod.rs:6949:0-8437:1) (stdin thread) | `event_loop/cmd_parsing.rs` |
+| 8310-8438 | [run_viewer](mod.rs:6949:0-8437:1) (event loop) | `event_loop/run_viewer.rs` |
 | 8440-8470 | IPC helpers | `ipc/mod.rs` |
-| 8472-8668 | [run_viewer_with_ipc](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:8471:0-8666:1) | `event_loop/run_viewer_ipc.rs` |
+| 8472-8668 | [run_viewer_with_ipc](mod.rs:8471:0-8666:1) | `event_loop/run_viewer_ipc.rs` |
 
 ### Cycle Avoidance Strategy
 
-1. **Dependency direction:** [mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0) → `init/*` → `state/*` → `uniforms.rs`
+1. **Dependency direction:** [mod.rs](mod.rs:0:0-0:0) → `init/*` → `state/*` → `uniforms.rs`
 2. **Render depends on state:** `render/*` → `state/*`
 3. **Commands depend on state:** `cmd/*` → `state/*`
 4. **No cycles:** `state/*` modules do not import from `init/*`, `render/*`, or `cmd/*`
-5. **Shared types in `uniforms.rs` and [viewer_types.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_types.rs:0:0-0:0)** — both are leaf modules
+5. **Shared types in `uniforms.rs` and [viewer_types.rs](viewer_types.rs:0:0-0:0)** — both are leaf modules
 
 ---
 
@@ -307,12 +291,12 @@ pytest tests/ -v --tb=short
 
 ### Step 1: Extract `uniforms.rs` (uniform structs)
 
-**Action:** Move `SkyUniforms`, `FogCameraUniforms`, `VolumetricUniformsStd140`, `FogUpsampleParamsStd140` from [mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0) to new `uniforms.rs`.
+**Action:** Move `SkyUniforms`, `FogCameraUniforms`, `VolumetricUniformsStd140`, `FogUpsampleParamsStd140` from [mod.rs](mod.rs:0:0-0:0) to new `uniforms.rs`.
 
 **Edits:**
 1. Create `src/viewer/uniforms.rs` with structs
-2. Add `mod uniforms;` + `pub use uniforms::*;` to [mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0)
-3. Remove struct definitions from [mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0)
+2. Add `mod uniforms;` + `pub use uniforms::*;` to [mod.rs](mod.rs:0:0-0:0)
+3. Remove struct definitions from [mod.rs](mod.rs:0:0-0:0)
 
 **Risks:** None — pure data structs with `#[repr(C)]`, no complex deps.
 
@@ -341,7 +325,7 @@ pytest tests/ -v --tb=short
 
 ### Step 3: Extract `init/` module (Viewer::new decomposition)
 
-**Action:** Split [Viewer::new](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:1144:4-3164:5) into init functions returning sub-state structs.
+**Action:** Split [Viewer::new](mod.rs:1144:4-3164:5) into init functions returning sub-state structs.
 
 **Substeps:**
 - 3a: `init/device_init.rs` — instance, adapter, device, surface
@@ -361,21 +345,21 @@ pytest tests/ -v --tb=short
 
 ### Step 4: Extract `input/` module
 
-**Action:** Move [handle_input](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3453:4-3539:5) to `input/mod.rs`, split keyboard/mouse.
+**Action:** Move [handle_input](mod.rs:3453:4-3539:5) to `input/mod.rs`, split keyboard/mouse.
 
 **Edits:**
 1. Create `input/mod.rs`, `input/keyboard.rs`, `input/mouse.rs`
 2. Move keyboard handling to `keyboard.rs`
 3. Move mouse/scroll handling to `mouse.rs`
-4. Update [mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0) to call [input::handle_input](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3453:4-3539:5)
+4. Update [mod.rs](mod.rs:0:0-0:0) to call [input::handle_input](mod.rs:3453:4-3539:5)
 
 **Risks:** Low — isolated functionality.
 
 ---
 
-### Step 5: Extract [render/](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3612:4-5222:5) module
+### Step 5: Extract [render/](mod.rs:3612:4-5222:5) module
 
-**Action:** Decompose [render()](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3612:4-5222:5) into pass modules.
+**Action:** Decompose [render()](mod.rs:3612:4-5222:5) into pass modules.
 
 **Substeps:**
 - 5a: `render/sky_pass.rs` — sky compute dispatch
@@ -393,7 +377,7 @@ pytest tests/ -v --tb=short
 
 ### Step 6: Extract `cmd/` module (handle_cmd decomposition)
 
-**Action:** Split [handle_cmd](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:5856:4-6855:5) match arms into handler modules.
+**Action:** Split [handle_cmd](mod.rs:5856:4-6855:5) match arms into handler modules.
 
 **Substeps:**
 - 6a: `cmd/gi_handlers.rs` — GI/SSAO/SSR/SSGI commands
@@ -409,7 +393,7 @@ pytest tests/ -v --tb=short
 
 ### Step 7: Extract `event_loop/` module
 
-**Action:** Move [run_viewer](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1) and [run_viewer_with_ipc](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:8471:0-8666:1) to dedicated module.
+**Action:** Move [run_viewer](mod.rs:6949:0-8437:1) and [run_viewer_with_ipc](mod.rs:8471:0-8666:1) to dedicated module.
 
 **Substeps:**
 - 7a: `event_loop/cmd_parsing.rs` — stdin command parsing
@@ -417,7 +401,7 @@ pytest tests/ -v --tb=short
 - 7c: `event_loop/run_viewer_ipc.rs` — IPC event loop
 - 7d: `event_loop/mod.rs` — re-exports
 
-**Risks:** Global statics (`INITIAL_CMDS`, `IPC_QUEUE`). Mitigation: Keep statics in [mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0) or dedicated `globals.rs`.
+**Risks:** Global statics (`INITIAL_CMDS`, `IPC_QUEUE`). Mitigation: Keep statics in [mod.rs](mod.rs:0:0-0:0) or dedicated `globals.rs`.
 
 ---
 
@@ -427,21 +411,21 @@ pytest tests/ -v --tb=short
 
 | File | Split Into |
 |------|-----------|
-| [ipc.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/ipc.rs:0:0-0:0) (~580 LOC) | `ipc/mod.rs`, `ipc/server.rs`, `ipc/protocol.rs` |
-| [viewer_cmd_parse.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_cmd_parse.rs:0:0-0:0) (~350 LOC) | Already handled by `cmd/` extraction |
-| [viewer_p5.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_p5.rs:0:0-0:0) (~630 LOC) | `p5/gi_stack.rs` + consolidate |
-| [viewer_p5_ao.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_p5_ao.rs:0:0-0:0) (~480 LOC) | `p5/ao_grid.rs`, `p5/ao_sweep.rs` |
-| [viewer_p5_gi.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_p5_gi.rs:0:0-0:0) (~640 LOC) | `p5/ssgi.rs`, `p5/ssgi_temporal.rs` |
-| [viewer_p5_ssr.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_p5_ssr.rs:0:0-0:0) (~490 LOC) | `p5/ssr_glossy.rs`, `p5/ssr_thickness.rs` |
-| [viewer_struct.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_struct.rs:0:0-0:0) (~320 LOC) | Merge into `state/` or split |
-| [viewer_terrain.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/viewer_terrain.rs:0:0-0:0) (~840 LOC) | `terrain/scene.rs`, `terrain/render.rs`, `terrain/camera.rs` |
+| [ipc.rs](ipc.rs:0:0-0:0) (~580 LOC) | `ipc/mod.rs`, `ipc/server.rs`, `ipc/protocol.rs` |
+| [viewer_cmd_parse.rs](viewer_cmd_parse.rs:0:0-0:0) (~350 LOC) | Already handled by `cmd/` extraction |
+| [viewer_p5.rs](viewer_p5.rs:0:0-0:0) (~630 LOC) | `p5/gi_stack.rs` + consolidate |
+| [viewer_p5_ao.rs](viewer_p5_ao.rs:0:0-0:0) (~480 LOC) | `p5/ao_grid.rs`, `p5/ao_sweep.rs` |
+| [viewer_p5_gi.rs](viewer_p5_gi.rs:0:0-0:0) (~640 LOC) | `p5/ssgi.rs`, `p5/ssgi_temporal.rs` |
+| [viewer_p5_ssr.rs](viewer_p5_ssr.rs:0:0-0:0) (~490 LOC) | `p5/ssr_glossy.rs`, `p5/ssr_thickness.rs` |
+| [viewer_struct.rs](viewer_struct.rs:0:0-0:0) (~320 LOC) | Merge into `state/` or split |
+| [viewer_terrain.rs](viewer_terrain.rs:0:0-0:0) (~840 LOC) | `terrain/scene.rs`, `terrain/render.rs`, `terrain/camera.rs` |
 
 ---
 
 ### Step 9: Final Cleanup
 
 **Action:**
-1. Ensure [mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0) ≤300 LOC (only imports, re-exports, statics)
+1. Ensure [mod.rs](mod.rs:0:0-0:0) ≤300 LOC (only imports, re-exports, statics)
 2. Run full verification suite
 3. Update any broken doc comments
 4. Squash/rebase commits
@@ -509,7 +493,7 @@ sha256sum src/shaders/viewer/*.wgsl
 
 | Criterion | Verification |
 |-----------|--------------|
-| [src/viewer/mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0) ≤ 300 LOC | `wc -l src/viewer/mod.rs` |
+| [src/viewer/mod.rs](mod.rs:0:0-0:0) ≤ 300 LOC | `wc -l src/viewer/mod.rs` |
 | No viewer file exceeds 300 LOC | `find src/viewer -name '*.rs' -exec wc -l {} + | sort -n | tail -20` |
 | `cargo check --all-features` passes | CI / local |
 | `cargo test --all-features` passes | CI / local |
@@ -521,16 +505,16 @@ sha256sum src/shaders/viewer/*.wgsl
 
 ## Summary
 
-The refactoring plan for [src/viewer/mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:0:0-0:0) is complete. Key deliverables:
+The refactoring plan for [src/viewer/mod.rs](mod.rs:0:0-0:0) is complete. Key deliverables:
 
 - **Current state:** 8,668 LOC monolithic file with mixed responsibilities
 - **Target:** ~45 files across 9 subdirectories, all ≤300 LOC
 - **Major decomposition areas:**
   - `state/` — Viewer sub-structs (GPU, render, GI, fog, sky, scene)
-  - `init/` — [Viewer::new](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:1144:4-3164:5) decomposition (7 init modules)
-  - [render/](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:3612:4-5222:5) — Render loop decomposition (7 pass modules)
+  - `init/` — [Viewer::new](mod.rs:1144:4-3164:5) decomposition (7 init modules)
+  - [render/](mod.rs:3612:4-5222:5) — Render loop decomposition (7 pass modules)
   - `cmd/` — Command handling (5 handler modules)
-  - `event_loop/` — [run_viewer](cci:1://file:///Users/mpopovic3/forge3d/src/viewer/mod.rs:6949:0-8437:1) decomposition (3 modules)
+  - `event_loop/` — [run_viewer](mod.rs:6949:0-8437:1) decomposition (3 modules)
   - `p5/` — Consolidated P5 captures (9 modules)
   - `terrain/` — Split from 840 LOC file (3 modules)
 

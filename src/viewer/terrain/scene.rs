@@ -54,6 +54,21 @@ pub struct ViewerTerrainScene {
     pub(super) pbr_bind_group_layout: Option<wgpu::BindGroupLayout>,
     pub(super) pbr_uniform_buffer: Option<wgpu::Buffer>,
     pub(super) pbr_bind_group: Option<wgpu::BindGroup>,
+    // Heightfield compute pipelines for AO and sun visibility
+    pub(super) height_ao_pipeline: Option<wgpu::ComputePipeline>,
+    pub(super) height_ao_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    pub(super) height_ao_texture: Option<wgpu::Texture>,
+    pub(super) height_ao_view: Option<wgpu::TextureView>,
+    pub(super) height_ao_uniform_buffer: Option<wgpu::Buffer>,
+    pub(super) sun_vis_pipeline: Option<wgpu::ComputePipeline>,
+    pub(super) sun_vis_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    pub(super) sun_vis_texture: Option<wgpu::Texture>,
+    pub(super) sun_vis_view: Option<wgpu::TextureView>,
+    pub(super) sun_vis_uniform_buffer: Option<wgpu::Buffer>,
+    pub(super) sampler_linear: Option<wgpu::Sampler>,
+    // Fallback 1x1 white texture for when AO/sun_vis are disabled
+    pub(super) fallback_texture: Option<wgpu::Texture>,
+    pub(super) fallback_texture_view: Option<wgpu::TextureView>,
 }
 
 impl ViewerTerrainScene {
@@ -171,6 +186,19 @@ impl ViewerTerrainScene {
             pbr_bind_group_layout: None,
             pbr_uniform_buffer: None,
             pbr_bind_group: None,
+            height_ao_pipeline: None,
+            height_ao_bind_group_layout: None,
+            height_ao_texture: None,
+            height_ao_view: None,
+            height_ao_uniform_buffer: None,
+            sun_vis_pipeline: None,
+            sun_vis_bind_group_layout: None,
+            sun_vis_texture: None,
+            sun_vis_view: None,
+            sun_vis_uniform_buffer: None,
+            sampler_linear: None,
+            fallback_texture: None,
+            fallback_texture_view: None,
         })
     }
 
@@ -207,6 +235,28 @@ impl ViewerTerrainScene {
                     binding: 2,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                // Height AO texture (R32Float, non-filterable)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Sun visibility texture (R32Float, non-filterable)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
             ],
@@ -278,6 +328,144 @@ impl ViewerTerrainScene {
         self.pbr_pipeline = Some(pbr_pipeline);
         self.pbr_bind_group_layout = Some(pbr_bind_group_layout);
         println!("[terrain] PBR pipeline initialized");
+        Ok(())
+    }
+
+    /// Initialize compute pipelines for heightfield AO and sun visibility
+    pub fn init_heightfield_compute_pipelines(&mut self) -> Result<()> {
+        let terrain = self.terrain.as_ref().ok_or_else(|| anyhow::anyhow!("No terrain loaded"))?;
+        let (width, height) = terrain.dimensions;
+        
+        // Create linear sampler if not exists
+        if self.sampler_linear.is_none() {
+            self.sampler_linear = Some(self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("terrain_viewer.sampler_linear"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            }));
+        }
+
+        // Initialize height AO compute pipeline if enabled and not already initialized
+        if self.pbr_config.height_ao.enabled && self.height_ao_pipeline.is_none() {
+            let ao_width = (width as f32 * self.pbr_config.height_ao.resolution_scale) as u32;
+            let ao_height = (height as f32 * self.pbr_config.height_ao.resolution_scale) as u32;
+            
+            // Create AO texture
+            let ao_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.height_ao_texture"),
+                size: wgpu::Extent3d { width: ao_width, height: ao_height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            self.height_ao_view = Some(ao_texture.create_view(&wgpu::TextureViewDescriptor::default()));
+            self.height_ao_texture = Some(ao_texture);
+            
+            // Create uniform buffer
+            self.height_ao_uniform_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("terrain_viewer.height_ao_uniforms"),
+                size: 64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            
+            // Create bind group layout
+            let ao_bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("terrain_viewer.height_ao_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::StorageTexture { access: wgpu::StorageTextureAccess::WriteOnly, format: wgpu::TextureFormat::R32Float, view_dimension: wgpu::TextureViewDimension::D2 }, count: None },
+                ],
+            });
+            
+            let ao_shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("terrain_viewer.height_ao_shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/heightfield_ao.wgsl").into()),
+            });
+            
+            let ao_pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("terrain_viewer.height_ao_pipeline_layout"),
+                bind_group_layouts: &[&ao_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+            
+            self.height_ao_pipeline = Some(self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("terrain_viewer.height_ao_pipeline"),
+                layout: Some(&ao_pipeline_layout),
+                module: &ao_shader,
+                entry_point: "main",
+            }));
+            self.height_ao_bind_group_layout = Some(ao_bind_group_layout);
+            println!("[terrain] Height AO compute pipeline initialized ({}x{})", ao_width, ao_height);
+        }
+        
+        // Initialize sun visibility compute pipeline if enabled and not already initialized
+        if self.pbr_config.sun_visibility.enabled && self.sun_vis_pipeline.is_none() {
+            let sv_width = (width as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
+            let sv_height = (height as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
+            
+            // Create sun vis texture
+            let sv_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.sun_vis_texture"),
+                size: wgpu::Extent3d { width: sv_width, height: sv_height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            self.sun_vis_view = Some(sv_texture.create_view(&wgpu::TextureViewDescriptor::default()));
+            self.sun_vis_texture = Some(sv_texture);
+            
+            // Create uniform buffer
+            self.sun_vis_uniform_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("terrain_viewer.sun_vis_uniforms"),
+                size: 64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            
+            // Create bind group layout
+            let sv_bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("terrain_viewer.sun_vis_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::StorageTexture { access: wgpu::StorageTextureAccess::WriteOnly, format: wgpu::TextureFormat::R32Float, view_dimension: wgpu::TextureViewDimension::D2 }, count: None },
+                ],
+            });
+            
+            let sv_shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("terrain_viewer.sun_vis_shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/heightfield_sun_vis.wgsl").into()),
+            });
+            
+            let sv_pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("terrain_viewer.sun_vis_pipeline_layout"),
+                bind_group_layouts: &[&sv_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+            
+            self.sun_vis_pipeline = Some(self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("terrain_viewer.sun_vis_pipeline"),
+                layout: Some(&sv_pipeline_layout),
+                module: &sv_shader,
+                entry_point: "main",
+            }));
+            self.sun_vis_bind_group_layout = Some(sv_bind_group_layout);
+            println!("[terrain] Sun visibility compute pipeline initialized ({}x{})", sv_width, sv_height);
+        }
+        
         Ok(())
     }
 

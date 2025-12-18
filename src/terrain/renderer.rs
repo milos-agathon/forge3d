@@ -58,6 +58,28 @@ pub struct TerrainScene {
     // P6: Detail normal texture for DEM-derived detail normals (fallback = neutral normal)
     detail_normal_fallback_view: wgpu::TextureView,
     detail_normal_sampler: wgpu::Sampler,
+    // Heightfield ray AO fallback (1x1 white = AO=1.0, no occlusion)
+    height_ao_fallback_view: wgpu::TextureView,
+    height_ao_sampler: wgpu::Sampler,
+    // Sun visibility fallback (1x1 white = vis=1.0, fully lit)
+    sun_vis_fallback_view: wgpu::TextureView,
+    sun_vis_sampler: wgpu::Sampler,
+    // Heightfield ray AO compute pipeline resources
+    height_ao_compute_pipeline: wgpu::ComputePipeline,
+    height_ao_bind_group_layout: wgpu::BindGroupLayout,
+    height_ao_uniform_buffer: wgpu::Buffer,
+    height_ao_texture: Mutex<Option<wgpu::Texture>>,
+    height_ao_storage_view: Mutex<Option<wgpu::TextureView>>,
+    height_ao_sample_view: Mutex<Option<wgpu::TextureView>>,
+    height_ao_size: Mutex<(u32, u32)>,
+    // Heightfield sun visibility compute pipeline resources
+    sun_vis_compute_pipeline: wgpu::ComputePipeline,
+    sun_vis_bind_group_layout: wgpu::BindGroupLayout,
+    sun_vis_uniform_buffer: wgpu::Buffer,
+    sun_vis_texture: Mutex<Option<wgpu::Texture>>,
+    sun_vis_storage_view: Mutex<Option<wgpu::TextureView>>,
+    sun_vis_sample_view: Mutex<Option<wgpu::TextureView>>,
+    sun_vis_size: Mutex<(u32, u32)>,
     height_curve_lut_sampler: wgpu::Sampler,
     color_format: wgpu::TextureFormat,
     // P1-08: Light buffer for multi-light support
@@ -218,6 +240,34 @@ impl FogUniforms {
             _padding: 0.0,
         }
     }
+}
+
+/// Heightfield ray-traced AO compute shader uniforms
+/// Must match HeightAoUniforms struct in heightfield_ao.wgsl exactly.
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct HeightAoUniforms {
+    /// x=directions, y=steps, z=max_distance (world units), w=strength
+    params0: [f32; 4],
+    /// x=spacing_x, y=spacing_y, z=height_scale, w=height_min
+    params1: [f32; 4],
+    /// x=output_width, y=output_height, z=height_tex_width, w=height_tex_height
+    params2: [f32; 4],
+}
+
+/// Heightfield ray-traced sun visibility compute shader uniforms
+/// Must match SunVisUniforms struct in heightfield_sun_vis.wgsl exactly.
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SunVisUniforms {
+    /// x=samples, y=steps, z=max_distance (world units), w=softness
+    params0: [f32; 4],
+    /// x=spacing_x, y=spacing_y, z=height_scale, w=height_min
+    params1: [f32; 4],
+    /// x=output_width, y=output_height, z=height_tex_width, w=height_tex_height
+    params2: [f32; 4],
+    /// x=sun_dir_x, y=sun_dir_y, z=sun_dir_z (normalized), w=bias
+    params3: [f32; 4],
 }
 
 /// P4: Water planar reflection uniforms
@@ -932,6 +982,42 @@ impl TerrainScene {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // @binding(16): Heightfield ray AO texture (R32Float, non-filterable)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 16,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // @binding(17): Heightfield ray AO sampler (non-filtering for R32Float)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 17,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                // @binding(18): Sun visibility texture (R32Float, non-filterable)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 18,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // @binding(19): Sun visibility sampler (non-filtering for R32Float)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 19,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
             ],
         });
 
@@ -1140,6 +1226,267 @@ impl TerrainScene {
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+
+        // Heightfield ray AO fallback texture (1x1 white = AO=1.0, no occlusion)
+        // Must be R32Float to match bind group layout (non-filterable)
+        let height_ao_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.height_ao_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &height_ao_fallback_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&[1.0f32]), // 1.0 = no occlusion
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4), // R32Float = 4 bytes
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let height_ao_fallback_view =
+            height_ao_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let height_ao_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain.height_ao.sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            // R32Float doesn't support filtering, use Nearest
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        // Sun visibility fallback texture (1x1 white = vis=1.0, fully lit)
+        // Must be R32Float to match bind group layout (non-filterable)
+        let sun_vis_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.sun_vis_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &sun_vis_fallback_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&[1.0f32]), // 1.0 = fully lit
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4), // R32Float = 4 bytes
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let sun_vis_fallback_view =
+            sun_vis_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sun_vis_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain.sun_vis.sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            // R32Float doesn't support filtering, use Nearest
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        // Heightfield ray AO compute pipeline
+        let height_ao_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("heightfield_ao.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../shaders/heightfield_ao.wgsl").into(),
+            ),
+        });
+
+        let height_ao_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("height_ao.bind_group_layout"),
+                entries: &[
+                    // @binding(0): HeightAoUniforms
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // @binding(1): height_tex (R32Float is not filterable)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // @binding(2): height_samp (non-filtering for R32Float)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                    // @binding(3): ao_output (storage texture)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::WriteOnly,
+                            format: wgpu::TextureFormat::R32Float,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let height_ao_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("height_ao.pipeline_layout"),
+                bind_group_layouts: &[&height_ao_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let height_ao_compute_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("height_ao.compute_pipeline"),
+                layout: Some(&height_ao_pipeline_layout),
+                module: &height_ao_shader,
+                entry_point: "main",
+            });
+
+        let height_ao_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("height_ao.uniform_buffer"),
+                contents: bytemuck::bytes_of(&HeightAoUniforms {
+                    params0: [6.0, 16.0, 200.0, 1.0], // directions, steps, max_distance, strength
+                    params1: [1.0, 1.0, 1.0, 0.0],    // spacing_x, spacing_y, height_scale, height_min
+                    params2: [1.0, 1.0, 1.0, 1.0],    // output_width, output_height, tex_width, tex_height
+                }),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
+        // Sun visibility compute pipeline
+        let sun_vis_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("heightfield_sun_vis.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../shaders/heightfield_sun_vis.wgsl").into(),
+            ),
+        });
+
+        let sun_vis_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("sun_vis.bind_group_layout"),
+                entries: &[
+                    // @binding(0): uniforms
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // @binding(1): height_tex (R32Float is not filterable)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // @binding(2): height_samp (non-filtering for R32Float)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                    // @binding(3): vis_output (storage texture)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::WriteOnly,
+                            format: wgpu::TextureFormat::R32Float,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let sun_vis_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("sun_vis.pipeline_layout"),
+                bind_group_layouts: &[&sun_vis_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let sun_vis_compute_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("sun_vis.compute_pipeline"),
+                layout: Some(&sun_vis_pipeline_layout),
+                module: &sun_vis_shader,
+                entry_point: "main",
+            });
+
+        let sun_vis_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("sun_vis.uniform_buffer"),
+                contents: bytemuck::bytes_of(&SunVisUniforms {
+                    params0: [4.0, 24.0, 400.0, 1.0], // samples, steps, max_distance, softness
+                    params1: [1.0, 1.0, 1.0, 0.0],    // spacing_x, spacing_y, height_scale, height_min
+                    params2: [1.0, 1.0, 1.0, 1.0],    // output_width, output_height, tex_width, tex_height
+                    params3: [0.0, 1.0, 0.0, 0.01],   // sun_dir (pointing up), bias
+                }),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
         // P5: AO debug fallback texture (1x1 white)
         let ao_debug_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -1390,6 +1737,27 @@ impl TerrainScene {
             // P6: Detail normal texture and sampler
             detail_normal_fallback_view,
             detail_normal_sampler,
+            // Heightfield ray AO and sun visibility fallback textures
+            height_ao_fallback_view,
+            height_ao_sampler,
+            sun_vis_fallback_view,
+            sun_vis_sampler,
+            // Heightfield ray AO compute pipeline resources
+            height_ao_compute_pipeline,
+            height_ao_bind_group_layout,
+            height_ao_uniform_buffer,
+            height_ao_texture: Mutex::new(None),
+            height_ao_storage_view: Mutex::new(None),
+            height_ao_sample_view: Mutex::new(None),
+            height_ao_size: Mutex::new((0, 0)),
+            // Heightfield sun visibility compute pipeline resources
+            sun_vis_compute_pipeline,
+            sun_vis_bind_group_layout,
+            sun_vis_uniform_buffer,
+            sun_vis_texture: Mutex::new(None),
+            sun_vis_storage_view: Mutex::new(None),
+            sun_vis_sample_view: Mutex::new(None),
+            sun_vis_size: Mutex::new((0, 0)),
             height_curve_lut_sampler,
             color_format,
             light_buffer: Arc::new(Mutex::new(light_buffer)),
@@ -1630,6 +1998,148 @@ impl TerrainScene {
         *view = new_view;
         *depth_tex = new_depth_texture;
         *depth_view = new_depth_view;
+        *size = (target_width, target_height);
+
+        Ok(true)
+    }
+
+    /// Ensure heightfield AO texture matches the required size (scaled by resolution_scale).
+    /// Returns true if texture was recreated, false if size was already correct.
+    fn ensure_height_ao_texture_size(&self, width: u32, height: u32, resolution_scale: f32) -> Result<bool> {
+        let target_width = ((width as f32 * resolution_scale) as u32).max(1);
+        let target_height = ((height as f32 * resolution_scale) as u32).max(1);
+
+        let mut size = self
+            .height_ao_size
+            .lock()
+            .map_err(|_| anyhow!("height_ao_size mutex poisoned"))?;
+
+        if size.0 == target_width && size.1 == target_height {
+            return Ok(false);
+        }
+
+        log::info!(
+            target: "terrain.height_ao",
+            "Recreating height AO texture: {}x{} -> {}x{} (scale={:.2} of {}x{})",
+            size.0, size.1, target_width, target_height, resolution_scale, width, height
+        );
+
+        // Create new AO texture with storage and sampled usage
+        let new_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.height_ao.texture"),
+            size: wgpu::Extent3d {
+                width: target_width,
+                height: target_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        // Create storage view for compute shader write
+        let new_storage_view = new_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("terrain.height_ao.storage_view"),
+            ..Default::default()
+        });
+
+        // Create sample view for fragment shader read
+        let new_sample_view = new_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("terrain.height_ao.sample_view"),
+            ..Default::default()
+        });
+
+        // Update the textures under lock
+        let mut tex = self
+            .height_ao_texture
+            .lock()
+            .map_err(|_| anyhow!("height_ao_texture mutex poisoned"))?;
+        let mut storage_view = self
+            .height_ao_storage_view
+            .lock()
+            .map_err(|_| anyhow!("height_ao_storage_view mutex poisoned"))?;
+        let mut sample_view = self
+            .height_ao_sample_view
+            .lock()
+            .map_err(|_| anyhow!("height_ao_sample_view mutex poisoned"))?;
+
+        *tex = Some(new_texture);
+        *storage_view = Some(new_storage_view);
+        *sample_view = Some(new_sample_view);
+        *size = (target_width, target_height);
+
+        Ok(true)
+    }
+
+    /// Ensure sun visibility texture matches the required size (scaled by resolution_scale).
+    /// Returns true if texture was recreated, false if size was already correct.
+    fn ensure_sun_vis_texture_size(&self, width: u32, height: u32, resolution_scale: f32) -> Result<bool> {
+        let target_width = ((width as f32 * resolution_scale) as u32).max(1);
+        let target_height = ((height as f32 * resolution_scale) as u32).max(1);
+
+        let mut size = self
+            .sun_vis_size
+            .lock()
+            .map_err(|_| anyhow!("sun_vis_size mutex poisoned"))?;
+
+        if size.0 == target_width && size.1 == target_height {
+            return Ok(false);
+        }
+
+        log::info!(
+            target: "terrain.sun_vis",
+            "Recreating sun visibility texture: {}x{} -> {}x{} (scale={:.2} of {}x{})",
+            size.0, size.1, target_width, target_height, resolution_scale, width, height
+        );
+
+        // Create new sun visibility texture with storage and sampled usage
+        let new_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.sun_vis.texture"),
+            size: wgpu::Extent3d {
+                width: target_width,
+                height: target_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        // Create storage view for compute shader write
+        let new_storage_view = new_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("terrain.sun_vis.storage_view"),
+            ..Default::default()
+        });
+
+        // Create sample view for fragment shader read
+        let new_sample_view = new_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("terrain.sun_vis.sample_view"),
+            ..Default::default()
+        });
+
+        // Update the textures under lock
+        let mut tex = self
+            .sun_vis_texture
+            .lock()
+            .map_err(|_| anyhow!("sun_vis_texture mutex poisoned"))?;
+        let mut storage_view = self
+            .sun_vis_storage_view
+            .lock()
+            .map_err(|_| anyhow!("sun_vis_storage_view mutex poisoned"))?;
+        let mut sample_view = self
+            .sun_vis_sample_view
+            .lock()
+            .map_err(|_| anyhow!("sun_vis_sample_view mutex poisoned"))?;
+
+        *tex = Some(new_texture);
+        *storage_view = Some(new_storage_view);
+        *sample_view = Some(new_sample_view);
         *size = (target_width, target_height);
 
         Ok(true)
@@ -3008,6 +3518,218 @@ impl TerrainScene {
             });
 
         // ──────────────────────────────────────────────────────────────────────────
+        // Heightfield Ray AO Compute Pass (before shadow rendering)
+        // ──────────────────────────────────────────────────────────────────────────
+        let height_ao_enabled = decoded.height_ao.enabled;
+        let height_ao_computed = if height_ao_enabled {
+            // Ensure AO texture is the right size
+            let ao_resolution_scale = decoded.height_ao.resolution_scale.clamp(0.1, 1.0);
+            self.ensure_height_ao_texture_size(internal_width, internal_height, ao_resolution_scale)?;
+
+            // Get AO texture size
+            let ao_size = self
+                .height_ao_size
+                .lock()
+                .map_err(|_| anyhow!("height_ao_size mutex poisoned"))?;
+            let (ao_width, ao_height) = *ao_size;
+            drop(ao_size);
+
+            // Update AO uniforms
+            let height_exag_for_ao = params.z_scale;
+            let height_min_for_ao = decoded.clamp.height_range.0;
+            let ao_uniforms = HeightAoUniforms {
+                params0: [
+                    decoded.height_ao.directions as f32,
+                    decoded.height_ao.steps as f32,
+                    decoded.height_ao.max_distance,
+                    decoded.height_ao.strength,
+                ],
+                params1: [
+                    params.terrain_span / width as f32,  // spacing_x (world units per texel)
+                    params.terrain_span / height as f32, // spacing_y
+                    height_exag_for_ao,
+                    height_min_for_ao,
+                ],
+                params2: [
+                    ao_width as f32,
+                    ao_height as f32,
+                    width as f32,
+                    height as f32,
+                ],
+            };
+            self.queue.write_buffer(
+                &self.height_ao_uniform_buffer,
+                0,
+                bytemuck::bytes_of(&ao_uniforms),
+            );
+
+            // Get views for compute pass
+            let storage_view_guard = self
+                .height_ao_storage_view
+                .lock()
+                .map_err(|_| anyhow!("height_ao_storage_view mutex poisoned"))?;
+            let storage_view = storage_view_guard
+                .as_ref()
+                .ok_or_else(|| anyhow!("height_ao_storage_view not initialized"))?;
+
+            // Create bind group for compute pass
+            let ao_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("height_ao.bind_group"),
+                layout: &self.height_ao_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.height_ao_uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&heightmap_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(storage_view),
+                    },
+                ],
+            });
+            drop(storage_view_guard);
+
+            // Dispatch compute pass
+            {
+                let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("height_ao.compute_pass"),
+                    timestamp_writes: None,
+                });
+                compute_pass.set_pipeline(&self.height_ao_compute_pipeline);
+                compute_pass.set_bind_group(0, &ao_bind_group, &[]);
+                // Workgroup size is 8x8, dispatch enough groups to cover the AO texture
+                let workgroups_x = (ao_width + 7) / 8;
+                let workgroups_y = (ao_height + 7) / 8;
+                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+            }
+
+            true // AO was computed
+        } else {
+            false // AO not computed, use fallback
+        };
+
+        // ──────────────────────────────────────────────────────────────────────────
+        // Heightfield Sun Visibility Compute Pass (after AO, before shadow rendering)
+        // ──────────────────────────────────────────────────────────────────────────
+        let sun_vis_enabled = decoded.sun_visibility.enabled;
+        let sun_vis_computed = if sun_vis_enabled {
+            // Ensure sun visibility texture is the right size
+            let sv_resolution_scale = decoded.sun_visibility.resolution_scale.clamp(0.1, 1.0);
+            self.ensure_sun_vis_texture_size(internal_width, internal_height, sv_resolution_scale)?;
+
+            // Get sun visibility texture size
+            let sv_size = self
+                .sun_vis_size
+                .lock()
+                .map_err(|_| anyhow!("sun_vis_size mutex poisoned"))?;
+            let (sv_width, sv_height) = *sv_size;
+            drop(sv_size);
+
+            // Compute sun direction for ray marching (toward the sun)
+            // decoded.light.direction is light-to-surface, so negate to get surface-to-sun
+            let sun_dir = glam::Vec3::new(
+                -decoded.light.direction[0],
+                -decoded.light.direction[1],
+                -decoded.light.direction[2],
+            ).normalize();
+
+            // Update sun visibility uniforms
+            let height_exag_for_sv = params.z_scale;
+            let height_min_for_sv = decoded.clamp.height_range.0;
+            let sv_uniforms = SunVisUniforms {
+                params0: [
+                    decoded.sun_visibility.samples as f32,
+                    decoded.sun_visibility.steps as f32,
+                    decoded.sun_visibility.max_distance,
+                    decoded.sun_visibility.softness,
+                ],
+                params1: [
+                    params.terrain_span / width as f32,  // spacing_x (world units per texel)
+                    params.terrain_span / height as f32, // spacing_y
+                    height_exag_for_sv,
+                    height_min_for_sv,
+                ],
+                params2: [
+                    sv_width as f32,
+                    sv_height as f32,
+                    width as f32,
+                    height as f32,
+                ],
+                params3: [
+                    sun_dir.x,
+                    sun_dir.y,
+                    sun_dir.z,
+                    decoded.sun_visibility.bias,
+                ],
+            };
+            self.queue.write_buffer(
+                &self.sun_vis_uniform_buffer,
+                0,
+                bytemuck::bytes_of(&sv_uniforms),
+            );
+
+            // Get views for compute pass
+            let sv_storage_view_guard = self
+                .sun_vis_storage_view
+                .lock()
+                .map_err(|_| anyhow!("sun_vis_storage_view mutex poisoned"))?;
+            let sv_storage_view = sv_storage_view_guard
+                .as_ref()
+                .ok_or_else(|| anyhow!("sun_vis_storage_view not initialized"))?;
+
+            // Create bind group for compute pass
+            let sv_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("sun_vis.bind_group"),
+                layout: &self.sun_vis_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.sun_vis_uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&heightmap_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(sv_storage_view),
+                    },
+                ],
+            });
+            drop(sv_storage_view_guard);
+
+            // Dispatch compute pass
+            {
+                let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("sun_vis.compute_pass"),
+                    timestamp_writes: None,
+                });
+                compute_pass.set_pipeline(&self.sun_vis_compute_pipeline);
+                compute_pass.set_bind_group(0, &sv_bind_group, &[]);
+                // Workgroup size is 8x8, dispatch enough groups to cover the visibility texture
+                let workgroups_x = (sv_width + 7) / 8;
+                let workgroups_y = (sv_height + 7) / 8;
+                compute_pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+            }
+
+            true // Sun visibility was computed
+        } else {
+            false // Sun visibility not computed, use fallback
+        };
+
+        // ──────────────────────────────────────────────────────────────────────────
         // P1-Shadow: Render shadow depth passes for terrain self-shadowing
         // ──────────────────────────────────────────────────────────────────────────
         // Compute camera matrices for shadow cascade calculations
@@ -3185,6 +3907,18 @@ impl TerrainScene {
             .map(|(_, view)| view as &wgpu::TextureView)
             .unwrap_or(&self.height_curve_identity_view);
 
+        // Acquire height AO sample view for bind group (must be held during bind group creation)
+        let height_ao_sample_guard = self
+            .height_ao_sample_view
+            .lock()
+            .map_err(|_| anyhow!("height_ao_sample_view mutex poisoned"))?;
+
+        // Acquire sun visibility sample view for bind group (must be held during bind group creation)
+        let sun_vis_sample_guard = self
+            .sun_vis_sample_view
+            .lock()
+            .map_err(|_| anyhow!("sun_vis_sample_view mutex poisoned"))?;
+
         // Create main terrain bind group (deferred from earlier to avoid borrow conflict)
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain_pbr_pom.bind_group"),
@@ -3264,6 +3998,42 @@ impl TerrainScene {
                 wgpu::BindGroupEntry {
                     binding: 15,
                     resource: wgpu::BindingResource::Sampler(&self.detail_normal_sampler),
+                },
+                // Heightfield ray AO texture (computed or fallback = 1x1 white)
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: wgpu::BindingResource::TextureView(
+                        if height_ao_computed {
+                            height_ao_sample_guard
+                                .as_ref()
+                                .unwrap_or(&self.height_ao_fallback_view)
+                        } else {
+                            &self.height_ao_fallback_view
+                        },
+                    ),
+                },
+                // Heightfield ray AO sampler
+                wgpu::BindGroupEntry {
+                    binding: 17,
+                    resource: wgpu::BindingResource::Sampler(&self.height_ao_sampler),
+                },
+                // Sun visibility texture (computed or fallback = 1x1 white)
+                wgpu::BindGroupEntry {
+                    binding: 18,
+                    resource: wgpu::BindingResource::TextureView(
+                        if sun_vis_computed {
+                            sun_vis_sample_guard
+                                .as_ref()
+                                .unwrap_or(&self.sun_vis_fallback_view)
+                        } else {
+                            &self.sun_vis_fallback_view
+                        },
+                    ),
+                },
+                // Sun visibility sampler
+                wgpu::BindGroupEntry {
+                    binding: 19,
+                    resource: wgpu::BindingResource::Sampler(&self.sun_vis_sampler),
                 },
             ],
         });

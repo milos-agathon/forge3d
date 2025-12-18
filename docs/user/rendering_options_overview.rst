@@ -245,6 +245,154 @@ Global Illumination Parameters
 
 **Note:** Multiple GI modes can be combined, e.g., ``["ibl", "ssao", "ssr"]``
 
+Terrain-Specific Effects
+------------------------
+
+These effects are specific to terrain rendering and use heightfield ray-tracing for
+high-quality ambient occlusion and sun visibility computation directly from the DEM data.
+
+Heightfield Ray AO (HeightAoSettings)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Computes ambient occlusion by ray-marching the heightfield in multiple directions,
+producing soft darkening in concave terrain regions (valleys, crevices). This is
+an alternative to screen-space AO that works directly on terrain geometry.
+
+.. list-table:: HeightAoSettings Configuration
+   :header-rows: 1
+   :widths: 20 15 15 50
+
+   * - Field
+     - Type
+     - Default
+     - Description
+   * - ``enabled``
+     - bool
+     - ``False``
+     - Enable heightfield ray-traced AO
+   * - ``resolution_scale``
+     - float
+     - ``0.5``
+     - AO texture resolution relative to render size [0.1, 1.0]
+   * - ``directions``
+     - int
+     - ``6``
+     - Number of ray directions around horizon [4, 16]
+   * - ``steps``
+     - int
+     - ``16``
+     - Ray march steps per direction [8, 64]
+   * - ``max_distance``
+     - float
+     - ``200.0``
+     - Maximum ray distance in world units (should be proportional to terrain_span)
+   * - ``strength``
+     - float
+     - ``1.0``
+     - AO darkening intensity [0.0, 2.0]
+   * - ``blur``
+     - bool
+     - ``False``
+     - Apply blur to reduce noise (not yet implemented)
+
+**Usage Example:**
+
+.. code-block:: python
+
+    from forge3d.terrain_params import HeightAoSettings, TerrainRenderParams
+
+    config = TerrainRenderParamsConfig(
+        # ... other settings ...
+        height_ao=HeightAoSettings(
+            enabled=True,
+            directions=8,
+            steps=24,
+            max_distance=100.0,  # Adjust based on terrain_span
+            strength=1.0,
+            resolution_scale=0.5,
+        ),
+    )
+
+**Debug Mode:** Use debug mode 28 (``DBG_RAW_SSAO``) to visualize the combined AO buffer.
+
+Sun Visibility (SunVisibilitySettings)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Computes terrain self-shadowing by ray-marching along the sun direction, producing
+shadows where terrain occludes direct sunlight. Can be used alongside or instead of
+cascaded shadow maps (CSM) for terrain-specific shadowing.
+
+.. list-table:: SunVisibilitySettings Configuration
+   :header-rows: 1
+   :widths: 20 15 15 50
+
+   * - Field
+     - Type
+     - Default
+     - Description
+   * - ``enabled``
+     - bool
+     - ``False``
+     - Enable heightfield ray-traced sun visibility
+   * - ``mode``
+     - string
+     - ``"soft"``
+     - Shadow mode: ``"hard"`` (binary) or ``"soft"`` (jittered samples)
+   * - ``resolution_scale``
+     - float
+     - ``0.5``
+     - Visibility texture resolution relative to render size [0.1, 1.0]
+   * - ``samples``
+     - int
+     - ``4``
+     - Number of jittered samples for soft shadows [1, 16]
+   * - ``steps``
+     - int
+     - ``24``
+     - Ray march steps toward sun [8, 64]
+   * - ``max_distance``
+     - float
+     - ``400.0``
+     - Maximum ray distance in world units
+   * - ``softness``
+     - float
+     - ``1.0``
+     - Soft shadow penumbra size [0.0, 4.0]
+   * - ``bias``
+     - float
+     - ``0.01``
+     - Self-shadowing bias to reduce artifacts
+
+**Usage Example:**
+
+.. code-block:: python
+
+    from forge3d.terrain_params import SunVisibilitySettings, TerrainRenderParamsConfig
+
+    config = TerrainRenderParamsConfig(
+        # ... other settings ...
+        sun_visibility=SunVisibilitySettings(
+            enabled=True,
+            mode="soft",
+            samples=4,
+            steps=32,
+            max_distance=200.0,
+            softness=1.0,
+            bias=0.01,
+        ),
+    )
+
+**Interaction with CSM Shadows:**
+
+When both CSM shadows and sun visibility are enabled, they are combined multiplicatively:
+
+* ``combined_shadow = csm_shadow * sun_vis``
+
+This deepens terrain self-shadowing while preserving CSM's object-based shadows.
+To use sun visibility alone (without CSM), disable shadows in ShadowSettings.
+
+**Debug Mode:** Use debug mode 29 (``DBG_SUN_VIS``) to visualize the sun visibility buffer.
+
 Atmosphere Parameters
 ---------------------
 

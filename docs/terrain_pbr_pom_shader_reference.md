@@ -9,7 +9,9 @@ Advanced terrain rendering shader combining:
 - **POM:** Parallax Occlusion Mapping for surface detail
 - **Triplanar:** Distortion-free texture mapping
 - **IBL:** Image-Based Lighting for realistic ambient
-- **Shadows:** Shadow mapping with PCF
+- **Shadows:** Shadow mapping with PCF/PCSS/CSM
+- **Heightfield Ray AO:** Ambient occlusion from terrain geometry (opt-in)
+- **Heightfield Sun Visibility:** Terrain self-shadowing from sun direction (opt-in)
 
 ## Bind Group Layout
 
@@ -143,6 +145,45 @@ struct ShadowParams {
 }
 
 @group(6) @binding(2) var<uniform> shadow: ShadowParams;
+```
+
+### Group 0 Extended: Heightfield Ray AO & Sun Visibility
+These bindings are part of Group 0 (bindings 16-19) and are used for terrain-specific
+ambient occlusion and sun visibility computed via heightfield ray-tracing.
+
+```wgsl
+// Heightfield ray-traced AO texture (R32Float)
+// When HeightAoSettings.enabled=false, bound to 1x1 white (AO=1.0)
+@group(0) @binding(16) var height_ao_tex : texture_2d<f32>;
+@group(0) @binding(17) var height_ao_samp : sampler;  // NonFiltering
+
+// Heightfield ray-traced sun visibility texture (R32Float)
+// When SunVisibilitySettings.enabled=false, bound to 1x1 white (vis=1.0)
+@group(0) @binding(18) var sun_vis_tex : texture_2d<f32>;
+@group(0) @binding(19) var sun_vis_samp : sampler;    // NonFiltering
+```
+
+**Notes:**
+- Both textures use R32Float format (non-filterable, requires `textureLoad`)
+- Values are in [0, 1]: 1.0 = no occlusion/fully lit, 0.0 = fully occluded/shadowed
+- Textures may be at lower resolution than render target (controlled by `resolution_scale`)
+- When disabled, fallback 1x1 white textures ensure no visual change
+
+**Shader Usage:**
+```wgsl
+// Sample height AO (use textureLoad for R32Float)
+let ao_size = vec2<f32>(textureDimensions(height_ao_tex, 0));
+let ao_pixel = vec2<i32>(uv * ao_size);
+let height_ao = textureLoad(height_ao_tex, clamp(ao_pixel, vec2(0), vec2(ao_size) - 1), 0).r;
+
+// Sample sun visibility (use textureLoad for R32Float)
+let sv_size = vec2<f32>(textureDimensions(sun_vis_tex, 0));
+let sv_pixel = vec2<i32>(uv * sv_size);
+let sun_vis = textureLoad(sun_vis_tex, clamp(sv_pixel, vec2(0), vec2(sv_size) - 1), 0).r;
+
+// Apply to lighting
+let combined_shadow = shadow_factor * sun_vis;
+let ao_shadow_factor = ao_clamped * combined_shadow;
 ```
 
 ## Entry Points
@@ -559,6 +600,32 @@ These commands rely on the existing `PomSettings` defaults from
 - Increase shadow bias (0.002-0.005)
 - Use slope-scale bias
 - Check depth precision
+
+## Debug Modes
+
+The shader supports numerous debug visualization modes activated via the `debug_mode` uniform.
+Key modes for terrain-specific features:
+
+| Mode | Constant | Description |
+|------|----------|-------------|
+| 28 | `DBG_RAW_SSAO` | Combined AO buffer (heightfield ray AO + coarse AO). White=no occlusion, black=full occlusion. |
+| 29 | `DBG_SUN_VIS` | Sun visibility buffer (heightfield ray-traced). White=fully lit, black=fully shadowed. |
+| 30 | `DBG_NDOTL` | N·L (lambert term) as grayscale. |
+| 31 | `DBG_SHADOW_FACTOR` | CSM shadow visibility as grayscale. |
+| 32 | `DBG_PRE_TONEMAP` | Final color before tonemapping (linear, clamped). |
+
+**Usage (Python):**
+```python
+# Set debug mode via overlay params
+config = TerrainRenderParamsConfig(
+    # ... other settings ...
+    debug_mode=28,  # DBG_RAW_SSAO
+)
+```
+
+**Full Debug Mode List:**
+See the shader source (`terrain_pbr_pom.wgsl`) for the complete list of 40+ debug modes
+covering water mask, PBR components, triplanar blending, POM, and more.
 
 ## Example Integration (Rust)
 

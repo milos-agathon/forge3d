@@ -292,6 +292,66 @@ impl Default for DetailSettingsNative {
     }
 }
 
+/// Heightfield ray-traced AO settings
+/// When enabled = false, AO is disabled (fallback 1x1 white texture)
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct HeightAoSettingsNative {
+    pub enabled: bool,
+    pub resolution_scale: f32,
+    pub directions: u32,
+    pub steps: u32,
+    pub max_distance: f32,
+    pub strength: f32,
+    pub blur: bool,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for HeightAoSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            resolution_scale: 0.5,
+            directions: 6,
+            steps: 16,
+            max_distance: 200.0,
+            strength: 1.0,
+            blur: false,
+        }
+    }
+}
+
+/// Heightfield ray-traced sun visibility settings
+/// When enabled = false, sun visibility is disabled (fallback 1x1 white texture)
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct SunVisibilitySettingsNative {
+    pub enabled: bool,
+    pub mode: String,
+    pub resolution_scale: f32,
+    pub samples: u32,
+    pub steps: u32,
+    pub max_distance: f32,
+    pub softness: f32,
+    pub bias: f32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for SunVisibilitySettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: "hard".to_string(),
+            resolution_scale: 0.5,
+            samples: 4,
+            steps: 24,
+            max_distance: 400.0,
+            softness: 1.0,
+            bias: 0.01,
+        }
+    }
+}
+
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
 pub struct DecodedTerrainSettings {
@@ -305,6 +365,8 @@ pub struct DecodedTerrainSettings {
     pub fog: FogSettingsNative,
     pub reflection: ReflectionSettingsNative,
     pub detail: DetailSettingsNative,
+    pub height_ao: HeightAoSettingsNative,
+    pub sun_visibility: SunVisibilitySettingsNative,
 }
 
 #[cfg(feature = "extension-module")]
@@ -840,6 +902,97 @@ impl TerrainRenderParams {
             DetailSettingsNative::default()
         };
 
+        // Heightfield ray AO settings (defaults to disabled)
+        let height_ao_native = if let Ok(hao) = params.getattr("height_ao") {
+            let enabled: bool = hao
+                .getattr("enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let resolution_scale: f32 = hao
+                .getattr("resolution_scale")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.5);
+            let directions: u32 = hao
+                .getattr("directions")
+                .and_then(|v| v.extract())
+                .unwrap_or(6);
+            let steps: u32 = hao
+                .getattr("steps")
+                .and_then(|v| v.extract())
+                .unwrap_or(16);
+            let max_distance: f32 = hao
+                .getattr("max_distance")
+                .and_then(|v| v.extract())
+                .unwrap_or(200.0);
+            let strength: f32 = hao
+                .getattr("strength")
+                .and_then(|v| v.extract())
+                .unwrap_or(1.0);
+            let blur: bool = hao
+                .getattr("blur")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            HeightAoSettingsNative {
+                enabled,
+                resolution_scale,
+                directions,
+                steps,
+                max_distance,
+                strength,
+                blur,
+            }
+        } else {
+            HeightAoSettingsNative::default()
+        };
+
+        // Heightfield sun visibility settings (defaults to disabled)
+        let sun_visibility_native = if let Ok(sv) = params.getattr("sun_visibility") {
+            let enabled: bool = sv
+                .getattr("enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let mode: String = sv
+                .getattr("mode")
+                .and_then(|v| v.extract())
+                .unwrap_or_else(|_| "hard".to_string());
+            let resolution_scale: f32 = sv
+                .getattr("resolution_scale")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.5);
+            let samples: u32 = sv
+                .getattr("samples")
+                .and_then(|v| v.extract())
+                .unwrap_or(4);
+            let steps: u32 = sv
+                .getattr("steps")
+                .and_then(|v| v.extract())
+                .unwrap_or(24);
+            let max_distance: f32 = sv
+                .getattr("max_distance")
+                .and_then(|v| v.extract())
+                .unwrap_or(400.0);
+            let softness: f32 = sv
+                .getattr("softness")
+                .and_then(|v| v.extract())
+                .unwrap_or(1.0);
+            let bias: f32 = sv
+                .getattr("bias")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.01);
+            SunVisibilitySettingsNative {
+                enabled,
+                mode,
+                resolution_scale,
+                samples,
+                steps,
+                max_distance,
+                softness,
+                bias,
+            }
+        } else {
+            SunVisibilitySettingsNative::default()
+        };
+
         let decoded = DecodedTerrainSettings {
             light: LightSettingsNative {
                 direction,
@@ -855,6 +1008,8 @@ impl TerrainRenderParams {
             fog: fog_native,
             reflection: reflection_native,
             detail: detail_native,
+            height_ao: height_ao_native,
+            sun_visibility: sun_visibility_native,
         };
 
         let overlays = extract_overlays(params.getattr("overlays")?.as_gil_ref())?;

@@ -215,7 +215,35 @@ pub enum ViewerCmd {
         msaa: Option<u32>,
         /// Terrain normal strength multiplier
         normal_strength: Option<f32>,
+        /// Heightfield ray-traced AO settings
+        height_ao: Option<ViewerHeightAoConfig>,
+        /// Heightfield ray-traced sun visibility settings
+        sun_visibility: Option<ViewerSunVisConfig>,
     },
+}
+
+/// Heightfield ray-traced AO configuration for viewer
+#[derive(Debug, Clone, Default)]
+pub struct ViewerHeightAoConfig {
+    pub enabled: bool,
+    pub directions: u32,
+    pub steps: u32,
+    pub max_distance: f32,
+    pub strength: f32,
+    pub resolution_scale: f32,
+}
+
+/// Heightfield ray-traced sun visibility configuration for viewer
+#[derive(Debug, Clone, Default)]
+pub struct ViewerSunVisConfig {
+    pub enabled: bool,
+    pub mode: String,
+    pub samples: u32,
+    pub steps: u32,
+    pub max_distance: f32,
+    pub softness: f32,
+    pub bias: f32,
+    pub resolution_scale: f32,
 }
 
 /// Visualization mode for viewer output

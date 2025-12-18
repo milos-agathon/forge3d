@@ -13,6 +13,8 @@ The interactive terrain viewer now supports an enhanced **PBR rendering mode** w
 | Lighting | Lambertian diffuse | Blinn-Phong specular + diffuse |
 | Materials | Height-based colormap | Height + slope based with roughness |
 | Shadows | Fake shadow intensity | Real-time CSM shadows (hard/pcf/pcss) |
+| Heightfield AO | None | Ray-traced terrain AO (opt-in) |
+| Sun Visibility | None | Ray-traced terrain self-shadowing (opt-in) |
 | Tonemapping | None | ACES filmic curve |
 | Exposure | Fixed | Configurable (0.1 - 5.0) |
 | Sun Control | Fixed | Configurable azimuth, elevation, intensity |
@@ -36,6 +38,15 @@ python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr
 
 # PBR with all options
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --exposure 0.2 --hdr assets/snow_field_4k.hdr --normal-strength 0.5 --ibl-intensity 0.1 --sun-azimuth 90 --sun-elevation 45 --sun-intensity 0.8 --msaa 8
+
+# PBR with heightfield AO (darkens valleys/crevices)
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --height-ao --height-ao-strength 1.0
+
+# PBR with sun visibility (terrain self-shadowing)
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --sun-vis --sun-vis-mode soft --sun-elevation 15
+
+# PBR with all terrain effects
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --height-ao --sun-vis --exposure 1.2
 ```
 
 ## Implementation Status
@@ -82,6 +93,38 @@ python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr
 | `--sun-azimuth` | Float | 135.0 | Sun azimuth angle in degrees |
 | `--sun-elevation` | Float | 35.0 | Sun elevation angle in degrees |
 | `--sun-intensity` | Float | 1.0 | Sun light intensity multiplier |
+
+### Heightfield AO
+
+Ambient occlusion computed by ray-marching the heightfield in multiple directions,
+producing soft darkening in concave terrain regions (valleys, crevices).
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--height-ao` | Flag | Off | Enable heightfield ray-traced AO |
+| `--height-ao-directions` | Int | 6 | Ray directions around horizon [4-16] |
+| `--height-ao-steps` | Int | 16 | Ray march steps per direction [8-64] |
+| `--height-ao-distance` | Float | 200.0 | Max ray distance in world units |
+| `--height-ao-strength` | Float | 1.0 | AO darkening intensity [0.0-2.0] |
+| `--height-ao-resolution` | Float | 0.5 | Texture resolution scale [0.1-1.0] |
+
+### Sun Visibility
+
+Terrain self-shadowing computed by ray-marching along the sun direction,
+producing shadows where terrain occludes direct sunlight.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--sun-vis` | Flag | Off | Enable heightfield sun visibility |
+| `--sun-vis-mode` | String | "soft" | Shadow mode: "hard" or "soft" |
+| `--sun-vis-samples` | Int | 4 | Jittered samples for soft shadows [1-16] |
+| `--sun-vis-steps` | Int | 24 | Ray march steps toward sun [8-64] |
+| `--sun-vis-distance` | Float | 400.0 | Max ray distance in world units |
+| `--sun-vis-softness` | Float | 1.0 | Soft shadow penumbra size [0.0-4.0] |
+| `--sun-vis-bias` | Float | 0.01 | Self-shadowing bias |
+| `--sun-vis-resolution` | Float | 0.5 | Texture resolution scale [0.1-1.0] |
+
+**Note:** Sun visibility combines multiplicatively with CSM shadows when both are enabled.
 
 ## Interactive Commands
 

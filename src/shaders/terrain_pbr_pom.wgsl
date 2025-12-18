@@ -14,6 +14,17 @@
 //   - @binding(6): texture_2d<f32> - Colormap texture
 //   - @binding(7): sampler - Colormap sampler
 //   - @binding(8): uniform<OverlayUniforms> - Overlay domain, blend mode, albedo mode, colormap strength, gamma
+//   - @binding(9): texture_2d<f32> - Height curve LUT texture
+//   - @binding(10): sampler - Height curve LUT sampler
+//   - @binding(11): texture_2d<f32> - Water mask texture
+//   - @binding(12): texture_2d<f32> - AO debug/fallback texture
+//   - @binding(13): sampler - AO debug sampler
+//   - @binding(14): texture_2d<f32> - Detail normal texture
+//   - @binding(15): sampler - Detail normal sampler
+//   - @binding(16): texture_2d<f32> - Heightfield ray AO texture (default: 1x1 white)
+//   - @binding(17): sampler - Heightfield ray AO sampler
+//   - @binding(18): texture_2d<f32> - Sun visibility texture (default: 1x1 white)
+//   - @binding(19): sampler - Sun visibility sampler
 // - @group(1): Light buffer (P1-06)
 //   - @binding(3): storage<array<Light>> - Light array
 //   - @binding(4): uniform<LightMetadata> - Light count, frame index, sequence seed
@@ -115,6 +126,8 @@ const DBG_FLAKE_HEIGHT_LOD: u32 = 26u;      // Visualize computed height LOD
 const DBG_FLAKE_NORMAL_BLEND: u32 = 27u;    // Visualize effective normal_blend after LOD fade
 // P5: Raw SSAO visualization
 const DBG_RAW_SSAO: u32 = 28u;
+// Sun visibility debug mode
+const DBG_SUN_VIS: u32 = 29u;
 // Sprint 1: Shadow-field diagnostic modes
 const DBG_NDOTL: u32 = 30u;           // N·L (lambert term) as grayscale
 const DBG_SHADOW_FACTOR: u32 = 31u;   // Shadow visibility factor as grayscale
@@ -217,6 +230,22 @@ var detail_normal_tex : texture_2d<f32>;
 
 @group(0) @binding(15)
 var detail_normal_samp : sampler;
+
+// Heightfield ray-traced AO texture (R8Unorm, computed by heightfield_ao.wgsl)
+// When height_ao.enabled=false, this is bound to a 1x1 white texture (AO=1.0)
+@group(0) @binding(16)
+var height_ao_tex : texture_2d<f32>;
+
+@group(0) @binding(17)
+var height_ao_samp : sampler;
+
+// Heightfield ray-traced sun visibility texture (R8Unorm, computed by heightfield_sun_vis.wgsl)
+// When sun_visibility.enabled=false, this is bound to a 1x1 white texture (vis=1.0)
+@group(0) @binding(18)
+var sun_vis_tex : texture_2d<f32>;
+
+@group(0) @binding(19)
+var sun_vis_samp : sampler;
 
 // P1-06: Light buffer bindings (@group(1))
 struct Light {
@@ -2573,12 +2602,31 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         out.color = vec4<f32>(out_srgb, 1.0);
         return out;
     } else if (debug_mode == DBG_RAW_SSAO) {
-        // ── MODE 28: Raw SSAO buffer ──
-        // Samples bound AO debug texture (raw SSAO or coarse AO fallback) and outputs grayscale.
+        // ── MODE 28: Raw AO buffer ──
+        // Shows heightfield ray-traced AO (binding 16) combined with coarse AO (binding 12).
+        // White = no occlusion, black = fully occluded.
         let uv_dbg = clamp(input.tex_coord, vec2<f32>(0.0), vec2<f32>(1.0));
-        let ao_raw = textureSampleLevel(ao_debug_tex, ao_debug_samp, uv_dbg, 0.0).r;
-        let ao_vis = clamp(ao_raw, 0.0, 1.0);
-        out.color = vec4<f32>(vec3<f32>(ao_vis), 1.0);
+        let ao_coarse = textureSampleLevel(ao_debug_tex, ao_debug_samp, uv_dbg, 0.0).r;
+        // Use textureLoad for R32Float height_ao_tex (non-filterable)
+        let height_ao_dbg_size = vec2<f32>(textureDimensions(height_ao_tex, 0));
+        let height_ao_dbg_pixel = vec2<i32>(uv_dbg * height_ao_dbg_size);
+        let height_ao_dbg_clamped = clamp(height_ao_dbg_pixel, vec2<i32>(0), vec2<i32>(height_ao_dbg_size) - vec2<i32>(1));
+        let ao_height = textureLoad(height_ao_tex, height_ao_dbg_clamped, 0).r;
+        // Combine both AO sources (multiply)
+        let ao_combined = clamp(ao_coarse * ao_height, 0.0, 1.0);
+        out.color = vec4<f32>(vec3<f32>(ao_combined), 1.0);
+        return out;
+    } else if (debug_mode == DBG_SUN_VIS) {
+        // ── MODE 29: Sun Visibility buffer ──
+        // Shows heightfield ray-traced sun visibility (binding 18).
+        // White = fully lit, black = fully shadowed by terrain.
+        let uv_dbg = clamp(input.tex_coord, vec2<f32>(0.0), vec2<f32>(1.0));
+        // Use textureLoad for R32Float sun_vis_tex (non-filterable)
+        let sun_vis_dbg_size = vec2<f32>(textureDimensions(sun_vis_tex, 0));
+        let sun_vis_dbg_pixel = vec2<i32>(uv_dbg * sun_vis_dbg_size);
+        let sun_vis_dbg_clamped = clamp(sun_vis_dbg_pixel, vec2<i32>(0), vec2<i32>(sun_vis_dbg_size) - vec2<i32>(1));
+        let sun_vis_dbg = textureLoad(sun_vis_tex, sun_vis_dbg_clamped, 0).r;
+        out.color = vec4<f32>(vec3<f32>(sun_vis_dbg), 1.0);
         return out;
     } else if (debug_mode == DBG_PBR_SPECULAR_ONLY) {
         // ── MODE 8: PBR Specular Only ──
@@ -3148,6 +3196,16 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
                 let ao_sample = textureSampleLevel(ao_debug_tex, ao_debug_samp, ao_uv, 0.0).r;
                 ao_clamped = mix(1.0, max(ao_sample, 0.65), ao_weight);
             }
+            // Heightfield ray-traced AO: sample and combine with existing AO
+            // When height_ao disabled, texture is 1x1 white (1.0 = no occlusion)
+            // Use textureLoad since R32Float doesn't support filtering
+            let height_ao_uv = clamp(input.tex_coord, vec2<f32>(0.0), vec2<f32>(1.0));
+            let height_ao_tex_size = vec2<f32>(textureDimensions(height_ao_tex, 0));
+            let height_ao_pixel = vec2<i32>(height_ao_uv * height_ao_tex_size);
+            let height_ao_clamped_pixel = clamp(height_ao_pixel, vec2<i32>(0), vec2<i32>(height_ao_tex_size) - vec2<i32>(1));
+            let height_ao_sample = textureLoad(height_ao_tex, height_ao_clamped_pixel, 0).r;
+            let height_ao_clamped = max(height_ao_sample, 0.65);
+            ao_clamped = ao_clamped * height_ao_clamped;
             // Also apply POM occlusion with same clamp
             ao_clamped = ao_clamped * max(occlusion, 0.65);
             
@@ -3155,10 +3213,24 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             // Use the already-mapped shadow value from CSM
             let shadow_clamped = max(shadow_factor, 0.30);
             
+            // Heightfield ray-traced sun visibility: modulates direct sun lighting
+            // When sun_visibility disabled, texture is 1x1 white (1.0 = fully lit)
+            // Use textureLoad since R32Float doesn't support filtering
+            let sun_vis_uv = clamp(input.tex_coord, vec2<f32>(0.0), vec2<f32>(1.0));
+            let sun_vis_tex_size = vec2<f32>(textureDimensions(sun_vis_tex, 0));
+            let sun_vis_pixel = vec2<i32>(sun_vis_uv * sun_vis_tex_size);
+            let sun_vis_clamped_pixel = clamp(sun_vis_pixel, vec2<i32>(0), vec2<i32>(sun_vis_tex_size) - vec2<i32>(1));
+            let sun_vis_sample = textureLoad(sun_vis_tex, sun_vis_clamped_pixel, 0).r;
+            // Clamp sun visibility to min 0.30 to prevent pitch-black shadows
+            let sun_vis_clamped = max(sun_vis_sample, 0.30);
+            // Combine CSM shadow with heightfield sun visibility (multiplicative)
+            let combined_shadow = shadow_clamped * sun_vis_clamped;
+            
             // P3-S1: Compute combined shadow/AO attenuation
             // Direct product for full contrast range (no sqrt compression)
             // P3 requires lf_max/lf_min >= 4.5
-            let ao_shadow_factor = ao_clamped * shadow_clamped; // Range [0.195, 1.0]
+            // Use combined_shadow which includes both CSM and heightfield sun visibility
+            let ao_shadow_factor = ao_clamped * combined_shadow; // Range [0.195, 1.0]
             let diffuse_lit = diffuse_raw * ao_shadow_factor;
             
             // P3-S1: IBL term adds minimal fill light

@@ -993,6 +993,8 @@ impl Viewer {
                 exposure,
                 msaa,
                 normal_strength,
+                height_ao,
+                sun_visibility,
             } => {
                 if let Some(ref mut tv) = self.terrain_viewer {
                     tv.pbr_config.apply_updates(
@@ -1004,11 +1006,19 @@ impl Viewer {
                         exposure,
                         msaa,
                         normal_strength,
+                        height_ao,
+                        sun_visibility,
                     );
                     // Initialize PBR pipeline if enabling PBR mode
                     if tv.pbr_config.enabled && tv.pbr_pipeline.is_none() {
                         if let Err(e) = tv.init_pbr_pipeline(self.config.format) {
                             eprintln!("[terrain] Failed to init PBR pipeline: {}", e);
+                        }
+                    }
+                    // Initialize compute pipelines for heightfield effects
+                    if tv.pbr_config.height_ao.enabled || tv.pbr_config.sun_visibility.enabled {
+                        if let Err(e) = tv.init_heightfield_compute_pipelines() {
+                            eprintln!("[terrain] Failed to init heightfield compute pipelines: {}", e);
                         }
                     }
                     println!("[terrain] {}", tv.pbr_config.to_display_string());

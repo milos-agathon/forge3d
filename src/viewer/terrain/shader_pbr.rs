@@ -20,6 +20,8 @@ struct Uniforms {
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var heightmap: texture_2d<f32>;
 @group(0) @binding(2) var height_sampler: sampler;
+@group(0) @binding(3) var height_ao_tex: texture_2d<f32>;
+@group(0) @binding(4) var sun_vis_tex: texture_2d<f32>;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -175,9 +177,22 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let sun_dir = normalize(u.sun_dir.xyz);
     let ndotl = max(dot(normal, sun_dir), 0.0);
     
+    // Sample heightfield AO (use textureLoad for R32Float)
+    let ao_dims = textureDimensions(height_ao_tex, 0);
+    let ao_pixel = vec2<i32>(in.uv * vec2<f32>(ao_dims));
+    let ao_clamped = clamp(ao_pixel, vec2<i32>(0), vec2<i32>(ao_dims) - vec2<i32>(1));
+    let height_ao = textureLoad(height_ao_tex, ao_clamped, 0).r;
+    
+    // Sample sun visibility (use textureLoad for R32Float)
+    let sv_dims = textureDimensions(sun_vis_tex, 0);
+    let sv_pixel = vec2<i32>(in.uv * vec2<f32>(sv_dims));
+    let sv_clamped = clamp(sv_pixel, vec2<i32>(0), vec2<i32>(sv_dims) - vec2<i32>(1));
+    let sun_vis = textureLoad(sun_vis_tex, sv_clamped, 0).r;
+    
     // Soft shadow
     let shadow = soft_shadow_factor(normal, sun_dir);
-    let shadow_term = mix(1.0, shadow, shadow_strength);
+    // Combine soft shadow with sun visibility (multiplicative)
+    let shadow_term = mix(1.0, shadow * sun_vis, shadow_strength);
     
     // View direction (approximate from camera_pos or use fragment position)
     let view_dir = normalize(u.camera_pos.xyz - in.world_pos);
@@ -197,8 +212,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         specular *= sun_intensity * 0.8;
     }
     
-    // Ambient/IBL approximation
-    let ambient_color = sky_ambient(normal) * albedo * ambient_strength * ibl_intensity;
+    // Ambient/IBL approximation - modulated by heightfield AO
+    let ambient_color = sky_ambient(normal) * albedo * ambient_strength * ibl_intensity * height_ao;
     
     // Combine lighting
     var color = diffuse + vec3<f32>(specular) + ambient_color;
