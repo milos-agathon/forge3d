@@ -120,6 +120,8 @@ def main() -> int:
     parser.add_argument("--height", type=int, default=2160, help="Window height")
     parser.add_argument("--snapshot", type=Path,
                         help="Take snapshot at this path and exit")
+    parser.add_argument("--preset", choices=["default", "alpine", "cinematic", "high_quality"],
+                        help="Rendering preset (overrides individual settings)")
     
     # PBR+POM rendering options
     pbr_group = parser.add_argument_group("PBR Rendering", "High-quality terrain rendering options")
@@ -183,7 +185,100 @@ def main() -> int:
     sv_group.add_argument("--sun-vis-resolution", type=float, default=0.5,
                           help="Visibility texture resolution scale [0.1-1.0] (default: 0.5)")
     
+    # M4: Material Layering options
+    mat_group = parser.add_argument_group("Material Layering (M4)", "Terrain material layers: snow, rock, wetness")
+    mat_group.add_argument("--snow", action="store_true",
+                           help="Enable snow layer based on altitude and slope")
+    mat_group.add_argument("--snow-altitude", type=float, default=2500.0,
+                           help="Minimum altitude for snow in world units (default: 2500.0)")
+    mat_group.add_argument("--snow-blend", type=float, default=200.0,
+                           help="Altitude blend range for snow transition (default: 200.0)")
+    mat_group.add_argument("--snow-slope", type=float, default=45.0,
+                           help="Maximum slope for snow accumulation in degrees (default: 45.0)")
+    mat_group.add_argument("--rock", action="store_true",
+                           help="Enable exposed rock layer on steep slopes")
+    mat_group.add_argument("--rock-slope", type=float, default=45.0,
+                           help="Minimum slope for exposed rock in degrees (default: 45.0)")
+    mat_group.add_argument("--wetness", action="store_true",
+                           help="Enable wetness effect in low areas")
+    mat_group.add_argument("--wetness-strength", type=float, default=0.3,
+                           help="Wetness darkening strength [0.0-1.0] (default: 0.3)")
+    
+    # M5: Vector Overlay options
+    vo_group = parser.add_argument_group("Vector Overlays (M5)", "Depth-correct vector overlays with halos")
+    vo_group.add_argument("--overlay-depth", action="store_true",
+                          help="Enable depth testing for vector overlays (occlude behind terrain)")
+    vo_group.add_argument("--overlay-depth-bias", type=float, default=0.001,
+                          help="Depth bias to prevent z-fighting (default: 0.001)")
+    vo_group.add_argument("--overlay-halo", action="store_true",
+                          help="Enable halo/outline around vector overlays")
+    vo_group.add_argument("--overlay-halo-width", type=float, default=2.0,
+                          help="Halo width in pixels (default: 2.0)")
+    vo_group.add_argument("--overlay-halo-color", type=str, default="0,0,0,0.5",
+                          help="Halo color as R,G,B,A (default: 0,0,0,0.5)")
+    
+    # M6: Tonemap options
+    tm_group = parser.add_argument_group("Tonemap (M6)", "HDR tonemapping and color grading")
+    tm_group.add_argument("--tonemap", choices=["reinhard", "reinhard_extended", "aces", "uncharted2", "exposure"],
+                          default="aces", help="Tonemap operator (default: aces)")
+    tm_group.add_argument("--tonemap-white-point", type=float, default=4.0,
+                          help="White point for extended operators (default: 4.0)")
+    tm_group.add_argument("--white-balance", action="store_true",
+                          help="Enable white balance adjustment")
+    tm_group.add_argument("--temperature", type=float, default=6500.0,
+                          help="Color temperature in Kelvin [2000-12000] (default: 6500.0 = D65)")
+    tm_group.add_argument("--tint", type=float, default=0.0,
+                          help="Green-magenta tint [-1.0 to 1.0] (default: 0.0)")
+    
     args = parser.parse_args()
+    
+    # Apply preset settings (overrides individual flags)
+    if args.preset:
+        if args.preset == "default":
+            # All features disabled - use defaults
+            pass
+        elif args.preset == "alpine":
+            # Alpine mountain scene with snow and rock layers
+            args.pbr = True
+            args.snow = True
+            args.snow_altitude = 2500.0
+            args.snow_blend = 300.0
+            args.snow_slope = 50.0
+            args.rock = True
+            args.rock_slope = 40.0
+            args.overlay_depth = True
+            args.overlay_halo = True
+            args.tonemap = "aces"
+            args.white_balance = True
+            args.temperature = 7000.0  # Slightly cool for snow
+            print(f"Preset: alpine - Snow/rock layers, ACES tonemap, cool temperature")
+        elif args.preset == "cinematic":
+            # Cinematic warm-toned render with bloom
+            args.pbr = True
+            args.wetness = True
+            args.wetness_strength = 0.4
+            args.overlay_halo = True
+            args.overlay_halo_width = 3.0
+            args.tonemap = "uncharted2"
+            args.tonemap_white_point = 6.0
+            args.white_balance = True
+            args.temperature = 5500.0  # Warm golden hour
+            args.tint = 0.1
+            print(f"Preset: cinematic - Warm tones, Uncharted2 tonemap")
+        elif args.preset == "high_quality":
+            # Maximum quality with all features
+            args.pbr = True
+            args.msaa = 8
+            args.snow = True
+            args.rock = True
+            args.wetness = True
+            args.overlay_depth = True
+            args.overlay_halo = True
+            args.height_ao = True
+            args.sun_vis = True
+            args.tonemap = "aces"
+            args.white_balance = True
+            print(f"Preset: high_quality - All features enabled, MSAA 8x")
     
     binary = find_viewer_binary()
     dem_path = args.dem.resolve()
@@ -283,6 +378,39 @@ def main() -> int:
                 "resolution_scale": args.sun_vis_resolution,
             }
         
+        # M4: Material Layering settings
+        if args.snow or args.rock or args.wetness:
+            pbr_cmd["materials"] = {
+                "snow_enabled": args.snow,
+                "snow_altitude_min": args.snow_altitude,
+                "snow_altitude_blend": args.snow_blend,
+                "snow_slope_max": args.snow_slope,
+                "rock_enabled": args.rock,
+                "rock_slope_min": args.rock_slope,
+                "wetness_enabled": args.wetness,
+                "wetness_strength": args.wetness_strength,
+            }
+        
+        # M5: Vector Overlay settings
+        if args.overlay_depth or args.overlay_halo:
+            halo_color = [float(x) for x in args.overlay_halo_color.split(",")]
+            pbr_cmd["vector_overlay"] = {
+                "depth_test": args.overlay_depth,
+                "depth_bias": args.overlay_depth_bias,
+                "halo_enabled": args.overlay_halo,
+                "halo_width": args.overlay_halo_width,
+                "halo_color": halo_color,
+            }
+        
+        # M6: Tonemap settings
+        pbr_cmd["tonemap"] = {
+            "operator": args.tonemap,
+            "white_point": args.tonemap_white_point,
+            "white_balance_enabled": args.white_balance,
+            "temperature": args.temperature,
+            "tint": args.tint,
+        }
+        
         resp = send_ipc(sock, pbr_cmd)
         if not resp.get("ok"):
             print(f"Warning: PBR config failed: {resp.get('error')}")
@@ -292,6 +420,13 @@ def main() -> int:
                 features.append("height_ao=on")
             if args.sun_vis:
                 features.append(f"sun_vis={args.sun_vis_mode}")
+            if args.snow:
+                features.append("snow=on")
+            if args.rock:
+                features.append("rock=on")
+            if args.overlay_depth or args.overlay_halo:
+                features.append("overlay=on")
+            features.append(f"tonemap={args.tonemap}")
             print(f"PBR mode enabled: {', '.join(features)}")
     
     # Snapshot mode

@@ -8,6 +8,7 @@ use std::borrow::Cow;
 use wgpu::*;
 
 /// Tonemap post-processor for converting HDR linear to sRGB
+/// M6: Extended with LUT and white balance support
 pub struct TonemapProcessor {
     /// Render pipeline for tonemap pass
     pipeline: RenderPipeline,
@@ -19,16 +20,62 @@ pub struct TonemapProcessor {
     exposure: f32,
     /// Uniform buffer for exposure
     uniform_buffer: Buffer,
+    // M6: Extended settings
+    /// White point for extended operators
+    white_point: f32,
+    /// Gamma correction value
+    gamma: f32,
+    /// Tonemap operator index
+    operator_index: u32,
+    /// LUT enabled
+    lut_enabled: bool,
+    /// LUT blend strength
+    lut_strength: f32,
+    /// LUT dimension
+    lut_size: f32,
+    /// White balance enabled
+    white_balance_enabled: bool,
+    /// Color temperature in Kelvin
+    temperature: f32,
+    /// Green-magenta tint
+    tint: f32,
+    /// M6: Default 1x1x1 LUT texture (identity)
+    #[allow(dead_code)]
+    default_lut_texture: Texture,
+    default_lut_view: TextureView,
+    /// M6: LUT sampler
+    lut_sampler: Sampler,
 }
 
 /// Tonemap uniform data
+/// M6: Extended with LUT and white balance parameters
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct TonemapUniforms {
     /// Exposure multiplier
     exposure: f32,
+    /// White point for extended operators
+    white_point: f32,
+    /// Gamma correction
+    gamma: f32,
+    /// Tonemap operator index: 0=Reinhard, 1=ReinhardExtended, 2=ACES, 3=Uncharted2, 4=Exposure
+    operator_index: u32,
+    // M6: LUT and white balance
+    /// LUT enabled (0=disabled, 1=enabled)
+    lut_enabled: u32,
+    /// LUT blend strength (0-1)
+    lut_strength: f32,
+    /// LUT dimension (e.g., 32 for 32x32x32)
+    lut_size: f32,
+    /// White balance enabled (0=disabled, 1=enabled)
+    white_balance_enabled: u32,
+    /// Color temperature in Kelvin
+    temperature: f32,
+    /// Green-magenta tint (-1 to 1)
+    tint: f32,
     /// Padding for 16-byte alignment
-    _pad: [f32; 3],
+    _pad0: f32,
+    _pad1: f32,
 }
 
 impl TonemapProcessor {
@@ -65,6 +112,24 @@ impl TonemapProcessor {
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
+                    count: None,
+                },
+                // M6: 3D LUT texture
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D3,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // M6: LUT sampler
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
@@ -141,12 +206,54 @@ impl TonemapProcessor {
             mapped_at_creation: false,
         });
 
+        // M6: Create default 1x1x1 identity LUT texture
+        let default_lut_texture = device.create_texture(&TextureDescriptor {
+            label: Some("tonemap_default_lut"),
+            size: Extent3d {
+                width: 2,
+                height: 2,
+                depth_or_array_layers: 2,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D3,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let default_lut_view = default_lut_texture.create_view(&TextureViewDescriptor::default());
+
+        // M6: Create LUT sampler with trilinear filtering
+        let lut_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("tonemap_lut_sampler"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Linear,
+            ..Default::default()
+        });
+
         Ok(Self {
             pipeline,
             bind_group_layout,
             sampler,
-            exposure: 1.0, // Default exposure
+            exposure: 1.0,
             uniform_buffer,
+            // M6: Extended settings with defaults
+            white_point: 4.0,
+            gamma: 2.2,
+            operator_index: 2, // ACES
+            lut_enabled: false,
+            lut_strength: 1.0,
+            lut_size: 0.0,
+            white_balance_enabled: false,
+            temperature: 6500.0,
+            tint: 0.0,
+            default_lut_texture,
+            default_lut_view,
+            lut_sampler,
         })
     }
 
@@ -160,6 +267,52 @@ impl TonemapProcessor {
         self.exposure
     }
 
+    // M6: Extended setters for tonemap settings
+    /// Set the tonemap operator index
+    pub fn set_operator(&mut self, index: u32) {
+        self.operator_index = index;
+    }
+
+    /// Set white point for extended operators
+    pub fn set_white_point(&mut self, white_point: f32) {
+        self.white_point = white_point.max(0.1);
+    }
+
+    /// Set gamma correction value
+    pub fn set_gamma(&mut self, gamma: f32) {
+        self.gamma = gamma.max(0.1);
+    }
+
+    /// Enable/disable LUT
+    pub fn set_lut_enabled(&mut self, enabled: bool) {
+        self.lut_enabled = enabled;
+    }
+
+    /// Set LUT blend strength
+    pub fn set_lut_strength(&mut self, strength: f32) {
+        self.lut_strength = strength.clamp(0.0, 1.0);
+    }
+
+    /// Set LUT dimension
+    pub fn set_lut_size(&mut self, size: f32) {
+        self.lut_size = size;
+    }
+
+    /// Enable/disable white balance
+    pub fn set_white_balance_enabled(&mut self, enabled: bool) {
+        self.white_balance_enabled = enabled;
+    }
+
+    /// Set color temperature in Kelvin
+    pub fn set_temperature(&mut self, temp: f32) {
+        self.temperature = temp.clamp(2000.0, 12000.0);
+    }
+
+    /// Set green-magenta tint
+    pub fn set_tint(&mut self, tint: f32) {
+        self.tint = tint.clamp(-1.0, 1.0);
+    }
+
     /// Render tone-mapped output from HDR input
     pub fn render(
         &self,
@@ -169,14 +322,24 @@ impl TonemapProcessor {
         hdr_input: &TextureView,
         srgb_output: &TextureView,
     ) -> RenderResult<()> {
-        // Update uniforms
+        // Update uniforms with all M6 fields
         let uniforms = TonemapUniforms {
             exposure: self.exposure,
-            _pad: [0.0; 3],
+            white_point: self.white_point,
+            gamma: self.gamma,
+            operator_index: self.operator_index,
+            lut_enabled: if self.lut_enabled { 1 } else { 0 },
+            lut_strength: self.lut_strength,
+            lut_size: self.lut_size,
+            white_balance_enabled: if self.white_balance_enabled { 1 } else { 0 },
+            temperature: self.temperature,
+            tint: self.tint,
+            _pad0: 0.0,
+            _pad1: 0.0,
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
 
-        // Create bind group
+        // Create bind group with M6 LUT bindings
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("tonemap_bind_group"),
             layout: &self.bind_group_layout,
@@ -192,6 +355,15 @@ impl TonemapProcessor {
                 BindGroupEntry {
                     binding: 2,
                     resource: self.uniform_buffer.as_entire_binding(),
+                },
+                // M6: LUT texture (use default if not set)
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::TextureView(&self.default_lut_view),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::Sampler(&self.lut_sampler),
                 },
             ],
         });
@@ -241,6 +413,15 @@ impl TonemapProcessor {
                     binding: 2,
                     resource: self.uniform_buffer.as_entire_binding(),
                 },
+                // M6: LUT texture bindings
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::TextureView(&self.default_lut_view),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::Sampler(&self.lut_sampler),
+                },
             ],
         })
     }
@@ -254,7 +435,17 @@ impl TonemapProcessor {
     pub fn update_uniforms(&self, queue: &Queue) {
         let uniforms = TonemapUniforms {
             exposure: self.exposure,
-            _pad: [0.0; 3],
+            white_point: self.white_point,
+            gamma: self.gamma,
+            operator_index: self.operator_index,
+            lut_enabled: if self.lut_enabled { 1 } else { 0 },
+            lut_strength: self.lut_strength,
+            lut_size: self.lut_size,
+            white_balance_enabled: if self.white_balance_enabled { 1 } else { 0 },
+            temperature: self.temperature,
+            tint: self.tint,
+            _pad0: 0.0,
+            _pad1: 0.0,
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }

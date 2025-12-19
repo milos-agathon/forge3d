@@ -305,6 +305,130 @@ class TestTerrainViewerPbr:
         assert resp.get("ok"), f"PBR disable failed: {resp.get('error')}"
         print("[test] PBR mode disabled successfully")
 
+    def test_height_ao_compute_pipeline_metal_compat(self, viewer_context):
+        """Regression test: height_ao compute pipeline with R32Float texture.
+        
+        Tests fix for Metal/R32Float compatibility issue where filterable: true
+        in bind group layout caused crash on macOS because R32Float doesn't
+        support filtering. The fix changed to filterable: false and NonFiltering
+        sampler since the shader uses textureLoad (not textureSample).
+        """
+        sock = viewer_context["sock"]
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snap_path = Path(tmpdir) / "height_ao.png"
+            
+            # Enable PBR with height_ao - this would crash before the fix
+            resp = send_ipc(sock, {
+                "cmd": "set_terrain_pbr",
+                "enabled": True,
+                "exposure": 1.0,
+                "height_ao": {
+                    "enabled": True,
+                    "directions": 6,
+                    "steps": 16,
+                    "max_distance": 200.0,
+                    "strength": 1.0,
+                    "resolution_scale": 0.5,
+                },
+            })
+            assert resp.get("ok"), f"Height AO enable failed: {resp.get('error')}"
+            
+            # Wait for compute pass to run
+            time.sleep(0.5)
+            
+            # Take snapshot - crash would occur here during render
+            resp = send_ipc(sock, {
+                "cmd": "snapshot",
+                "path": str(snap_path),
+                "width": 640,
+                "height": 480,
+            })
+            time.sleep(0.5)
+            
+            assert snap_path.exists(), "Height AO snapshot not created (compute pipeline crash?)"
+            assert snap_path.stat().st_size > 1000, "Height AO snapshot too small"
+            print(f"[test] Height AO snapshot: {snap_path.stat().st_size} bytes - Metal/R32Float compat OK")
+
+    def test_sun_visibility_compute_pipeline_metal_compat(self, viewer_context):
+        """Regression test: sun_visibility compute pipeline with R32Float texture.
+        
+        Same Metal/R32Float compatibility fix as height_ao.
+        """
+        sock = viewer_context["sock"]
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snap_path = Path(tmpdir) / "sun_vis.png"
+            
+            # Enable PBR with sun_visibility - this would crash before the fix
+            resp = send_ipc(sock, {
+                "cmd": "set_terrain_pbr",
+                "enabled": True,
+                "exposure": 1.0,
+                "sun_visibility": {
+                    "enabled": True,
+                    "mode": "soft",
+                    "samples": 4,
+                    "steps": 24,
+                    "max_distance": 400.0,
+                    "softness": 1.0,
+                    "bias": 0.01,
+                    "resolution_scale": 0.5,
+                },
+            })
+            assert resp.get("ok"), f"Sun visibility enable failed: {resp.get('error')}"
+            
+            time.sleep(0.5)
+            
+            resp = send_ipc(sock, {
+                "cmd": "snapshot",
+                "path": str(snap_path),
+                "width": 640,
+                "height": 480,
+            })
+            time.sleep(0.5)
+            
+            assert snap_path.exists(), "Sun vis snapshot not created (compute pipeline crash?)"
+            assert snap_path.stat().st_size > 1000, "Sun vis snapshot too small"
+            print(f"[test] Sun visibility snapshot: {snap_path.stat().st_size} bytes - Metal/R32Float compat OK")
+
+    def test_both_heightfield_effects_combined(self, viewer_context):
+        """Regression test: both height_ao and sun_visibility enabled together."""
+        sock = viewer_context["sock"]
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snap_path = Path(tmpdir) / "combined.png"
+            
+            # Enable both effects - stress test for compute pipelines
+            resp = send_ipc(sock, {
+                "cmd": "set_terrain_pbr",
+                "enabled": True,
+                "exposure": 1.2,
+                "height_ao": {
+                    "enabled": True,
+                    "strength": 1.0,
+                },
+                "sun_visibility": {
+                    "enabled": True,
+                    "mode": "soft",
+                },
+            })
+            assert resp.get("ok"), f"Combined effects enable failed: {resp.get('error')}"
+            
+            time.sleep(0.5)
+            
+            resp = send_ipc(sock, {
+                "cmd": "snapshot",
+                "path": str(snap_path),
+                "width": 640,
+                "height": 480,
+            })
+            time.sleep(0.5)
+            
+            assert snap_path.exists(), "Combined effects snapshot not created"
+            assert snap_path.stat().st_size > 1000, "Combined effects snapshot too small"
+            print(f"[test] Combined effects snapshot: {snap_path.stat().st_size} bytes")
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

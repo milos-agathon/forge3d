@@ -1,7 +1,9 @@
-//! Q5: Bloom post-processing effect implementation
+//! M2: Bloom post-processing effect implementation
 //!
 //! Implements bloom effect with bright-pass filtering and dual blur passes.
-//! Integrates with the post-processing chain system.
+//! Can be used standalone or integrated with the post-processing chain system.
+//!
+//! Pipeline: Input HDR → Brightpass → H Blur → V Blur → Composite → Output
 
 use super::error::{RenderError, RenderResult};
 use crate::core::gpu_timing::GpuTimingManager;
@@ -10,20 +12,27 @@ use std::borrow::Cow;
 use wgpu::*;
 
 /// Bloom effect configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BloomConfig {
+    /// Enabled flag (false = passthrough, no bloom)
+    pub enabled: bool,
+    /// Brightness threshold for bloom extraction (default 1.0 = HDR only)
     pub threshold: f32,
+    /// Softness of threshold transition (0.0 = hard, 1.0 = very soft)
     pub softness: f32,
+    /// Bloom intensity/strength when compositing (0.0-1.0+)
     pub strength: f32,
+    /// Blur radius multiplier (affects spread)
     pub radius: f32,
 }
 
 impl Default for BloomConfig {
     fn default() -> Self {
         Self {
-            threshold: 1.0,
-            softness: 0.1,
-            strength: 0.5,
+            enabled: false,  // M2: Default off for backward compatibility
+            threshold: 1.5,  // Conservative: only HDR values bloom
+            softness: 0.5,
+            strength: 0.3,   // Conservative: subtle bloom
             radius: 1.0,
         }
     }
@@ -45,6 +54,14 @@ struct BloomBlurUniforms {
     radius: f32,
     strength: f32,
     _pad: [f32; 2],
+}
+
+/// Uniform data for bloom composite pass
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct BloomCompositeUniforms {
+    intensity: f32,
+    _pad: [f32; 3],
 }
 
 /// Bloom post-processing effect implementation

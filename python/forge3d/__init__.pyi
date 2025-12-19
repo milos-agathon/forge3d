@@ -27,6 +27,7 @@ from .terrain_params import (
 PathLikeStr = os.PathLike[str] | str
 
 __version__: str
+version: str
 
 class RendererConfig:
     lighting: Dict[str, Any]

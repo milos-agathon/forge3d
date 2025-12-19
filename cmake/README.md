@@ -191,7 +191,7 @@ include(FetchContent)
 FetchContent_Declare(
     forge3d
     GIT_REPOSITORY https://github.com/example/forge3d.git
-    GIT_TAG v0.6.0
+    GIT_TAG v1.2.0
 )
 
 FetchContent_MakeAvailable(forge3d)

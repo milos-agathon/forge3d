@@ -281,6 +281,251 @@ impl ViewerTerrainScene {
         true
     }
 
+    /// Render terrain to an offscreen texture at the specified resolution.
+    /// This allows high-resolution snapshots independent of window size.
+    /// Returns the texture if successful.
+    pub fn render_to_texture(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        target_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> Option<wgpu::Texture> {
+        if self.terrain.is_none() {
+            return None;
+        }
+
+        // Create offscreen color texture at requested resolution
+        let color_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain_viewer.snapshot_color"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: target_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let color_view = color_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Create depth texture at requested resolution
+        let depth_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain_viewer.snapshot_depth"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Calculate all the same values as render() but with custom dimensions
+        let use_pbr = self.pbr_config.enabled && self.pbr_pipeline.is_some();
+        let terrain = self.terrain.as_ref().unwrap();
+
+        let phi = terrain.cam_phi_deg.to_radians();
+        let theta = terrain.cam_theta_deg.to_radians();
+        let r = terrain.cam_radius;
+        let (tw, th) = terrain.dimensions;
+        let terrain_width = tw.max(th) as f32;
+        let h_range = terrain.domain.1 - terrain.domain.0;
+        let legacy_z_scale = terrain.z_scale * h_range * 1000.0 / terrain_width.max(1.0);
+        let shader_z_scale = if use_pbr { terrain.z_scale } else { legacy_z_scale };
+        let center_y = if use_pbr {
+            h_range * terrain.z_scale * 0.5
+        } else {
+            terrain_width * legacy_z_scale * 0.001 * 0.5
+        };
+        let center = glam::Vec3::new(
+            terrain_width * 0.5,
+            center_y,
+            terrain_width * 0.5,
+        );
+
+        let eye = glam::Vec3::new(
+            center.x + r * theta.sin() * phi.cos(),
+            center.y + r * theta.cos(),
+            center.z + r * theta.sin() * phi.sin(),
+        );
+
+        let view_mat = glam::Mat4::look_at_rh(eye, center, glam::Vec3::Y);
+        // Use requested width/height for aspect ratio
+        let proj = glam::Mat4::perspective_rh(
+            terrain.cam_fov_deg.to_radians(),
+            width as f32 / height as f32,
+            1.0,
+            r * 10.0,
+        );
+        let view_proj = proj * view_mat;
+
+        let sun_az = terrain.sun_azimuth_deg.to_radians();
+        let sun_el = terrain.sun_elevation_deg.to_radians();
+        let sun_dir = glam::Vec3::new(
+            sun_el.cos() * sun_az.sin(),
+            sun_el.sin(),
+            sun_el.cos() * sun_az.cos(),
+        )
+        .normalize();
+
+        let uniforms = TerrainUniforms {
+            view_proj: view_proj.to_cols_array_2d(),
+            sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
+            terrain_params: [
+                terrain.domain.0,
+                terrain.domain.1 - terrain.domain.0,
+                terrain_width,
+                shader_z_scale,
+            ],
+            lighting: [
+                terrain.sun_intensity,
+                terrain.ambient,
+                terrain.shadow_intensity,
+                terrain.water_level,
+            ],
+            background: [
+                terrain.background_color[0],
+                terrain.background_color[1],
+                terrain.background_color[2],
+                0.0,
+            ],
+            water_color: [
+                terrain.water_color[0],
+                terrain.water_color[1],
+                terrain.water_color[2],
+                0.0,
+            ],
+        };
+
+        self.queue.write_buffer(
+            &terrain.uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[uniforms]),
+        );
+
+        // Prepare PBR bind group if enabled
+        let pbr_uniforms_data = if use_pbr {
+            Some((
+                terrain.domain,
+                terrain.z_scale,
+                terrain.sun_intensity,
+                terrain.ambient,
+                terrain.shadow_intensity,
+                terrain.water_level,
+                terrain.background_color,
+                terrain.water_color,
+            ))
+        } else {
+            None
+        };
+
+        let bg = terrain.background_color;
+        let _ = terrain; // Release borrow
+
+        if let Some((domain, z_scale, sun_intensity, ambient, shadow_intensity, water_level, background_color, water_color)) = pbr_uniforms_data {
+            let pbr_uniforms = TerrainPbrUniforms {
+                view_proj: view_proj.to_cols_array_2d(),
+                sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
+                terrain_params: [
+                    domain.0,
+                    domain.1 - domain.0,
+                    terrain_width,
+                    z_scale,
+                ],
+                lighting: [
+                    sun_intensity,
+                    ambient,
+                    shadow_intensity,
+                    water_level,
+                ],
+                background: [
+                    background_color[0],
+                    background_color[1],
+                    background_color[2],
+                    0.0,
+                ],
+                water_color: [
+                    water_color[0],
+                    water_color[1],
+                    water_color[2],
+                    0.0,
+                ],
+                pbr_params: [
+                    self.pbr_config.exposure,
+                    self.pbr_config.normal_strength,
+                    self.pbr_config.ibl_intensity,
+                    0.0,
+                ],
+                camera_pos: [eye.x, eye.y, eye.z, 1.0],
+            };
+            self.prepare_pbr_bind_group_internal(&pbr_uniforms);
+        }
+
+        // Run compute passes
+        self.dispatch_heightfield_compute(encoder, terrain_width, sun_dir);
+
+        // Re-borrow terrain
+        let terrain = self.terrain.as_ref().unwrap();
+
+        // Render to offscreen texture
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terrain_viewer.snapshot_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: bg[0] as f64,
+                            g: bg[1] as f64,
+                            b: bg[2] as f64,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            if use_pbr {
+                if let Some(ref pbr_bind_group) = self.pbr_bind_group {
+                    pass.set_pipeline(self.pbr_pipeline.as_ref().unwrap());
+                    pass.set_bind_group(0, pbr_bind_group, &[]);
+                } else {
+                    pass.set_pipeline(&self.pipeline);
+                    pass.set_bind_group(0, &terrain.bind_group, &[]);
+                }
+            } else {
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &terrain.bind_group, &[]);
+            }
+
+            pass.set_vertex_buffer(0, terrain.vertex_buffer.slice(..));
+            pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..terrain.index_count, 0, 0..1);
+        }
+
+        Some(color_tex)
+    }
+
     /// Prepare PBR bind group with current uniforms (called before render pass)
     /// Gets heightmap_view internally from self.terrain to avoid borrow issues
     fn prepare_pbr_bind_group_internal(&mut self, uniforms: &TerrainPbrUniforms) {
@@ -409,7 +654,7 @@ impl ViewerTerrainScene {
                 &self.height_ao_bind_group_layout,
                 &self.height_ao_uniform_buffer,
                 &self.height_ao_view,
-                &self.sampler_linear,
+                &self.sampler_nearest,
             ) {
                 let ao_width = (width as f32 * self.pbr_config.height_ao.resolution_scale) as u32;
                 let ao_height = (height as f32 * self.pbr_config.height_ao.resolution_scale) as u32;
@@ -460,7 +705,7 @@ impl ViewerTerrainScene {
                 &self.sun_vis_bind_group_layout,
                 &self.sun_vis_uniform_buffer,
                 &self.sun_vis_view,
-                &self.sampler_linear,
+                &self.sampler_nearest,
             ) {
                 let sv_width = (width as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
                 let sv_height = (height as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;

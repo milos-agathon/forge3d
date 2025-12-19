@@ -44,6 +44,14 @@ pub use analysis::{
 };
 // B13/B14-END:analysis-mod
 
+// M1: Accumulation AA infrastructure for offline rendering
+pub mod accumulation;
+pub use accumulation::{AccumulationBuffer, AccumulationConfig, JitterSequence};
+
+// M2: Bloom post-processing for terrain offline rendering
+pub mod bloom_processor;
+pub use bloom_processor::{TerrainBloomConfig, TerrainBloomProcessor};
+
 // Terrain camera helpers (orbit camera, view-proj)
 pub mod camera;
 pub use camera::{build_view_proj, orbit_camera};
@@ -1061,7 +1069,7 @@ impl TerrainSpike {
             // Prefer height mosaic view if present, else None (renderer will use dummy)
             let height_view_opt = self.height_mosaic.as_ref().map(|m| &m.view);
             let pt_buf_opt = self.page_table.as_ref().map(|pt| &pt.buffer);
-            ov.recreate_bind_group(&self.device, overlay_view_opt, height_view_opt, pt_buf_opt);
+            ov.recreate_bind_group(&self.device, overlay_view_opt, height_view_opt, pt_buf_opt, None);
             ov.upload_uniforms(&self.queue);
 
             let mut rp2 = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1307,6 +1315,7 @@ impl TerrainSpike {
                 Some(&mosaic.view),
                 height_view_opt,
                 pt_buf_opt,
+                None,
             );
             // Enable overlay by default with alpha 1.0
             ov.set_enabled(true);

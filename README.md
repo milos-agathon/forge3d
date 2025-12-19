@@ -16,7 +16,7 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.1.0 — Interactive viewer with real-time terminal commands, PBR mode, and snapshot support up to 16K resolution.
+Current release: 1.2.0 — Golden-image regression testing and GPU memory-budget enforcement, plus a refreshed IBL pipeline.
 
 ## Installation
 
@@ -30,30 +30,32 @@ maturin develop --release
 
 ## Quick Start (< 10 minutes)
 
-New to forge3d? Get a terrain rendering example working in a few seconds:
+New to forge3d? Launch the interactive viewer and capture a high-resolution snapshot of Mount Rainier:
 
-1. **Install prerequisites**: Ensure you have Python 3.8 installed
+1. **Install prerequisites**: Ensure you have Python 3.8+ and Rust installed
 2. **Install maturin**: `pip install -U maturin`
 3. **Build forge3d**: `maturin develop --release`
-4. **Run terrain example**:
+4. **Build the interactive viewer**:
 
 ```bash
-python examples/geopandas_demo.py 
---output-size 1200 900 
---lighting-type "blinn-phong" 
---lighting-intensity 1 
---lighting-azimuth 315 
---lighting-elevation 315 
---shadow-intensity 1 
---contrast-pct 0.5 
---gamma 0.5 
---camera-theta 90
+cargo build --release --bin interactive_viewer
 ```
 
-This should be rendered within 5 seconds! 
-The example will create a terrain image under `reports/Gore_Range_Albers_1m.png`.
+5. **Launch the viewer with a high-quality preset**:
 
-![Gore Range](assets/Gore_Range_Albers_1m.png)
+```bash
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --preset high_quality --width 800 --height 800
+```
+
+6. **Capture a high-resolution snapshot** (type this in the viewer's terminal):
+
+```bash
+snap highres_rainier.png 4000x4000
+```
+
+This workflow demonstrates forge3d's **supersampled snapshot** capability: the viewer runs at interactive resolution (800×800) for real-time exploration, then renders a single frame at 4000×4000 (16 megapixels) for publication-quality output. Because the GPU renders only one high-res frame on demand, you get print-ready imagery without the memory cost of a persistent 4K framebuffer.
+
+![Mount Rainier High-Resolution Snapshot](assets/highres.png)
 
 ## Platform requirements
 

@@ -1082,7 +1082,7 @@ impl Scene {
             TEXTURE_FORMAT,
             height_filterable,
         );
-        overlay_renderer.recreate_bind_group(&g.device, None, Some(&hview), None);
+        overlay_renderer.recreate_bind_group(&g.device, None, Some(&hview), None, None);
         overlay_renderer.upload_uniforms(&g.queue);
 
         // D: Text overlay (native)
@@ -1328,7 +1328,7 @@ impl Scene {
         // Update overlays compositor to use the new height view
         let height_ref = self.height_view.as_ref();
         if let Some(ref mut ov) = self.overlay_renderer {
-            ov.recreate_bind_group(&g.device, None, height_ref, None);
+            ov.recreate_bind_group(&g.device, None, height_ref, None, None);
             ov.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -4862,7 +4862,7 @@ impl Scene {
         // Ensure height view is bound
         if let Some(ref hv) = self.height_view {
             let g = crate::core::gpu::ctx();
-            ov.recreate_bind_group(&g.device, None, Some(hv), None);
+            ov.recreate_bind_group(&g.device, None, Some(hv), None, None);
         }
         let g = crate::core::gpu::ctx();
         ov.upload_uniforms(&g.queue);
@@ -4968,7 +4968,7 @@ impl Scene {
         ov.overlay_view = Some(view);
         // Recreate bind group with new overlay view and existing height view
         let height_view = self.height_view.as_ref();
-        ov.recreate_bind_group(&g.device, None, height_view, None);
+        ov.recreate_bind_group(&g.device, None, height_view, None, None);
         Ok(())
     }
 
@@ -5294,7 +5294,7 @@ impl Scene {
             // Keep GPU resources alive
             ov.set_overlay_texture(tex, view);
             // Rebind with current height view for altitude/contours
-            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref(), None);
+            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref(), None, None);
 
             // Set params
             ov.set_enabled(true);
@@ -6229,7 +6229,7 @@ impl Scene {
 
         // Recreate native overlay bind group with current overlay/height views
         if let Some(ref mut ov) = self.overlay_renderer {
-            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref(), None);
+            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref(), None, None);
             ov.upload_uniforms(&g.queue);
         }
 

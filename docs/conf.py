@@ -15,9 +15,9 @@ copyright = '2025, forge3d contributors'
 author = 'forge3d contributors'
 
 # The short X.Y version
-version = '0.94.0'
+version = '1.2.0'
 # The full version, including alpha/beta/rc tags
-release = '0.94.0'
+release = '1.2.0'
 
 # Add any Sphinx extension module names here, as strings.
 extensions = [

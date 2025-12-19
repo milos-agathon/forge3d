@@ -2,17 +2,30 @@
 //! 
 //! Full-screen triangle approach with exposure control for converting
 //! HDR linear color space to sRGB output with tone mapping.
+//! M6: Extended with 3D LUT support and white balance (temperature/tint).
 
 struct TonemapUniforms {
     exposure: f32,
     white_point: f32,
     gamma: f32,
     operator_index: u32, // 0=Reinhard, 1=ReinhardExtended, 2=ACES, 3=Uncharted2, 4=Exposure
+    // M6: LUT and white balance parameters
+    lut_enabled: u32,        // 0=disabled, 1=enabled
+    lut_strength: f32,       // LUT blend strength 0-1
+    lut_size: f32,           // LUT dimension (e.g., 32 for 32x32x32)
+    white_balance_enabled: u32, // 0=disabled, 1=enabled
+    temperature: f32,        // Color temperature in Kelvin (2000-12000)
+    tint: f32,               // Green-magenta tint (-1 to 1)
+    _pad0: f32,
+    _pad1: f32,
 }
 
 @group(0) @binding(0) var hdr_texture: texture_2d<f32>;
 @group(0) @binding(1) var hdr_sampler: sampler;
 @group(0) @binding(2) var<uniform> uniforms: TonemapUniforms;
+// M6: 3D LUT texture for color grading
+@group(0) @binding(3) var lut_texture: texture_3d<f32>;
+@group(0) @binding(4) var lut_sampler: sampler;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -81,6 +94,46 @@ fn exposure_tonemap(color: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(1.0) - exp(-color);
 }
 
+// M6: White balance adjustment using temperature and tint
+// Based on Bradford chromatic adaptation
+fn apply_white_balance(color: vec3<f32>, temperature: f32, tint: f32) -> vec3<f32> {
+    // Convert temperature to approximate RGB multipliers
+    // Based on Kelvin to RGB approximation (simplified Planckian locus)
+    let temp_normalized = (temperature - 6500.0) / 5500.0; // Normalize around D65
+    
+    // Temperature: negative = warmer (more red), positive = cooler (more blue)
+    var r_mult = 1.0;
+    var b_mult = 1.0;
+    if (temp_normalized < 0.0) {
+        // Warmer: boost red, reduce blue
+        r_mult = 1.0 - temp_normalized * 0.3;
+        b_mult = 1.0 + temp_normalized * 0.3;
+    } else {
+        // Cooler: reduce red, boost blue
+        r_mult = 1.0 - temp_normalized * 0.3;
+        b_mult = 1.0 + temp_normalized * 0.3;
+    }
+    
+    // Tint: negative = more green, positive = more magenta
+    var g_mult = 1.0 - tint * 0.2;
+    
+    return color * vec3<f32>(r_mult, g_mult, b_mult);
+}
+
+// M6: Sample 3D LUT with trilinear interpolation
+fn sample_lut(color: vec3<f32>, lut_size: f32) -> vec3<f32> {
+    // Clamp input to valid range
+    let clamped = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
+    
+    // Scale to LUT coordinates (0.5/size to 1-0.5/size for proper texel centers)
+    let half_texel = 0.5 / lut_size;
+    let scale = (lut_size - 1.0) / lut_size;
+    let lut_coord = clamped * scale + half_texel;
+    
+    // Sample with trilinear filtering
+    return textureSampleLevel(lut_texture, lut_sampler, lut_coord, 0.0).rgb;
+}
+
 // Linear to sRGB conversion
 fn linear_to_srgb(color: vec3<f32>) -> vec3<f32> {
     return select(
@@ -94,10 +147,15 @@ fn linear_to_srgb(color: vec3<f32>) -> vec3<f32> {
 @fragment  
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Sample HDR input
-    let hdr_color = textureSample(hdr_texture, hdr_sampler, input.uv).rgb;
+    var color = textureSample(hdr_texture, hdr_sampler, input.uv).rgb;
+    
+    // M6: Apply white balance before exposure (in linear space)
+    if (uniforms.white_balance_enabled > 0u) {
+        color = apply_white_balance(color, uniforms.temperature, uniforms.tint);
+    }
     
     // Apply exposure
-    let exposed_color = hdr_color * uniforms.exposure;
+    let exposed_color = color * uniforms.exposure;
     
     // Apply tone mapping based on operator selection
     var tonemapped_color: vec3<f32>;
@@ -120,6 +178,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         default: { // Default to Reinhard
             tonemapped_color = reinhard_tonemap(exposed_color);
         }
+    }
+    
+    // M6: Apply 3D LUT after tonemapping (before gamma)
+    if (uniforms.lut_enabled > 0u && uniforms.lut_size > 0.0) {
+        let lut_color = sample_lut(tonemapped_color, uniforms.lut_size);
+        tonemapped_color = mix(tonemapped_color, lut_color, uniforms.lut_strength);
     }
     
     // Apply gamma correction (output linear→gamma corrected)

@@ -360,8 +360,9 @@ struct FogUniforms {
     camera_height: f32,
     // Inscatter color (linear RGB, typically sky-tinted)
     fog_inscatter: vec3<f32>,
-    // Padding for 16-byte alignment
-    _padding: f32,
+    // M3: Aerial perspective strength (0.0 = disabled, 1.0 = full effect)
+    // Controls distance-based desaturation and blue shift
+    aerial_perspective: f32,
 }
 
 @group(4) @binding(0)
@@ -393,6 +394,153 @@ var reflection_texture: texture_2d<f32>;
 
 @group(5) @binding(2)
 var reflection_sampler: sampler;
+
+// ──────────────────────────────────────────────────────────────────────────
+// M4: Material Layer Uniforms (@group(6))
+// Slope/aspect/altitude-driven material blending for snow, rock, wetness.
+// When all layers are disabled, output is identical to baseline.
+// ──────────────────────────────────────────────────────────────────────────
+struct MaterialLayerUniforms {
+    // Snow layer: vec4(altitude_min, altitude_blend, slope_max_rad, slope_blend_rad)
+    snow_params0: vec4<f32>,
+    // Snow layer: vec4(aspect_influence, roughness, enabled, _pad)
+    snow_params1: vec4<f32>,
+    // Snow color (RGB) + padding
+    snow_color: vec4<f32>,
+    // Rock layer: vec4(slope_min_rad, slope_blend_rad, roughness, enabled)
+    rock_params: vec4<f32>,
+    // Rock color (RGB) + padding
+    rock_color: vec4<f32>,
+    // Wetness layer: vec4(strength, slope_influence, enabled, _pad)
+    wetness_params: vec4<f32>,
+}
+
+@group(6) @binding(0)
+var<uniform> material_layer_uniforms: MaterialLayerUniforms;
+
+// ──────────────────────────────────────────────────────────────────────────
+// M4: Terrain attribute computation (slope, aspect)
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Compute terrain attributes from world normal
+/// Returns: vec4(slope_radians, aspect_radians, curvature_proxy, _pad)
+/// slope: 0 = flat, PI/2 = vertical cliff
+/// aspect: angle from north (0 = north, PI/2 = east, PI = south, 3PI/2 = west)
+fn compute_terrain_attributes(world_normal: vec3<f32>) -> vec4<f32> {
+    // Slope: angle from vertical (Z-up coordinate system)
+    // slope = acos(dot(normal, up)) where up = (0,0,1)
+    let slope = acos(clamp(world_normal.z, -1.0, 1.0));
+    
+    // Aspect: direction the slope faces (azimuth of steepest descent)
+    // In Z-up: project normal to XY plane and compute angle from Y-axis (north)
+    let horizontal = vec2<f32>(world_normal.x, world_normal.y);
+    let horiz_len = length(horizontal);
+    var aspect = 0.0;
+    if (horiz_len > 0.001) {
+        // atan2(x, y) gives angle from Y-axis (north)
+        aspect = atan2(horizontal.x, horizontal.y);
+        if (aspect < 0.0) {
+            aspect = aspect + 2.0 * 3.14159265;
+        }
+    }
+    
+    // Curvature proxy: use slope derivative approximation
+    // For now, just use slope as curvature proxy (simplified)
+    let curvature_proxy = slope;
+    
+    return vec4<f32>(slope, aspect, curvature_proxy, 0.0);
+}
+
+/// M4: Apply snow layer blending based on altitude, slope, and aspect
+fn apply_snow_layer(
+    base_albedo: vec3<f32>,
+    base_roughness: f32,
+    world_pos: vec3<f32>,
+    terrain_attrs: vec4<f32>,
+) -> vec3<f32> {
+    let snow_enabled = material_layer_uniforms.snow_params1.z;
+    if (snow_enabled < 0.5) {
+        return base_albedo;
+    }
+    
+    let altitude = world_pos.z;
+    let slope = terrain_attrs.x;
+    let aspect = terrain_attrs.y;
+    
+    // Altitude factor: ramp from 0 at min to 1 at min+blend
+    let alt_min = material_layer_uniforms.snow_params0.x;
+    let alt_blend = material_layer_uniforms.snow_params0.y;
+    let altitude_factor = clamp((altitude - alt_min) / max(alt_blend, 0.001), 0.0, 1.0);
+    
+    // Slope factor: snow accumulates on flat surfaces, not on cliffs
+    // slope_max is in radians, ramp from 1 at 0 to 0 at slope_max
+    let slope_max = material_layer_uniforms.snow_params0.z;
+    let slope_blend = material_layer_uniforms.snow_params0.w;
+    let slope_factor = 1.0 - clamp((slope - slope_max + slope_blend) / max(slope_blend, 0.001), 0.0, 1.0);
+    
+    // Aspect factor: south-facing slopes get less snow (more sun exposure)
+    // aspect=0 is north, aspect=PI is south
+    let aspect_influence = material_layer_uniforms.snow_params1.x;
+    // cos(aspect) = 1 for north, -1 for south
+    // We want: north=1, south=reduced
+    let south_factor = cos(aspect); // 1 for north, -1 for south
+    let aspect_factor = mix(1.0, 0.5 + 0.5 * south_factor, aspect_influence);
+    
+    // Combined snow weight
+    let snow_weight = altitude_factor * slope_factor * aspect_factor;
+    
+    // Blend to snow color
+    let snow_color = material_layer_uniforms.snow_color.rgb;
+    return mix(base_albedo, snow_color, snow_weight);
+}
+
+/// M4: Apply rock layer blending based on slope
+fn apply_rock_layer(
+    base_albedo: vec3<f32>,
+    base_roughness: f32,
+    terrain_attrs: vec4<f32>,
+) -> vec3<f32> {
+    let rock_enabled = material_layer_uniforms.rock_params.w;
+    if (rock_enabled < 0.5) {
+        return base_albedo;
+    }
+    
+    let slope = terrain_attrs.x;
+    
+    // Rock exposed on steep slopes
+    let slope_min = material_layer_uniforms.rock_params.x;
+    let slope_blend = material_layer_uniforms.rock_params.y;
+    let rock_weight = clamp((slope - slope_min) / max(slope_blend, 0.001), 0.0, 1.0);
+    
+    let rock_color = material_layer_uniforms.rock_color.rgb;
+    return mix(base_albedo, rock_color, rock_weight);
+}
+
+/// M4: Apply wetness darkening based on slope (concavity proxy)
+fn apply_wetness_layer(
+    base_albedo: vec3<f32>,
+    terrain_attrs: vec4<f32>,
+) -> vec3<f32> {
+    let wetness_enabled = material_layer_uniforms.wetness_params.z;
+    if (wetness_enabled < 0.5) {
+        return base_albedo;
+    }
+    
+    let slope = terrain_attrs.x;
+    let curvature = terrain_attrs.z;
+    
+    // Wetness accumulates in flat, low areas (simplified: low slope = wet)
+    let strength = material_layer_uniforms.wetness_params.x;
+    let slope_influence = material_layer_uniforms.wetness_params.y;
+    
+    // Flat areas (low slope) are wetter
+    let flat_factor = 1.0 - clamp(slope / (3.14159265 * 0.25), 0.0, 1.0);
+    let wetness_factor = flat_factor * slope_influence;
+    
+    // Darken by wetness
+    let darkening = 1.0 - wetness_factor * strength;
+    return base_albedo * darkening;
+}
 
 // P4: Sample reflection texture with wave-based UV distortion
 // Returns (reflection_color, valid) where valid indicates if sample is in bounds
@@ -1919,9 +2067,6 @@ fn apply_atmospheric_fog(
         return base_color;
     }
     
-    // DEBUG: Return red to verify fog is being applied
-    // return vec3<f32>(1.0, 0.0, 0.0);
-    
     // Quadratic density scaling: makes 0-1 range perceptually useful
     // density=0.1 → 0.01, density=0.5 → 0.25, density=1.0 → 1.0
     let density = density_raw * density_raw;
@@ -1952,7 +2097,35 @@ fn apply_atmospheric_fog(
     
     // Mix: at extinction=1 (no fog), result is base_color
     //      at extinction=0 (full fog), result is inscatter
-    let fog_result = mix(inscatter, base_color, extinction);
+    var fog_result = mix(inscatter, base_color, extinction);
+    
+    // ──────────────────────────────────────────────────────────────────────────
+    // M3: Aerial Perspective
+    // Distance-based desaturation and blue shift simulating Rayleigh scattering.
+    // Real atmosphere scatters shorter wavelengths (blue) more than longer (red).
+    // Effect: distant objects appear desaturated and shifted toward blue/gray.
+    // ──────────────────────────────────────────────────────────────────────────
+    let aerial_strength = fog_uniforms.aerial_perspective;
+    if (aerial_strength > 0.0) {
+        // Compute aerial perspective factor based on distance
+        // Use same extinction curve but with separate scaling
+        // K_aerial=0.003 for subtle effect at typical terrain distances
+        let aerial_factor = 1.0 - exp(-density * view_distance * height_factor * 0.003);
+        let aerial_amount = aerial_factor * aerial_strength;
+        
+        // Desaturation: reduce color saturation with distance
+        // Compute luminance (Rec. 709 coefficients)
+        let luma = dot(fog_result, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let desaturated = mix(fog_result, vec3<f32>(luma), aerial_amount * 0.6);
+        
+        // Blue shift: blend toward atmospheric blue with distance
+        // Typical sky/atmosphere color (slightly desaturated blue)
+        let atmosphere_blue = vec3<f32>(0.65, 0.75, 0.9);
+        let blue_shifted = mix(desaturated, atmosphere_blue * luma, aerial_amount * 0.3);
+        
+        fog_result = blue_shifted;
+    }
+    
     return fog_result;
 }
 
@@ -2364,6 +2537,22 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     if (!is_water) {
         let hue_variation_strength = 0.08;
         albedo = apply_slope_hue_variation(albedo, slope_factor, height_norm, hue_variation_strength);
+    }
+    
+    // ──────────────────────────────────────────────────────────────────────────
+    // M4: Material Layer Blending (snow, rock, wetness)
+    // Applied after base material but before lighting calculations.
+    // When all layers disabled, this is a no-op preserving baseline output.
+    // ──────────────────────────────────────────────────────────────────────────
+    if (!is_water) {
+        // Compute terrain attributes from stable geometric normal
+        let terrain_attrs = compute_terrain_attributes(base_normal);
+        
+        // Apply material layers in order: wetness (darkening) -> rock -> snow
+        // Order matters: snow on top, then rock, then wetness darkening at base
+        albedo = apply_wetness_layer(albedo, terrain_attrs);
+        albedo = apply_rock_layer(albedo, roughness, terrain_attrs);
+        albedo = apply_snow_layer(albedo, roughness, input.world_position, terrain_attrs);
     }
     
     occlusion = clamp(occlusion, u_shading.clamp2.x, u_shading.clamp2.y);

@@ -2,7 +2,10 @@
 // Bridge to TerrainRenderer for PBR+POM terrain rendering in the interactive viewer
 
 use std::path::PathBuf;
-use crate::viewer::viewer_enums::{ViewerHeightAoConfig, ViewerSunVisConfig};
+use crate::viewer::viewer_enums::{
+    ViewerHeightAoConfig, ViewerSunVisConfig,
+    ViewerMaterialLayerConfig, ViewerVectorOverlayConfig, ViewerTonemapConfig,
+};
 
 /// Configuration for PBR terrain rendering mode
 #[derive(Debug, Clone)]
@@ -27,6 +30,12 @@ pub struct ViewerTerrainPbrConfig {
     pub height_ao: HeightAoConfig,
     /// Heightfield ray-traced sun visibility settings
     pub sun_visibility: SunVisConfig,
+    /// M4: Material layer settings (snow/rock/wetness)
+    pub materials: MaterialLayerConfig,
+    /// M5: Vector overlay settings (depth test, halos)
+    pub vector_overlay: VectorOverlayConfig,
+    /// M6: Tonemap settings (operator, white balance)
+    pub tonemap: TonemapConfig,
 }
 
 /// Internal heightfield AO configuration
@@ -81,6 +90,78 @@ impl Default for SunVisConfig {
     }
 }
 
+/// M4: Internal material layer configuration
+#[derive(Debug, Clone)]
+pub struct MaterialLayerConfig {
+    pub snow_enabled: bool,
+    pub snow_altitude_min: f32,
+    pub snow_altitude_blend: f32,
+    pub snow_slope_max: f32,
+    pub rock_enabled: bool,
+    pub rock_slope_min: f32,
+    pub wetness_enabled: bool,
+    pub wetness_strength: f32,
+}
+
+impl Default for MaterialLayerConfig {
+    fn default() -> Self {
+        Self {
+            snow_enabled: false,
+            snow_altitude_min: 2500.0,
+            snow_altitude_blend: 200.0,
+            snow_slope_max: 45.0,
+            rock_enabled: false,
+            rock_slope_min: 45.0,
+            wetness_enabled: false,
+            wetness_strength: 0.3,
+        }
+    }
+}
+
+/// M5: Internal vector overlay configuration
+#[derive(Debug, Clone)]
+pub struct VectorOverlayConfig {
+    pub depth_test: bool,
+    pub depth_bias: f32,
+    pub halo_enabled: bool,
+    pub halo_width: f32,
+    pub halo_color: [f32; 4],
+}
+
+impl Default for VectorOverlayConfig {
+    fn default() -> Self {
+        Self {
+            depth_test: false,
+            depth_bias: 0.001,
+            halo_enabled: false,
+            halo_width: 2.0,
+            halo_color: [0.0, 0.0, 0.0, 0.5],
+        }
+    }
+}
+
+/// M6: Internal tonemap configuration
+#[derive(Debug, Clone)]
+pub struct TonemapConfig {
+    pub operator: String,
+    pub white_point: f32,
+    pub white_balance_enabled: bool,
+    pub temperature: f32,
+    pub tint: f32,
+}
+
+impl Default for TonemapConfig {
+    fn default() -> Self {
+        Self {
+            operator: "aces".to_string(),
+            white_point: 4.0,
+            white_balance_enabled: false,
+            temperature: 6500.0,
+            tint: 0.0,
+        }
+    }
+}
+
 impl Default for ViewerTerrainPbrConfig {
     fn default() -> Self {
         Self {
@@ -94,12 +175,16 @@ impl Default for ViewerTerrainPbrConfig {
             normal_strength: 1.0,
             height_ao: HeightAoConfig::default(),
             sun_visibility: SunVisConfig::default(),
+            materials: MaterialLayerConfig::default(),
+            vector_overlay: VectorOverlayConfig::default(),
+            tonemap: TonemapConfig::default(),
         }
     }
 }
 
 impl ViewerTerrainPbrConfig {
     /// Update config from optional parameters (used by IPC handler)
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_updates(
         &mut self,
         enabled: Option<bool>,
@@ -112,6 +197,9 @@ impl ViewerTerrainPbrConfig {
         normal_strength: Option<f32>,
         height_ao: Option<ViewerHeightAoConfig>,
         sun_visibility: Option<ViewerSunVisConfig>,
+        materials: Option<ViewerMaterialLayerConfig>,
+        vector_overlay: Option<ViewerVectorOverlayConfig>,
+        tonemap: Option<ViewerTonemapConfig>,
     ) {
         if let Some(v) = enabled {
             self.enabled = v;
@@ -161,6 +249,36 @@ impl ViewerTerrainPbrConfig {
             self.sun_visibility.bias = sv.bias.clamp(0.0, 0.1);
             self.sun_visibility.resolution_scale = sv.resolution_scale.clamp(0.1, 1.0);
         }
+        // M4: Material layer config
+        if let Some(mat) = materials {
+            self.materials.snow_enabled = mat.snow_enabled;
+            self.materials.snow_altitude_min = mat.snow_altitude_min.max(0.0);
+            self.materials.snow_altitude_blend = mat.snow_altitude_blend.max(0.0);
+            self.materials.snow_slope_max = mat.snow_slope_max.clamp(0.0, 90.0);
+            self.materials.rock_enabled = mat.rock_enabled;
+            self.materials.rock_slope_min = mat.rock_slope_min.clamp(0.0, 90.0);
+            self.materials.wetness_enabled = mat.wetness_enabled;
+            self.materials.wetness_strength = mat.wetness_strength.clamp(0.0, 1.0);
+        }
+        // M5: Vector overlay config
+        if let Some(vo) = vector_overlay {
+            self.vector_overlay.depth_test = vo.depth_test;
+            self.vector_overlay.depth_bias = vo.depth_bias.max(0.0);
+            self.vector_overlay.halo_enabled = vo.halo_enabled;
+            self.vector_overlay.halo_width = vo.halo_width.max(0.0);
+            self.vector_overlay.halo_color = vo.halo_color;
+        }
+        // M6: Tonemap config
+        if let Some(tm) = tonemap {
+            let valid_ops = ["reinhard", "reinhard_extended", "aces", "uncharted2", "exposure"];
+            if valid_ops.contains(&tm.operator.to_lowercase().as_str()) {
+                self.tonemap.operator = tm.operator.to_lowercase();
+            }
+            self.tonemap.white_point = tm.white_point.max(0.1);
+            self.tonemap.white_balance_enabled = tm.white_balance_enabled;
+            self.tonemap.temperature = tm.temperature.clamp(2000.0, 12000.0);
+            self.tonemap.tint = tm.tint.clamp(-1.0, 1.0);
+        }
     }
 
     /// Format config as display string
@@ -179,6 +297,16 @@ impl ViewerTerrainPbrConfig {
             parts.push(format!("sun_vis={} samples={} steps={}", 
                 self.sun_visibility.mode, self.sun_visibility.samples, self.sun_visibility.steps));
         }
+        // M4-M6 display
+        if self.materials.snow_enabled || self.materials.rock_enabled {
+            parts.push(format!("materials: snow={} rock={}", 
+                self.materials.snow_enabled, self.materials.rock_enabled));
+        }
+        if self.vector_overlay.depth_test || self.vector_overlay.halo_enabled {
+            parts.push(format!("overlay: depth={} halo={}", 
+                self.vector_overlay.depth_test, self.vector_overlay.halo_enabled));
+        }
+        parts.push(format!("tonemap={}", self.tonemap.operator));
         parts.join(" | ")
     }
 }

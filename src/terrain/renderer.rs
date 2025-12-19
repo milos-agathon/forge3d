@@ -110,6 +110,16 @@ pub struct TerrainScene {
     water_reflection_fallback_view: wgpu::TextureView,
     // P4: Non-MSAA pipeline for reflection pass (reflection textures are always sample_count=1)
     water_reflection_pipeline: wgpu::RenderPipeline,
+    // M1: Accumulation AA resources
+    accumulation_bind_group_layout: wgpu::BindGroupLayout,
+    accumulation_pipeline: wgpu::ComputePipeline,
+    accumulation_texture: Mutex<Option<wgpu::Texture>>,
+    accumulation_view: Mutex<Option<wgpu::TextureView>>,
+    accumulation_size: Mutex<(u32, u32)>,
+    accumulation_params_buffer: wgpu::Buffer,
+    // M4: Material layer resources
+    material_layer_bind_group_layout: wgpu::BindGroupLayout,
+    material_layer_uniform_buffer: wgpu::Buffer,
     // P0-03: Config plumbing (no shader/pipeline behavior changes)
     #[cfg(feature = "enable-renderer-config")]
     config: Arc<Mutex<crate::render::params::RendererConfig>>,
@@ -224,8 +234,9 @@ struct FogUniforms {
     camera_height: f32,
     /// Inscatter color (linear RGB)
     fog_inscatter: [f32; 3],
-    /// Padding for 16-byte alignment
-    _padding: f32,
+    /// M3: Aerial perspective strength (0.0 = disabled, 1.0 = full effect)
+    /// Controls distance-based desaturation and blue shift (Rayleigh scattering)
+    aerial_perspective: f32,
 }
 
 impl FogUniforms {
@@ -237,7 +248,41 @@ impl FogUniforms {
             fog_base_height: 0.0,
             camera_height: 0.0,
             fog_inscatter: [1.0, 1.0, 1.0],
-            _padding: 0.0,
+            aerial_perspective: 0.0,
+        }
+    }
+}
+
+/// M4: Material layer uniforms for terrain shader
+/// Must match MaterialLayerUniforms struct in terrain_pbr_pom.wgsl exactly.
+/// When all layers are disabled (default), output is identical to baseline.
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct MaterialLayerUniforms {
+    /// Snow: vec4(altitude_min, altitude_blend, slope_max_rad, slope_blend_rad)
+    snow_params0: [f32; 4],
+    /// Snow: vec4(aspect_influence, roughness, enabled, _pad)
+    snow_params1: [f32; 4],
+    /// Snow color (RGB) + padding
+    snow_color: [f32; 4],
+    /// Rock: vec4(slope_min_rad, slope_blend_rad, roughness, enabled)
+    rock_params: [f32; 4],
+    /// Rock color (RGB) + padding
+    rock_color: [f32; 4],
+    /// Wetness: vec4(strength, slope_influence, enabled, _pad)
+    wetness_params: [f32; 4],
+}
+
+impl MaterialLayerUniforms {
+    /// Create material layer uniforms with all layers disabled (no-op for backward compatibility)
+    fn disabled() -> Self {
+        Self {
+            snow_params0: [2000.0, 500.0, 0.785, 0.262], // 45°, 15° in radians
+            snow_params1: [0.3, 0.4, 0.0, 0.0],          // disabled
+            snow_color: [0.95, 0.95, 0.98, 0.0],
+            rock_params: [0.785, 0.175, 0.8, 0.0],       // 45°, 10° in radians, disabled
+            rock_color: [0.35, 0.32, 0.28, 0.0],
+            wetness_params: [0.3, 0.5, 0.0, 0.0],        // disabled
         }
     }
 }
@@ -1639,6 +1684,17 @@ impl TerrainScene {
         );
         let water_reflection_fallback_view =
             water_reflection_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // M4: Create material layer bind group layout and buffer
+        let material_layer_bind_group_layout =
+            Self::create_material_layer_bind_group_layout(device.as_ref());
+        let material_layer_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.material_layer.uniform_buffer"),
+                contents: bytemuck::bytes_of(&MaterialLayerUniforms::disabled()),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
         let pipeline = Self::create_render_pipeline(
             device.as_ref(),
             &bind_group_layout,
@@ -1647,6 +1703,7 @@ impl TerrainScene {
             &shadow_bind_group_layout,
             &fog_bind_group_layout,
             &water_reflection_bind_group_layout,
+            &material_layer_bind_group_layout,
             color_format,
             1,
         );
@@ -1660,12 +1717,84 @@ impl TerrainScene {
             &shadow_bind_group_layout,
             &fog_bind_group_layout,
             &water_reflection_bind_group_layout,
+            &material_layer_bind_group_layout,
             color_format,
             1, // Always sample_count=1 for reflection pass
         );
 
         let blit_pipeline =
             Self::create_blit_pipeline(device.as_ref(), &blit_bind_group_layout, color_format);
+
+        // M1: Accumulation AA bind group layout and pipeline
+        let accumulation_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("terrain.accumulation.bind_group_layout"),
+                entries: &[
+                    // @binding(0): accumulation params uniform
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // @binding(1): current sample texture (read)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // @binding(2): accumulation texture (read_write storage)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::ReadWrite,
+                            format: wgpu::TextureFormat::Rgba32Float,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let accumulation_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain.accumulation.shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "../shaders/accumulation_blend.wgsl"
+            ))),
+        });
+
+        let accumulation_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("terrain.accumulation.pipeline_layout"),
+                bind_group_layouts: &[&accumulation_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let accumulation_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("terrain.accumulation.pipeline"),
+                layout: Some(&accumulation_pipeline_layout),
+                module: &accumulation_shader,
+                entry_point: "accumulate",
+            });
+
+        // M1: Accumulation params buffer
+        let accumulation_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("terrain.accumulation.params"),
+            size: 16, // 4 x u32: sample_index, total_samples, width, height
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         // Create noop shadow resources for bind group at index 3
         // Shadow depth texture is cleared to 1.0 so terrain is fully lit when not using real shadows
@@ -1785,6 +1914,16 @@ impl TerrainScene {
             )),
             water_reflection_fallback_view,
             water_reflection_pipeline,
+            // M1: Accumulation AA resources
+            accumulation_bind_group_layout,
+            accumulation_pipeline,
+            accumulation_texture: Mutex::new(None),
+            accumulation_view: Mutex::new(None),
+            accumulation_size: Mutex::new((0, 0)),
+            accumulation_params_buffer,
+            // M4: Material layer resources
+            material_layer_bind_group_layout,
+            material_layer_uniform_buffer,
             // P0-03: Initialize with default config (no behavior changes)
             #[cfg(feature = "enable-renderer-config")]
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
@@ -2143,6 +2282,81 @@ impl TerrainScene {
         *size = (target_width, target_height);
 
         Ok(true)
+    }
+
+    /// M1: Ensure accumulation texture matches the required size.
+    /// Returns true if texture was recreated, false if size was already correct.
+    fn ensure_accumulation_texture_size(&self, width: u32, height: u32) -> Result<bool> {
+        let mut size = self
+            .accumulation_size
+            .lock()
+            .map_err(|_| anyhow!("accumulation_size mutex poisoned"))?;
+
+        if size.0 == width && size.1 == height {
+            return Ok(false);
+        }
+
+        log::info!(
+            target: "terrain.accumulation",
+            "M1: Recreating accumulation texture: {}x{} -> {}x{}",
+            size.0, size.1, width, height
+        );
+
+        // Create new accumulation texture (Rgba32Float for precision)
+        let new_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.accumulation.texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        let new_view = new_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("terrain.accumulation.view"),
+            ..Default::default()
+        });
+
+        // Update the textures under lock
+        let mut tex = self
+            .accumulation_texture
+            .lock()
+            .map_err(|_| anyhow!("accumulation_texture mutex poisoned"))?;
+        let mut view = self
+            .accumulation_view
+            .lock()
+            .map_err(|_| anyhow!("accumulation_view mutex poisoned"))?;
+
+        *tex = Some(new_texture);
+        *view = Some(new_view);
+        *size = (width, height);
+
+        Ok(true)
+    }
+
+    /// M1: Clear accumulation texture to zero (black with zero alpha).
+    fn clear_accumulation_texture(&self, _encoder: &mut wgpu::CommandEncoder, _width: u32, _height: u32) -> Result<()> {
+        let view_guard = self
+            .accumulation_view
+            .lock()
+            .map_err(|_| anyhow!("accumulation_view mutex poisoned"))?;
+
+        if let Some(view) = view_guard.as_ref() {
+            // Use a render pass to clear the storage texture
+            // Note: Storage textures can't be directly cleared, so we use compute
+            // For now, just ensure texture exists - clearing happens via first sample write
+            let _ = view;
+        }
+
+        Ok(())
     }
 
     /// Preprocess terrain shader by resolving #include directives
@@ -2515,6 +2729,27 @@ impl TerrainScene {
         })
     }
 
+    /// M4: Create material layer bind group layout for terrain shader (group 6)
+    /// Matches terrain_pbr_pom.wgsl @group(6) bindings: MaterialLayerUniforms
+    fn create_material_layer_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain_pbr_pom.material_layer_bind_group_layout"),
+            entries: &[
+                // @binding(0): MaterialLayerUniforms
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        })
+    }
+
     /// P4: Create water reflection bind group layout for terrain shader (group 5)
     /// Matches terrain_pbr_pom.wgsl @group(5) bindings: WaterReflectionUniforms, texture, sampler
     fn create_water_reflection_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -2562,6 +2797,7 @@ impl TerrainScene {
         shadow_bind_group_layout: &wgpu::BindGroupLayout,
         fog_bind_group_layout: &wgpu::BindGroupLayout,
         water_reflection_bind_group_layout: &wgpu::BindGroupLayout,
+        material_layer_bind_group_layout: &wgpu::BindGroupLayout,
         color_format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> wgpu::RenderPipeline {
@@ -2580,6 +2816,7 @@ impl TerrainScene {
                 &shadow_bind_group_layout, // @group(3): shadows (bindings 0-4)
                 fog_bind_group_layout,     // @group(4): fog (binding 0)
                 water_reflection_bind_group_layout, // @group(5): water reflections (bindings 0-2)
+                material_layer_bind_group_layout,   // @group(6): material layers (binding 0)
             ],
             push_constant_ranges: &[],
         });
@@ -3415,6 +3652,7 @@ impl TerrainScene {
                 &self.shadow_bind_group_layout,
                 &self.fog_bind_group_layout,
                 &self.water_reflection_bind_group_layout,
+                &self.material_layer_bind_group_layout,
                 self.color_format,
                 effective_msaa,
             );
@@ -4053,7 +4291,7 @@ impl TerrainScene {
             fog_base_height,
             camera_height: eye_y, // Camera Y position for fog height calculation
             fog_inscatter: decoded.fog.inscatter,
-            _padding: 0.0,
+            aerial_perspective: decoded.fog.aerial_perspective,
         };
         self.queue.write_buffer(
             &self.fog_uniform_buffer,
@@ -4067,6 +4305,65 @@ impl TerrainScene {
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: self.fog_uniform_buffer.as_entire_binding(),
+            }],
+        });
+
+        // ──────────────────────────────────────────────────────────────────────────
+        // M4: Material Layer Uniforms
+        // ──────────────────────────────────────────────────────────────────────────
+        let materials = &decoded.materials;
+        // Convert degrees to radians for slope thresholds
+        let deg_to_rad = std::f32::consts::PI / 180.0;
+        let material_layer_uniforms = MaterialLayerUniforms {
+            snow_params0: [
+                materials.snow_altitude_min,
+                materials.snow_altitude_blend,
+                materials.snow_slope_max * deg_to_rad,
+                materials.snow_slope_blend * deg_to_rad,
+            ],
+            snow_params1: [
+                materials.snow_aspect_influence,
+                materials.snow_roughness,
+                if materials.snow_enabled { 1.0 } else { 0.0 },
+                0.0,
+            ],
+            snow_color: [
+                materials.snow_color[0],
+                materials.snow_color[1],
+                materials.snow_color[2],
+                0.0,
+            ],
+            rock_params: [
+                materials.rock_slope_min * deg_to_rad,
+                materials.rock_slope_blend * deg_to_rad,
+                materials.rock_roughness,
+                if materials.rock_enabled { 1.0 } else { 0.0 },
+            ],
+            rock_color: [
+                materials.rock_color[0],
+                materials.rock_color[1],
+                materials.rock_color[2],
+                0.0,
+            ],
+            wetness_params: [
+                materials.wetness_strength,
+                materials.wetness_slope_influence,
+                if materials.wetness_enabled { 1.0 } else { 0.0 },
+                0.0,
+            ],
+        };
+        self.queue.write_buffer(
+            &self.material_layer_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&material_layer_uniforms),
+        );
+
+        let material_layer_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain.material_layer.bind_group"),
+            layout: &self.material_layer_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: self.material_layer_uniform_buffer.as_entire_binding(),
             }],
         });
 
@@ -4398,6 +4695,9 @@ impl TerrainScene {
 
                 // P4: Bind water reflection bind group at index 5
                 pass.set_bind_group(5, &water_reflection_bind_group, &[]);
+
+                // M4: Bind material layer bind group at index 6
+                pass.set_bind_group(6, &material_layer_bind_group, &[]);
 
                 // P7: Vertex count depends on camera mode
                 // Screen mode: 3 vertices (fullscreen triangle)

@@ -1468,9 +1468,30 @@ impl Viewer {
 
         // Standalone terrain viewer (works without extension-module)
         let mut terrain_rendered = false;
+        // Check if snapshot requested with custom resolution (for terrain viewer)
+        let terrain_snap_size = if self.snapshot_request.is_some() {
+            if let (Some(w), Some(h)) = (self.view_config.snapshot_width, self.view_config.snapshot_height) {
+                Some((w, h))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         if let Some(ref mut tv) = self.terrain_viewer {
             if tv.has_terrain() {
+                // Always render to screen first at window resolution
                 terrain_rendered = tv.render(&mut encoder, &view, self.config.width, self.config.height);
+
+                // Then render to offscreen texture at snapshot resolution (if requested)
+                // This must be LAST so the uniform buffer has the correct aspect ratio for the snapshot
+                if let Some((snap_w, snap_h)) = terrain_snap_size {
+                    println!("[terrain] Rendering snapshot at {}x{}", snap_w, snap_h);
+                    if let Some(tex) = tv.render_to_texture(&mut encoder, self.config.format, snap_w, snap_h) {
+                        self.pending_snapshot_tex = Some(tex);
+                    }
+                }
             }
         }
 

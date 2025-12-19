@@ -2,11 +2,28 @@
 
 **Status: ✅ Complete - All Phases Implemented and Tested**
 
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Quick Start](#quick-start)
+3. [CLI Reference](#cli-reference)
+4. [Interactive Commands](#interactive-commands)
+5. [Advanced Examples](#advanced-examples)
+6. [API Reference](#api-reference)
+7. [Technical Details](#technical-details)
+8. [Testing](#testing)
+9. [Implementation](#implementation)
+10. [Troubleshooting](#troubleshooting)
+
+---
+
 ## Overview
 
 The interactive terrain viewer now supports an enhanced **PBR rendering mode** with improved lighting, materials, and visual quality. This mode is **opt-in** - the legacy simple shader remains the default for backward compatibility.
 
-### Features
+### Feature Comparison
 
 | Feature | Legacy Mode | PBR Mode |
 |---------|-------------|----------|
@@ -21,48 +38,35 @@ The interactive terrain viewer now supports an enhanced **PBR rendering mode** w
 | Window Size | 1280×720 | 4K default (3840×2160) |
 | Snapshot | Up to 4K | Up to 16K (16384×16384) |
 
+---
+
 ## Quick Start
 
-```bash
-# Build the viewer
-cargo build --release --bin interactive_viewer
+### Build the Viewer
 
+```bash
+cargo build --release --bin interactive_viewer
+```
+
+### Basic Usage
+
+```bash
 # Legacy mode (unchanged default behavior)
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif
+
+# Window size (default 4K)
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --width 1920 --height 1080
 
 # PBR mode (enhanced rendering)
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr
 
 # PBR with custom exposure
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --exposure 0.2
-
-# PBR with all options
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --exposure 0.2 --hdr assets/snow_field_4k.hdr --normal-strength 0.5 --ibl-intensity 0.1 --sun-azimuth 90 --sun-elevation 45 --sun-intensity 0.8 --msaa 8
-
-# PBR with heightfield AO (darkens valleys/crevices)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --height-ao --height-ao-strength 1.0
-
-# PBR with sun visibility (terrain self-shadowing)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --sun-vis --sun-vis-mode soft --sun-elevation 15
-
-# PBR with all terrain effects
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --height-ao --sun-vis --exposure 1.2
 ```
-
-## Implementation Status
-
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 1 | IPC protocol + ViewerCmd extension | ✅ Complete |
-| 2 | ViewerTerrainPbrConfig struct | ✅ Complete |
-| 3 | Python CLI args + IPC commands | ✅ Complete |
-| 4 | PBR shader + pipeline integration | ✅ Complete |
-| 5 | End-to-end testing (5/5 passed) | ✅ Complete |
-| 6 | Documentation | ✅ Complete |
 
 ---
 
-## CLI Options
+## CLI Reference
 
 ### Window & Output
 
@@ -96,8 +100,7 @@ python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr
 
 ### Heightfield AO
 
-Ambient occlusion computed by ray-marching the heightfield in multiple directions,
-producing soft darkening in concave terrain regions (valleys, crevices).
+Ambient occlusion computed by ray-marching the heightfield in multiple directions, producing soft darkening in concave terrain regions (valleys, crevices).
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -110,8 +113,7 @@ producing soft darkening in concave terrain regions (valleys, crevices).
 
 ### Sun Visibility
 
-Terrain self-shadowing computed by ray-marching along the sun direction,
-producing shadows where terrain occludes direct sunlight.
+Terrain self-shadowing computed by ray-marching along the sun direction, producing shadows where terrain occludes direct sunlight.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -125,6 +127,47 @@ producing shadows where terrain occludes direct sunlight.
 | `--sun-vis-resolution` | Float | 0.5 | Texture resolution scale [0.1-1.0] |
 
 **Note:** Sun visibility combines multiplicatively with CSM shadows when both are enabled.
+
+### Material Layering (M4)
+
+Terrain material layers: snow, rock, wetness based on altitude and slope.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--snow` | Flag | Off | Enable snow layer based on altitude and slope |
+| `--snow-altitude` | Float | 2500.0 | Minimum altitude for snow in world units |
+| `--snow-blend` | Float | 200.0 | Altitude blend range for snow transition |
+| `--snow-slope` | Float | 45.0 | Maximum slope for snow accumulation in degrees |
+| `--rock` | Flag | Off | Enable exposed rock layer on steep slopes |
+| `--rock-slope` | Float | 45.0 | Minimum slope for exposed rock in degrees |
+| `--wetness` | Flag | Off | Enable wetness effect in low areas |
+| `--wetness-strength` | Float | 0.3 | Wetness darkening strength [0.0-1.0] |
+
+### Vector Overlays (M5)
+
+Depth-correct vector overlays with halos.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--overlay-depth` | Flag | Off | Enable depth testing for vector overlays |
+| `--overlay-depth-bias` | Float | 0.001 | Depth bias to prevent z-fighting |
+| `--overlay-halo` | Flag | Off | Enable halo/outline around vector overlays |
+| `--overlay-halo-width` | Float | 2.0 | Halo width in pixels |
+| `--overlay-halo-color` | String | "0,0,0,0.5" | Halo color as R,G,B,A |
+
+### Tonemapping (M6)
+
+HDR tonemapping and color grading.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--tonemap` | Choice | "aces" | Tonemap operator (reinhard/reinhard_extended/aces/uncharted2/exposure) |
+| `--tonemap-white-point` | Float | 4.0 | White point for extended operators |
+| `--white-balance` | Flag | Off | Enable white balance adjustment |
+| `--temperature` | Float | 6500.0 | Color temperature in Kelvin [2000-12000] |
+| `--tint` | Float | 0.0 | Green-magenta tint [-1.0 to 1.0] |
+
+---
 
 ## Interactive Commands
 
@@ -166,6 +209,55 @@ producing shadows where terrain occludes direct sunlight.
 
 ---
 
+## Advanced Examples
+
+### Full PBR Configuration
+
+```bash
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --exposure 0.2 --hdr assets/snow_field_4k.hdr --normal-strength 0.5 --ibl-intensity 0.1 --sun-azimuth 90 --sun-elevation 45 --sun-intensity 0.8 --msaa 8
+```
+
+### Heightfield Effects
+
+```bash
+# Heightfield AO (darkens valleys/crevices)
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --height-ao --height-ao-strength 1.0
+
+# Sun visibility (terrain self-shadowing)
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --sun-vis --sun-vis-mode soft --sun-elevation 15
+
+# Both terrain effects combined
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --height-ao --sun-vis --exposure 1.2
+```
+
+### Material & Stylization
+
+```bash
+# Alpine scene with snow and rock
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --snow --snow-altitude 2500 --rock --rock-slope 45 --tonemap aces
+
+# Cinematic warm render
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --tonemap uncharted2 --white-balance --temperature 5500 --exposure 1.2 --tonemap uncharted2 --white-balance --temperature 5500 --exposure 1.2
+
+# All features enabled
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --height-ao --sun-vis --snow --rock --wetness --overlay-depth --overlay-halo --tonemap aces --white-balance
+```
+
+### Presets
+
+```bash
+# Alpine preset
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --preset alpine
+
+# Cinematic preset  
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --preset cinematic
+
+# High quality preset
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --preset high_quality --width 800 --height 800
+```
+
+---
+
 ## API Reference
 
 ### IPC Command: `set_terrain_pbr`
@@ -202,34 +294,45 @@ pub struct ViewerTerrainPbrConfig {
 
 ---
 
-## PBR Shader Features
+## Technical Details
+
+### PBR Shader Features
 
 The PBR shader (`src/viewer/terrain/shader_pbr.rs`) provides:
 
-### Lighting Model
+#### Lighting Model
 - **Blinn-Phong specular** with roughness-based shininess
 - **Soft self-shadows** via normal·light smoothstep
 - **Sky-gradient ambient** approximating hemisphere lighting
 
-### Materials
+#### Materials
 - **Height-based zones**: vegetation → rock → snow transitions
 - **Slope-based rock exposure**: steep slopes reveal rock texture
 - **Roughness variation**: snow is glossy, rock is matte
 
-### Post-Processing
+#### Post-Processing
 - **ACES tonemapping** for HDR to LDR conversion
 - **Gamma correction** (linear → sRGB)
 - **Configurable exposure** for brightness control
 
+### Known Limitations
+
+- **No POM displacement**: Parallax occlusion mapping not implemented in viewer shader
+- **16K snapshots require significant GPU memory**: ~1GB+ VRAM for render target alone
+
+These features exist in the full `TerrainRenderer` and may be integrated in future phases.
+
 ---
 
-## Test Coverage
+## Testing
 
-Run the test suite:
+### Run the Test Suite
 
 ```bash
 pytest tests/test_terrain_viewer_pbr.py -v
 ```
+
+### Test Coverage
 
 | Test | Validates |
 |------|-----------|
@@ -238,12 +341,28 @@ pytest tests/test_terrain_viewer_pbr.py -v
 | `test_pbr_produces_different_output` | PBR visually differs from legacy |
 | `test_pbr_exposure_affects_output` | Exposure parameter works |
 | `test_pbr_can_be_disabled` | Toggle back to legacy |
+| `test_height_ao_compute_pipeline_metal_compat` | Height AO R32Float/Metal compatibility |
+| `test_sun_visibility_compute_pipeline_metal_compat` | Sun vis R32Float/Metal compatibility |
+| `test_both_heightfield_effects_combined` | Combined heightfield effects |
 
 ---
 
-## Files Modified
+## Implementation
 
-### Backend (Rust)
+### Status
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | IPC protocol + ViewerCmd extension | ✅ Complete |
+| 2 | ViewerTerrainPbrConfig struct | ✅ Complete |
+| 3 | Python CLI args + IPC commands | ✅ Complete |
+| 4 | PBR shader + pipeline integration | ✅ Complete |
+| 5 | End-to-end testing (5/5 passed) | ✅ Complete |
+| 6 | Documentation | ✅ Complete |
+
+### Files Modified
+
+#### Backend (Rust)
 
 | File | Change |
 |------|--------|
@@ -256,7 +375,7 @@ pytest tests/test_terrain_viewer_pbr.py -v
 | `src/viewer/ipc/protocol.rs` | IPC request mapping |
 | `src/viewer/cmd/handler.rs` | Command handler |
 
-### Frontend (Python)
+#### Frontend (Python)
 
 | File | Change |
 |------|--------|
@@ -265,25 +384,19 @@ pytest tests/test_terrain_viewer_pbr.py -v
 
 ---
 
-## Known Limitations
-
-- **No POM displacement**: Parallax occlusion mapping not implemented in viewer shader
-- **16K snapshots require significant GPU memory**: ~1GB+ VRAM for render target alone
-
-These features exist in the full `TerrainRenderer` and may be integrated in future phases.
-
----
-
 ## Troubleshooting
 
-**PBR mode looks the same as legacy:**
+### PBR mode looks the same as legacy
+
 - Ensure `--pbr` flag is passed on command line
 - Check console for `[terrain] PBR pipeline initialized` message
 - Try adjusting exposure: `--pbr --exposure 2.0`
 
-**Shader compilation error:**
+### Shader compilation error
+
 - Run `cargo build --release --bin interactive_viewer` to rebuild
 - Check for WGSL syntax errors in `src/viewer/terrain/shader_pbr.rs`
 
-**Tests fail with "viewer binary not found":**
+### Tests fail with "viewer binary not found"
+
 - Build the viewer: `cargo build --release --bin interactive_viewer`

@@ -131,6 +131,15 @@ pub enum IpcRequest {
         height_ao: Option<IpcHeightAoConfig>,
         #[serde(default)]
         sun_visibility: Option<IpcSunVisConfig>,
+        /// M4: Material layer settings
+        #[serde(default)]
+        materials: Option<IpcMaterialLayerConfig>,
+        /// M5: Vector overlay settings
+        #[serde(default)]
+        vector_overlay: Option<IpcVectorOverlayConfig>,
+        /// M6: Tonemap settings
+        #[serde(default)]
+        tonemap: Option<IpcTonemapConfig>,
     },
 }
 
@@ -170,6 +179,57 @@ pub struct IpcSunVisConfig {
     pub bias: Option<f32>,
     #[serde(default)]
     pub resolution_scale: Option<f32>,
+}
+
+/// M4: Material layer configuration (IPC)
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcMaterialLayerConfig {
+    #[serde(default)]
+    pub snow_enabled: Option<bool>,
+    #[serde(default)]
+    pub snow_altitude_min: Option<f32>,
+    #[serde(default)]
+    pub snow_altitude_blend: Option<f32>,
+    #[serde(default)]
+    pub snow_slope_max: Option<f32>,
+    #[serde(default)]
+    pub rock_enabled: Option<bool>,
+    #[serde(default)]
+    pub rock_slope_min: Option<f32>,
+    #[serde(default)]
+    pub wetness_enabled: Option<bool>,
+    #[serde(default)]
+    pub wetness_strength: Option<f32>,
+}
+
+/// M5: Vector overlay configuration (IPC)
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcVectorOverlayConfig {
+    #[serde(default)]
+    pub depth_test: Option<bool>,
+    #[serde(default)]
+    pub depth_bias: Option<f32>,
+    #[serde(default)]
+    pub halo_enabled: Option<bool>,
+    #[serde(default)]
+    pub halo_width: Option<f32>,
+    #[serde(default)]
+    pub halo_color: Option<[f32; 4]>,
+}
+
+/// M6: Tonemap configuration (IPC)
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcTonemapConfig {
+    #[serde(default)]
+    pub operator: Option<String>,
+    #[serde(default)]
+    pub white_point: Option<f32>,
+    #[serde(default)]
+    pub white_balance_enabled: Option<bool>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub tint: Option<f32>,
 }
 
 /// Stats about the currently loaded scene
@@ -372,8 +432,14 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             normal_strength,
             height_ao,
             sun_visibility,
+            materials,
+            vector_overlay,
+            tonemap,
         } => {
-            use crate::viewer::viewer_enums::{ViewerHeightAoConfig, ViewerSunVisConfig};
+            use crate::viewer::viewer_enums::{
+                ViewerHeightAoConfig, ViewerSunVisConfig,
+                ViewerMaterialLayerConfig, ViewerVectorOverlayConfig, ViewerTonemapConfig,
+            };
             
             let height_ao_config = height_ao.as_ref().map(|c| ViewerHeightAoConfig {
                 enabled: c.enabled.unwrap_or(false),
@@ -395,6 +461,36 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 resolution_scale: c.resolution_scale.unwrap_or(0.5),
             });
             
+            // M4: Material layer config
+            let materials_config = materials.as_ref().map(|c| ViewerMaterialLayerConfig {
+                snow_enabled: c.snow_enabled.unwrap_or(false),
+                snow_altitude_min: c.snow_altitude_min.unwrap_or(2500.0),
+                snow_altitude_blend: c.snow_altitude_blend.unwrap_or(200.0),
+                snow_slope_max: c.snow_slope_max.unwrap_or(45.0),
+                rock_enabled: c.rock_enabled.unwrap_or(false),
+                rock_slope_min: c.rock_slope_min.unwrap_or(45.0),
+                wetness_enabled: c.wetness_enabled.unwrap_or(false),
+                wetness_strength: c.wetness_strength.unwrap_or(0.3),
+            });
+            
+            // M5: Vector overlay config
+            let vector_overlay_config = vector_overlay.as_ref().map(|c| ViewerVectorOverlayConfig {
+                depth_test: c.depth_test.unwrap_or(false),
+                depth_bias: c.depth_bias.unwrap_or(0.001),
+                halo_enabled: c.halo_enabled.unwrap_or(false),
+                halo_width: c.halo_width.unwrap_or(2.0),
+                halo_color: c.halo_color.unwrap_or([0.0, 0.0, 0.0, 0.5]),
+            });
+            
+            // M6: Tonemap config
+            let tonemap_config = tonemap.as_ref().map(|c| ViewerTonemapConfig {
+                operator: c.operator.clone().unwrap_or_else(|| "aces".to_string()),
+                white_point: c.white_point.unwrap_or(4.0),
+                white_balance_enabled: c.white_balance_enabled.unwrap_or(false),
+                temperature: c.temperature.unwrap_or(6500.0),
+                tint: c.tint.unwrap_or(0.0),
+            });
+            
             Ok(Some(ViewerCmd::SetTerrainPbr {
                 enabled: *enabled,
                 hdr_path: hdr_path.clone(),
@@ -406,6 +502,9 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 normal_strength: *normal_strength,
                 height_ao: height_ao_config,
                 sun_visibility: sun_vis_config,
+                materials: materials_config,
+                vector_overlay: vector_overlay_config,
+                tonemap: tonemap_config,
             }))
         },
     }

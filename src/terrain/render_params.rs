@@ -212,6 +212,9 @@ pub struct FogSettingsNative {
     pub base_height: f32,
     /// Inscatter color (linear RGB, typically sky-tinted)
     pub inscatter: [f32; 3],
+    /// M3: Aerial perspective strength (0.0 = disabled, 1.0 = full effect)
+    /// Controls distance-based desaturation and blue shift (Rayleigh scattering)
+    pub aerial_perspective: f32,
 }
 
 #[cfg(feature = "extension-module")]
@@ -222,6 +225,7 @@ impl Default for FogSettingsNative {
             height_falloff: 0.0,
             base_height: 0.0,
             inscatter: [1.0, 1.0, 1.0],
+            aerial_perspective: 0.0, // Disabled by default
         }
     }
 }
@@ -255,6 +259,185 @@ impl Default for ReflectionSettingsNative {
             wave_strength: 0.02,
             shore_atten_width: 0.3,
             water_plane_height: 0.0,
+        }
+    }
+}
+
+/// M2: Bloom post-processing settings
+/// When enabled = false, bloom is disabled (identical output for backward compatibility)
+#[cfg(feature = "extension-module")]
+#[derive(Clone, Copy)]
+pub struct BloomSettingsNative {
+    /// Enable bloom post-processing
+    pub enabled: bool,
+    /// Brightness threshold for bloom extraction (default 1.5 = HDR only)
+    pub threshold: f32,
+    /// Softness of threshold transition (0.0 = hard, 1.0 = very soft)
+    pub softness: f32,
+    /// Bloom intensity when compositing (0.0-1.0+)
+    pub intensity: f32,
+    /// Blur radius multiplier (affects spread)
+    pub radius: f32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for BloomSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false, // Disabled by default for backward compatibility
+            threshold: 1.5, // Conservative: only HDR values bloom
+            softness: 0.5,
+            intensity: 0.3, // Conservative: subtle bloom
+            radius: 1.0,
+        }
+    }
+}
+
+/// M4: Material layering settings for terrain (snow/rock/wetness)
+/// When all layers are disabled, output is identical to baseline
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct MaterialLayerSettingsNative {
+    // Snow layer
+    pub snow_enabled: bool,
+    pub snow_altitude_min: f32,
+    pub snow_altitude_blend: f32,
+    pub snow_slope_max: f32,      // degrees
+    pub snow_slope_blend: f32,    // degrees
+    pub snow_aspect_influence: f32,
+    pub snow_color: [f32; 3],
+    pub snow_roughness: f32,
+    // Rock layer
+    pub rock_enabled: bool,
+    pub rock_slope_min: f32,      // degrees
+    pub rock_slope_blend: f32,    // degrees
+    pub rock_color: [f32; 3],
+    pub rock_roughness: f32,
+    // Wetness layer
+    pub wetness_enabled: bool,
+    pub wetness_strength: f32,
+    pub wetness_slope_influence: f32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for MaterialLayerSettingsNative {
+    fn default() -> Self {
+        Self {
+            snow_enabled: false,
+            snow_altitude_min: 2000.0,
+            snow_altitude_blend: 500.0,
+            snow_slope_max: 45.0,
+            snow_slope_blend: 15.0,
+            snow_aspect_influence: 0.3,
+            snow_color: [0.95, 0.95, 0.98],
+            snow_roughness: 0.4,
+            rock_enabled: false,
+            rock_slope_min: 45.0,
+            rock_slope_blend: 10.0,
+            rock_color: [0.35, 0.32, 0.28],
+            rock_roughness: 0.8,
+            wetness_enabled: false,
+            wetness_strength: 0.3,
+            wetness_slope_influence: 0.5,
+        }
+    }
+}
+
+/// M5: Vector overlay settings for depth-correct rendering and halos
+/// When depth_test = false, output is identical to baseline
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct VectorOverlaySettingsNative {
+    /// When true, vectors are occluded by terrain
+    pub depth_test: bool,
+    /// Depth offset to prevent z-fighting
+    pub depth_bias: f32,
+    /// Slope-scaled bias for grazing angles
+    pub depth_bias_slope: f32,
+    /// Enable halo/outline rendering
+    pub halo_enabled: bool,
+    /// Halo width in pixels
+    pub halo_width: f32,
+    /// Halo color (RGBA)
+    pub halo_color: [f32; 4],
+    /// Halo blur/softness
+    pub halo_blur: f32,
+    /// Enable contour rendering
+    pub contour_enabled: bool,
+    /// Contour line width in pixels
+    pub contour_width: f32,
+    /// Contour color (RGBA)
+    pub contour_color: [f32; 4],
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for VectorOverlaySettingsNative {
+    fn default() -> Self {
+        Self {
+            depth_test: false,
+            depth_bias: 0.001,
+            depth_bias_slope: 1.0,
+            halo_enabled: false,
+            halo_width: 2.0,
+            halo_color: [0.0, 0.0, 0.0, 0.5],
+            halo_blur: 1.0,
+            contour_enabled: false,
+            contour_width: 1.0,
+            contour_color: [0.0, 0.0, 0.0, 0.8],
+        }
+    }
+}
+
+/// M6: Tonemap settings for HDR to SDR conversion
+/// Controls tonemap operator, 3D LUT, and white balance
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct TonemapSettingsNative {
+    /// Tonemap operator index: 0=Reinhard, 1=ReinhardExtended, 2=ACES, 3=Uncharted2, 4=Exposure
+    pub operator_index: u32,
+    /// White point for extended operators
+    pub white_point: f32,
+    /// Enable 3D LUT
+    pub lut_enabled: bool,
+    /// Path to .cube LUT file
+    pub lut_path: Option<String>,
+    /// LUT blend strength (0-1)
+    pub lut_strength: f32,
+    /// Enable white balance adjustment
+    pub white_balance_enabled: bool,
+    /// Color temperature in Kelvin (2000-12000)
+    pub temperature: f32,
+    /// Green-magenta tint (-1 to 1)
+    pub tint: f32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for TonemapSettingsNative {
+    fn default() -> Self {
+        Self {
+            operator_index: 2, // ACES by default
+            white_point: 4.0,
+            lut_enabled: false,
+            lut_path: None,
+            lut_strength: 1.0,
+            white_balance_enabled: false,
+            temperature: 6500.0,
+            tint: 0.0,
+        }
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl TonemapSettingsNative {
+    /// Convert operator string to index
+    pub fn operator_from_str(s: &str) -> u32 {
+        match s.to_lowercase().as_str() {
+            "reinhard" => 0,
+            "reinhard_extended" => 1,
+            "aces" => 2,
+            "uncharted2" => 3,
+            "exposure" => 4,
+            _ => 2, // Default to ACES
         }
     }
 }
@@ -367,6 +550,10 @@ pub struct DecodedTerrainSettings {
     pub detail: DetailSettingsNative,
     pub height_ao: HeightAoSettingsNative,
     pub sun_visibility: SunVisibilitySettingsNative,
+    pub bloom: BloomSettingsNative,
+    pub materials: MaterialLayerSettingsNative,
+    pub vector_overlay: VectorOverlaySettingsNative,
+    pub tonemap: TonemapSettingsNative,
 }
 
 #[cfg(feature = "extension-module")]
@@ -440,6 +627,10 @@ pub struct TerrainRenderParams {
     pub camera_mode: String,
     /// P7: Debug mode for projection probes (0=normal, 40=view-depth, 41=NDC depth, 42=view-pos XYZ)
     pub debug_mode: u32,
+    /// M1: Accumulation AA sample count (1 = no AA, 16/64/256 typical for offline)
+    pub aa_samples: u32,
+    /// M1: Accumulation AA seed for deterministic jitter (None = default sequence)
+    pub aa_seed: Option<u64>,
     pub height_curve_lut: Option<Arc<Vec<f32>>>,
     pub overlays: Vec<Py<crate::core::overlay_layer::OverlayLayer>>,
     light: Py<PyAny>,
@@ -606,6 +797,25 @@ impl TerrainRenderParams {
             .ok()
             .and_then(|v| v.extract::<u32>().ok())
             .unwrap_or(0);
+
+        // M1: Accumulation AA parameters (default 1 = no AA for backward compatibility)
+        let aa_samples = params
+            .getattr("aa_samples")
+            .ok()
+            .and_then(|v| v.extract::<u32>().ok())
+            .unwrap_or(1)
+            .max(1); // Minimum 1 sample
+
+        let aa_seed = params
+            .getattr("aa_seed")
+            .ok()
+            .and_then(|v| {
+                if v.is_none() {
+                    None
+                } else {
+                    v.extract::<u64>().ok()
+                }
+            });
 
         let height_curve_lut: Option<Arc<Vec<f32>>> = if height_curve_mode == "lut" {
             let raw_lut = params.getattr("height_curve_lut")?;
@@ -816,11 +1026,17 @@ impl TerrainRenderParams {
                 .getattr("base_height")
                 .and_then(|v| v.extract())
                 .unwrap_or(0.0);
+            // M3: Aerial perspective strength
+            let aerial_perspective: f32 = fog
+                .getattr("aerial_perspective")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.0);
             FogSettingsNative {
                 density,
                 height_falloff,
                 base_height,
                 inscatter,
+                aerial_perspective,
             }
         } else {
             FogSettingsNative::default()
@@ -993,6 +1209,263 @@ impl TerrainRenderParams {
             SunVisibilitySettingsNative::default()
         };
 
+        // M2: Bloom settings (defaults to disabled for backward compatibility)
+        let bloom_native = if let Ok(bloom) = params.getattr("bloom") {
+            let enabled: bool = bloom
+                .getattr("enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let threshold: f32 = bloom
+                .getattr("threshold")
+                .and_then(|v| v.extract())
+                .unwrap_or(1.5);
+            let softness: f32 = bloom
+                .getattr("softness")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.5);
+            let intensity: f32 = bloom
+                .getattr("intensity")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.3);
+            let radius: f32 = bloom
+                .getattr("radius")
+                .and_then(|v| v.extract())
+                .unwrap_or(1.0);
+            BloomSettingsNative {
+                enabled,
+                threshold,
+                softness,
+                intensity,
+                radius,
+            }
+        } else {
+            BloomSettingsNative::default()
+        };
+
+        // M4: Material layer settings (defaults to all disabled for backward compatibility)
+        let materials_native = if let Ok(materials) = params.getattr("materials") {
+            // Snow settings
+            let snow_enabled: bool = materials
+                .getattr("snow_enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let snow_altitude_min: f32 = materials
+                .getattr("snow_altitude_min")
+                .and_then(|v| v.extract())
+                .unwrap_or(2000.0);
+            let snow_altitude_blend: f32 = materials
+                .getattr("snow_altitude_blend")
+                .and_then(|v| v.extract())
+                .unwrap_or(500.0);
+            let snow_slope_max: f32 = materials
+                .getattr("snow_slope_max")
+                .and_then(|v| v.extract())
+                .unwrap_or(45.0);
+            let snow_slope_blend: f32 = materials
+                .getattr("snow_slope_blend")
+                .and_then(|v| v.extract())
+                .unwrap_or(15.0);
+            let snow_aspect_influence: f32 = materials
+                .getattr("snow_aspect_influence")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.3);
+            let snow_color_vec: Vec<f32> = materials
+                .getattr("snow_color")
+                .and_then(|v| v.extract())
+                .unwrap_or_else(|_| vec![0.95, 0.95, 0.98]);
+            let snow_color = [
+                snow_color_vec.first().copied().unwrap_or(0.95),
+                snow_color_vec.get(1).copied().unwrap_or(0.95),
+                snow_color_vec.get(2).copied().unwrap_or(0.98),
+            ];
+            let snow_roughness: f32 = materials
+                .getattr("snow_roughness")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.4);
+            
+            // Rock settings
+            let rock_enabled: bool = materials
+                .getattr("rock_enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let rock_slope_min: f32 = materials
+                .getattr("rock_slope_min")
+                .and_then(|v| v.extract())
+                .unwrap_or(45.0);
+            let rock_slope_blend: f32 = materials
+                .getattr("rock_slope_blend")
+                .and_then(|v| v.extract())
+                .unwrap_or(10.0);
+            let rock_color_vec: Vec<f32> = materials
+                .getattr("rock_color")
+                .and_then(|v| v.extract())
+                .unwrap_or_else(|_| vec![0.35, 0.32, 0.28]);
+            let rock_color = [
+                rock_color_vec.first().copied().unwrap_or(0.35),
+                rock_color_vec.get(1).copied().unwrap_or(0.32),
+                rock_color_vec.get(2).copied().unwrap_or(0.28),
+            ];
+            let rock_roughness: f32 = materials
+                .getattr("rock_roughness")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.8);
+            
+            // Wetness settings
+            let wetness_enabled: bool = materials
+                .getattr("wetness_enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let wetness_strength: f32 = materials
+                .getattr("wetness_strength")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.3);
+            let wetness_slope_influence: f32 = materials
+                .getattr("wetness_slope_influence")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.5);
+            
+            MaterialLayerSettingsNative {
+                snow_enabled,
+                snow_altitude_min,
+                snow_altitude_blend,
+                snow_slope_max,
+                snow_slope_blend,
+                snow_aspect_influence,
+                snow_color,
+                snow_roughness,
+                rock_enabled,
+                rock_slope_min,
+                rock_slope_blend,
+                rock_color,
+                rock_roughness,
+                wetness_enabled,
+                wetness_strength,
+                wetness_slope_influence,
+            }
+        } else {
+            MaterialLayerSettingsNative::default()
+        };
+
+        // M5: Vector overlay settings (defaults to disabled for backward compatibility)
+        let vector_overlay_native = if let Ok(vo) = params.getattr("vector_overlay") {
+            let depth_test: bool = vo
+                .getattr("depth_test")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let depth_bias: f32 = vo
+                .getattr("depth_bias")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.001);
+            let depth_bias_slope: f32 = vo
+                .getattr("depth_bias_slope")
+                .and_then(|v| v.extract())
+                .unwrap_or(1.0);
+            let halo_enabled: bool = vo
+                .getattr("halo_enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let halo_width: f32 = vo
+                .getattr("halo_width")
+                .and_then(|v| v.extract())
+                .unwrap_or(2.0);
+            let halo_color_vec: Vec<f32> = vo
+                .getattr("halo_color")
+                .and_then(|v| v.extract())
+                .unwrap_or_else(|_| vec![0.0, 0.0, 0.0, 0.5]);
+            let halo_color = [
+                halo_color_vec.first().copied().unwrap_or(0.0),
+                halo_color_vec.get(1).copied().unwrap_or(0.0),
+                halo_color_vec.get(2).copied().unwrap_or(0.0),
+                halo_color_vec.get(3).copied().unwrap_or(0.5),
+            ];
+            let halo_blur: f32 = vo
+                .getattr("halo_blur")
+                .and_then(|v| v.extract())
+                .unwrap_or(1.0);
+            let contour_enabled: bool = vo
+                .getattr("contour_enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let contour_width: f32 = vo
+                .getattr("contour_width")
+                .and_then(|v| v.extract())
+                .unwrap_or(1.0);
+            let contour_color_vec: Vec<f32> = vo
+                .getattr("contour_color")
+                .and_then(|v| v.extract())
+                .unwrap_or_else(|_| vec![0.0, 0.0, 0.0, 0.8]);
+            let contour_color = [
+                contour_color_vec.first().copied().unwrap_or(0.0),
+                contour_color_vec.get(1).copied().unwrap_or(0.0),
+                contour_color_vec.get(2).copied().unwrap_or(0.0),
+                contour_color_vec.get(3).copied().unwrap_or(0.8),
+            ];
+            VectorOverlaySettingsNative {
+                depth_test,
+                depth_bias,
+                depth_bias_slope,
+                halo_enabled,
+                halo_width,
+                halo_color,
+                halo_blur,
+                contour_enabled,
+                contour_width,
+                contour_color,
+            }
+        } else {
+            VectorOverlaySettingsNative::default()
+        };
+
+        // M6: Tonemap settings (defaults to ACES for backward compatibility)
+        let tonemap_native = if let Ok(tm) = params.getattr("tonemap") {
+            let operator_str: String = tm
+                .getattr("operator")
+                .and_then(|v| v.extract())
+                .unwrap_or_else(|_| "aces".to_string());
+            let operator_index = TonemapSettingsNative::operator_from_str(&operator_str);
+            let white_point: f32 = tm
+                .getattr("white_point")
+                .and_then(|v| v.extract())
+                .unwrap_or(4.0);
+            let lut_enabled: bool = tm
+                .getattr("lut_enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let lut_path: Option<String> = tm
+                .getattr("lut_path")
+                .and_then(|v| v.extract())
+                .ok()
+                .flatten();
+            let lut_strength: f32 = tm
+                .getattr("lut_strength")
+                .and_then(|v| v.extract())
+                .unwrap_or(1.0);
+            let white_balance_enabled: bool = tm
+                .getattr("white_balance_enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let temperature: f32 = tm
+                .getattr("temperature")
+                .and_then(|v| v.extract())
+                .unwrap_or(6500.0);
+            let tint: f32 = tm
+                .getattr("tint")
+                .and_then(|v| v.extract())
+                .unwrap_or(0.0);
+            TonemapSettingsNative {
+                operator_index,
+                white_point,
+                lut_enabled,
+                lut_path,
+                lut_strength,
+                white_balance_enabled,
+                temperature,
+                tint,
+            }
+        } else {
+            TonemapSettingsNative::default()
+        };
+
         let decoded = DecodedTerrainSettings {
             light: LightSettingsNative {
                 direction,
@@ -1010,6 +1483,10 @@ impl TerrainRenderParams {
             detail: detail_native,
             height_ao: height_ao_native,
             sun_visibility: sun_visibility_native,
+            bloom: bloom_native,
+            materials: materials_native,
+            vector_overlay: vector_overlay_native,
+            tonemap: tonemap_native,
         };
 
         let overlays = extract_overlays(params.getattr("overlays")?.as_gil_ref())?;
@@ -1040,6 +1517,8 @@ impl TerrainRenderParams {
             output_srgb_eotf,
             camera_mode,
             debug_mode,
+            aa_samples,
+            aa_seed,
             height_curve_lut,
             overlays,
             light: light.unbind(),
@@ -1179,6 +1658,18 @@ impl TerrainRenderParams {
     #[getter]
     pub fn debug_mode(&self) -> u32 {
         self.debug_mode
+    }
+
+    /// M1: Accumulation AA sample count (1 = no AA, 16/64/256 typical for offline)
+    #[getter]
+    pub fn aa_samples(&self) -> u32 {
+        self.aa_samples
+    }
+
+    /// M1: Accumulation AA seed for deterministic jitter (None = default sequence)
+    #[getter]
+    pub fn aa_seed(&self) -> Option<u64> {
+        self.aa_seed
     }
 
     #[getter]

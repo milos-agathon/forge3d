@@ -219,6 +219,12 @@ pub enum ViewerCmd {
         height_ao: Option<ViewerHeightAoConfig>,
         /// Heightfield ray-traced sun visibility settings
         sun_visibility: Option<ViewerSunVisConfig>,
+        /// M4: Material layer settings (snow/rock/wetness)
+        materials: Option<ViewerMaterialLayerConfig>,
+        /// M5: Vector overlay settings (depth test, halos)
+        vector_overlay: Option<ViewerVectorOverlayConfig>,
+        /// M6: Tonemap settings (operator, white balance)
+        tonemap: Option<ViewerTonemapConfig>,
     },
 }
 
@@ -244,6 +250,51 @@ pub struct ViewerSunVisConfig {
     pub softness: f32,
     pub bias: f32,
     pub resolution_scale: f32,
+}
+
+/// M4: Material layer configuration for viewer
+#[derive(Debug, Clone, Default)]
+pub struct ViewerMaterialLayerConfig {
+    pub snow_enabled: bool,
+    pub snow_altitude_min: f32,
+    pub snow_altitude_blend: f32,
+    pub snow_slope_max: f32,
+    pub rock_enabled: bool,
+    pub rock_slope_min: f32,
+    pub wetness_enabled: bool,
+    pub wetness_strength: f32,
+}
+
+/// M5: Vector overlay configuration for viewer
+#[derive(Debug, Clone, Default)]
+pub struct ViewerVectorOverlayConfig {
+    pub depth_test: bool,
+    pub depth_bias: f32,
+    pub halo_enabled: bool,
+    pub halo_width: f32,
+    pub halo_color: [f32; 4],
+}
+
+/// M6: Tonemap configuration for viewer
+#[derive(Debug, Clone)]
+pub struct ViewerTonemapConfig {
+    pub operator: String,
+    pub white_point: f32,
+    pub white_balance_enabled: bool,
+    pub temperature: f32,
+    pub tint: f32,
+}
+
+impl Default for ViewerTonemapConfig {
+    fn default() -> Self {
+        Self {
+            operator: "aces".to_string(),
+            white_point: 4.0,
+            white_balance_enabled: false,
+            temperature: 6500.0,
+            tint: 0.0,
+        }
+    }
 }
 
 /// Visualization mode for viewer output

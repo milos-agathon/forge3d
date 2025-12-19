@@ -21,6 +21,10 @@ pub struct OverlayUniforms {
     pub overlay_uv: [f32; 4],     // x: uv_offset_x, y: uv_offset_y, z: uv_scale_x, w: uv_scale_y
     pub contour_params: [f32; 4], // x: contour_enabled, y: interval, z: thickness_mul, w: unused
     pub contour_color: [f32; 4],  // rgba for contour lines
+    // M5: Vector overlay depth and halo parameters
+    pub depth_params: [f32; 4],   // x: depth_test_enabled, y: depth_bias, z: depth_bias_slope, w: pad
+    pub halo_params: [f32; 4],    // x: halo_enabled, y: halo_width, z: halo_blur, w: pad
+    pub halo_color: [f32; 4],     // rgba for halo/outline
 }
 
 impl Default for OverlayUniforms {
@@ -32,6 +36,10 @@ impl Default for OverlayUniforms {
             overlay_uv: [0.0, 0.0, 1.0, 1.0],
             contour_params: [0.0, 0.1, 1.0, 0.0],
             contour_color: [0.0, 0.0, 0.0, 0.75],
+            // M5: Depth and halo disabled by default
+            depth_params: [0.0, 0.001, 1.0, 0.0],
+            halo_params: [0.0, 2.0, 1.0, 0.0],
+            halo_color: [0.0, 0.0, 0.0, 0.5],
         }
     }
 }
@@ -48,6 +56,8 @@ pub struct OverlayRenderer {
     pub overlay_view: Option<TextureView>,
     pub overlay_sampler: Sampler,
     pub height_sampler: Sampler,
+    // M5: Depth sampler for terrain occlusion
+    pub depth_sampler: Sampler,
 
     // formats
     pub overlay_format: TextureFormat,
@@ -130,6 +140,24 @@ impl OverlayRenderer {
                     },
                     count: None,
                 },
+                // M5: Depth texture for terrain occlusion
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: TextureViewDimension::D2,
+                        sample_type: TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                // M5: Depth sampler
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
 
@@ -153,6 +181,15 @@ impl OverlayRenderer {
             } else {
                 wgpu::FilterMode::Nearest
             },
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        // M5: Depth sampler for terrain occlusion testing
+        let depth_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("overlay_depth_sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
@@ -210,6 +247,15 @@ impl OverlayRenderer {
                     binding: 5,
                     resource: pt_dummy.as_entire_binding(),
                 },
+                // M5: Depth texture (dummy for now, real texture bound at render time)
+                BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&dummy_view),
+                },
+                BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(&depth_sampler),
+                },
             ],
         });
 
@@ -260,6 +306,7 @@ impl OverlayRenderer {
             overlay_view: None,
             overlay_sampler,
             height_sampler,
+            depth_sampler,
             overlay_format: TextureFormat::Rgba8UnormSrgb,
         }
     }
@@ -297,6 +344,36 @@ impl OverlayRenderer {
         ];
     }
 
+    // M5: Depth testing setters
+    pub fn set_depth_test_enabled(&mut self, enabled: bool) {
+        self.uniforms.depth_params[0] = if enabled { 1.0 } else { 0.0 };
+    }
+    pub fn set_depth_bias(&mut self, bias: f32) {
+        self.uniforms.depth_params[1] = bias.max(0.0);
+    }
+    pub fn set_depth_bias_slope(&mut self, slope: f32) {
+        self.uniforms.depth_params[2] = slope.max(0.0);
+    }
+
+    // M5: Halo setters
+    pub fn set_halo_enabled(&mut self, enabled: bool) {
+        self.uniforms.halo_params[0] = if enabled { 1.0 } else { 0.0 };
+    }
+    pub fn set_halo_width(&mut self, width: f32) {
+        self.uniforms.halo_params[1] = width.max(0.0);
+    }
+    pub fn set_halo_blur(&mut self, blur: f32) {
+        self.uniforms.halo_params[2] = blur.max(0.0);
+    }
+    pub fn set_halo_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.uniforms.halo_color = [
+            r.clamp(0.0, 1.0),
+            g.clamp(0.0, 1.0),
+            b.clamp(0.0, 1.0),
+            a.clamp(0.0, 1.0),
+        ];
+    }
+
     pub fn upload_uniforms(&self, queue: &Queue) {
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&self.uniforms));
     }
@@ -307,11 +384,12 @@ impl OverlayRenderer {
         overlay_view: Option<&TextureView>,
         height_view: Option<&TextureView>,
         page_table: Option<&Buffer>,
+        depth_view: Option<&TextureView>, // M5: Terrain depth texture for occlusion
     ) {
         // fallback to dummy 1x1 white created via a small temporary texture
         // Prefer provided view, then stored view, else dummy
         let use_overlay_view = overlay_view.or(self.overlay_view.as_ref());
-        let (dummy_tex, dummy_view) = if use_overlay_view.is_none() || height_view.is_none() {
+        let (dummy_tex, dummy_view) = if use_overlay_view.is_none() || height_view.is_none() || depth_view.is_none() {
             let t = device.create_texture(&TextureDescriptor {
                 label: Some("overlay_dummy_tmp"),
                 size: wgpu::Extent3d {
@@ -334,6 +412,7 @@ impl OverlayRenderer {
 
         let overlay_view = use_overlay_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());
         let height_view = height_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());
+        let depth_view = depth_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());
 
         // Fallback dummy storage buffer if page table is not provided
         let pt_dummy = device.create_buffer(&BufferDescriptor {
@@ -373,6 +452,15 @@ impl OverlayRenderer {
                 BindGroupEntry {
                     binding: 5,
                     resource: pt_binding,
+                },
+                // M5: Depth texture for terrain occlusion
+                BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(depth_view),
+                },
+                BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(&self.depth_sampler),
                 },
             ],
         });

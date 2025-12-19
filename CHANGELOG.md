@@ -1,203 +1,4 @@
 # Changelog
-## [1.1.0] - Interactive Viewer Documentation & Codebase Polish
-
-### Added
-- **Interactive Viewer Documentation** (`docs/viewer/interactive_viewer.md`)
-  - Comprehensive user guide with quick start examples for terrain viewing and PBR mode.
-  - Terminal command reference: `set` for multi-parameter adjustments (camera, lighting, terrain, water).
-  - PBR mode commands (`pbr on|off`, `pbr exposure=`, `pbr shadows=`).
-  - High-resolution snapshot support up to 16K (16384×16384, 270 megapixels).
-  - IPC protocol documentation with JSON/TCP examples for programmatic control.
-  - Platform support matrix (macOS/Metal, Linux/Vulkan, Windows/DX12).
-
-### Changed
-- Applied rustfmt code formatting across 50+ source files for consistent style.
-- Added 45-file viewer refactoring plan targeting ≤300 LOC per module.
-- Enhanced AGENTS.md with 40 AI evidence and stop-condition rules for quality assurance.
-
-## [1.0.0] - PBR Terrain Viewer Phase 6: Documentation
-
-### Added
-- **Phase 6 — Documentation**
-  - Complete user guide (`docs/pbm_pom_viewer.md`) covering CLI options, interactive commands, API reference, and troubleshooting.
-  - Files modified table documenting all backend (Rust) and frontend (Python) changes.
-  - Known limitations section identifying future work: CSM shadows, IBL cubemaps, POM displacement.
-
-## [0.99.0] - PBR Terrain Viewer Phase 5: End-to-End Testing
-
-### Added
-- **Phase 5 — End-to-End Testing**
-  - Integration test suite (`tests/test_terrain_viewer_pbr.py`) with 5 test cases validating legacy/PBR modes.
-  - Test coverage: legacy mode renders, PBR mode enables, PBR produces different output, exposure affects output, PBR can be disabled.
-  - Pytest-compatible test harness with viewer binary detection.
-
-## [0.98.0] - PBR Terrain Viewer Phase 4: PBR Shader & Pipeline
-
-### Added
-- **Phase 4 — PBR Shader + Pipeline Integration**
-  - PBR WGSL shader (`src/viewer/terrain/shader_pbr.rs`) with Blinn-Phong specular, soft self-shadows, and sky-gradient ambient.
-  - Height-based material zones (vegetation → rock → snow), slope-based rock exposure, roughness variation.
-  - ACES tonemapping, gamma correction, and configurable exposure post-processing.
-  - Dual render path in `src/viewer/terrain/render.rs` for legacy/PBR switching.
-
-## [0.97.0] - PBR Terrain Viewer Phase 3: Python CLI & IPC
-
-### Added
-- **Phase 3 — Python CLI Args + IPC Commands**
-  - CLI options in `examples/terrain_viewer_interactive.py`: `--pbr`, `--exposure`, `--normal-strength`, `--ibl-intensity`, `--shadows`.
-  - Interactive console commands: `pbr on|off`, `pbr exposure=<float>`, `pbr normal=<float>`, `pbr status`.
-  - IPC command routing from Python to Rust viewer process.
-
-## [0.96.0] - PBR Terrain Viewer Phase 2: Config Struct
-
-### Added
-- **Phase 2 — ViewerTerrainPbrConfig Struct**
-  - `ViewerTerrainPbrConfig` Rust struct with fields: enabled, exposure, normal_strength, ibl_intensity, shadow_technique, shadow_map_res, hdr_path, msaa.
-  - Default values: enabled=false (legacy mode), exposure=1.0, normal_strength=1.0, ibl_intensity=1.0.
-  - PBR renderer module (`src/viewer/terrain/pbr_renderer.rs`) with config management.
-
-## [0.95.0] - PBR Terrain Viewer Phase 1: IPC Protocol
-
-### Added
-- **Phase 1 — IPC Protocol + ViewerCmd Extension**
-  - `ViewerCmd::SetTerrainPbr` enum variant in `src/viewer/viewer_enums.rs`.
-  - IPC JSON command `set_terrain_pbr` with optional fields: enabled, exposure, normal_strength, ibl_intensity, shadow_technique.
-  - Protocol mapping in `src/viewer/ipc/protocol.rs` and command handler in `src/viewer/cmd/handler.rs`.
-
-## [0.94.0] - P6 Micro-Detail
-
-### Added
-- **P6 — Micro-Detail**
-  - Triplanar detail normal sampling (2 m repeat) blended via RNM with distance-based fade to avoid LOD popping.
-  - Procedural albedo brightness noise (±10%) in stable world-space coordinates for close-range variation.
-  - Validation artifacts: `phase_p6.png`, `phase_p6_diff.png`, `p6_run.log`, `p6_result.json` with shimmer checks and fade distances.
-
-## [0.93.0] - P5 Ambient Occlusion Enhancement
-
-### Added
-- **P5 — Ambient Occlusion Enhancement**
-  - Debug mode 28 outputs the raw SSAO buffer for verification.
-  - Coarse horizon AO precomputed from the heightmap, bound as an optional multiplier with default weight 0 (no-op by default).
-  - Validation artifacts: `phase_p5.png`, `p5_run.log`, `p5_result.json` confirming SSAO presence and AO fallback path.
-
-## [0.92.0] - P4 Water Planar Reflections
-
-### Added
-- **P4 — Water Planar Reflections**
-  - Planar reflection render pass with mirrored camera, clip plane, and half-resolution target.
-  - Shader sampling with wave-based distortion plus Fresnel mixing; shore attenuation reduces wave intensity near land.
-  - Validation artifacts: `phase_p4.png`, `phase_p4_diff.png`, `p4_run.log`, `p4_result.json` logging clip plane, resolution, and wave params.
-
-## [0.91.0] - P3 Normal Anti-Aliasing Fix
-
-### Added
-- **P3 — Normal Anti-Aliasing Fix**
-  - Normal-variance mipchain generated at heightmap upload; Toksvig-style roughness adjustment applied to specular only.
-  - Roughness floors lowered to 0.25 for land and 0.02 for water with clamping for stability; water branch unchanged.
-  - Validation artifacts: `phase_p3.png`, `p3_run.log`, `p3_result.json` with energy histograms and roughness floor confirmation; debug modes 23–25 preserved.
-
-## [0.90.0] - P2 Atmospheric Depth
-
-### Added
-- **P2 — Atmospheric Depth**
-  - Height-based fog pipeline with uniform struct and bind group entries; applied after PBR and before tonemap.
-  - CLI parameters `--fog-density`, `--fog-height-falloff`, `--fog-inscatter` (all default 0) keep baseline identical when fog is off.
-  - Validation artifacts: `phase_p2.png`, `phase_p2_diff.png`, `p2_run.log`, `p2_result.json` including fog-on notes and SSIM vs P1 with fog off.
-
-## [0.89.0] - P1 Cascaded Shadows
-
-### Added
-- **P1 — Cascaded Shadows**
-  - Single source of truth for `TERRAIN_USE_SHADOWS` with real CSM resources bound in `TerrainRenderer` (group 3); defaults to one cascade if params missing.
-  - Cascade splits config `[50, 200, 800, 3000]` behind a toggle plus optional PCSS light-size parameter retaining prior hard-shadow behavior by default.
-  - Compile-time debug overlay for cascade boundaries and validation artifacts: `phase_p1.png`, `phase_p1_diff.png`, `p1_run.log`, `p1_result.json` with SSIM and shadow config logs.
-
-## [0.88.0] - P7 Python UX Polish
-
-### Added
-- **P7 — Python UX Polish: High-level Presets & Validation + Examples**
-  - **Presets API** (`python/forge3d/presets.py`):
-    - `studio_pbr()`: Indoor studio lighting with directional key + IBL, PCF shadows, Disney Principled BRDF, HDRI sky
-    - `outdoor_sun()`: Outdoor scenes with Hosek-Wilkie sky, sun directional light, CSM shadows, Cook-Torrance GGX BRDF
-    - `toon_viz()`: Stylized NPR rendering with Toon BRDF, hard shadows, no GI
-    - `get(name)` and `available()` helpers for case-insensitive preset resolution
-    - All presets return mappings compatible with `RendererConfig.from_mapping()` for clean merging
-  - **Renderer.apply_preset(name, **overrides)** method:
-    - Merges preset into current `RendererConfig` instance
-    - Applies user overrides after preset application
-    - Raises `ValueError` for invalid preset names with helpful error messages
-  - **CLI integration** in `examples/terrain_demo.py`:
-    - `--preset <name>` flag to apply preset as base configuration
-    - CLI overrides (--brdf, --shadows, --hdr, etc.) take precedence over preset defaults
-    - Acceptance one-liner: `python examples/terrain_demo.py --preset outdoor_sun --brdf cooktorrance-ggx --shadows csm --cascades 4 --hdr assets/sky.hdr`
-  - **Example galleries**:
-    - `examples/lighting_gallery.py`: Grid render comparing BRDF models (Lambert, Phong, Oren-Nayar, GGX, Disney, Ashikhmin, Ward, Toon, Minnaert) with configurable output
-    - `examples/shadow_gallery.py`: Side-by-side comparison of shadow techniques (Hard, PCF, PCSS, VSM, EVSM, MSM, CSM) with quality/performance notes
-    - `examples/ibl_gallery.py`: HDR environment rotation sweep, roughness sweep (0-1), metallic vs. dielectric comparisons
-  - **Unit tests** (`tests/test_presets.py`, `tests/test_renderer_apply_preset.py`):
-    - Validates all presets return valid mappings accepted by `RendererConfig.from_mapping()`
-    - Verifies expected fields for each preset (sky model, shadow technique, BRDF)
-    - Tests preset application and override precedence
-
-### Documentation
-- Added Sphinx how-to pages for presets (`docs/user/presets_overview.rst`, per-preset pages)
-- Example gallery documentation with CLI usage and reproducibility tips
-- Import-safe design ensures presets work in CPU-only environments without native dependencies
-
-## [0.87.0] - P6 Performance & Polish
-
-### Added
-- Half-resolution volumetric fog path with bilateral, depth-aware upsampling to full resolution.
-- New viewer commands for fog performance/quality tuning:
-  - `:fog-half on|off` to enable/disable half-resolution fog rendering.
-  - `:fog-edges on|off` to enable/disable depth-aware bilateral upsample.
-  - `:fog-upsigma <float>` to tune bilateral depth sigma.
-- Step-count heuristic in half-res mode to maintain quality at lower cost.
-
-### Changed
-- Integrated the half-res compute + upsample pass into the viewer render graph, preserving the single-terminal workflow and automatic snapshot path.
-- Minor cleanup and uniform consistency checks around camera/fog parameters.
-
-### Documentation
-- Updated `docs/rendering_options.rst` with the new fog controls, usage, and tuning notes.
-
-## [0.86.0] - P5 Screen-space Effects
-
-### Added
-- SSAO/GTAO, SSGI, and SSR passes integrated and toggleable from the viewer and Python API.
-- Bilateral blur, temporal accumulation controls, and GI debug viz.
-- Golden image generator updated and made resilient to slow-exiting viewers; automatic snapshot plumbing stabilized.
-
-## [0.85.0] - P4 Image-Based Lighting
-
-### Added
-- End-to-end IBL pipeline: HDR import, irradiance convolution, specular prefilter, BRDF LUT.
-- Cache-aware resource init with conservative memory budget selection and auto-downgrade heuristics.
-- Viewer Lit viz path with `--lit-sun`/`--lit-ibl` parameters.
-
-## [0.84.0] - P3 Shadows
-
-### Added
-- Pluggable shadow techniques: Hard, PCF, PCSS, VSM, EVSM, MSM, and CSM.
-- Shadow manager, atlas allocation, and quality controls; PCSS blocker search and PCF filtering.
-
-## [0.83.0] - P2 BRDF Library
-
-### Added
-- BRDF library and dispatcher covering Lambert, Phong, Blinn-Phong, Oren–Nayar, Cook–Torrance (GGX/Beckmann), Disney Principled, Ashikhmin–Shirley, Ward, Toon, Minnaert.
-- Material uniform extensions and global override plumbed via `RendererConfig.brdf_override`.
-
-## [0.82.0] - P1 Light System
-
-### Added
-- Typed light buffer (std430) with multiple light types and per-frame sampling seeds.
-- Python `Renderer.set_lights(...)` and viewer light controls.
-
-## [0.81.0] - P0 Config & CLI Plumbing
-
-### Added
-- Typed `RendererConfig` with enums for lights, BRDF, shadows, GI, sky/volumetrics; serde + validation.
-- CLI/Viewer flag plumbing for selecting viz/gi modes; Python wrappers and docs.
 
 All notable changes to this project will be documented in this file.
 
@@ -206,6 +7,8 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## [Unreleased]
 
 ### Added
+
+## [1.2.0] - QA, Memory Budget Enforcement, and IBL Refresh
 
 - **P4 - IBL pipeline refresh**
   - Compute-driven equirectangular -> cubemap conversion plus irradiance/specular prefiltering and BRDF LUT generation (WGSL: `ibl_equirect.wgsl`, `ibl_prefilter.wgsl`, `ibl_brdf.wgsl`)
@@ -424,6 +227,206 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ### Documentation
 - Added ``docs/rendering_options.rst`` summarizing lighting, BRDF, shadow, GI, and volumetric options alongside the new CLI flags.
 - Point auxiliary CLAUDE files at the canonical root guide to avoid drift.
+
+## [1.1.0] - Interactive Viewer Documentation & Codebase Polish
+
+### Added
+- **Interactive Viewer Documentation** (`docs/viewer/interactive_viewer.md`)
+  - Comprehensive user guide with quick start examples for terrain viewing and PBR mode.
+  - Terminal command reference: `set` for multi-parameter adjustments (camera, lighting, terrain, water).
+  - PBR mode commands (`pbr on|off`, `pbr exposure=`, `pbr shadows=`).
+  - High-resolution snapshot support up to 16K (16384×16384, 270 megapixels).
+  - IPC protocol documentation with JSON/TCP examples for programmatic control.
+  - Platform support matrix (macOS/Metal, Linux/Vulkan, Windows/DX12).
+
+### Changed
+- Applied rustfmt code formatting across 50+ source files for consistent style.
+- Added 45-file viewer refactoring plan targeting ≤300 LOC per module.
+- Enhanced AGENTS.md with 40 AI evidence and stop-condition rules for quality assurance.
+
+## [1.0.0] - PBR Terrain Viewer Phase 6: Documentation
+
+### Added
+- **Phase 6 — Documentation**
+  - Complete user guide (`docs/pbm_pom_viewer.md`) covering CLI options, interactive commands, API reference, and troubleshooting.
+  - Files modified table documenting all backend (Rust) and frontend (Python) changes.
+  - Known limitations section identifying future work: CSM shadows, IBL cubemaps, POM displacement.
+
+## [0.99.0] - PBR Terrain Viewer Phase 5: End-to-End Testing
+
+### Added
+- **Phase 5 — End-to-End Testing**
+  - Integration test suite (`tests/test_terrain_viewer_pbr.py`) with 5 test cases validating legacy/PBR modes.
+  - Test coverage: legacy mode renders, PBR mode enables, PBR produces different output, exposure affects output, PBR can be disabled.
+  - Pytest-compatible test harness with viewer binary detection.
+
+## [0.98.0] - PBR Terrain Viewer Phase 4: PBR Shader & Pipeline
+
+### Added
+- **Phase 4 — PBR Shader + Pipeline Integration**
+  - PBR WGSL shader (`src/viewer/terrain/shader_pbr.rs`) with Blinn-Phong specular, soft self-shadows, and sky-gradient ambient.
+  - Height-based material zones (vegetation → rock → snow), slope-based rock exposure, roughness variation.
+  - ACES tonemapping, gamma correction, and configurable exposure post-processing.
+  - Dual render path in `src/viewer/terrain/render.rs` for legacy/PBR switching.
+
+## [0.97.0] - PBR Terrain Viewer Phase 3: Python CLI & IPC
+
+### Added
+- **Phase 3 — Python CLI Args + IPC Commands**
+  - CLI options in `examples/terrain_viewer_interactive.py`: `--pbr`, `--exposure`, `--normal-strength`, `--ibl-intensity`, `--shadows`.
+  - Interactive console commands: `pbr on|off`, `pbr exposure=<float>`, `pbr normal=<float>`, `pbr status`.
+  - IPC command routing from Python to Rust viewer process.
+
+## [0.96.0] - PBR Terrain Viewer Phase 2: Config Struct
+
+### Added
+- **Phase 2 — ViewerTerrainPbrConfig Struct**
+  - `ViewerTerrainPbrConfig` Rust struct with fields: enabled, exposure, normal_strength, ibl_intensity, shadow_technique, shadow_map_res, hdr_path, msaa.
+  - Default values: enabled=false (legacy mode), exposure=1.0, normal_strength=1.0, ibl_intensity=1.0.
+  - PBR renderer module (`src/viewer/terrain/pbr_renderer.rs`) with config management.
+
+## [0.95.0] - PBR Terrain Viewer Phase 1: IPC Protocol
+
+### Added
+- **Phase 1 — IPC Protocol + ViewerCmd Extension**
+  - `ViewerCmd::SetTerrainPbr` enum variant in `src/viewer/viewer_enums.rs`.
+  - IPC JSON command `set_terrain_pbr` with optional fields: enabled, exposure, normal_strength, ibl_intensity, shadow_technique.
+  - Protocol mapping in `src/viewer/ipc/protocol.rs` and command handler in `src/viewer/cmd/handler.rs`.
+
+## [0.94.0] - P6 Micro-Detail
+
+### Added
+- **P6 — Micro-Detail**
+  - Triplanar detail normal sampling (2 m repeat) blended via RNM with distance-based fade to avoid LOD popping.
+  - Procedural albedo brightness noise (±10%) in stable world-space coordinates for close-range variation.
+  - Validation artifacts: `phase_p6.png`, `phase_p6_diff.png`, `p6_run.log`, `p6_result.json` with shimmer checks and fade distances.
+
+## [0.93.0] - P5 Ambient Occlusion Enhancement
+
+### Added
+- **P5 — Ambient Occlusion Enhancement**
+  - Debug mode 28 outputs the raw SSAO buffer for verification.
+  - Coarse horizon AO precomputed from the heightmap, bound as an optional multiplier with default weight 0 (no-op by default).
+  - Validation artifacts: `phase_p5.png`, `p5_run.log`, `p5_result.json` confirming SSAO presence and AO fallback path.
+
+## [0.92.0] - P4 Water Planar Reflections
+
+### Added
+- **P4 — Water Planar Reflections**
+  - Planar reflection render pass with mirrored camera, clip plane, and half-resolution target.
+  - Shader sampling with wave-based distortion plus Fresnel mixing; shore attenuation reduces wave intensity near land.
+  - Validation artifacts: `phase_p4.png`, `phase_p4_diff.png`, `p4_run.log`, `p4_result.json` logging clip plane, resolution, and wave params.
+
+## [0.91.0] - P3 Normal Anti-Aliasing Fix
+
+### Added
+- **P3 — Normal Anti-Aliasing Fix**
+  - Normal-variance mipchain generated at heightmap upload; Toksvig-style roughness adjustment applied to specular only.
+  - Roughness floors lowered to 0.25 for land and 0.02 for water with clamping for stability; water branch unchanged.
+  - Validation artifacts: `phase_p3.png`, `p3_run.log`, `p3_result.json` with energy histograms and roughness floor confirmation; debug modes 23–25 preserved.
+
+## [0.90.0] - P2 Atmospheric Depth
+
+### Added
+- **P2 — Atmospheric Depth**
+  - Height-based fog pipeline with uniform struct and bind group entries; applied after PBR and before tonemap.
+  - CLI parameters `--fog-density`, `--fog-height-falloff`, `--fog-inscatter` (all default 0) keep baseline identical when fog is off.
+  - Validation artifacts: `phase_p2.png`, `phase_p2_diff.png`, `p2_run.log`, `p2_result.json` including fog-on notes and SSIM vs P1 with fog off.
+
+## [0.89.0] - P1 Cascaded Shadows
+
+### Added
+- **P1 — Cascaded Shadows**
+  - Single source of truth for `TERRAIN_USE_SHADOWS` with real CSM resources bound in `TerrainRenderer` (group 3); defaults to one cascade if params missing.
+  - Cascade splits config `[50, 200, 800, 3000]` behind a toggle plus optional PCSS light-size parameter retaining prior hard-shadow behavior by default.
+  - Compile-time debug overlay for cascade boundaries and validation artifacts: `phase_p1.png`, `phase_p1_diff.png`, `p1_run.log`, `p1_result.json` with SSIM and shadow config logs.
+
+## [0.88.0] - P7 Python UX Polish
+
+### Added
+- **P7 — Python UX Polish: High-level Presets & Validation + Examples**
+  - **Presets API** (`python/forge3d/presets.py`):
+    - `studio_pbr()`: Indoor studio lighting with directional key + IBL, PCF shadows, Disney Principled BRDF, HDRI sky
+    - `outdoor_sun()`: Outdoor scenes with Hosek-Wilkie sky, sun directional light, CSM shadows, Cook-Torrance GGX BRDF
+    - `toon_viz()`: Stylized NPR rendering with Toon BRDF, hard shadows, no GI
+    - `get(name)` and `available()` helpers for case-insensitive preset resolution
+    - All presets return mappings compatible with `RendererConfig.from_mapping()` for clean merging
+  - **Renderer.apply_preset(name, **overrides)** method:
+    - Merges preset into current `RendererConfig` instance
+    - Applies user overrides after preset application
+    - Raises `ValueError` for invalid preset names with helpful error messages
+  - **CLI integration** in `examples/terrain_demo.py`:
+    - `--preset <name>` flag to apply preset as base configuration
+    - CLI overrides (--brdf, --shadows, --hdr, etc.) take precedence over preset defaults
+    - Acceptance one-liner: `python examples/terrain_demo.py --preset outdoor_sun --brdf cooktorrance-ggx --shadows csm --cascades 4 --hdr assets/sky.hdr`
+  - **Example galleries**:
+    - `examples/lighting_gallery.py`: Grid render comparing BRDF models (Lambert, Phong, Oren-Nayar, GGX, Disney, Ashikhmin, Ward, Toon, Minnaert) with configurable output
+    - `examples/shadow_gallery.py`: Side-by-side comparison of shadow techniques (Hard, PCF, PCSS, VSM, EVSM, MSM, CSM) with quality/performance notes
+    - `examples/ibl_gallery.py`: HDR environment rotation sweep, roughness sweep (0-1), metallic vs. dielectric comparisons
+  - **Unit tests** (`tests/test_presets.py`, `tests/test_renderer_apply_preset.py`):
+    - Validates all presets return valid mappings accepted by `RendererConfig.from_mapping()`
+    - Verifies expected fields for each preset (sky model, shadow technique, BRDF)
+    - Tests preset application and override precedence
+
+### Documentation
+- Added Sphinx how-to pages for presets (`docs/user/presets_overview.rst`, per-preset pages)
+- Example gallery documentation with CLI usage and reproducibility tips
+- Import-safe design ensures presets work in CPU-only environments without native dependencies
+
+## [0.87.0] - P6 Performance & Polish
+
+### Added
+- Half-resolution volumetric fog path with bilateral, depth-aware upsampling to full resolution.
+- New viewer commands for fog performance/quality tuning:
+  - `:fog-half on|off` to enable/disable half-resolution fog rendering.
+  - `:fog-edges on|off` to enable/disable depth-aware bilateral upsample.
+  - `:fog-upsigma <float>` to tune bilateral depth sigma.
+- Step-count heuristic in half-res mode to maintain quality at lower cost.
+
+### Changed
+- Integrated the half-res compute + upsample pass into the viewer render graph, preserving the single-terminal workflow and automatic snapshot path.
+- Minor cleanup and uniform consistency checks around camera/fog parameters.
+
+### Documentation
+- Updated `docs/rendering_options.rst` with the new fog controls, usage, and tuning notes.
+
+## [0.86.0] - P5 Screen-space Effects
+
+### Added
+- SSAO/GTAO, SSGI, and SSR passes integrated and toggleable from the viewer and Python API.
+- Bilateral blur, temporal accumulation controls, and GI debug viz.
+- Golden image generator updated and made resilient to slow-exiting viewers; automatic snapshot plumbing stabilized.
+
+## [0.85.0] - P4 Image-Based Lighting
+
+### Added
+- End-to-end IBL pipeline: HDR import, irradiance convolution, specular prefilter, BRDF LUT.
+- Cache-aware resource init with conservative memory budget selection and auto-downgrade heuristics.
+- Viewer Lit viz path with `--lit-sun`/`--lit-ibl` parameters.
+
+## [0.84.0] - P3 Shadows
+
+### Added
+- Pluggable shadow techniques: Hard, PCF, PCSS, VSM, EVSM, MSM, and CSM.
+- Shadow manager, atlas allocation, and quality controls; PCSS blocker search and PCF filtering.
+
+## [0.83.0] - P2 BRDF Library
+
+### Added
+- BRDF library and dispatcher covering Lambert, Phong, Blinn-Phong, Oren–Nayar, Cook–Torrance (GGX/Beckmann), Disney Principled, Ashikhmin–Shirley, Ward, Toon, Minnaert.
+- Material uniform extensions and global override plumbed via `RendererConfig.brdf_override`.
+
+## [0.82.0] - P1 Light System
+
+### Added
+- Typed light buffer (std430) with multiple light types and per-frame sampling seeds.
+- Python `Renderer.set_lights(...)` and viewer light controls.
+
+## [0.81.0] - P0 Config & CLI Plumbing
+
+### Added
+- Typed `RendererConfig` with enums for lights, BRDF, shadows, GI, sky/volumetrics; serde + validation.
+- CLI/Viewer flag plumbing for selecting viz/gi modes; Python wrappers and docs.
 
 ## [0.80.0]
 

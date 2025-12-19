@@ -995,6 +995,9 @@ impl Viewer {
                 normal_strength,
                 height_ao,
                 sun_visibility,
+                materials,
+                vector_overlay,
+                tonemap,
             } => {
                 if let Some(ref mut tv) = self.terrain_viewer {
                     tv.pbr_config.apply_updates(
@@ -1008,6 +1011,9 @@ impl Viewer {
                         normal_strength,
                         height_ao,
                         sun_visibility,
+                        materials,
+                        vector_overlay,
+                        tonemap,
                     );
                     // Initialize PBR pipeline if enabling PBR mode
                     if tv.pbr_config.enabled && tv.pbr_pipeline.is_none() {

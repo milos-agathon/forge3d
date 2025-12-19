@@ -65,7 +65,7 @@ pub struct ViewerTerrainScene {
     pub(super) sun_vis_texture: Option<wgpu::Texture>,
     pub(super) sun_vis_view: Option<wgpu::TextureView>,
     pub(super) sun_vis_uniform_buffer: Option<wgpu::Buffer>,
-    pub(super) sampler_linear: Option<wgpu::Sampler>,
+    pub(super) sampler_nearest: Option<wgpu::Sampler>,
     // Fallback 1x1 white texture for when AO/sun_vis are disabled
     pub(super) fallback_texture: Option<wgpu::Texture>,
     pub(super) fallback_texture_view: Option<wgpu::TextureView>,
@@ -196,7 +196,7 @@ impl ViewerTerrainScene {
             sun_vis_texture: None,
             sun_vis_view: None,
             sun_vis_uniform_buffer: None,
-            sampler_linear: None,
+            sampler_nearest: None,
             fallback_texture: None,
             fallback_texture_view: None,
         })
@@ -336,14 +336,14 @@ impl ViewerTerrainScene {
         let terrain = self.terrain.as_ref().ok_or_else(|| anyhow::anyhow!("No terrain loaded"))?;
         let (width, height) = terrain.dimensions;
         
-        // Create linear sampler if not exists
-        if self.sampler_linear.is_none() {
-            self.sampler_linear = Some(self.device.create_sampler(&wgpu::SamplerDescriptor {
-                label: Some("terrain_viewer.sampler_linear"),
+        // Create non-filtering sampler for R32Float textures (R32Float doesn't support filtering on Metal)
+        if self.sampler_nearest.is_none() {
+            self.sampler_nearest = Some(self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("terrain_viewer.sampler_nearest"),
                 address_mode_u: wgpu::AddressMode::ClampToEdge,
                 address_mode_v: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
                 ..Default::default()
             }));
         }
@@ -380,8 +380,8 @@ impl ViewerTerrainScene {
                 label: Some("terrain_viewer.height_ao_bind_group_layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                    wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
-                    wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering), count: None },
                     wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::StorageTexture { access: wgpu::StorageTextureAccess::WriteOnly, format: wgpu::TextureFormat::R32Float, view_dimension: wgpu::TextureViewDimension::D2 }, count: None },
                 ],
             });
@@ -439,8 +439,8 @@ impl ViewerTerrainScene {
                 label: Some("terrain_viewer.sun_vis_bind_group_layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                    wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
-                    wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering), count: None },
                     wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::StorageTexture { access: wgpu::StorageTextureAccess::WriteOnly, format: wgpu::TextureFormat::R32Float, view_dimension: wgpu::TextureViewDimension::D2 }, count: None },
                 ],
             });

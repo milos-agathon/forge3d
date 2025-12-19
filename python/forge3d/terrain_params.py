@@ -175,12 +175,16 @@ class FogSettings:
     base_height: World-space Z coordinate below which fog is at full density.
                  Should be set to the minimum terrain elevation (in world units).
                  If None, will be auto-computed from terrain bounds.
+    
+    aerial_perspective: M3 feature - distance-based desaturation and blue shift
+                       simulating Rayleigh scattering. 0.0 = disabled, 1.0 = full effect.
     """
 
     density: float = 0.0  # 0.0 = disabled
     height_falloff: float = 0.0
     base_height: Optional[float] = None  # None = auto from terrain min height
     inscatter: Tuple[float, float, float] = (1.0, 1.0, 1.0)
+    aerial_perspective: float = 0.0  # M3: 0.0 = disabled, 1.0 = full effect
 
     def __post_init__(self) -> None:
         if self.density < 0.0:
@@ -192,6 +196,8 @@ class FogSettings:
         for c in self.inscatter:
             if not 0.0 <= c <= 1.0:
                 raise ValueError("inscatter components must be in [0, 1]")
+        if not 0.0 <= self.aerial_perspective <= 1.0:
+            raise ValueError("aerial_perspective must be in [0, 1]")
 
 
 @dataclass
@@ -219,6 +225,32 @@ class ReflectionSettings:
             raise ValueError("wave_strength must be >= 0")
         if self.shore_atten_width < 0.0:
             raise ValueError("shore_atten_width must be >= 0")
+
+
+@dataclass
+class BloomSettings:
+    """M2: Bloom post-processing configuration.
+    
+    When enabled=False, bloom is disabled (identical output for backward compatibility).
+    Bloom extracts bright pixels above threshold and applies Gaussian blur,
+    then composites the result back onto the original image.
+    """
+
+    enabled: bool = False  # Disabled by default for backward compatibility
+    threshold: float = 1.5  # Brightness threshold (1.5 = HDR only)
+    softness: float = 0.5  # Threshold transition softness (0.0-1.0)
+    intensity: float = 0.3  # Bloom intensity when compositing
+    radius: float = 1.0  # Blur radius multiplier
+
+    def __post_init__(self) -> None:
+        if self.threshold < 0.0:
+            raise ValueError("threshold must be >= 0")
+        if not 0.0 <= self.softness <= 1.0:
+            raise ValueError("softness must be in [0, 1]")
+        if self.intensity < 0.0:
+            raise ValueError("intensity must be >= 0")
+        if self.radius <= 0.0:
+            raise ValueError("radius must be > 0")
 
 
 @dataclass
@@ -332,6 +364,159 @@ class DetailSettings:
             raise ValueError("detail_sigma_px must be > 0")
         if not 0.0 <= self.detail_strength <= 1.0:
             raise ValueError("detail_strength must be in [0, 1]")
+
+
+@dataclass
+class MaterialLayerSettings:
+    """M4: Terrain material layering configuration.
+    
+    Provides slope/aspect/altitude-driven material blending for realistic terrain:
+    - Snow: deposits on high-altitude, low-slope areas (south-facing receives less)
+    - Rock: exposed on steep slopes (>45°)
+    - Wetness: darkening in concave areas (placeholder: based on slope curvature)
+    
+    When all layers are disabled (default), output is identical to baseline.
+    """
+    
+    # Snow layer settings
+    snow_enabled: bool = False
+    snow_altitude_min: float = 2000.0  # Minimum altitude for snow (world units)
+    snow_altitude_blend: float = 500.0  # Altitude blend range
+    snow_slope_max: float = 45.0  # Maximum slope angle (degrees) for snow
+    snow_slope_blend: float = 15.0  # Slope blend range (degrees)
+    snow_aspect_influence: float = 0.3  # 0=no aspect effect, 1=full (south-facing less snow)
+    snow_color: Tuple[float, float, float] = (0.95, 0.95, 0.98)  # Snow albedo
+    snow_roughness: float = 0.4  # Snow surface roughness
+    
+    # Rock layer settings
+    rock_enabled: bool = False
+    rock_slope_min: float = 45.0  # Minimum slope angle (degrees) for rock exposure
+    rock_slope_blend: float = 10.0  # Slope blend range (degrees)
+    rock_color: Tuple[float, float, float] = (0.35, 0.32, 0.28)  # Rock albedo
+    rock_roughness: float = 0.8  # Rock surface roughness
+    
+    # Wetness layer settings (darkening in concave areas)
+    wetness_enabled: bool = False
+    wetness_strength: float = 0.3  # Darkening strength (0-1)
+    wetness_slope_influence: float = 0.5  # How much slope affects wetness
+
+    def __post_init__(self) -> None:
+        if self.snow_altitude_blend <= 0.0:
+            raise ValueError("snow_altitude_blend must be > 0")
+        if not 0.0 <= self.snow_slope_max <= 90.0:
+            raise ValueError("snow_slope_max must be in [0, 90]")
+        if self.snow_slope_blend <= 0.0:
+            raise ValueError("snow_slope_blend must be > 0")
+        if not 0.0 <= self.snow_aspect_influence <= 1.0:
+            raise ValueError("snow_aspect_influence must be in [0, 1]")
+        if len(self.snow_color) != 3:
+            raise ValueError("snow_color must be (R, G, B)")
+        if not 0.0 <= self.snow_roughness <= 1.0:
+            raise ValueError("snow_roughness must be in [0, 1]")
+        
+        if not 0.0 <= self.rock_slope_min <= 90.0:
+            raise ValueError("rock_slope_min must be in [0, 90]")
+        if self.rock_slope_blend <= 0.0:
+            raise ValueError("rock_slope_blend must be > 0")
+        if len(self.rock_color) != 3:
+            raise ValueError("rock_color must be (R, G, B)")
+        if not 0.0 <= self.rock_roughness <= 1.0:
+            raise ValueError("rock_roughness must be in [0, 1]")
+        
+        if not 0.0 <= self.wetness_strength <= 1.0:
+            raise ValueError("wetness_strength must be in [0, 1]")
+        if not 0.0 <= self.wetness_slope_influence <= 1.0:
+            raise ValueError("wetness_slope_influence must be in [0, 1]")
+
+
+@dataclass
+class VectorOverlaySettings:
+    """M5: Vector overlay configuration for depth-correct rendering and halos.
+    
+    Controls how vector overlays (lines, polygons) interact with terrain:
+    - depth_test: When True, vectors are occluded by terrain ridges
+    - halo: Adds outline/shadow for improved readability over terrain
+    
+    When depth_test=False (default), output is identical to baseline.
+    """
+    
+    # Depth testing
+    depth_test: bool = False  # When True, vectors hidden behind terrain
+    depth_bias: float = 0.001  # Depth offset to prevent z-fighting (smaller = closer)
+    depth_bias_slope: float = 1.0  # Slope-scaled bias for grazing angles
+    
+    # Halo/outline for readability
+    halo_enabled: bool = False
+    halo_width: float = 2.0  # Halo width in pixels
+    halo_color: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.5)  # RGBA
+    halo_blur: float = 1.0  # Blur/softness of halo edge
+    
+    # Contour rendering (ink-like effect)
+    contour_enabled: bool = False
+    contour_width: float = 1.0  # Contour line width in pixels
+    contour_color: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.8)
+
+    def __post_init__(self) -> None:
+        if self.depth_bias < 0.0:
+            raise ValueError("depth_bias must be >= 0")
+        if self.depth_bias_slope < 0.0:
+            raise ValueError("depth_bias_slope must be >= 0")
+        if self.halo_width < 0.0:
+            raise ValueError("halo_width must be >= 0")
+        if len(self.halo_color) != 4:
+            raise ValueError("halo_color must be (R, G, B, A)")
+        if self.halo_blur < 0.0:
+            raise ValueError("halo_blur must be >= 0")
+        if self.contour_width < 0.0:
+            raise ValueError("contour_width must be >= 0")
+        if len(self.contour_color) != 4:
+            raise ValueError("contour_color must be (R, G, B, A)")
+
+
+@dataclass
+class TonemapSettings:
+    """M6: Tonemap configuration for HDR to SDR conversion.
+    
+    Controls tone mapping operator selection, 3D LUT application, and white balance.
+    
+    Operators:
+    - 'reinhard': Simple Reinhard (default)
+    - 'reinhard_extended': Extended Reinhard with white point
+    - 'aces': ACES filmic (cinematic look)
+    - 'uncharted2': Uncharted 2 filmic
+    - 'exposure': Simple exposure mapping
+    
+    White balance uses temperature (Kelvin) and tint (green-magenta).
+    """
+    
+    # Tonemap operator selection
+    operator: str = "aces"  # reinhard, reinhard_extended, aces, uncharted2, exposure
+    
+    # White point for extended operators
+    white_point: float = 4.0
+    
+    # 3D LUT support (cube format)
+    lut_enabled: bool = False
+    lut_path: Optional[str] = None  # Path to .cube LUT file
+    lut_strength: float = 1.0  # Blend strength 0-1
+    
+    # White balance (temperature/tint)
+    white_balance_enabled: bool = False
+    temperature: float = 6500.0  # Color temperature in Kelvin (2000-12000)
+    tint: float = 0.0  # Green-magenta tint (-1.0 to 1.0)
+
+    def __post_init__(self) -> None:
+        valid_operators = {"reinhard", "reinhard_extended", "aces", "uncharted2", "exposure"}
+        if self.operator not in valid_operators:
+            raise ValueError(f"operator must be one of {valid_operators}, got '{self.operator}'")
+        if self.white_point <= 0.0:
+            raise ValueError("white_point must be > 0")
+        if self.lut_strength < 0.0 or self.lut_strength > 1.0:
+            raise ValueError("lut_strength must be in range [0, 1]")
+        if self.temperature < 2000.0 or self.temperature > 12000.0:
+            raise ValueError("temperature must be in range [2000, 12000] Kelvin")
+        if self.tint < -1.0 or self.tint > 1.0:
+            raise ValueError("tint must be in range [-1, 1]")
 
 
 @dataclass
@@ -513,6 +698,18 @@ class TerrainRenderParams:
     camera_mode: str = "screen"
     # P7: Debug mode for projection probes (0=normal, 40=view-depth, 41=NDC depth, 42=view-pos XYZ)
     debug_mode: int = 0
+    # M1: Accumulation AA sample count (1 = no AA, 16/64/256 typical for offline)
+    aa_samples: int = 1
+    # M1: Accumulation AA seed for deterministic jitter (None = default sequence)
+    aa_seed: Optional[int] = None
+    # M2: Bloom post-processing (defaults to disabled for backward compatibility)
+    bloom: Optional[BloomSettings] = None
+    # M4: Material layering (snow/rock/wetness, defaults to disabled for backward compatibility)
+    materials: Optional[MaterialLayerSettings] = None
+    # M5: Vector overlay settings (depth test, halos)
+    vector_overlay: Optional[VectorOverlaySettings] = None
+    # M6: Tonemap settings (operator, LUT, white balance)
+    tonemap: Optional[TonemapSettings] = None
 
     def __post_init__(self) -> None:
         # Default fog to disabled if not provided
@@ -530,6 +727,18 @@ class TerrainRenderParams:
         # Default sun_visibility to disabled if not provided
         if self.sun_visibility is None:
             self.sun_visibility = SunVisibilitySettings()
+        # M2: Default bloom to disabled if not provided
+        if self.bloom is None:
+            self.bloom = BloomSettings()
+        # M4: Default materials to disabled if not provided
+        if self.materials is None:
+            self.materials = MaterialLayerSettings()
+        # M5: Default vector overlay to disabled if not provided
+        if self.vector_overlay is None:
+            self.vector_overlay = VectorOverlaySettings()
+        # M6: Default tonemap to ACES if not provided
+        if self.tonemap is None:
+            self.tonemap = TonemapSettings()
         width, height = self.size_px
         if width < 64 or height < 64:
             raise ValueError("size_px must be >= 64x64")
@@ -600,6 +809,12 @@ class TerrainRenderParams:
         if not 0.0 <= self.ao_weight <= 1.0:
             raise ValueError("ao_weight must be 0.0-1.0")
 
+        # M1: Validate aa_samples (must be >= 1)
+        if self.aa_samples < 1:
+            raise ValueError("aa_samples must be >= 1")
+        if self.aa_samples > 4096:
+            raise ValueError("aa_samples must be <= 4096 (practical limit for offline rendering)")
+
 
 def load_height_curve_lut(path: str | Path) -> np.ndarray:
     p = Path(path)
@@ -666,6 +881,12 @@ def make_terrain_params_config(
     detail: Optional[DetailSettings] = None,
     height_ao: Optional[HeightAoSettings] = None,
     sun_visibility: Optional[SunVisibilitySettings] = None,
+    aa_samples: int = 1,  # M1: Accumulation AA sample count (1 = no AA)
+    aa_seed: Optional[int] = None,  # M1: Accumulation AA seed for determinism
+    bloom: Optional[BloomSettings] = None,  # M2: Bloom post-processing
+    materials: Optional[MaterialLayerSettings] = None,  # M4: Material layering
+    vector_overlay: Optional[VectorOverlaySettings] = None,  # M5: Vector overlay settings
+    tonemap: Optional[TonemapSettings] = None,  # M6: Tonemap settings
 ) -> TerrainRenderParams:
     light_color = [1.0, 1.0, 1.0]
     if sun_color is not None:
@@ -797,6 +1018,12 @@ def make_terrain_params_config(
         sun_visibility=sun_visibility,
         camera_mode=str(camera_mode),
         debug_mode=int(debug_mode),
+        aa_samples=int(aa_samples),
+        aa_seed=aa_seed,
+        bloom=bloom,
+        materials=materials,
+        vector_overlay=vector_overlay,
+        tonemap=tonemap,
     )
 
 
@@ -806,9 +1033,13 @@ __all__ = [
     "ShadowSettings",
     "FogSettings",
     "ReflectionSettings",
+    "BloomSettings",
     "HeightAoSettings",
     "SunVisibilitySettings",
     "DetailSettings",
+    "MaterialLayerSettings",
+    "VectorOverlaySettings",
+    "TonemapSettings",
     "TriplanarSettings",
     "PomSettings",
     "LodSettings",
