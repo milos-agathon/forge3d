@@ -31,7 +31,10 @@ pub struct DofUniforms {
     // Debug and visualization
     pub debug_mode: u32,
     pub show_coc: u32,
-    pub _padding: [f32; 2],
+
+    // M3: Tilt-shift parameters for Scheimpflug effect
+    pub tilt_pitch: f32,     // Tilt around horizontal axis (radians)
+    pub tilt_yaw: f32,       // Tilt around vertical axis (radians)
 }
 
 impl Default for DofUniforms {
@@ -53,7 +56,8 @@ impl Default for DofUniforms {
             inv_screen_size: [1.0 / 1920.0, 1.0 / 1080.0],
             debug_mode: 0,
             show_coc: 0,
-            _padding: [0.0; 2],
+            tilt_pitch: 0.0,
+            tilt_yaw: 0.0,
         }
     }
 }

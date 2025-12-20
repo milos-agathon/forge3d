@@ -153,6 +153,24 @@ impl DofRenderer {
         self.method = method;
     }
 
+    /// M3: Set tilt-shift parameters for Scheimpflug effect.
+    /// Pitch tilts the focus plane around the horizontal axis.
+    /// Yaw tilts the focus plane around the vertical axis.
+    pub fn set_tilt(&mut self, pitch: f32, yaw: f32) {
+        self.uniforms.tilt_pitch = pitch;
+        self.uniforms.tilt_yaw = yaw;
+    }
+
+    /// M3: Set tilt pitch (radians).
+    pub fn set_tilt_pitch(&mut self, pitch: f32) {
+        self.uniforms.tilt_pitch = pitch;
+    }
+
+    /// M3: Set tilt yaw (radians).
+    pub fn set_tilt_yaw(&mut self, yaw: f32) {
+        self.uniforms.tilt_yaw = yaw;
+    }
+
     /// Upload uniform data to GPU.
     pub fn upload_uniforms(&self, queue: &Queue) {
         queue.write_buffer(

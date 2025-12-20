@@ -14,7 +14,7 @@ use shadows::state::{CpuCsmConfig, CpuCsmState};
 #[cfg(feature = "extension-module")]
 use glam::Vec3;
 #[cfg(feature = "extension-module")]
-use numpy::{IntoPyArray, PyArray1, PyArray3, PyArrayMethods};
+use numpy::{IntoPyArray, PyArray1, PyArray3, PyArrayMethods, PyReadonlyArrayDyn};
 #[cfg(feature = "extension-module")]
 use pyo3::types::PyDict;
 #[cfg(feature = "extension-module")]
@@ -49,6 +49,8 @@ use crate::renderer::readback::read_texture_tight;
 use crate::sdf::hybrid::Ray as HybridRay;
 #[cfg(feature = "extension-module")]
 use crate::sdf::py::PySdfScene;
+#[cfg(all(feature = "extension-module", feature = "images"))]
+use crate::util::exr_write;
 #[cfg(feature = "extension-module")]
 use crate::util::image_write;
 #[cfg(feature = "extension-module")]
@@ -230,24 +232,66 @@ impl Frame {
     }
 
     fn save(&self, path: &str) -> PyResult<()> {
-        let mut data = self
-            .read_tight_bytes()
-            .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
-
+        let path_obj = Path::new(path);
         match self.format {
             wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
+                if let Some(ext) = path_obj.extension().and_then(|ext| ext.to_str()) {
+                    if !ext.eq_ignore_ascii_case("png") {
+                        return Err(PyValueError::new_err(format!(
+                            "expected .png extension for RGBA8 frame save, got .{}",
+                            ext
+                        )));
+                    }
+                }
+                let mut data = self
+                    .read_tight_bytes()
+                    .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
                 for px in data.chunks_exact_mut(4) {
                     px[3] = 255;
                 }
-                image_write::write_png_rgba8(Path::new(path), &data, self.width, self.height)
-                    .map_err(|err| {
-                        PyRuntimeError::new_err(format!("failed to write PNG: {err:#}"))
-                    })?;
+                image_write::write_png_rgba8(path_obj, &data, self.width, self.height).map_err(
+                    |err| PyRuntimeError::new_err(format!("failed to write PNG: {err:#}")),
+                )?;
                 Ok(())
             }
-            wgpu::TextureFormat::Rgba16Float => Err(PyRuntimeError::new_err(
-                "saving RGBA16F frames is not implemented yet",
-            )),
+            wgpu::TextureFormat::Rgba16Float => {
+                if let Some(ext) = path_obj.extension().and_then(|ext| ext.to_str()) {
+                    if !ext.eq_ignore_ascii_case("exr") {
+                        return Err(PyValueError::new_err(format!(
+                            "expected .exr extension for RGBA16F frame save, got .{}",
+                            ext
+                        )));
+                    }
+                }
+                #[cfg(feature = "images")]
+                {
+                    let data = crate::core::hdr::read_hdr_texture(
+                        &self.device,
+                        &self.queue,
+                        &self.texture,
+                        self.width,
+                        self.height,
+                        self.format,
+                    )
+                    .map_err(|err| PyRuntimeError::new_err(format!("HDR readback failed: {err}")))?;
+
+                    exr_write::write_exr_rgba_f32(
+                        path_obj,
+                        self.width,
+                        self.height,
+                        &data,
+                        "beauty",
+                    )
+                    .map_err(|err| PyRuntimeError::new_err(format!("failed to write EXR: {err:#}")))?;
+                    Ok(())
+                }
+                #[cfg(not(feature = "images"))]
+                {
+                    Err(PyRuntimeError::new_err(
+                        "saving RGBA16F frames requires the 'images' feature",
+                    ))
+                }
+            }
             other => Err(PyValueError::new_err(format!(
                 "unsupported texture format for save: {:?}",
                 other
@@ -288,6 +332,163 @@ impl Frame {
     }
 }
 
+/// M1: AOV (Arbitrary Output Variable) frame container
+/// Holds the auxiliary render outputs captured alongside the beauty pass
+#[cfg(feature = "extension-module")]
+#[pyclass(module = "forge3d._forge3d", name = "AovFrame")]
+pub struct AovFrame {
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
+    /// Albedo texture (base color before lighting)
+    albedo_texture: Option<wgpu::Texture>,
+    /// Normal texture (world-space normals encoded to [0,1])
+    normal_texture: Option<wgpu::Texture>,
+    /// Depth texture (linear depth normalized)
+    depth_texture: Option<wgpu::Texture>,
+    width: u32,
+    height: u32,
+}
+
+#[cfg(feature = "extension-module")]
+impl AovFrame {
+    pub(crate) fn new(
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        albedo_texture: Option<wgpu::Texture>,
+        normal_texture: Option<wgpu::Texture>,
+        depth_texture: Option<wgpu::Texture>,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        Self {
+            device,
+            queue,
+            albedo_texture,
+            normal_texture,
+            depth_texture,
+            width,
+            height,
+        }
+    }
+
+    fn read_texture_bytes(&self, texture: &wgpu::Texture) -> anyhow::Result<Vec<u8>> {
+        read_texture_tight(
+            &self.device,
+            &self.queue,
+            texture,
+            (self.width, self.height),
+            wgpu::TextureFormat::Rgba8Unorm,
+        )
+    }
+}
+
+#[cfg(feature = "extension-module")]
+#[pymethods]
+impl AovFrame {
+    #[new]
+    fn py_new() -> PyResult<Self> {
+        Err(PyRuntimeError::new_err(
+            "AovFrame objects are constructed internally by forge3d",
+        ))
+    }
+
+    #[getter]
+    fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    #[getter]
+    fn has_albedo(&self) -> bool {
+        self.albedo_texture.is_some()
+    }
+
+    #[getter]
+    fn has_normal(&self) -> bool {
+        self.normal_texture.is_some()
+    }
+
+    #[getter]
+    fn has_depth(&self) -> bool {
+        self.depth_texture.is_some()
+    }
+
+    /// Save albedo AOV to PNG file
+    fn save_albedo(&self, path: &str) -> PyResult<()> {
+        let texture = self.albedo_texture.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err("Albedo AOV not available")
+        })?;
+        let mut data = self.read_texture_bytes(texture)
+            .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
+        for px in data.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        image_write::write_png_rgba8(Path::new(path), &data, self.width, self.height)
+            .map_err(|err| PyRuntimeError::new_err(format!("failed to write PNG: {err:#}")))?;
+        Ok(())
+    }
+
+    /// Save normal AOV to PNG file
+    fn save_normal(&self, path: &str) -> PyResult<()> {
+        let texture = self.normal_texture.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err("Normal AOV not available")
+        })?;
+        let mut data = self.read_texture_bytes(texture)
+            .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
+        for px in data.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        image_write::write_png_rgba8(Path::new(path), &data, self.width, self.height)
+            .map_err(|err| PyRuntimeError::new_err(format!("failed to write PNG: {err:#}")))?;
+        Ok(())
+    }
+
+    /// Save depth AOV to PNG file
+    fn save_depth(&self, path: &str) -> PyResult<()> {
+        let texture = self.depth_texture.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err("Depth AOV not available")
+        })?;
+        let mut data = self.read_texture_bytes(texture)
+            .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
+        for px in data.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        image_write::write_png_rgba8(Path::new(path), &data, self.width, self.height)
+            .map_err(|err| PyRuntimeError::new_err(format!("failed to write PNG: {err:#}")))?;
+        Ok(())
+    }
+
+    /// Save all AOVs to directory with standard naming
+    fn save_all(&self, output_dir: &str, base_name: &str) -> PyResult<()> {
+        let dir = Path::new(output_dir);
+        std::fs::create_dir_all(dir)
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to create directory: {e}")))?;
+        
+        if self.albedo_texture.is_some() {
+            let path = dir.join(format!("{}_albedo.png", base_name));
+            self.save_albedo(path.to_str().unwrap())?;
+        }
+        if self.normal_texture.is_some() {
+            let path = dir.join(format!("{}_normal.png", base_name));
+            self.save_normal(path.to_str().unwrap())?;
+        }
+        if self.depth_texture.is_some() {
+            let path = dir.join(format!("{}_depth.png", base_name));
+            self.save_depth(path.to_str().unwrap())?;
+        }
+        Ok(())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "AovFrame(width={}, height={}, albedo={}, normal={}, depth={})",
+            self.width, self.height,
+            self.albedo_texture.is_some(),
+            self.normal_texture.is_some(),
+            self.depth_texture.is_some()
+        )
+    }
+}
+
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 fn render_debug_pattern_frame(py: Python<'_>, width: u32, height: u32) -> PyResult<Py<Frame>> {
@@ -310,6 +511,76 @@ fn render_debug_pattern_frame(py: Python<'_>, width: u32, height: u32) -> PyResu
     );
 
     Py::new(py, frame)
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (path, array, channel_prefix=None))]
+fn numpy_to_exr(path: &str, array: PyReadonlyArrayDyn<f32>, channel_prefix: Option<&str>) -> PyResult<()> {
+    let path_obj = Path::new(path);
+    if let Some(ext) = path_obj.extension().and_then(|ext| ext.to_str()) {
+        if !ext.eq_ignore_ascii_case("exr") {
+            return Err(PyValueError::new_err(format!(
+                "expected .exr extension, got .{}",
+                ext
+            )));
+        }
+    }
+
+    let prefix = channel_prefix.unwrap_or("beauty").trim();
+    if prefix.is_empty() {
+        return Err(PyValueError::new_err("EXR channel prefix must be non-empty"));
+    }
+
+    let view = array.as_array();
+    let shape = view.shape();
+    let (height, width, channels) = match shape.len() {
+        2 => (shape[0], shape[1], 1usize),
+        3 => (shape[0], shape[1], shape[2]),
+        _ => {
+            return Err(PyValueError::new_err(format!(
+                "expected array shape (H,W), (H,W,3), or (H,W,4); got {:?}",
+                shape
+            )))
+        }
+    };
+
+    if height == 0 || width == 0 {
+        return Err(PyValueError::new_err("array dimensions must be positive"));
+    }
+
+    if channels != 1 && channels != 3 && channels != 4 {
+        return Err(PyValueError::new_err(format!(
+            "unsupported channel count {}; expected 1, 3, or 4",
+            channels
+        )));
+    }
+
+    let height_u32 = u32::try_from(height)
+        .map_err(|_| PyValueError::new_err("array height exceeds u32"))?;
+    let width_u32 = u32::try_from(width)
+        .map_err(|_| PyValueError::new_err("array width exceeds u32"))?;
+
+    #[cfg(feature = "images")]
+    {
+        let data = view.to_owned().into_raw_vec();
+        let write_result = match channels {
+            1 => exr_write::write_exr_scalar_f32(path_obj, width_u32, height_u32, &data, prefix),
+            3 => exr_write::write_exr_rgb_f32(path_obj, width_u32, height_u32, &data, prefix),
+            4 => exr_write::write_exr_rgba_f32(path_obj, width_u32, height_u32, &data, prefix),
+            _ => unreachable!("channel validation guards this"),
+        };
+        write_result
+            .map_err(|err| PyRuntimeError::new_err(format!("failed to write EXR: {err:#}")))?;
+        Ok(())
+    }
+
+    #[cfg(not(feature = "images"))]
+    {
+        Err(PyRuntimeError::new_err(
+            "writing EXR requires the 'images' feature",
+        ))
+    }
 }
 
 // Core modules
@@ -3840,6 +4111,7 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
     m.add_function(wrap_pyfunction!(global_memory_metrics, m)?)?;
     m.add_function(wrap_pyfunction!(render_debug_pattern_frame, m)?)?;
+    m.add_function(wrap_pyfunction!(numpy_to_exr, m)?)?;
     // P5 Screen-space GI manager
     m.add_class::<PyScreenSpaceGI>()?;
 
@@ -3951,6 +4223,8 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // P6 Atmospherics classes
     m.add_class::<crate::lighting::PySkySettings>()?;
     m.add_class::<crate::lighting::PyVolumetricSettings>()?;
+    // M1: AOV frame class
+    m.add_class::<AovFrame>()?;
 
     Ok(())
 }

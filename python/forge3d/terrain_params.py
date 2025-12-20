@@ -520,6 +520,385 @@ class TonemapSettings:
 
 
 @dataclass
+class AovSettings:
+    """M1: AOV (Arbitrary Output Variable) export configuration.
+    
+    Controls which auxiliary render outputs are captured alongside the beauty pass.
+    When enabled=False, no AOVs are exported (default for backward compatibility).
+    
+    Supported AOVs for M1:
+    - albedo: Base color before lighting (Rgba8Unorm)
+    - normal: World-space normals remapped to [0,1] (Rgba8Unorm)
+    - depth: Linear depth normalized to [near, far] (R32Float or Rgba8Unorm)
+    
+    Future milestones will add: roughness, metallic, AO, sun_vis, mask/ID
+    """
+    
+    enabled: bool = False  # Disabled by default (backward compatibility)
+    albedo: bool = True    # Export albedo AOV when enabled
+    normal: bool = True    # Export world-space normal AOV when enabled
+    depth: bool = True     # Export linear depth AOV when enabled
+    output_dir: Optional[str] = None  # Directory for AOV output (None = same as beauty)
+    format: str = "png"    # Output format: "png" or "exr" (M2)
+    
+    def __post_init__(self) -> None:
+        valid_formats = {"png", "exr", "raw"}
+        if self.format not in valid_formats:
+            raise ValueError(f"format must be one of {valid_formats}, got '{self.format}'")
+    
+    @property
+    def any_enabled(self) -> bool:
+        """Returns True if AOV export is enabled and at least one AOV is selected."""
+        return self.enabled and (self.albedo or self.normal or self.depth)
+
+
+@dataclass
+class DofSettings:
+    """M3: Depth of Field configuration with tilt-shift support.
+    
+    Controls camera depth of field blur effect. When enabled=False, DoF is disabled
+    (default for backward compatibility).
+    
+    Standard DoF parameters:
+    - f_stop: Aperture f-number (e.g., 2.8, 5.6, 11). Lower = more blur.
+    - focus_distance: Distance to focus plane in world units.
+    - focal_length: Camera focal length in mm (default 50mm).
+    
+    Tilt-shift parameters (Scheimpflug effect):
+    - tilt_pitch: Tilt around horizontal axis in degrees. Creates diagonal focus plane.
+    - tilt_yaw: Tilt around vertical axis in degrees.
+    
+    Quality settings:
+    - method: "gather" (quality) or "separable" (performance)
+    - quality: "low", "medium", "high", "ultra"
+    """
+    
+    enabled: bool = False  # Disabled by default (backward compatibility)
+    f_stop: float = 5.6    # Aperture f-number (2.8 = shallow DoF, 16 = deep DoF)
+    focus_distance: float = 100.0  # Focus distance in world units
+    focal_length: float = 50.0     # Focal length in mm
+    
+    # M3: Tilt-shift parameters (Scheimpflug effect)
+    tilt_pitch: float = 0.0  # Tilt around horizontal axis (degrees)
+    tilt_yaw: float = 0.0    # Tilt around vertical axis (degrees)
+    
+    # Quality settings
+    method: str = "gather"   # "gather" or "separable"
+    quality: str = "medium"  # "low", "medium", "high", "ultra"
+    
+    # Debug/visualization
+    show_coc: bool = False   # Overlay circle-of-confusion visualization
+    debug_mode: int = 0      # 0=normal, 1=CoC grayscale, 2=field zones
+    
+    def __post_init__(self) -> None:
+        if self.f_stop <= 0:
+            raise ValueError("f_stop must be > 0")
+        if self.focus_distance <= 0:
+            raise ValueError("focus_distance must be > 0")
+        if self.focal_length <= 0:
+            raise ValueError("focal_length must be > 0")
+        
+        valid_methods = {"gather", "separable"}
+        if self.method not in valid_methods:
+            raise ValueError(f"method must be one of {valid_methods}, got '{self.method}'")
+        
+        valid_qualities = {"low", "medium", "high", "ultra"}
+        if self.quality not in valid_qualities:
+            raise ValueError(f"quality must be one of {valid_qualities}, got '{self.quality}'")
+    
+    @property
+    def aperture(self) -> float:
+        """Convert f-stop to aperture value (1/f_stop)."""
+        return 1.0 / self.f_stop
+    
+    @property
+    def tilt_pitch_rad(self) -> float:
+        """Tilt pitch in radians."""
+        import math
+        return math.radians(self.tilt_pitch)
+    
+    @property
+    def tilt_yaw_rad(self) -> float:
+        """Tilt yaw in radians."""
+        import math
+        return math.radians(self.tilt_yaw)
+    
+    @property
+    def has_tilt(self) -> bool:
+        """Returns True if tilt-shift is active."""
+        return abs(self.tilt_pitch) > 0.01 or abs(self.tilt_yaw) > 0.01
+
+
+@dataclass
+class MotionBlurSettings:
+    """M4: Motion blur configuration for camera shutter accumulation.
+    
+    Simulates motion blur by accumulating multiple sub-frames across a shutter
+    interval. Camera position/rotation is interpolated between frames.
+    
+    Note: Object motion blur is NOT supported in this implementation.
+    Only camera motion blur via shutter accumulation is available.
+    
+    Shutter timing:
+    - shutter_open: When shutter opens relative to frame (0.0 = start of frame)
+    - shutter_close: When shutter closes relative to frame (1.0 = end of frame)
+    - For 180° shutter: shutter_open=0.0, shutter_close=0.5
+    - For 360° shutter: shutter_open=0.0, shutter_close=1.0
+    
+    Camera interpolation:
+    - cam_phi_delta: Change in camera azimuth (degrees) over shutter interval
+    - cam_theta_delta: Change in camera elevation (degrees) over shutter interval
+    - cam_radius_delta: Change in camera distance over shutter interval
+    """
+    
+    enabled: bool = False  # Disabled by default (backward compatibility)
+    samples: int = 8       # Number of sub-frames to accumulate (1-64)
+    shutter_open: float = 0.0   # Shutter open time (0.0 = frame start)
+    shutter_close: float = 0.5  # Shutter close time (1.0 = frame end)
+    
+    # Camera motion deltas over shutter interval
+    cam_phi_delta: float = 0.0      # Azimuth change (degrees)
+    cam_theta_delta: float = 0.0    # Elevation change (degrees)
+    cam_radius_delta: float = 0.0   # Distance change (world units)
+    
+    # Determinism
+    seed: Optional[int] = None  # Seed for deterministic sampling (None = default)
+    
+    def __post_init__(self) -> None:
+        if self.samples < 1:
+            raise ValueError("samples must be >= 1")
+        if self.samples > 64:
+            raise ValueError("samples must be <= 64 (performance limit)")
+        if self.shutter_open < 0.0 or self.shutter_open > 1.0:
+            raise ValueError("shutter_open must be in [0.0, 1.0]")
+        if self.shutter_close < 0.0 or self.shutter_close > 1.0:
+            raise ValueError("shutter_close must be in [0.0, 1.0]")
+        if self.shutter_close <= self.shutter_open:
+            raise ValueError("shutter_close must be > shutter_open")
+    
+    @property
+    def shutter_angle(self) -> float:
+        """Shutter angle in degrees (360° = full frame exposure)."""
+        return (self.shutter_close - self.shutter_open) * 360.0
+    
+    @property
+    def has_camera_motion(self) -> bool:
+        """Returns True if any camera motion is configured."""
+        return (abs(self.cam_phi_delta) > 0.001 or 
+                abs(self.cam_theta_delta) > 0.001 or 
+                abs(self.cam_radius_delta) > 0.001)
+
+
+@dataclass
+class LensEffectsSettings:
+    """M5: Lens and sensor effects for post-processing.
+    
+    Simulates optical imperfections and sensor characteristics:
+    - Barrel/pincushion distortion
+    - Chromatic aberration (color fringing)
+    - Vignetting (corner darkening)
+    
+    Applied after tonemapping, before final output.
+    """
+    
+    enabled: bool = False  # Disabled by default (backward compatibility)
+    
+    # Lens distortion (barrel/pincushion)
+    # Positive = barrel, Negative = pincushion, 0 = none
+    distortion: float = 0.0
+    
+    # Chromatic aberration (lateral color fringing)
+    # Controls RGB channel separation at edges
+    chromatic_aberration: float = 0.0
+    
+    # Vignette (corner darkening)
+    vignette_strength: float = 0.0   # 0 = none, 1 = strong
+    vignette_radius: float = 0.7     # Start radius (0-1, center to corner)
+    vignette_softness: float = 0.3   # Falloff softness
+    
+    def __post_init__(self) -> None:
+        if self.vignette_strength < 0.0:
+            raise ValueError("vignette_strength must be >= 0")
+        if self.vignette_radius < 0.0 or self.vignette_radius > 1.0:
+            raise ValueError("vignette_radius must be in [0.0, 1.0]")
+        if self.vignette_softness < 0.0:
+            raise ValueError("vignette_softness must be >= 0")
+    
+    @property
+    def has_distortion(self) -> bool:
+        """Returns True if lens distortion is active."""
+        return abs(self.distortion) > 0.001
+    
+    @property
+    def has_chromatic_aberration(self) -> bool:
+        """Returns True if chromatic aberration is active."""
+        return abs(self.chromatic_aberration) > 0.001
+    
+    @property
+    def has_vignette(self) -> bool:
+        """Returns True if vignetting is active."""
+        return self.vignette_strength > 0.001
+    
+    @property
+    def has_any_effect(self) -> bool:
+        """Returns True if any lens effect is active."""
+        return self.has_distortion or self.has_chromatic_aberration or self.has_vignette
+
+
+@dataclass
+class DenoiseSettings:
+    """M5: Denoising configuration for noise reduction.
+    
+    Supports CPU-based A-trous wavelet denoising for:
+    - Final rendered images
+    - AOV buffers (AO, sun visibility, etc.)
+    
+    Methods:
+    - 'atrous': A-trous wavelet transform (edge-preserving)
+    - 'bilateral': Bilateral filter (simpler, faster)
+    - 'none': No denoising
+    """
+    
+    enabled: bool = False  # Disabled by default
+    method: str = "atrous"  # 'atrous', 'bilateral', 'none'
+    iterations: int = 3     # Number of filter passes (1-10)
+    
+    # A-trous parameters
+    sigma_color: float = 0.1   # Color similarity weight
+    sigma_normal: float = 0.1  # Normal similarity weight (if guidance available)
+    sigma_depth: float = 0.1   # Depth similarity weight (if guidance available)
+    
+    # Edge preservation
+    edge_stopping: float = 1.0  # Edge-stopping strength (0 = none, 1 = strong)
+    
+    def __post_init__(self) -> None:
+        valid_methods = ("atrous", "bilateral", "none")
+        if self.method not in valid_methods:
+            raise ValueError(f"method must be one of {valid_methods}")
+        if self.iterations < 1:
+            raise ValueError("iterations must be >= 1")
+        if self.iterations > 10:
+            raise ValueError("iterations must be <= 10 (quality/performance limit)")
+        if self.sigma_color < 0.0:
+            raise ValueError("sigma_color must be >= 0")
+        if self.sigma_normal < 0.0:
+            raise ValueError("sigma_normal must be >= 0")
+        if self.sigma_depth < 0.0:
+            raise ValueError("sigma_depth must be >= 0")
+        if self.edge_stopping < 0.0:
+            raise ValueError("edge_stopping must be >= 0")
+    
+    @property
+    def uses_guidance(self) -> bool:
+        """Returns True if denoiser uses normal/depth guidance."""
+        return (self.sigma_normal > 0.001 or self.sigma_depth > 0.001) and self.method == "atrous"
+
+
+@dataclass
+class VolumetricsSettings:
+    """M6: Volumetric fog and light shafts configuration.
+    
+    Simulates atmospheric scattering effects:
+    - Volumetric fog with density falloff
+    - Light shafts (god rays) from sun
+    - Shadow-aware volumetric lighting
+    
+    Applied after depth, before tonemapping.
+    """
+    
+    enabled: bool = False  # Disabled by default
+    mode: str = "uniform"  # 'uniform', 'height', 'exponential'
+    density: float = 0.01  # Global fog density
+    
+    # Height-based fog parameters
+    height_falloff: float = 0.1   # Density falloff with altitude
+    base_height: float = 0.0      # Fog base height in world units
+    
+    # Scattering parameters
+    scattering: float = 0.5       # In-scatter amount [0-1]
+    absorption: float = 0.1       # Light absorption [0-1]
+    phase_g: float = 0.0          # Henyey-Greenstein phase (-1=back, 0=iso, 1=forward)
+    
+    # Light shafts
+    light_shafts: bool = False    # Enable god rays
+    shaft_intensity: float = 1.0  # Light shaft brightness
+    shaft_samples: int = 32       # Ray march samples [8-128]
+    
+    # Performance
+    use_shadows: bool = True      # Use shadow map for volumetrics
+    half_res: bool = False        # Render at half resolution
+    
+    def __post_init__(self) -> None:
+        valid_modes = ("uniform", "height", "exponential")
+        if self.mode not in valid_modes:
+            raise ValueError(f"mode must be one of {valid_modes}")
+        if self.density < 0.0:
+            raise ValueError("density must be >= 0")
+        if self.scattering < 0.0 or self.scattering > 1.0:
+            raise ValueError("scattering must be in [0.0, 1.0]")
+        if self.absorption < 0.0 or self.absorption > 1.0:
+            raise ValueError("absorption must be in [0.0, 1.0]")
+        if self.phase_g < -1.0 or self.phase_g > 1.0:
+            raise ValueError("phase_g must be in [-1.0, 1.0]")
+        if self.shaft_samples < 8 or self.shaft_samples > 128:
+            raise ValueError("shaft_samples must be in [8, 128]")
+    
+    @property
+    def has_light_shafts(self) -> bool:
+        """Returns True if light shafts are enabled."""
+        return self.light_shafts and self.shaft_intensity > 0.001
+
+
+@dataclass
+class SkySettings:
+    """M6: Physically-based sky and aerial perspective configuration.
+    
+    Renders procedural sky with:
+    - Rayleigh and Mie scattering
+    - Sun disc rendering
+    - Aerial perspective for distant terrain
+    
+    Applied as background where depth is far.
+    """
+    
+    enabled: bool = False  # Disabled by default
+    
+    # Sky model parameters
+    turbidity: float = 2.0        # Atmospheric haziness [1.0-10.0]
+    ground_albedo: float = 0.3    # Ground reflectance for bounce light
+    
+    # Sun parameters (uses global sun direction if not overridden)
+    sun_intensity: float = 1.0    # Sun disc brightness multiplier
+    sun_size: float = 1.0         # Sun disc angular size multiplier
+    
+    # Aerial perspective
+    aerial_perspective: bool = True  # Apply atmospheric scattering to terrain
+    aerial_density: float = 1.0      # Aerial perspective strength
+    
+    # Exposure
+    sky_exposure: float = 1.0     # Sky brightness adjustment
+    
+    def __post_init__(self) -> None:
+        if self.turbidity < 1.0 or self.turbidity > 10.0:
+            raise ValueError("turbidity must be in [1.0, 10.0]")
+        if self.ground_albedo < 0.0 or self.ground_albedo > 1.0:
+            raise ValueError("ground_albedo must be in [0.0, 1.0]")
+        if self.sun_intensity < 0.0:
+            raise ValueError("sun_intensity must be >= 0")
+        if self.sun_size < 0.0:
+            raise ValueError("sun_size must be >= 0")
+        if self.aerial_density < 0.0:
+            raise ValueError("aerial_density must be >= 0")
+        if self.sky_exposure < 0.0:
+            raise ValueError("sky_exposure must be >= 0")
+    
+    @property
+    def has_aerial_perspective(self) -> bool:
+        """Returns True if aerial perspective is active."""
+        return self.aerial_perspective and self.aerial_density > 0.001
+
+
+@dataclass
 class TriplanarSettings:
     """Triplanar texture mapping configuration."""
 
@@ -710,6 +1089,20 @@ class TerrainRenderParams:
     vector_overlay: Optional[VectorOverlaySettings] = None
     # M6: Tonemap settings (operator, LUT, white balance)
     tonemap: Optional[TonemapSettings] = None
+    # M1: AOV export settings
+    aov: Optional[AovSettings] = None
+    # M3: Depth of Field settings
+    dof: Optional[DofSettings] = None
+    # M4: Motion blur settings
+    motion_blur: Optional[MotionBlurSettings] = None
+    # M5: Lens effects settings
+    lens_effects: Optional[LensEffectsSettings] = None
+    # M5: Denoise settings
+    denoise: Optional[DenoiseSettings] = None
+    # M6: Volumetrics settings
+    volumetrics: Optional[VolumetricsSettings] = None
+    # M6: Sky settings
+    sky: Optional[SkySettings] = None
 
     def __post_init__(self) -> None:
         # Default fog to disabled if not provided
@@ -739,6 +1132,27 @@ class TerrainRenderParams:
         # M6: Default tonemap to ACES if not provided
         if self.tonemap is None:
             self.tonemap = TonemapSettings()
+        # M1: Default AOV to disabled if not provided
+        if self.aov is None:
+            self.aov = AovSettings()
+        # M3: Default DoF to disabled if not provided
+        if self.dof is None:
+            self.dof = DofSettings()
+        # M4: Default motion blur to disabled if not provided
+        if self.motion_blur is None:
+            self.motion_blur = MotionBlurSettings()
+        # M5: Default lens effects to disabled if not provided
+        if self.lens_effects is None:
+            self.lens_effects = LensEffectsSettings()
+        # M5: Default denoise to disabled if not provided
+        if self.denoise is None:
+            self.denoise = DenoiseSettings()
+        # M6: Default volumetrics to disabled if not provided
+        if self.volumetrics is None:
+            self.volumetrics = VolumetricsSettings()
+        # M6: Default sky to disabled if not provided
+        if self.sky is None:
+            self.sky = SkySettings()
         width, height = self.size_px
         if width < 64 or height < 64:
             raise ValueError("size_px must be >= 64x64")
@@ -887,6 +1301,13 @@ def make_terrain_params_config(
     materials: Optional[MaterialLayerSettings] = None,  # M4: Material layering
     vector_overlay: Optional[VectorOverlaySettings] = None,  # M5: Vector overlay settings
     tonemap: Optional[TonemapSettings] = None,  # M6: Tonemap settings
+    aov: Optional[AovSettings] = None,  # M1: AOV export settings
+    dof: Optional[DofSettings] = None,  # M3: Depth of Field settings
+    motion_blur: Optional[MotionBlurSettings] = None,  # M4: Motion blur settings
+    lens_effects: Optional[LensEffectsSettings] = None,  # M5: Lens effects settings
+    denoise: Optional[DenoiseSettings] = None,  # M5: Denoise settings
+    volumetrics: Optional[VolumetricsSettings] = None,  # M6: Volumetrics settings
+    sky: Optional[SkySettings] = None,  # M6: Sky settings
 ) -> TerrainRenderParams:
     light_color = [1.0, 1.0, 1.0]
     if sun_color is not None:
@@ -1024,6 +1445,13 @@ def make_terrain_params_config(
         materials=materials,
         vector_overlay=vector_overlay,
         tonemap=tonemap,
+        aov=aov,
+        dof=dof,
+        motion_blur=motion_blur,
+        lens_effects=lens_effects,
+        denoise=denoise,
+        volumetrics=volumetrics,
+        sky=sky,
     )
 
 
@@ -1040,6 +1468,13 @@ __all__ = [
     "MaterialLayerSettings",
     "VectorOverlaySettings",
     "TonemapSettings",
+    "AovSettings",
+    "DofSettings",
+    "MotionBlurSettings",
+    "LensEffectsSettings",
+    "DenoiseSettings",
+    "VolumetricsSettings",
+    "SkySettings",
     "TriplanarSettings",
     "PomSettings",
     "LodSettings",

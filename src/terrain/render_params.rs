@@ -535,6 +535,329 @@ impl Default for SunVisibilitySettingsNative {
     }
 }
 
+/// M1: AOV (Arbitrary Output Variable) export settings
+/// When enabled = false, no AOVs are exported (default for backward compatibility)
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct AovSettingsNative {
+    /// Enable AOV export
+    pub enabled: bool,
+    /// Export albedo AOV (base color before lighting)
+    pub albedo: bool,
+    /// Export world-space normal AOV
+    pub normal: bool,
+    /// Export linear depth AOV
+    pub depth: bool,
+    /// Output directory (None = same as beauty)
+    pub output_dir: Option<String>,
+    /// Output format: "png", "exr", or "raw"
+    pub format: String,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for AovSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false, // Disabled by default (backward compatibility)
+            albedo: true,
+            normal: true,
+            depth: true,
+            output_dir: None,
+            format: "png".to_string(),
+        }
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl AovSettingsNative {
+    /// Returns true if AOV export is enabled and at least one AOV is selected
+    pub fn any_enabled(&self) -> bool {
+        self.enabled && (self.albedo || self.normal || self.depth)
+    }
+}
+
+/// M3: Depth of Field settings with tilt-shift support
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct DofSettingsNative {
+    pub enabled: bool,
+    pub f_stop: f32,
+    pub focus_distance: f32,
+    pub focal_length: f32,
+    pub tilt_pitch: f32,      // Tilt in radians
+    pub tilt_yaw: f32,        // Tilt in radians
+    pub method: DofMethodNative,
+    pub quality: DofQualityNative,
+    pub show_coc: bool,
+    pub debug_mode: u32,
+}
+
+#[cfg(feature = "extension-module")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DofMethodNative {
+    Gather,
+    Separable,
+}
+
+#[cfg(feature = "extension-module")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DofQualityNative {
+    Low,
+    Medium,
+    High,
+    Ultra,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for DofSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            f_stop: 5.6,
+            focus_distance: 100.0,
+            focal_length: 50.0,
+            tilt_pitch: 0.0,
+            tilt_yaw: 0.0,
+            method: DofMethodNative::Gather,
+            quality: DofQualityNative::Medium,
+            show_coc: false,
+            debug_mode: 0,
+        }
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl DofSettingsNative {
+    /// Convert f-stop to aperture value (1/f_stop)
+    pub fn aperture(&self) -> f32 {
+        1.0 / self.f_stop.max(0.1)
+    }
+
+    /// Returns true if tilt-shift is active
+    pub fn has_tilt(&self) -> bool {
+        self.tilt_pitch.abs() > 0.001 || self.tilt_yaw.abs() > 0.001
+    }
+}
+
+/// M4: Motion blur settings for camera shutter accumulation
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct MotionBlurSettingsNative {
+    pub enabled: bool,
+    pub samples: u32,
+    pub shutter_open: f32,
+    pub shutter_close: f32,
+    pub cam_phi_delta: f32,      // Azimuth change in degrees
+    pub cam_theta_delta: f32,    // Elevation change in degrees
+    pub cam_radius_delta: f32,   // Distance change in world units
+    pub seed: Option<u64>,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for MotionBlurSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            samples: 8,
+            shutter_open: 0.0,
+            shutter_close: 0.5,
+            cam_phi_delta: 0.0,
+            cam_theta_delta: 0.0,
+            cam_radius_delta: 0.0,
+            seed: None,
+        }
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl MotionBlurSettingsNative {
+    /// Returns true if any camera motion is configured
+    pub fn has_camera_motion(&self) -> bool {
+        self.cam_phi_delta.abs() > 0.001
+            || self.cam_theta_delta.abs() > 0.001
+            || self.cam_radius_delta.abs() > 0.001
+    }
+
+    /// Get shutter angle in degrees (360° = full frame exposure)
+    pub fn shutter_angle(&self) -> f32 {
+        (self.shutter_close - self.shutter_open) * 360.0
+    }
+
+    /// Interpolate camera parameters at a given time t in [0, 1]
+    /// Returns (phi_offset, theta_offset, radius_offset) for the given time
+    pub fn interpolate_camera(&self, t: f32) -> (f32, f32, f32) {
+        // t is normalized time within shutter interval [shutter_open, shutter_close]
+        // Map t to actual shutter time
+        let shutter_t = self.shutter_open + t * (self.shutter_close - self.shutter_open);
+        
+        // Linear interpolation of camera motion
+        let phi_offset = self.cam_phi_delta * shutter_t;
+        let theta_offset = self.cam_theta_delta * shutter_t;
+        let radius_offset = self.cam_radius_delta * shutter_t;
+        
+        (phi_offset, theta_offset, radius_offset)
+    }
+}
+
+/// M5: Lens effects settings for post-processing
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct LensEffectsSettingsNative {
+    pub enabled: bool,
+    pub distortion: f32,
+    pub chromatic_aberration: f32,
+    pub vignette_strength: f32,
+    pub vignette_radius: f32,
+    pub vignette_softness: f32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for LensEffectsSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            distortion: 0.0,
+            chromatic_aberration: 0.0,
+            vignette_strength: 0.0,
+            vignette_radius: 0.7,
+            vignette_softness: 0.3,
+        }
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl LensEffectsSettingsNative {
+    /// Returns true if any lens effect is active
+    pub fn has_any_effect(&self) -> bool {
+        self.distortion.abs() > 0.001
+            || self.chromatic_aberration.abs() > 0.001
+            || self.vignette_strength > 0.001
+    }
+}
+
+/// M5: Denoise settings for noise reduction
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct DenoiseSettingsNative {
+    pub enabled: bool,
+    pub method: DenoiseMethodNative,
+    pub iterations: u32,
+    pub sigma_color: f32,
+    pub sigma_normal: f32,
+    pub sigma_depth: f32,
+    pub edge_stopping: f32,
+}
+
+#[cfg(feature = "extension-module")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DenoiseMethodNative {
+    Atrous,
+    Bilateral,
+    None,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for DenoiseSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            method: DenoiseMethodNative::Atrous,
+            iterations: 3,
+            sigma_color: 0.1,
+            sigma_normal: 0.1,
+            sigma_depth: 0.1,
+            edge_stopping: 1.0,
+        }
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl DenoiseSettingsNative {
+    /// Returns true if denoiser uses normal/depth guidance
+    pub fn uses_guidance(&self) -> bool {
+        (self.sigma_normal > 0.001 || self.sigma_depth > 0.001)
+            && self.method == DenoiseMethodNative::Atrous
+    }
+}
+
+/// M6: Volumetrics settings for fog and light shafts
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct VolumetricsSettingsNative {
+    pub enabled: bool,
+    pub mode: VolumetricsModeNative,
+    pub density: f32,
+    pub height_falloff: f32,
+    pub base_height: f32,
+    pub scattering: f32,
+    pub absorption: f32,
+    pub phase_g: f32,
+    pub light_shafts: bool,
+    pub shaft_intensity: f32,
+    pub shaft_samples: u32,
+    pub use_shadows: bool,
+    pub half_res: bool,
+}
+
+#[cfg(feature = "extension-module")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum VolumetricsModeNative {
+    Uniform,
+    Height,
+    Exponential,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for VolumetricsSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: VolumetricsModeNative::Uniform,
+            density: 0.01,
+            height_falloff: 0.1,
+            base_height: 0.0,
+            scattering: 0.5,
+            absorption: 0.1,
+            phase_g: 0.0,
+            light_shafts: false,
+            shaft_intensity: 1.0,
+            shaft_samples: 32,
+            use_shadows: true,
+            half_res: false,
+        }
+    }
+}
+
+/// M6: Sky settings for physically-based sky rendering
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct SkySettingsNative {
+    pub enabled: bool,
+    pub turbidity: f32,
+    pub ground_albedo: f32,
+    pub sun_intensity: f32,
+    pub sun_size: f32,
+    pub aerial_perspective: bool,
+    pub aerial_density: f32,
+    pub sky_exposure: f32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for SkySettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            turbidity: 2.0,
+            ground_albedo: 0.3,
+            sun_intensity: 1.0,
+            sun_size: 1.0,
+            aerial_perspective: true,
+            aerial_density: 1.0,
+            sky_exposure: 1.0,
+        }
+    }
+}
+
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
 pub struct DecodedTerrainSettings {
@@ -554,6 +877,13 @@ pub struct DecodedTerrainSettings {
     pub materials: MaterialLayerSettingsNative,
     pub vector_overlay: VectorOverlaySettingsNative,
     pub tonemap: TonemapSettingsNative,
+    pub aov: AovSettingsNative,
+    pub dof: DofSettingsNative,
+    pub motion_blur: MotionBlurSettingsNative,
+    pub lens_effects: LensEffectsSettingsNative,
+    pub denoise: DenoiseSettingsNative,
+    pub volumetrics: VolumetricsSettingsNative,
+    pub sky: SkySettingsNative,
 }
 
 #[cfg(feature = "extension-module")]
@@ -1466,6 +1796,342 @@ impl TerrainRenderParams {
             TonemapSettingsNative::default()
         };
 
+        // M1: Parse AOV settings
+        let aov_native = if let Ok(aov) = params.getattr("aov") {
+            if !aov.is_none() {
+                let enabled: bool = aov
+                    .getattr("enabled")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(false);
+                let albedo: bool = aov
+                    .getattr("albedo")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(true);
+                let normal: bool = aov
+                    .getattr("normal")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(true);
+                let depth: bool = aov
+                    .getattr("depth")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(true);
+                let output_dir: Option<String> = aov
+                    .getattr("output_dir")
+                    .and_then(|v| {
+                        if v.is_none() {
+                            Ok(None)
+                        } else {
+                            v.extract().map(Some)
+                        }
+                    })
+                    .unwrap_or(None);
+                let format: String = aov
+                    .getattr("format")
+                    .and_then(|v| v.extract())
+                    .unwrap_or_else(|_| "png".to_string());
+                AovSettingsNative {
+                    enabled,
+                    albedo,
+                    normal,
+                    depth,
+                    output_dir,
+                    format,
+                }
+            } else {
+                AovSettingsNative::default()
+            }
+        } else {
+            AovSettingsNative::default()
+        };
+
+        // M3: Parse DoF settings
+        let dof_native = if let Ok(dof) = params.getattr("dof") {
+            if !dof.is_none() {
+                let enabled: bool = dof
+                    .getattr("enabled")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(false);
+                let f_stop: f32 = dof
+                    .getattr("f_stop")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(5.6);
+                let focus_distance: f32 = dof
+                    .getattr("focus_distance")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(100.0);
+                let focal_length: f32 = dof
+                    .getattr("focal_length")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(50.0);
+                // Tilt parameters come in as degrees, convert to radians
+                let tilt_pitch_deg: f32 = dof
+                    .getattr("tilt_pitch")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.0);
+                let tilt_yaw_deg: f32 = dof
+                    .getattr("tilt_yaw")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.0);
+                let tilt_pitch = tilt_pitch_deg.to_radians();
+                let tilt_yaw = tilt_yaw_deg.to_radians();
+                let method_str: String = dof
+                    .getattr("method")
+                    .and_then(|v| v.extract())
+                    .unwrap_or_else(|_| "gather".to_string());
+                let method = match method_str.as_str() {
+                    "separable" => DofMethodNative::Separable,
+                    _ => DofMethodNative::Gather,
+                };
+                let quality_str: String = dof
+                    .getattr("quality")
+                    .and_then(|v| v.extract())
+                    .unwrap_or_else(|_| "medium".to_string());
+                let quality = match quality_str.as_str() {
+                    "low" => DofQualityNative::Low,
+                    "high" => DofQualityNative::High,
+                    "ultra" => DofQualityNative::Ultra,
+                    _ => DofQualityNative::Medium,
+                };
+                let show_coc: bool = dof
+                    .getattr("show_coc")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(false);
+                let debug_mode: u32 = dof
+                    .getattr("debug_mode")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0);
+                DofSettingsNative {
+                    enabled,
+                    f_stop,
+                    focus_distance,
+                    focal_length,
+                    tilt_pitch,
+                    tilt_yaw,
+                    method,
+                    quality,
+                    show_coc,
+                    debug_mode,
+                }
+            } else {
+                DofSettingsNative::default()
+            }
+        } else {
+            DofSettingsNative::default()
+        };
+
+        // M4: Parse motion blur settings
+        let motion_blur_native = if let Ok(mb) = params.getattr("motion_blur") {
+            if !mb.is_none() {
+                let enabled: bool = mb
+                    .getattr("enabled")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(false);
+                let samples: u32 = mb
+                    .getattr("samples")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(8);
+                let shutter_open: f32 = mb
+                    .getattr("shutter_open")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.0);
+                let shutter_close: f32 = mb
+                    .getattr("shutter_close")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.5);
+                let cam_phi_delta: f32 = mb
+                    .getattr("cam_phi_delta")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.0);
+                let cam_theta_delta: f32 = mb
+                    .getattr("cam_theta_delta")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.0);
+                let cam_radius_delta: f32 = mb
+                    .getattr("cam_radius_delta")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.0);
+                let seed: Option<u64> = mb
+                    .getattr("seed")
+                    .and_then(|v| {
+                        if v.is_none() {
+                            Ok(None)
+                        } else {
+                            v.extract().map(Some)
+                        }
+                    })
+                    .unwrap_or(None);
+                MotionBlurSettingsNative {
+                    enabled,
+                    samples,
+                    shutter_open,
+                    shutter_close,
+                    cam_phi_delta,
+                    cam_theta_delta,
+                    cam_radius_delta,
+                    seed,
+                }
+            } else {
+                MotionBlurSettingsNative::default()
+            }
+        } else {
+            MotionBlurSettingsNative::default()
+        };
+
+        // M5: Parse lens effects settings
+        let lens_effects_native = if let Ok(le) = params.getattr("lens_effects") {
+            if !le.is_none() {
+                let enabled: bool = le
+                    .getattr("enabled")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(false);
+                let distortion: f32 = le
+                    .getattr("distortion")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.0);
+                let chromatic_aberration: f32 = le
+                    .getattr("chromatic_aberration")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.0);
+                let vignette_strength: f32 = le
+                    .getattr("vignette_strength")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.0);
+                let vignette_radius: f32 = le
+                    .getattr("vignette_radius")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.7);
+                let vignette_softness: f32 = le
+                    .getattr("vignette_softness")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.3);
+                LensEffectsSettingsNative {
+                    enabled,
+                    distortion,
+                    chromatic_aberration,
+                    vignette_strength,
+                    vignette_radius,
+                    vignette_softness,
+                }
+            } else {
+                LensEffectsSettingsNative::default()
+            }
+        } else {
+            LensEffectsSettingsNative::default()
+        };
+
+        // M5: Parse denoise settings
+        let denoise_native = if let Ok(dn) = params.getattr("denoise") {
+            if !dn.is_none() {
+                let enabled: bool = dn
+                    .getattr("enabled")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(false);
+                let method_str: String = dn
+                    .getattr("method")
+                    .and_then(|v| v.extract())
+                    .unwrap_or_else(|_| "atrous".to_string());
+                let method = match method_str.as_str() {
+                    "bilateral" => DenoiseMethodNative::Bilateral,
+                    "none" => DenoiseMethodNative::None,
+                    _ => DenoiseMethodNative::Atrous,
+                };
+                let iterations: u32 = dn
+                    .getattr("iterations")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(3);
+                let sigma_color: f32 = dn
+                    .getattr("sigma_color")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.1);
+                let sigma_normal: f32 = dn
+                    .getattr("sigma_normal")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.1);
+                let sigma_depth: f32 = dn
+                    .getattr("sigma_depth")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.1);
+                let edge_stopping: f32 = dn
+                    .getattr("edge_stopping")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(1.0);
+                DenoiseSettingsNative {
+                    enabled,
+                    method,
+                    iterations,
+                    sigma_color,
+                    sigma_normal,
+                    sigma_depth,
+                    edge_stopping,
+                }
+            } else {
+                DenoiseSettingsNative::default()
+            }
+        } else {
+            DenoiseSettingsNative::default()
+        };
+
+        // M6: Parse volumetrics settings
+        let volumetrics_native = if let Ok(vol) = params.getattr("volumetrics") {
+            if !vol.is_none() {
+                let enabled: bool = vol
+                    .getattr("enabled")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(false);
+                let mode_str: String = vol
+                    .getattr("mode")
+                    .and_then(|v| v.extract())
+                    .unwrap_or_else(|_| "uniform".to_string());
+                let mode = match mode_str.as_str() {
+                    "height" => VolumetricsModeNative::Height,
+                    "exponential" => VolumetricsModeNative::Exponential,
+                    _ => VolumetricsModeNative::Uniform,
+                };
+                let density: f32 = vol.getattr("density").and_then(|v| v.extract()).unwrap_or(0.01);
+                let height_falloff: f32 = vol.getattr("height_falloff").and_then(|v| v.extract()).unwrap_or(0.1);
+                let base_height: f32 = vol.getattr("base_height").and_then(|v| v.extract()).unwrap_or(0.0);
+                let scattering: f32 = vol.getattr("scattering").and_then(|v| v.extract()).unwrap_or(0.5);
+                let absorption: f32 = vol.getattr("absorption").and_then(|v| v.extract()).unwrap_or(0.1);
+                let phase_g: f32 = vol.getattr("phase_g").and_then(|v| v.extract()).unwrap_or(0.0);
+                let light_shafts: bool = vol.getattr("light_shafts").and_then(|v| v.extract()).unwrap_or(false);
+                let shaft_intensity: f32 = vol.getattr("shaft_intensity").and_then(|v| v.extract()).unwrap_or(1.0);
+                let shaft_samples: u32 = vol.getattr("shaft_samples").and_then(|v| v.extract()).unwrap_or(32);
+                let use_shadows: bool = vol.getattr("use_shadows").and_then(|v| v.extract()).unwrap_or(true);
+                let half_res: bool = vol.getattr("half_res").and_then(|v| v.extract()).unwrap_or(false);
+                VolumetricsSettingsNative {
+                    enabled, mode, density, height_falloff, base_height, scattering,
+                    absorption, phase_g, light_shafts, shaft_intensity, shaft_samples,
+                    use_shadows, half_res,
+                }
+            } else {
+                VolumetricsSettingsNative::default()
+            }
+        } else {
+            VolumetricsSettingsNative::default()
+        };
+
+        // M6: Parse sky settings
+        let sky_native = if let Ok(sky) = params.getattr("sky") {
+            if !sky.is_none() {
+                let enabled: bool = sky.getattr("enabled").and_then(|v| v.extract()).unwrap_or(false);
+                let turbidity: f32 = sky.getattr("turbidity").and_then(|v| v.extract()).unwrap_or(2.0);
+                let ground_albedo: f32 = sky.getattr("ground_albedo").and_then(|v| v.extract()).unwrap_or(0.3);
+                let sun_intensity: f32 = sky.getattr("sun_intensity").and_then(|v| v.extract()).unwrap_or(1.0);
+                let sun_size: f32 = sky.getattr("sun_size").and_then(|v| v.extract()).unwrap_or(1.0);
+                let aerial_perspective: bool = sky.getattr("aerial_perspective").and_then(|v| v.extract()).unwrap_or(true);
+                let aerial_density: f32 = sky.getattr("aerial_density").and_then(|v| v.extract()).unwrap_or(1.0);
+                let sky_exposure: f32 = sky.getattr("sky_exposure").and_then(|v| v.extract()).unwrap_or(1.0);
+                SkySettingsNative {
+                    enabled, turbidity, ground_albedo, sun_intensity, sun_size,
+                    aerial_perspective, aerial_density, sky_exposure,
+                }
+            } else {
+                SkySettingsNative::default()
+            }
+        } else {
+            SkySettingsNative::default()
+        };
+
         let decoded = DecodedTerrainSettings {
             light: LightSettingsNative {
                 direction,
@@ -1487,6 +2153,13 @@ impl TerrainRenderParams {
             materials: materials_native,
             vector_overlay: vector_overlay_native,
             tonemap: tonemap_native,
+            aov: aov_native,
+            dof: dof_native,
+            motion_blur: motion_blur_native,
+            lens_effects: lens_effects_native,
+            denoise: denoise_native,
+            volumetrics: volumetrics_native,
+            sky: sky_native,
         };
 
         let overlays = extract_overlays(params.getattr("overlays")?.as_gil_ref())?;

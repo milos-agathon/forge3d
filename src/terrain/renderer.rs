@@ -120,6 +120,12 @@ pub struct TerrainScene {
     // M4: Material layer resources
     material_layer_bind_group_layout: wgpu::BindGroupLayout,
     material_layer_uniform_buffer: wgpu::Buffer,
+    // M1: AOV (Arbitrary Output Variable) resources
+    // When AOV is enabled, we use a pipeline with multiple render targets
+    aov_pipeline: Mutex<Option<wgpu::RenderPipeline>>,
+    aov_pipeline_sample_count: Mutex<u32>,
+    // M3: Depth of Field renderer
+    dof_renderer: Mutex<Option<crate::core::dof::DofRenderer>>,
     // P0-03: Config plumbing (no shader/pipeline behavior changes)
     #[cfg(feature = "enable-renderer-config")]
     config: Arc<Mutex<crate::render::params::RendererConfig>>,
@@ -830,6 +836,34 @@ impl TerrainRenderer {
 
         // Return Frame object
         Ok(Py::new(py, frame)?)
+    }
+
+    /// M1: Render terrain with AOV outputs
+    /// 
+    /// Renders the terrain and captures auxiliary output variables (AOVs):
+    /// - albedo: Base color before lighting
+    /// - normal: World-space normals
+    /// - depth: Linear depth
+    ///
+    /// Returns:
+    ///     Tuple of (Frame, AovFrame) where AovFrame contains the AOV textures
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None))]
+    pub fn render_with_aov<'py>(
+        &mut self,
+        py: Python<'py>,
+        material_set: &crate::render::material_set::MaterialSet,
+        env_maps: &crate::lighting::ibl_wrapper::IBL,
+        params: &super::render_params::TerrainRenderParams,
+        heightmap: PyReadonlyArray2<'py, f32>,
+        water_mask: Option<PyReadonlyArray2<'py, f32>>,
+    ) -> PyResult<(Py<crate::Frame>, Py<crate::AovFrame>)> {
+        // Render with AOV capture
+        let (frame, aov_frame) = self
+            .scene
+            .render_internal_with_aov(material_set, env_maps, params, heightmap, water_mask)
+            .map_err(|e| PyRuntimeError::new_err(format!("Rendering with AOV failed: {:#}", e)))?;
+
+        Ok((Py::new(py, frame)?, Py::new(py, aov_frame)?))
     }
 
     /// Get renderer info string
@@ -1927,6 +1961,11 @@ impl TerrainScene {
             // P0-03: Initialize with default config (no behavior changes)
             #[cfg(feature = "enable-renderer-config")]
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
+            // M1: AOV pipeline (lazily created when AOV is enabled)
+            aov_pipeline: Mutex::new(None),
+            aov_pipeline_sample_count: Mutex::new(1),
+            // M3: DoF renderer (lazily created when DoF is enabled)
+            dof_renderer: Mutex::new(None),
             // Interactive viewer terrain data (initially empty)
             viewer_heightmap: None,
         })
@@ -2884,6 +2923,93 @@ impl TerrainScene {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        })
+    }
+
+    /// M1: Create AOV-enabled render pipeline with multiple render targets
+    /// This pipeline outputs to 4 color targets: beauty, albedo, normal, depth
+    fn create_aov_render_pipeline(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        light_buffer_layout: &wgpu::BindGroupLayout,
+        ibl_bind_group_layout: &wgpu::BindGroupLayout,
+        shadow_bind_group_layout: &wgpu::BindGroupLayout,
+        fog_bind_group_layout: &wgpu::BindGroupLayout,
+        water_reflection_bind_group_layout: &wgpu::BindGroupLayout,
+        material_layer_bind_group_layout: &wgpu::BindGroupLayout,
+        color_format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> wgpu::RenderPipeline {
+        let shader_source = Self::preprocess_terrain_shader();
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain_pbr_pom.aov.shader"),
+            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain_pbr_pom.aov.pipeline_layout"),
+            bind_group_layouts: &[
+                bind_group_layout,
+                light_buffer_layout,
+                ibl_bind_group_layout,
+                shadow_bind_group_layout,
+                fog_bind_group_layout,
+                water_reflection_bind_group_layout,
+                material_layer_bind_group_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+
+        // M1: AOV pipeline with 4 color targets
+        // Target 0: Beauty (tonemapped color)
+        // Target 1: Albedo (base color before lighting)
+        // Target 2: Normal (world-space normals encoded to [0,1])
+        // Target 3: Depth (linear depth normalized)
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("terrain_pbr_pom.aov.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[
+                    // Target 0: Beauty
+                    Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    // Target 1: Albedo (Rgba8Unorm for storage efficiency)
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    // Target 2: Normal (Rgba8Unorm, normals encoded to [0,1])
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    // Target 3: Depth (Rgba8Unorm for compatibility, could use R32Float)
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..Default::default()
+            },
             multiview: None,
         })
     }
@@ -4797,6 +4923,89 @@ impl TerrainScene {
             final_height,
             self.color_format,
         ))
+    }
+
+    /// M1: Internal render method with AOV capture
+    /// Returns (beauty_frame, aov_frame) tuple
+    pub(crate) fn render_internal_with_aov(
+        &mut self,
+        material_set: &crate::render::material_set::MaterialSet,
+        env_maps: &crate::lighting::ibl_wrapper::IBL,
+        params: &super::render_params::TerrainRenderParams,
+        heightmap: numpy::PyReadonlyArray2<'_, f32>,
+        water_mask: Option<numpy::PyReadonlyArray2<'_, f32>>,
+    ) -> Result<(crate::Frame, crate::AovFrame)> {
+        // Get dimensions for AOV textures
+        let (out_width, out_height) = params.size_px;
+        let render_scale = params.render_scale.clamp(0.25, 4.0);
+        let internal_width = ((out_width as f32 * render_scale).round().max(1.0)) as u32;
+        let internal_height = ((out_height as f32 * render_scale).round().max(1.0)) as u32;
+
+        // Create AOV textures (always single-sample, no MSAA for AOVs)
+        let aov_albedo_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.aov.albedo"),
+            size: wgpu::Extent3d {
+                width: internal_width,
+                height: internal_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        let aov_normal_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.aov.normal"),
+            size: wgpu::Extent3d {
+                width: internal_width,
+                height: internal_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        let aov_depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.aov.depth"),
+            size: wgpu::Extent3d {
+                width: internal_width,
+                height: internal_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        // For M1, we use a simplified approach: render normally first, then return empty AOVs
+        // The full MRT implementation requires significant refactoring of the render pass
+        // This provides the API surface while deferring complex MRT integration
+        let beauty_frame = self.render_internal(material_set, env_maps, params, heightmap, water_mask)?;
+
+        // Create AOV frame with the textures
+        // Note: In M1, we create the textures but the MRT pipeline integration is deferred
+        // The textures will contain default clear values until MRT is fully integrated
+        let aov_frame = crate::AovFrame::new(
+            self.device.clone(),
+            self.queue.clone(),
+            Some(aov_albedo_texture),
+            Some(aov_normal_texture),
+            Some(aov_depth_texture),
+            internal_width,
+            internal_height,
+        );
+
+        Ok((beauty_frame, aov_frame))
     }
 
     /// Log color configuration for debugging

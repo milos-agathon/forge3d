@@ -14,6 +14,12 @@ import time as _time
 from .materials import PbrMaterial
 from .denoise import atrous_denoise
 
+try:
+    from ._native import get_native_module as _get_native_module
+    _NATIVE = _get_native_module()
+except Exception:
+    _NATIVE = None
+
 # --- A19: Scene cache for HQ path tracing (Python fallback) ---
 # Minimal in-memory cache to reuse scene-dependent precomputations across renders.
 # On cache hit for unchanged (scene,camera,dimensions,seed,frames,denoiser) the re-render path
@@ -556,6 +562,7 @@ def save_aovs(
     HDR AOVs (albedo, normal, depth, direct, indirect, emission) are intended for EXR.
     Visibility is written as PNG. If EXR support is not available, this function
     skips HDR files and returns paths only for saved images.
+    When present, the native EXR writer is used before any optional Python fallbacks.
 
     """
     from pathlib import Path
@@ -569,6 +576,10 @@ def save_aovs(
         from . import numpy_to_png  # type: ignore
     except Exception:
         numpy_to_png = None  # type: ignore
+
+    native_exr = None
+    if _NATIVE is not None:
+        native_exr = getattr(_NATIVE, "numpy_to_exr", None)
 
     for key, arr in aovs_map.items():
         k = str(key).lower()
@@ -594,11 +605,22 @@ def save_aovs(
             # We still record the intended path for clarity.
             filename = f"{basename}_aov-{k}.exr"
             path = out_dir / filename
+            data = np.ascontiguousarray(arr, dtype=np.float32)
+            if native_exr is not None:
+                try:
+                    native_exr(str(path), data, channel_prefix=k)
+                    out_paths[k] = str(path)
+                    continue
+                except Exception as exc:
+                    msg = str(exc).lower()
+                    if "images" in msg and "feature" in msg:
+                        native_exr = None
+                    else:
+                        raise
             # Optional: attempt OpenEXR via imageio if present.
             try:
                 import imageio.v3 as iio  # type: ignore
 
-                data = arr.astype(np.float32)
                 # Some writers expect 3-channel for EXR, convert depth to 1-channel compatible
                 if data.ndim == 2:
                     data = data[..., None]

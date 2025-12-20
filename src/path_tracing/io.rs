@@ -8,6 +8,8 @@
 use crate::path_tracing::aov::AovKind;
 use anyhow::{Context, Result};
 use std::path::Path;
+#[cfg(feature = "images")]
+use crate::util::exr_write;
 
 /// Represents AOV data for writing to files
 #[derive(Debug, Clone)]
@@ -164,10 +166,26 @@ impl AovWriter {
     }
 
     #[cfg(feature = "images")]
-    fn write_exr(_aov_data: &AovData, _path: &Path) -> Result<()> {
-        // For now, provide a placeholder implementation
-        // In a full implementation, this would use the 'exr' crate to write float data
-        anyhow::bail!("EXR writing not yet implemented - would use 'exr' crate here");
+    fn write_exr(aov_data: &AovData, path: &Path) -> Result<()> {
+        match &aov_data.data {
+            AovDataType::Float32(data) => exr_write::write_exr_rgb_f32_from_rgba(
+                path,
+                aov_data.width,
+                aov_data.height,
+                data,
+                aov_data.kind.name(),
+            ),
+            AovDataType::Float32Single(data) => exr_write::write_exr_scalar_f32(
+                path,
+                aov_data.width,
+                aov_data.height,
+                data,
+                aov_data.kind.name(),
+            ),
+            AovDataType::Uint8Single(_) => {
+                anyhow::bail!("EXR writer does not support uint8 AOV data")
+            }
+        }
     }
 
     #[cfg(feature = "images")]

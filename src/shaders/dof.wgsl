@@ -29,7 +29,10 @@ struct DofUniforms {
     // Debug and visualization
     debug_mode: u32,           // Debug visualization mode
     show_coc: u32,            // Show circle-of-confusion
-    _padding: vec2<f32>,      // Padding for alignment
+
+    // M3: Tilt-shift parameters for Scheimpflug effect
+    tilt_pitch: f32,          // Tilt around horizontal axis (radians)
+    tilt_yaw: f32,            // Tilt around vertical axis (radians)
 };
 
 @group(0) @binding(0) var<uniform> dof_params: DofUniforms;
@@ -74,6 +77,45 @@ const HEX_SAMPLES: array<vec2<f32>, 7> = array<vec2<f32>, 7>(
     vec2<f32>(-0.5, -0.866025),             // Bottom-left
     vec2<f32>(0.5, -0.866025)               // Bottom-right
 );
+
+// M3: Calculate effective focus distance with tilt-shift (Scheimpflug principle)
+// The tilted focus plane varies focus distance across the image
+fn calculate_tilted_focus_distance(uv: vec2<f32>) -> f32 {
+    // Convert UV to normalized screen coordinates centered at origin [-1, 1]
+    let centered_uv = (uv - 0.5) * 2.0;
+    
+    // Calculate tilt offset based on screen position
+    // Tilt pitch affects vertical (Y) variation
+    // Tilt yaw affects horizontal (X) variation
+    let tilt_offset = centered_uv.y * tan(dof_params.tilt_pitch) + 
+                      centered_uv.x * tan(dof_params.tilt_yaw);
+    
+    // Scale the tilt effect by focus distance to create realistic plane tilt
+    // A larger focus distance means more dramatic variation across the frame
+    let focus_variation = dof_params.focus_distance * tilt_offset * 0.5;
+    
+    // Return modified focus distance (clamped to positive values)
+    return max(dof_params.focus_distance + focus_variation, 0.1);
+}
+
+// Calculate circle of confusion (CoC) from depth with tilt-shift support
+fn calculate_coc_tilt(depth: f32, uv: vec2<f32>) -> f32 {
+    // Get effective focus distance for this pixel (accounts for tilt)
+    let effective_focus = calculate_tilted_focus_distance(uv);
+    
+    let object_distance = depth;
+    let distance_diff = abs(object_distance - effective_focus);
+    let denominator = object_distance * (effective_focus + dof_params.focal_length);
+    
+    if (denominator < 0.001) {
+        return 0.0;
+    }
+    
+    let coc = (dof_params.aperture * dof_params.focal_length * distance_diff) / denominator;
+    let coc_pixels = coc * dof_params.sensor_size * dof_params.blur_radius_scale;
+    
+    return clamp(coc_pixels + dof_params.coc_bias, 0.0, dof_params.max_blur_radius);
+}
 
 // Calculate circle of confusion (CoC) from depth
 fn calculate_coc(depth: f32) -> f32 {
@@ -230,7 +272,15 @@ fn cs_dof(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Sample depth and calculate CoC
     let depth = textureSample(depth_texture, color_sampler, uv).r;
-    let coc = calculate_coc(depth);
+    
+    // M3: Use tilt-shift CoC calculation when tilt is enabled
+    let has_tilt = abs(dof_params.tilt_pitch) > 0.001 || abs(dof_params.tilt_yaw) > 0.001;
+    var coc: f32;
+    if (has_tilt) {
+        coc = calculate_coc_tilt(depth, uv);
+    } else {
+        coc = calculate_coc(depth);
+    }
     let field_type = get_field_type(depth);
 
     var final_color: vec4<f32>;

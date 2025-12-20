@@ -230,6 +230,100 @@ def main() -> int:
     tm_group.add_argument("--tint", type=float, default=0.0,
                           help="Green-magenta tint [-1.0 to 1.0] (default: 0.0)")
     
+    # M3: Depth of Field options
+    dof_group = parser.add_argument_group("Depth of Field (M3)", "Camera DoF with tilt-shift support")
+    dof_group.add_argument("--dof", action="store_true",
+                           help="Enable depth of field effect")
+    dof_group.add_argument("--dof-f-stop", type=float, default=5.6,
+                           help="Aperture f-stop [1.0-22.0] (default: 5.6)")
+    dof_group.add_argument("--dof-focus-distance", type=float, default=100.0,
+                           help="Focus distance in world units (default: 100.0)")
+    dof_group.add_argument("--dof-focal-length", type=float, default=50.0,
+                           help="Lens focal length in mm (default: 50.0)")
+    dof_group.add_argument("--dof-tilt-pitch", type=float, default=0.0,
+                           help="Tilt-shift pitch angle in degrees (default: 0.0)")
+    dof_group.add_argument("--dof-tilt-yaw", type=float, default=0.0,
+                           help="Tilt-shift yaw angle in degrees (default: 0.0)")
+    dof_group.add_argument("--dof-quality", choices=["low", "medium", "high", "ultra"],
+                           default="medium", help="DoF quality preset (default: medium)")
+    
+    # M4: Motion Blur options
+    mb_group = parser.add_argument_group("Motion Blur (M4)", "Camera shutter accumulation")
+    mb_group.add_argument("--motion-blur", action="store_true",
+                          help="Enable motion blur (camera shutter accumulation)")
+    mb_group.add_argument("--mb-samples", type=int, default=8,
+                          help="Number of sub-frames [1-64] (default: 8)")
+    mb_group.add_argument("--mb-shutter-angle", type=float, default=180.0,
+                          help="Shutter angle in degrees [0-360] (default: 180)")
+    mb_group.add_argument("--mb-cam-phi-delta", type=float, default=0.0,
+                          help="Camera azimuth change over shutter (default: 0.0)")
+    mb_group.add_argument("--mb-cam-theta-delta", type=float, default=0.0,
+                          help="Camera elevation change over shutter (default: 0.0)")
+    mb_group.add_argument("--mb-cam-radius-delta", type=float, default=0.0,
+                          help="Camera distance change over shutter (default: 0.0)")
+    
+    # M5: Lens Effects options
+    le_group = parser.add_argument_group("Lens Effects (M5)", "Optical imperfections and sensor effects")
+    le_group.add_argument("--lens-effects", action="store_true",
+                          help="Enable lens effects (distortion, CA, vignette)")
+    le_group.add_argument("--lens-distortion", type=float, default=0.0,
+                          help="Barrel (+) / pincushion (-) distortion (default: 0.0)")
+    le_group.add_argument("--lens-ca", type=float, default=0.0,
+                          help="Chromatic aberration strength (default: 0.0)")
+    le_group.add_argument("--lens-vignette", type=float, default=0.0,
+                          help="Vignette strength [0.0-1.0] (default: 0.0)")
+    le_group.add_argument("--lens-vignette-radius", type=float, default=0.7,
+                          help="Vignette start radius [0.0-1.0] (default: 0.7)")
+    le_group.add_argument("--lens-vignette-softness", type=float, default=0.3,
+                          help="Vignette falloff softness (default: 0.3)")
+    
+    # M5: Denoise options
+    dn_group = parser.add_argument_group("Denoise (M5)", "Noise reduction for rendered images")
+    dn_group.add_argument("--denoise", action="store_true",
+                          help="Enable CPU-based denoising")
+    dn_group.add_argument("--denoise-method", choices=["atrous", "bilateral", "none"],
+                          default="atrous", help="Denoise method (default: atrous)")
+    dn_group.add_argument("--denoise-iterations", type=int, default=3,
+                          help="Filter iterations [1-10] (default: 3)")
+    dn_group.add_argument("--denoise-sigma-color", type=float, default=0.1,
+                          help="Color similarity weight (default: 0.1)")
+    
+    # M6: Volumetrics options
+    vol_group = parser.add_argument_group("Volumetrics (M6)", "Volumetric fog and light shafts")
+    vol_group.add_argument("--volumetrics", action="store_true",
+                           help="Enable volumetric fog")
+    vol_group.add_argument("--vol-mode", choices=["uniform", "height", "exponential"],
+                           default="uniform", help="Fog density mode (default: uniform)")
+    vol_group.add_argument("--vol-density", type=float, default=0.01,
+                           help="Global fog density (default: 0.01)")
+    vol_group.add_argument("--vol-scattering", type=float, default=0.5,
+                           help="In-scatter amount [0.0-1.0] (default: 0.5)")
+    vol_group.add_argument("--vol-absorption", type=float, default=0.1,
+                           help="Light absorption [0.0-1.0] (default: 0.1)")
+    vol_group.add_argument("--vol-light-shafts", action="store_true",
+                           help="Enable god rays / light shafts")
+    vol_group.add_argument("--vol-shaft-intensity", type=float, default=1.0,
+                           help="Light shaft brightness (default: 1.0)")
+    vol_group.add_argument("--vol-half-res", action="store_true",
+                           help="Render volumetrics at half resolution (faster)")
+    
+    # M6: Sky options
+    sky_group = parser.add_argument_group("Sky (M6)", "Physically-based sky rendering")
+    sky_group.add_argument("--sky", action="store_true",
+                           help="Enable procedural sky")
+    sky_group.add_argument("--sky-turbidity", type=float, default=2.0,
+                           help="Atmospheric haziness [1.0-10.0] (default: 2.0)")
+    sky_group.add_argument("--sky-ground-albedo", type=float, default=0.3,
+                           help="Ground reflectance [0.0-1.0] (default: 0.3)")
+    sky_group.add_argument("--sky-sun-intensity", type=float, default=1.0,
+                           help="Sun disc brightness (default: 1.0)")
+    sky_group.add_argument("--sky-aerial", action="store_true", default=True,
+                           help="Enable aerial perspective (default: on)")
+    sky_group.add_argument("--no-sky-aerial", action="store_false", dest="sky_aerial",
+                           help="Disable aerial perspective")
+    sky_group.add_argument("--sky-exposure", type=float, default=1.0,
+                           help="Sky brightness adjustment (default: 1.0)")
+    
     args = parser.parse_args()
     
     # Apply preset settings (overrides individual flags)
@@ -411,6 +505,75 @@ def main() -> int:
             "tint": args.tint,
         }
         
+        # M3: Depth of Field settings
+        if args.dof:
+            pbr_cmd["dof"] = {
+                "enabled": True,
+                "f_stop": args.dof_f_stop,
+                "focus_distance": args.dof_focus_distance,
+                "focal_length": args.dof_focal_length,
+                "tilt_pitch": args.dof_tilt_pitch,
+                "tilt_yaw": args.dof_tilt_yaw,
+                "quality": args.dof_quality,
+            }
+        
+        # M4: Motion Blur settings
+        if args.motion_blur:
+            shutter_close = args.mb_shutter_angle / 360.0
+            pbr_cmd["motion_blur"] = {
+                "enabled": True,
+                "samples": args.mb_samples,
+                "shutter_open": 0.0,
+                "shutter_close": shutter_close,
+                "cam_phi_delta": args.mb_cam_phi_delta,
+                "cam_theta_delta": args.mb_cam_theta_delta,
+                "cam_radius_delta": args.mb_cam_radius_delta,
+            }
+        
+        # M5: Lens Effects settings
+        if args.lens_effects or args.lens_distortion != 0.0 or args.lens_ca != 0.0 or args.lens_vignette > 0.0:
+            pbr_cmd["lens_effects"] = {
+                "enabled": True,
+                "distortion": args.lens_distortion,
+                "chromatic_aberration": args.lens_ca,
+                "vignette_strength": args.lens_vignette,
+                "vignette_radius": args.lens_vignette_radius,
+                "vignette_softness": args.lens_vignette_softness,
+            }
+        
+        # M5: Denoise settings
+        if args.denoise:
+            pbr_cmd["denoise"] = {
+                "enabled": True,
+                "method": args.denoise_method,
+                "iterations": args.denoise_iterations,
+                "sigma_color": args.denoise_sigma_color,
+            }
+        
+        # M6: Volumetrics settings
+        if args.volumetrics:
+            pbr_cmd["volumetrics"] = {
+                "enabled": True,
+                "mode": args.vol_mode,
+                "density": args.vol_density,
+                "scattering": args.vol_scattering,
+                "absorption": args.vol_absorption,
+                "light_shafts": args.vol_light_shafts,
+                "shaft_intensity": args.vol_shaft_intensity,
+                "half_res": args.vol_half_res,
+            }
+        
+        # M6: Sky settings
+        if args.sky:
+            pbr_cmd["sky"] = {
+                "enabled": True,
+                "turbidity": args.sky_turbidity,
+                "ground_albedo": args.sky_ground_albedo,
+                "sun_intensity": args.sky_sun_intensity,
+                "aerial_perspective": args.sky_aerial,
+                "sky_exposure": args.sky_exposure,
+            }
+        
         resp = send_ipc(sock, pbr_cmd)
         if not resp.get("ok"):
             print(f"Warning: PBR config failed: {resp.get('error')}")
@@ -427,6 +590,18 @@ def main() -> int:
             if args.overlay_depth or args.overlay_halo:
                 features.append("overlay=on")
             features.append(f"tonemap={args.tonemap}")
+            if args.dof:
+                features.append("dof=on")
+            if args.motion_blur:
+                features.append(f"motion_blur={args.mb_samples}spp")
+            if args.lens_effects or args.lens_distortion != 0.0 or args.lens_ca != 0.0 or args.lens_vignette > 0.0:
+                features.append("lens=on")
+            if args.denoise:
+                features.append(f"denoise={args.denoise_method}")
+            if args.volumetrics:
+                features.append("volumetrics=on")
+            if args.sky:
+                features.append("sky=on")
             print(f"PBR mode enabled: {', '.join(features)}")
     
     # Snapshot mode

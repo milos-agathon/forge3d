@@ -1,224 +1,147 @@
-You are acting as a **principal real-time rendering engineer** (Rust + WGSL + WebGPU/wgpu + Python) working in the `forge3d` repo. You MUST fix the remaining unmet requirements while preserving the frozen production default.
+You are **GPT-5.2 Codex** acting as a **principal offline rendering engineer** (Rust + wgpu + WGSL + Python/PyO3) and a **strict engineering program manager**. You are working inside the `milos-agathon/forge3d` repository.
 
-## CRITICAL RULES
+# Mission
 
-* You must fully read AGENTS.md to learn repo rules.
-* Do not regress existing passing tests.
-* After every edit: **run tests** and **re-render all required evidence images in the same session**. No “generated earlier” exceptions.
-* Do NOT modify thresholds in any strict validation profiles to “make tests pass”.
-* Preserve existing behavior as the default unless a new opt-in flag/mode is introduced.
-* No handwaving: provide concrete diffs, exact files/lines, and reproducible commands with raw output.
+1. **Investigate the level of presence** (PRESENT / PARTIAL / ABSENT) of **ALL** the features listed below in the repo, with **file-path + symbol evidence** for every claim.
+2. Produce a **surgically precise, strict, methodical implementation plan** to add/complete any missing pieces, with **measurable deliverables** and **milestones**.
 
----
+## Features to audit (ALL of these)
 
-## CONTEXT (WHAT IS ALREADY MET — MUST KEEP)
+**F1. AOVs + OpenEXR output**
 
-These must remain true:
+* Beauty + AOV passes: albedo, normal, depth, roughness/metallic, AO, sun-vis, masks/IDs
+* EXR output (multi-channel or multi-part) *optional*, must not break PNG pipeline
 
-1. HARD / PCF / PCSS are wired end-to-end and produce different output (hash/pixel-diff tests exist).
-2. CLI no longer crashes for shadow technique values.
-3. [SHADOW] technique=... logging exists.
-4. Tests are green.
-5. Decisions already taken and implemented: **S2 (fail-fast VSM/EVSM/MSM)** and **P1 (mesh-based perspective heightfield)**.
+**F2. Depth of Field**
 
-Do not break any of the above.
+* Post DoF from depth buffer
+* Optional tilt-shift mode (map “miniature” look)
 
----
+**F3. Motion blur**
 
-## WHAT IS STILL NOT ACCEPTED (THE REAL GAP)
+* Camera shutter model (temporal accumulation or analytic approximation)
+* Optional object motion blur if you support animated transforms
 
-Your current evidence **does not prove** the user’s real issue is solved:
+**F4. Lens/sensor effects (tasteful, controllable)**
 
-* The user’s “Rainier looks flat” complaint is about the **actual Rainier scene**, not the synthetic step DEM.
-* Shadow-technique evidence currently leans on **step_dem.tif** because Rainier “still looks similar across techniques” — that is precisely what we must fix (or explain with concrete, measured evidence).
-* Evidence discipline is incomplete: any required probe images must be freshly regenerated and the md5/diff tooling must be fully reproducible (no placeholder “md5/diff script” line).
+* Lens distortion
+* Chromatic aberration
+* Vignette (prefer mask + strength)
 
-This milestone is not done until Rainier relief is clearly non-flat **under low-angle lighting** and we can prove it reproducibly.
+**F5. Optional denoising**
 
----
+* For ray-derived buffers (AO/sun-vis/volumetrics)
+* Must be opt-in; must not require external services; document CPU/GPU options if any
 
-## OBJECTIVE (DO NOT MISINTERPRET)
+**F6. True volumetrics + light shafts**
 
-The renderer must produce **Blender-like relief** on the **Rainier** terrain under **low sun elevation (< 30°)** while honoring the user’s camera controls (theta/phi/fov) and without relying on “sun = camera + 90°” heuristics.
+* Participating media: scattering + absorption
+* Crepuscular rays/god rays (sun shafts)
 
-You must **find and fix root causes**, not recommend different angles.
+**F7. Physically based sky + aerial perspective**
 
----
+* Precomputed/analytic atmospheric scattering (Rayleigh/Mie) preferred
+* Should integrate with sun direction and camera; must be controllable and deterministic
 
-## NON-NEGOTIABLE INVESTIGATION TASKS (DO THESE FIRST)
+# Non-negotiable constraints
 
-### I0) Confirm the Rainier scene is actually using mesh perspective mode
+* **Preserve current default output.** Any new feature must be **opt-in** (flags/config/presets). Defaults must not change.
+* **Do not regress tests.** Do not relax thresholds. Do not “fix” by changing tolerances.
+* **Be file-path and symbol specific.** Every “present/partial/absent” decision must cite exact paths + symbol names + call sites.
+* **No hand-waving.** If a feature is “partial”, you must state exactly what exists and exactly what’s missing (and where).
+* **Portable-first** across wgpu backends unless you explicitly gate an optional non-portable mode and justify it.
+* **No implementation code yet.** This task is investigation + plan only.
 
-**Deliverable I0:** In the Rainier preset and CLI path, prove (via log + config dump) that the Rainier render is using the mesh/perspective mode you added — not silently falling back to screen-mode/fullscreen reconstruction.
+# Required workflow
 
-* Add a single debug log line (guarded by `FORGE3D_DEBUG_CAMERA=1`) that prints:
+## Step 0 — Read repo rules
 
-  * `render_mode` (screen vs mesh) and the exact code path taken
-  * camera eye/target, derived `view_dir` (normalized)
-  * raw CLI values used (phi/theta/fov)
-  * sun azimuth/elevation, derived `sun_dir` (normalized)
-  * `dot(view_dir, sun_dir)`
-  * DEM texel size (dx, dy) + elevation scale used in normal/mesh generation
+* You MUST read `AGENTS.md` in the repo root first and comply with it.
 
-### I1) Audit unit/scale correctness for Rainier DEM
+## Step 1 — Pipeline map (repo reconnaissance)
 
-Flat relief is often caused by **XY/Z unit mismatch** (degrees treated as meters, wrong texel size, wrong z-scale, wrong height normalization).
+Build a concise map of the offline rendering pipeline (Python → Rust → wgpu/WGSL → readback/output).
+You must locate:
 
-**Deliverable I1:** Identify and fix (if needed) at least one of the following (with code references):
+* Python entrypoints used to render terrain/PNG (examples + python package)
+* Rust entrypoints that create device/queue/surface (headless) and encode passes
+* Shader modules for main terrain PBR/IBL/POM and post/tonemap
+* Readback path and output encoding
 
-* degrees vs meters mismatch
-* swapped dx/dy
-* radians/degrees mixup in camera or sun math
-* incorrect normal derivation scale (slope too small → normals near-up → flat shading)
-* mesh height scale not matching world XY scale
+Deliverable: a table with columns:
 
-If Rainier DEM is geographic (lat/lon), you MUST either:
+* **Subsystem** | **File path(s)** | **Key symbols** | **What it does** | **Why it matters for F1–F7**
 
-* (Preferred) enforce/auto-reproject to a projected CRS for shading/mesh scale, OR
-* implement a correct meters-per-degree approximation based on latitude and use it consistently.
+## Step 2 — Feature presence audit (F1–F7)
 
-No silent behavior: warn/error clearly.
+For each feature F1–F7, label status:
 
-### I2) Add a Rainier-only relief metric (measured, not vibes)
+* **PRESENT**: implemented + reachable from user-facing config/preset/CLI + at least one example uses it
+* **PARTIAL**: some code exists but missing integration/config, incomplete algorithm, or not wired to examples
+* **ABSENT**: no meaningful implementation
 
-Add a small deterministic analysis script that quantifies “relief” from an image **without manual judgment**.
+Deliverable: one audit table with columns:
 
-**Deliverable I2:** Add `tools/relief_metric.py` (or similar) that outputs:
+* **Feature ID** | **Status** | **Evidence (paths + symbols)** | **User-facing knobs** | **Gaps / Risks**
 
-* luminance stddev over non-background pixels
-* edge/gradient magnitude percentiles (e.g., p50/p90)
-* optional “shadowed pixel ratio” if you have a shadow factor buffer in debug mode
+After the table, add a “Key findings” section:
 
-This tool must take `--input <png>` and print a stable, parseable summary.
+* Top 5 gaps that most impact “Blender-like offline PNG quality”
+* Any architectural constraints (missing AOV buffers, missing linear HDR step, no EXR writer, etc.)
 
----
+## Step 3 — Strict plan with deliverables & milestones
 
-## IMPLEMENTATION REQUIREMENTS (STRICT)
+Create ONE integrated plan that addresses every ABSENT/PARTIAL item, prioritized by **impact-to-effort** for offline map PNGs.
 
-### R1 — Rainier must show real relief under low sun elevation
+### Plan format (MUST follow exactly)
 
-You must produce a Rainier preset output that is obviously non-flat **without** “sun = camera + 90°” logic.
+1. **Design decisions**
 
-**Deliverable R1A (Preset):** Update or create:
-
-* `presets/rainier_relief_low_sun.json` (or equivalent)
-
-  * explicit `sun_elevation_deg` in **[10°, 25°]**
-  * camera theta/phi/fov that is clearly perspective (not top-down)
-  * explicitly uses mesh/perspective mode (no ambiguity)
-  * add a comment block explaining the intent and constraints (low sun, no heuristic offset)
-
-**Deliverable R1B (Output):**
-
-* `examples/out/rainier_relief_low_sun.png`
-
-**Acceptance (Measured):**
-
-* `tools/relief_metric.py` must report:
-
-  * luminance stddev ≥ a threshold you justify from baselines (and you must include baseline numbers)
-  * edge magnitude p90 ≥ threshold
-* You must provide the baseline measurements for:
-
-  * the previous “flat” Rainier render
-  * the new “relief” Rainier render
-    so we can see objective improvement.
-
-### R2 — Shadow techniques must be meaningfully different on Rainier (not just step DEM)
-
-If Rainier still looks “similar”, you must either:
-
-* fix it (preferred), OR
-* prove via quantitative evidence why it is physically expected in that configuration and adjust the Rainier preset so differences become visible **without breaking defaults**.
-
-**Deliverable R2A (Outputs):**
-Render the *same Rainier scene* with:
-
-* `examples/out/rainier_shadow_hard.png`
-* `examples/out/rainier_shadow_pcf.png`
-* `examples/out/rainier_shadow_pcss.png`
-
-**Acceptance:**
-
-* md5 hashes must differ
-* pixel-diff counts must be non-zero and above a tiny floor (to avoid “1 pixel differs” flukes)
-
-### R3 — Keep step DEM, but demote it to tests-only evidence
-
-Step DEM is fine for deterministic tests, but it cannot be the primary justification for the user-facing Rainier fix.
-
-**Deliverable R3:**
-
-* If `step_dem.tif` is required for tests, it must be:
-
-  * either generated deterministically by a script checked into `tools/` and produced during tests, OR
-  * checked into an appropriate test asset location (not `examples/out/`)
-* `examples/out/` must not be treated as a source-controlled dependency unless AGENTS.md explicitly allows it.
-
-### R4 — Evidence reproducibility: no placeholders, no “generated earlier”
-
-You must re-render **all** required evidence images in this session and include raw outputs.
-
-**Deliverables R4:**
-
-1. A committed script `tools/md5_and_diff.py` (or similar) that:
-
-   * prints md5 for each image
-   * prints pixel-diff counts for specified pairs
-2. In your final report, include:
-
-   * the exact command lines used
-   * the raw stdout of md5/diff script
-   * the raw stdout of `python -m pytest -q`
-
----
-
-## REQUIRED EVIDENCE OUTPUTS (MUST BE FRESHLY GENERATED)
-
-### E1 — Geometry probes (lighting-independent; regenerate all)
-
-* probe_fov30.png, probe_fov60.png, probe_fov90.png
-* probe_theta25.png, probe_theta75.png
-* probe_phi0.png, probe_phi90.png
-
-### E2 — Rainier relief (this is the real user problem)
-
-* rainier_relief_low_sun.png
-
-### E3 — Rainier shadow technique sanity
-
-* rainier_shadow_hard.png, rainier_shadow_pcf.png, rainier_shadow_pcss.png
-
-### E4 — Optional but strongly recommended (diagnostic)
-
-* rainier_depth_probe.png (Rainier using the geometry-only depth/debug mode)
-
----
-
-## ACCEPTANCE CRITERIA (MUST ALL PASS)
-
-1. Rainier preset uses mesh/perspective mode (proven via debug log).
-2. Rainier low-sun render is measurably higher-relief than prior baseline (relief metric tool output included).
-3. Rainier HARD/PCF/PCSS outputs differ (md5 + pixel diffs).
-4. All geometry probes are regenerated in this session and still differ as required.
-5. VSM/EVSM/MSM remain fail-fast with clear error (no regressions).
-6. `python -m pytest -q` passes.
-
----
-
-## OUTPUT FORMAT (STRICT)
-
-Return:
-
-1. A short “What was wrong” section (max 6 bullets, each bullet must cite file/line or value).
-2. A short plan (max 10 bullets).
-3. List of edited files.
-4. Exact commands run (every render + metrics + tests).
-5. Raw output blocks:
-
-   * relief metric output (baseline + new)
-   * md5 + pixel-diff output
-   * pytest output
-6. Final test results summary.
-
-No extra commentary.
+   * For each feature: where it lives (shader pass / compute pass / CPU post / output layer)
+   * Data needed (AOV formats, depth/normal availability, temporal samples)
+   * Determinism requirements (seeding, reproducibility)
+
+2. **Per-feature implementation spec**
+   For each feature F1–F7 include:
+
+* **Integration point(s)**: exact file paths and functions to modify/add
+* **GPU resources**: textures/buffers/samplers needed, proposed formats, resize rules
+* **Pass scheduling**: before/after which existing passes
+* **Config surface**: Python dataclass fields + CLI flags/preset keys (names/types/defaults)
+* **Failure modes**: what can go wrong and how to detect it
+
+3. **Definition of Done**
+   List 10–15 measurable items, including:
+
+* No change to defaults and baseline images
+* Tests added (unit/integration) for critical pieces
+* At least one example script that exercises each feature
+* Image artifact outputs + numeric metrics (SSIM/PSNR/ROI stats) for validation
+* Performance measurement method (time per sample / total render time) with targets/ranges
+* Shader validation step (wgsl-analyzer/naga clean)
+
+4. **Milestones & deliverables (strict)**
+   Provide **5–8 milestones**. Each milestone MUST include:
+
+* **Milestone name**
+* **Scope (features covered)**
+* **Files touched/added (explicit paths)**
+* **Deliverables** (code, tests, sample renders, logs/metrics)
+* **Acceptance criteria** (measurable; include at least one numeric check when relevant)
+* **Risks & mitigations**
+
+# Allowed commands (use as needed)
+
+* `rg -n "<pattern>" .` for discovery
+* `cargo test`, `cargo clippy`, `cargo check`
+* `python -m pytest`
+* Any existing example runner commands documented in the repo (do not invent new tooling without justification)
+
+# Output requirements
+
+* Be concise but complete.
+* No code patches yet.
+* Every claim about repo state must be backed by file-path evidence.
+* End with a “Next actions” checklist.
+
+Now execute Step 0 → Step 1 → Step 2 → Step 3 in order and output exactly as specified.

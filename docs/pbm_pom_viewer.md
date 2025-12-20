@@ -256,6 +256,31 @@ python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pre
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --preset high_quality --width 800 --height 800
 ```
 
+# Depth of Field with tilt-shift
+```bash
+python examples/terrain_viewer_interactive.py --dem assets/dem.tif \
+    --pbr --dof --dof-f-stop 2.8 --dof-focus-distance 200 --dof-tilt-pitch 15
+
+# Motion Blur with camera pan
+python examples/terrain_viewer_interactive.py --dem assets/dem.tif \
+    --pbr --motion-blur --mb-samples 16 --mb-shutter-angle 180 --mb-cam-phi-delta 10
+
+# Lens Effects (vintage look)
+python examples/terrain_viewer_interactive.py --dem assets/dem.tif \
+    --pbr --lens-effects --lens-distortion 0.1 --lens-ca 0.02 --lens-vignette 0.5
+
+# Volumetric fog with god rays
+python examples/terrain_viewer_interactive.py --dem assets/dem.tif \
+    --pbr --volumetrics --vol-mode height --vol-density 0.02 --vol-light-shafts
+
+# Procedural sky with aerial perspective
+python examples/terrain_viewer_interactive.py --dem assets/dem.tif \
+    --pbr --sky --sky-turbidity 3.0 --sky-aerial --sky-exposure 1.2
+
+# Combined cinematic scene
+python examples/terrain_viewer_interactive.py --dem assets/dem.tif \
+    --pbr --dof --lens-vignette 0.3 --volumetrics --sky --tonemap aces
+```
 ---
 
 ## API Reference

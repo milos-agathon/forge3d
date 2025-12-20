@@ -17,6 +17,22 @@
   - depth: `r32float`.
   - visibility: `r8unorm`.
 
+## EXR Output
+
+HDR AOVs are written as OpenEXR when the native EXR writer is available. The Python
+`save_aovs` helper prefers the Rust writer (`forge3d._forge3d.numpy_to_exr`) and
+falls back to `imageio` if installed. Visibility remains PNG.
+
+Channel naming follows a `prefix.channel` convention:
+
+- beauty: `beauty.R`, `beauty.G`, `beauty.B`, `beauty.A`.
+- albedo/direct/indirect/emission: `prefix.R`, `prefix.G`, `prefix.B`.
+- normal: `normal.X`, `normal.Y`, `normal.Z`.
+- depth: `depth.Z`.
+- scalar AOVs (roughness/metallic/ao/sun_vis/id/mask): `prefix`.
+
+Arrays must be float32 with shape `(H, W)`, `(H, W, 3)`, or `(H, W, 4)`.
+
 ## Python Usage
 
 ```python

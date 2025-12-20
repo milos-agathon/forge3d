@@ -1,283 +1,185 @@
-• Repo Integration Investigation
-                                                                                                                                                                              
-  - Terrain pipeline is driven from Python helpers python/forge3d/terrain_demo.py / python/forge3d/terrain_pbr_pom.py (run/render_terrain_pbr_pom_sequence), which build      
-    configs then call forge3d.TerrainRenderer.render_terrain_pbr_pom.                                                                                                         
-  - Render parameters and validation live in python/forge3d/terrain_params.py (dataclasses for light/IBL/shadows/triplanar/POM/fog/reflection/detail,                         
-    ShadowSettings.validate_for_terrain, AO weight fields).                                                                                                                   
-  - Core renderer is src/terrain/renderer.rs (TerrainScene, TerrainRenderer::render_terrain_pbr_pom, render_internal, compute_coarse_ao_from_heightmap, shadow pass setup).   
-    Internal render target is a single color texture (Rgba8Unorm, optional MSAA, optional blit for render_scale). No depth buffer/G-buffer; world position is reconstructed   
-    from UV/height inside the shader. Shadow maps are separate depth attachments via CsmRenderer.                                                                             
-  - Shader src/shaders/terrain_pbr_pom.wgsl defines TerrainUniforms, TerrainShadingUniforms, OverlayUniforms, bind group 0 entries (0–15), shadow sampling, IBL               
-    (lighting_ibl.wgsl), POM, and AO hook via ao_debug_tex/u_overlay.params3.x multiplying diffuse+IBL. No outputs beyond the final color.                                    
-  - Shadows: src/shadows + src/core/shadow_mapping/types.rs feed CsmRenderer used by terrain; shadow bind group is @group(3) in the terrain pipeline.                         
-  - IBL: src/lighting/ibl_wrapper.rs builds prefiltered environment maps and uniforms; WGSL side uses group(2) eval_ibl/eval_ibl_split.                                       
-  - Screen-space effects infra exists in src/core/screen_space_effects.rs (compute SSAO/GTAO/SSGI/SSR) with raw/blurred AO textures and getters;                              
-    TerrainScene::set_ao_debug_view can bind an external AO view into the terrain shader.                                                                                     
-  - Readback/output: src/lib.rs Frame -> to_numpy/save uses src/renderer/readback.rs (read_texture_tight) and src/util/image_write.rs. Color-space conversion is shader-side  
-    (tonemap + optional sRGB EOTF flag). Tests tests/test_terrain_render_color_space.py and tests/verify_terrain_pbr_pom_shader.py guard current behavior.                    
-                                                                                                                                                                              
-  Subsystem map:                                                                                                                                                              
-                                                                                                                                                                              
-  Subsystem | File path | Key symbols | What it does | Why it matters for AO/sun_vis                                                                                          
-                                                                                                                                                                              
-  - Python entry | python/forge3d/terrain_demo.py, python/forge3d/terrain_pbr_pom.py | run, _build_renderer_config, render_terrain_pbr_pom | Loads DEM/HDR, builds params,    
-    calls native renderer | New flags/presets must thread through here without breaking aliases                                                                               
-  - Params/validation | python/forge3d/terrain_params.py | TerrainRenderParamsConfig, ShadowSettings.validate_for_terrain, AO weight fields | Validates all terrain knobs,    
-    clamps memory budgets | New AO/sun visibility settings and CLI wiring land here                                                                                           
-  - Renderer core | src/terrain/renderer.rs | TerrainScene, render_terrain_pbr_pom, render_internal, compute_coarse_ao_from_heightmap, create_shadow_bind_group | Allocates   
-    textures, encodes shadow pass, main render, blit; owns bind group layouts (0–5) | Compute passes and new textures must be created/bound here; current AO hook uses        
-    binding(12)                                                                                                                                                               
-  - Terrain shader | src/shaders/terrain_pbr_pom.wgsl | TerrainUniforms, OverlayUniforms, calculate_shadow_terrain, eval_ibl usage, DBG_RAW_SSAO | Performs triplanar/POM,    
-    direct sun, IBL; samples ao_debug_tex; modulates direct light via shadows | AO/sun_vis compositing and new bindings must be added here; no depth/G-buffer exists          
-  - Shadow pipeline | src/shadows/*, src/core/shadow_mapping/types.rs, TerrainScene.shadow_depth_pipeline | CsmRenderer, CsmUniforms, depth maps | Builds cascaded shadow maps    consumed by terrain shader | Sun visibility must coexist with or gate this; bind group(3) already occupied                                                                
-  - IBL resources | src/lighting/ibl_wrapper.rs, src/shaders/lighting_ibl.wgsl | IBL, IblGpuResources, WGSL eval_ibl/eval_ibl_split | Prefilters env maps and exposes bind    
-    group(2) | AO must modulate IBL diffuse; rotation/intensity already wired                                                                                                 
-  - Screen-space effects | src/core/screen_space_effects.rs | ScreenSpaceEffectsManager, SSAO pipelines, get_ssao_view | Compute SSAO/GTAO buffers with storage textures |    
-    Potential reuse for AO texture or validation; existing binding(12) can point at these outputs                                                                             
-  - Readback/output | src/lib.rs, src/renderer/readback.rs | Frame::to_numpy/save, read_texture_tight | Copies single-sample color to CPU/PNG | Validation renders will use   
-    this path; color-space handled in shader                                                                                                                                  
-                                                                                                                                                                              
-  Missing supporting buffers: no depth buffer, no world-position/normal render targets; only heightmap (R32F), optional water mask, and shadow maps exist. Any AO/sun         
-  visibility must derive geometry from the heightfield + matrices or add new intermediate textures.                                                                           
-                                                                                                                                                                              
-  Feasibility & Preconditions                                                                                                                                                 
-                                                                                                                                                                              
-  - Heightfield Ray AO:                                                                                                                                                       
-      - Inputs needed: heightmap texture (R32F, non-filtered), spacing/height scale (TerrainUniforms.spacing_h_exag), height min/max and POM height curve                     
-        (TerrainShadingUniforms), camera view/proj, render resolution, optional water mask for excluding water.                                                               
-      - Currently available: all above via existing uniform buffers and textures; no world-position buffer, so AO must raymarch the heightfield.                              
-      - New GPU resources: AO output texture (R8Unorm or R16Float) at internal resolution (or downscaled), storage binding + sampled view/sampler; optional temporal/blur     
-        buffers if denoising is added.                                                                                                                                        
-      - Coordinate space: terrain XY spans spacing_h_exag.xy around (0,0); height uses clamp0 + height_curve; UV is [0,1] with Python-side flipud already applied.            
-      - Memory guard: 4K R8 AO ≈ 8 MB; add blur targets doubles that; stays within 512 MiB budget if reused/re-sized.                                                         
-      - Choice: use heightfield ray-march in DEM texture space (B) because no G-buffer/depth exists and fullscreen triangle makes interpolated world_pos unreliable;          
-        heightfield path aligns with shadow-normalization already in shader.                                                                                                  
-  - Heightfield Ray Sun Visibility / Soft Shadows:                                                                                                                            
-      - Inputs needed: heightmap, spacing/height scale, sun direction/intensity (TerrainUniforms.sun_exposure), camera matrices for view-dependent marching, cascade distances        for consistency with CSM (optional), resolution and step budget, optional jitter seeds for softness.                                                                  
-      - Currently available: sun direction/intensity via uniforms, heightmap and spacing via group(0); no per-pixel depth, so must reconstruct from UV/heightfield.           
-      - New GPU resources: sun visibility texture (R8Unorm/R16Float) at internal resolution (optional lower scale) + sampler; optional multi-sample accumulation buffer for   
-        soft shadows.                                                                                                                                                         
-      - Coordinate space: same DEM UV/world mapping as AO; must match shadow map conventions (normalize_for_shadow uses tex_coord-derived world xy/z).                        
-      - Memory guard: 4K R8 sun_vis ≈ 8 MB; one extra buffer for soft accumulation doubles cost; within budget.                                                               
-      - Choice: heightfield ray-march in DEM space (B) to stay portable and consistent with existing CSM normalization; G-buffer path is unavailable.                         
-                                                                                                                                                                              
-  Plan A — Heightfield Ray AO                                                                                                                                                 
-                                                                                                                                                                              
-  ### A.1 Goal                                                                                                                                                                
-                                                                                                                                                                              
-  - Compute heightfield ray-traced ambient occlusion per pixel to darken ambient/IBL diffuse; opt-in; defaults preserve current output.                                       
-                                                                                                                                                                              
-  ### A.2 Definition of Done (measurable)                                                                                                                                     
-                                                                                                                                                                              
-  - New config fields (Python + Rust) to enable AO, set samples/step length/max distance/resolution scale; default disabled.                                                  
-  - New compute pipeline created once and reused per resolution change; validated by naga/wgsl-analyzer clean compile.                                                        
-  - AO texture generated and bound into render pass; shader applies it only when enabled.                                                                                     
-  - Automated test: render forced-impact scene (steep ridge) with AO on/off; assert measurable delta (e.g., SSIM drop > 0.05 or mean luminance difference in occluded ROI >   
-    5%).                                                                                                                                                                      
-  - Perf measurement: record compute pass GPU time at 1080p (target ≤ 2 ms with default settings) via wgpu timestamps or profiler hook.                                       
-  - Memory check: log AO texture size; assert within budget in test (<=32 MB total for AO resources).                                                                         
-  - Image artifact check: AO debug output path wired to DBG_RAW_SSAO using new texture.                                                                                       
-  - Existing test suite passes unchanged.                                                                                                                                     
-  - Render artifact saved (PNG) for AO-on vs off plus numeric metric stored/logged.                                                                                           
-                                                                                                                                                                              
-  ### A.3 Data flow & resources                                                                                                                                               
-                                                                                                                                                                              
-  - Inputs: heightmap R32F (binding 1), height sampler (2), terrain/shading uniforms (0,5), overlay uniforms (8) for AO weight, optional water mask (11) to zero AO over      
-    water, camera matrices for ray direction, AO params uniform (new).                                                                                                        
-  - Outputs: AO texture (R8Unorm or R16Float) at internal resolution (or scale factor); sampled with linear sampler.                                                          
-  - Bind groups: reuse group(0) binding(12/13) for AO texture/sampler (currently debug); add small AO params uniform (e.g., group(0) binding(16) if needed for params) without    colliding existing indices.                                                                                                                                               
-  - Pass order: compute AO before shadow + main render; AO texture stays bound for render pass.                                                                               
-  - Composite: shader replaces ao_debug_tex sample with computed AO; multiplies IBL diffuse (and optional diffuse edge term) by ao_weight-scaled factor.                      
-                                                                                                                                                                              
-  ### A.4 Algorithm choice (portable)                                                                                                                                         
-                                                                                                                                                                              
-  - Heightfield ray-march: for each pixel UV, march along a small set of horizon directions (e.g., 6–8 directions) with fixed texel step up to max_distance in world units    
-    (converted to UV via spacing). Accumulate max elevation angle to derive occlusion.                                                                                        
-  - Complexity: O(pixels * directions * steps); default directions=6, steps=16 → ~96 samples/pixel.                                                                           
-  - Softening: optional one-pass bilateral blur using normals from height derivatives; default off.                                                                           
-  - Quality knobs: resolution_scale (default 0.5 for perf), directions (6), steps (16), max_distance (e.g., 200 m), blur_enable (false), ao_strength mapped to ao_weight.     
-                                                                                                                                                                              
-  ### A.5 Rust/wgpu integration points                                                                                                                                        
-                                                                                                                                                                              
-  - Add compute pipeline creation and cache in src/terrain/renderer.rs (pipeline cache struct).                                                                               
-  - Add AO params uniform struct and buffer in render_internal.                                                                                                               
-  - Encode compute pass in render_internal before shadow rendering: bind heightmap, uniforms, AO output storage texture.                                                      
-  - Manage AO textures in TerrainScene (reuse, resize on resolution change).                                                                                                  
-  - Bind AO texture into existing bind group (0) via ao_debug_view/coarse_ao_view plumbing; ensure layout matches shader changes.                                             
-                                                                                                                                                                              
-  ### A.6 Python API & presets surface                                                                                                                                        
-                                                                                                                                                                              
-  - Introduce HeightAoSettings dataclass (enabled: bool, resolution_scale: float, directions: int, steps: int, max_distance: float, strength: float, blur: bool) in python/   
-    forge3d/terrain_params.py, default enabled=False.                                                                                                                         
-  - Thread through TerrainRenderParamsConfig and TerrainRenderParams.                                                                                                         
-  - CLI: optional flags --height-ao (bool), --height-ao-strength, --height-ao-resolution-scale, --height-ao-distance, --height-ao-steps, --height-ao-directions, --height-ao- 
-    blur with defaults matching disabled behavior; update preset param_map/override precedence if present.                                                                    
-  - Update stubs (python/forge3d/__init__.pyi) and docs/presets without breaking existing presets.                                                                            
-                                                                                                                                                                              
-  ### A.7 Validation & benchmarking                                                                                                                                           
-                                                                                                                                                                              
-  - Scene: existing assets assets/Gore_Range_Albers_1m.tif at 1080p; camera angled to cast self-occlusion; render AO off vs on.                                               
-  - Outputs: ao_off.png, ao_on.png, ao_heat.png (DBG_RAW_SSAO).                                                                                                               
-  - Metrics: SSIM/PSNR between off/on; ROI mean darkening near concave regions (>5%); AO histogram sanity (values in [0,1]).                                                  
-  - Perf: measure compute dispatch duration (wgpu timestamps or frame timing log) and memory usage log.                                                                       
-  - Failure checks: banding, light leaks (bright AO), temporal noise if blur off, mismatch with water mask.                                                                   
-                                                                                                                                                                              
-  ### A.8 Milestones & deliverables                                                                                                                                           
-                                                                                                                                                                              
-  - M1: Shader/API plumbing — Files: terrain_pbr_pom.wgsl, terrain_params.py, __init__.pyi. Deliverables: new bindings/params default-off, docs draft. Acceptance: naga       
-    compile passes; defaults keep tests green. Risks: bind group layout mismatch; mitigate with feature toggle + pipeline layout update.                                      
-  - M2: Compute pipeline + resource mgmt — Files: terrain/renderer.rs. Deliverables: AO pipeline creation, texture reuse/resizing, params uniform. Acceptance: AO pass runs   
-    without errors at 1080p, memory log <32 MB. Risks: lifetime hazards; mitigate with reuse + resize guards.                                                                 
-  - M3: Shader composite + debug — Files: terrain_pbr_pom.wgsl, renderer.rs. Deliverables: AO sampling replaces debug texture path, debug mode outputs AO. Acceptance: AO     
-    visible in DBG_RAW_SSAO; base render unchanged when disabled. Risks: unintended darkening; mitigate with default weight 0 and clamps.                                     
-  - M4: Tests & metrics — Files: tests/test_terrain_renderer.py (new case) or new test file, scripts/terrain_validation.py update. Deliverables: AO on/off integration test,  
-    metric computation script. Acceptance: test asserts >5% ROI delta and SSIM drop; existing tests pass. Risks: nondeterminism; mitigate by fixed seeds/directions.          
-  - M5: Docs/presets — Files: docs/terrain_pbr_pom_shader_reference.md, docs/examples/terrain_demo_quickstart.rst, presets if any. Deliverables: user-facing description, CLI 
-    help updates. Acceptance: docs build passes, defaults unchanged. Risks: doc drift; mitigate with exact flag names.                                                        
-                                                                                                                                                                              
-  Plan B — Heightfield Ray Sun Visibility / Soft Shadows                                                                                                                      
-                                                                                                                                                                              
-  ### B.1 Goal                                                                                                                                                                
-                                                                                                                                                                              
-  - Compute heightfield ray-traced sun visibility factor to modulate direct-sun lighting (hard or soft); opt-in; defaults preserve current output and existing CSM.           
-                                                                                                                                                                              
-  ### B.2 Definition of Done (measurable)                                                                                                                                     
-                                                                                                                                                                              
-  - New config fields to enable heightfield sun visibility, choose hard/soft mode, sample count, max distance, resolution scale; default disabled.                            
-  - Compute pipeline built and reused; naga/wgsl-analyzer clean.                                                                                                              
-  - Sun visibility texture generated and sampled in shader to scale direct sun term (and optional IBL diffuse) only when enabled.                                             
-  - Automated test: forced-impact scene with sun low angle; compare CSM-only vs CSM+sun_vis (or sun_vis-only if CSM disabled); assert luminance drop in occluded ROI >10% and 
-    SSIM drop >0.08.                                                                                                                                                          
-  - Perf measurement: compute pass timing at 1080p (target ≤ 3 ms default soft settings).                                                                                     
-  - Memory log for sun_vis resources (target <32 MB).                                                                                                                         
-  - Debug visualization path for visibility (grayscale output or debug mode) proves branch executed.                                                                          
-  - Existing tests unaffected when feature off.                                                                                                                               
-                                                                                                                                                                              
-  ### B.3 Data flow & resources                                                                                                                                               
-                                                                                                                                                                              
-  - Inputs: heightmap, height sampler, terrain/shading uniforms (spacing, height exag, clamp), sun direction/intensity (u_terrain.sun_exposure), camera matrices, optional    
-    cascade split info for aligning distance falloff, optional jitter seed.                                                                                                   
-  - Outputs: sun visibility texture (R8Unorm/R16Float) at internal resolution (or scaled); linear sampler.                                                                    
-  - Bind groups: add group(0) binding for sun visibility texture + sampler (e.g., binding(16)/(17)) and small params uniform; ensure pipeline layout updated in renderer.rs.  
-  - Pass order: compute sun_vis after AO (reuse same internal resolution) but before shadow sampling/main render; texture stays bound through render pass.                    
-  - Composite: shader multiplies direct sun lighting by sun_vis (optionally blends with existing shadow_factor); by default, if enabled alongside CSM, combine                
-    multiplicatively to deepen terrain self-shadowing; if CSM disabled, sun_vis replaces shadow_factor.                                                                       
-                                                                                                                                                                              
-  ### B.4 Algorithm choice (portable)                                                                                                                                         
-                                                                                                                                                                              
-  - Heightfield ray-march along sun direction projected into UV plane: step in UV proportional to spacing and sun direction XY; track max horizon elevation to compute        
-    visibility = smoothstep(horizon - sun_elev).                                                                                                                              
-  - Hard shadows: single ray per pixel, visibility 0/1 (with epsilon bias).                                                                                                   
-  - Soft shadows: N jittered rays or PCF-like multi-offset sampling (e.g., 4–8 offsets) averaged; optional penumbra estimation based on height delta.                         
-  - Complexity: O(pixels * samples * steps); default samples=4, steps=24.                                                                                                     
-  - Quality knobs: resolution_scale (default 0.5), samples (4), steps (24), max_distance (e.g., 400 m), bias/offset to reduce self-shadowing, softness toggle.                
-                                                                                                                                                                              
-  ### B.5 Rust/wgpu integration points                                                                                                                                        
-                                                                                                                                                                              
-  - Add sun visibility compute pipeline and resources to TerrainScene cache in src/terrain/renderer.rs.                                                                       
-  - Manage visibility textures with resize on resolution change; optional combined resource manager with AO.                                                                  
-  - Encode compute dispatch before main render; share command encoder; bind outputs to new bind group entries.                                                                
-  - Update pipeline layout creation (create_render_pipeline) to include new bindings in group(0) and set bind group entries when building the main bind group.                
-                                                                                                                                                                              
-  ### B.6 Python API & presets surface                                                                                                                                        
-                                                                                                                                                                              
-  - Add SunVisibilitySettings dataclass (enabled: bool, mode: str {“hard”, “soft”}, resolution_scale: float, samples: int, steps: int, max_distance: float, softness: float,  
-    bias: float) default disabled.                                                                                                                                            
-  - Wire through TerrainRenderParamsConfig/TerrainRenderParams, expose in __init__.pyi.                                                                                       
-  - CLI flags (defaults off): --sun-vis, --sun-vis-mode, --sun-vis-resolution-scale, --sun-vis-samples, --sun-vis-steps, --sun-vis-distance, --sun-vis-softness, --sun-vis-   
-    bias.                                                                                                                                                                     
-  - Presets: none enable by default; add optional preset demonstrating feature without touching existing ones.                                                                
-                                                                                                                                                                              
-  ### B.7 Validation & benchmarking                                                                                                                                           
-                                                                                                                                                                              
-  - Scene: low sun angle over mountainous DEM; render cases: baseline (CSM only), sun_vis on (with/without CSM).                                                              
-  - Outputs: sunvis_off.png, sunvis_on.png, sunvis_debug.png (visibility map).                                                                                                
-  - Metrics: ROI mean luminance drop in self-occluded slopes (>10%), SSIM/PSNR comparisons, histogram of visibility values.                                                   
-  - Perf: log compute pass timing and total frame time delta; report samples/steps used.                                                                                      
-  - Failure modes: light leaks at grazing angles, acne from bias, mismatch with CSM cascade edges, shimmer from jitter; check via debug map and stability across frames (if   
-    temporal enabled later).                                                                                                                                                  
-                                                                                                                                                                              
-  ### B.8 Milestones & deliverables                                                                                                                                           
-                                                                                                                                                                              
-  - M1: API + shader hooks — Files: terrain_params.py, terrain_pbr_pom.wgsl, __init__.pyi. Deliverables: config structs/flags, shader bindings placeholders gated by enabled. 
-    Acceptance: naga compile clean; feature off preserves output. Risks: layout churn; mitigate with default-off + guarded sampling.                                          
-  - M2: Compute pipeline + resources — Files: terrain/renderer.rs. Deliverables: sun_vis textures, pipeline cache, dispatch encoding. Acceptance: visibility map produced     
-    without errors at 1080p; memory log <32 MB. Risks: race with main pass; mitigate via single encoder ordering.                                                             
-  - M3: Shader compositing — Files: terrain_pbr_pom.wgsl, renderer.rs. Deliverables: direct lighting multiplied by sun_vis, debug output for visibility. Acceptance: debug    
-    mode shows expected occlusion; baseline unchanged when disabled. Risks: double-darkening with CSM; mitigate via blend policy and clamps.                                  
-  - M4: Tests/metrics — Files: new integration test + validation script updates. Deliverables: sun_vis on/off render diff with numeric thresholds. Acceptance: test passes    
-    with measurable delta; existing suite green. Risks: nondeterminism from jitter; mitigate with deterministic jitter seeds in tests.                                        
-  - M5: Docs/help — Files: docs and CLI help. Deliverables: user guide for sun_vis flags, interaction with shadows. Acceptance: docs build succeeds; defaults unchanged.      
-    Risks: user confusion vs CSM; mitigate with explicit precedence doc.
+## Strict plan with deliverables & milestones
 
-  What remains / risks
+### 1. Design decisions
 
-  - Need design decisions on blend policy with existing CSM (multiply vs replace) and default resolution scales to hit perf targets.   
-  - Shader bind-group expansion risks touching multiple tests; careful gating and default-off needed.
-  - Temporal stability/denoise strategies are deferred; might be required if soft shadows shimmer.
-  - No automated perf harness yet; will need timing hooks or timestamp queries to meet perf DoD.
+#### 1.1 Global rules
 
-  Remaining checklist
+* Global: keep defaults identical (all new features opt-in); budget all new textures against ≤512 MiB host-visible; avoid cross-backend feature requirements; do not add new tools/scripts unless unavoidable; read AGENTS.md before you start working to get familiar with codebase rules.
 
-  - [ ] Implement heightfield ray AO compute path and bind into terrain pipeline
-  - [ ] Implement heightfield sun visibility compute path and shader compositing
-  - [ ] Add Python config/CLI/docs/tests for both features with defaults off
+#### 1.2 Preset schema discipline
+
+* Preset schema discipline: before adding any new CLI/config keys, enumerate preset keys in examples/terrain_demo.py (_apply_json_preset param_map) and config parsing in python/forge3d/config.py::load_renderer_config and python/forge3d/terrain_demo.py overrides; update argparse + preset param_map + CLI override precedence map together; define boolean precedence (--flag, --no-flag, default, preset).
+
+#### 1.3 Feature-specific design notes
+
+* F1 AOVs + OpenEXR: implement in shader pass (MRT or storage writes) plus output layer (PNG/EXR), only when aovs enabled; AOV set must include albedo/normal/depth/roughness/metallic/AO/sun-vis/mask/ID.
+* F2 DoF: reuse core/dof compute on HDR color + depth; add optional focus-plane tilt for tilt-shift; keep determinism via analytic CoC and fixed kernel.
+* F3 Motion blur: reuse terrain/accumulation.rs for temporal accumulation with shutter interval; deterministic sample sequence tied to seed and sample index.
+* F4 Lens effects: add post-process pass after tonemap (LDR) for distortion/CA/vignette; deterministic math only.
+* F5 Denoising: keep CPU A-trous (no external services) and add optional GPU denoise for AO/sun-vis/volumetrics; deterministic kernels and guidance AOVs.
+* F6 Volumetrics: reuse volumetric.wgsl compute with depth + sun + shadows; allow raymarch/froxels; deterministic jitter sequence.
+* F7 Sky + aerial perspective: reuse sky.wgsl compute; integrate with sun/camera and optional IBL generation; tie fog aerial perspective to sky/inscatter colors.
 
 ---
 
-## Agent Observations (prompt_raytrace.md compliance review)
+### 2. Per-feature implementation spec
 
-### Verification of plan accuracy against codebase
+#### F1 AOVs + OpenEXR
 
-**Bind group layout (group(0)):** Verified bindings 0–15 are occupied in `terrain_pbr_pom.wgsl`:
-- 0: TerrainUniforms, 1–2: height tex/sampler, 3–4: material tex/sampler
-- 5: TerrainShadingUniforms, 6–7: colormap, 8: OverlayUniforms, 9–10: height curve LUT
-- 11: water mask, 12–13: ao_debug tex/sampler, 14–15: detail normal tex/sampler
-- **Bindings 16+ are free** for new AO/sun_vis resources—plan's proposal to use 16/17 is valid.
+* F1 AOVs + OpenEXR Integration point(s): src/terrain/renderer.rs (add TerrainAovTargets, new render path or MRT variant), src/terrain/render_params.rs (add AovSettingsNative), src/shaders/terrain_pbr_pom.wgsl (AOV writes), src/renderer/readback.rs (typed readback), src/util/image_write.rs or new src/util/exr_write.rs, src/path_tracing/io.rs::AovWriter::write_exr, python/forge3d/terrain_params.py (AOV dataclass), python/forge3d/terrain_demo.py and examples/terrain_demo.py (CLI/preset keys), python/forge3d/render.py (wire save_aovs);
+* GPU resources: per-AOV textures (albedo/normal/roughness+metallic in Rgba16Float, depth in R32Float, AO/sun-vis in R32Float, mask/ID in Rgba8Unorm or R32Uint if supported), optional staging buffers;
+* Pass scheduling: write AOVs in main PBR pass (MRT or storage), readback after render/tonemap, no impact when aovs empty;
+* Config surface: TerrainRenderParams.aovs, aov_format (png|exr|raw), aov_dir, aov_channels, CLI --aovs, --aov-dir, --aov-format;
+* Failure modes: EXR writer unavailable (images feature), memory budget exceeded, unsupported format on backend, missing material IDs—error early with clear message.
 
-**Existing AO infrastructure:** `TerrainScene` already has `coarse_ao_texture`/`coarse_ao_view` computed via `compute_coarse_ao_from_heightmap()` (CPU-side horizon sampling). The new GPU compute path should **replace** this with a more sophisticated ray-march, reusing the same binding slot (12) and fallback chain.
+#### F2 Depth of Field
 
-**Screen-space effects:** `ScreenSpaceEffectsManager` in `src/core/screen_space_effects.rs` provides SSAO/GTAO but requires a G-buffer (depth + normals). Terrain pipeline has **no G-buffer**, so this infrastructure cannot be reused directly. The heightfield ray-march approach in Plan A/B is correct.
+* F2 Depth of Field Integration point(s): src/terrain/renderer.rs (instantiate core::dof::DofRenderer), src/terrain/render_params.rs (add DofSettingsNative), src/shaders/dof.wgsl (tilt-shift plane params), python/forge3d/terrain_params.py (DofSettings dataclass), python/forge3d/terrain_demo.py + examples/terrain_demo.py (CLI flags/preset keys);
+* GPU resources: HDR color Rgba16Float, depth view, DOF output Rgba16Float, uniforms buffer;
+* Pass scheduling: after PBR + volumetric, before tonemap/bloom (or explicitly chosen order, documented);
+* Config surface: dof.enabled, dof.f_stop, dof.focus_distance, dof.focal_length, dof.method, dof.quality, dof.tilt_pitch/yaw;
+* Failure modes: DOF enabled without depth, invalid focus distance, unsupported sample count.
 
-**IBL modulation:** `eval_ibl` / `eval_ibl_split` in `lighting_ibl.wgsl` are called from terrain shader. AO currently modulates via `ao_weight` in `OverlayUniforms.params3.x`—plan correctly identifies this hook.
+#### F3 Motion blur
 
-### Completeness against prompt_raytrace.md requirements
+* F3 Motion blur Integration point(s): src/terrain/renderer.rs (temporal loop), src/terrain/accumulation.rs (reuse accumulation + jitter), python/forge3d/terrain_params.py (MotionBlurSettings), src/terrain/render_params.rs (MotionBlurSettingsNative), CLI in python/forge3d/terrain_demo.py/examples/terrain_demo.py;
+* GPU resources: existing accumulation texture (Rgba32Float), per-sample color target;
+* Pass scheduling: N sub-frames across shutter interval, accumulate, resolve at end;
+* Config surface: motion_blur.enabled, samples, shutter_open, shutter_close, camera_path (optional), seed;
+* Failure modes: high sample count exceeds time budget; if object motion blur requested without animated transforms, error (no silent fallback).
 
-| Requirement | Status | Notes |
-|-------------|--------|-------|
-| Step 1: Repo reconnaissance table | ✓ Complete | Subsystem map with file paths, symbols, and integration relevance |
-| Step 2: Feasibility & preconditions | ✓ Complete | Both features analyzed; heightfield ray-march (option B) justified |
-| Plan X.1 Goal | ✓ Complete | Both plans state opt-in with defaults preserving output |
-| Plan X.2 Definition of Done | ✓ Complete | 9 items each; includes tests, metrics, perf, memory checks |
-| Plan X.3 Data flow & resources | ✓ Complete | Inputs/outputs/bindings specified |
-| Plan X.4 Algorithm choice | ✓ Complete | Complexity estimates, quality knobs with defaults |
-| Plan X.5 Rust/wgpu integration | ✓ Complete | Files/functions listed |
-| Plan X.6 Python API | ✓ Complete | Dataclass fields, CLI flags, backward compat strategy |
-| Plan X.7 Validation | ✓ Complete | Scene, outputs, metrics, failure modes |
-| Plan X.8 Milestones | ✓ Complete | 5 milestones each with files/deliverables/acceptance/risks |
+#### F4 Lens/sensor effects
 
-### Refinements recommended
+* F4 Lens/sensor effects Integration point(s): new src/terrain/lens_effects.rs + src/shaders/lens_effects.wgsl, hook in src/terrain/renderer.rs post-tonemap, parse in src/terrain/render_params.rs, add LensEffectsSettings in python/forge3d/terrain_params.py, CLI + preset keys in python/forge3d/terrain_demo.py/examples/terrain_demo.py;
+* GPU resources: LDR color input, one LDR output, uniforms;
+* Pass scheduling: after tonemap and before final PNG readback;
+* Config surface: lens.distortion, lens.chromatic_aberration, lens.vignette_strength, lens.vignette_radius/softness;
+* Failure modes: sampling outside bounds, non-finite params, intermediate texture not allocated.
 
-1. **Binding strategy clarification:** Plan A says reuse binding(12/13) for AO; Plan B proposes new binding(16/17) for sun_vis. This is correct—AO replaces existing debug texture, sun_vis needs new slots.
+#### F5 Optional denoising
 
-2. **Compute shader file location:** Plans should specify new WGSL files will be created:
-   - `src/shaders/heightfield_ao.wgsl` (compute)
-   - `src/shaders/heightfield_sun_vis.wgsl` (compute)
+* F5 Optional denoising Integration point(s): python/forge3d/denoise.py (CPU A-trous), python/forge3d/path_tracing.py (wire GPU AOV guidance when available), add GPU denoise pass in src/terrain/renderer.rs (AO/sun-vis/volumetrics), optional helper in src/core/screen_space_effects.rs or new src/terrain/denoise.rs, config in python/forge3d/terrain_params.py + src/terrain/render_params.rs;
+* GPU resources: ping-pong textures per buffer, guidance textures (normal/depth/albedo);
+* Pass scheduling: denoise AO/sun-vis before shading; denoise volumetric before composite;
+* Config surface: denoise.enabled, denoise.method, denoise.iterations, denoise.sigma_*;
+* Failure modes: denoise enabled without guidance AOVs, CPU/GPU mismatch, performance regressions.
 
-3. **Resolution scale interaction:** Both plans default to `resolution_scale=0.5`. Clarify whether AO and sun_vis share the same scaled resolution or can differ independently.
+#### F6 Volumetrics + light shafts
 
-4. **CSM interaction policy:** Plan B mentions "multiply vs replace" as open question. Recommend: when `sun_vis` enabled alongside CSM, use `final_shadow = min(csm_shadow, sun_vis)` to let heightfield self-shadow override CSM in occluded areas, avoiding double-darkening.
+* F6 Volumetrics + light shafts Integration point(s): share viewer fog creation (src/viewer/init/fog_init.rs) by extracting a core::volumetric module, wire into src/terrain/renderer.rs with new pass using src/shaders/volumetric.wgsl; parse AtmosphereParams.volumetric from python/forge3d/config.py into terrain params;
+* GPU resources: fog_output, fog_history, optional half-res/froxel textures, shadow map + uniforms;
+* Pass scheduling: after depth, before tonemap; composite using existing HDR path;
+* Config surface: existing --volumetric string + structured overrides (mode, density, steps, phase, anisotropy, use_shadows);
+* Failure modes: use_shadows without CSM, memory budget exceeded, unsupported mode -> hard error.
 
-5. **Texture format choice:** Plan suggests R8Unorm or R16Float. Recommend **R8Unorm** for both (8 MB at 4K) unless soft shadows need sub-1% precision—saves memory and bandwidth.
+#### F7 Physically based sky + aerial perspective
 
-6. **Blur strategy:** Plan A mentions optional bilateral blur; recommend deferring blur to a later milestone (M6) to keep initial implementation minimal per guardrails.
+* F7 Physically based sky + aerial perspective Integration point(s): reuse src/shaders/sky.wgsl via new core::sky module (mirroring src/viewer/init/sky_init.rs), integrate sky compute into src/terrain/renderer.rs (background replace, optional IBL source), add sky parameters to terrain params;
+* GPU resources: sky output texture (Rgba16Float), sky uniform buffers, optional low-res cubemap for IBL;
+* Pass scheduling: generate sky before main render, composite where depth is far;
+* Config surface: atmosphere.sky, sky_turbidity, sky_ground_albedo, sky_exposure, sky_sun_intensity;
+* Failure modes: sky enabled with missing sun direction or invalid params; IBL generation unsupported for some backends -> error.
 
-### Implementation order recommendation
+---
 
-Execute **Plan A (AO) first**—it establishes the compute pipeline infrastructure and texture management patterns that Plan B will reuse. Milestones can interleave:
-1. A.M1 + B.M1 (API/shader plumbing for both)
-2. A.M2 (AO compute pipeline)
-3. A.M3 + A.M4 (AO composite + tests)
-4. B.M2 (sun_vis compute pipeline, reusing patterns)
-5. B.M3 + B.M4 (sun_vis composite + tests)
-6. A.M5 + B.M5 (docs)
+### 3. Definition of Done
+
+* Default images unchanged with all new features off; baseline PNG hashes/metrics identical using pinned presets.
+* Terrain AOV export supports albedo/normal/depth/roughness/metallic/AO/sun-vis/mask-ID, with correct sizes and formats.
+* EXR output implemented for HDR AOVs and HDR frames; PNG pipeline unchanged; Frame.save rejects unsupported formats explicitly.
+* DOF enabled on terrain changes output with measurable blur (edge-width or PSNR/SSIM delta); tilt-shift produces directional blur with only tilt changed.
+* Motion blur shows measurable temporal blur with shutter interval >0; A/B test uses identical scene/camera/preset, only shutter changes.
+* Lens effects produce measurable distortion/CA/vignette deltas (edge displacement, channel shift, luminance falloff stats).
+* Denoiser reduces variance for AO/sun-vis/volumetric buffers with numeric metrics (variance/ROI stats); CPU/GPU options documented.
+* Volumetrics show forced-impact delta (sun-only or no-sun scene), density=0 matches baseline within numeric tolerance.
+* Sky model renders deterministically with sun/camera integration; A/B diff vs sky off with numeric stats.
+* Tests added under tests/ for AOV export, EXR writer, DOF, motion blur, lens effects, volumetrics, sky; no tolerance relaxation.
+* Example scripts updated to exercise each feature; outputs include A/B metrics or pixel diffs.
+* Performance measurement recorded using existing runners (e.g., examples/terrain_demo.py timed runs, python/tools/perf_sanity.py for GPU baseline) with target ranges documented.
+* Shader validation clean (wgsl-analyzer/naga), and build logs captured for shader provenance.
+* Canonical verification suite defined and run before concluding: python -m pytest, cargo test, cargo check (or documented exceptions).
+
+---
+
+### 4. Milestones & deliverables (strict)
+
+#### M1: Terrain AOV plumbing
+
+* Scope: F1 core AOV textures for albedo/normal/depth
+* Files: src/terrain/renderer.rs, src/terrain/render_params.rs, src/shaders/terrain_pbr_pom.wgsl, python/forge3d/terrain_params.py, python/forge3d/terrain_demo.py, examples/terrain_demo.py
+* Deliverables: AOV outputs (PNG/raw), tests in tests/, sample renders
+* Acceptance: AOV outputs exist + correct shapes
+* Risks: MRT limits—mitigate by storage textures.
+
+#### M2: EXR output + HDR save
+
+* Scope: F1 EXR writer and HDR frame export
+* Files: src/path_tracing/io.rs, src/util/image_write.rs or new src/util/exr_write.rs, src/lib.rs, python/forge3d/path_tracing.py
+* Deliverables: EXR writer, docs update, tests
+* Acceptance: EXR loads with expected named channels (beauty, depth, normal, albedo, roughness, metallic, ao, sun_vis, id/mask) and correct dimensions.
+* Risks: platform packaging—mitigate with feature-gated exr crate.
+
+#### M3: DoF + tilt-shift
+
+* Scope: F2
+* Files: src/core/dof/mod.rs, src/shaders/dof.wgsl, src/terrain/renderer.rs, src/terrain/render_params.rs, python/forge3d/terrain_params.py, CLI files
+* Deliverables: DoF controls, tests, example
+* Acceptance: numeric blur delta on forced-impact scene
+* Risks: depth mismatch—mitigate with depth visualization test.
+
+#### M4: Motion blur
+
+* Scope: F3 object motion blur is not included; camera shutter accumulation only.
+* Files: src/terrain/renderer.rs, src/terrain/accumulation.rs, src/shaders/accumulation_blend.wgsl, python/forge3d/terrain_params.py, CLI files
+* Deliverables: shutter accumulation, tests, sample renders
+* Acceptance: measurable blur on moving camera
+* Risks: perf—mitigate with sample cap + half-res option.
+
+#### M5: Lens effects + denoise
+
+* Scope: F4 + F5
+* Files: new src/terrain/lens_effects.rs, src/shaders/lens_effects.wgsl, src/terrain/renderer.rs, python/forge3d/terrain_params.py, python/forge3d/denoise.py
+* Deliverables: lens post pass + denoise integration
+* Acceptance: numeric CA/vignette/diff metrics and variance reduction
+* Risks: halo/artifacts—mitigate with clamp + edge-aware filtering.
+
+#### M6: Volumetrics + sky
+
+* Scope: F6 + F7
+* Files: src/shaders/volumetric.wgsl, src/shaders/sky.wgsl, src/terrain/renderer.rs, new shared src/core/volumetric.rs/src/core/sky.rs (or adapted from viewer), python/forge3d/config.py, CLI files
+* Deliverables: offline volumetrics + analytic sky integration
+* Acceptance: forced-impact delta + baseline preservation at density=0
+* Risks: memory budget—mitigate with half-res and opt-in defaults.
+
+---
+
+## Assumptions
+
+* Offline terrain renders go through TerrainRenderer.render_terrain_pbr_pom and Frame.save rather than the interactive viewer; verify by inspecting python/forge3d/terrain_demo.py and src/terrain/renderer.rs.
+* EXR is currently unsupported in Rust output paths and must be implemented for HDR export; verify src/lib.rs::Frame.save and src/path_tracing/io.rs::AovWriter::write_exr.
+* AOV/EXR is implemented for the terrain pipeline first; path tracer parity is explicitly out of scope for this plan.
+---
+
+## What remains / risks
+
+* No tests or renders executed in this pass; integration risk for GPU memory and multi-target outputs remains.
+* Volumetrics/sky reuse from viewer may require shared modules; risk of duplication vs refactor scope.
+* EXR dependency and cross-platform packaging need validation in CI.
+
+---
+
+## Remaining checklist (Next actions)
+
+- [x] Confirm whether to prioritize terrain pipeline only or also path tracer for AOV/EXR parity.  
+  Decision: Terrain pipeline first. Keep naming/channel conventions compatible with future path tracer parity, but do not expand scope now.
+
+- [x] Decide EXR writer approach and expected channel layout.  
+  Decision: Rust-native EXR writer (feature-gated). Single EXR with named channels:
+  beauty (RGB[A]), depth (Z), normal (Nx,Ny,Nz), albedo (RGB), roughness, metallic, ao, sun_vis, id/mask.
+
+- [x] Approve milestone ordering and scope exclusions.  
+  Decision: Keep milestone order. Explicitly exclude object motion blur in this plan (camera shutter accumulation only). Track object blur as future work.
+
+- [x] After implementation, run verification suite and record raw outputs.  
+  Decision: Required gate for each milestone: capture raw logs for `python -m pytest`, `cargo test`, `cargo check` (and `cargo clippy` if in AGENTS.md), plus a deterministic sample render set and metrics.
+

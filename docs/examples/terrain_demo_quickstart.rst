@@ -99,7 +99,7 @@ Render Workflow
 
 #. Wrap the dataclass inside ``TerrainRenderParams(params)`` and dispatch ``TerrainRenderer.render_terrain_pbr_pom``.
 
-#. Save the generated ``Frame`` via ``frame.save(path)`` or convert to NumPy with ``frame.to_numpy()``.
+#. Save the generated ``Frame`` via ``frame.save("out.png")`` for RGBA8 or ``frame.save("out.exr")`` for RGBA16F (HDR, when the images feature is enabled), or convert to NumPy with ``frame.to_numpy()``.
 
 This mirrors ``examples/terrain_demo.py`` and exercises every exported symbol listed above.
 
