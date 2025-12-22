@@ -73,6 +73,10 @@ pub struct ViewerTerrainScene {
     pub(super) post_process: Option<super::post_process::PostProcessPass>,
     // Depth of Field pass
     pub(super) dof_pass: Option<super::dof::DofPass>,
+    // Motion blur accumulator
+    pub(super) motion_blur_pass: Option<super::motion_blur::MotionBlurAccumulator>,
+    // P5: Volumetrics pass
+    pub(super) volumetrics_pass: Option<super::volumetrics::VolumetricsPass>,
     pub(super) surface_format: wgpu::TextureFormat,
 }
 
@@ -206,6 +210,8 @@ impl ViewerTerrainScene {
             fallback_texture_view: None,
             post_process: None,
             dof_pass: None,
+            motion_blur_pass: None,
+            volumetrics_pass: None,
             surface_format: target_format,
         })
     }
@@ -224,6 +230,26 @@ impl ViewerTerrainScene {
     pub fn init_dof_pass(&mut self) {
         if self.dof_pass.is_none() {
             self.dof_pass = Some(super::dof::DofPass::new(
+                self.device.clone(),
+                self.surface_format,
+            ));
+        }
+    }
+    
+    /// Initialize motion blur pass (called lazily when motion blur enabled)
+    pub fn init_motion_blur_pass(&mut self) {
+        if self.motion_blur_pass.is_none() {
+            self.motion_blur_pass = Some(super::motion_blur::MotionBlurAccumulator::new(
+                self.device.clone(),
+                self.surface_format,
+            ));
+        }
+    }
+    
+    /// Initialize volumetrics pass (called lazily when volumetrics enabled)
+    pub fn init_volumetrics_pass(&mut self) {
+        if self.volumetrics_pass.is_none() {
+            self.volumetrics_pass = Some(super::volumetrics::VolumetricsPass::new(
                 self.device.clone(),
                 self.surface_format,
             ));

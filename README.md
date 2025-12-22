@@ -16,7 +16,7 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.2.0 — Golden-image regression testing and GPU memory-budget enforcement, plus a refreshed IBL pipeline.
+Current release: 1.7.0 — Interactive viewer post-processing pipeline with depth of field, motion blur, lens effects (distortion/chromatic aberration), and volumetric fog with god rays.
 
 ## Installation
 

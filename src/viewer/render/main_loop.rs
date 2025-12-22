@@ -1377,74 +1377,44 @@ impl Viewer {
                 }
             }
         }
-
-        // If we didn't composite anything (GI path unavailable), either let an attached
-        // TerrainScene render, or fall back to the purple debug pipeline.
-        // Helper closure to render fallback with optional snapshot texture
-        let render_fallback = |encoder: &mut wgpu::CommandEncoder,
-                               view: &wgpu::TextureView,
-                               pipeline: &wgpu::RenderPipeline,
-                               device: &wgpu::Device,
-                               config: &wgpu::SurfaceConfiguration,
-                               snapshot_request: &Option<String>,
-                               view_config: &crate::viewer::viewer_config::ViewerConfig|
-         -> Option<wgpu::Texture> {
-            // If snapshot requested, create offscreen texture at requested size
-            let snap_tex = if snapshot_request.is_some() {
-                let (snap_w, snap_h) = if let (Some(w), Some(h)) =
-                    (view_config.snapshot_width, view_config.snapshot_height)
-                {
-                    (w, h)
-                } else {
-                    (config.width, config.height)
-                };
-                let tex = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("viewer.fallback.snapshot"),
-                    size: wgpu::Extent3d {
-                        width: snap_w,
-                        height: snap_h,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: config.format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::COPY_SRC,
-                    view_formats: &[],
-                });
-                let snap_view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("viewer.fallback.pass.snapshot"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &snap_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.05,
-                                g: 0.0,
-                                b: 0.15,
-                                a: 1.0,
-                            }),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-                pass.set_pipeline(pipeline);
-                pass.draw(0..3, 0..1);
-                drop(pass);
-                Some(tex)
+    // TerrainScene render, or fall back to the purple debug pipeline.
+    // Helper closure to render fallback with optional snapshot texture
+    let render_fallback = |encoder: &mut wgpu::CommandEncoder,
+                           view: &wgpu::TextureView,
+                           pipeline: &wgpu::RenderPipeline,
+                           device: &wgpu::Device,
+                           config: &wgpu::SurfaceConfiguration,
+                           snapshot_request: &Option<String>,
+                           view_config: &crate::viewer::viewer_config::ViewerConfig|
+     -> Option<wgpu::Texture> {
+        // If snapshot requested, create offscreen texture at requested size
+        let snap_tex = if snapshot_request.is_some() {
+            let (snap_w, snap_h) = if let (Some(w), Some(h)) =
+                (view_config.snapshot_width, view_config.snapshot_height)
+            {
+                (w, h)
             } else {
-                None
+                (config.width, config.height)
             };
-            // Always render to swapchain view too
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewer.fallback.snapshot"),
+                size: wgpu::Extent3d {
+                    width: snap_w,
+                    height: snap_h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let snap_view = tex.create_view(&wgpu::TextureViewDescriptor::default());
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("viewer.fallback.pass"),
+                label: Some("viewer.fallback.pass.snapshot"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
+                    view: &snap_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -1463,8 +1433,36 @@ impl Viewer {
             pass.set_pipeline(pipeline);
             pass.draw(0..3, 0..1);
             drop(pass);
-            snap_tex
+            Some(tex)
+        } else {
+            None
         };
+
+        // Always render to swapchain view too
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("viewer.fallback.pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 0.05,
+                        g: 0.0,
+                        b: 0.15,
+                        a: 1.0,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(pipeline);
+        pass.draw(0..3, 0..1);
+        drop(pass);
+        snap_tex
+    };
 
         // Standalone terrain viewer (works without extension-module)
         let mut terrain_rendered = false;
@@ -1473,7 +1471,7 @@ impl Viewer {
             if let (Some(w), Some(h)) = (self.view_config.snapshot_width, self.view_config.snapshot_height) {
                 Some((w, h))
             } else {
-                None
+                Some((self.config.width, self.config.height))
             }
         } else {
             None
@@ -1481,15 +1479,32 @@ impl Viewer {
 
         if let Some(ref mut tv) = self.terrain_viewer {
             if tv.has_terrain() {
-                // Always render to screen first at window resolution
+                // Render to screen at window resolution
+                // Note: Motion blur is too expensive for real-time rendering (N full renders per frame),
+                // so we only apply it for snapshots. The interactive viewer shows a regular render.
                 terrain_rendered = tv.render(&mut encoder, &view, self.config.width, self.config.height);
 
                 // Then render to offscreen texture at snapshot resolution (if requested)
                 // This must be LAST so the uniform buffer has the correct aspect ratio for the snapshot
                 if let Some((snap_w, snap_h)) = terrain_snap_size {
-                    println!("[terrain] Rendering snapshot at {}x{}", snap_w, snap_h);
-                    if let Some(tex) = tv.render_to_texture(&mut encoder, self.config.format, snap_w, snap_h) {
-                        self.pending_snapshot_tex = Some(tex);
+                    // P4: Use motion blur rendering if enabled
+                    if tv.pbr_config.motion_blur.enabled && tv.pbr_config.motion_blur.samples > 1 {
+                        println!("[terrain] Rendering motion blur snapshot at {}x{} ({} samples)", 
+                            snap_w, snap_h, tv.pbr_config.motion_blur.samples);
+                        // Motion blur handles its own encoder internally
+                        self.queue.submit(std::iter::once(encoder.finish()));
+                        if let Some(tex) = tv.render_with_motion_blur(self.config.format, snap_w, snap_h) {
+                            self.pending_snapshot_tex = Some(tex);
+                        }
+                        // Create a new encoder for any remaining work
+                        encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("viewer.render.post_motion_blur"),
+                        });
+                    } else {
+                        println!("[terrain] Rendering snapshot at {}x{}", snap_w, snap_h);
+                        if let Some(tex) = tv.render_to_texture(&mut encoder, self.config.format, snap_w, snap_h) {
+                            self.pending_snapshot_tex = Some(tex);
+                        }
                     }
                 }
             }

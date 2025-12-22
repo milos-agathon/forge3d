@@ -3,6 +3,32 @@
 
 use super::scene::ViewerTerrainScene;
 
+/// Shader for accumulating frames (additive blend)
+const ACCUMULATE_SHADER: &str = r#"
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+
+@group(0) @binding(0) var input_tex: texture_2d<f32>;
+@group(0) @binding(1) var samp: sampler;
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+    var out: VertexOutput;
+    let x = f32((vertex_index << 1u) & 2u);
+    let y = f32(vertex_index & 2u);
+    out.position = vec4<f32>(x * 2.0 - 1.0, y * 2.0 - 1.0, 0.0, 1.0);
+    out.uv = vec2<f32>(x, 1.0 - y);
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return textureSample(input_tex, samp, in.uv);
+}
+"#;
+
 /// Terrain uniforms for the simple terrain shader
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -48,7 +74,17 @@ impl ViewerTerrainScene {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
-            self.depth_view = Some(tex.create_view(&wgpu::TextureViewDescriptor::default()));
+            // Create depth view with explicit DepthOnly aspect for sampling
+            self.depth_view = Some(tex.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("terrain_viewer.depth_view"),
+                format: Some(wgpu::TextureFormat::Depth32Float),
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                aspect: wgpu::TextureAspect::DepthOnly,
+                base_mip_level: 0,
+                mip_level_count: None,
+                base_array_layer: 0,
+                array_layer_count: None,
+            }));
             self.depth_texture = Some(tex);
             self.depth_size = (width, height);
         }
@@ -74,12 +110,20 @@ impl ViewerTerrainScene {
         // Check if DoF is enabled
         let needs_dof = self.pbr_config.dof.enabled;
         
-        // Check if post-process effects need a separate pass (distortion or CA)
+        // Check if post-process effects need a separate pass (distortion, CA, or vignette)
         let needs_post_process = self.pbr_config.lens_effects.enabled && 
             (self.pbr_config.lens_effects.distortion.abs() > 0.001 || 
-             self.pbr_config.lens_effects.chromatic_aberration > 0.001);
+             self.pbr_config.lens_effects.chromatic_aberration > 0.001 ||
+             self.pbr_config.lens_effects.vignette_strength > 0.001);
         
-        // Initialize passes upfront to avoid borrow conflicts
+        // P5: Volumetrics pass
+        let needs_volumetrics = self.pbr_config.volumetrics.enabled && 
+            self.pbr_config.volumetrics.density > 0.0001;
+        
+        // Initialize volumetrics pass if needed
+        if needs_volumetrics && self.volumetrics_pass.is_none() {
+            self.init_volumetrics_pass();
+        }
         if needs_dof && self.dof_pass.is_none() {
             self.init_dof_pass();
         }
@@ -89,10 +133,10 @@ impl ViewerTerrainScene {
             }
         }
         
-        if needs_post_process && self.post_process.is_none() {
+        if (needs_post_process || needs_volumetrics) && self.post_process.is_none() {
             self.init_post_process();
         }
-        if needs_post_process {
+        if needs_post_process || needs_volumetrics {
             if let Some(ref mut pp) = self.post_process {
                 let _ = pp.get_intermediate_view(width, height, self.surface_format);
             }
@@ -272,12 +316,14 @@ impl ViewerTerrainScene {
         // Re-borrow terrain after mutable operations
         // Get render target after mutable borrows complete
         // Priority: DoF needs its own input -> post-process intermediate -> final view
+        // P5: Volumetrics will be applied as a post-process step after main render
         let render_target: &wgpu::TextureView = if needs_dof {
             // When DoF enabled, render to DoF input texture first
             self.dof_pass.as_ref()
                 .and_then(|dof| dof.input_view.as_ref())
                 .unwrap_or(view)
-        } else if needs_post_process {
+        } else if needs_post_process || needs_volumetrics {
+            // Need intermediate for post-process or volumetrics
             self.post_process.as_ref()
                 .and_then(|pp| pp.intermediate_view.as_ref())
                 .unwrap_or(view)
@@ -338,6 +384,54 @@ impl ViewerTerrainScene {
             pass.set_vertex_buffer(0, terrain.vertex_buffer.slice(..));
             pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..terrain.index_count, 0, 0..1);
+        }
+        
+        // P5: Apply volumetrics pass if enabled (after main render, before DoF)
+        if needs_volumetrics {
+            if let Some(ref vol_pass) = self.volumetrics_pass {
+                let depth_view = self.depth_view.as_ref().unwrap();
+                let color_input = match self.post_process.as_ref().and_then(|pp| pp.intermediate_view.as_ref()) {
+                    Some(v) => v,
+                    None => {
+                        eprintln!("[volumetrics] ERROR: intermediate_view is None, skipping volumetrics pass");
+                        return false;
+                    }
+                };
+                
+                // Determine volumetrics output target:
+                // - If DoF enabled: output to DoF input texture
+                // - If lens effects enabled (but no DoF): output to final view (lens will read from intermediate)
+                // - Otherwise: output to final view
+                let vol_output = if needs_dof {
+                    // Output to DoF input
+                    self.dof_pass.as_ref()
+                        .and_then(|dof| dof.input_view.as_ref())
+                        .unwrap_or(view)
+                } else {
+                    // Output directly to final view
+                    view
+                };
+                
+                // Calculate inverse view-projection matrix
+                let inv_view_proj = (proj * view_mat).inverse();
+                
+                vol_pass.apply(
+                    encoder,
+                    &self.queue,
+                    color_input,
+                    depth_view,
+                    vol_output,
+                    width,
+                    height,
+                    inv_view_proj.to_cols_array_2d(),
+                    [eye.x, eye.y, eye.z],
+                    1.0,  // near
+                    cam_radius * 10.0,  // far
+                    [sun_dir.x, sun_dir.y, sun_dir.z],
+                    terrain.sun_intensity,
+                    &self.pbr_config.volumetrics,
+                );
+            }
         }
         
         // Apply DoF pass if enabled (before other post-process effects)
@@ -652,6 +746,9 @@ impl ViewerTerrainScene {
             pass.draw_indexed(0..terrain.index_count, 0, 0..1);
         }
 
+        let mut out_tex = color_tex;
+        let mut out_view = color_view;
+
         // Apply DoF if enabled
         let needs_dof = self.pbr_config.dof.enabled;
         if needs_dof {
@@ -677,7 +774,9 @@ impl ViewerTerrainScene {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: target_format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
                     view_formats: &[],
                 });
                 let dof_output_view = dof_output_tex.create_view(&wgpu::TextureViewDescriptor::default());
@@ -698,7 +797,7 @@ impl ViewerTerrainScene {
                 dof.apply(
                     encoder,
                     &self.queue,
-                    &color_view,
+                    &out_view,
                     &depth_view,
                     &dof_output_view,
                     width,
@@ -709,11 +808,434 @@ impl ViewerTerrainScene {
                     cam_radius * 10.0,
                 );
                 
-                return Some(dof_output_tex);
+                out_tex = dof_output_tex;
+                out_view = dof_output_view;
             }
         }
 
-        Some(color_tex)
+        // Apply lens effects post-process in snapshot path to match on-screen output
+        let needs_post_process = self.pbr_config.lens_effects.enabled
+            && (self.pbr_config.lens_effects.distortion.abs() > 0.001
+                || self.pbr_config.lens_effects.chromatic_aberration > 0.001
+                || self.pbr_config.lens_effects.vignette_strength > 0.001);
+        if needs_post_process {
+            if self.post_process.is_none() {
+                self.init_post_process();
+            }
+
+            if let Some(ref mut pp) = self.post_process {
+                let lens = &self.pbr_config.lens_effects;
+                let lens_output_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("terrain_viewer.snapshot_lens_output"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: target_format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let lens_output_view =
+                    lens_output_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+                pp.apply_from_input(
+                    encoder,
+                    &self.queue,
+                    &out_view,
+                    &lens_output_view,
+                    width,
+                    height,
+                    lens.distortion,
+                    lens.chromatic_aberration,
+                    lens.vignette_strength,
+                    lens.vignette_radius,
+                    lens.vignette_softness,
+                );
+                return Some(lens_output_tex);
+            }
+        }
+
+        Some(out_tex)
+    }
+
+    /// Render terrain with motion blur via temporal accumulation.
+    /// Returns the final resolved texture if successful.
+    pub fn render_with_motion_blur(
+        &mut self,
+        target_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> Option<wgpu::Texture> {
+        if self.terrain.is_none() {
+            return None;
+        }
+
+        let config = self.pbr_config.motion_blur.clone();
+        if !config.enabled || config.samples <= 1 {
+            // No motion blur needed, fall back to regular render
+            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("terrain_viewer.motion_blur_fallback"),
+            });
+            let result = self.render_to_texture(&mut encoder, target_format, width, height);
+            self.queue.submit(std::iter::once(encoder.finish()));
+            return result;
+        }
+
+        // Initialize motion blur pass if needed
+        if self.motion_blur_pass.is_none() {
+            self.init_motion_blur_pass();
+        }
+
+        // Store original camera params
+        let terrain = self.terrain.as_ref().unwrap();
+        let base_phi = terrain.cam_phi_deg;
+        let base_theta = terrain.cam_theta_deg;
+        let base_radius = terrain.cam_radius;
+        let _ = terrain;
+
+        // Create accumulation texture (Rgba32Float for HDR)
+        let accum_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain_viewer.motion_blur_accum"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let accum_view = accum_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Clear accumulation buffer
+        {
+            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("terrain_viewer.motion_blur_clear"),
+            });
+            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terrain_viewer.motion_blur_clear_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &accum_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            self.queue.submit(std::iter::once(encoder.finish()));
+        }
+
+        // Render N sub-frames with interpolated camera
+        let orig_distortion = self.pbr_config.lens_effects.distortion;
+        let orig_chromatic_aberration = self.pbr_config.lens_effects.chromatic_aberration;
+        self.pbr_config.lens_effects.distortion = 0.0;
+        self.pbr_config.lens_effects.chromatic_aberration = 0.0;
+
+        let samples = config.samples.max(1);
+        let shutter_range = config.shutter_close - config.shutter_open;
+
+        for i in 0..samples {
+            // Calculate interpolation factor: t = shutter_open + (shutter_close - shutter_open) * (i + 0.5) / samples
+            let sample_t = (i as f32 + 0.5) / samples as f32;
+            let t = config.shutter_open + shutter_range * sample_t;
+
+            // Interpolate camera
+            let phi = base_phi + config.cam_phi_delta * t;
+            let theta = base_theta + config.cam_theta_delta * t;
+            let radius = base_radius + config.cam_radius_delta * t;
+
+            // Temporarily set camera params
+            if let Some(ref mut terrain) = self.terrain {
+                terrain.cam_phi_deg = phi;
+                terrain.cam_theta_deg = theta;
+                terrain.cam_radius = radius;
+            }
+
+            // Render frame to temporary texture
+            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("terrain_viewer.motion_blur_sample"),
+            });
+            
+            let frame_tex = self.render_to_texture(&mut encoder, target_format, width, height);
+            self.queue.submit(std::iter::once(encoder.finish()));
+
+            // Add to accumulation (additive blend)
+            if let Some(ref frame) = frame_tex {
+                let frame_view = frame.create_view(&wgpu::TextureViewDescriptor::default());
+                self.accumulate_frame(&frame_view, &accum_view, width, height);
+            }
+        }
+
+        self.pbr_config.lens_effects.distortion = orig_distortion;
+        self.pbr_config.lens_effects.chromatic_aberration = orig_chromatic_aberration;
+
+        // Restore original camera params
+        if let Some(ref mut terrain) = self.terrain {
+            terrain.cam_phi_deg = base_phi;
+            terrain.cam_theta_deg = base_theta;
+            terrain.cam_radius = base_radius;
+        }
+
+        // Resolve: create final output and divide by sample count
+        let output_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain_viewer.motion_blur_output"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: target_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let output_view = output_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Use motion blur pass to resolve
+        let needs_post_process = self.pbr_config.lens_effects.enabled
+            && (self.pbr_config.lens_effects.distortion.abs() > 0.001
+                || self.pbr_config.lens_effects.chromatic_aberration > 0.001
+                || self.pbr_config.lens_effects.vignette_strength > 0.001);
+
+        let mut final_tex = output_tex;
+        if let Some(ref motion_blur) = self.motion_blur_pass {
+            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("terrain_viewer.motion_blur_resolve"),
+            });
+            motion_blur.resolve(
+                &mut encoder,
+                &self.queue,
+                &accum_view,
+                &output_view,
+                width,
+                height,
+                samples,
+            );
+
+            if needs_post_process {
+                if self.post_process.is_none() {
+                    self.init_post_process();
+                }
+                if let Some(ref mut pp) = self.post_process {
+                    let lens = &self.pbr_config.lens_effects;
+                    let lens_output_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("terrain_viewer.motion_blur_lens_output"),
+                        size: wgpu::Extent3d {
+                            width,
+                            height,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: target_format,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                        view_formats: &[],
+                    });
+                    let lens_output_view = lens_output_tex
+                        .create_view(&wgpu::TextureViewDescriptor::default());
+
+                    pp.apply_from_input(
+                        &mut encoder,
+                        &self.queue,
+                        &output_view,
+                        &lens_output_view,
+                        width,
+                        height,
+                        lens.distortion,
+                        lens.chromatic_aberration,
+                        lens.vignette_strength,
+                        lens.vignette_radius,
+                        lens.vignette_softness,
+                    );
+                    final_tex = lens_output_tex;
+                }
+            }
+
+            self.queue.submit(std::iter::once(encoder.finish()));
+        }
+
+        println!("[terrain] Motion blur: {} samples rendered", samples);
+        Some(final_tex)
+    }
+
+    /// Accumulate a frame into the accumulation buffer (additive blend)
+    fn accumulate_frame(
+        &self,
+        frame_view: &wgpu::TextureView,
+        accum_view: &wgpu::TextureView,
+        _width: u32,
+        _height: u32,
+    ) {
+        // Create a simple additive blit pipeline if needed
+        // For now, use a compute or render pass with additive blending
+        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("motion_blur.accumulate_shader"),
+            source: wgpu::ShaderSource::Wgsl(ACCUMULATE_SHADER.into()),
+        });
+
+        let bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("motion_blur.accumulate_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("motion_blur.accumulate_pipeline_layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("motion_blur.accumulate_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("motion_blur.accumulate_sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("motion_blur.accumulate_bind_group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(frame_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("motion_blur.accumulate"),
+        });
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("motion_blur.accumulate_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: accum_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    /// Blit an arbitrary texture view to a target view using the existing post-process pipeline with neutral parameters.
+    pub fn blit_texture_to_view(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        input_view: &wgpu::TextureView,
+        output_view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) {
+        if self.post_process.is_none() {
+            self.post_process = Some(super::post_process::PostProcessPass::new(
+                self.device.clone(),
+                format,
+            ));
+        }
+        if let Some(ref mut pp) = self.post_process {
+            pp.apply_from_input(
+                encoder,
+                &self.queue,
+                input_view,
+                output_view,
+                width,
+                height,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            );
+        }
     }
 
     /// Prepare PBR bind group with current uniforms (called before render pass)

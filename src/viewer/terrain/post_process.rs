@@ -176,6 +176,68 @@ impl PostProcessPass {
         self.intermediate_view.as_ref().unwrap()
     }
 
+    pub fn apply_from_input(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
+        input_view: &wgpu::TextureView,
+        output_view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        distortion: f32,
+        chromatic_aberration: f32,
+        vignette_strength: f32,
+        vignette_radius: f32,
+        vignette_softness: f32,
+    ) {
+        let uniforms = PostProcessUniforms {
+            screen_dims: [width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32],
+            lens_params: [distortion, chromatic_aberration, vignette_strength, vignette_radius],
+            lens_params2: [vignette_softness, 0.0, 0.0, 0.0],
+        };
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
+
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("post_process.bind_group"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(input_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("post_process.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: output_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+
     /// Apply post-process effects and render to final target
     pub fn apply(
         &mut self,

@@ -1054,9 +1054,23 @@ impl Viewer {
                         }
                     }
                 }
+                // P4: Apply motion blur config
                 if let Some(ref cfg) = motion_blur {
-                    if cfg.enabled {
-                        eprintln!("[terrain] Motion blur requested but render pass not implemented (config received: {} samples)", cfg.samples);
+                    if let Some(ref mut tv) = self.terrain_viewer {
+                        tv.pbr_config.apply_motion_blur(
+                            cfg.enabled,
+                            cfg.samples,
+                            cfg.shutter_open,
+                            cfg.shutter_close,
+                            cfg.cam_phi_delta,
+                            cfg.cam_theta_delta,
+                            cfg.cam_radius_delta,
+                        );
+                        if cfg.enabled {
+                            println!("[terrain] Motion blur enabled: samples={} shutter={:.2}-{:.2} cam_delta=({:.1}, {:.1}, {:.1})", 
+                                cfg.samples, cfg.shutter_open, cfg.shutter_close,
+                                cfg.cam_phi_delta, cfg.cam_theta_delta, cfg.cam_radius_delta);
+                        }
                     }
                 }
                 if let Some(ref cfg) = lens_effects {
@@ -1080,9 +1094,23 @@ impl Viewer {
                         eprintln!("[terrain] Denoise requested but render pass not implemented (config received: method={})", cfg.method);
                     }
                 }
+                // P5: Volumetrics config
                 if let Some(ref cfg) = volumetrics {
-                    if cfg.enabled {
-                        eprintln!("[terrain] Volumetrics requested but render pass not implemented (config received: mode={})", cfg.mode);
+                    if let Some(ref mut tv) = self.terrain_viewer {
+                        tv.pbr_config.apply_volumetrics(
+                            cfg.enabled,
+                            &cfg.mode,
+                            cfg.density,
+                            cfg.scattering,
+                            cfg.absorption,
+                            cfg.light_shafts,
+                            cfg.shaft_intensity,
+                            cfg.half_res,
+                        );
+                        if cfg.enabled {
+                            println!("[terrain] Volumetrics enabled: mode={} density={:.4} scattering={:.2} light_shafts={}", 
+                                cfg.mode, cfg.density, cfg.scattering, cfg.light_shafts);
+                        }
                     }
                 }
                 

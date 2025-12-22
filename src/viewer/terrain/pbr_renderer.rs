@@ -40,6 +40,10 @@ pub struct ViewerTerrainPbrConfig {
     pub lens_effects: LensEffectsConfig,
     /// M3: Depth of Field settings
     pub dof: DofConfig,
+    /// P4: Motion blur settings
+    pub motion_blur: MotionBlurConfig,
+    /// P5: Volumetrics settings
+    pub volumetrics: VolumetricsConfig,
 }
 
 /// Internal heightfield AO configuration
@@ -204,6 +208,64 @@ impl Default for DofConfig {
     }
 }
 
+/// P4: Internal motion blur configuration
+#[derive(Debug, Clone)]
+pub struct MotionBlurConfig {
+    pub enabled: bool,
+    pub samples: u32,
+    pub shutter_open: f32,
+    pub shutter_close: f32,
+    pub cam_phi_delta: f32,
+    pub cam_theta_delta: f32,
+    pub cam_radius_delta: f32,
+}
+
+impl Default for MotionBlurConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            samples: 16,
+            shutter_open: 0.0,
+            shutter_close: 0.5,  // 180° shutter angle
+            cam_phi_delta: 0.0,
+            cam_theta_delta: 0.0,
+            cam_radius_delta: 0.0,
+        }
+    }
+}
+
+/// P5: Internal volumetrics configuration
+#[derive(Debug, Clone)]
+pub struct VolumetricsConfig {
+    pub enabled: bool,
+    pub mode: String,
+    pub density: f32,
+    pub scattering: f32,
+    pub absorption: f32,
+    pub height_falloff: f32,
+    pub light_shafts: bool,
+    pub shaft_intensity: f32,
+    pub steps: u32,
+    pub half_res: bool,
+}
+
+impl Default for VolumetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: "height".to_string(),
+            density: 0.01,
+            scattering: 0.5,
+            absorption: 0.1,
+            height_falloff: 0.01,
+            light_shafts: false,
+            shaft_intensity: 1.0,
+            steps: 32,
+            half_res: false,
+        }
+    }
+}
+
 impl Default for TonemapConfig {
     fn default() -> Self {
         Self {
@@ -234,6 +296,8 @@ impl Default for ViewerTerrainPbrConfig {
             tonemap: TonemapConfig::default(),
             lens_effects: LensEffectsConfig::default(),
             dof: DofConfig::default(),
+            motion_blur: MotionBlurConfig::default(),
+            volumetrics: VolumetricsConfig::default(),
         }
     }
 }
@@ -359,6 +423,48 @@ impl ViewerTerrainPbrConfig {
             "high" => 16,
             _ => 8,
         };
+    }
+    
+    /// Apply motion blur config from IPC
+    pub fn apply_motion_blur(
+        &mut self,
+        enabled: bool,
+        samples: u32,
+        shutter_open: f32,
+        shutter_close: f32,
+        cam_phi_delta: f32,
+        cam_theta_delta: f32,
+        cam_radius_delta: f32,
+    ) {
+        self.motion_blur.enabled = enabled;
+        self.motion_blur.samples = samples.clamp(1, 64);
+        self.motion_blur.shutter_open = shutter_open.clamp(0.0, 1.0);
+        self.motion_blur.shutter_close = shutter_close.clamp(0.0, 1.0);
+        self.motion_blur.cam_phi_delta = cam_phi_delta;
+        self.motion_blur.cam_theta_delta = cam_theta_delta;
+        self.motion_blur.cam_radius_delta = cam_radius_delta;
+    }
+
+    /// Apply volumetrics config from IPC
+    pub fn apply_volumetrics(
+        &mut self,
+        enabled: bool,
+        mode: &str,
+        density: f32,
+        scattering: f32,
+        absorption: f32,
+        light_shafts: bool,
+        shaft_intensity: f32,
+        half_res: bool,
+    ) {
+        self.volumetrics.enabled = enabled;
+        self.volumetrics.mode = mode.to_string();
+        self.volumetrics.density = density.clamp(0.0, 0.5);
+        self.volumetrics.scattering = scattering.clamp(0.0, 1.0);
+        self.volumetrics.absorption = absorption.clamp(0.0, 1.0);
+        self.volumetrics.light_shafts = light_shafts;
+        self.volumetrics.shaft_intensity = shaft_intensity.clamp(0.0, 10.0);
+        self.volumetrics.half_res = half_res;
     }
 
     /// Format config as display string

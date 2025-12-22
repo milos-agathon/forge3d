@@ -8,6 +8,72 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ### Added
 
+## [1.7.0] - Interactive Viewer Post-Processing Pipeline
+
+### Added
+- **P5 — Volumetric Fog + Light Shafts**
+  - Height-based fog with exponential density falloff and configurable absorption/scattering
+  - God rays (volumetric shadows) via shadow map sampling during ray march
+  - Henyey-Greenstein phase function for realistic single-scattering
+  - Half-resolution rendering option with bilateral depth-aware upsampling
+  - CLI: `--volumetrics --vol-mode height --vol-density 0.02 --vol-light-shafts --vol-shaft-intensity 2.0`
+
+- **P4 — Motion Blur (Temporal Accumulation)**
+  - Camera motion blur via multi-frame temporal accumulation across shutter interval
+  - Configurable sample count (8-32), shutter angle, and camera delta parameters
+  - Accumulation buffer (Rgba32Float) with final resolve pass
+  - CLI: `--motion-blur --mb-samples 16 --mb-shutter-angle 180 --mb-cam-phi-delta 5`
+
+- **P3 — Depth of Field (Separable Blur)**
+  - Circle of Confusion (CoC) calculation with configurable f-stop, focus distance, focal length
+  - Two-pass separable Gaussian blur weighted by CoC
+  - Tilt-shift support via tilted focal plane (pitch/yaw parameters)
+  - Quality presets (low=4, medium=8, high=16 samples)
+  - CLI: `--dof --dof-f-stop 2.8 --dof-focus-distance 300 --dof-quality high`
+
+- **P2 — Barrel Distortion + Chromatic Aberration**
+  - Brown-Conrady barrel/pincushion distortion model
+  - Radial RGB split for chromatic aberration effect
+  - Edge clamping to prevent sampling outside texture bounds
+  - CLI: `--lens-effects --lens-distortion 0.15 --lens-ca 0.03 --lens-vignette 0.3`
+
+- **P1 — Full-Screen Post-Process Infrastructure**
+  - Reusable post-process pass with ping-pong textures for UV-remapping effects
+  - Full-screen triangle vertex shader with screen-space uniforms
+  - Integration point in ViewerTerrainScene::render() after main pass
+  - Bit-exact passthrough when all effects disabled
+
+### Documentation
+- Extended `docs/pbm_pom_viewer.md` with comprehensive P1-P5 post-processing examples
+- Added combined scene examples demonstrating full post-processing stack
+
+## [1.6.0] - P4 Motion Blur
+
+### Added
+- Temporal accumulation motion blur for camera movement
+- Multi-frame render loop with camera interpolation across shutter interval
+- Configurable shutter angle and sample count
+
+## [1.5.0] - P3 Depth of Field
+
+### Added
+- Separable blur DoF with Circle of Confusion calculation
+- Tilt-shift focal plane support for miniature effects
+- Quality presets for blur kernel radius
+
+## [1.4.0] - P2 Lens Effects
+
+### Added
+- Barrel distortion and chromatic aberration post-process effects
+- Vignette integration with lens effects pass
+
+## [1.3.0] - P1 Post-Process Infrastructure
+
+### Added
+- Full-screen post-process pass infrastructure
+- Ping-pong texture management for multi-pass effects
+- Screen-space uniform buffer for lens parameters
+
 ## [1.2.0] - QA, Memory Budget Enforcement, and IBL Refresh
 
 - **P4 - IBL pipeline refresh**
