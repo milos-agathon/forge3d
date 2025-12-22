@@ -69,6 +69,11 @@ pub struct ViewerTerrainScene {
     // Fallback 1x1 white texture for when AO/sun_vis are disabled
     pub(super) fallback_texture: Option<wgpu::Texture>,
     pub(super) fallback_texture_view: Option<wgpu::TextureView>,
+    // Post-process pass for lens effects (distortion, CA, vignette)
+    pub(super) post_process: Option<super::post_process::PostProcessPass>,
+    // Depth of Field pass
+    pub(super) dof_pass: Option<super::dof::DofPass>,
+    pub(super) surface_format: wgpu::TextureFormat,
 }
 
 impl ViewerTerrainScene {
@@ -199,7 +204,30 @@ impl ViewerTerrainScene {
             sampler_nearest: None,
             fallback_texture: None,
             fallback_texture_view: None,
+            post_process: None,
+            dof_pass: None,
+            surface_format: target_format,
         })
+    }
+    
+    /// Initialize post-process pass (called lazily when lens effects enabled)
+    pub fn init_post_process(&mut self) {
+        if self.post_process.is_none() {
+            self.post_process = Some(super::post_process::PostProcessPass::new(
+                self.device.clone(),
+                self.surface_format,
+            ));
+        }
+    }
+    
+    /// Initialize DoF pass (called lazily when DoF enabled)
+    pub fn init_dof_pass(&mut self) {
+        if self.dof_pass.is_none() {
+            self.dof_pass = Some(super::dof::DofPass::new(
+                self.device.clone(),
+                self.surface_format,
+            ));
+        }
     }
 
     /// Initialize PBR pipeline (called lazily when PBR mode is enabled)

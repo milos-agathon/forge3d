@@ -27,9 +27,10 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 def find_viewer_binary() -> Path:
     """Find the interactive_viewer binary."""
+    ext = ".exe" if os.name == "nt" else ""
     candidates = [
-        PROJECT_ROOT / "target" / "release" / "interactive_viewer",
-        PROJECT_ROOT / "target" / "debug" / "interactive_viewer",
+        PROJECT_ROOT / "target" / "release" / f"interactive_viewer{ext}",
+        PROJECT_ROOT / "target" / "debug" / f"interactive_viewer{ext}",
     ]
     for c in candidates:
         if c.exists():
@@ -285,6 +286,41 @@ class TestTerrainViewerPbr:
             
             if exp1_hash == exp2_hash:
                 pytest.xfail("Exposure change didn't affect output - config may not be wired")
+
+    def test_dof_enabled_does_not_crash(self, viewer_context):
+        """Regression test: enabling DoF via IPC should not crash viewer."""
+        sock = viewer_context["sock"]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snap_path = Path(tmpdir) / "dof.png"
+
+            resp = send_ipc(sock, {
+                "cmd": "set_terrain_pbr",
+                "enabled": True,
+                "exposure": 1.0,
+                "dof": {
+                    "enabled": True,
+                    "f_stop": 2.8,
+                    "focus_distance": 500.0,
+                    "focal_length": 50.0,
+                    "quality": "medium",
+                },
+            })
+            assert resp.get("ok"), f"DoF enable failed: {resp.get('error')}"
+
+            time.sleep(0.5)
+
+            resp = send_ipc(sock, {
+                "cmd": "snapshot",
+                "path": str(snap_path),
+                "width": 640,
+                "height": 480,
+            })
+            time.sleep(0.5)
+
+            assert snap_path.exists(), "DoF snapshot not created (viewer crash?)"
+            assert snap_path.stat().st_size > 1000, "DoF snapshot too small"
+            print(f"[test] DoF snapshot: {snap_path.stat().st_size} bytes")
 
     def test_pbr_can_be_disabled(self, viewer_context):
         """Test that PBR mode can be disabled to return to legacy."""

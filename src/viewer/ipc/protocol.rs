@@ -140,6 +140,24 @@ pub enum IpcRequest {
         /// M6: Tonemap settings
         #[serde(default)]
         tonemap: Option<IpcTonemapConfig>,
+        /// M3: Depth of Field settings
+        #[serde(default)]
+        dof: Option<IpcDofConfig>,
+        /// M4: Motion blur settings
+        #[serde(default)]
+        motion_blur: Option<IpcMotionBlurConfig>,
+        /// M5: Lens effects settings
+        #[serde(default)]
+        lens_effects: Option<IpcLensEffectsConfig>,
+        /// M5: Denoise settings
+        #[serde(default)]
+        denoise: Option<IpcDenoiseConfig>,
+        /// M6: Volumetrics settings
+        #[serde(default)]
+        volumetrics: Option<IpcVolumetricsConfig>,
+        /// M6: Sky settings
+        #[serde(default)]
+        sky: Option<IpcSkyConfig>,
     },
 }
 
@@ -230,6 +248,112 @@ pub struct IpcTonemapConfig {
     pub temperature: Option<f32>,
     #[serde(default)]
     pub tint: Option<f32>,
+}
+
+/// M3: Depth of Field configuration (IPC)
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcDofConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub f_stop: Option<f32>,
+    #[serde(default)]
+    pub focus_distance: Option<f32>,
+    #[serde(default)]
+    pub focal_length: Option<f32>,
+    #[serde(default)]
+    pub tilt_pitch: Option<f32>,
+    #[serde(default)]
+    pub tilt_yaw: Option<f32>,
+    #[serde(default)]
+    pub quality: Option<String>,
+}
+
+/// M4: Motion blur configuration (IPC)
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcMotionBlurConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub samples: Option<u32>,
+    #[serde(default)]
+    pub shutter_open: Option<f32>,
+    #[serde(default)]
+    pub shutter_close: Option<f32>,
+    #[serde(default)]
+    pub cam_phi_delta: Option<f32>,
+    #[serde(default)]
+    pub cam_theta_delta: Option<f32>,
+    #[serde(default)]
+    pub cam_radius_delta: Option<f32>,
+}
+
+/// M5: Lens effects configuration (IPC)
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcLensEffectsConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub distortion: Option<f32>,
+    #[serde(default)]
+    pub chromatic_aberration: Option<f32>,
+    #[serde(default)]
+    pub vignette_strength: Option<f32>,
+    #[serde(default)]
+    pub vignette_radius: Option<f32>,
+    #[serde(default)]
+    pub vignette_softness: Option<f32>,
+}
+
+/// M5: Denoise configuration (IPC)
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcDenoiseConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub method: Option<String>,
+    #[serde(default)]
+    pub iterations: Option<u32>,
+    #[serde(default)]
+    pub sigma_color: Option<f32>,
+}
+
+/// M6: Volumetrics configuration (IPC)
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcVolumetricsConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub density: Option<f32>,
+    #[serde(default)]
+    pub scattering: Option<f32>,
+    #[serde(default)]
+    pub absorption: Option<f32>,
+    #[serde(default)]
+    pub light_shafts: Option<bool>,
+    #[serde(default)]
+    pub shaft_intensity: Option<f32>,
+    #[serde(default)]
+    pub half_res: Option<bool>,
+}
+
+/// M6: Sky configuration (IPC)
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcSkyConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub turbidity: Option<f32>,
+    #[serde(default)]
+    pub ground_albedo: Option<f32>,
+    #[serde(default)]
+    pub sun_intensity: Option<f32>,
+    #[serde(default)]
+    pub aerial_perspective: Option<bool>,
+    #[serde(default)]
+    pub sky_exposure: Option<f32>,
 }
 
 /// Stats about the currently loaded scene
@@ -435,10 +559,18 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             materials,
             vector_overlay,
             tonemap,
+            dof,
+            motion_blur,
+            lens_effects,
+            denoise,
+            volumetrics,
+            sky,
         } => {
             use crate::viewer::viewer_enums::{
                 ViewerHeightAoConfig, ViewerSunVisConfig,
                 ViewerMaterialLayerConfig, ViewerVectorOverlayConfig, ViewerTonemapConfig,
+                ViewerDofConfig, ViewerMotionBlurConfig, ViewerLensEffectsConfig,
+                ViewerDenoiseConfig, ViewerVolumetricsConfig, ViewerSkyConfig,
             };
             
             let height_ao_config = height_ao.as_ref().map(|c| ViewerHeightAoConfig {
@@ -491,6 +623,68 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 tint: c.tint.unwrap_or(0.0),
             });
             
+            // M3: DoF config
+            let dof_config = dof.as_ref().map(|c| ViewerDofConfig {
+                enabled: c.enabled.unwrap_or(false),
+                f_stop: c.f_stop.unwrap_or(5.6),
+                focus_distance: c.focus_distance.unwrap_or(100.0),
+                focal_length: c.focal_length.unwrap_or(50.0),
+                tilt_pitch: c.tilt_pitch.unwrap_or(0.0),
+                tilt_yaw: c.tilt_yaw.unwrap_or(0.0),
+                quality: c.quality.clone().unwrap_or_else(|| "medium".to_string()),
+            });
+            
+            // M4: Motion blur config
+            let motion_blur_config = motion_blur.as_ref().map(|c| ViewerMotionBlurConfig {
+                enabled: c.enabled.unwrap_or(false),
+                samples: c.samples.unwrap_or(8),
+                shutter_open: c.shutter_open.unwrap_or(0.0),
+                shutter_close: c.shutter_close.unwrap_or(0.5),
+                cam_phi_delta: c.cam_phi_delta.unwrap_or(0.0),
+                cam_theta_delta: c.cam_theta_delta.unwrap_or(0.0),
+                cam_radius_delta: c.cam_radius_delta.unwrap_or(0.0),
+            });
+            
+            // M5: Lens effects config
+            let lens_effects_config = lens_effects.as_ref().map(|c| ViewerLensEffectsConfig {
+                enabled: c.enabled.unwrap_or(false),
+                distortion: c.distortion.unwrap_or(0.0),
+                chromatic_aberration: c.chromatic_aberration.unwrap_or(0.0),
+                vignette_strength: c.vignette_strength.unwrap_or(0.0),
+                vignette_radius: c.vignette_radius.unwrap_or(0.7),
+                vignette_softness: c.vignette_softness.unwrap_or(0.3),
+            });
+            
+            // M5: Denoise config
+            let denoise_config = denoise.as_ref().map(|c| ViewerDenoiseConfig {
+                enabled: c.enabled.unwrap_or(false),
+                method: c.method.clone().unwrap_or_else(|| "atrous".to_string()),
+                iterations: c.iterations.unwrap_or(3),
+                sigma_color: c.sigma_color.unwrap_or(0.1),
+            });
+            
+            // M6: Volumetrics config
+            let volumetrics_config = volumetrics.as_ref().map(|c| ViewerVolumetricsConfig {
+                enabled: c.enabled.unwrap_or(false),
+                mode: c.mode.clone().unwrap_or_else(|| "uniform".to_string()),
+                density: c.density.unwrap_or(0.01),
+                scattering: c.scattering.unwrap_or(0.5),
+                absorption: c.absorption.unwrap_or(0.1),
+                light_shafts: c.light_shafts.unwrap_or(false),
+                shaft_intensity: c.shaft_intensity.unwrap_or(1.0),
+                half_res: c.half_res.unwrap_or(false),
+            });
+            
+            // M6: Sky config
+            let sky_config = sky.as_ref().map(|c| ViewerSkyConfig {
+                enabled: c.enabled.unwrap_or(false),
+                turbidity: c.turbidity.unwrap_or(2.0),
+                ground_albedo: c.ground_albedo.unwrap_or(0.3),
+                sun_intensity: c.sun_intensity.unwrap_or(1.0),
+                aerial_perspective: c.aerial_perspective.unwrap_or(true),
+                sky_exposure: c.sky_exposure.unwrap_or(1.0),
+            });
+            
             Ok(Some(ViewerCmd::SetTerrainPbr {
                 enabled: *enabled,
                 hdr_path: hdr_path.clone(),
@@ -505,6 +699,12 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 materials: materials_config,
                 vector_overlay: vector_overlay_config,
                 tonemap: tonemap_config,
+                dof: dof_config,
+                motion_blur: motion_blur_config,
+                lens_effects: lens_effects_config,
+                denoise: denoise_config,
+                volumetrics: volumetrics_config,
+                sky: sky_config,
             }))
         },
     }

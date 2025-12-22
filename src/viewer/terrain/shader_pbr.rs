@@ -15,6 +15,10 @@ struct Uniforms {
     // PBR params
     pbr_params: vec4<f32>,      // exposure, normal_strength, ibl_intensity, _
     camera_pos: vec4<f32>,      // camera world position
+    // Lens effects: vignette_strength, vignette_radius, vignette_softness, _
+    lens_params: vec4<f32>,
+    // Screen dimensions for UV calculation
+    screen_dims: vec4<f32>,     // width, height, _, _
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -224,6 +228,21 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     // Gamma correction (linear to sRGB)
     color = pow(color, vec3<f32>(1.0 / 2.2));
+    
+    // Apply vignette (lens effect)
+    let vignette_strength = u.lens_params.x;
+    let vignette_radius = u.lens_params.y;
+    let vignette_softness = u.lens_params.z;
+    if vignette_strength > 0.001 {
+        // Calculate screen UV from fragment position
+        let screen_uv = in.position.xy / u.screen_dims.xy;
+        // Distance from center (0.5, 0.5)
+        let center_dist = length(screen_uv - vec2<f32>(0.5));
+        // Vignette falloff
+        let vignette = 1.0 - smoothstep(vignette_radius - vignette_softness, vignette_radius + vignette_softness, center_dist * 2.0);
+        // Apply vignette darkening
+        color = color * mix(1.0, vignette, vignette_strength);
+    }
     
     return vec4<f32>(color, 1.0);
 }

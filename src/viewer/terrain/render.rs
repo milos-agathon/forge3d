@@ -27,6 +27,8 @@ pub(super) struct TerrainPbrUniforms {
     pub water_color: [f32; 4],
     pub pbr_params: [f32; 4],    // exposure, normal_strength, ibl_intensity, _
     pub camera_pos: [f32; 4],   // camera world position
+    pub lens_params: [f32; 4],  // vignette_strength, vignette_radius, vignette_softness, _
+    pub screen_dims: [f32; 4],  // width, height, _, _
 }
 
 impl ViewerTerrainScene {
@@ -43,7 +45,7 @@ impl ViewerTerrainScene {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Depth32Float,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
             self.depth_view = Some(tex.create_view(&wgpu::TextureViewDescriptor::default()));
@@ -68,6 +70,33 @@ impl ViewerTerrainScene {
         
         // Pre-compute values needed for PBR bind group before borrowing terrain
         let use_pbr = self.pbr_config.enabled && self.pbr_pipeline.is_some();
+        
+        // Check if DoF is enabled
+        let needs_dof = self.pbr_config.dof.enabled;
+        
+        // Check if post-process effects need a separate pass (distortion or CA)
+        let needs_post_process = self.pbr_config.lens_effects.enabled && 
+            (self.pbr_config.lens_effects.distortion.abs() > 0.001 || 
+             self.pbr_config.lens_effects.chromatic_aberration > 0.001);
+        
+        // Initialize passes upfront to avoid borrow conflicts
+        if needs_dof && self.dof_pass.is_none() {
+            self.init_dof_pass();
+        }
+        if needs_dof {
+            if let Some(ref mut dof) = self.dof_pass {
+                let _ = dof.get_input_view(width, height, self.surface_format);
+            }
+        }
+        
+        if needs_post_process && self.post_process.is_none() {
+            self.init_post_process();
+        }
+        if needs_post_process {
+            if let Some(ref mut pp) = self.post_process {
+                let _ = pp.get_intermediate_view(width, height, self.surface_format);
+            }
+        }
         
         let terrain = self.terrain.as_ref().unwrap();
 
@@ -218,6 +247,13 @@ impl ViewerTerrainScene {
                     0.0,
                 ],
                 camera_pos: [eye.x, eye.y, eye.z, 1.0],
+                lens_params: [
+                    self.pbr_config.lens_effects.vignette_strength,
+                    self.pbr_config.lens_effects.vignette_radius,
+                    self.pbr_config.lens_effects.vignette_softness,
+                    0.0,
+                ],
+                screen_dims: [width as f32, height as f32, 0.0, 0.0],
             };
             self.prepare_pbr_bind_group_internal(&pbr_uniforms);
         }
@@ -225,7 +261,33 @@ impl ViewerTerrainScene {
         // Run compute passes for heightfield AO and sun visibility before render
         self.dispatch_heightfield_compute(encoder, terrain_width, sun_dir);
         
+        // Ensure DoF textures are allocated before scene render if DoF is enabled
+        if needs_dof {
+            if let Some(ref mut dof) = self.dof_pass {
+                // This allocates textures if they don't exist or size changed
+                let _ = dof.get_input_view(width, height, self.surface_format);
+            }
+        }
+        
         // Re-borrow terrain after mutable operations
+        // Get render target after mutable borrows complete
+        // Priority: DoF needs its own input -> post-process intermediate -> final view
+        let render_target: &wgpu::TextureView = if needs_dof {
+            // When DoF enabled, render to DoF input texture first
+            self.dof_pass.as_ref()
+                .and_then(|dof| dof.input_view.as_ref())
+                .unwrap_or(view)
+        } else if needs_post_process {
+            self.post_process.as_ref()
+                .and_then(|pp| pp.intermediate_view.as_ref())
+                .unwrap_or(view)
+        } else {
+            view
+        };
+        
+        // Store camera params for DoF
+        let cam_radius = self.terrain.as_ref().unwrap().cam_radius;
+        
         let terrain = self.terrain.as_ref().unwrap();
         let depth_view = self.depth_view.as_ref().unwrap();
         let bg = &terrain.background_color;
@@ -233,7 +295,7 @@ impl ViewerTerrainScene {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain_viewer.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
+                    view: render_target,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -277,6 +339,65 @@ impl ViewerTerrainScene {
             pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..terrain.index_count, 0, 0..1);
         }
+        
+        // Apply DoF pass if enabled (before other post-process effects)
+        if needs_dof {
+            // DoF uses its input_view as source (scene rendered there)
+            // and outputs to either post-process intermediate or final view
+            let dof_output = if needs_post_process {
+                self.post_process.as_ref()
+                    .and_then(|pp| pp.intermediate_view.as_ref())
+                    .unwrap_or(view)
+            } else {
+                view
+            };
+            
+            if let Some(ref mut dof) = self.dof_pass {
+                let depth_view = self.depth_view.as_ref().unwrap();
+                
+                let dof_cfg = super::dof::DofConfig {
+                    enabled: true,
+                    focus_distance: self.pbr_config.dof.focus_distance,
+                    f_stop: self.pbr_config.dof.f_stop,
+                    focal_length: self.pbr_config.dof.focal_length,
+                    quality: self.pbr_config.dof.quality,
+                    max_blur_radius: self.pbr_config.dof.max_blur_radius,
+                    blur_strength: self.pbr_config.dof.blur_strength,
+                };
+                
+                dof.apply_from_input(
+                    encoder,
+                    &self.queue,
+                    depth_view,
+                    dof_output,
+                    width,
+                    height,
+                    self.surface_format,
+                    &dof_cfg,
+                    1.0,           // near plane
+                    cam_radius * 10.0, // far plane
+                );
+            }
+        }
+        
+        // Apply post-process pass if needed (distortion, CA, vignette)
+        if needs_post_process {
+            if let Some(ref mut pp) = self.post_process {
+                let lens = &self.pbr_config.lens_effects;
+                pp.apply(
+                    encoder,
+                    &self.queue,
+                    view,
+                    width,
+                    height,
+                    lens.distortion,
+                    lens.chromatic_aberration,
+                    lens.vignette_strength,
+                    lens.vignette_radius,
+                    lens.vignette_softness,
+                );
+            }
+        }
 
         true
     }
@@ -296,6 +417,7 @@ impl ViewerTerrainScene {
         }
 
         // Create offscreen color texture at requested resolution
+        // Include TEXTURE_BINDING for DoF shader to sample from
         let color_tex = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("terrain_viewer.snapshot_color"),
             size: wgpu::Extent3d {
@@ -307,7 +429,7 @@ impl ViewerTerrainScene {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: target_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let color_view = color_tex.create_view(&wgpu::TextureViewDescriptor::default());
@@ -324,7 +446,7 @@ impl ViewerTerrainScene {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
@@ -466,6 +588,13 @@ impl ViewerTerrainScene {
                     0.0,
                 ],
                 camera_pos: [eye.x, eye.y, eye.z, 1.0],
+                lens_params: [
+                    self.pbr_config.lens_effects.vignette_strength,
+                    self.pbr_config.lens_effects.vignette_radius,
+                    self.pbr_config.lens_effects.vignette_softness,
+                    0.0,
+                ],
+                screen_dims: [width as f32, height as f32, 0.0, 0.0],
             };
             self.prepare_pbr_bind_group_internal(&pbr_uniforms);
         }
@@ -521,6 +650,67 @@ impl ViewerTerrainScene {
             pass.set_vertex_buffer(0, terrain.vertex_buffer.slice(..));
             pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..terrain.index_count, 0, 0..1);
+        }
+
+        // Apply DoF if enabled
+        let needs_dof = self.pbr_config.dof.enabled;
+        if needs_dof {
+            // Initialize DoF pass if needed
+            if self.dof_pass.is_none() {
+                self.init_dof_pass();
+            }
+            
+            if let Some(ref mut dof) = self.dof_pass {
+                // Get DoF input view (allocates textures if needed)
+                let _ = dof.get_input_view(width, height, target_format);
+                
+                // We need to copy the rendered scene to DoF input first
+                // Then apply DoF from input to a new output texture
+                let dof_output_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("terrain_viewer.snapshot_dof_output"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: target_format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let dof_output_view = dof_output_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                
+                let cam_radius = self.terrain.as_ref().map(|t| t.cam_radius).unwrap_or(2000.0);
+                
+                let dof_cfg = super::dof::DofConfig {
+                    enabled: true,
+                    focus_distance: self.pbr_config.dof.focus_distance,
+                    f_stop: self.pbr_config.dof.f_stop,
+                    focal_length: self.pbr_config.dof.focal_length,
+                    quality: self.pbr_config.dof.quality,
+                    max_blur_radius: self.pbr_config.dof.max_blur_radius,
+                    blur_strength: self.pbr_config.dof.blur_strength,
+                };
+                
+                // Apply DoF: reads from color_view, writes to dof_output_view
+                dof.apply(
+                    encoder,
+                    &self.queue,
+                    &color_view,
+                    &depth_view,
+                    &dof_output_view,
+                    width,
+                    height,
+                    target_format,
+                    &dof_cfg,
+                    1.0,
+                    cam_radius * 10.0,
+                );
+                
+                return Some(dof_output_tex);
+            }
         }
 
         Some(color_tex)

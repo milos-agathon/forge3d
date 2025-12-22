@@ -998,6 +998,12 @@ impl Viewer {
                 materials,
                 vector_overlay,
                 tonemap,
+                dof,
+                motion_blur,
+                lens_effects,
+                denoise,
+                volumetrics,
+                sky,
             } => {
                 if let Some(ref mut tv) = self.terrain_viewer {
                     tv.pbr_config.apply_updates(
@@ -1030,6 +1036,67 @@ impl Viewer {
                     println!("[terrain] {}", tv.pbr_config.to_display_string());
                 } else {
                     eprintln!("[terrain] No terrain loaded - load terrain first with load_terrain");
+                }
+                
+                // M3: Apply DoF config
+                if let Some(ref cfg) = dof {
+                    if let Some(ref mut tv) = self.terrain_viewer {
+                        tv.pbr_config.apply_dof(
+                            cfg.enabled,
+                            cfg.f_stop,
+                            cfg.focus_distance,
+                            cfg.focal_length,
+                            &cfg.quality,
+                        );
+                        if cfg.enabled {
+                            println!("[terrain] DoF enabled: f_stop={:.1} focus={:.0} focal_length={:.0}mm quality={}", 
+                                cfg.f_stop, cfg.focus_distance, cfg.focal_length, cfg.quality);
+                        }
+                    }
+                }
+                if let Some(ref cfg) = motion_blur {
+                    if cfg.enabled {
+                        eprintln!("[terrain] Motion blur requested but render pass not implemented (config received: {} samples)", cfg.samples);
+                    }
+                }
+                if let Some(ref cfg) = lens_effects {
+                    if let Some(ref mut tv) = self.terrain_viewer {
+                        tv.pbr_config.apply_lens_effects(
+                            cfg.enabled,
+                            cfg.vignette_strength,
+                            cfg.vignette_radius,
+                            cfg.vignette_softness,
+                            cfg.distortion,
+                            cfg.chromatic_aberration,
+                        );
+                        if cfg.enabled {
+                            println!("[terrain] Lens effects: vignette={:.2} radius={:.2} softness={:.2}", 
+                                cfg.vignette_strength, cfg.vignette_radius, cfg.vignette_softness);
+                        }
+                    }
+                }
+                if let Some(ref cfg) = denoise {
+                    if cfg.enabled {
+                        eprintln!("[terrain] Denoise requested but render pass not implemented (config received: method={})", cfg.method);
+                    }
+                }
+                if let Some(ref cfg) = volumetrics {
+                    if cfg.enabled {
+                        eprintln!("[terrain] Volumetrics requested but render pass not implemented (config received: mode={})", cfg.mode);
+                    }
+                }
+                
+                // M6: Wire sky config to existing viewer sky system
+                if let Some(ref cfg) = sky {
+                    self.sky_enabled = cfg.enabled;
+                    if cfg.enabled {
+                        self.sky_turbidity = cfg.turbidity;
+                        self.sky_ground_albedo = cfg.ground_albedo;
+                        self.sky_exposure = cfg.sky_exposure;
+                        self.sky_sun_intensity = cfg.sun_intensity;
+                        println!("[terrain] Sky enabled: turbidity={:.1} ground_albedo={:.2} exposure={:.2}", 
+                            cfg.turbidity, cfg.ground_albedo, cfg.sky_exposure);
+                    }
                 }
             }
         }

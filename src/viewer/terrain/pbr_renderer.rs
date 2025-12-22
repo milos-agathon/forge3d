@@ -36,6 +36,10 @@ pub struct ViewerTerrainPbrConfig {
     pub vector_overlay: VectorOverlayConfig,
     /// M6: Tonemap settings (operator, white balance)
     pub tonemap: TonemapConfig,
+    /// M5: Lens effects settings (vignette, distortion, CA)
+    pub lens_effects: LensEffectsConfig,
+    /// M3: Depth of Field settings
+    pub dof: DofConfig,
 }
 
 /// Internal heightfield AO configuration
@@ -150,6 +154,56 @@ pub struct TonemapConfig {
     pub tint: f32,
 }
 
+/// M5: Internal lens effects configuration
+#[derive(Debug, Clone)]
+pub struct LensEffectsConfig {
+    pub enabled: bool,
+    pub vignette_strength: f32,
+    pub vignette_radius: f32,
+    pub vignette_softness: f32,
+    pub distortion: f32,
+    pub chromatic_aberration: f32,
+}
+
+impl Default for LensEffectsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            vignette_strength: 0.0,
+            vignette_radius: 0.7,
+            vignette_softness: 0.3,
+            distortion: 0.0,
+            chromatic_aberration: 0.0,
+        }
+    }
+}
+
+/// M3: Internal DoF configuration
+#[derive(Debug, Clone)]
+pub struct DofConfig {
+    pub enabled: bool,
+    pub focus_distance: f32,
+    pub f_stop: f32,
+    pub focal_length: f32,
+    pub quality: u32,
+    pub max_blur_radius: f32,
+    pub blur_strength: f32,  // Artistic multiplier for landscape DoF (1.0 = physical, higher = more blur)
+}
+
+impl Default for DofConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            focus_distance: 500.0,
+            f_stop: 5.6,
+            focal_length: 50.0,
+            quality: 8,
+            max_blur_radius: 16.0,
+            blur_strength: 1000.0,  // High default for visible effect at landscape distances
+        }
+    }
+}
+
 impl Default for TonemapConfig {
     fn default() -> Self {
         Self {
@@ -178,6 +232,8 @@ impl Default for ViewerTerrainPbrConfig {
             materials: MaterialLayerConfig::default(),
             vector_overlay: VectorOverlayConfig::default(),
             tonemap: TonemapConfig::default(),
+            lens_effects: LensEffectsConfig::default(),
+            dof: DofConfig::default(),
         }
     }
 }
@@ -279,6 +335,30 @@ impl ViewerTerrainPbrConfig {
             self.tonemap.temperature = tm.temperature.clamp(2000.0, 12000.0);
             self.tonemap.tint = tm.tint.clamp(-1.0, 1.0);
         }
+    }
+    
+    /// Apply lens effects config from IPC
+    pub fn apply_lens_effects(&mut self, enabled: bool, vignette: f32, radius: f32, softness: f32, distortion: f32, ca: f32) {
+        self.lens_effects.enabled = enabled;
+        self.lens_effects.vignette_strength = vignette.clamp(0.0, 1.0);
+        self.lens_effects.vignette_radius = radius.clamp(0.1, 1.0);
+        self.lens_effects.vignette_softness = softness.clamp(0.1, 1.0);
+        self.lens_effects.distortion = distortion.clamp(-0.5, 0.5);
+        self.lens_effects.chromatic_aberration = ca.clamp(0.0, 0.1);
+    }
+    
+    /// Apply DoF config from IPC
+    pub fn apply_dof(&mut self, enabled: bool, f_stop: f32, focus_distance: f32, focal_length: f32, quality: &str) {
+        self.dof.enabled = enabled;
+        self.dof.f_stop = f_stop.clamp(1.4, 22.0);
+        self.dof.focus_distance = focus_distance.max(1.0);
+        self.dof.focal_length = focal_length.clamp(10.0, 200.0);
+        self.dof.quality = match quality.to_lowercase().as_str() {
+            "low" => 4,
+            "medium" => 8,
+            "high" => 16,
+            _ => 8,
+        };
     }
 
     /// Format config as display string

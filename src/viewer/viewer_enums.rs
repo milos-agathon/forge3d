@@ -225,6 +225,18 @@ pub enum ViewerCmd {
         vector_overlay: Option<ViewerVectorOverlayConfig>,
         /// M6: Tonemap settings (operator, white balance)
         tonemap: Option<ViewerTonemapConfig>,
+        /// M3: Depth of Field settings
+        dof: Option<ViewerDofConfig>,
+        /// M4: Motion blur settings
+        motion_blur: Option<ViewerMotionBlurConfig>,
+        /// M5: Lens effects settings
+        lens_effects: Option<ViewerLensEffectsConfig>,
+        /// M5: Denoise settings
+        denoise: Option<ViewerDenoiseConfig>,
+        /// M6: Volumetrics settings
+        volumetrics: Option<ViewerVolumetricsConfig>,
+        /// M6: Sky settings
+        sky: Option<ViewerSkyConfig>,
     },
 }
 
@@ -293,6 +305,87 @@ impl Default for ViewerTonemapConfig {
             white_balance_enabled: false,
             temperature: 6500.0,
             tint: 0.0,
+        }
+    }
+}
+
+/// M3: Depth of Field configuration for viewer
+#[derive(Debug, Clone, Default)]
+pub struct ViewerDofConfig {
+    pub enabled: bool,
+    pub f_stop: f32,
+    pub focus_distance: f32,
+    pub focal_length: f32,
+    pub tilt_pitch: f32,
+    pub tilt_yaw: f32,
+    pub quality: String,
+}
+
+/// M4: Motion blur configuration for viewer
+#[derive(Debug, Clone, Default)]
+pub struct ViewerMotionBlurConfig {
+    pub enabled: bool,
+    pub samples: u32,
+    pub shutter_open: f32,
+    pub shutter_close: f32,
+    pub cam_phi_delta: f32,
+    pub cam_theta_delta: f32,
+    pub cam_radius_delta: f32,
+}
+
+/// M5: Lens effects configuration for viewer
+#[derive(Debug, Clone, Default)]
+pub struct ViewerLensEffectsConfig {
+    pub enabled: bool,
+    pub distortion: f32,
+    pub chromatic_aberration: f32,
+    pub vignette_strength: f32,
+    pub vignette_radius: f32,
+    pub vignette_softness: f32,
+}
+
+/// M5: Denoise configuration for viewer
+#[derive(Debug, Clone, Default)]
+pub struct ViewerDenoiseConfig {
+    pub enabled: bool,
+    pub method: String,
+    pub iterations: u32,
+    pub sigma_color: f32,
+}
+
+/// M6: Volumetrics configuration for viewer
+#[derive(Debug, Clone, Default)]
+pub struct ViewerVolumetricsConfig {
+    pub enabled: bool,
+    pub mode: String,
+    pub density: f32,
+    pub scattering: f32,
+    pub absorption: f32,
+    pub light_shafts: bool,
+    pub shaft_intensity: f32,
+    pub half_res: bool,
+}
+
+/// M6: Sky configuration for viewer
+#[derive(Debug, Clone)]
+pub struct ViewerSkyConfig {
+    pub enabled: bool,
+    pub turbidity: f32,
+    pub ground_albedo: f32,
+    pub sun_intensity: f32,
+    pub aerial_perspective: bool,
+    pub sky_exposure: f32,
+}
+
+impl Default for ViewerSkyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            turbidity: 2.0,
+            ground_albedo: 0.3,
+            sun_intensity: 1.0,
+            aerial_perspective: true,
+            sky_exposure: 1.0,
         }
     }
 }
