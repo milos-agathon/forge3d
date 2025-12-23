@@ -751,6 +751,62 @@ impl ViewerTerrainScene {
         let mut out_tex = color_tex;
         let mut out_view = color_view;
 
+        // P5: Apply volumetrics pass if enabled (after main render, before DoF)
+        let needs_volumetrics = self.pbr_config.volumetrics.enabled && 
+            self.pbr_config.volumetrics.density > 0.0001;
+        if needs_volumetrics {
+            // Initialize volumetrics pass if needed
+            if self.volumetrics_pass.is_none() {
+                self.init_volumetrics_pass();
+            }
+
+            if let Some(ref vol_pass) = self.volumetrics_pass {
+                // Create output texture for volumetrics
+                let vol_output_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("terrain_viewer.snapshot_vol_output"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: target_format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let vol_output_view = vol_output_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+                // Calculate inverse view-projection matrix
+                let inv_view_proj = (proj * view_mat).inverse();
+                let cam_radius = self.terrain.as_ref().map(|t| t.cam_radius).unwrap_or(2000.0);
+                let terrain_sun_intensity = self.terrain.as_ref().map(|t| t.sun_intensity).unwrap_or(1.0);
+
+                vol_pass.apply(
+                    encoder,
+                    &self.queue,
+                    &out_view,
+                    &depth_view,
+                    &vol_output_view,
+                    width,
+                    height,
+                    inv_view_proj.to_cols_array_2d(),
+                    [eye.x, eye.y, eye.z],
+                    1.0,  // near
+                    cam_radius * 10.0,  // far
+                    [sun_dir.x, sun_dir.y, sun_dir.z],
+                    terrain_sun_intensity,
+                    &self.pbr_config.volumetrics,
+                );
+
+                out_tex = vol_output_tex;
+                out_view = vol_output_view;
+            }
+        }
+
         // Apply DoF if enabled
         let needs_dof = self.pbr_config.dof.enabled;
         if needs_dof {
@@ -949,17 +1005,17 @@ impl ViewerTerrainScene {
         self.pbr_config.lens_effects.chromatic_aberration = 0.0;
 
         let samples = config.samples.max(1);
-        let shutter_range = config.shutter_close - config.shutter_open;
 
         for i in 0..samples {
-            // Calculate interpolation factor: t = shutter_open + (shutter_close - shutter_open) * (i + 0.5) / samples
+            // Calculate interpolation factor: sample_t ranges 0..1 across the sample set
+            // This represents the relative position within the shutter window
             let sample_t = (i as f32 + 0.5) / samples as f32;
-            let t = config.shutter_open + shutter_range * sample_t;
 
-            // Interpolate camera
-            let phi = base_phi + config.cam_phi_delta * t;
-            let theta = base_theta + config.cam_theta_delta * t;
-            let radius = base_radius + config.cam_radius_delta * t;
+            // Interpolate camera using sample_t (0..1) so that cam_*_delta represents
+            // the FULL camera motion during the shutter period, not scaled by shutter time
+            let phi = base_phi + config.cam_phi_delta * sample_t;
+            let theta = base_theta + config.cam_theta_delta * sample_t;
+            let radius = base_radius + config.cam_radius_delta * sample_t;
 
             // Temporarily set camera params
             if let Some(ref mut terrain) = self.terrain {

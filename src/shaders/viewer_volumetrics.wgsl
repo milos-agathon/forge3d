@@ -79,13 +79,14 @@ fn phase_hg(cos_theta: f32, g: f32) -> f32 {
     return (1.0 - g2) / (4.0 * 3.14159265 * pow(denom, 1.5));
 }
 
-// Linearize depth from NDC (0=near, 1=far in reversed-Z or standard)
+// Linearize depth from NDC for wgpu reverse-Z (depth=1 at near, depth=0 at far)
 fn linearize_depth(ndc_depth: f32, near: f32, far: f32) -> f32 {
-    // For standard perspective projection with reversed-Z (common in wgpu)
-    // depth = 0 at far, depth = 1 at near
-    // Linear depth = near * far / (far - depth * (far - near))
-    let z = ndc_depth;
-    return near * far / (far - z * (far - near));
+    // wgpu uses reverse-Z: ndc_depth=1.0 at near plane, ndc_depth=0.0 at far plane
+    // For reverse-Z perspective: linear_z = near * far / (far - ndc_depth * (far - near))
+    // But we need the VIEW-SPACE distance, not clip z
+    // Correct formula for reverse-Z to get view distance:
+    let z = clamp(ndc_depth, 0.0001, 0.9999);  // Avoid division issues at extremes
+    return near * far / (near + z * (far - near));
 }
 
 // Light shaft shadow estimation using sun ray march through volume
@@ -116,65 +117,79 @@ fn estimate_light_shaft_shadow(world_pos: vec3<f32>, sun_dir: vec3<f32>) -> f32 
 }
 
 // Ray march through fog volume with depth-aware termination
+// Returns fog color (rgb) and fog amount (a) for proper compositing
 fn raymarch_fog_with_depth(ray_origin: vec3<f32>, ray_dir: vec3<f32>, scene_dist: f32) -> vec4<f32> {
     let steps = get_steps();
-    let max_dist = min(scene_dist, get_far());
-    let step_size = max_dist / f32(steps);
     let sun_dir = normalize(u.sun_direction.xyz);
     let scattering = get_scattering();
     let absorption = get_absorption();
-    let light_shafts = get_light_shafts_enabled();
     let shaft_intensity = get_shaft_intensity();
     let sun_intensity = get_sun_intensity();
+    let base_density = get_density();
     
-    var inscatter = vec3<f32>(0.0);
-    var transmittance = 1.0;
+    // Scene scale for normalization
+    let scene_scale = max(get_far() * 0.1, 1000.0);
+    let density_multiplier = 50.0 / scene_scale;  // Stronger fog effect
+    
+    // Limit fog distance to avoid excessive accumulation
+    let fog_max_dist = min(scene_dist, scene_scale * 2.0);
+    let step_size = fog_max_dist / f32(steps);
+    
+    // Base fog color (atmospheric blue-gray)
+    let fog_base_color = vec3<f32>(0.7, 0.8, 0.9);
+    // Sun-tinted fog color (warm golden)
+    let sun_fog_color = vec3<f32>(1.0, 0.95, 0.85);
+    
+    var accumulated_fog = 0.0;
+    var light_accumulation = 0.0;
+    
+    // Jitter start position to reduce banding
+    let jitter = fract(sin(dot(ray_dir.xy, vec2<f32>(12.9898, 78.233))) * 43758.5453) * 0.5;
     
     for (var i = 0u; i < steps; i++) {
-        let t = (f32(i) + 0.5) * step_size;
-        
-        // Stop if we've reached the scene geometry
+        let t = (f32(i) + 0.5 + jitter) * step_size;
         if t >= scene_dist {
             break;
         }
         
         let pos = ray_origin + ray_dir * t;
-        let density = fog_density_at(pos);
+        let local_density = fog_density_at(pos) * density_multiplier;
         
-        // Skip if density is negligible
-        if density < 0.0001 {
+        if local_density < 0.00001 {
             continue;
         }
         
-        // Phase function for anisotropic scattering toward sun
+        // Phase function for directional scattering
         let cos_theta = dot(ray_dir, sun_dir);
         let phase = phase_hg(cos_theta, scattering);
         
-        // Calculate sun visibility for light shafts
-        var sun_vis = 1.0;
-        if light_shafts {
-            // Full light shaft shadow estimation
-            sun_vis = estimate_light_shaft_shadow(pos, sun_dir);
-            
-            // Additional height-based attenuation for god ray effect
-            let height_atten = clamp(pos.y * 0.001 + 0.5, 0.0, 1.0);
-            sun_vis *= height_atten;
-        }
+        // Light shaft shadow estimation
+        let shadow = estimate_light_shaft_shadow(pos, sun_dir);
         
-        // In-scattering contribution
-        let light = sun_vis * sun_intensity * phase * shaft_intensity;
+        // Height-based light attenuation for god ray effect
+        let height_norm = clamp(pos.y / scene_scale, 0.0, 1.0);
+        let height_light = 1.0 - height_norm * 0.5;  // More light at lower heights
         
-        // Accumulate inscattering and transmittance
-        inscatter += transmittance * light * density * step_size;
-        transmittance *= exp(-density * absorption * step_size);
+        // Accumulated light contribution (creates visible shafts)
+        let light_contrib = shadow * phase * sun_intensity * shaft_intensity * height_light;
+        light_accumulation += light_contrib * local_density * step_size * (1.0 - accumulated_fog);
         
-        // Early exit if fully opaque
-        if transmittance < 0.01 {
+        // Accumulated fog density
+        let fog_step = local_density * step_size * (1.0 + absorption);
+        accumulated_fog += fog_step * (1.0 - accumulated_fog);
+        
+        // Early exit if fog is saturated
+        if accumulated_fog > 0.85 {
+            accumulated_fog = 0.85;
             break;
         }
     }
     
-    return vec4<f32>(inscatter, transmittance);
+    // Blend fog color based on light accumulation (sun influence)
+    let sun_influence = clamp(light_accumulation * 2.0, 0.0, 0.7);
+    let fog_color = mix(fog_base_color, sun_fog_color, sun_influence);
+    
+    return vec4<f32>(fog_color, accumulated_fog);
 }
 
 @fragment
@@ -195,33 +210,94 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let near = get_near();
     let far = get_far();
     
-    // Linearize depth to get world-space distance
-    let linear_depth = linearize_depth(ndc_depth, near, far);
+    // Detect sky pixels (at or very close to far plane in reverse-Z)
+    // In reverse-Z: ndc_depth near 0 means far plane (sky)
+    let is_sky = ndc_depth < 0.001;
     
-    // If depth is at far plane (sky), use full far distance
-    let scene_dist = select(linear_depth, far, ndc_depth > 0.9999);
+    // For sky pixels, skip volumetric processing to avoid artifacts
+    if is_sky {
+        return vec4<f32>(scene_color, 1.0);
+    }
     
-    // Reconstruct ray direction from camera through pixel
+    // Reconstruct world position and calculate ray parameters
     let camera_pos = u.camera_pos.xyz;
     let world_pos = world_pos_from_depth(uv, ndc_depth);
     let ray_dir = normalize(world_pos - camera_pos);
+    let scene_dist = length(world_pos - camera_pos);
     
-    // Raymarch fog with depth-aware termination
-    let fog_result = raymarch_fog_with_depth(camera_pos, ray_dir, scene_dist);
-    let fog_inscatter = fog_result.rgb;
-    let fog_transmittance = fog_result.w;
+    // Scene scale for density normalization
+    let scene_scale = max(far * 0.1, 1000.0);
+    let density_multiplier = 1000.0 / scene_scale;
     
-    // Atmospheric fog color (blue-ish haze, tinted by sun)
-    let sun_color = vec3<f32>(1.0, 0.95, 0.85);  // Warm sun tint
-    let sky_color = vec3<f32>(0.5, 0.6, 0.75);   // Cool sky tint
+    // Use raymarching for proper volumetric effects (especially light shafts)
+    let light_shafts = get_light_shafts_enabled();
+    
+    if light_shafts {
+        // Full volumetric raymarching with light shafts
+        let vol_result = raymarch_fog_with_depth(camera_pos, ray_dir, scene_dist);
+        let fog_color = vol_result.rgb;
+        let fog_amount = vol_result.a;
+        
+        // Composite with scene
+        let final_color = mix(scene_color, fog_color, fog_amount);
+        return vec4<f32>(final_color, 1.0);
+    }
+    
+    // Simplified fog for non-light-shaft modes (faster)
+    let mode = get_mode();
+    var fog_amount: f32;
+    
+    // Distance-normalized fog factor
+    let dist_factor = scene_dist / scene_scale;
+    
+    if mode == 0u {
+        // Uniform fog: exponential distance fog
+        // density 0.01-0.05 should produce visible fog at typical viewing distances
+        let fog_strength = density * 50.0;  // Amplify density for visible effect
+        fog_amount = 1.0 - exp(-fog_strength * dist_factor);
+    } else {
+        // Height-based fog: denser at lower elevations
+        let height_falloff = get_height_falloff();
+        
+        // Height factor: fog is denser at lower heights
+        // Normalize height relative to scene (0 = lowest, 1 = highest visible)
+        let height_norm = clamp(world_pos.y / scene_scale, 0.0, 2.0);
+        let height_factor = exp(-height_norm * height_falloff * 20.0);
+        
+        // Combined distance and height fog
+        let fog_strength = density * 60.0;  // Slightly stronger for height mode
+        let base_fog = 1.0 - exp(-fog_strength * dist_factor);
+        fog_amount = base_fog * (0.2 + 0.8 * height_factor);
+    }
+    
+    // Clamp fog to preserve scene visibility
+    fog_amount = clamp(fog_amount, 0.0, 0.75);
+    
+    // Calculate fog color with scattering
     let sun_dir = normalize(u.sun_direction.xyz);
-    let view_sun_angle = max(0.0, dot(ray_dir, sun_dir));
-    let fog_tint = mix(sky_color, sun_color, view_sun_angle * view_sun_angle);
+    let cos_angle = dot(ray_dir, sun_dir);
+    let scattering = get_scattering();
+    let phase = phase_hg(cos_angle, scattering);
     
-    let final_inscatter = fog_inscatter * fog_tint;
+    // Base atmospheric fog color (blue-gray)
+    let fog_base_color = vec3<f32>(0.7, 0.8, 0.9);
     
-    // Composite: scene * transmittance + inscatter
-    let final_color = scene_color * fog_transmittance + final_inscatter;
+    // Sun-influenced color (warm golden for forward scatter)
+    let sun_color = vec3<f32>(1.0, 0.95, 0.85);
+    
+    // Scattering effect: stronger when looking toward sun
+    let sun_intensity = get_sun_intensity();
+    let scatter_strength = phase * sun_intensity * scattering;
+    
+    // Blend fog colors based on scattering
+    var fog_color = mix(fog_base_color, sun_color, clamp(scatter_strength, 0.0, 0.6));
+    
+    // Apply absorption (slightly darkens fog)
+    let absorption = get_absorption();
+    fog_color *= (1.0 - absorption * 0.2);
+    
+    // Composite: blend scene with fog
+    let final_color = mix(scene_color, fog_color, fog_amount);
     
     return vec4<f32>(final_color, 1.0);
 }

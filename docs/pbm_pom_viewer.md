@@ -335,7 +335,7 @@ python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-mode uniform --vol-density 0.02
 
 # Height-based fog (denser near ground)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-mode height --vol-density 0.015 --vol-height-falloff 0.005
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-mode height --vol-density 0.015
 
 # God rays (volumetric light shafts)
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-mode height --vol-density 0.02 --vol-light-shafts --vol-shaft-intensity 2.0 --sun-elevation 15
@@ -344,7 +344,7 @@ python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-density 0.01 --vol-scattering 0.8 --vol-absorption 0.1
 
 # Half-resolution volumetrics (performance mode)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-density 0.02 --vol-half-res --vol-steps 32
+python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-density 0.02 --vol-half-res
 ```
 
 #### Combined Post-Processing Scenes
