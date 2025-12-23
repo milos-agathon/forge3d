@@ -457,6 +457,8 @@ impl ViewerTerrainScene {
                     quality: self.pbr_config.dof.quality,
                     max_blur_radius: self.pbr_config.dof.max_blur_radius,
                     blur_strength: self.pbr_config.dof.blur_strength,
+                    tilt_pitch: self.pbr_config.dof.tilt_pitch,
+                    tilt_yaw: self.pbr_config.dof.tilt_yaw,
                 };
                 
                 dof.apply_from_input(
@@ -791,6 +793,8 @@ impl ViewerTerrainScene {
                     quality: self.pbr_config.dof.quality,
                     max_blur_radius: self.pbr_config.dof.max_blur_radius,
                     blur_strength: self.pbr_config.dof.blur_strength,
+                    tilt_pitch: self.pbr_config.dof.tilt_pitch,
+                    tilt_yaw: self.pbr_config.dof.tilt_yaw,
                 };
                 
                 // Apply DoF: reads from color_view, writes to dof_output_view

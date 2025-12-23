@@ -1047,10 +1047,18 @@ impl Viewer {
                             cfg.focus_distance,
                             cfg.focal_length,
                             &cfg.quality,
+                            cfg.tilt_pitch,
+                            cfg.tilt_yaw,
                         );
                         if cfg.enabled {
-                            println!("[terrain] DoF enabled: f_stop={:.1} focus={:.0} focal_length={:.0}mm quality={}", 
-                                cfg.f_stop, cfg.focus_distance, cfg.focal_length, cfg.quality);
+                            // cfg.tilt_pitch/yaw are in degrees from IPC, show them directly
+                            let tilt_info = if cfg.tilt_pitch.abs() > 0.001 || cfg.tilt_yaw.abs() > 0.001 {
+                                format!(" tilt_pitch={:.1}° tilt_yaw={:.1}°", cfg.tilt_pitch, cfg.tilt_yaw)
+                            } else {
+                                String::new()
+                            };
+                            println!("[terrain] DoF enabled: f_stop={:.1} focus={:.0} focal_length={:.0}mm quality={}{}", 
+                                cfg.f_stop, cfg.focus_distance, cfg.focal_length, cfg.quality, tilt_info);
                         }
                     }
                 }

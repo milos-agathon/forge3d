@@ -296,7 +296,7 @@ python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --lens-effects --lens-distortion 0.1 --lens-ca 0.02 --lens-vignette 0.5 --tonemap uncharted2
 ```
 
-#### P3: Depth of Field (Separable Blur)
+#### Depth of Field (Separable Blur)
 
 ```bash
 # Shallow depth of field (wide aperture, blurry background)
@@ -312,7 +312,7 @@ python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --dof --dof-f-stop 2.8 --dof-focus-distance 250 --dof-tilt-pitch 15 --dof-tilt-yaw 45
 ```
 
-#### P4: Motion Blur (Temporal Accumulation)
+#### Motion Blur (Temporal Accumulation)
 
 ```bash
 # Camera pan motion blur (horizontal sweep)
@@ -328,7 +328,7 @@ python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --motion-blur --mb-samples 32 --mb-shutter-angle 270 --mb-cam-phi-delta 10
 ```
 
-#### P5: Volumetric Fog + Light Shafts
+#### Volumetric Fog + Light Shafts
 
 ```bash
 # Uniform fog

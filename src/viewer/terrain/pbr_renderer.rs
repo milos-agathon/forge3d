@@ -192,6 +192,8 @@ pub struct DofConfig {
     pub quality: u32,
     pub max_blur_radius: f32,
     pub blur_strength: f32,  // Artistic multiplier for landscape DoF (1.0 = physical, higher = more blur)
+    pub tilt_pitch: f32,     // Tilt-shift pitch in radians (Scheimpflug effect)
+    pub tilt_yaw: f32,       // Tilt-shift yaw in radians
 }
 
 impl Default for DofConfig {
@@ -202,8 +204,10 @@ impl Default for DofConfig {
             f_stop: 5.6,
             focal_length: 50.0,
             quality: 8,
-            max_blur_radius: 16.0,
-            blur_strength: 1000.0,  // High default for visible effect at landscape distances
+            max_blur_radius: 32.0,
+            blur_strength: 500.0,  // Landscape scale multiplier (physical CoC is tiny at 100s of meters)
+            tilt_pitch: 0.0,
+            tilt_yaw: 0.0,
         }
     }
 }
@@ -412,17 +416,34 @@ impl ViewerTerrainPbrConfig {
     }
     
     /// Apply DoF config from IPC
-    pub fn apply_dof(&mut self, enabled: bool, f_stop: f32, focus_distance: f32, focal_length: f32, quality: &str) {
+    /// Note: tilt_pitch and tilt_yaw are expected in DEGREES from CLI/IPC
+    pub fn apply_dof(&mut self, enabled: bool, f_stop: f32, focus_distance: f32, focal_length: f32, quality: &str, tilt_pitch_deg: f32, tilt_yaw_deg: f32) {
         self.dof.enabled = enabled;
-        self.dof.f_stop = f_stop.clamp(1.4, 22.0);
+        let clamped_f_stop = f_stop.clamp(1.4, 22.0);
+        self.dof.f_stop = clamped_f_stop;
         self.dof.focus_distance = focus_distance.max(1.0);
         self.dof.focal_length = focal_length.clamp(10.0, 200.0);
         self.dof.quality = match quality.to_lowercase().as_str() {
             "low" => 4,
             "medium" => 8,
             "high" => 16,
+            "ultra" => 32,
             _ => 8,
         };
+        // Convert degrees to radians for shader (tan() expects radians)
+        self.dof.tilt_pitch = tilt_pitch_deg.to_radians();
+        self.dof.tilt_yaw = tilt_yaw_deg.to_radians();
+        
+        // Scale blur_strength inversely with f-stop:
+        // - f/1.4 (wide) -> blur_strength ~1000 (max blur)
+        // - f/5.6 (medium) -> blur_strength ~250
+        // - f/16 (narrow) -> blur_strength ~88 (minimal visible blur)
+        // - f/22 (very narrow) -> blur_strength ~64 (nearly sharp)
+        // Formula: blur_strength = base_strength / (f_stop / reference_f_stop)
+        // Using f/1.4 as reference with base 1000
+        let base_strength = 1000.0;
+        let reference_f_stop = 1.4;
+        self.dof.blur_strength = base_strength * (reference_f_stop / clamped_f_stop);
     }
     
     /// Apply motion blur config from IPC
