@@ -16,6 +16,7 @@ pub struct VolumetricsUniforms {
     pub sun_direction: [f32; 4],        // 16 bytes (vec3 + intensity), offset 112
     pub shaft_params: [f32; 4],         // shaft_intensity, light_shafts_enabled, steps, mode; offset 128
     pub screen_dims: [f32; 4],          // width, height, pad, pad; offset 144
+    pub terrain_params: [f32; 4],       // terrain_size, min_h, h_scale, pad; offset 160
 }
 
 /// Volumetric fog pass manager
@@ -86,6 +87,17 @@ impl VolumetricsPass {
                     binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                // Heightmap texture (R32Float, non-filterable)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
             ],
@@ -177,6 +189,7 @@ impl VolumetricsPass {
         queue: &wgpu::Queue,
         color_view: &wgpu::TextureView,
         depth_view: &wgpu::TextureView,
+        heightmap_view: &wgpu::TextureView,
         output_view: &wgpu::TextureView,
         width: u32,
         height: u32,
@@ -186,6 +199,7 @@ impl VolumetricsPass {
         far: f32,
         sun_direction: [f32; 3],
         sun_intensity: f32,
+        terrain_params: [f32; 4], // width, min_h, h_scale, pad
         config: &super::pbr_renderer::VolumetricsConfig,
     ) {
         // Update uniforms with proper alignment
@@ -208,6 +222,7 @@ impl VolumetricsPass {
                 mode as f32,
             ],
             screen_dims: [width as f32, height as f32, 0.0, 0.0],
+            terrain_params,
         };
 
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -236,6 +251,10 @@ impl VolumetricsPass {
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: wgpu::BindingResource::Sampler(&self.depth_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(heightmap_view),
                 },
             ],
         });

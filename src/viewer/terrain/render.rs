@@ -420,6 +420,7 @@ impl ViewerTerrainScene {
                     &self.queue,
                     color_input,
                     depth_view,
+                    &terrain.heightmap_view,
                     vol_output,
                     width,
                     height,
@@ -429,6 +430,7 @@ impl ViewerTerrainScene {
                     cam_radius * 10.0,  // far
                     [sun_dir.x, sun_dir.y, sun_dir.z],
                     terrain.sun_intensity,
+                    [terrain_width, terrain.domain.0, shader_z_scale, h_range],
                     &self.pbr_config.volumetrics,
                 );
             }
@@ -698,11 +700,9 @@ impl ViewerTerrainScene {
         // Run compute passes
         self.dispatch_heightfield_compute(encoder, terrain_width, sun_dir);
 
-        // Re-borrow terrain
-        let terrain = self.terrain.as_ref().unwrap();
-
         // Render to offscreen texture
         {
+            let terrain = self.terrain.as_ref().unwrap();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain_viewer.snapshot_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -782,14 +782,16 @@ impl ViewerTerrainScene {
 
                 // Calculate inverse view-projection matrix
                 let inv_view_proj = (proj * view_mat).inverse();
-                let cam_radius = self.terrain.as_ref().map(|t| t.cam_radius).unwrap_or(2000.0);
-                let terrain_sun_intensity = self.terrain.as_ref().map(|t| t.sun_intensity).unwrap_or(1.0);
+                let terrain = self.terrain.as_ref().unwrap();
+                let cam_radius = terrain.cam_radius;
+                let terrain_sun_intensity = terrain.sun_intensity;
 
                 vol_pass.apply(
                     encoder,
                     &self.queue,
                     &out_view,
                     &depth_view,
+                    &terrain.heightmap_view,
                     &vol_output_view,
                     width,
                     height,
@@ -799,6 +801,7 @@ impl ViewerTerrainScene {
                     cam_radius * 10.0,  // far
                     [sun_dir.x, sun_dir.y, sun_dir.z],
                     terrain_sun_intensity,
+                    [terrain_width, terrain.domain.0, shader_z_scale, h_range],
                     &self.pbr_config.volumetrics,
                 );
 
@@ -1007,12 +1010,17 @@ impl ViewerTerrainScene {
         let samples = config.samples.max(1);
 
         for i in 0..samples {
-            // Calculate interpolation factor: sample_t ranges 0..1 across the sample set
-            // This represents the relative position within the shutter window
-            let sample_t = (i as f32 + 0.5) / samples as f32;
+            // Calculate interpolation factor using the shutter timing
+            // sample_t spans [shutter_open, shutter_close] across the sample set
+            // This allows the cam_*_delta values to represent motion per full frame,
+            // with the shutter timing determining how much of that motion is captured
+            let shutter_range = config.shutter_close - config.shutter_open;
+            let relative_t = (i as f32 + 0.5) / samples as f32;  // 0..1
+            let sample_t = config.shutter_open + shutter_range * relative_t;
 
-            // Interpolate camera using sample_t (0..1) so that cam_*_delta represents
-            // the FULL camera motion during the shutter period, not scaled by shutter time
+            // Interpolate camera position across the shutter interval
+            // cam_*_delta represents motion per full frame (frame time = 1.0)
+            // The shutter timing naturally scales the effective motion captured
             let phi = base_phi + config.cam_phi_delta * sample_t;
             let theta = base_theta + config.cam_theta_delta * sample_t;
             let radius = base_radius + config.cam_radius_delta * sample_t;

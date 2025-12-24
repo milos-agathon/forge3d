@@ -128,7 +128,7 @@ Terrain self-shadowing computed by ray-marching along the sun direction, produci
 
 **Note:** Sun visibility combines multiplicatively with CSM shadows when both are enabled.
 
-### Material Layering (M4)
+### Material Layering
 
 Terrain material layers: snow, rock, wetness based on altitude and slope.
 
@@ -143,7 +143,7 @@ Terrain material layers: snow, rock, wetness based on altitude and slope.
 | `--wetness` | Flag | Off | Enable wetness effect in low areas |
 | `--wetness-strength` | Float | 0.3 | Wetness darkening strength [0.0-1.0] |
 
-### Vector Overlays (M5)
+### Vector Overlays
 
 Depth-correct vector overlays with halos.
 
@@ -155,7 +155,7 @@ Depth-correct vector overlays with halos.
 | `--overlay-halo-width` | Float | 2.0 | Halo width in pixels |
 | `--overlay-halo-color` | String | "0,0,0,0.5" | Halo color as R,G,B,A |
 
-### Tonemapping (M6)
+### Tonemapping
 
 HDR tonemapping and color grading.
 
@@ -276,7 +276,7 @@ python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --dof --lens-vignette 0.3 --volumetrics --sky --tonemap aces
 ```
 
-### Post-Processing Effects (P1-P5)
+### Post-Processing Effects
 
 The following examples demonstrate the post-processing pipeline.
 
