@@ -205,7 +205,7 @@ impl Default for DofConfig {
             focal_length: 50.0,
             quality: 8,
             max_blur_radius: 32.0,
-            blur_strength: 500.0,  // Landscape scale multiplier (physical CoC is tiny at 100s of meters)
+            blur_strength: 25.0,  // Landscape scale multiplier (reasonable for visible but not overwhelming DoF)
             tilt_pitch: 0.0,
             tilt_yaw: 0.0,
         }
@@ -435,13 +435,14 @@ impl ViewerTerrainPbrConfig {
         self.dof.tilt_yaw = tilt_yaw_deg.to_radians();
         
         // Scale blur_strength inversely with f-stop:
-        // - f/1.4 (wide) -> blur_strength ~1000 (max blur)
-        // - f/5.6 (medium) -> blur_strength ~250
-        // - f/16 (narrow) -> blur_strength ~88 (minimal visible blur)
-        // - f/22 (very narrow) -> blur_strength ~64 (nearly sharp)
-        // Formula: blur_strength = base_strength / (f_stop / reference_f_stop)
-        // Using f/1.4 as reference with base 1000
-        let base_strength = 1000.0;
+        // - f/1.4 (wide) -> blur_strength ~50 (visible blur)
+        // - f/2.8 -> blur_strength ~25
+        // - f/5.6 (medium) -> blur_strength ~12.5
+        // - f/16 (narrow) -> blur_strength ~4.4 (subtle blur)
+        // - f/22 (very narrow) -> blur_strength ~3.2 (minimal blur)
+        // Formula: blur_strength = base_strength * (reference_f_stop / f_stop)
+        // Using f/1.4 as reference with base 50 (reduced from 1000 to prevent over-blur)
+        let base_strength = 50.0;
         let reference_f_stop = 1.4;
         self.dof.blur_strength = base_strength * (reference_f_stop / clamped_f_stop);
     }

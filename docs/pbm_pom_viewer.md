@@ -256,26 +256,6 @@ python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pre
 python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --preset high_quality --width 800 --height 800
 ```
 
-```bash
-# Depth of Field with tilt-shift
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --dof --dof-f-stop 2.8 --dof-focus-distance 200 --dof-tilt-pitch 15
-
-# Motion Blur with camera pan
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --motion-blur --mb-samples 16 --mb-shutter-angle 180 --mb-cam-phi-delta 10
-
-# Lens Effects (vintage look)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --lens-effects --lens-distortion 0.1 --lens-ca 0.02 --lens-vignette 0.5
-
-# Volumetric fog with god rays
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-mode height --vol-density 0.02 --vol-light-shafts
-
-# Procedural sky with aerial perspective
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --sky --sky-turbidity 3.0 --sky-aerial --sky-exposure 1.2
-
-# Combined cinematic scene
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --dof --lens-vignette 0.3 --volumetrics --sky --tonemap aces
-```
-
 ### Post-Processing Effects
 
 The following examples demonstrate the post-processing pipeline.

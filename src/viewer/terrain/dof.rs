@@ -41,7 +41,7 @@ impl Default for DofConfig {
             focal_length: 50.0,
             quality: 8,
             max_blur_radius: 32.0,
-            blur_strength: 500.0,  // Landscape scale multiplier (physical CoC is tiny at 100s of meters)
+            blur_strength: 25.0,  // Landscape scale multiplier (reasonable for visible but not overwhelming DoF)
             tilt_pitch: 0.0,
             tilt_yaw: 0.0,
         }
