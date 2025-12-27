@@ -65,7 +65,7 @@ The `swiss_terrain_landcover_viewer.py` example showcases the new **draped overl
 python examples/swiss_terrain_landcover_viewer.py --preset hq4 --snapshot swiss_render.png
 ```
 
-![Swiss Terrain with Land Cover Legend](swiss-legend.png)
+![Swiss Terrain with Land Cover Legend](assets/swiss-legend.png)
 
 ## Platform requirements
 
