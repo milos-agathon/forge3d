@@ -899,6 +899,107 @@ class SkySettings:
 
 
 @dataclass
+class OverlayBlendMode:
+    """Blend mode constants for overlay layers."""
+    NORMAL = "normal"
+    MULTIPLY = "multiply"
+    OVERLAY = "overlay"
+
+
+@dataclass
+class OverlayLayerConfig:
+    """Configuration for a single terrain overlay layer.
+    
+    Overlays are textures draped onto terrain surface, sampled in the fragment
+    shader and blended into albedo before lighting. This means overlays are
+    fully lit and shadowed by the sun, just like the terrain itself.
+    
+    Attributes:
+        name: Unique identifier for this layer
+        source: Path to image file (PNG, JPEG, etc.) or RGBA numpy array
+        extent: Extent in terrain UV space [u_min, v_min, u_max, v_max].
+                None means full terrain coverage [0, 0, 1, 1]
+        opacity: Overlay opacity (0.0 = transparent, 1.0 = opaque)
+        blend_mode: How to blend with terrain albedo ("normal", "multiply", "overlay")
+        visible: Whether this layer is rendered
+        z_order: Stacking order (lower = behind, higher = in front)
+    """
+    
+    name: str
+    source: str  # Path to image file, or np.ndarray for raw RGBA
+    extent: Optional[Tuple[float, float, float, float]] = None  # [u_min, v_min, u_max, v_max]
+    opacity: float = 1.0
+    blend_mode: str = "normal"  # "normal", "multiply", "overlay"
+    visible: bool = True
+    z_order: int = 0
+    
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("name must be non-empty")
+        if not 0.0 <= self.opacity <= 1.0:
+            raise ValueError("opacity must be in [0.0, 1.0]")
+        valid_blend_modes = {"normal", "multiply", "overlay"}
+        if self.blend_mode not in valid_blend_modes:
+            raise ValueError(f"blend_mode must be one of {valid_blend_modes}, got '{self.blend_mode}'")
+        if self.extent is not None:
+            if len(self.extent) != 4:
+                raise ValueError("extent must be (u_min, v_min, u_max, v_max)")
+            u_min, v_min, u_max, v_max = self.extent
+            if u_min >= u_max or v_min >= v_max:
+                raise ValueError("extent must have u_min < u_max and v_min < v_max")
+
+
+@dataclass
+class OverlaySettings:
+    """Terrain overlay system configuration.
+    
+    When enabled=False, the overlay system is disabled and output is identical
+    to rendering without overlays (default off for backward compatibility).
+    
+    Overlays modify terrain albedo before lighting, meaning they:
+    - Are lit by sun (diffuse term includes overlay color)
+    - Are shadowed (shadow_term multiplies diffuse result)  
+    - Receive ambient occlusion (height_ao multiplies ambient term)
+    - Do NOT affect specular (specular depends on roughness, not albedo)
+    
+    Attributes:
+        enabled: Enable the overlay system (default: False)
+        global_opacity: Global opacity multiplier for all layers (0.0-1.0)
+        layers: List of OverlayLayerConfig for individual overlay layers
+        resolution_scale: Composite texture resolution relative to terrain
+                         (1.0 = terrain resolution, 0.5 = half resolution)
+    """
+    
+    enabled: bool = False  # Disabled by default for backward compatibility
+    global_opacity: float = 1.0  # Global opacity multiplier
+    layers: Optional[List[OverlayLayerConfig]] = None  # Overlay layer configs
+    resolution_scale: float = 1.0  # Composite texture resolution scale
+    
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.global_opacity <= 1.0:
+            raise ValueError("global_opacity must be in [0.0, 1.0]")
+        if not 0.1 <= self.resolution_scale <= 2.0:
+            raise ValueError("resolution_scale must be in [0.1, 2.0]")
+        if self.layers is None:
+            self.layers = []
+    
+    @property
+    def has_visible_layers(self) -> bool:
+        """Returns True if any layers are visible with non-zero opacity."""
+        if not self.layers:
+            return False
+        return any(
+            layer.visible and layer.opacity > 0.001 
+            for layer in self.layers
+        )
+    
+    @property
+    def layer_count(self) -> int:
+        """Returns the number of configured overlay layers."""
+        return len(self.layers) if self.layers else 0
+
+
+@dataclass
 class TriplanarSettings:
     """Triplanar texture mapping configuration."""
 
@@ -1103,6 +1204,8 @@ class TerrainRenderParams:
     volumetrics: Optional[VolumetricsSettings] = None
     # M6: Sky settings
     sky: Optional[SkySettings] = None
+    # Overlay system settings (lit texture overlays draped on terrain)
+    overlay: Optional[OverlaySettings] = None
 
     def __post_init__(self) -> None:
         # Default fog to disabled if not provided
@@ -1153,6 +1256,9 @@ class TerrainRenderParams:
         # M6: Default sky to disabled if not provided
         if self.sky is None:
             self.sky = SkySettings()
+        # Default overlay to disabled if not provided
+        if self.overlay is None:
+            self.overlay = OverlaySettings()
         width, height = self.size_px
         if width < 64 or height < 64:
             raise ValueError("size_px must be >= 64x64")
@@ -1308,6 +1414,7 @@ def make_terrain_params_config(
     denoise: Optional[DenoiseSettings] = None,  # M5: Denoise settings
     volumetrics: Optional[VolumetricsSettings] = None,  # M6: Volumetrics settings
     sky: Optional[SkySettings] = None,  # M6: Sky settings
+    overlay: Optional[OverlaySettings] = None,  # Overlay settings (lit texture overlays)
 ) -> TerrainRenderParams:
     light_color = [1.0, 1.0, 1.0]
     if sun_color is not None:
@@ -1452,6 +1559,7 @@ def make_terrain_params_config(
         denoise=denoise,
         volumetrics=volumetrics,
         sky=sky,
+        overlay=overlay,
     )
 
 
@@ -1475,6 +1583,9 @@ __all__ = [
     "DenoiseSettings",
     "VolumetricsSettings",
     "SkySettings",
+    "OverlayBlendMode",
+    "OverlayLayerConfig",
+    "OverlaySettings",
     "TriplanarSettings",
     "PomSettings",
     "LodSettings",

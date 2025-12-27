@@ -6,6 +6,7 @@ use crate::viewer::viewer_enums::{
     ViewerHeightAoConfig, ViewerSunVisConfig,
     ViewerMaterialLayerConfig, ViewerVectorOverlayConfig, ViewerTonemapConfig,
 };
+use super::overlay::OverlayConfig;
 
 /// Configuration for PBR terrain rendering mode
 #[derive(Debug, Clone)]
@@ -44,6 +45,8 @@ pub struct ViewerTerrainPbrConfig {
     pub motion_blur: MotionBlurConfig,
     /// P5: Volumetrics settings
     pub volumetrics: VolumetricsConfig,
+    /// Overlay system settings (lit texture overlays)
+    pub overlay: OverlayConfig,
 }
 
 /// Internal heightfield AO configuration
@@ -302,6 +305,7 @@ impl Default for ViewerTerrainPbrConfig {
             dof: DofConfig::default(),
             motion_blur: MotionBlurConfig::default(),
             volumetrics: VolumetricsConfig::default(),
+            overlay: OverlayConfig::new(),  // DEFAULT OFF per AGENTS.md
         }
     }
 }

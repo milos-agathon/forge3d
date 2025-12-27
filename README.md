@@ -16,7 +16,7 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.7.0 — Interactive viewer post-processing pipeline with depth of field, motion blur, lens effects (distortion/chromatic aberration), and volumetric fog with god rays.
+Current release: 1.8.0 — Draped terrain overlays with full PBR lighting integration, enabling lit and shadowed texture overlays on terrain surfaces.
 
 ## Installation
 
@@ -56,6 +56,16 @@ snap highres_rainier.png 4000x4000
 This workflow demonstrates forge3d's **supersampled snapshot** capability: the viewer runs at interactive resolution (800×800) for real-time exploration, then renders a single frame at 4000×4000 (16 megapixels) for publication-quality output. Because the GPU renders only one high-res frame on demand, you get print-ready imagery without the memory cost of a persistent 4K framebuffer.
 
 ![Mount Rainier High-Resolution Snapshot](assets/highres.png)
+
+## Terrain with Land Cover Overlays
+
+The `swiss_terrain_landcover_viewer.py` example showcases the new **draped overlay system** by rendering a Switzerland DEM with land cover classification data (water, trees, crops, built areas, snow, etc.) overlaid on the terrain. The land cover overlay is automatically resampled to match the DEM resolution and receives full PBR lighting—including sun shading, shadows, and ambient occlusion—because it is blended into the terrain's albedo before lighting calculations. Four high-quality presets (`hq1`–`hq4`) enable everything from standard 4K renders to cinematic shots with depth of field and lens effects.
+
+```bash
+python examples/swiss_terrain_landcover_viewer.py --preset hq4 --snapshot swiss_render.png
+```
+
+![Swiss Terrain with Land Cover Legend](swiss-legend.png)
 
 ## Platform requirements
 

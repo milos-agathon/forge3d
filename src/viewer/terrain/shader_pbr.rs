@@ -19,6 +19,8 @@ struct Uniforms {
     lens_params: vec4<f32>,
     // Screen dimensions for UV calculation
     screen_dims: vec4<f32>,     // width, height, _, _
+    // Overlay params: enabled (>0.5), opacity, blend_mode (0=normal, 1=multiply, 2=overlay), solid (>0.5)
+    overlay_params: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -26,6 +28,9 @@ struct Uniforms {
 @group(0) @binding(2) var height_sampler: sampler;
 @group(0) @binding(3) var height_ao_tex: texture_2d<f32>;
 @group(0) @binding(4) var sun_vis_tex: texture_2d<f32>;
+// Overlay texture and sampler for lit draped overlays
+@group(0) @binding(5) var overlay_tex: texture_2d<f32>;
+@group(0) @binding(6) var overlay_sampler: sampler;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -95,16 +100,16 @@ fn get_material(h_norm: f32, slope: f32) -> vec4<f32> {
     var albedo: vec3<f32>;
     var roughness: f32;
     
-    // Vegetation (low elevation, gentle slopes)
+    // Low elevation - neutral brown/grey terrain (for areas without overlay)
     if h_norm < 0.25 && slope < 0.5 {
-        albedo = vec3<f32>(0.15, 0.35, 0.12); // Dark green grass
-        roughness = 0.85;
+        albedo = vec3<f32>(0.42, 0.38, 0.34); // Neutral grey-brown terrain
+        roughness = 0.7;
     }
-    // Grass to rock transition
+    // Transition to darker rock
     else if h_norm < 0.4 {
         let t = (h_norm - 0.25) / 0.15;
-        albedo = mix(vec3<f32>(0.2, 0.4, 0.15), vec3<f32>(0.4, 0.35, 0.3), t);
-        roughness = mix(0.8, 0.7, t);
+        albedo = mix(vec3<f32>(0.42, 0.38, 0.34), vec3<f32>(0.4, 0.35, 0.3), t);
+        roughness = mix(0.7, 0.7, t);
     }
     // Rocky terrain (mid elevation or steep slopes)
     else if h_norm < 0.7 || slope > 0.6 {
@@ -176,6 +181,47 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if is_water {
         albedo = u.water_color.rgb;
     }
+    
+    // === OVERLAY BLENDING (before lighting, so overlays are lit) ===
+    let overlay_enabled = u.overlay_params.x > 0.5;
+    let overlay_opacity = u.overlay_params.y;
+    let overlay_blend_mode = u.overlay_params.z;
+    let solid_surface = u.overlay_params.w > 0.5;
+    
+    // Sample overlay texture for solid check and blending
+    let overlay = textureSample(overlay_tex, overlay_sampler, in.uv);
+    
+    // When solid=false and overlay is enabled, discard fragments where overlay alpha is 0
+    // This hides the base surface outside the region of interest (like rayshader solid=FALSE)
+    if overlay_enabled && !solid_surface && overlay.a < 0.01 {
+        discard;
+    }
+    
+    if overlay_enabled && overlay_opacity > 0.001 {
+        let blend_alpha = overlay.a * overlay_opacity;
+        
+        if blend_alpha > 0.001 {
+            // Apply blend mode (overlay already sampled above for solid check)
+            if overlay_blend_mode < 0.5 {
+                // Normal blend: mix based on alpha
+                albedo = mix(albedo, overlay.rgb, blend_alpha);
+            } else if overlay_blend_mode < 1.5 {
+                // Multiply blend
+                let multiplied = albedo * overlay.rgb;
+                albedo = mix(albedo, multiplied, blend_alpha);
+            } else {
+                // Overlay blend (Photoshop-style)
+                let base = albedo;
+                var blended: vec3<f32>;
+                // Overlay formula: 2*base*blend if base < 0.5, else 1 - 2*(1-base)*(1-blend)
+                blended.r = select(1.0 - 2.0 * (1.0 - base.r) * (1.0 - overlay.r), 2.0 * base.r * overlay.r, base.r < 0.5);
+                blended.g = select(1.0 - 2.0 * (1.0 - base.g) * (1.0 - overlay.g), 2.0 * base.g * overlay.g, base.g < 0.5);
+                blended.b = select(1.0 - 2.0 * (1.0 - base.b) * (1.0 - overlay.b), 2.0 * base.b * overlay.b, base.b < 0.5);
+                albedo = mix(albedo, blended, blend_alpha);
+            }
+        }
+    }
+    // === END OVERLAY BLENDING ===
     
     // Sun lighting
     let sun_dir = normalize(u.sun_dir.xyz);

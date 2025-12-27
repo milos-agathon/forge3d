@@ -88,6 +88,8 @@ pub struct SamplerConfig {
     pub lod_min: f32,
     /// Maximum LOD level
     pub lod_max: f32,
+    /// Anisotropic filtering level (1 = disabled, 2-16 = enabled)
+    pub anisotropy_clamp: u16,
 }
 
 impl SamplerConfig {
@@ -107,6 +109,7 @@ impl SamplerConfig {
             mipmap_filter,
             lod_min: 0.0,
             lod_max: f32::MAX,
+            anisotropy_clamp: 1,
         }
     }
 
@@ -128,6 +131,7 @@ impl SamplerConfig {
             mipmap_filter,
             lod_min: 0.0,
             lod_max: f32::MAX,
+            anisotropy_clamp: 1,
         }
     }
 
@@ -151,9 +155,15 @@ impl SamplerConfig {
             lod_min_clamp: self.lod_min,
             lod_max_clamp: self.lod_max,
             compare: None,
-            anisotropy_clamp: 1,
+            anisotropy_clamp: self.anisotropy_clamp,
             border_color: None,
         }
+    }
+
+    /// Set anisotropic filtering level (1-16)
+    pub fn with_anisotropy(mut self, level: u16) -> Self {
+        self.anisotropy_clamp = level.clamp(1, 16);
+        self
     }
 
     /// Create wgpu sampler

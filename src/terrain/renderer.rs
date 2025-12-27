@@ -4682,7 +4682,7 @@ impl TerrainScene {
                 pass.set_bind_group(5, &reflection_pass_water_bind_group, &[]);
                 // P7: Vertex count depends on camera mode
                 let vertex_count = if params.camera_mode.to_lowercase() == "mesh" {
-                    let grid_size: u32 = 64;
+                    let grid_size: u32 = 512;
                     6 * (grid_size - 1) * (grid_size - 1)
                 } else {
                     3
@@ -4829,7 +4829,7 @@ impl TerrainScene {
                 // Screen mode: 3 vertices (fullscreen triangle)
                 // Mesh mode: 6 * (grid_size-1)^2 vertices (triangle list for grid mesh)
                 let vertex_count = if params.camera_mode.to_lowercase() == "mesh" {
-                    let grid_size: u32 = 64;
+                    let grid_size: u32 = 512;
                     let quads = (grid_size - 1) * (grid_size - 1);
                     6 * quads // 2 triangles per quad, 3 vertices per triangle
                 } else {
@@ -5404,7 +5404,7 @@ impl TerrainScene {
         // camera_mode_params: (camera_mode, grid_size, unused, unused)
         // camera_mode: 0 = screen (fullscreen triangle), 1 = mesh (perspective grid)
         let camera_mode = if is_mesh_mode { 1.0 } else { 0.0 };
-        let grid_size = 64.0; // 64x64 grid for mesh mode
+        let grid_size = 512.0; // 512x512 grid for mesh mode (increased for better detail)
         uniforms.extend_from_slice(&[camera_mode, grid_size, 0.0, 0.0]);
 
         Ok(uniforms)
@@ -5445,7 +5445,7 @@ impl TerrainScene {
         // camera_mode_params: (camera_mode, grid_size, unused, unused)
         // camera_mode: 0 = screen (fullscreen triangle), 1 = mesh (perspective grid)
         let camera_mode = if is_mesh_mode { 1.0 } else { 0.0 };
-        let grid_size = 64.0; // 64x64 grid for mesh mode
+        let grid_size = 512.0; // 512x512 grid for mesh mode (increased for better detail)
         uniforms.extend_from_slice(&[camera_mode, grid_size, 0.0, 0.0]);
 
         uniforms
@@ -5603,7 +5603,7 @@ impl TerrainScene {
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Create terrain mesh (grid)
-        let grid_resolution = 256u32.min(width.min(height));
+        let grid_resolution = 4096u32.min(width.min(height));
         let (vertex_buffer, index_buffer, index_count) =
             self.create_terrain_mesh(grid_resolution)?;
 

@@ -4,6 +4,7 @@
 
 mod dof;
 mod motion_blur;
+pub mod overlay;
 mod pbr_renderer;
 mod post_process;
 mod render;
@@ -13,5 +14,8 @@ mod shader_pbr;
 mod volumetrics;
 
 #[allow(unused_imports)]
+pub use overlay::{OverlayStack, OverlayLayer, OverlayData, BlendMode, OverlayConfig};
+#[allow(unused_imports)]
 pub use pbr_renderer::ViewerTerrainPbrConfig;
 pub use scene::ViewerTerrainScene;
+

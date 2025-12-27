@@ -78,6 +78,8 @@ pub struct ViewerTerrainScene {
     // P5: Volumetrics pass
     pub(super) volumetrics_pass: Option<super::volumetrics::VolumetricsPass>,
     pub(super) surface_format: wgpu::TextureFormat,
+    // Overlay layer stack for lit draped overlays
+    pub overlay_stack: Option<super::overlay::OverlayStack>,
 }
 
 impl ViewerTerrainScene {
@@ -213,6 +215,7 @@ impl ViewerTerrainScene {
             motion_blur_pass: None,
             volumetrics_pass: None,
             surface_format: target_format,
+            overlay_stack: None,
         })
     }
     
@@ -311,6 +314,24 @@ impl ViewerTerrainScene {
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
+                    count: None,
+                },
+                // Overlay texture (RGBA8, filterable)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Overlay sampler (filterable)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
@@ -531,7 +552,7 @@ impl ViewerTerrainScene {
         let (width, height) = decoder.dimensions()?;
         let image = decoder.read_image()?;
 
-        let heightmap: Vec<f32> = match image {
+        let mut heightmap: Vec<f32> = match image {
             tiff::decoder::DecodingResult::F32(data) => data,
             tiff::decoder::DecodingResult::F64(data) => data.iter().map(|&v| v as f32).collect(),
             tiff::decoder::DecodingResult::I16(data) => data.iter().map(|&v| v as f32).collect(),
@@ -555,6 +576,14 @@ impl ViewerTerrainScene {
         // Debug: print height range to diagnose flat terrain issue
         let h_range = max_h - min_h;
         println!("[terrain] Height range: {:.1} to {:.1} (range: {:.1})", min_h, max_h, h_range);
+        
+        // Replace NoData values with min_h to prevent edge artifacts
+        // NoData values are typically: NaN, Inf, < -1000, > 10000
+        for h in heightmap.iter_mut() {
+            if !h.is_finite() || *h < -1000.0 || *h > 10000.0 {
+                *h = min_h;
+            }
+        }
 
         let heightmap_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("terrain_viewer.heightmap"),
@@ -592,7 +621,7 @@ impl ViewerTerrainScene {
         );
 
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let grid_res = 1024u32.min(width.min(height));
+        let grid_res = 4096u32.min(width.min(height));
         let (vertices, indices) = create_grid_mesh(grid_res);
 
         let vertex_buffer = self
@@ -742,6 +771,152 @@ impl ViewerTerrainScene {
             t.cam_theta_deg = (t.cam_theta_deg - forward * 2.0).clamp(5.0, 85.0);
             t.cam_radius = (t.cam_radius * (1.0 - up * 0.02)).clamp(100.0, 50000.0);
         }
+    }
+
+    // === OVERLAY MANAGEMENT API ===
+    
+    /// Initialize the overlay stack if not already initialized
+    fn ensure_overlay_stack(&mut self) {
+        if self.overlay_stack.is_none() {
+            self.overlay_stack = Some(super::overlay::OverlayStack::new(
+                self.device.clone(),
+                self.queue.clone(),
+            ));
+        }
+    }
+    
+    /// Add an overlay layer from raw RGBA data. Returns layer ID.
+    pub fn add_overlay_raster(
+        &mut self,
+        name: &str,
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+        extent: Option<[f32; 4]>,
+        opacity: f32,
+        blend_mode: super::overlay::BlendMode,
+        z_order: i32,
+    ) -> u32 {
+        self.ensure_overlay_stack();
+        if let Some(ref mut stack) = self.overlay_stack {
+            // Build composite at terrain resolution
+            if let Some(ref terrain) = self.terrain {
+                stack.build_composite(terrain.dimensions.0, terrain.dimensions.1);
+            }
+            let id = stack.add_raster(name, rgba, width, height, extent, opacity, blend_mode, z_order);
+            // Rebuild composite after adding layer
+            if let Some(ref terrain) = self.terrain {
+                stack.build_composite(terrain.dimensions.0, terrain.dimensions.1);
+            }
+            // Enable overlay system in config
+            self.pbr_config.overlay.enabled = true;
+            id
+        } else {
+            0
+        }
+    }
+    
+    /// Add an overlay layer from an image file. Returns layer ID or error.
+    pub fn add_overlay_image(
+        &mut self,
+        name: &str,
+        path: &std::path::Path,
+        extent: Option<[f32; 4]>,
+        opacity: f32,
+        blend_mode: super::overlay::BlendMode,
+        z_order: i32,
+    ) -> Result<u32> {
+        self.ensure_overlay_stack();
+        if let Some(ref mut stack) = self.overlay_stack {
+            let id = stack.add_image(name, path, extent, opacity, blend_mode, z_order)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            // Rebuild composite after adding layer
+            if let Some(ref terrain) = self.terrain {
+                stack.build_composite(terrain.dimensions.0, terrain.dimensions.1);
+            }
+            // Enable overlay system in config
+            self.pbr_config.overlay.enabled = true;
+            Ok(id)
+        } else {
+            Err(anyhow::anyhow!("Overlay stack not initialized"))
+        }
+    }
+    
+    /// Remove an overlay by ID. Returns true if found and removed.
+    pub fn remove_overlay(&mut self, id: u32) -> bool {
+        if let Some(ref mut stack) = self.overlay_stack {
+            let removed = stack.remove(id);
+            if removed {
+                // Rebuild composite after removing layer
+                if let Some(ref terrain) = self.terrain {
+                    stack.build_composite(terrain.dimensions.0, terrain.dimensions.1);
+                }
+                // Disable overlay system if no visible layers
+                if !stack.has_visible_layers() {
+                    self.pbr_config.overlay.enabled = false;
+                }
+            }
+            removed
+        } else {
+            false
+        }
+    }
+    
+    /// Set overlay visibility
+    pub fn set_overlay_visible(&mut self, id: u32, visible: bool) {
+        if let Some(ref mut stack) = self.overlay_stack {
+            stack.set_visible(id, visible);
+            // Rebuild composite
+            if let Some(ref terrain) = self.terrain {
+                stack.build_composite(terrain.dimensions.0, terrain.dimensions.1);
+            }
+            // Update enabled state
+            self.pbr_config.overlay.enabled = stack.has_visible_layers();
+        }
+    }
+    
+    /// Set overlay opacity (0.0 - 1.0)
+    pub fn set_overlay_opacity(&mut self, id: u32, opacity: f32) {
+        if let Some(ref mut stack) = self.overlay_stack {
+            stack.set_opacity(id, opacity);
+            // Rebuild composite
+            if let Some(ref terrain) = self.terrain {
+                stack.build_composite(terrain.dimensions.0, terrain.dimensions.1);
+            }
+        }
+    }
+    
+    /// Get list of all overlay IDs in z-order
+    pub fn list_overlays(&self) -> Vec<u32> {
+        if let Some(ref stack) = self.overlay_stack {
+            stack.list_ids()
+        } else {
+            Vec::new()
+        }
+    }
+    
+    /// Get number of overlay layers
+    pub fn overlay_count(&self) -> usize {
+        if let Some(ref stack) = self.overlay_stack {
+            stack.len()
+        } else {
+            0
+        }
+    }
+    
+    /// Set global overlay opacity multiplier (0.0 - 1.0)
+    pub fn set_global_overlay_opacity(&mut self, opacity: f32) {
+        self.pbr_config.overlay.global_opacity = opacity.clamp(0.0, 1.0);
+    }
+    
+    /// Enable or disable the overlay system
+    pub fn set_overlays_enabled(&mut self, enabled: bool) {
+        self.pbr_config.overlay.enabled = enabled;
+    }
+    
+    /// Set overlay solid surface mode (true=show base surface, false=hide where alpha=0)
+    pub fn set_overlay_solid(&mut self, solid: bool) {
+        self.pbr_config.overlay.solid = solid;
     }
 
     // ensure_depth and render moved to terrain/render.rs

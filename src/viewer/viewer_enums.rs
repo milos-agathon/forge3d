@@ -238,6 +238,48 @@ pub enum ViewerCmd {
         /// M6: Sky settings
         sky: Option<ViewerSkyConfig>,
     },
+    /// Load an overlay texture from an image file
+    LoadOverlay {
+        /// Unique name for this overlay layer
+        name: String,
+        /// Path to image file (PNG, JPEG, etc.)
+        path: String,
+        /// Extent in terrain UV space: [u_min, v_min, u_max, v_max]
+        /// None means full terrain coverage [0, 0, 1, 1]
+        extent: Option<[f32; 4]>,
+        /// Opacity (0.0 - 1.0)
+        opacity: Option<f32>,
+        /// Z-order for stacking (lower = behind)
+        z_order: Option<i32>,
+    },
+    /// Remove an overlay by ID
+    RemoveOverlay {
+        id: u32,
+    },
+    /// Set overlay visibility
+    SetOverlayVisible {
+        id: u32,
+        visible: bool,
+    },
+    /// Set overlay opacity (0.0 - 1.0)
+    SetOverlayOpacity {
+        id: u32,
+        opacity: f32,
+    },
+    /// Set global overlay opacity multiplier (0.0 - 1.0)
+    SetGlobalOverlayOpacity {
+        opacity: f32,
+    },
+    /// Enable or disable overlays
+    SetOverlaysEnabled {
+        enabled: bool,
+    },
+    /// Set overlay solid surface mode (true=show base surface, false=hide where alpha=0)
+    SetOverlaySolid {
+        solid: bool,
+    },
+    /// List all overlay IDs
+    ListOverlays,
 }
 
 /// Heightfield ray-traced AO configuration for viewer

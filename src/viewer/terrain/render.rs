@@ -55,6 +55,7 @@ pub(super) struct TerrainPbrUniforms {
     pub camera_pos: [f32; 4],   // camera world position
     pub lens_params: [f32; 4],  // vignette_strength, vignette_radius, vignette_softness, _
     pub screen_dims: [f32; 4],  // width, height, _, _
+    pub overlay_params: [f32; 4], // enabled (>0.5), opacity, blend_mode (0=normal, 1=multiply, 2=overlay), solid (>0.5)
 }
 
 impl ViewerTerrainScene {
@@ -298,7 +299,14 @@ impl ViewerTerrainScene {
                     0.0,
                 ],
                 screen_dims: [width as f32, height as f32, 0.0, 0.0],
+                overlay_params: [
+                    if self.pbr_config.overlay.enabled { 1.0 } else { 0.0 },
+                    self.pbr_config.overlay.global_opacity,
+                    0.0,  // Blend mode: 0 = Normal
+                    if self.pbr_config.overlay.solid { 1.0 } else { 0.0 },
+                ],
             };
+            
             self.prepare_pbr_bind_group_internal(&pbr_uniforms);
         }
 
@@ -693,6 +701,12 @@ impl ViewerTerrainScene {
                     0.0,
                 ],
                 screen_dims: [width as f32, height as f32, 0.0, 0.0],
+                overlay_params: [
+                    if self.pbr_config.overlay.enabled { 1.0 } else { 0.0 },
+                    self.pbr_config.overlay.global_opacity,
+                    0.0,  // Blend mode: 0 = Normal
+                    if self.pbr_config.overlay.solid { 1.0 } else { 0.0 },
+                ],
             };
             self.prepare_pbr_bind_group_internal(&pbr_uniforms);
         }
@@ -1342,12 +1356,36 @@ impl ViewerTerrainScene {
             ..Default::default()
         });
 
+        // Ensure overlay stack exists with fallback texture BEFORE borrowing other fields
+        if self.overlay_stack.is_none() {
+            self.overlay_stack = Some(super::overlay::OverlayStack::new(
+                self.device.clone(),
+                self.queue.clone(),
+            ));
+        }
+        // Rebuild overlay composite if dirty, then ensure fallback exists
+        if let Some(ref mut stack) = self.overlay_stack {
+            if stack.is_dirty() {
+                if let Some(ref terrain) = self.terrain {
+                    stack.build_composite(terrain.dimensions.0, terrain.dimensions.1);
+                }
+            }
+            stack.ensure_fallback_texture();
+        }
+
         // Now borrow everything we need
         let layout = self.pbr_bind_group_layout.as_ref().unwrap();
         let terrain = self.terrain.as_ref().unwrap();
         let fallback_view = self.fallback_texture_view.as_ref().unwrap();
         let ao_view = self.height_ao_view.as_ref().unwrap_or(fallback_view);
         let sv_view = self.sun_vis_view.as_ref().unwrap_or(fallback_view);
+        
+        // Get overlay view and sampler from stack
+        // ensure_fallback_texture() guarantees composite_view is Some (either actual composite or RGBA fallback)
+        let overlay_stack = self.overlay_stack.as_ref().unwrap();
+        let overlay_view = overlay_stack.composite_view()
+            .expect("overlay composite_view should exist after ensure_fallback_texture");
+        let overlay_sampler = overlay_stack.sampler();
         
         if let Some(ref buf) = self.pbr_uniform_buffer {
             self.pbr_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1373,6 +1411,14 @@ impl ViewerTerrainScene {
                     wgpu::BindGroupEntry {
                         binding: 4,
                         resource: wgpu::BindingResource::TextureView(sv_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::TextureView(overlay_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Sampler(overlay_sampler),
                     },
                 ],
             }));

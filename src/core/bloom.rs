@@ -59,6 +59,7 @@ struct BloomBlurUniforms {
 /// Uniform data for bloom composite pass
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[allow(dead_code)]
 struct BloomCompositeUniforms {
     intensity: f32,
     _pad: [f32; 3],

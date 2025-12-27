@@ -8,6 +8,39 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ### Added
 
+## [1.8.0] - Draped Terrain Overlays
+
+### Added
+- **Draped Terrain Overlays (Option A)** — Full implementation of terrain overlay system with lit/shadowed texture overlays
+  - Overlay textures sampled in terrain UV space and blended into albedo before lighting
+  - Overlays receive full PBR lighting: sun diffuse, shadows, ambient occlusion
+  - Multiple overlay layers with deterministic stacking order (z_order)
+  - Three blend modes: Normal (alpha blend), Multiply (darken), Overlay (Photoshop-style contrast)
+  - Per-layer opacity, visibility, and extent controls
+  - Global overlay opacity multiplier for quick adjustments
+  - Overlay system disabled by default (existing behavior preserved)
+  - GPU resources: Per-layer textures + composite texture (Rgba8UnormSrgb)
+  - Memory budget: ~80 MB for 4 layers at 2k resolution (well within 512 MiB limit)
+  - **Rust API**: `add_overlay_raster()`, `add_overlay_image()`, `remove_overlay()`, `set_overlay_visible()`, `set_overlay_opacity()`, `list_overlays()`, `overlay_count()`, `set_global_overlay_opacity()`, `set_overlays_enabled()`
+  - **IPC Commands**: `load_overlay`, `remove_overlay`, `set_overlay_visible`, `set_overlay_opacity`, `set_global_overlay_opacity`, `set_overlays_enabled`, `list_overlays`
+  - **Python API**: `OverlaySettings`, `OverlayLayerConfig`, `OverlayBlendMode` in `terrain_params.py`
+
+- **Swiss Terrain Land Cover Viewer Example** (`examples/swiss_terrain_landcover_viewer.py`)
+  - Interactive 3D viewer for Switzerland DEM with land cover classification overlay
+  - Land cover resampled to match DEM resolution via rasterio/GDAL
+  - EPSG:3035 (LAEA Europe) projection support
+  - Four high-quality snapshot presets (hq1-hq4) with varying effects
+  - Automatic legend generation with transparent background
+  - Demonstrates draped overlay integration with full PBR lighting
+
+### Documentation
+- Added `docs/terrain_overlays.rst` — User guide for overlay system
+- Updated `docs/plan_overlays_option_a_draped_textures.md` — Full implementation plan
+
+### Fixed
+- Removed unused import warning for `ViewerTerrainPbrConfig` in terrain module
+- Suppressed dead code warning for `BloomCompositeUniforms` (reserved for future bloom composite pass)
+
 ## [1.7.0] - Interactive Viewer Post-Processing Pipeline
 
 ### Added

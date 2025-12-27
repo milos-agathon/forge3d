@@ -1135,6 +1135,78 @@ impl Viewer {
                     }
                 }
             }
+            // Overlay commands
+            ViewerCmd::LoadOverlay { name, path, extent, opacity, z_order } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    use std::path::Path;
+                    let opacity_val = opacity.unwrap_or(1.0);
+                    let z_order_val = z_order.unwrap_or(0);
+                    match tv.add_overlay_image(
+                        &name,
+                        Path::new(&path),
+                        extent,
+                        opacity_val,
+                        crate::viewer::terrain::BlendMode::Normal,
+                        z_order_val,
+                    ) {
+                        Ok(id) => println!("[overlay] Loaded '{}' from {} (id={})", name, path, id),
+                        Err(e) => eprintln!("[overlay] Failed to load '{}': {}", name, e),
+                    }
+                } else {
+                    eprintln!("[overlay] No terrain loaded - load terrain first");
+                }
+            }
+            ViewerCmd::RemoveOverlay { id } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    if tv.remove_overlay(id) {
+                        println!("[overlay] Removed overlay id={}", id);
+                    } else {
+                        eprintln!("[overlay] Overlay id={} not found", id);
+                    }
+                }
+            }
+            ViewerCmd::SetOverlayVisible { id, visible } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    tv.set_overlay_visible(id, visible);
+                    println!("[overlay] id={} visible={}", id, visible);
+                }
+            }
+            ViewerCmd::SetOverlayOpacity { id, opacity } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    tv.set_overlay_opacity(id, opacity);
+                    println!("[overlay] id={} opacity={:.2}", id, opacity);
+                }
+            }
+            ViewerCmd::SetGlobalOverlayOpacity { opacity } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    tv.set_global_overlay_opacity(opacity);
+                    println!("[overlay] global opacity={:.2}", opacity);
+                }
+            }
+            ViewerCmd::SetOverlaysEnabled { enabled } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    tv.set_overlays_enabled(enabled);
+                    println!("[overlay] enabled={}", enabled);
+                }
+            }
+            ViewerCmd::SetOverlaySolid { solid } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    tv.set_overlay_solid(solid);
+                    println!("[overlay] solid={}", solid);
+                }
+            }
+            ViewerCmd::ListOverlays => {
+                if let Some(ref tv) = self.terrain_viewer {
+                    let ids = tv.list_overlays();
+                    if ids.is_empty() {
+                        println!("[overlay] No overlays loaded");
+                    } else {
+                        println!("[overlay] Loaded overlays: {:?}", ids);
+                    }
+                } else {
+                    println!("[overlay] No terrain loaded");
+                }
+            }
         }
     }
 }
