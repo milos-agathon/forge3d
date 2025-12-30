@@ -1207,6 +1207,97 @@ impl Viewer {
                     println!("[overlay] No terrain loaded");
                 }
             }
+            
+            // === OPTION B: VECTOR OVERLAY GEOMETRY COMMANDS ===
+            ViewerCmd::AddVectorOverlay {
+                name,
+                vertices,
+                indices,
+                primitive,
+                drape,
+                drape_offset,
+                opacity,
+                depth_bias,
+                line_width,
+                point_size,
+                z_order,
+            } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    use crate::viewer::terrain::vector_overlay::{VectorOverlayLayer, VectorVertex, OverlayPrimitive};
+                    
+                    // Convert vertices from [x, y, z, r, g, b, a] to VectorVertex
+                    let verts: Vec<VectorVertex> = vertices.iter().map(|v| {
+                        VectorVertex::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6])
+                    }).collect();
+                    
+                    let prim = OverlayPrimitive::from_str(&primitive).unwrap_or(OverlayPrimitive::Triangles);
+                    
+                    let layer = VectorOverlayLayer {
+                        name: name.clone(),
+                        vertices: verts,
+                        indices: indices.clone(),
+                        primitive: prim,
+                        drape,
+                        drape_offset,
+                        opacity,
+                        depth_bias,
+                        line_width,
+                        point_size,
+                        visible: true,
+                        z_order,
+                    };
+                    
+                    let id = tv.add_vector_overlay(layer);
+                    println!("[vector_overlay] Added '{}' with {} vertices (id={})", name, vertices.len(), id);
+                } else {
+                    eprintln!("[vector_overlay] No terrain loaded - load terrain first");
+                }
+            }
+            ViewerCmd::RemoveVectorOverlay { id } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    if tv.remove_vector_overlay(id) {
+                        println!("[vector_overlay] Removed id={}", id);
+                    } else {
+                        eprintln!("[vector_overlay] id={} not found", id);
+                    }
+                }
+            }
+            ViewerCmd::SetVectorOverlayVisible { id, visible } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    tv.set_vector_overlay_visible(id, visible);
+                    println!("[vector_overlay] id={} visible={}", id, visible);
+                }
+            }
+            ViewerCmd::SetVectorOverlayOpacity { id, opacity } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    tv.set_vector_overlay_opacity(id, opacity);
+                    println!("[vector_overlay] id={} opacity={:.2}", id, opacity);
+                }
+            }
+            ViewerCmd::ListVectorOverlays => {
+                if let Some(ref tv) = self.terrain_viewer {
+                    let ids = tv.list_vector_overlays();
+                    if ids.is_empty() {
+                        println!("[vector_overlay] No vector overlays loaded");
+                    } else {
+                        println!("[vector_overlay] Loaded: {:?}", ids);
+                    }
+                } else {
+                    println!("[vector_overlay] No terrain loaded");
+                }
+            }
+            ViewerCmd::SetVectorOverlaysEnabled { enabled } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    tv.set_vector_overlays_enabled(enabled);
+                    println!("[vector_overlay] enabled={}", enabled);
+                }
+            }
+            ViewerCmd::SetGlobalVectorOverlayOpacity { opacity } => {
+                if let Some(ref mut tv) = self.terrain_viewer {
+                    tv.set_global_vector_overlay_opacity(opacity);
+                    println!("[vector_overlay] global opacity={:.2}", opacity);
+                }
+            }
         }
     }
 }

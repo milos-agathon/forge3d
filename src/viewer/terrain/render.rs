@@ -345,6 +345,70 @@ impl ViewerTerrainScene {
         let terrain = self.terrain.as_ref().unwrap();
         let depth_view = self.depth_view.as_ref().unwrap();
         let bg = &terrain.background_color;
+        
+        // Option B: Prepare vector overlay stack if it has visible layers
+        let has_vector_overlays = if let Some(ref stack) = self.vector_overlay_stack {
+            stack.is_enabled() && stack.visible_layer_count() > 0
+        } else {
+            false
+        };
+        
+        if has_vector_overlays {
+            // Ensure we have a fallback texture for when sun visibility isn't enabled
+            if self.fallback_texture.is_none() {
+                let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("vector_overlay_fallback_texture"),
+                    size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R32Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                // Initialize to 1.0 (full visibility / no shadow)
+                self.queue.write_texture(
+                    wgpu::ImageCopyTexture {
+                        texture: &texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    bytemuck::cast_slice(&[1.0f32]),
+                    wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4),
+                        rows_per_image: Some(1),
+                    },
+                    wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                );
+                self.fallback_texture_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+                self.fallback_texture = Some(texture);
+            }
+            
+            // Initialize vector overlay pipelines if not yet done
+            if let Some(ref mut stack) = self.vector_overlay_stack {
+                if !stack.pipelines_ready() {
+                    stack.init_pipelines(self.surface_format);
+                }
+                
+                // Prepare bind group with sun visibility texture or fallback
+                let texture_view = self.sun_vis_view.as_ref()
+                    .or(self.fallback_texture_view.as_ref())
+                    .unwrap();
+                stack.prepare_bind_group(texture_view);
+            }
+        }
+        
+        // Store values needed for vector overlay rendering
+        let vo_view_proj = view_proj.to_cols_array_2d();
+        let vo_sun_dir = [sun_dir.x, sun_dir.y, sun_dir.z];
+        let vo_lighting = [
+            terrain.sun_intensity,
+            terrain.ambient,
+            terrain.shadow_intensity,
+            terrain_width,
+        ];
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain_viewer.render_pass"),
@@ -392,6 +456,18 @@ impl ViewerTerrainScene {
             pass.set_vertex_buffer(0, terrain.vertex_buffer.slice(..));
             pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..terrain.index_count, 0, 0..1);
+            
+            // Option B: Render vector overlays after terrain
+            if has_vector_overlays {
+                if let Some(ref stack) = self.vector_overlay_stack {
+                    if stack.pipelines_ready() && stack.bind_group.is_some() {
+                        let layer_count = stack.visible_layer_count();
+                        for i in 0..layer_count {
+                            stack.render_layer(&mut pass, i, vo_view_proj, vo_sun_dir, vo_lighting);
+                        }
+                    }
+                }
+            }
         }
         
         // P5: Apply volumetrics pass if enabled (after main render, before DoF)
@@ -714,6 +790,72 @@ impl ViewerTerrainScene {
         // Run compute passes
         self.dispatch_heightfield_compute(encoder, terrain_width, sun_dir);
 
+        // Option B: Prepare vector overlay stack if it has visible layers (for snapshot path)
+        let has_vector_overlays = if let Some(ref stack) = self.vector_overlay_stack {
+            stack.is_enabled() && stack.visible_layer_count() > 0
+        } else {
+            false
+        };
+        
+        if has_vector_overlays {
+            // Ensure we have a fallback texture for when sun visibility isn't enabled
+            if self.fallback_texture.is_none() {
+                let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("vector_overlay_fallback_texture_snapshot"),
+                    size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R32Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                // Initialize to 1.0 (full visibility / no shadow)
+                self.queue.write_texture(
+                    wgpu::ImageCopyTexture {
+                        texture: &texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    bytemuck::cast_slice(&[1.0f32]),
+                    wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4),
+                        rows_per_image: Some(1),
+                    },
+                    wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                );
+                self.fallback_texture_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+                self.fallback_texture = Some(texture);
+            }
+            
+            // Initialize vector overlay pipelines if not yet done
+            if let Some(ref mut stack) = self.vector_overlay_stack {
+                if !stack.pipelines_ready() {
+                    stack.init_pipelines(self.surface_format);
+                }
+                
+                // Prepare bind group with sun visibility texture or fallback
+                let texture_view = self.sun_vis_view.as_ref()
+                    .or(self.fallback_texture_view.as_ref())
+                    .unwrap();
+                stack.prepare_bind_group(texture_view);
+            }
+        }
+        
+        // Store values needed for vector overlay rendering
+        let vo_view_proj = view_proj.to_cols_array_2d();
+        let vo_sun_dir = [sun_dir.x, sun_dir.y, sun_dir.z];
+        let terrain = self.terrain.as_ref().unwrap();
+        let vo_lighting = [
+            terrain.sun_intensity,
+            terrain.ambient,
+            terrain.shadow_intensity,
+            terrain_width,
+        ];
+        let _ = terrain; // Release borrow for render pass
+
         // Render to offscreen texture
         {
             let terrain = self.terrain.as_ref().unwrap();
@@ -760,6 +902,18 @@ impl ViewerTerrainScene {
             pass.set_vertex_buffer(0, terrain.vertex_buffer.slice(..));
             pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..terrain.index_count, 0, 0..1);
+            
+            // Option B: Render vector overlays after terrain (snapshot path)
+            if has_vector_overlays {
+                if let Some(ref stack) = self.vector_overlay_stack {
+                    if stack.pipelines_ready() && stack.bind_group.is_some() {
+                        let layer_count = stack.visible_layer_count();
+                        for i in 0..layer_count {
+                            stack.render_layer(&mut pass, i, vo_view_proj, vo_sun_dir, vo_lighting);
+                        }
+                    }
+                }
+            }
         }
 
         let mut out_tex = color_tex;

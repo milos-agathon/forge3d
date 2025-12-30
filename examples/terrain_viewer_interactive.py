@@ -288,6 +288,31 @@ def main() -> int:
     dn_group.add_argument("--denoise-sigma-color", type=float, default=0.1,
                           help="Color similarity weight (default: 0.1)")
     
+    # Option B: Vector Overlay Geometry options
+    vo_group = parser.add_argument_group("Vector Overlay (Option B)", "GPU-rendered vector overlays draped on terrain")
+    vo_group.add_argument("--vector-overlay", type=str, default=None, metavar="PATH",
+                          help="Path to vector file (.gpkg, .geojson, .shp) for overlay")
+    vo_group.add_argument("--vo-drape", action="store_true", default=True,
+                          help="Drape vector geometry onto terrain surface (default: on)")
+    vo_group.add_argument("--no-vo-drape", action="store_false", dest="vo_drape",
+                          help="Don't drape - use original Z coordinates")
+    vo_group.add_argument("--vo-drape-offset", type=float, default=2.0,
+                          help="Height above terrain when draped (default: 2.0)")
+    vo_group.add_argument("--vo-line-width", type=float, default=3.0,
+                          help="Line width in pixels (default: 3.0)")
+    vo_group.add_argument("--vo-point-size", type=float, default=5.0,
+                          help="Point size in pixels (default: 5.0)")
+    vo_group.add_argument("--vo-depth-bias", type=float, default=0.1,
+                          help="Depth bias for z-fighting prevention (default: 0.1)")
+    vo_group.add_argument("--vo-opacity", type=float, default=1.0,
+                          help="Overlay opacity [0.0-1.0] (default: 1.0)")
+    vo_group.add_argument("--vo-color", type=float, nargs=4, default=[0.9, 0.3, 0.1, 1.0],
+                          metavar=("R", "G", "B", "A"), help="Line/point color RGBA (default: red-orange)")
+    vo_group.add_argument("--vo-enabled", action="store_true", default=True,
+                          help="Enable vector overlay rendering (default: on)")
+    vo_group.add_argument("--no-vo-enabled", action="store_false", dest="vo_enabled",
+                          help="Disable vector overlay rendering")
+    
     # M6: Volumetrics options
     vol_group = parser.add_argument_group("Volumetrics (M6)", "Volumetric fog and light shafts")
     vol_group.add_argument("--volumetrics", action="store_true",

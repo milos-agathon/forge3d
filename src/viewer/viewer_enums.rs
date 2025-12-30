@@ -280,6 +280,58 @@ pub enum ViewerCmd {
     },
     /// List all overlay IDs
     ListOverlays,
+    
+    // === OPTION B: VECTOR OVERLAY GEOMETRY COMMANDS ===
+    
+    /// Add a vector overlay layer with geometry
+    AddVectorOverlay {
+        /// Unique name for this overlay layer
+        name: String,
+        /// Vertices: list of [x, y, z, r, g, b, a]
+        vertices: Vec<[f32; 7]>,
+        /// Indices for indexed drawing
+        indices: Vec<u32>,
+        /// Primitive type: "points", "lines", "line_strip", "triangles", "triangle_strip"
+        primitive: String,
+        /// Drape onto terrain surface
+        drape: bool,
+        /// Height offset above terrain when draped
+        drape_offset: f32,
+        /// Opacity (0.0 - 1.0)
+        opacity: f32,
+        /// Depth bias for z-fighting prevention
+        depth_bias: f32,
+        /// Line width for line primitives
+        line_width: f32,
+        /// Point size for point primitives
+        point_size: f32,
+        /// Z-order for stacking (lower = behind)
+        z_order: i32,
+    },
+    /// Remove a vector overlay by ID
+    RemoveVectorOverlay {
+        id: u32,
+    },
+    /// Set vector overlay visibility
+    SetVectorOverlayVisible {
+        id: u32,
+        visible: bool,
+    },
+    /// Set vector overlay opacity (0.0 - 1.0)
+    SetVectorOverlayOpacity {
+        id: u32,
+        opacity: f32,
+    },
+    /// List all vector overlay IDs
+    ListVectorOverlays,
+    /// Enable or disable vector overlays
+    SetVectorOverlaysEnabled {
+        enabled: bool,
+    },
+    /// Set global vector overlay opacity multiplier (0.0 - 1.0)
+    SetGlobalVectorOverlayOpacity {
+        opacity: f32,
+    },
 }
 
 /// Heightfield ray-traced AO configuration for viewer

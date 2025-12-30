@@ -11,6 +11,7 @@ mod render;
 mod scene;
 mod shader;
 mod shader_pbr;
+pub mod vector_overlay;
 mod volumetrics;
 
 #[allow(unused_imports)]
@@ -18,4 +19,12 @@ pub use overlay::{OverlayStack, OverlayLayer, OverlayData, BlendMode, OverlayCon
 #[allow(unused_imports)]
 pub use pbr_renderer::ViewerTerrainPbrConfig;
 pub use scene::ViewerTerrainScene;
+
+// Option B: Vector overlay geometry exports
+#[allow(unused_imports)]
+pub use vector_overlay::{
+    VectorOverlayStack, VectorOverlayLayer, VectorVertex, 
+    OverlayPrimitive, VectorOverlayUniforms, VectorOverlayGpu,
+    drape_vertices, VECTOR_OVERLAY_SHADER,
+};
 

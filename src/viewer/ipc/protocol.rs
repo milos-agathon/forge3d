@@ -204,6 +204,43 @@ pub enum IpcRequest {
     },
     /// List all overlay IDs
     ListOverlays,
+    
+    // === OPTION B: VECTOR OVERLAY GEOMETRY REQUESTS ===
+    
+    /// Add a vector overlay layer with geometry
+    AddVectorOverlay {
+        name: String,
+        vertices: Vec<[f32; 7]>,
+        indices: Vec<u32>,
+        #[serde(default = "default_primitive")]
+        primitive: String,
+        #[serde(default)]
+        drape: bool,
+        #[serde(default = "default_drape_offset")]
+        drape_offset: f32,
+        #[serde(default = "default_opacity")]
+        opacity: f32,
+        #[serde(default = "default_depth_bias")]
+        depth_bias: f32,
+        #[serde(default = "default_line_width")]
+        line_width: f32,
+        #[serde(default = "default_point_size")]
+        point_size: f32,
+        #[serde(default)]
+        z_order: i32,
+    },
+    /// Remove a vector overlay by ID
+    RemoveVectorOverlay { id: u32 },
+    /// Set vector overlay visibility
+    SetVectorOverlayVisible { id: u32, visible: bool },
+    /// Set vector overlay opacity
+    SetVectorOverlayOpacity { id: u32, opacity: f32 },
+    /// List all vector overlay IDs
+    ListVectorOverlays,
+    /// Enable or disable vector overlays
+    SetVectorOverlaysEnabled { enabled: bool },
+    /// Set global vector overlay opacity multiplier
+    SetGlobalVectorOverlayOpacity { opacity: f32 },
 }
 
 /// Heightfield ray-traced AO configuration (IPC)
@@ -452,6 +489,31 @@ fn default_sun_elevation() -> f32 {
 
 fn default_sun_intensity() -> f32 {
     1.0
+}
+
+// Vector overlay defaults
+fn default_primitive() -> String {
+    "triangles".to_string()
+}
+
+fn default_drape_offset() -> f32 {
+    0.5
+}
+
+fn default_opacity() -> f32 {
+    1.0
+}
+
+fn default_depth_bias() -> f32 {
+    0.1
+}
+
+fn default_line_width() -> f32 {
+    2.0
+}
+
+fn default_point_size() -> f32 {
+    5.0
 }
 
 /// IPC response envelope
@@ -788,5 +850,54 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             Ok(Some(ViewerCmd::SetOverlaySolid { solid: *solid }))
         }
         IpcRequest::ListOverlays => Ok(Some(ViewerCmd::ListOverlays)),
+        
+        // Vector overlay commands
+        IpcRequest::AddVectorOverlay {
+            name,
+            vertices,
+            indices,
+            primitive,
+            drape,
+            drape_offset,
+            opacity,
+            depth_bias,
+            line_width,
+            point_size,
+            z_order,
+        } => Ok(Some(ViewerCmd::AddVectorOverlay {
+            name: name.clone(),
+            vertices: vertices.clone(),
+            indices: indices.clone(),
+            primitive: primitive.clone(),
+            drape: *drape,
+            drape_offset: *drape_offset,
+            opacity: *opacity,
+            depth_bias: *depth_bias,
+            line_width: *line_width,
+            point_size: *point_size,
+            z_order: *z_order,
+        })),
+        IpcRequest::RemoveVectorOverlay { id } => {
+            Ok(Some(ViewerCmd::RemoveVectorOverlay { id: *id }))
+        }
+        IpcRequest::SetVectorOverlayVisible { id, visible } => {
+            Ok(Some(ViewerCmd::SetVectorOverlayVisible {
+                id: *id,
+                visible: *visible,
+            }))
+        }
+        IpcRequest::SetVectorOverlayOpacity { id, opacity } => {
+            Ok(Some(ViewerCmd::SetVectorOverlayOpacity {
+                id: *id,
+                opacity: *opacity,
+            }))
+        }
+        IpcRequest::ListVectorOverlays => Ok(Some(ViewerCmd::ListVectorOverlays)),
+        IpcRequest::SetVectorOverlaysEnabled { enabled } => {
+            Ok(Some(ViewerCmd::SetVectorOverlaysEnabled { enabled: *enabled }))
+        }
+        IpcRequest::SetGlobalVectorOverlayOpacity { opacity } => {
+            Ok(Some(ViewerCmd::SetGlobalVectorOverlayOpacity { opacity: *opacity }))
+        }
     }
 }

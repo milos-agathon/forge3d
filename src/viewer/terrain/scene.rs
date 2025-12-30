@@ -3,6 +3,7 @@
 
 use super::render::TerrainUniforms;
 use super::shader::TERRAIN_SHADER;
+use super::vector_overlay::{VectorOverlayStack, VectorOverlayLayer, VectorVertex, drape_vertices};
 use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -80,6 +81,8 @@ pub struct ViewerTerrainScene {
     pub(super) surface_format: wgpu::TextureFormat,
     // Overlay layer stack for lit draped overlays
     pub overlay_stack: Option<super::overlay::OverlayStack>,
+    // Option B: Vector overlay geometry stack
+    pub vector_overlay_stack: Option<VectorOverlayStack>,
 }
 
 impl ViewerTerrainScene {
@@ -216,6 +219,7 @@ impl ViewerTerrainScene {
             volumetrics_pass: None,
             surface_format: target_format,
             overlay_stack: None,
+            vector_overlay_stack: None,
         })
     }
     
@@ -917,6 +921,139 @@ impl ViewerTerrainScene {
     /// Set overlay solid surface mode (true=show base surface, false=hide where alpha=0)
     pub fn set_overlay_solid(&mut self, solid: bool) {
         self.pbr_config.overlay.solid = solid;
+    }
+
+    // === VECTOR OVERLAY (OPTION B) MANAGEMENT API ===
+    
+    /// Initialize the vector overlay stack if not already initialized
+    fn ensure_vector_overlay_stack(&mut self) {
+        if self.vector_overlay_stack.is_none() {
+            self.vector_overlay_stack = Some(VectorOverlayStack::new(
+                self.device.clone(),
+                self.queue.clone(),
+            ));
+        }
+    }
+    
+    /// Add a vector overlay layer. Returns layer ID.
+    /// If drape is true and terrain is loaded, vertices will be draped onto terrain.
+    pub fn add_vector_overlay(&mut self, mut layer: VectorOverlayLayer) -> u32 {
+        self.ensure_vector_overlay_stack();
+        
+        // If draping requested and terrain is loaded, drape the vertices
+        if layer.drape {
+            if let Some(ref terrain) = self.terrain {
+                let terrain_width = terrain.dimensions.0.max(terrain.dimensions.1) as f32;
+                let height_range = terrain.domain.1 - terrain.domain.0;
+                let height_scale = terrain_width * terrain.z_scale * 0.1 / height_range.max(1.0);
+                
+                drape_vertices(
+                    &mut layer.vertices,
+                    &terrain.heightmap,
+                    terrain.dimensions,
+                    terrain_width,
+                    (0.0, 0.0),  // terrain origin
+                    layer.drape_offset,
+                    height_scale,
+                );
+            }
+        }
+        
+        if let Some(ref mut stack) = self.vector_overlay_stack {
+            stack.add_layer(layer)
+        } else {
+            0
+        }
+    }
+    
+    /// Update vertices for an existing layer (for animation)
+    pub fn update_vector_overlay(&mut self, id: u32, mut vertices: Vec<VectorVertex>, drape: bool, drape_offset: f32) {
+        // If draping requested and terrain is loaded, drape the vertices
+        if drape {
+            if let Some(ref terrain) = self.terrain {
+                let terrain_width = terrain.dimensions.0.max(terrain.dimensions.1) as f32;
+                let height_range = terrain.domain.1 - terrain.domain.0;
+                let height_scale = terrain_width * terrain.z_scale * 0.1 / height_range.max(1.0);
+                
+                drape_vertices(
+                    &mut vertices,
+                    &terrain.heightmap,
+                    terrain.dimensions,
+                    terrain_width,
+                    (0.0, 0.0),
+                    drape_offset,
+                    height_scale,
+                );
+            }
+        }
+        
+        if let Some(ref mut stack) = self.vector_overlay_stack {
+            stack.update_vertices(id, vertices);
+        }
+    }
+    
+    /// Remove a vector overlay by ID. Returns true if found and removed.
+    pub fn remove_vector_overlay(&mut self, id: u32) -> bool {
+        if let Some(ref mut stack) = self.vector_overlay_stack {
+            stack.remove(id)
+        } else {
+            false
+        }
+    }
+    
+    /// Set vector overlay visibility
+    pub fn set_vector_overlay_visible(&mut self, id: u32, visible: bool) {
+        if let Some(ref mut stack) = self.vector_overlay_stack {
+            stack.set_visible(id, visible);
+        }
+    }
+    
+    /// Set vector overlay opacity (0.0 - 1.0)
+    pub fn set_vector_overlay_opacity(&mut self, id: u32, opacity: f32) {
+        if let Some(ref mut stack) = self.vector_overlay_stack {
+            stack.set_opacity(id, opacity);
+        }
+    }
+    
+    /// List all vector overlay IDs in z-order
+    pub fn list_vector_overlays(&self) -> Vec<u32> {
+        if let Some(ref stack) = self.vector_overlay_stack {
+            stack.list_ids()
+        } else {
+            Vec::new()
+        }
+    }
+    
+    /// Get number of vector overlay layers
+    pub fn vector_overlay_count(&self) -> usize {
+        if let Some(ref stack) = self.vector_overlay_stack {
+            stack.len()
+        } else {
+            0
+        }
+    }
+    
+    /// Enable or disable the vector overlay system
+    pub fn set_vector_overlays_enabled(&mut self, enabled: bool) {
+        if let Some(ref mut stack) = self.vector_overlay_stack {
+            stack.set_enabled(enabled);
+        }
+    }
+    
+    /// Set global vector overlay opacity multiplier (0.0 - 1.0)
+    pub fn set_global_vector_overlay_opacity(&mut self, opacity: f32) {
+        if let Some(ref mut stack) = self.vector_overlay_stack {
+            stack.set_global_opacity(opacity);
+        }
+    }
+    
+    /// Check if vector overlays are available
+    pub fn has_vector_overlays(&self) -> bool {
+        if let Some(ref stack) = self.vector_overlay_stack {
+            stack.has_visible_layers()
+        } else {
+            false
+        }
     }
 
     // ensure_depth and render moved to terrain/render.rs
