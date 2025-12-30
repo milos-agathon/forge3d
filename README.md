@@ -44,7 +44,7 @@ cargo build --release --bin interactive_viewer
 5. **Launch the viewer with a high-quality preset**:
 
 ```bash
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --preset high_quality --width 800 --height 800
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --preset high_quality --width 800 --height 800
 ```
 
 6. **Capture a high-resolution snapshot** (type this in the viewer's terminal):
