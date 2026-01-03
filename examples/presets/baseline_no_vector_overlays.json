@@ -1,0 +1,22 @@
+{
+    "description": "Baseline preset with vector overlays disabled (Option B). Use for regression testing to verify existing behavior is unchanged.",
+    "pbr": {
+        "enabled": true,
+        "vector_overlays_enabled": false,
+        "shadow_technique": "pcss",
+        "shadow_map_res": 2048,
+        "exposure": 1.0,
+        "ibl_intensity": 1.0,
+        "normal_strength": 1.0,
+        "msaa": 1
+    },
+    "height_ao": {
+        "enabled": false
+    },
+    "sun_visibility": {
+        "enabled": false
+    },
+    "overlay": {
+        "enabled": false
+    }
+}

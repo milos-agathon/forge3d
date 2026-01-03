@@ -420,7 +420,8 @@ fn compute_terrain_normal(
 /// * `terrain_width` - World-space width of terrain
 /// * `terrain_origin` - World-space origin (x, z) of terrain
 /// * `height_offset` - Offset above terrain surface
-/// * `height_scale` - Scale factor for height values
+/// * `height_min` - Minimum height value in heightmap (for normalization)
+/// * `height_scale` - Scale factor for normalized height values
 pub fn drape_vertices(
     vertices: &mut [VectorVertex],
     heightmap: &[f32],
@@ -428,6 +429,7 @@ pub fn drape_vertices(
     terrain_width: f32,
     terrain_origin: (f32, f32),
     height_offset: f32,
+    height_min: f32,
     height_scale: f32,
 ) {
     if heightmap.is_empty() || dims.0 == 0 || dims.1 == 0 {
@@ -448,8 +450,11 @@ pub fn drape_vertices(
         let u = (x / terrain_width).clamp(0.0, 1.0);
         let vv = (z / terrain_width).clamp(0.0, 1.0);
         
-        // Sample heightmap
-        let terrain_height = sample_heightmap_bilinear(heightmap, dims, u, vv) * height_scale;
+        // Sample heightmap and normalize like the terrain shader does:
+        // world_y = (h - min_h) / h_range * terrain_width * z_scale * 0.001
+        // Here height_scale = terrain_width * z_scale * 0.001 / h_range
+        let h = sample_heightmap_bilinear(heightmap, dims, u, vv);
+        let terrain_height = (h - height_min) * height_scale;
         
         // Set vertex Y to terrain height + offset
         v.position[1] = terrain_height + height_offset;
@@ -526,10 +531,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     // Sample sun visibility for shadow (use world position to compute UV)
     // UV is based on world XZ normalized to [0,1] (terrain goes from 0 to terrain_width)
-    let uv = vec2<f32>(
+    // Clamp to [0,1] to ensure valid texture sampling even for vertices slightly outside bounds
+    let uv = clamp(vec2<f32>(
         (in.world_pos.x / terrain_width),
         (in.world_pos.z / terrain_width)
-    );
+    ), vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
     let sun_vis = textureSampleLevel(sun_vis_tex, sun_vis_sampler, uv, 0.0).r;
     
     // Shadow factor: 1.0 = fully lit, 0.0 = fully shadowed
@@ -610,16 +616,16 @@ impl VectorOverlayStack {
         });
 
         // Common depth stencil state (depth test, no write for overlays)
-
-        // Common depth stencil state (depth test, no write for overlays)
+        // Use LessEqual to be more forgiving with depth precision, and aggressive bias
+        // to ensure overlay is clearly in front of terrain
         let depth_stencil = Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth32Float,
             depth_write_enabled: false,  // Read only - don't write to depth
-            depth_compare: wgpu::CompareFunction::Less,
+            depth_compare: wgpu::CompareFunction::LessEqual,
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState {
-                constant: -2,  // Slight bias towards camera
-                slope_scale: -2.0,
+                constant: -100,  // Strong bias towards camera
+                slope_scale: -10.0,
                 clamp: 0.0,
             },
         });

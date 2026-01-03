@@ -47,6 +47,8 @@ pub struct ViewerTerrainPbrConfig {
     pub volumetrics: VolumetricsConfig,
     /// Overlay system settings (lit texture overlays)
     pub overlay: OverlayConfig,
+    /// Enable vector overlay geometry system (Option B) - default OFF
+    pub vector_overlays_enabled: bool,
 }
 
 /// Internal heightfield AO configuration
@@ -306,6 +308,7 @@ impl Default for ViewerTerrainPbrConfig {
             motion_blur: MotionBlurConfig::default(),
             volumetrics: VolumetricsConfig::default(),
             overlay: OverlayConfig::new(),  // DEFAULT OFF per AGENTS.md
+            vector_overlays_enabled: false, // DEFAULT OFF per plan Section 11
         }
     }
 }

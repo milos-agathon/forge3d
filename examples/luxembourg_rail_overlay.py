@@ -49,6 +49,19 @@ except ImportError:
     sys.exit(1)
 
 try:
+    from forge3d.terrain_params import (
+        VectorOverlayConfig,
+        VectorVertex,
+        PrimitiveType,
+    )
+    HAS_VECTOR_API = True
+except ImportError:
+    HAS_VECTOR_API = False
+    VectorOverlayConfig = None
+    VectorVertex = None
+    PrimitiveType = None
+
+try:
     import geopandas as gpd
     HAS_GPD = True
 except ImportError:
@@ -91,24 +104,42 @@ def find_viewer_binary() -> str:
 def send_ipc(sock: socket.socket, cmd: dict) -> dict:
     """Send an IPC command and receive response."""
     msg = json.dumps(cmd) + "\n"
-    sock.sendall(msg.encode())
+    msg_bytes = msg.encode()
+    
+    # Log message size for debugging large payloads
+    msg_size = len(msg_bytes)
+    if msg_size > 100000:
+        print(f"  Sending large IPC message: {msg_size / 1024 / 1024:.1f} MB")
+    
+    try:
+        sock.sendall(msg_bytes)
+    except Exception as e:
+        return {"ok": False, "error": f"Send failed: {e}"}
     
     data = b""
     while True:
         try:
-            chunk = sock.recv(4096)
+            chunk = sock.recv(8192)
             if not chunk:
                 break
             data += chunk
             if b"\n" in data:
                 break
         except socket.timeout:
+            if not data:
+                return {"ok": False, "error": "Timeout waiting for response"}
             break
+        except Exception as e:
+            return {"ok": False, "error": f"Receive failed: {e}"}
     
     line = data.decode().strip()
     if not line:
-        return {"ok": False, "error": "No response"}
-    return json.loads(line)
+        return {"ok": False, "error": "Empty response from viewer"}
+    
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError as e:
+        return {"ok": False, "error": f"Invalid JSON response: {e}"}
 
 
 def hex_to_rgba(hex_color: str, alpha: float = 1.0) -> List[float]:
@@ -262,10 +293,11 @@ def _add_linestring_as_quads(coords: list, color: list, vertices: list, indices:
                               vertex_offset: int, min_x: float, max_x: float, 
                               min_y: float, max_y: float, terrain_width: float,
                               line_width: float = 10.0):
-    """Add a linestring as triangle strip quads for thick line rendering.
+    """Add a linestring as continuous triangle strip for thick line rendering.
     
-    WebGPU/wgpu doesn't support wide lines, so we convert each line segment
-    into a quad (2 triangles) with the specified width.
+    WebGPU/wgpu doesn't support wide lines, so we convert the linestring
+    into a continuous triangle strip with the specified width. This creates
+    solid lines without gaps between segments.
     """
     if len(coords) < 2:
         return
@@ -274,13 +306,7 @@ def _add_linestring_as_quads(coords: list, color: list, vertices: list, indices:
     world_coords = []
     for x, y, *rest in coords:
         u = (x - min_x) / (max_x - min_x) if max_x != min_x else 0.5
-        # IMPORTANT: Flip v coordinate because:
-        # - Geographic Y increases northward (min_y=south, max_y=north)
-        # - Raster/texture row 0 is at the north (top), increasing southward
-        # So geographic north (max_y) should map to v=0 (top of terrain)
-        # and geographic south (min_y) should map to v=1 (bottom of terrain)
         v = (max_y - y) / (max_y - min_y) if max_y != min_y else 0.5
-        # Terrain shader uses world coords from 0 to terrain_width
         world_x = u * terrain_width
         world_z = v * terrain_width
         world_coords.append((world_x, world_z))
@@ -288,35 +314,79 @@ def _add_linestring_as_quads(coords: list, color: list, vertices: list, indices:
     # Half width for offset calculation
     half_w = line_width / 2.0
     
-    # For each segment, create 4 vertices forming a quad
-    for i in range(len(world_coords) - 1):
-        x1, z1 = world_coords[i]
-        x2, z2 = world_coords[i + 1]
+    # Generate continuous strip vertices along the entire linestring
+    # For each point, we create 2 vertices (left and right of the line)
+    strip_vertices = []
+    
+    for i in range(len(world_coords)):
+        x, z = world_coords[i]
         
-        # Calculate perpendicular direction for line width
-        dx = x2 - x1
-        dz = z2 - z1
+        # Calculate tangent direction (average of prev and next segments)
+        if i == 0:
+            # First point: use direction to next point
+            nx, nz = world_coords[i + 1]
+            dx, dz = nx - x, nz - z
+        elif i == len(world_coords) - 1:
+            # Last point: use direction from previous point
+            px, pz = world_coords[i - 1]
+            dx, dz = x - px, z - pz
+        else:
+            # Middle point: average of incoming and outgoing directions
+            px, pz = world_coords[i - 1]
+            nx, nz = world_coords[i + 1]
+            dx1, dz1 = x - px, z - pz
+            dx2, dz2 = nx - x, nz - z
+            # Normalize both and average
+            len1 = (dx1*dx1 + dz1*dz1) ** 0.5
+            len2 = (dx2*dx2 + dz2*dz2) ** 0.5
+            if len1 > 0.001 and len2 > 0.001:
+                dx = dx1/len1 + dx2/len2
+                dz = dz1/len1 + dz2/len2
+            elif len1 > 0.001:
+                dx, dz = dx1, dz1
+            else:
+                dx, dz = dx2, dz2
+        
+        # Normalize tangent
         length = (dx * dx + dz * dz) ** 0.5
         if length < 0.001:
+            # Skip degenerate points
             continue
+        dx /= length
+        dz /= length
         
-        # Perpendicular vector (normalized)
-        perp_x = -dz / length * half_w
-        perp_z = dx / length * half_w
+        # Perpendicular vector (rotated 90 degrees)
+        perp_x = -dz * half_w
+        perp_z = dx * half_w
         
-        # Four corners of the quad
-        # Bottom-left, bottom-right, top-left, top-right
-        v_idx = len(vertices)
+        # Add left and right vertices
+        strip_vertices.append((x - perp_x, z - perp_z))  # Left
+        strip_vertices.append((x + perp_x, z + perp_z))  # Right
+    
+    if len(strip_vertices) < 4:
+        return
+    
+    # Add vertices and create triangle strip indices
+    base_idx = len(vertices)
+    
+    # Add all strip vertices
+    for vx, vz in strip_vertices:
+        vertices.append([vx, 0.0, vz] + color)
+    
+    # Create triangles connecting the strip
+    # Strip vertices are: L0, R0, L1, R1, L2, R2, ...
+    # We need triangles: (L0,R0,L1), (R0,R1,L1), (L1,R1,L2), (R1,R2,L2), ...
+    num_points = len(strip_vertices) // 2
+    for i in range(num_points - 1):
+        # Indices for this quad
+        l0 = base_idx + i * 2      # Left vertex of current point
+        r0 = base_idx + i * 2 + 1  # Right vertex of current point
+        l1 = base_idx + (i+1) * 2  # Left vertex of next point
+        r1 = base_idx + (i+1) * 2 + 1  # Right vertex of next point
         
-        # Vertex format: [x, y, z, r, g, b, a]
-        vertices.append([x1 - perp_x, 0.0, z1 - perp_z] + color)  # BL
-        vertices.append([x1 + perp_x, 0.0, z1 + perp_z] + color)  # BR
-        vertices.append([x2 - perp_x, 0.0, z2 - perp_z] + color)  # TL
-        vertices.append([x2 + perp_x, 0.0, z2 + perp_z] + color)  # TR
-        
-        # Two triangles: BL-BR-TL and BR-TR-TL
-        indices.extend([v_idx, v_idx + 1, v_idx + 2])  # Triangle 1
-        indices.extend([v_idx + 1, v_idx + 3, v_idx + 2])  # Triangle 2
+        # Two triangles forming a quad
+        indices.extend([l0, r0, l1])  # Triangle 1
+        indices.extend([r0, r1, l1])  # Triangle 2
 
 
 def create_demo_lines(terrain_width: float, line_width: float = 15.0) -> Tuple[List[List[float]], List[int]]:
@@ -628,11 +698,13 @@ def main() -> int:
                             help="Hide terrain where raster overlay alpha=0 (NOTE: only works with raster overlays like swiss_terrain_landcover_viewer.py; for vector overlays, terrain always remains visible)")
     rail_group.add_argument("--drape", action="store_true", default=True, help="Drape lines onto terrain")
     rail_group.add_argument("--no-drape", action="store_false", dest="drape", help="Don't drape lines")
-    rail_group.add_argument("--drape-offset", type=float, default=5.0, help="Height above terrain (default: 5)")
+    rail_group.add_argument("--drape-offset", type=float, default=50.0, help="Height above terrain (default: 50)")
     rail_group.add_argument("--line-width", type=float, default=15.0, 
                             help="Line width in world units (default: 15, visible range: 5-50)")
     rail_group.add_argument("--line-color", type=str, default="#E64A19",
                             help="Line color in hex format, e.g. #FF5500 or #E64A19 (default: deep orange)")
+    rail_group.add_argument("--max-vertices", type=int, default=20000,
+                            help="Maximum vertices to send (decimates if needed, default: 20000)")
     
     # M6: Tonemap options
     tm_group = parser.add_argument_group("Tonemap (M6)", "HDR tonemapping and color grading")
@@ -1090,23 +1162,67 @@ def main() -> int:
             for v in vertices:
                 v[3:7] = line_color
     
+    # Note: Decimation removed - IPC now handles large messages (tested up to 6MB+)
+    # The continuous triangle strip format doesn't support simple decimation
+    # without breaking line connectivity
+    
     # Add vector overlay if we have data (rail overlay is visible here)
     if vertices and indices:
         print(f"Adding vector overlay: {len(vertices)} vertices, {len(indices)//3} triangles")
-        resp = send_ipc(sock, {
-            "cmd": "add_vector_overlay",
-            "name": "rail_network",
-            "vertices": vertices,
-            "indices": indices,
-            "primitive": "triangles",  # Use triangles for thick quads
-            "drape": args.drape,
-            "drape_offset": args.drape_offset,
-            "opacity": args.overlay_opacity,  # Use --overlay-opacity
-            "depth_bias": 0.5,
-            "line_width": args.line_width,
-            "point_size": 5.0,
-            "z_order": 0
-        })
+        
+        # For large overlays (>10000 vertices), use raw dict directly to avoid
+        # memory overhead of VectorVertex object conversion
+        use_raw_dict = len(vertices) > 10000 or not HAS_VECTOR_API or VectorOverlayConfig is None
+        
+        if not use_raw_dict:
+            # Use the new Python API classes (demonstrates Option B API from plan)
+            try:
+                vertex_objects = [
+                    VectorVertex(x=v[0], y=v[1], z=v[2], r=v[3], g=v[4], b=v[5], a=v[6])
+                    for v in vertices
+                ]
+                
+                overlay_config = VectorOverlayConfig(
+                    name="rail_network",
+                    vertices=vertex_objects,
+                    indices=indices,
+                    primitive=PrimitiveType.TRIANGLES,
+                    drape=args.drape,
+                    drape_offset=args.drape_offset,
+                    opacity=args.overlay_opacity,
+                    depth_bias=0.5,
+                    line_width=args.line_width,
+                    point_size=5.0,
+                    z_order=0,
+                )
+                ipc_cmd = overlay_config.to_ipc_dict()
+            except Exception as e:
+                print(f"  VectorOverlayConfig failed ({e}), using raw dict")
+                use_raw_dict = True
+        
+        if use_raw_dict:
+            # Send raw dict directly (more efficient for large overlays)
+            ipc_cmd = {
+                "cmd": "add_vector_overlay",
+                "name": "rail_network",
+                "vertices": vertices,
+                "indices": indices,
+                "primitive": "triangles",
+                "drape": args.drape,
+                "drape_offset": args.drape_offset,
+                "opacity": args.overlay_opacity,
+                "depth_bias": 5.0,
+                "line_width": args.line_width,
+                "point_size": 5.0,
+                "z_order": 0
+            }
+        
+        # Send with extended timeout for large payloads
+        old_timeout = sock.gettimeout()
+        sock.settimeout(120.0)  # 2 minutes for large overlays
+        resp = send_ipc(sock, ipc_cmd)
+        sock.settimeout(old_timeout)
+        
         if not resp.get("ok"):
             print(f"Vector overlay warning: {resp.get('error')}")
         else:

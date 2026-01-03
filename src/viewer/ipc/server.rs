@@ -101,11 +101,19 @@ where
     F: Fn(ViewerCmd) -> Result<(), String>,
     G: Fn() -> ViewerStats,
 {
+    // IMPORTANT: The stream may inherit non-blocking mode from the listener.
+    // We must set it to blocking mode for reliable read_line behavior with large messages.
+    if let Err(e) = stream.set_nonblocking(false) {
+        eprintln!("[IPC] Failed to set blocking mode: {}", e);
+        return;
+    }
+    
     // Set timeouts to prevent blocking forever
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(300)));
     let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(30)));
 
-    let mut reader = BufReader::new(stream.try_clone().expect("Failed to clone stream"));
+    // Use larger buffer for handling large JSON messages (e.g., vector overlays with many vertices)
+    let mut reader = BufReader::with_capacity(4 * 1024 * 1024, stream.try_clone().expect("Failed to clone stream"));
     let mut writer = stream;
 
     let mut line = String::new();
@@ -116,7 +124,12 @@ where
                 // EOF - client closed connection
                 break;
             }
-            Ok(_) => {
+            Ok(n) => {
+                // Debug: log large messages
+                if n > 100000 {
+                    eprintln!("[IPC] Received large message: {} bytes", n);
+                }
+                
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
                     continue;
@@ -124,6 +137,11 @@ where
 
                 let response = match parse_ipc_request(trimmed) {
                     Ok(req) => {
+                        // Debug: log command type for large messages
+                        if line.len() > 100000 {
+                            eprintln!("[IPC] Parsed large request: {:?}", std::mem::discriminant(&req));
+                        }
+                        
                         // Handle GetStats specially - it returns data directly
                         if matches!(req, IpcRequest::GetStats) {
                             IpcResponse::with_stats(stats_getter())
@@ -131,17 +149,26 @@ where
                             match ipc_request_to_viewer_cmd(&req) {
                                 Ok(Some(cmd)) => match cmd_sender(cmd) {
                                     Ok(()) => IpcResponse::success(),
-                                    Err(e) => IpcResponse::error(e),
+                                    Err(e) => {
+                                        eprintln!("[IPC] Command error: {}", e);
+                                        IpcResponse::error(e)
+                                    },
                                 },
                                 Ok(None) => {
                                     // Should not happen - GetStats is handled above
                                     IpcResponse::error("Internal error: unhandled special request")
                                 }
-                                Err(e) => IpcResponse::error(e),
+                                Err(e) => {
+                                    eprintln!("[IPC] Conversion error: {}", e);
+                                    IpcResponse::error(e)
+                                },
                             }
                         }
                     }
-                    Err(e) => IpcResponse::error(e),
+                    Err(e) => {
+                        eprintln!("[IPC] Parse error (msg len={}): {}", trimmed.len(), e);
+                        IpcResponse::error(e)
+                    },
                 };
 
                 let response_json = serde_json::to_string(&response)

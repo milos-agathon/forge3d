@@ -945,7 +945,8 @@ impl ViewerTerrainScene {
             if let Some(ref terrain) = self.terrain {
                 let terrain_width = terrain.dimensions.0.max(terrain.dimensions.1) as f32;
                 let height_range = terrain.domain.1 - terrain.domain.0;
-                let height_scale = terrain_width * terrain.z_scale * 0.1 / height_range.max(1.0);
+                // Match terrain shader formula: world_y = (h - min_h) / h_range * terrain_width * z_scale * 0.001
+                let height_scale = terrain_width * terrain.z_scale * 0.001 / height_range.max(1.0);
                 
                 drape_vertices(
                     &mut layer.vertices,
@@ -954,6 +955,7 @@ impl ViewerTerrainScene {
                     terrain_width,
                     (0.0, 0.0),  // terrain origin
                     layer.drape_offset,
+                    terrain.domain.0,  // height_min for normalization
                     height_scale,
                 );
             }
@@ -973,7 +975,8 @@ impl ViewerTerrainScene {
             if let Some(ref terrain) = self.terrain {
                 let terrain_width = terrain.dimensions.0.max(terrain.dimensions.1) as f32;
                 let height_range = terrain.domain.1 - terrain.domain.0;
-                let height_scale = terrain_width * terrain.z_scale * 0.1 / height_range.max(1.0);
+                // Match terrain shader formula: world_y = (h - min_h) / h_range * terrain_width * z_scale * 0.001
+                let height_scale = terrain_width * terrain.z_scale * 0.001 / height_range.max(1.0);
                 
                 drape_vertices(
                     &mut vertices,
@@ -982,6 +985,7 @@ impl ViewerTerrainScene {
                     terrain_width,
                     (0.0, 0.0),
                     drape_offset,
+                    terrain.domain.0,  // height_min for normalization
                     height_scale,
                 );
             }

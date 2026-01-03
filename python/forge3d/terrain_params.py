@@ -999,6 +999,151 @@ class OverlaySettings:
         return len(self.layers) if self.layers else 0
 
 
+from enum import Enum
+
+
+class PrimitiveType(Enum):
+    """Primitive type for vector overlay geometry."""
+    POINTS = "points"
+    LINES = "lines"
+    LINE_STRIP = "line_strip"
+    TRIANGLES = "triangles"
+    TRIANGLE_STRIP = "triangle_strip"
+
+
+@dataclass
+class VectorVertex:
+    """Single vertex for vector overlay geometry.
+    
+    Vector overlays are GPU geometry (points/lines/polygons) rendered in world space,
+    optionally draped onto terrain heightfield, with proper lighting and shadowing.
+    
+    Attributes:
+        x: World X coordinate
+        y: World Y coordinate (or 0 if draping - will be computed from terrain)
+        z: World Z coordinate
+        r: Red color component (0.0-1.0)
+        g: Green color component (0.0-1.0)
+        b: Blue color component (0.0-1.0)
+        a: Alpha component (0.0-1.0)
+    """
+    x: float
+    y: float
+    z: float
+    r: float = 1.0
+    g: float = 1.0
+    b: float = 1.0
+    a: float = 1.0
+    
+    def __post_init__(self) -> None:
+        for name, val in [("r", self.r), ("g", self.g), ("b", self.b), ("a", self.a)]:
+            if not 0.0 <= val <= 1.0:
+                raise ValueError(f"{name} must be in [0.0, 1.0]")
+    
+    def to_array(self) -> List[float]:
+        """Convert to [x, y, z, r, g, b, a] array for IPC."""
+        return [self.x, self.y, self.z, self.r, self.g, self.b, self.a]
+
+
+@dataclass
+class VectorOverlayConfig:
+    """Configuration for a vector overlay layer.
+    
+    Vector overlays render GPU geometry (points/lines/polygons) in world space,
+    optionally draped onto terrain heightfield, with proper lighting and shadows.
+    
+    The overlay shader uses the same lighting model as terrain:
+    - Diffuse: albedo * sun_color * NdotL * sun_intensity * shadow_term
+    - Shadow lookup: Sample sun_vis_tex at terrain UV for shadow factor
+    - Ambient: albedo * ambient
+    
+    This ensures overlays receive identical lighting and shadows as terrain.
+    
+    Attributes:
+        name: Unique identifier for this overlay layer
+        vertices: List of VectorVertex defining geometry
+        indices: List of indices for indexed drawing
+        primitive: Primitive type (points, lines, triangles, etc.)
+        drape: If True, drape vertices onto terrain surface
+        drape_offset: Height offset above terrain when draped (meters)
+        opacity: Layer opacity (0.0-1.0)
+        depth_bias: Z-fighting prevention offset (0.01-1.0)
+        line_width: Line width (world units for triangle quads, pixels for GPU lines)
+        point_size: Point size (world units for markers, pixels for GPU points)
+        visible: Whether this layer is rendered
+        z_order: Stacking order (lower = behind, higher = in front)
+    
+    Example:
+        # Simple red triangle
+        config = VectorOverlayConfig(
+            name="marker",
+            vertices=[
+                VectorVertex(100, 0, 100, r=1, g=0, b=0),
+                VectorVertex(200, 0, 100, r=0, g=1, b=0),
+                VectorVertex(150, 0, 200, r=0, g=0, b=1),
+            ],
+            indices=[0, 1, 2],
+            primitive=PrimitiveType.TRIANGLES,
+            drape=True,
+            drape_offset=1.0,
+        )
+    """
+    
+    name: str
+    vertices: List[VectorVertex]
+    indices: List[int]
+    primitive: PrimitiveType = PrimitiveType.TRIANGLES
+    drape: bool = False
+    drape_offset: float = 0.5
+    opacity: float = 1.0
+    depth_bias: float = 0.1
+    line_width: float = 2.0
+    point_size: float = 5.0
+    visible: bool = True
+    z_order: int = 0
+    
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("name must be non-empty")
+        if not 0.0 <= self.opacity <= 1.0:
+            raise ValueError("opacity must be in [0.0, 1.0]")
+        if not 0.01 <= self.depth_bias <= 1.0:
+            raise ValueError("depth_bias must be in [0.01, 1.0]")
+        if self.line_width < 0.1:
+            raise ValueError("line_width must be >= 0.1")
+        if self.point_size < 0.1:
+            raise ValueError("point_size must be >= 0.1")
+        if not isinstance(self.primitive, PrimitiveType):
+            raise ValueError("primitive must be a PrimitiveType enum value")
+    
+    def to_ipc_dict(self) -> dict:
+        """Convert to IPC request dictionary format."""
+        return {
+            "cmd": "add_vector_overlay",
+            "name": self.name,
+            "vertices": [v.to_array() for v in self.vertices],
+            "indices": self.indices,
+            "primitive": self.primitive.value,
+            "drape": self.drape,
+            "drape_offset": self.drape_offset,
+            "opacity": self.opacity,
+            "depth_bias": self.depth_bias,
+            "line_width": self.line_width,
+            "point_size": self.point_size,
+            "z_order": self.z_order,
+        }
+    
+    @property
+    def vertex_count(self) -> int:
+        """Number of vertices in this overlay."""
+        return len(self.vertices)
+    
+    @property
+    def index_count(self) -> int:
+        """Number of indices in this overlay."""
+        return len(self.indices)
+
+
 @dataclass
 class TriplanarSettings:
     """Triplanar texture mapping configuration."""
