@@ -94,39 +94,31 @@ fn soft_shadow_factor(normal: vec3<f32>, light_dir: vec3<f32>) -> f32 {
     return shadow;
 }
 
-// Height-based material (PBR-like with roughness variation)
+// Height-based material (PBR-like with Imhof palette and roughness variation)
 fn get_material(h_norm: f32, slope: f32) -> vec4<f32> {
     // albedo.rgb, roughness
     var albedo: vec3<f32>;
     var roughness: f32;
     
-    // Low elevation - neutral brown/grey terrain (for areas without overlay)
-    if h_norm < 0.25 && slope < 0.5 {
-        albedo = vec3<f32>(0.42, 0.38, 0.34); // Neutral grey-brown terrain
+    // Imhof palette: green valleys -> brown slopes -> white peaks
+    if h_norm < 0.3 {
+        // Green valleys
+        albedo = mix(vec3<f32>(0.2, 0.5, 0.2), vec3<f32>(0.4, 0.6, 0.3), h_norm / 0.3);
+        roughness = 0.8;
+    } else if h_norm < 0.7 {
+        // Brown slopes
+        albedo = mix(vec3<f32>(0.4, 0.6, 0.3), vec3<f32>(0.5, 0.4, 0.3), (h_norm - 0.3) / 0.4);
         roughness = 0.7;
-    }
-    // Transition to darker rock
-    else if h_norm < 0.4 {
-        let t = (h_norm - 0.25) / 0.15;
-        albedo = mix(vec3<f32>(0.42, 0.38, 0.34), vec3<f32>(0.4, 0.35, 0.3), t);
-        roughness = mix(0.7, 0.7, t);
-    }
-    // Rocky terrain (mid elevation or steep slopes)
-    else if h_norm < 0.7 || slope > 0.6 {
-        albedo = vec3<f32>(0.45, 0.4, 0.35); // Gray-brown rock
-        roughness = 0.6;
-    }
-    // Snow/ice (high elevation)
-    else {
-        let snow_factor = smoothstep(0.7, 0.85, h_norm);
-        albedo = mix(vec3<f32>(0.5, 0.45, 0.4), vec3<f32>(0.95, 0.95, 0.98), snow_factor);
-        roughness = mix(0.5, 0.3, snow_factor); // Snow is slightly glossy
+    } else {
+        // White peaks
+        albedo = mix(vec3<f32>(0.5, 0.4, 0.3), vec3<f32>(0.95, 0.95, 0.95), (h_norm - 0.7) / 0.3);
+        roughness = 0.4;
     }
     
-    // Add slope-based rock exposure
-    if slope > 0.4 && h_norm < 0.8 {
-        let rock_blend = smoothstep(0.4, 0.7, slope);
-        albedo = mix(albedo, vec3<f32>(0.4, 0.38, 0.35), rock_blend * 0.6);
+    // Add slope-based rock exposure (darkens steep areas)
+    if slope > 0.5 && h_norm < 0.8 {
+        let rock_blend = smoothstep(0.5, 0.75, slope);
+        albedo = mix(albedo, vec3<f32>(0.35, 0.32, 0.28), rock_blend * 0.4);
         roughness = mix(roughness, 0.65, rock_blend);
     }
     
@@ -191,8 +183,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Sample overlay texture for solid check and blending
     let overlay = textureSample(overlay_tex, overlay_sampler, in.uv);
     
-    // When solid=false and overlay is enabled, discard fragments where overlay alpha is 0
+    // When solid=false and overlay is enabled, discard fragments where overlay alpha is near 0
     // This hides the base surface outside the region of interest (like rayshader solid=FALSE)
+    // Use low threshold (0.01) - the overlay image should have alpha=1.0 for valid areas
+    // and alpha=0.0 for areas to hide. Only truly transparent pixels should be discarded.
     if overlay_enabled && !solid_surface && overlay.a < 0.01 {
         discard;
     }
@@ -200,10 +194,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if overlay_enabled && overlay_opacity > 0.001 {
         let blend_alpha = overlay.a * overlay_opacity;
         
-        if blend_alpha > 0.001 {
+        if blend_alpha > 0.01 {
             // Apply blend mode (overlay already sampled above for solid check)
             if overlay_blend_mode < 0.5 {
-                // Normal blend: mix based on alpha
+                // Normal blend: fully replace albedo with overlay when alpha is high
+                // For land cover overlays, we want the categorical colors to show through
                 albedo = mix(albedo, overlay.rgb, blend_alpha);
             } else if overlay_blend_mode < 1.5 {
                 // Multiply blend

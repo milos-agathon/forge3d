@@ -530,6 +530,10 @@ impl OverlayStack {
             wgpu::Extent3d { width: target_width, height: target_height, depth_or_array_layers: 1 },
         );
 
+        // DEBUG: Check non-zero alpha count
+        let nonzero = composite_rgba.chunks(4).filter(|p| p[3] > 0).count();
+        println!("[overlay] Composite non-zero alpha pixels: {} / {}", nonzero, pixel_count);
+
         self.dirty = false;
         
         println!("[overlay] Built composite texture {}x{} from {} visible layers",

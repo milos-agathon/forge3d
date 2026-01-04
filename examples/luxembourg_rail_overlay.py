@@ -33,7 +33,6 @@ Requirements:
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import socket
 import subprocess
@@ -41,6 +40,12 @@ import sys
 import time
 from pathlib import Path
 from typing import List, Tuple
+
+# Import shared utilities from forge3d package
+sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
+from forge3d.viewer_ipc import find_viewer_binary, send_ipc
+from forge3d.colors import hex_to_rgba
+from forge3d.interactive import run_interactive_loop
 
 try:
     import numpy as np
@@ -84,88 +89,8 @@ except ImportError:
     HAS_PYPROJ = False
 
 
-def find_viewer_binary() -> str:
-    """Find the interactive_viewer binary."""
-    import platform
-    ext = ".exe" if platform.system() == "Windows" else ""
-    candidates = [
-        Path(__file__).parent.parent / "target" / "release" / f"interactive_viewer{ext}",
-        Path(__file__).parent.parent / "target" / "debug" / f"interactive_viewer{ext}",
-    ]
-    for c in candidates:
-        if c.exists():
-            return str(c)
-    raise FileNotFoundError(
-        "interactive_viewer binary not found. "
-        "Build with: cargo build --release --bin interactive_viewer"
-    )
-
-
-def send_ipc(sock: socket.socket, cmd: dict) -> dict:
-    """Send an IPC command and receive response."""
-    msg = json.dumps(cmd) + "\n"
-    msg_bytes = msg.encode()
-    
-    # Log message size for debugging large payloads
-    msg_size = len(msg_bytes)
-    if msg_size > 100000:
-        print(f"  Sending large IPC message: {msg_size / 1024 / 1024:.1f} MB")
-    
-    try:
-        sock.sendall(msg_bytes)
-    except Exception as e:
-        return {"ok": False, "error": f"Send failed: {e}"}
-    
-    data = b""
-    while True:
-        try:
-            chunk = sock.recv(8192)
-            if not chunk:
-                break
-            data += chunk
-            if b"\n" in data:
-                break
-        except socket.timeout:
-            if not data:
-                return {"ok": False, "error": "Timeout waiting for response"}
-            break
-        except Exception as e:
-            return {"ok": False, "error": f"Receive failed: {e}"}
-    
-    line = data.decode().strip()
-    if not line:
-        return {"ok": False, "error": "Empty response from viewer"}
-    
-    try:
-        return json.loads(line)
-    except json.JSONDecodeError as e:
-        return {"ok": False, "error": f"Invalid JSON response: {e}"}
-
-
-def hex_to_rgba(hex_color: str, alpha: float = 1.0) -> List[float]:
-    """Convert hex color to RGBA list (0.0-1.0 range).
-    
-    Args:
-        hex_color: Color in hex format, e.g. '#FF5500' or 'FF5500'
-        alpha: Alpha value (0.0-1.0)
-        
-    Returns:
-        List of [R, G, B, A] values in 0.0-1.0 range
-    """
-    hex_color = hex_color.lstrip('#')
-    if len(hex_color) == 6:
-        r = int(hex_color[0:2], 16) / 255.0
-        g = int(hex_color[2:4], 16) / 255.0
-        b = int(hex_color[4:6], 16) / 255.0
-        return [r, g, b, alpha]
-    elif len(hex_color) == 8:
-        r = int(hex_color[0:2], 16) / 255.0
-        g = int(hex_color[2:4], 16) / 255.0
-        b = int(hex_color[4:6], 16) / 255.0
-        a = int(hex_color[6:8], 16) / 255.0
-        return [r, g, b, a]
-    else:
-        raise ValueError(f"Invalid hex color: {hex_color}")
+# find_viewer_binary, send_ipc imported from forge3d.viewer_ipc
+# hex_to_rgba imported from forge3d.colors
 
 
 def load_gpkg_lines(gpkg_path: Path, dem_path: Path, color: List[float], line_width: float = 10.0) -> Tuple[List[List[float]], List[int]]:
@@ -1267,167 +1192,8 @@ def main() -> int:
         sock.close()
         proc.wait(timeout=5.0)
     else:
-        # Interactive mode
-        print("\n" + "=" * 60)
-        print("LUXEMBOURG RAIL VIEWER")
-        print("=" * 60)
-        print()
-        print("Terminal commands (set any combination of parameters):")
-        print("  set phi=45 theta=60 radius=2000 fov=55")
-        print("  set sun_az=135 sun_el=45 intensity=1.5 ambient=0.3")
-        print("  set zscale=2.0 shadow=0.5")
-        print("  set background=0.2,0.3,0.5")
-        print("  set water=1500 water_color=0.1,0.3,0.5")
-        print()
-        print("Other commands:")
-        print("  params         - Show current parameters")
-        print("  snap <path> [<width>x<height>]  - Take snapshot")
-        print("  pbr on/off     - Toggle PBR rendering mode")
-        print("  pbr shadows=pcss exposure=1.5 ibl=2.0")
-        print("  quit           - Close viewer")
-        print("=" * 60 + "\n")
-        
-        def parse_set_command(args: str) -> dict:
-            """Parse 'set key=value key=value ...' into IPC params."""
-            params = {"cmd": "set_terrain"}
-            for pair in args.split():
-                if "=" not in pair:
-                    continue
-                key, val = pair.split("=", 1)
-                key = key.lower().strip()
-                val = val.strip()
-                
-                # Map friendly names to IPC param names
-                key_map = {
-                    "phi": "phi", "theta": "theta", "radius": "radius", "fov": "fov",
-                    "sun_az": "sun_azimuth", "sun_azimuth": "sun_azimuth",
-                    "sun_el": "sun_elevation", "sun_elevation": "sun_elevation",
-                    "intensity": "sun_intensity", "sun_intensity": "sun_intensity",
-                    "ambient": "ambient", "zscale": "zscale", "z_scale": "zscale",
-                    "shadow": "shadow", "bg": "background", "background": "background",
-                    "water": "water_level", "water_level": "water_level",
-                    "water_color": "water_color",
-                }
-                
-                ipc_key = key_map.get(key, key)
-                
-                # Parse value
-                if "," in val:  # RGB color
-                    params[ipc_key] = [float(x) for x in val.split(",")]
-                else:
-                    params[ipc_key] = float(val)
-            
-            return params
-
-        try:
-            while proc.poll() is None:
-                try:
-                    cmd_str = input("> ").strip()
-                except EOFError:
-                    break
-                
-                if not cmd_str:
-                    continue
-                
-                parts = cmd_str.split(maxsplit=1)
-                name = parts[0].lower()
-                cmd_args = parts[1] if len(parts) > 1 else ""
-                
-                if name in ("quit", "exit", "q"):
-                    send_ipc(sock, {"cmd": "close"})
-                    break
-                elif name == "set":
-                    if cmd_args:
-                        params = parse_set_command(cmd_args)
-                        resp = send_ipc(sock, params)
-                        if not resp.get("ok"):
-                            print(f"Error: {resp.get('error')}")
-                    else:
-                        print("Usage: set key=value [key=value ...]")
-                elif name == "params":
-                    send_ipc(sock, {"cmd": "get_terrain_params"})
-                elif name == "snap":
-                    if cmd_args:
-                        snap_parts = cmd_args.split()
-                        path = str(Path(snap_parts[0]).resolve())
-                        snap_cmd = {"cmd": "snapshot", "path": path}
-                        if len(snap_parts) == 2:
-                            m = re.match(r"^(\d+)x(\d+)$", snap_parts[1].lower())
-                            if not m:
-                                print("Usage: snap <path> [<width>x<height>]")
-                                continue
-                            snap_cmd["width"] = int(m.group(1))
-                            snap_cmd["height"] = int(m.group(2))
-                        elif len(snap_parts) == 3:
-                            try:
-                                snap_cmd["width"] = int(snap_parts[1])
-                                snap_cmd["height"] = int(snap_parts[2])
-                            except ValueError:
-                                print("Usage: snap <path> [<width>x<height>]")
-                                continue
-                        elif len(snap_parts) > 3:
-                            print("Usage: snap <path> [<width>x<height>]")
-                            continue
-
-                        resp = send_ipc(sock, snap_cmd)
-                        if resp.get("ok"):
-                            print(f"Saved: {path}")
-                    else:
-                        print("Usage: snap <path> [<width>x<height>]")
-                # Legacy commands for compatibility
-                elif name == "cam" and len(parts) > 1:
-                    try:
-                        vals = [float(x) for x in cmd_args.split()]
-                        if len(vals) >= 4:
-                            send_ipc(sock, {"cmd": "set_terrain_camera",
-                                "phi_deg": vals[0], "theta_deg": vals[1], 
-                                "radius": vals[2], "fov_deg": vals[3]})
-                    except ValueError:
-                        print("Usage: cam <phi> <theta> <radius> <fov>")
-                elif name == "sun" and len(parts) > 1:
-                    try:
-                        vals = [float(x) for x in cmd_args.split()]
-                        if len(vals) >= 3:
-                            send_ipc(sock, {"cmd": "set_terrain_sun",
-                                "azimuth_deg": vals[0], "elevation_deg": vals[1], 
-                                "intensity": vals[2]})
-                    except ValueError:
-                        print("Usage: sun <azimuth> <elevation> <intensity>")
-                elif name == "pbr":
-                    pbr_cmd = {"cmd": "set_terrain_pbr"}
-                    if cmd_args.lower() in ("on", "true", "1"):
-                        pbr_cmd["enabled"] = True
-                    elif cmd_args.lower() in ("off", "false", "0"):
-                        pbr_cmd["enabled"] = False
-                    else:
-                        # Parse key=value pairs
-                        for pair in cmd_args.split():
-                            if "=" not in pair:
-                                continue
-                            key, val = pair.split("=", 1)
-                            key = key.lower().strip()
-                            val = val.strip()
-                            if key == "shadows":
-                                pbr_cmd["shadow_technique"] = val
-                            elif key == "exposure":
-                                pbr_cmd["exposure"] = float(val)
-                            elif key in ("ibl", "ibl_intensity"):
-                                pbr_cmd["ibl_intensity"] = float(val)
-                            elif key in ("normal", "normal_strength"):
-                                pbr_cmd["normal_strength"] = float(val)
-                            elif key in ("msaa",):
-                                pbr_cmd["msaa"] = int(val)
-                            elif key in ("shadow_res", "shadow_map_res"):
-                                pbr_cmd["shadow_map_res"] = int(val)
-                            elif key in ("hdr", "hdr_path"):
-                                pbr_cmd["hdr_path"] = str(Path(val).resolve())
-                    resp = send_ipc(sock, pbr_cmd)
-                    if not resp.get("ok"):
-                        print(f"Error: {resp.get('error')}")
-                else:
-                    print("Unknown command. Type 'set', 'params', 'snap', 'pbr', or 'quit'")
-        except KeyboardInterrupt:
-            pass
+        # Interactive mode - use shared interactive loop
+        run_interactive_loop(sock, proc, title="LUXEMBOURG RAIL VIEWER")
         
         sock.close()
         proc.terminate()

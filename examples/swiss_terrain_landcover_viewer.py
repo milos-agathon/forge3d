@@ -41,7 +41,6 @@ Interactive Commands:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import socket
@@ -52,6 +51,12 @@ import time
 from pathlib import Path
 
 import numpy as np
+
+# Import shared utilities from forge3d package
+sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
+from forge3d.viewer_ipc import find_viewer_binary, send_ipc
+from forge3d.colors import hex_to_rgb
+from forge3d.interactive import run_interactive_loop, parse_set_command, handle_snapshot_command
 
 # Optional: rasterio for GeoTIFF handling and reprojection
 try:
@@ -85,10 +90,7 @@ LANDCOVER_LEGEND = [
 ]
 
 
-def hex_to_rgb(hex_color: str) -> tuple:
-    """Convert hex color to RGB tuple."""
-    hex_color = hex_color.lstrip('#')
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+# hex_to_rgb imported from forge3d.colors
 
 
 def create_legend_image(width: int = 400, height: int = 600) -> Image.Image:
@@ -257,44 +259,11 @@ def add_legend_to_image(image_path: Path, output_path: Path = None,
     
     # Save result
     map_img.save(output_path)
+    
     return output_path
 
 
-def find_viewer_binary() -> str:
-    """Find the interactive_viewer binary."""
-    import platform
-    ext = ".exe" if platform.system() == "Windows" else ""
-    candidates = [
-        Path(__file__).parent.parent / "target" / "release" / f"interactive_viewer{ext}",
-        Path(__file__).parent.parent / "target" / "debug" / f"interactive_viewer{ext}",
-    ]
-    for c in candidates:
-        if c.exists():
-            return str(c)
-    raise FileNotFoundError(
-        "interactive_viewer binary not found. "
-        "Build with: cargo build --release --bin interactive_viewer"
-    )
-
-
-def send_ipc(sock: socket.socket, cmd: dict) -> dict:
-    """Send an IPC command and receive response."""
-    msg = json.dumps(cmd) + "\n"
-    sock.sendall(msg.encode())
-    
-    data = b""
-    while True:
-        chunk = sock.recv(4096)
-        if not chunk:
-            break
-        data += chunk
-        if b"\n" in data:
-            break
-    
-    response_str = data.decode().strip()
-    if response_str:
-        return json.loads(response_str)
-    return {"ok": False, "error": "Empty response"}
+# find_viewer_binary and send_ipc imported from forge3d.viewer_ipc
 
 
 def get_default_paths() -> tuple[Path, Path]:
@@ -317,7 +286,7 @@ def resample_landcover_to_dem(
         landcover_path: Path to land cover GeoTIFF
         dem_path: Path to DEM GeoTIFF (reference for resolution/extent)
         output_path: Path to save resampled land cover
-        target_crs: Target coordinate reference system
+        target_crs: Target coordinate reference system (unused if both in same CRS)
         
     Returns:
         Path to resampled land cover RGBA PNG
@@ -336,44 +305,63 @@ def resample_landcover_to_dem(
         dem_height = dem_src.height
         dem_bounds = dem_src.bounds
         print(f"  DEM: {dem_width}x{dem_height}, CRS: {dem_crs}")
+        print(f"  DEM bounds: {dem_bounds}")
     
     # Read and reproject land cover
     with rasterio.open(landcover_path) as lc_src:
         lc_crs = lc_src.crs
         print(f"  Land cover: {lc_src.width}x{lc_src.height}, CRS: {lc_crs}")
+        print(f"  Land cover bounds: {lc_src.bounds}")
         
-        # Calculate transform to match DEM exactly
-        dst_transform, dst_width, dst_height = calculate_default_transform(
-            lc_src.crs, target_crs,
-            lc_src.width, lc_src.height,
-            *lc_src.bounds,
-            dst_width=dem_width,
-            dst_height=dem_height,
-        )
-        
-        # Use DEM transform directly for perfect alignment
+        # Use DEM transform and CRS directly for proper alignment
+        # Both files should be in the same CRS (EPSG:4326)
         dst_transform = dem_transform
         dst_width = dem_width
         dst_height = dem_height
+        dst_crs = dem_crs  # Keep in DEM's CRS
         
-        # Reproject each band
-        lc_data = lc_src.read()
+        # Reproject each band - use masked read to handle nodata
+        lc_data = lc_src.read(masked=True)  # Returns MaskedArray
         num_bands = lc_data.shape[0]
         
-        resampled = np.zeros((num_bands, dst_height, dst_width), dtype=lc_data.dtype)
+        # Convert MaskedArray to regular array, replacing masked values with 0
+        if np.ma.is_masked(lc_data):
+            print(f"  Source has {lc_data.mask.sum()} masked (nodata) pixels")
+            lc_data_filled = lc_data.filled(0.0)  # Fill masked with 0
+        else:
+            lc_data_filled = np.asarray(lc_data)
+        
+        # Debug source data
+        print(f"  Source data shape: {lc_data_filled.shape}, dtype: {lc_data_filled.dtype}")
+        print(f"  Source min/max: {lc_data_filled.min():.3f} / {lc_data_filled.max():.3f}")
+        print(f"  Source non-zero: {np.count_nonzero(lc_data_filled)}")
+        print(f"  Transforms - Src: {lc_src.transform}")
+        print(f"  Transforms - Dst: {dst_transform}")
+        
+        resampled = np.zeros((num_bands, dst_height, dst_width), dtype=np.float32)
+        
+        # Choose resampling method
+        # Nearest for categorical (single band), Bilinear for RGB (continuous/visual)
+        resampling_method = Resampling.nearest if num_bands == 1 else Resampling.bilinear
+        print(f"  Resampling method: {resampling_method}")
         
         for i in range(num_bands):
             reproject(
-                source=lc_data[i],
+                source=lc_data_filled[i],  # Use filled data, not masked
                 destination=resampled[i],
                 src_transform=lc_src.transform,
                 src_crs=lc_src.crs,
                 dst_transform=dst_transform,
-                dst_crs=dem_crs,  # Use DEM's CRS to match the transform
-                resampling=Resampling.nearest,  # Nearest for categorical data
+                dst_crs=dst_crs,
+                resampling=resampling_method,
+                src_nodata=None, # We already handled nodata by filling with 0
             )
         
-        print(f"  Resampled to: {dst_width}x{dst_height}")
+        # Debug: check if reprojection produced valid data
+        valid_count = np.count_nonzero(~np.isnan(resampled))
+        nonzero_count = np.count_nonzero(resampled)
+        print(f"  Resampled to: {dst_width}x{dst_height}, valid pixels: {valid_count}, non-zero: {nonzero_count}")
+        print(f"  Resampled min/max: {resampled.min():.3f} / {resampled.max():.3f}")
     
     # Convert to RGBA PNG for overlay
     # Land cover typically has class values - convert to colormap
@@ -382,19 +370,26 @@ def resample_landcover_to_dem(
         lc_class = resampled[0]
         rgba = apply_landcover_colormap(lc_class)
     elif num_bands >= 3:
-        # Already RGB(A) - data is float32 but values are in 0-255 range
+        # Already RGB(A) - data might be in 0-1 or 0-255 range
         if num_bands == 3:
             rgba = np.zeros((dst_height, dst_width, 4), dtype=np.uint8)
-            # Cast float to uint8 (values already in 0-255 range)
             rgb_float = np.moveaxis(resampled[:3], 0, -1)
-            # Create mask for valid data: non-NaN AND at least one RGB channel > 50
-            valid_mask = ~np.isnan(rgb_float).any(axis=2) & (rgb_float.max(axis=2) > 50.0)
-            # Handle NaN values by replacing with 0
+            # Handle NaN values first
             rgb_float = np.nan_to_num(rgb_float, nan=0.0)
+            
+            # Auto-detect range: if max < 2, assume 0-1 range, else 0-255
+            max_val = rgb_float.max()
+            if max_val < 2.0:
+                # Convert 0-1 to 0-255
+                rgb_float = rgb_float * 255.0
+                print(f"  Detected 0-1 range, scaling to 0-255 (max was {max_val:.3f})")
+            
+            # Create mask for valid data: non-zero pixels
+            valid_mask = (rgb_float.sum(axis=2) > 0.1)
             rgba[..., :3] = np.clip(rgb_float, 0, 255).astype(np.uint8)
-            # Set alpha=0 for no-data areas (transparent) so terrain shows through
-            # Alpha=255 for valid land cover data
+            # Set alpha=255 for valid land cover data, 0 for no-data
             rgba[..., 3] = np.where(valid_mask, 255, 0).astype(np.uint8)
+            print(f"  RGBA created: {np.count_nonzero(rgba[..., 3])} non-transparent pixels")
         else:
             rgb_float = np.moveaxis(resampled[:4], 0, -1)
             # Create mask for valid data
@@ -403,6 +398,7 @@ def resample_landcover_to_dem(
             rgba = np.clip(rgb_float, 0, 255).astype(np.uint8)
             # Override alpha channel with mask
             rgba[..., 3] = np.where(valid_mask, 255, 0).astype(np.uint8)
+            print(f"  RGBA created: {np.count_nonzero(rgba[..., 3])} non-transparent pixels")
     else:
         raise ValueError(f"Unexpected band count: {num_bands}")
     
@@ -411,6 +407,12 @@ def resample_landcover_to_dem(
         img = Image.fromarray(rgba)
         img.save(output_path)
         print(f"  Saved: {output_path}")
+        
+        # Verify saved file
+        verify_img = Image.open(output_path)
+        verify_arr = np.array(verify_img)
+        verify_alpha = np.count_nonzero(verify_arr[..., 3]) if len(verify_arr.shape) > 2 and verify_arr.shape[2] == 4 else 0
+        print(f"  Verified: {verify_alpha} non-transparent pixels in saved file")
     else:
         # Fallback: save raw RGBA
         np.save(output_path.with_suffix('.npy'), rgba)
@@ -498,8 +500,8 @@ def main() -> int:
                         help="Path to DEM GeoTIFF (default: assets/tif/switzerland_dem.tif)")
     parser.add_argument("--landcover", type=Path, default=None,
                         help="Path to land cover GeoTIFF (default: assets/tif/switzerland_land_cover.tif)")
-    parser.add_argument("--width", type=int, default=1920, help="Window width")
-    parser.add_argument("--height", type=int, default=1080, help="Window height")
+    parser.add_argument("--width", type=int, default=None, help="Window width (default: 1920, or 3840 for HQ presets)")
+    parser.add_argument("--height", type=int, default=None, help="Window height (default: 1080, or 2160 for HQ presets)")
     parser.add_argument("--snapshot", type=Path,
                         help="Take snapshot at this path and exit")
     parser.add_argument("--crs", type=str, default="EPSG:3035",
@@ -524,8 +526,8 @@ def main() -> int:
     
     # Background options
     bg_group = parser.add_argument_group("Background", "Background color settings")
-    bg_group.add_argument("--background", type=str, default="#FFFFFF",
-                          help="Background color as hex (e.g. #FFFFFF) or gradient as hex1,hex2 (default: #FFFFFF white)")
+    bg_group.add_argument("--background", type=str, default="#87CEEB",
+                          help="Background color as hex (e.g. #87CEEB) or gradient as hex1,hex2 (default: #87CEEB sky blue)")
     
     # PBR rendering options (inherited from template)
     pbr_group = parser.add_argument_group("PBR Rendering", "High-quality terrain rendering options")
@@ -567,76 +569,99 @@ def main() -> int:
     lens_effects = False
     temperature = 6500.0
     
+    # Track if user explicitly set resolution
+    user_set_resolution = args.width is not None or args.height is not None
+    if args.width is None:
+        args.width = 1920
+    if args.height is None:
+        args.height = 1080
+    
     if args.preset:
         if args.preset == "hq1":
-            # Standard high quality
-            args.width = 3840
-            args.height = 2160
+            # Standard high quality - optimized for land cover overlay
+            if not user_set_resolution:
+                args.width = 1920
+                args.height = 1080
             args.msaa = 8
-            height_ao = True
-            sun_vis = True
+            height_ao = False  # Disabled to preserve land cover colors
+            sun_vis = False     # Disabled to preserve land cover colors
             args.exposure = 1.2
-            print("Preset: hq1 - Standard high quality (4K, MSAA 8x, AO, sun visibility)")
+            res_str = f"{args.width}x{args.height}"
+            print(f"Preset: hq1 - Standard high quality ({res_str}, MSAA 8x)")
         elif args.preset == "hq2":
-            # Alpine preset
-            args.width = 3840
-            args.height = 2160
+            # Alpine preset - optimized for land cover overlay
+            if not user_set_resolution:
+                args.width = 1920
+                args.height = 1080
             args.msaa = 4
-            height_ao = True
-            sun_vis = True
-            snow = True
-            rock = True
+            height_ao = False   # Disabled to preserve land cover colors
+            sun_vis = False     # Disabled to preserve land cover colors
+            snow = False        # Disabled - land cover provides colors
+            rock = False        # Disabled - land cover provides colors
             temperature = 7000.0  # Cool for alpine
             args.exposure = 1.3
-            print("Preset: hq2 - Alpine (4K, snow/rock layers, cool temperature)")
+            res_str = f"{args.width}x{args.height}"
+            print(f"Preset: hq2 - Alpine ({res_str}, cool temperature)")
         elif args.preset == "hq3":
-            # Cinematic
-            args.width = 3840
-            args.height = 2160
+            # Cinematic - optimized for land cover overlay
+            if not user_set_resolution:
+                args.width = 1920
+                args.height = 1080
             args.msaa = 4
-            height_ao = True
-            dof = True
+            height_ao = False   # Disabled to preserve land cover colors
+            dof = False         # Disabled - focus on full terrain
             lens_effects = True
             temperature = 5500.0  # Warm golden hour
             args.exposure = 1.4
-            print("Preset: hq3 - Cinematic (4K, DoF, lens effects, warm tones)")
+            res_str = f"{args.width}x{args.height}"
+            print(f"Preset: hq3 - Cinematic ({res_str}, lens effects, warm tones)")
         elif args.preset == "hq4":
-            # Maximum quality - all effects
-            args.width = 3840
-            args.height = 2160
+            # Maximum quality - optimized for land cover overlay
+            if not user_set_resolution:
+                args.width = 1920
+                args.height = 1080
             args.msaa = 8
-            height_ao = True
-            sun_vis = True
-            snow = True
-            rock = True
-            dof = True
+            height_ao = False  # Disabled to preserve land cover colors
+            sun_vis = False     # Disabled to preserve land cover colors
+            snow = False        # Disabled - land cover provides colors
+            rock = False        # Disabled - land cover provides colors
+            dof = False         # Disabled - focus on full terrain
             lens_effects = True
             temperature = 6500.0
-            args.exposure = 1.2
-            print("Preset: hq4 - Maximum quality (4K, all effects enabled)")
+            args.exposure = 1.3  # Increased for better visibility
+            # Keep solid=True so terrain is visible even where overlay has alpha=0
+            res_str = f"{args.width}x{args.height}"
+            print(f"Preset: hq4 - Maximum quality ({res_str}, MSAA 8x, lens effects)")
     
     # Resample land cover to match DEM
     overlay_png_path = None
+    persistent_path = dem_path.parent / "switzerland_landcover_overlay.png"
+    
     if not args.no_overlay and HAS_RASTERIO:
+        # Always regenerate the overlay to ensure it's up to date
+        # Delete old overlay if it exists to force regeneration
+        if persistent_path.exists():
+            persistent_path.unlink()
+        
         with tempfile.TemporaryDirectory() as tmpdir:
-            overlay_png_path = Path(tmpdir) / "landcover_resampled.png"
+            tmp_overlay = Path(tmpdir) / "landcover_resampled.png"
             try:
-                overlay_png_path = resample_landcover_to_dem(
-                    landcover_path, dem_path, overlay_png_path, args.crs
+                tmp_overlay = resample_landcover_to_dem(
+                    landcover_path, dem_path, tmp_overlay, args.crs
                 )
                 # Copy to persistent location for viewer
-                persistent_path = dem_path.parent / "switzerland_landcover_overlay.png"
                 if HAS_PIL:
                     import shutil
-                    shutil.copy(overlay_png_path, persistent_path)
+                    shutil.copy2(tmp_overlay, persistent_path)
                     overlay_png_path = persistent_path
                     print(f"Overlay saved to: {overlay_png_path}")
             except Exception as e:
                 print(f"Warning: Failed to resample land cover: {e}")
+                import traceback
+                traceback.print_exc()
                 overlay_png_path = None
     elif not args.no_overlay:
         # Try to use pre-existing overlay if available
-        persistent_path = dem_path.parent / "switzerland_landcover_overlay.png"
         if persistent_path.exists():
             overlay_png_path = persistent_path
             print(f"Using existing overlay: {overlay_png_path}")
@@ -644,30 +669,67 @@ def main() -> int:
     # Start viewer
     binary = find_viewer_binary()
     cmd = [binary, "--ipc-port", "0", "--size", f"{args.width}x{args.height}"]
+    # Capture stdout/stderr for debugging
     process = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
     )
+    
+    # Start threads to consume stdout/stderr
+    import threading
+    import queue
+    
+    stdout_queue = queue.Queue()
+    stderr_queue = queue.Queue()
+    
+    def enqueue_output(stream, q, prefix):
+        for line in iter(stream.readline, ''):
+            q.put(line)
+            print(f"[{prefix}] {line.strip()}")
+        stream.close()
+
+    t_out = threading.Thread(target=enqueue_output, args=(process.stdout, stdout_queue, "VIEWER"), daemon=True)
+    t_err = threading.Thread(target=enqueue_output, args=(process.stderr, stderr_queue, "VIEWER_ERR"), daemon=True)
+    t_out.start()
+    t_err.start()
     
     # Wait for READY
     ready_pattern = re.compile(r"FORGE3D_VIEWER_READY\s+port=(\d+)")
     port = None
     start = time.time()
     
+    stdout_lines = []
+    
     while time.time() - start < 30.0:
         if process.poll() is not None:
             print("Viewer exited unexpectedly")
             return 1
-        line = process.stdout.readline()
-        if line:
-            match = ready_pattern.search(line)
-            if match:
-                port = int(match.group(1))
-                break
+            
+        # Check queue for new lines
+        try:
+            while True:
+                line = stdout_queue.get_nowait()
+                stdout_lines.append(line)
+                match = ready_pattern.search(line)
+                if match:
+                    port = int(match.group(1))
+                    break
+        except queue.Empty:
+            pass
+            
+        if port:
+            break
+        time.sleep(0.1)
     
     if port is None:
         print("Timeout waiting for viewer")
+        print("Captured STDOUT:")
+        print("".join(stdout_lines[-20:])) # Print last 20 lines
         process.terminate()
         return 1
+        
+    print(f"Viewer ready on port {port}")
+    
+    # Connect and load terrain
     
     # Connect and load terrain
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -698,10 +760,12 @@ def main() -> int:
         ]
     
     # Set initial camera and terrain params
+    # Viewer normalizes terrain by pixel dimensions (7294x3200 for Switzerland DEM)
+    # radius is in pixel-space units, so ~4500 is appropriate for full view
     send_ipc(sock, {
         "cmd": "set_terrain",
         "phi": 45.0, "theta": 40.0, "radius": 4500.0, "fov": 35.0,
-        "zscale": 0.05,  # Good for Swiss Alps
+        "zscale": 0.05,  # Height exaggeration factor
         "sun_azimuth": args.sun_azimuth,
         "sun_elevation": args.sun_elevation,
         "sun_intensity": 1.2,
@@ -819,7 +883,7 @@ def main() -> int:
     
     # Snapshot mode
     if args.snapshot:
-        time.sleep(1.0)  # Wait for render to stabilize
+        time.sleep(2.0)  # Wait for render to stabilize (increased from 1.0)
         resp = send_ipc(sock, {
             "cmd": "snapshot",
             "path": str(args.snapshot.resolve()),
@@ -834,141 +898,96 @@ def main() -> int:
             # Add land cover legend to the image if enabled
             if args.legend and not args.no_overlay and HAS_PIL:
                 add_legend_to_image(args.snapshot, legend_scale=0.35, position="southeast",
-                                    max_legend_height=800, transparent_background=True)
+                                    max_legend_height=800, transparent_background=False)
                 print(f"Saved with legend: {args.snapshot}")
             else:
                 print(f"Saved: {args.snapshot}")
             return 0
         return 1
     
-    # Interactive mode
-    print("\n" + "=" * 60)
-    print("SWISS TERRAIN VIEWER WITH LAND COVER OVERLAY")
-    print("=" * 60)
-    print("Window controls:")
+    # Wait for initial render before interactive mode
+    time.sleep(1.0)
+    
+    # Interactive mode - define custom overlay command handler
+    def handle_overlay(s: socket.socket, cmd_args: str) -> bool:
+        if cmd_args.lower() in ("on", "true", "1"):
+            send_ipc(s, {"cmd": "set_overlays_enabled", "enabled": True})
+            print("Overlay enabled")
+        elif cmd_args.lower() in ("off", "false", "0"):
+            send_ipc(s, {"cmd": "set_overlays_enabled", "enabled": False})
+            print("Overlay disabled")
+        elif "opacity=" in cmd_args.lower():
+            opacity = float(cmd_args.split("=")[1])
+            send_ipc(s, {"cmd": "set_global_overlay_opacity", "opacity": opacity})
+            print(f"Overlay opacity set to {opacity}")
+        else:
+            print("Usage: overlay on|off|opacity=0.5")
+        return True
+    
+    # Snapshot callback to add legend
+    def add_legend_callback(snap_path: Path) -> None:
+        if not args.legend or args.no_overlay or not HAS_PIL:
+            return
+            
+        # Wait for file to be written - viewer writes asynchronously
+        # We wait for the file size to be stable to ensure writing is complete
+        last_size = -1
+        stable_count = 0
+        
+        for wait_attempt in range(40):  # Up to 20 seconds (0.5s intervals)
+            time.sleep(0.5)
+            if not snap_path.exists():
+                continue
+            
+            try:
+                current_size = snap_path.stat().st_size
+            except OSError:
+                continue
+
+            if current_size > 1000:
+                if current_size == last_size:
+                    stable_count += 1
+                else:
+                    stable_count = 0
+                last_size = current_size
+                
+                # Require size to be stable for 2 consecutive checks (1.0 second)
+                if stable_count >= 2:
+                    break
+        else:
+            print(f"  Warning: Snapshot file not ready (timeout): {snap_path}")
+            return
+            
+        # Add legend with retries
+        for attempt in range(5):
+            time.sleep(0.5)
+            try:
+                add_legend_to_image(snap_path, legend_scale=0.35, position="southeast",
+                                    max_legend_height=800, transparent_background=False)
+                print(f"  Legend added to {snap_path}")
+                return
+            except Exception as e:
+                if attempt < 4:
+                    print(f"  Retry adding legend ({attempt+1}/5): {e}")
+                    time.sleep(1.0)
+                    continue
+                print(f"  Warning: Could not add legend: {e}")
+    
+    print("\nWindow controls:")
     print("  Mouse drag     - Orbit camera")
     print("  Scroll wheel   - Zoom in/out")
     print("  W/S or ↑/↓     - Tilt camera up/down")
     print("  A/D or ←/→     - Rotate camera left/right")
-    print()
-    print("Terminal commands:")
+    print("\nExtra commands:")
     print("  overlay on/off           - Toggle land cover overlay")
     print("  overlay opacity=0.5      - Set overlay opacity")
-    print("  set phi=45 theta=60 radius=2000")
-    print("  set sun_az=135 sun_el=45")
-    print("  snap <path> [<width>x<height>]  - Take snapshot")
-    print("  params                   - Show current parameters")
-    print("  quit                     - Close viewer")
-    print("=" * 60 + "\n")
     
-    def parse_set_command(cmd_args: str) -> dict:
-        """Parse 'set key=value key=value ...' into IPC params."""
-        params = {"cmd": "set_terrain"}
-        for pair in cmd_args.split():
-            if "=" not in pair:
-                continue
-            key, val = pair.split("=", 1)
-            key = key.lower().strip()
-            val = val.strip()
-            
-            key_map = {
-                "phi": "phi", "theta": "theta", "radius": "radius", "fov": "fov",
-                "sun_az": "sun_azimuth", "sun_azimuth": "sun_azimuth",
-                "sun_el": "sun_elevation", "sun_elevation": "sun_elevation",
-                "intensity": "sun_intensity", "sun_intensity": "sun_intensity",
-                "ambient": "ambient", "zscale": "zscale", "z_scale": "zscale",
-                "shadow": "shadow", "bg": "background", "background": "background",
-            }
-            
-            ipc_key = key_map.get(key, key)
-            
-            if "," in val:
-                params[ipc_key] = [float(x) for x in val.split(",")]
-            else:
-                params[ipc_key] = float(val)
-        
-        return params
-    
-    try:
-        while process.poll() is None:
-            try:
-                cmd_str = input("> ").strip()
-            except EOFError:
-                break
-            
-            if not cmd_str:
-                continue
-            
-            parts = cmd_str.split(maxsplit=1)
-            name = parts[0].lower()
-            cmd_args = parts[1] if len(parts) > 1 else ""
-            
-            if name in ("quit", "exit", "q"):
-                send_ipc(sock, {"cmd": "close"})
-                break
-            elif name == "overlay":
-                if cmd_args.lower() in ("on", "true", "1"):
-                    send_ipc(sock, {"cmd": "set_overlays_enabled", "enabled": True})
-                    print("Overlay enabled")
-                elif cmd_args.lower() in ("off", "false", "0"):
-                    send_ipc(sock, {"cmd": "set_overlays_enabled", "enabled": False})
-                    print("Overlay disabled")
-                elif "opacity=" in cmd_args.lower():
-                    opacity = float(cmd_args.split("=")[1])
-                    send_ipc(sock, {"cmd": "set_global_overlay_opacity", "opacity": opacity})
-                    print(f"Overlay opacity set to {opacity}")
-                else:
-                    print("Usage: overlay on|off|opacity=0.5")
-            elif name == "set":
-                if cmd_args:
-                    params = parse_set_command(cmd_args)
-                    resp = send_ipc(sock, params)
-                    if not resp.get("ok"):
-                        print(f"Error: {resp.get('error')}")
-                else:
-                    print("Usage: set key=value [key=value ...]")
-            elif name == "params":
-                send_ipc(sock, {"cmd": "get_terrain_params"})
-            elif name == "snap":
-                if cmd_args:
-                    snap_parts = cmd_args.split()
-                    path = str(Path(snap_parts[0]).resolve())
-                    snap_cmd = {"cmd": "snapshot", "path": path}
-                    if len(snap_parts) == 2:
-                        m = re.match(r"^(\d+)x(\d+)$", snap_parts[1].lower())
-                        if m:
-                            snap_cmd["width"] = int(m.group(1))
-                            snap_cmd["height"] = int(m.group(2))
-                    resp = send_ipc(sock, snap_cmd)
-                    if resp.get("ok"):
-                        snap_path = Path(path)
-                        # Add legend if enabled and overlay is active
-                        if args.legend and not args.no_overlay and HAS_PIL and snap_path.exists():
-                            # Wait for file to be fully written and retry if needed
-                            legend_added = False
-                            for attempt in range(5):
-                                time.sleep(0.5)  # Wait for file to be ready
-                                try:
-                                    add_legend_to_image(snap_path, legend_scale=0.35, position="southeast",
-                                                        max_legend_height=800, transparent_background=True)
-                                    legend_added = True
-                                    break
-                                except Exception as e:
-                                    if attempt < 4:
-                                        continue
-                                    print(f"Warning: Could not add legend: {e}")
-                            if legend_added:
-                                print(f"Saved with legend: {path}")
-                            else:
-                                print(f"Saved (legend failed): {path}")
-                        else:
-                            print(f"Saved: {path}")
-                else:
-                    print("Usage: snap <path> [<width>x<height>]")
-            else:
-                print("Unknown command. Type 'overlay', 'set', 'params', 'snap', or 'quit'")
-    except KeyboardInterrupt:
-        pass
+    run_interactive_loop(
+        sock, process,
+        title="SWISS TERRAIN VIEWER WITH LAND COVER OVERLAY",
+        extra_commands={"overlay": handle_overlay},
+        post_snapshot_callback=add_legend_callback,
+    )
     
     sock.close()
     process.terminate()

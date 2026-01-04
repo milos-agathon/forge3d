@@ -1137,10 +1137,12 @@ impl Viewer {
             }
             // Overlay commands
             ViewerCmd::LoadOverlay { name, path, extent, opacity, z_order } => {
+                println!("[overlay] LoadOverlay command received: name='{}' path='{}'", name, path);
                 if let Some(ref mut tv) = self.terrain_viewer {
                     use std::path::Path;
                     let opacity_val = opacity.unwrap_or(1.0);
                     let z_order_val = z_order.unwrap_or(0);
+                    println!("[overlay] terrain_viewer exists, calling add_overlay_image...");
                     match tv.add_overlay_image(
                         &name,
                         Path::new(&path),
@@ -1153,7 +1155,7 @@ impl Viewer {
                         Err(e) => eprintln!("[overlay] Failed to load '{}': {}", name, e),
                     }
                 } else {
-                    eprintln!("[overlay] No terrain loaded - load terrain first");
+                    eprintln!("[overlay] No terrain loaded - load terrain first (terrain_viewer is None)");
                 }
             }
             ViewerCmd::RemoveOverlay { id } => {

@@ -293,4 +293,8 @@ __all__ = [
     # Modules
     "geometry",
     "io",
+    # Viewer utilities
+    "viewer_ipc",
+    "colors",
+    "interactive",
 ]

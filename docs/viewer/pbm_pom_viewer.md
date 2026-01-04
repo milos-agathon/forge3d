@@ -52,16 +52,16 @@ cargo build --release --bin interactive_viewer
 
 ```bash
 # Legacy mode (unchanged default behavior)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif
 
 # Window size (default 4K)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --width 1920 --height 1080
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --width 1920 --height 1080
 
 # PBR mode (enhanced rendering)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr
 
 # PBR with custom exposure
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --exposure 0.2
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --exposure 0.2
 ```
 
 ---
@@ -214,46 +214,46 @@ HDR tonemapping and color grading.
 ### Full PBR Configuration
 
 ```bash
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --exposure 0.2 --hdr assets/snow_field_4k.hdr --normal-strength 0.5 --ibl-intensity 0.1 --sun-azimuth 90 --sun-elevation 45 --sun-intensity 0.8 --msaa 8
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --exposure 0.2 --hdr assets/hdri/snow_field_4k.hdr --normal-strength 0.5 --ibl-intensity 0.1 --sun-azimuth 90 --sun-elevation 45 --sun-intensity 0.8 --msaa 8
 ```
 
 ### Heightfield Effects
 
 ```bash
 # Heightfield AO (darkens valleys/crevices)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --height-ao --height-ao-strength 1.0
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --height-ao --height-ao-strength 1.0
 
 # Sun visibility (terrain self-shadowing)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --sun-vis --sun-vis-mode soft --sun-elevation 15
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --sun-vis --sun-vis-mode soft --sun-elevation 15
 
 # Both terrain effects combined
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --height-ao --sun-vis --exposure 1.2
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --height-ao --sun-vis --exposure 1.2
 ```
 
 ### Material & Stylization
 
 ```bash
 # Alpine scene with snow and rock
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --snow --snow-altitude 2500 --rock --rock-slope 45 --tonemap aces
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --snow --snow-altitude 2500 --rock --rock-slope 45 --tonemap aces
 
 # Cinematic warm render
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --tonemap uncharted2 --white-balance --temperature 5500 --exposure 1.2 --tonemap uncharted2 --white-balance --temperature 5500 --exposure 1.2
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --tonemap uncharted2 --white-balance --temperature 5500 --exposure 1.2 --tonemap uncharted2 --white-balance --temperature 5500 --exposure 1.2
 
 # All features enabled
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --height-ao --sun-vis --snow --rock --wetness --overlay-depth --overlay-halo --tonemap aces --white-balance
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --height-ao --sun-vis --snow --rock --wetness --overlay-depth --overlay-halo --tonemap aces --white-balance
 ```
 
 ### Presets
 
 ```bash
 # Alpine preset
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --preset alpine
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --preset alpine
 
 # Cinematic preset  
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --preset cinematic
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --preset cinematic
 
 # High quality preset
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --preset high_quality --width 800 --height 800
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --preset high_quality --width 800 --height 800
 ```
 
 ### Post-Processing Effects
@@ -264,83 +264,83 @@ The following examples demonstrate the post-processing pipeline.
 
 ```bash
 # Barrel distortion (center expands, edges compress)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --lens-effects --lens-distortion 0.15
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --lens-effects --lens-distortion 0.15
 
 # Chromatic aberration (RGB fringing at edges)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --lens-effects --lens-ca 0.03
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --lens-effects --lens-ca 0.03
 
 # Combined lens effects with vignette
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --lens-effects --lens-distortion 0.15 --lens-ca 0.03 --lens-vignette 0.3
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --lens-effects --lens-distortion 0.15 --lens-ca 0.03 --lens-vignette 0.3
 
 # Vintage camera look
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --lens-effects --lens-distortion 0.1 --lens-ca 0.02 --lens-vignette 0.5 --tonemap uncharted2
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --lens-effects --lens-distortion 0.1 --lens-ca 0.02 --lens-vignette 0.5 --tonemap uncharted2
 ```
 
 #### Depth of Field (Separable Blur)
 
 ```bash
 # Shallow depth of field (wide aperture, blurry background)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --dof --dof-f-stop 2.8 --dof-focus-distance 300 --dof-quality high
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --dof --dof-f-stop 2.8 --dof-focus-distance 300 --dof-quality high
 
 # Deep depth of field (narrow aperture, everything sharp)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --dof --dof-f-stop 16 --dof-focus-distance 500
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --dof --dof-f-stop 16 --dof-focus-distance 500
 
 # Tilt-shift miniature effect (diagonal focus plane)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --dof --dof-f-stop 2.8 --dof-focus-distance 200 --dof-tilt-pitch 30
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --dof --dof-f-stop 2.8 --dof-focus-distance 200 --dof-tilt-pitch 30
 
 # Tilt-shift with yaw rotation
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --dof --dof-f-stop 2.8 --dof-focus-distance 250 --dof-tilt-pitch 15 --dof-tilt-yaw 45
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --dof --dof-f-stop 2.8 --dof-focus-distance 250 --dof-tilt-pitch 15 --dof-tilt-yaw 45
 ```
 
 #### Motion Blur (Temporal Accumulation)
 
 ```bash
 # Camera pan motion blur (horizontal sweep)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --motion-blur --mb-samples 16 --mb-shutter-angle 180 --mb-cam-phi-delta 5
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --motion-blur --mb-samples 16 --mb-shutter-angle 180 --mb-cam-phi-delta 5
 
 # Camera tilt motion blur (vertical sweep)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --motion-blur --mb-samples 16 --mb-shutter-angle 180 --mb-cam-theta-delta 3
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --motion-blur --mb-samples 16 --mb-shutter-angle 180 --mb-cam-theta-delta 3
 
 # Zoom blur (dolly in/out)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --motion-blur --mb-samples 16 --mb-shutter-angle 180 --mb-cam-radius-delta -50
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --motion-blur --mb-samples 16 --mb-shutter-angle 180 --mb-cam-radius-delta -50
 
 # High-quality motion blur (32 samples)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --motion-blur --mb-samples 32 --mb-shutter-angle 270 --mb-cam-phi-delta 10
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --motion-blur --mb-samples 32 --mb-shutter-angle 270 --mb-cam-phi-delta 10
 ```
 
 #### Volumetric Fog + Light Shafts
 
 ```bash
 # Uniform fog
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-mode uniform --vol-density 0.02
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --volumetrics --vol-mode uniform --vol-density 0.02
 
 # Height-based fog (denser near ground)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-mode height --vol-density 0.015
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --volumetrics --vol-mode height --vol-density 0.015
 
 # God rays (volumetric light shafts)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-mode height --vol-density 0.02 --vol-light-shafts --vol-shaft-intensity 2.0 --sun-elevation 15
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --volumetrics --vol-mode height --vol-density 0.02 --vol-light-shafts --vol-shaft-intensity 2.0 --sun-elevation 15
 
 # Atmospheric haze with scattering
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-density 0.01 --vol-scattering 0.8 --vol-absorption 0.1
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --volumetrics --vol-density 0.01 --vol-scattering 0.8 --vol-absorption 0.1
 
 # Half-resolution volumetrics (performance mode)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-density 0.02 --vol-half-res
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --volumetrics --vol-density 0.02 --vol-half-res
 ```
 
 #### Combined Post-Processing Scenes
 
 ```bash
 # Cinematic sunrise with fog and god rays
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --volumetrics --vol-mode height --vol-density 0.02 --vol-light-shafts --sun-elevation 10 --sun-azimuth 90 --lens-vignette 0.3 --tonemap aces
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --volumetrics --vol-mode height --vol-density 0.02 --vol-light-shafts --sun-elevation 10 --sun-azimuth 90 --lens-vignette 0.3 --tonemap aces
 
 # Dreamy landscape (DoF + fog + soft lighting)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --dof --dof-f-stop 2.8 --dof-focus-distance 400 --volumetrics --vol-density 0.01 --lens-vignette 0.2 --exposure 1.2
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --dof --dof-f-stop 2.8 --dof-focus-distance 400 --volumetrics --vol-density 0.01 --lens-vignette 0.2 --exposure 1.2
 
 # Action shot (motion blur + lens effects)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --motion-blur --mb-samples 16 --mb-cam-phi-delta 8 --lens-effects --lens-ca 0.01 --lens-vignette 0.2
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --motion-blur --mb-samples 16 --mb-cam-phi-delta 8 --lens-effects --lens-ca 0.01 --lens-vignette 0.2
 
 # Full post-processing stack
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif --pbr --dof --dof-f-stop 4.0 --dof-focus-distance 300 --lens-effects --lens-distortion 0.05 --lens-ca 0.01 --lens-vignette 0.25 --volumetrics --vol-mode height --vol-density 0.01 --tonemap aces --exposure 1.1
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --dof --dof-f-stop 4.0 --dof-focus-distance 300 --lens-effects --lens-distortion 0.05 --lens-ca 0.01 --lens-vignette 0.25 --volumetrics --vol-mode height --vol-density 0.01 --tonemap aces --exposure 1.1
 ```
 
 ---
