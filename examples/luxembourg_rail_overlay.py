@@ -89,8 +89,45 @@ except ImportError:
     HAS_PYPROJ = False
 
 
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    Image = None
+    HAS_PIL = False
+
 # find_viewer_binary, send_ipc imported from forge3d.viewer_ipc
 # hex_to_rgba imported from forge3d.colors
+
+
+def generate_dem_mask(dem_path: Path, output_path: Path) -> bool:
+    """Generate a transparency mask from the DEM nodata values."""
+    if not HAS_RASTERIO:
+        print("Error: rasterio is required to generate DEM mask")
+        return False
+        
+    try:
+        with rasterio.open(dem_path) as src:
+            # Read the mask (255=valid, 0=nodata)
+            mask = src.read_masks(1)
+            
+            # Create an RGBA image
+            # RGB doesn't matter since we'll set opacity to 0, but black is safe
+            # Alpha is the mask itself
+            h, w = mask.shape
+            
+            # Create RGBA buffer: R=0, G=0, B=0, A=mask
+            # We can stack them
+            zeros = np.zeros_like(mask)
+            rgba = np.dstack((zeros, zeros, zeros, mask))
+            
+            # Save as PNG
+            img = Image.fromarray(rgba, 'RGBA')
+            img.save(output_path)
+            return True
+    except Exception as e:
+        print(f"Failed to generate DEM mask: {e}")
+        return False
 
 
 def load_gpkg_lines(gpkg_path: Path, dem_path: Path, color: List[float], line_width: float = 10.0) -> Tuple[List[List[float]], List[int]]:
@@ -1158,11 +1195,30 @@ def main() -> int:
             # the full DEM surface. The set_overlay_solid IPC command is sent but will
             # only have effect when a raster overlay (load_overlay) is also present.
             if args.no_solid:
-                # Send the IPC command (follows swiss_terrain_landcover_viewer.py pattern)
-                send_ipc(sock, {"cmd": "set_overlay_solid", "solid": False})
-                print("Note: --no-solid flag set, but terrain remains visible because")
-                print("      vector overlays (rail lines) don't mask the terrain.")
-                print("      For terrain masking, use a raster overlay like in swiss_terrain_landcover_viewer.py")
+                print("Generating DEM mask for --no-solid mode...")
+                mask_path = args.dem.parent / "luxembourg_mask.png"
+                
+                if generate_dem_mask(args.dem, mask_path):
+                    print(f"Loading mask overlay: {mask_path}")
+                    # Load the mask as a raster overlay
+                    resp = send_ipc(sock, {
+                        "cmd": "load_overlay",
+                        "name": "mask",
+                        "path": str(mask_path.absolute())
+                    })
+                    
+                    if resp.get("ok"):
+                        # Set opacity to 0 so we don't see the black color, just use alpha for masking
+                        send_ipc(sock, {"cmd": "set_overlay_opacity", "opacity": 0.0})
+                        # Enable non-solid mode (discard fragments with 0 alpha in overlay)
+                        send_ipc(sock, {"cmd": "set_overlay_solid", "solid": False})
+                        print("Mask loaded successfully. Terrain outside Luxembourg will be hidden.")
+                    else:
+                        print(f"Failed to load mask overlay: {resp.get('error')}")
+                else:
+                    print("Failed to generate DEM mask. Terrain masking unavailable.")
+                    # Fallback to just sending the command (might do nothing without overlay)
+                    send_ipc(sock, {"cmd": "set_overlay_solid", "solid": False})
     elif not args.no_overlay:
         print("Rail overlay requested but failed to load")
     else:

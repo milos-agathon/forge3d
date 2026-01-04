@@ -40,9 +40,10 @@ python examples/luxembourg_rail_overlay.py \
 - `pyproj`: For coordinate reprojection.
 - `rasterio`: For reading DEM metadata.
 - `numpy`: For numerical operations.
+- `Pillow` (PIL): For generating masking overlays.
 
 ```bash
-pip install geopandas fiona pyproj rasterio numpy
+pip install geopandas fiona pyproj rasterio numpy Pillow
 ```
 
 **Build Requirements:**
