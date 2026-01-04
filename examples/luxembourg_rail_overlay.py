@@ -1181,16 +1181,45 @@ def main() -> int:
             "height": args.height
         })
         if resp.get("ok"):
-            # Wait for snapshot to be written
-            time.sleep(2.0)
-            print(f"Snapshot saved to {args.snapshot}")
+            # Wait for snapshot to be written with stability check
+            snapshot_path = Path(args.snapshot).absolute()
+            print(f"Waiting for snapshot: {snapshot_path}")
+            
+            last_size = -1
+            stable_count = 0
+            
+            # Wait up to 60 seconds for file to be written and stable
+            for i in range(120):
+                time.sleep(0.5)
+                if snapshot_path.exists():
+                    try:
+                        current_size = snapshot_path.stat().st_size
+                        if current_size > 1000:
+                            if current_size == last_size:
+                                stable_count += 1
+                            else:
+                                stable_count = 0
+                            last_size = current_size
+                            
+                            if stable_count >= 2:  # Stable for 1 second
+                                print(f"Snapshot saved to {args.snapshot} (size: {current_size} bytes)")
+                                break
+                    except OSError:
+                        pass
+            else:
+                print(f"Warning: Snapshot file not ready or unstable after timeout")
         else:
             print(f"Snapshot failed: {resp.get('error')}")
         
         # Close viewer
         send_ipc(sock, {"cmd": "close"})
         sock.close()
-        proc.wait(timeout=5.0)
+        try:
+            proc.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            print("Viewer process timed out, terminating...")
+            proc.terminate()
+            proc.wait()
     else:
         # Interactive mode - use shared interactive loop
         run_interactive_loop(sock, proc, title="LUXEMBOURG RAIL VIEWER")
