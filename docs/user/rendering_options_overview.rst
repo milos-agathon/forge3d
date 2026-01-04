@@ -954,8 +954,8 @@ See Also
 --------
 
 * :doc:`presets_overview` - Pre-configured rendering presets
-* :doc:`../pbr_materials` - PBR material system documentation
-* :doc:`../shadow_mapping` - Shadow mapping techniques
+* :doc:`pbr_materials` - PBR material system documentation
+* :doc:`shadow_mapping` - Shadow mapping techniques
 * :doc:`path_tracing` - Path tracing features
 * :doc:`../examples/lighting_gallery` - Lighting examples
 * :doc:`../examples/shadow_gallery` - Shadow technique comparisons

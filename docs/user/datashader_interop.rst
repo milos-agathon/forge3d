@@ -739,7 +739,7 @@ See Also
 ========
 
 - :doc:`../integration/matplotlib` - Matplotlib colormap integration
-- :doc:`../gpu_memory_guide` - GPU memory management guide  
+- :doc:`../memory/gpu_memory_guide` - GPU memory management guide  
 - :doc:`../examples_guide` - General examples and usage patterns
 - `Datashader documentation <https://datashader.org/>`_ - Official datashader docs
 - `Holoviews <https://holoviews.org/>`_ - High-level datashader integration

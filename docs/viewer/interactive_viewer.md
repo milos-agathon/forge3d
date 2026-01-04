@@ -185,5 +185,5 @@ The terrain viewer uses a standalone WGSL shader with:
 
 ## See Also
 
-- [Terrain Rendering](../terrain_rendering.rst) — Offscreen terrain rendering API
+- [Terrain Rendering](../terrain/terrain_rendering.rst) — Offscreen terrain rendering API
 - [Terrain Demo Quickstart](../examples/terrain_demo_quickstart.rst) — Programmatic terrain rendering

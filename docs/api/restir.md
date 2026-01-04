@@ -215,5 +215,5 @@ print(f"Sampled light {light_idx} with PDF {pdf:.4f}")
 ## See Also
 
 - [Path Tracing API](path_tracing.md)
-- [GPU Memory Guide](../gpu_memory_guide.rst)
-- [WGSL Bind Group Layouts](../wgsl_bind_group_layouts.md)
+- [GPU Memory Guide](../memory/gpu_memory_guide.rst)
+- [WGSL Bind Group Layouts](wgsl_bind_group_layouts.md)

@@ -551,7 +551,7 @@ Terrain Rendering
 
 For terrain-specific shading with slope-based material blending and specialized BRDFs, see:
 
-:doc:`../terrain_rendering`
+:doc:`../terrain/terrain_rendering`
 
 The terrain renderer supports:
 
@@ -599,10 +599,10 @@ If materials don't look right:
 See Also
 --------
 
-- :doc:`../pbr_materials` - PBR material system
+- :doc:`pbr_materials` - PBR material system
 - :doc:`lights_overview` - Lighting system
 - :doc:`presets_overview` - Preset configurations
-- :doc:`../terrain_rendering` - Terrain-specific shading
+- :doc:`../terrain/terrain_rendering` - Terrain-specific shading
 - :doc:`path_tracing` - Path tracing with BRDFs
 
 References

@@ -8,14 +8,14 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    :caption: Getting Started:
 
    quickstart
-   installation
+   user/installation
    examples_guide
 
 .. toctree::
    :maxdepth: 2
    :caption: Core Documentation:
 
-   api_reference
+   api/api_reference
    api/io
    api/uv
    api/converters
@@ -23,10 +23,10 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    api/displacement
    api/curves
    api/atmospherics_p6
-   color_management
-   interop_zero_copy
-   memory_budget
-   gpu_memory_guide
+   user/color_management
+   integration/interop_zero_copy
+   memory/memory_budget
+   memory/gpu_memory_guide
    memory/index
    api/path_tracing
 
@@ -34,24 +34,24 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    :maxdepth: 2
    :caption: Advanced Features:
 
-   interactive_viewer
+   viewer/interactive_viewer
    postfx/index
    user/ibl_overview
    p5_gi_passes
-   pbr_materials
+   user/pbr_materials
    user/brdf_overview
    user/lights_overview
    user/shadows_overview
    user/presets_overview
    user/rendering_options_overview
-   shadow_mapping
+   user/shadow_mapping
    user/path_tracing
    user/vector_picking_oit
-   vector_graphics
-   terrain_rendering
-   rendering_options
-   async_operations
-   misc_topics
+   api/vector_graphics
+   terrain/terrain_rendering
+   user/rendering_options
+   offscreen/async_operations
+   user/misc_topics
 
 .. toctree::
    :maxdepth: 1
@@ -92,7 +92,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    :maxdepth: 2
    :caption: Troubleshooting:
 
-   troubleshooting_visuals
+   user/troubleshooting_visuals
 
 Overview
 --------
@@ -214,10 +214,10 @@ API Reference
 
 **Core Modules**
 
-* :doc:`forge3d <api_reference>` - Main rendering classes and utilities
-* :doc:`forge3d.pbr <pbr_materials>` - PBR materials system
-* :doc:`forge3d.shadows <shadow_mapping>` - Shadow mapping functionality
-* :doc:`forge3d.materials <pbr_materials>` - Legacy compatibility shim
+* :doc:`forge3d <api/api_reference>` - Main rendering classes and utilities
+* :doc:`forge3d.pbr <user/pbr_materials>` - PBR materials system
+* :doc:`forge3d.shadows <user/shadow_mapping>` - Shadow mapping functionality
+* :doc:`forge3d.materials <user/pbr_materials>` - Legacy compatibility shim
 * :doc:`forge3d.memory <memory/staging_rings>` - Memory management systems (O1-O2)
 * :doc:`forge3d.compressed <memory/compressed_textures>` - Compressed texture pipeline (O3)
 * :doc:`forge3d.streaming <memory/virtual_texturing>` - Virtual texture streaming (O4)

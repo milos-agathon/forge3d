@@ -501,10 +501,10 @@ Recommendations
 Related Documentation
 ---------------------
 
-- :doc:`../shadow_mapping` - Shadow mapping (P3 integration)
-- :doc:`../pbr_materials` - Material shading (P2 integration)
+- :doc:`shadow_mapping` - Shadow mapping (P3 integration)
+- :doc:`pbr_materials` - Material shading (P2 integration)
 - :doc:`../api/path_tracing` - Path tracing (uses lights directly)
-- :doc:`../memory_budget` - Memory budget analysis
+- :doc:`../memory/memory_budget` - Memory budget analysis
 
 References
 ----------
