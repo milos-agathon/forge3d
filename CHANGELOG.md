@@ -8,6 +8,20 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ### Added
 
+## [1.9.0] - Terrain Labels & Fuji Demo
+
+### Added
+- **Terrain Labels System** — Support for screen-space text labels anchored to world coordinates.
+  - Rendered via a font atlas (default: `assets/fonts/default_atlas.png`).
+  - Screen-space rendering with depth occlusion support.
+  - IPC commands: `add_label`, `clear_labels`, `set_labels_enabled`, `load_label_atlas`.
+- **Mount Fuji Labels Demo** (`examples/fuji_labels_demo.py`)
+  - Demonstrates loading OSM place names from a GeoPackage and overlaying them on a 30m DEM of Mount Fuji.
+  - Features high-quality PBR rendering presets, tonemapping, and depth-of-field integration.
+  - Usage: `python examples/fuji_labels_demo.py --preset high_quality`
+
+
+
 ## [1.8.0] - Draped Terrain Overlays
 
 ### Added

@@ -207,7 +207,7 @@ fn mat4_to_numpy<'py>(py: Python<'py>, mat: Mat4) -> PyResult<Bound<'py, PyArray
 
     let array = PyArray2::from_vec2_bound(
         py,
-        &vec![
+        &[
             flat[0..4].to_vec(),
             flat[4..8].to_vec(),
             flat[8..12].to_vec(),

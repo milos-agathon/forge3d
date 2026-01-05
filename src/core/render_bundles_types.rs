@@ -192,7 +192,7 @@ impl RenderBundleConfig {
                         usage: BundleBufferUsage::Index,
                         size: 6 * 4,
                         data: Some(
-                            vec![0u32, 1, 2, 0, 2, 3]
+                            [0u32, 1, 2, 0, 2, 3]
                                 .iter()
                                 .flat_map(|&i| i.to_ne_bytes())
                                 .collect(),

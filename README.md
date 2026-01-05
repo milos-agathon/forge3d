@@ -16,7 +16,7 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.8.0 — Draped terrain overlays with full PBR lighting integration, enabling lit and shadowed texture overlays on terrain surfaces.
+Current release: 1.9.0 — Terrain labels system with screen-space text anchored to world coordinates, plus a Mount Fuji demo showcasing OSM place name integration.
 
 ## Installation
 
@@ -30,7 +30,7 @@ maturin develop --release
 
 ## Quick Start (< 10 minutes)
 
-New to forge3d? Launch the interactive viewer and capture a high-resolution snapshot of Mount Rainier:
+New to forge3d? Launch the interactive viewer and capture a high-resolution snapshot of Mount Fuji with place labels:
 
 1. **Install prerequisites**: Ensure you have Python 3.8+ and Rust installed
 2. **Install maturin**: `pip install -U maturin`
@@ -41,13 +41,31 @@ New to forge3d? Launch the interactive viewer and capture a high-resolution snap
 cargo build --release --bin interactive_viewer
 ```
 
-5. **Launch the viewer with a high-quality preset**:
+5. **Launch the viewer with the Fuji labels demo**:
+
+```bash
+python examples/fuji_labels_demo.py --preset high_quality --width 3840 --height 2160
+```
+
+6. **Capture a 4K snapshot** (type this in the viewer's terminal):
+
+```bash
+snap fuji_labels.png 3840x2160
+```
+
+![Mount Fuji Labels Snapshot](assets/fuji_labels.png)
+
+### Mount Rainier Demo
+
+Alternatively, you can explore Mount Rainier with the classic interactive viewer.
+
+**1. Launch the viewer with a high-quality preset:**
 
 ```bash
 python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --preset high_quality --width 800 --height 800
 ```
 
-6. **Capture a high-resolution snapshot** (type this in the viewer's terminal):
+**2. Capture a high-resolution snapshot** (type this in the viewer's terminal):
 
 ```bash
 snap highres_rainier.png 4000x4000
