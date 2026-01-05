@@ -332,6 +332,30 @@ pub enum ViewerCmd {
     SetGlobalVectorOverlayOpacity {
         opacity: f32,
     },
+
+    // === LABELS ===
+
+    /// Add a text label at a world position
+    AddLabel {
+        text: String,
+        world_pos: [f32; 3],
+        size: Option<f32>,
+        color: Option<[f32; 4]>,
+        halo_color: Option<[f32; 4]>,
+        halo_width: Option<f32>,
+        priority: Option<i32>,
+    },
+    /// Remove a label by ID
+    RemoveLabel { id: u64 },
+    /// Clear all labels
+    ClearLabels,
+    /// Enable or disable labels
+    SetLabelsEnabled { enabled: bool },
+    /// Load a font atlas for labels
+    LoadLabelAtlas {
+        atlas_png_path: String,
+        metrics_json_path: String,
+    },
 }
 
 /// Heightfield ray-traced AO configuration for viewer

@@ -651,6 +651,7 @@ pub mod shadows; // Shadow mapping implementations
 pub mod terrain;
 pub mod uv; // UV unwrap helpers (planar, spherical)
 pub mod textures {}
+pub mod labels; // Screen-space text labels with MSDF rendering
 pub mod p5;
 pub mod passes;
 pub mod util;

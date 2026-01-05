@@ -241,6 +241,37 @@ pub enum IpcRequest {
     SetVectorOverlaysEnabled { enabled: bool },
     /// Set global vector overlay opacity multiplier
     SetGlobalVectorOverlayOpacity { opacity: f32 },
+
+    // === LABELS ===
+
+    /// Add a text label at a world position
+    AddLabel {
+        text: String,
+        /// World position [x, y, z]
+        world_pos: [f32; 3],
+        /// Optional style settings
+        #[serde(default)]
+        size: Option<f32>,
+        #[serde(default)]
+        color: Option<[f32; 4]>,
+        #[serde(default)]
+        halo_color: Option<[f32; 4]>,
+        #[serde(default)]
+        halo_width: Option<f32>,
+        #[serde(default)]
+        priority: Option<i32>,
+    },
+    /// Remove a label by ID
+    RemoveLabel { id: u64 },
+    /// Clear all labels
+    ClearLabels,
+    /// Enable or disable labels
+    SetLabelsEnabled { enabled: bool },
+    /// Load a font atlas for labels
+    LoadLabelAtlas {
+        atlas_png_path: String,
+        metrics_json_path: String,
+    },
 }
 
 /// Heightfield ray-traced AO configuration (IPC)
@@ -899,5 +930,36 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
         IpcRequest::SetGlobalVectorOverlayOpacity { opacity } => {
             Ok(Some(ViewerCmd::SetGlobalVectorOverlayOpacity { opacity: *opacity }))
         }
+
+        // Label commands
+        IpcRequest::AddLabel {
+            text,
+            world_pos,
+            size,
+            color,
+            halo_color,
+            halo_width,
+            priority,
+        } => Ok(Some(ViewerCmd::AddLabel {
+            text: text.clone(),
+            world_pos: *world_pos,
+            size: *size,
+            color: *color,
+            halo_color: *halo_color,
+            halo_width: *halo_width,
+            priority: *priority,
+        })),
+        IpcRequest::RemoveLabel { id } => Ok(Some(ViewerCmd::RemoveLabel { id: *id })),
+        IpcRequest::ClearLabels => Ok(Some(ViewerCmd::ClearLabels)),
+        IpcRequest::SetLabelsEnabled { enabled } => {
+            Ok(Some(ViewerCmd::SetLabelsEnabled { enabled: *enabled }))
+        }
+        IpcRequest::LoadLabelAtlas {
+            atlas_png_path,
+            metrics_json_path,
+        } => Ok(Some(ViewerCmd::LoadLabelAtlas {
+            atlas_png_path: atlas_png_path.clone(),
+            metrics_json_path: metrics_json_path.clone(),
+        })),
     }
 }

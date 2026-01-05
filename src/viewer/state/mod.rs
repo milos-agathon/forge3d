@@ -5,6 +5,7 @@
 mod fog_state;
 mod gi_state;
 mod gpu_state;
+mod labels;
 mod mesh_upload;
 mod resize;
 mod scene_state;

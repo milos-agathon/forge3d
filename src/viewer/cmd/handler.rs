@@ -1300,6 +1300,58 @@ impl Viewer {
                     println!("[vector_overlay] global opacity={:.2}", opacity);
                 }
             }
+
+            // === LABELS ===
+            ViewerCmd::AddLabel {
+                text,
+                world_pos,
+                size,
+                color,
+                halo_color,
+                halo_width,
+                priority,
+            } => {
+                use crate::labels::LabelStyle;
+                let mut style = LabelStyle::default();
+                if let Some(s) = size {
+                    style.size = s;
+                }
+                if let Some(c) = color {
+                    style.color = c;
+                }
+                if let Some(hc) = halo_color {
+                    style.halo_color = hc;
+                }
+                if let Some(hw) = halo_width {
+                    style.halo_width = hw;
+                }
+                if let Some(p) = priority {
+                    style.priority = p;
+                }
+                let id = self.add_label(&text, (world_pos[0], world_pos[1], world_pos[2]), Some(style));
+                println!("[label] added id={} text=\"{}\"", id, text);
+            }
+            ViewerCmd::RemoveLabel { id } => {
+                let removed = self.remove_label(id);
+                println!("[label] remove id={} success={}", id, removed);
+            }
+            ViewerCmd::ClearLabels => {
+                self.clear_labels();
+                println!("[label] cleared all labels");
+            }
+            ViewerCmd::SetLabelsEnabled { enabled } => {
+                self.set_labels_enabled(enabled);
+                println!("[label] enabled={}", enabled);
+            }
+            ViewerCmd::LoadLabelAtlas {
+                atlas_png_path,
+                metrics_json_path,
+            } => {
+                match self.load_label_atlas(&atlas_png_path, &metrics_json_path) {
+                    Ok(()) => println!("[label] atlas loaded from {}", atlas_png_path),
+                    Err(e) => eprintln!("[label] failed to load atlas: {}", e),
+                }
+            }
         }
     }
 }

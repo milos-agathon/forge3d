@@ -204,3 +204,109 @@ def close_viewer(
             process.kill()
         except Exception:
             pass
+
+
+# === LABEL API ===
+
+def add_label(
+    sock: socket.socket,
+    text: str,
+    world_pos: Tuple[float, float, float],
+    size: Optional[float] = None,
+    color: Optional[Tuple[float, float, float, float]] = None,
+    halo_color: Optional[Tuple[float, float, float, float]] = None,
+    halo_width: Optional[float] = None,
+    priority: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Add a text label at a world position.
+    
+    Args:
+        sock: Connected socket to viewer
+        text: Label text content
+        world_pos: World position (x, y, z)
+        size: Font size in pixels (default: 14)
+        color: Text color as RGBA tuple (0-1 range)
+        halo_color: Halo/outline color as RGBA tuple
+        halo_width: Halo width in pixels (0 = no halo)
+        priority: Priority for collision (higher = more important)
+        
+    Returns:
+        Response dict with 'ok' and optionally 'id' of the created label
+    """
+    cmd: Dict[str, Any] = {
+        "cmd": "add_label",
+        "text": text,
+        "world_pos": list(world_pos),
+    }
+    if size is not None:
+        cmd["size"] = size
+    if color is not None:
+        cmd["color"] = list(color)
+    if halo_color is not None:
+        cmd["halo_color"] = list(halo_color)
+    if halo_width is not None:
+        cmd["halo_width"] = halo_width
+    if priority is not None:
+        cmd["priority"] = priority
+    
+    return send_ipc(sock, cmd)
+
+
+def remove_label(sock: socket.socket, label_id: int) -> Dict[str, Any]:
+    """Remove a label by ID.
+    
+    Args:
+        sock: Connected socket to viewer
+        label_id: ID of the label to remove
+        
+    Returns:
+        Response dict with 'ok' status
+    """
+    return send_ipc(sock, {"cmd": "remove_label", "id": label_id})
+
+
+def clear_labels(sock: socket.socket) -> Dict[str, Any]:
+    """Clear all labels.
+    
+    Args:
+        sock: Connected socket to viewer
+        
+    Returns:
+        Response dict with 'ok' status
+    """
+    return send_ipc(sock, {"cmd": "clear_labels"})
+
+
+def set_labels_enabled(sock: socket.socket, enabled: bool) -> Dict[str, Any]:
+    """Enable or disable label rendering.
+    
+    Args:
+        sock: Connected socket to viewer
+        enabled: Whether labels should be rendered
+        
+    Returns:
+        Response dict with 'ok' status
+    """
+    return send_ipc(sock, {"cmd": "set_labels_enabled", "enabled": enabled})
+
+
+def load_label_atlas(
+    sock: socket.socket,
+    atlas_png_path: str,
+    metrics_json_path: str,
+) -> Dict[str, Any]:
+    """Load a font atlas for label rendering.
+    
+    Args:
+        sock: Connected socket to viewer
+        atlas_png_path: Path to the MSDF atlas PNG image
+        metrics_json_path: Path to the glyph metrics JSON file
+        
+    Returns:
+        Response dict with 'ok' status
+    """
+    return send_ipc(sock, {
+        "cmd": "load_label_atlas",
+        "atlas_png_path": atlas_png_path,
+        "metrics_json_path": metrics_json_path,
+    })

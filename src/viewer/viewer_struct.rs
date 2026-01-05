@@ -17,6 +17,7 @@ use crate::core::ibl::IBLRenderer;
 use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 use crate::core::shadows::{CsmConfig, CsmShadowMap};
 use crate::core::text_overlay::TextOverlayRenderer;
+use crate::labels::LabelManager;
 use crate::p5::ssr::SsrScenePreset;
 use crate::passes::gi::GiPass;
 use crate::render::params::SsrParams;
@@ -222,6 +223,8 @@ pub struct Viewer {
     // HUD overlay renderer
     pub(crate) hud_enabled: bool,
     pub(crate) hud: TextOverlayRenderer,
+    // Label manager for screen-space text labels
+    pub(crate) label_manager: LabelManager,
     pub(crate) ssr_scene_loaded: bool,
     pub(crate) ssr_scene_preset: Option<SsrScenePreset>,
     // Object transform (for IPC SetTransform command)

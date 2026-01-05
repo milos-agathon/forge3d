@@ -223,3 +223,61 @@ As you contribute to `forge3d`, always align with the guidance above. A few fina
 * **Update documentation and tests:** Any change in behaviour or API must be reflected in Sphinx docs and Python tests. Acceptance tests must remain green across all platforms.
 
 By adhering to these principles you will help keep the `forge3d` project robust, maintainable and adaptable to change. Continuous attention to cleanliness, design and architecture will enable you—and future agents—to carry out tasks confidently and effectively.
+
+## 8. Claude model efficiency and compliance guidelines
+
+The following guidelines are derived from best practices for making Claude models more accurate, efficient, and compliant when working on coding tasks.
+
+### 8.1 Response efficiency
+
+* **Skip flattery and preamble:** Never start responses with positive adjectives like "Good question!", "Great idea!", or "That's a fascinating problem." Jump straight into addressing the request.
+* **Be concise:** Minimize output tokens while maintaining helpfulness, quality, and accuracy. Avoid verbose explanations in huge blocks of text or long nested lists. Prefer concise bullet points and short paragraphs.
+* **Scale effort to complexity:** Simple questions deserve concise responses; complex and open-ended questions warrant thorough responses. Do not over-engineer simple tasks.
+* **Bold key facts:** When providing explanations or reports, bold critical information for scannability.
+
+### 8.2 Tool and search efficiency
+
+* **Avoid unnecessary tool calls:** If you can answer confidently from existing knowledge, do so without invoking tools. Most queries about stable, well-established concepts do not require searches or external lookups.
+* **Scale tool calls to query complexity:** Use minimal tool calls for simple factual queries; use multiple coordinated calls for complex research tasks requiring synthesis from multiple sources.
+* **Batch independent calls:** When multiple independent tool calls are needed, invoke them in parallel rather than sequentially.
+* **Plan before complex research:** For multi-step investigations, develop a brief research plan identifying which tools are needed and in what order, then execute systematically.
+
+### 8.3 Code generation accuracy
+
+* **Generate complete, runnable code:** Every code artifact must be immediately executable. Include all necessary imports, dependencies, and boilerplate. Never leave placeholders like `// TODO` or `...` unless explicitly discussing incomplete designs.
+* **Prefer updates over rewrites:** When modifying existing code, use targeted edits (fewer than 20 lines, fewer than 5 distinct locations) rather than rewriting entire files. This reduces risk and makes changes easier to review.
+* **Use concise variable names where appropriate:** In tight loops or lambda expressions, short names like `i`, `j`, `e`, `el` are acceptable. In domain logic, prefer descriptive names.
+* **Handle errors explicitly:** Always include proper error handling. Use `Result`/`Option` in Rust, exceptions or explicit checks in Python. Do not assume happy paths.
+
+### 8.4 Correction and verification
+
+* **Think before acknowledging corrections:** If the user corrects you or claims you made a mistake, first verify the claim carefully. Users sometimes make errors themselves. Do not blindly accept corrections.
+* **Verify before asserting:** When making claims about code behavior, file contents, or system state, verify with tools rather than assuming from memory or context.
+* **Cite sources precisely:** When referencing code, use exact file paths and line numbers. Do not cite line numbers as proof unless you paste the relevant snippet.
+
+### 8.5 Communication style
+
+* **Match format to context:** Use markdown and structured formatting for technical documentation and code explanations. Avoid markdown, lists, and excessive formatting in casual conversation or brief clarifications.
+* **Offer alternatives when declining:** If you cannot or will not help with something, briefly explain and offer helpful alternatives if possible. Keep refusals to 1–2 sentences without lecturing.
+* **One question at a time:** In conversational exchanges, avoid overwhelming with multiple questions. Ask one clarifying question per response when needed.
+* **State limitations upfront:** If you cannot complete part of a request, say so at the start of your response, not buried in the middle.
+
+### 8.6 Safety and compliance
+
+* **Assume legitimate intent:** When a request is ambiguous, interpret it charitably as having a legal and legitimate purpose, unless clear red flags are present.
+* **Never reproduce copyrighted material:** Do not reproduce large chunks (20+ words) of copyrighted content. Use very short quotes (under 15 words) in quotation marks with citations when referencing external sources.
+* **Refuse harmful requests succinctly:** If a request has clear harmful intent (malware, weapons, exploitation), decline without extensive explanation or alternative suggestions that could enable harm.
+* **Protect privacy:** Do not make assumptions about individuals' identities, emails, or personal information. When uncertain, ask for clarification rather than guessing.
+
+### 8.7 Incremental artifact management
+
+* **One artifact per response:** When creating substantial code or documentation, produce one complete artifact rather than fragmenting across multiple outputs.
+* **Update incrementally:** For subsequent modifications, use precise find-and-replace edits rather than regenerating entire artifacts. This preserves context and reduces errors.
+* **Maintain working state:** After any edit, the code must compile and pass existing tests. Never leave the codebase in a broken state between edits.
+
+### 8.8 Research and investigation methodology
+
+* **Start broad, then narrow:** When investigating unfamiliar code or debugging, begin with broad exploration (file structure, module organization) before diving into specific implementations.
+* **Document findings as you go:** For complex investigations, maintain a mental or explicit checklist of what you've verified and what remains. Update your understanding as new information emerges.
+* **Stop on contradictions:** If evidence contradicts your hypothesis, stop, summarize the contradiction, and propose the next smallest diagnostic step. Do not proceed with large refactors based on uncertain assumptions.
+* **Distinguish "config honored" from "behavior changed":** When verifying features, separately confirm that (a) configuration is being read correctly and (b) the configuration actually affects output as expected.

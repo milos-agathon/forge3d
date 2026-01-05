@@ -41,6 +41,54 @@ impl Viewer {
                 label: Some("Render Encoder"),
             });
 
+        // Update labels with current camera (before any rendering)
+        // Use terrain camera if terrain is loaded, otherwise use viewer camera
+        {
+            let view_proj = if let Some(ref terrain_viewer) = self.terrain_viewer {
+                if let Some(ref terrain) = terrain_viewer.terrain {
+                    // Use terrain camera parameters
+                    let phi = terrain.cam_phi_deg.to_radians();
+                    let theta = terrain.cam_theta_deg.to_radians();
+                    let r = terrain.cam_radius;
+                    let (tw, th) = terrain.dimensions;
+                    let terrain_width = tw.max(th) as f32;
+                    let h_range = terrain.domain.1 - terrain.domain.0;
+                    let center_y = h_range * terrain.z_scale * 0.5;
+                    let center = glam::Vec3::new(
+                        terrain_width * 0.5,
+                        center_y,
+                        terrain_width * 0.5,
+                    );
+                    let eye = glam::Vec3::new(
+                        center.x + r * theta.sin() * phi.cos(),
+                        center.y + r * theta.cos(),
+                        center.z + r * theta.sin() * phi.sin(),
+                    );
+                    let view_mat = Mat4::look_at_rh(eye, center, glam::Vec3::Y);
+                    let proj = Mat4::perspective_rh(
+                        terrain.cam_fov_deg.to_radians(),
+                        self.config.width as f32 / self.config.height as f32,
+                        1.0,
+                        r * 10.0,
+                    );
+                    proj * view_mat
+                } else {
+                    // No terrain data, use viewer camera
+                    let aspect = self.config.width as f32 / self.config.height as f32;
+                    let fov = self.view_config.fov_deg.to_radians();
+                    let proj = Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
+                    proj * self.camera.view_matrix()
+                }
+            } else {
+                // No terrain viewer, use viewer camera
+                let aspect = self.config.width as f32 / self.config.height as f32;
+                let fov = self.view_config.fov_deg.to_radians();
+                let proj = Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
+                proj * self.camera.view_matrix()
+            };
+            self.label_manager.update(view_proj);
+        }
+
         // Render sky background (compute) before opaques
         if self.sky_enabled {
             // Build camera matrices (view, proj, inv_view, inv_proj) and eye
@@ -1377,6 +1425,7 @@ impl Viewer {
                 }
             }
         }
+
     // TerrainScene render, or fall back to the purple debug pipeline.
     // Helper closure to render fallback with optional snapshot texture
     let render_fallback = |encoder: &mut wgpu::CommandEncoder,
@@ -1552,6 +1601,57 @@ impl Viewer {
             ) {
                 self.pending_snapshot_tex = Some(tex);
             }
+        }
+
+        // Render labels (screen-space text overlay) - AFTER terrain so labels appear on top
+        if self.label_manager.is_enabled() && self.label_manager.visible_count() > 0 {
+            self.label_manager.upload_to_renderer(&self.device, &self.queue, &mut self.hud);
+            self.hud.set_enabled(true);
+            self.hud.upload_uniforms(&self.queue);
+
+            // Render labels to snapshot texture if one exists
+            if let Some(ref snap_tex) = self.pending_snapshot_tex {
+                let snap_view = snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let snap_dims = snap_tex.size();
+                self.hud.set_resolution(snap_dims.width, snap_dims.height);
+                self.hud.upload_uniforms(&self.queue);
+                let mut label_snap_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("viewer.labels.snap.pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &snap_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                self.hud.render(&mut label_snap_pass);
+                drop(label_snap_pass);
+            }
+
+            // Also render to swapchain view for live display
+            self.hud.set_resolution(self.config.width, self.config.height);
+            self.hud.upload_uniforms(&self.queue);
+            let mut label_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("viewer.labels.pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            self.hud.render(&mut label_pass);
+            drop(label_pass);
         }
 
         // Submit rendering

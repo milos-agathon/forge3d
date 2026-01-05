@@ -273,6 +273,8 @@ impl Viewer {
             // HUD
             hud_enabled: true,
             hud,
+            // Label manager
+            label_manager: crate::labels::LabelManager::new(width, height),
             ssr_scene_loaded: false,
             ssr_scene_preset: None,
             // Object transform
