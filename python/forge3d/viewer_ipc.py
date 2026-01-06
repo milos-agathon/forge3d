@@ -217,6 +217,14 @@ def add_label(
     halo_color: Optional[Tuple[float, float, float, float]] = None,
     halo_width: Optional[float] = None,
     priority: Optional[int] = None,
+    min_zoom: Optional[float] = None,
+    max_zoom: Optional[float] = None,
+    offset: Optional[Tuple[float, float]] = None,
+    rotation: Optional[float] = None,
+    underline: Optional[bool] = None,
+    small_caps: Optional[bool] = None,
+    leader: Optional[bool] = None,
+    horizon_fade_angle: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Add a text label at a world position.
     
@@ -229,6 +237,14 @@ def add_label(
         halo_color: Halo/outline color as RGBA tuple
         halo_width: Halo width in pixels (0 = no halo)
         priority: Priority for collision (higher = more important)
+        min_zoom: Minimum zoom level for visibility (default: 0)
+        max_zoom: Maximum zoom level for visibility (default: inf)
+        offset: Screen offset from anchor in pixels (x, y)
+        rotation: Rotation angle in radians
+        underline: Enable underline style
+        small_caps: Enable small caps style
+        leader: Show leader line to anchor when offset
+        horizon_fade_angle: Angle in degrees for horizon fade (default: 5)
         
     Returns:
         Response dict with 'ok' and optionally 'id' of the created label
@@ -248,6 +264,22 @@ def add_label(
         cmd["halo_width"] = halo_width
     if priority is not None:
         cmd["priority"] = priority
+    if min_zoom is not None:
+        cmd["min_zoom"] = min_zoom
+    if max_zoom is not None:
+        cmd["max_zoom"] = max_zoom
+    if offset is not None:
+        cmd["offset"] = list(offset)
+    if rotation is not None:
+        cmd["rotation"] = rotation
+    if underline is not None:
+        cmd["underline"] = underline
+    if small_caps is not None:
+        cmd["small_caps"] = small_caps
+    if leader is not None:
+        cmd["leader"] = leader
+    if horizon_fade_angle is not None:
+        cmd["horizon_fade_angle"] = horizon_fade_angle
     
     return send_ipc(sock, cmd)
 
@@ -310,3 +342,277 @@ def load_label_atlas(
         "atlas_png_path": atlas_png_path,
         "metrics_json_path": metrics_json_path,
     })
+
+
+def add_line_label(
+    sock: socket.socket,
+    text: str,
+    polyline: list,
+    size: Optional[float] = None,
+    color: Optional[Tuple[float, float, float, float]] = None,
+    halo_color: Optional[Tuple[float, float, float, float]] = None,
+    halo_width: Optional[float] = None,
+    priority: Optional[int] = None,
+    placement: str = "center",
+    repeat_distance: Optional[float] = None,
+    min_zoom: Optional[float] = None,
+    max_zoom: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Add a line label along a polyline.
+    
+    Args:
+        sock: Connected socket to viewer
+        text: Label text content
+        polyline: List of world positions [(x, y, z), ...]
+        size: Font size in pixels (default: 14)
+        color: Text color as RGBA tuple (0-1 range)
+        halo_color: Halo/outline color as RGBA tuple
+        halo_width: Halo width in pixels (0 = no halo)
+        priority: Priority for collision (higher = more important)
+        placement: "center" or "along" (default: "center")
+        repeat_distance: Distance in pixels between repeated labels (0 = no repeat)
+        min_zoom: Minimum zoom level for visibility
+        max_zoom: Maximum zoom level for visibility
+        
+    Returns:
+        Response dict with 'ok' and optionally 'id' of the created label
+    """
+    cmd: Dict[str, Any] = {
+        "cmd": "add_line_label",
+        "text": text,
+        "polyline": [list(p) for p in polyline],
+    }
+    if size is not None:
+        cmd["size"] = size
+    if color is not None:
+        cmd["color"] = list(color)
+    if halo_color is not None:
+        cmd["halo_color"] = list(halo_color)
+    if halo_width is not None:
+        cmd["halo_width"] = halo_width
+    if priority is not None:
+        cmd["priority"] = priority
+    if placement:
+        cmd["placement"] = placement
+    if repeat_distance is not None:
+        cmd["repeat_distance"] = repeat_distance
+    if min_zoom is not None:
+        cmd["min_zoom"] = min_zoom
+    if max_zoom is not None:
+        cmd["max_zoom"] = max_zoom
+    
+    return send_ipc(sock, cmd)
+
+
+def set_label_zoom(sock: socket.socket, zoom: float) -> Dict[str, Any]:
+    """Set the current zoom level for scale-dependent label visibility.
+    
+    Args:
+        sock: Connected socket to viewer
+        zoom: Current zoom level
+        
+    Returns:
+        Response dict with 'ok' status
+    """
+    return send_ipc(sock, {"cmd": "set_label_zoom", "zoom": zoom})
+
+
+def set_max_visible_labels(sock: socket.socket, max_labels: int) -> Dict[str, Any]:
+    """Set the maximum number of visible labels.
+    
+    Args:
+        sock: Connected socket to viewer
+        max_labels: Maximum number of labels to display
+        
+    Returns:
+        Response dict with 'ok' status
+    """
+    return send_ipc(sock, {"cmd": "set_max_visible_labels", "max": max_labels})
+
+
+# === Plan 3: Premium Label Features ===
+
+def add_curved_label(
+    sock: socket.socket,
+    text: str,
+    polyline: list,
+    size: Optional[float] = None,
+    color: Optional[Tuple[float, float, float, float]] = None,
+    halo_color: Optional[Tuple[float, float, float, float]] = None,
+    halo_width: Optional[float] = None,
+    priority: Optional[int] = None,
+    tracking: Optional[float] = None,
+    center_on_path: bool = True,
+) -> Dict[str, Any]:
+    """Add a curved label along a polyline path (Plan 3 feature).
+    
+    Each glyph is positioned along the path with rotation following
+    the path tangent for atlas-style curved text.
+    
+    Args:
+        sock: Connected socket to viewer
+        text: Label text content
+        polyline: List of world positions [(x, y, z), ...] defining the path
+        size: Font size in pixels (default: 14)
+        color: Text color as RGBA tuple (0-1 range)
+        halo_color: Halo/outline color as RGBA tuple
+        halo_width: Halo width in pixels (0 = no halo)
+        priority: Priority for collision (higher = more important)
+        tracking: Letter-spacing as multiple of font size (0.0 = normal)
+        center_on_path: Whether to center text on the path (default: True)
+        
+    Returns:
+        Response dict with 'ok' and optionally 'id' of the created label
+    """
+    cmd: Dict[str, Any] = {
+        "cmd": "add_curved_label",
+        "text": text,
+        "polyline": [list(p) for p in polyline],
+    }
+    if size is not None:
+        cmd["size"] = size
+    if color is not None:
+        cmd["color"] = list(color)
+    if halo_color is not None:
+        cmd["halo_color"] = list(halo_color)
+    if halo_width is not None:
+        cmd["halo_width"] = halo_width
+    if priority is not None:
+        cmd["priority"] = priority
+    if tracking is not None:
+        cmd["tracking"] = tracking
+    cmd["center_on_path"] = center_on_path
+    
+    return send_ipc(sock, cmd)
+
+
+def add_callout(
+    sock: socket.socket,
+    text: str,
+    anchor: Tuple[float, float, float],
+    offset: Tuple[float, float] = (0.0, -50.0),
+    background_color: Optional[Tuple[float, float, float, float]] = None,
+    border_color: Optional[Tuple[float, float, float, float]] = None,
+    border_width: Optional[float] = None,
+    corner_radius: Optional[float] = None,
+    padding: Optional[float] = None,
+    text_size: Optional[float] = None,
+    text_color: Optional[Tuple[float, float, float, float]] = None,
+) -> Dict[str, Any]:
+    """Add a callout box with pointer at a world position (Plan 3 feature).
+    
+    Creates a labeled box with rounded corners and a pointer connecting
+    to the anchor position.
+    
+    Args:
+        sock: Connected socket to viewer
+        text: Callout text content (may be multi-line)
+        anchor: World position (x, y, z) for the pointer tip
+        offset: Screen offset from anchor (x, y) in pixels
+        background_color: Box background color as RGBA
+        border_color: Box border color as RGBA
+        border_width: Border width in pixels (0 = no border)
+        corner_radius: Rounded corner radius in pixels
+        padding: Padding inside the box in pixels
+        text_size: Font size for text in pixels
+        text_color: Text color as RGBA
+        
+    Returns:
+        Response dict with 'ok' and optionally 'id' of the created callout
+    """
+    cmd: Dict[str, Any] = {
+        "cmd": "add_callout",
+        "text": text,
+        "anchor": list(anchor),
+        "offset": list(offset),
+    }
+    if background_color is not None:
+        cmd["background_color"] = list(background_color)
+    if border_color is not None:
+        cmd["border_color"] = list(border_color)
+    if border_width is not None:
+        cmd["border_width"] = border_width
+    if corner_radius is not None:
+        cmd["corner_radius"] = corner_radius
+    if padding is not None:
+        cmd["padding"] = padding
+    if text_size is not None:
+        cmd["text_size"] = text_size
+    if text_color is not None:
+        cmd["text_color"] = list(text_color)
+    
+    return send_ipc(sock, cmd)
+
+
+def remove_callout(sock: socket.socket, callout_id: int) -> Dict[str, Any]:
+    """Remove a callout by ID.
+    
+    Args:
+        sock: Connected socket to viewer
+        callout_id: ID of the callout to remove
+        
+    Returns:
+        Response dict with 'ok' status
+    """
+    return send_ipc(sock, {"cmd": "remove_callout", "id": callout_id})
+
+
+def set_label_typography(
+    sock: socket.socket,
+    tracking: Optional[float] = None,
+    kerning: Optional[bool] = None,
+    line_height: Optional[float] = None,
+    word_spacing: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Set global typography settings for labels (Plan 3 feature).
+    
+    Args:
+        sock: Connected socket to viewer
+        tracking: Letter-spacing as multiple of font size (0.0 = normal)
+        kerning: Enable/disable kerning adjustments
+        line_height: Line height as multiple of font size (1.0 = single)
+        word_spacing: Word spacing as multiple of space width
+        
+    Returns:
+        Response dict with 'ok' status
+    """
+    cmd: Dict[str, Any] = {"cmd": "set_label_typography"}
+    if tracking is not None:
+        cmd["tracking"] = tracking
+    if kerning is not None:
+        cmd["kerning"] = kerning
+    if line_height is not None:
+        cmd["line_height"] = line_height
+    if word_spacing is not None:
+        cmd["word_spacing"] = word_spacing
+    
+    return send_ipc(sock, cmd)
+
+
+def set_declutter_algorithm(
+    sock: socket.socket,
+    algorithm: str = "greedy",
+    seed: Optional[int] = None,
+    max_iterations: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Set the label declutter algorithm (Plan 3 feature).
+    
+    Args:
+        sock: Connected socket to viewer
+        algorithm: "greedy" (fast) or "annealing" (better results)
+        seed: Random seed for reproducibility (annealing only)
+        max_iterations: Maximum iterations for annealing
+        
+    Returns:
+        Response dict with 'ok' status
+    """
+    cmd: Dict[str, Any] = {
+        "cmd": "set_declutter_algorithm",
+        "algorithm": algorithm,
+    }
+    if seed is not None:
+        cmd["seed"] = seed
+    if max_iterations is not None:
+        cmd["max_iterations"] = max_iterations
+    
+    return send_ipc(sock, cmd)

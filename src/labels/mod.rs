@@ -2,19 +2,42 @@
 //!
 //! Provides:
 //! - `LabelManager` for managing labels lifecycle
-//! - `LabelStyle` for styling configuration
-//! - Grid-based collision detection
+//! - `LabelStyle` for styling configuration  
+//! - Grid-based and R-tree collision detection
 //! - World-to-screen projection with depth occlusion
+//! - Line labels along polylines
+//! - Leader lines for offset labels
+//! - Scale-dependent visibility (min/max zoom)
+//! - Horizon fade for labels near the horizon
 
 mod atlas;
+pub mod callout;
 mod collision;
+pub mod curved;
+pub mod declutter;
+pub mod layer;
+pub mod leader;
+pub mod line_label;
 mod projection;
+pub mod rtree;
+pub mod typography;
 mod types;
 
 pub use atlas::{GlyphMetrics, MsdfAtlas};
+pub use callout::{Callout, CalloutStyle, PointerDirection};
 pub use collision::CollisionGrid;
+pub use curved::{CurvedGlyphInstance, CurvedTextLayout, SampledPath};
+pub use declutter::{DeclutterAlgorithm, DeclutterConfig, DeclutterResult, PlacementCandidate};
+pub use layer::{FeatureGeometry, FeatureType, LabelFeature, LabelLayer, LabelLayerConfig, PlacementStrategy};
+pub use leader::{create_leader_line, generate_leader_vertices};
+pub use line_label::{compute_glyph_advances, compute_line_label_placement};
 pub use projection::LabelProjector;
-pub use types::{LabelData, LabelId, LabelStyle};
+pub use rtree::LabelRTree;
+pub use typography::{KerningTable, TextCase, TypographySettings};
+pub use types::{
+    GlyphPlacement, LabelData, LabelFlags, LabelId, LabelStyle, LeaderLine, LineLabelData,
+    LineLabelPlacement,
+};
 
 use crate::core::text_overlay::{TextInstance, TextOverlayRenderer};
 use glam::{Mat4, Vec3};
@@ -24,12 +47,16 @@ use wgpu::{Device, Queue};
 /// Manages screen-space labels with collision detection and depth occlusion.
 pub struct LabelManager {
     labels: HashMap<LabelId, LabelData>,
+    line_labels: HashMap<LabelId, LineLabelData>,
     next_id: u64,
     atlas: Option<MsdfAtlas>,
-    collision_grid: CollisionGrid,
+    collision_rtree: LabelRTree,
     projector: LabelProjector,
     visible_instances: Vec<TextInstance>,
+    leader_lines: Vec<LeaderLine>,
     enabled: bool,
+    current_zoom: f32,
+    max_visible_labels: usize,
 }
 
 impl LabelManager {
@@ -37,12 +64,16 @@ impl LabelManager {
     pub fn new(screen_width: u32, screen_height: u32) -> Self {
         Self {
             labels: HashMap::new(),
+            line_labels: HashMap::new(),
             next_id: 1,
             atlas: None,
-            collision_grid: CollisionGrid::new(screen_width, screen_height, 10),
+            collision_rtree: LabelRTree::new(screen_width, screen_height),
             projector: LabelProjector::new(screen_width, screen_height),
             visible_instances: Vec::new(),
+            leader_lines: Vec::new(),
             enabled: true,
+            current_zoom: 1.0,
+            max_visible_labels: 500,
         }
     }
 
@@ -87,14 +118,42 @@ impl LabelManager {
             screen_pos: None,
             visible: true,
             depth: 0.0,
+            horizon_angle: 0.0,
+            computed_alpha: 1.0,
         };
         self.labels.insert(id, label);
         id
     }
 
+    /// Add a line label along a polyline.
+    pub fn add_line_label(
+        &mut self,
+        text: String,
+        polyline: Vec<Vec3>,
+        style: LabelStyle,
+        placement: LineLabelPlacement,
+        repeat_distance: f32,
+    ) -> LabelId {
+        let id = LabelId(self.next_id);
+        self.next_id += 1;
+
+        let line_label = LineLabelData {
+            id,
+            text,
+            polyline,
+            style,
+            placement,
+            repeat_distance,
+            glyph_positions: Vec::new(),
+            visible: true,
+        };
+        self.line_labels.insert(id, line_label);
+        id
+    }
+
     /// Remove a label by ID.
     pub fn remove_label(&mut self, id: LabelId) -> bool {
-        self.labels.remove(&id).is_some()
+        self.labels.remove(&id).is_some() || self.line_labels.remove(&id).is_some()
     }
 
     /// Update label style.
@@ -120,6 +179,8 @@ impl LabelManager {
     /// Clear all labels.
     pub fn clear(&mut self) {
         self.labels.clear();
+        self.line_labels.clear();
+        self.leader_lines.clear();
     }
 
     /// Set enabled state.
@@ -134,18 +195,43 @@ impl LabelManager {
 
     /// Get number of labels.
     pub fn label_count(&self) -> usize {
-        self.labels.len()
+        self.labels.len() + self.line_labels.len()
+    }
+
+    /// Set the current zoom level for scale-dependent visibility.
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.current_zoom = zoom;
+    }
+
+    /// Get the current zoom level.
+    pub fn get_zoom(&self) -> f32 {
+        self.current_zoom
+    }
+
+    /// Set maximum number of visible labels.
+    pub fn set_max_visible(&mut self, max: usize) {
+        self.max_visible_labels = max;
     }
 
     /// Resize for new screen dimensions.
     pub fn resize(&mut self, width: u32, height: u32) {
-        self.collision_grid = CollisionGrid::new(width, height, 10);
+        self.collision_rtree.resize(width, height);
         self.projector = LabelProjector::new(width, height);
+    }
+
+    /// Get leader lines for rendering.
+    pub fn leader_lines(&self) -> &[LeaderLine] {
+        &self.leader_lines
     }
 
     /// Update label positions and visibility based on current view.
     /// Returns the number of visible labels.
     pub fn update(&mut self, view_proj: Mat4) -> usize {
+        self.update_with_camera(view_proj, None)
+    }
+
+    /// Update with camera position for horizon fade calculation.
+    pub fn update_with_camera(&mut self, view_proj: Mat4, camera_pos: Option<Vec3>) -> usize {
         if !self.enabled {
             return 0;
         }
@@ -156,20 +242,67 @@ impl LabelManager {
         }
 
         let atlas = self.atlas.as_ref().unwrap();
-        self.collision_grid.clear();
+        self.collision_rtree.clear();
         self.visible_instances.clear();
+        self.leader_lines.clear();
+
+        let (screen_w, screen_h) = self.projector.screen_size();
+        let mut visible_count = 0;
 
         // Collect labels and sort by priority (higher priority first)
         let mut sorted_labels: Vec<_> = self.labels.values_mut().collect();
         sorted_labels.sort_by(|a, b| b.style.priority.cmp(&a.style.priority));
 
         for label in sorted_labels {
+            // Skip if we've reached max visible
+            if visible_count >= self.max_visible_labels {
+                label.visible = false;
+                continue;
+            }
+
+            // Scale filtering: check zoom range
+            if self.current_zoom < label.style.min_zoom || self.current_zoom > label.style.max_zoom
+            {
+                label.visible = false;
+                label.screen_pos = None;
+                continue;
+            }
+
             // Project world position to screen
             let projected = self.projector.project(label.world_pos, view_proj);
 
-            if let Some((screen_pos, depth)) = projected {
-                label.screen_pos = Some(screen_pos);
+            if let Some((mut screen_pos, depth)) = projected {
                 label.depth = depth;
+
+                // Compute horizon angle for fade
+                let horizon_alpha = if let Some(cam_pos) = camera_pos {
+                    let to_label = label.world_pos - cam_pos;
+                    let horizontal_dist =
+                        (to_label.x * to_label.x + to_label.z * to_label.z).sqrt();
+                    let angle_deg = (to_label.y / horizontal_dist.max(0.001))
+                        .atan()
+                        .to_degrees();
+                    label.horizon_angle = angle_deg;
+
+                    // Fade based on horizon angle
+                    let fade_start = label.style.horizon_fade_angle;
+                    if angle_deg.abs() < fade_start {
+                        (angle_deg.abs() / fade_start).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    }
+                } else {
+                    label.horizon_angle = 90.0;
+                    1.0
+                };
+
+                label.computed_alpha = horizon_alpha * label.style.color[3];
+
+                // Apply offset
+                let anchor_screen = screen_pos;
+                screen_pos[0] += label.style.offset[0];
+                screen_pos[1] += label.style.offset[1];
+                label.screen_pos = Some(screen_pos);
 
                 // Calculate label bounds
                 let (width, height) = atlas.measure_text(&label.text, label.style.size);
@@ -183,16 +316,33 @@ impl LabelManager {
                     screen_pos[1] + half_h,
                 ];
 
-                // Check collision
-                if self.collision_grid.try_insert(bounds) {
+                // Check collision using R-tree
+                if self.collision_rtree.try_insert(label.id.0, bounds) {
                     label.visible = true;
+                    visible_count += 1;
+
+                    // Generate leader line if offset and flag set
+                    if label.style.flags.leader
+                        && (label.style.offset[0].abs() > 1.0 || label.style.offset[1].abs() > 1.0)
+                    {
+                        self.leader_lines.push(create_leader_line(
+                            anchor_screen,
+                            screen_pos,
+                            label.style.halo_color,
+                            1.5,
+                        ));
+                    }
+
+                    // Apply color with computed alpha
+                    let mut color = label.style.color;
+                    color[3] = label.computed_alpha;
 
                     // Generate text instances for this label
                     let instances = atlas.layout_text(
                         &label.text,
                         screen_pos,
                         label.style.size,
-                        label.style.color,
+                        color,
                         label.style.halo_color,
                         label.style.halo_width,
                     );
@@ -204,6 +354,49 @@ impl LabelManager {
                 label.screen_pos = None;
                 label.visible = false;
             }
+        }
+
+        // Process line labels
+        for line_label in self.line_labels.values_mut() {
+            if visible_count >= self.max_visible_labels {
+                line_label.visible = false;
+                continue;
+            }
+
+            // Scale filtering
+            if self.current_zoom < line_label.style.min_zoom
+                || self.current_zoom > line_label.style.max_zoom
+            {
+                line_label.visible = false;
+                continue;
+            }
+
+            // Compute glyph advances
+            let advances = compute_glyph_advances(&line_label.text, line_label.style.size);
+
+            // Compute placements
+            let placements = compute_line_label_placement(
+                &line_label.polyline,
+                &line_label.text,
+                &advances,
+                view_proj,
+                screen_w,
+                screen_h,
+                line_label.placement,
+                line_label.style.size,
+            );
+
+            if placements.is_empty() {
+                line_label.visible = false;
+                continue;
+            }
+
+            line_label.glyph_positions = placements;
+            line_label.visible = true;
+            visible_count += 1;
+
+            // TODO: Generate rotated glyph instances for line labels
+            // For now, line labels are tracked but not rendered with rotation
         }
 
         self.visible_instances.len()

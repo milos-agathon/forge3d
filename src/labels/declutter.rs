@@ -1,0 +1,356 @@
+//! Annealing-based label decluttering.
+//!
+//! Uses simulated annealing or greedy algorithms to find optimal
+//! label placements that minimize overlap and maximize readability.
+
+use std::collections::HashSet;
+
+/// A candidate label placement.
+#[derive(Debug, Clone)]
+pub struct PlacementCandidate {
+    /// Label identifier.
+    pub label_id: u64,
+    /// Screen position (x, y).
+    pub position: [f32; 2],
+    /// Bounding box: [min_x, min_y, max_x, max_y].
+    pub bounds: [f32; 4],
+    /// Priority (higher = more important).
+    pub priority: i32,
+    /// Cost of this placement (lower = better).
+    pub cost: f32,
+    /// Whether this candidate is currently selected.
+    pub selected: bool,
+}
+
+/// Declutter algorithm configuration.
+#[derive(Debug, Clone)]
+pub struct DeclutterConfig {
+    /// Maximum iterations for annealing.
+    pub max_iterations: usize,
+    /// Initial temperature for annealing.
+    pub initial_temperature: f32,
+    /// Cooling rate (0.9-0.99 typical).
+    pub cooling_rate: f32,
+    /// Weight for overlap penalty in energy function.
+    pub overlap_weight: f32,
+    /// Weight for priority in energy function.
+    pub priority_weight: f32,
+    /// Weight for distance from preferred position.
+    pub distance_weight: f32,
+    /// Random seed for reproducibility.
+    pub seed: u64,
+    /// Margin around labels for collision.
+    pub margin: f32,
+}
+
+impl Default for DeclutterConfig {
+    fn default() -> Self {
+        Self {
+            max_iterations: 1000,
+            initial_temperature: 100.0,
+            cooling_rate: 0.95,
+            overlap_weight: 10.0,
+            priority_weight: 1.0,
+            distance_weight: 0.5,
+            seed: 42,
+            margin: 2.0,
+        }
+    }
+}
+
+/// Result of decluttering operation.
+#[derive(Debug, Clone)]
+pub struct DeclutterResult {
+    /// Selected label IDs that should be displayed.
+    pub visible_labels: Vec<u64>,
+    /// Final positions for visible labels.
+    pub positions: Vec<(u64, [f32; 2])>,
+    /// Total energy of the solution.
+    pub total_energy: f32,
+    /// Number of iterations performed.
+    pub iterations: usize,
+}
+
+/// Simple pseudo-random number generator for reproducibility.
+struct SimpleRng {
+    state: u64,
+}
+
+impl SimpleRng {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        self.state
+    }
+
+    fn next_f32(&mut self) -> f32 {
+        (self.next_u64() as f32) / (u64::MAX as f32)
+    }
+
+    fn next_usize(&mut self, max: usize) -> usize {
+        (self.next_u64() as usize) % max
+    }
+}
+
+/// Check if two bounding boxes overlap.
+fn boxes_overlap(a: &[f32; 4], b: &[f32; 4], margin: f32) -> bool {
+    let a_expanded = [
+        a[0] - margin,
+        a[1] - margin,
+        a[2] + margin,
+        a[3] + margin,
+    ];
+    !(a_expanded[2] < b[0] || b[2] < a_expanded[0] || 
+      a_expanded[3] < b[1] || b[3] < a_expanded[1])
+}
+
+/// Calculate overlap area between two boxes.
+fn overlap_area(a: &[f32; 4], b: &[f32; 4]) -> f32 {
+    let x_overlap = (a[2].min(b[2]) - a[0].max(b[0])).max(0.0);
+    let y_overlap = (a[3].min(b[3]) - a[1].max(b[1])).max(0.0);
+    x_overlap * y_overlap
+}
+
+/// Compute energy for a set of placements.
+fn compute_energy(
+    candidates: &[PlacementCandidate],
+    config: &DeclutterConfig,
+) -> f32 {
+    let selected: Vec<_> = candidates.iter().filter(|c| c.selected).collect();
+    
+    let mut energy = 0.0;
+
+    // Overlap penalty
+    for i in 0..selected.len() {
+        for j in (i + 1)..selected.len() {
+            let overlap = overlap_area(&selected[i].bounds, &selected[j].bounds);
+            energy += overlap * config.overlap_weight;
+        }
+    }
+
+    // Priority bonus (negative energy for high-priority labels)
+    for c in &selected {
+        energy -= (c.priority as f32) * config.priority_weight;
+    }
+
+    // Distance penalty
+    for c in candidates {
+        if c.selected {
+            energy += c.cost * config.distance_weight;
+        }
+    }
+
+    energy
+}
+
+/// Greedy decluttering algorithm.
+///
+/// Places labels in priority order, skipping those that overlap
+/// with already-placed labels.
+pub fn declutter_greedy(
+    mut candidates: Vec<PlacementCandidate>,
+    config: &DeclutterConfig,
+) -> DeclutterResult {
+    // Sort by priority (descending)
+    candidates.sort_by(|a, b| b.priority.cmp(&a.priority));
+
+    let mut visible_labels = Vec::new();
+    let mut positions = Vec::new();
+    let mut placed_bounds: Vec<[f32; 4]> = Vec::new();
+
+    for candidate in &mut candidates {
+        // Check if this candidate overlaps with any placed label
+        let overlaps = placed_bounds.iter().any(|b| {
+            boxes_overlap(&candidate.bounds, b, config.margin)
+        });
+
+        if !overlaps {
+            candidate.selected = true;
+            visible_labels.push(candidate.label_id);
+            positions.push((candidate.label_id, candidate.position));
+            placed_bounds.push(candidate.bounds);
+        } else {
+            candidate.selected = false;
+        }
+    }
+
+    let total_energy = compute_energy(&candidates, config);
+
+    DeclutterResult {
+        visible_labels,
+        positions,
+        total_energy,
+        iterations: 1,
+    }
+}
+
+/// Simulated annealing decluttering algorithm.
+///
+/// Uses stochastic optimization to find a near-optimal placement
+/// that balances visibility of important labels with minimal overlap.
+pub fn declutter_annealing(
+    mut candidates: Vec<PlacementCandidate>,
+    config: &DeclutterConfig,
+) -> DeclutterResult {
+    if candidates.is_empty() {
+        return DeclutterResult {
+            visible_labels: Vec::new(),
+            positions: Vec::new(),
+            total_energy: 0.0,
+            iterations: 0,
+        };
+    }
+
+    let mut rng = SimpleRng::new(config.seed);
+
+    // Start with greedy solution
+    let greedy = declutter_greedy(candidates.clone(), config);
+    let greedy_ids: HashSet<u64> = greedy.visible_labels.iter().copied().collect();
+    
+    for c in &mut candidates {
+        c.selected = greedy_ids.contains(&c.label_id);
+    }
+
+    let mut current_energy = compute_energy(&candidates, config);
+    let mut best_energy = current_energy;
+    let mut best_selection: Vec<bool> = candidates.iter().map(|c| c.selected).collect();
+
+    let mut temperature = config.initial_temperature;
+
+    for _iteration in 0..config.max_iterations {
+        // Pick a random candidate to toggle
+        let idx = rng.next_usize(candidates.len());
+        
+        // Toggle selection
+        candidates[idx].selected = !candidates[idx].selected;
+        
+        let new_energy = compute_energy(&candidates, config);
+        let delta = new_energy - current_energy;
+
+        // Accept or reject the change
+        let accept = if delta < 0.0 {
+            true
+        } else {
+            let prob = (-delta / temperature).exp();
+            rng.next_f32() < prob
+        };
+
+        if accept {
+            current_energy = new_energy;
+            if current_energy < best_energy {
+                best_energy = current_energy;
+                best_selection = candidates.iter().map(|c| c.selected).collect();
+            }
+        } else {
+            // Revert
+            candidates[idx].selected = !candidates[idx].selected;
+        }
+
+        // Cool down
+        temperature *= config.cooling_rate;
+
+        // Early termination if temperature is very low
+        if temperature < 0.001 {
+            break;
+        }
+    }
+
+    // Apply best solution
+    for (i, &selected) in best_selection.iter().enumerate() {
+        candidates[i].selected = selected;
+    }
+
+    let visible_labels: Vec<u64> = candidates
+        .iter()
+        .filter(|c| c.selected)
+        .map(|c| c.label_id)
+        .collect();
+
+    let positions: Vec<(u64, [f32; 2])> = candidates
+        .iter()
+        .filter(|c| c.selected)
+        .map(|c| (c.label_id, c.position))
+        .collect();
+
+    DeclutterResult {
+        visible_labels,
+        positions,
+        total_energy: best_energy,
+        iterations: config.max_iterations,
+    }
+}
+
+/// Declutter algorithm selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DeclutterAlgorithm {
+    /// Simple greedy algorithm (fast, decent results).
+    #[default]
+    Greedy,
+    /// Simulated annealing (slower, better results).
+    Annealing,
+}
+
+/// Run decluttering with the specified algorithm.
+pub fn declutter(
+    candidates: Vec<PlacementCandidate>,
+    config: &DeclutterConfig,
+    algorithm: DeclutterAlgorithm,
+) -> DeclutterResult {
+    match algorithm {
+        DeclutterAlgorithm::Greedy => declutter_greedy(candidates, config),
+        DeclutterAlgorithm::Annealing => declutter_annealing(candidates, config),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_candidate(id: u64, x: f32, y: f32, priority: i32) -> PlacementCandidate {
+        let size = 50.0;
+        PlacementCandidate {
+            label_id: id,
+            position: [x, y],
+            bounds: [x - size/2.0, y - size/2.0, x + size/2.0, y + size/2.0],
+            priority,
+            cost: 0.0,
+            selected: false,
+        }
+    }
+
+    #[test]
+    fn test_greedy_non_overlapping() {
+        let candidates = vec![
+            make_candidate(1, 100.0, 100.0, 10),
+            make_candidate(2, 200.0, 100.0, 5),
+        ];
+        let config = DeclutterConfig::default();
+        let result = declutter_greedy(candidates, &config);
+        assert_eq!(result.visible_labels.len(), 2);
+    }
+
+    #[test]
+    fn test_greedy_overlapping_priority() {
+        let candidates = vec![
+            make_candidate(1, 100.0, 100.0, 10),
+            make_candidate(2, 110.0, 100.0, 5), // Overlaps with 1
+        ];
+        let config = DeclutterConfig::default();
+        let result = declutter_greedy(candidates, &config);
+        assert_eq!(result.visible_labels.len(), 1);
+        assert_eq!(result.visible_labels[0], 1); // Higher priority wins
+    }
+
+    #[test]
+    fn test_boxes_overlap() {
+        let a = [0.0, 0.0, 10.0, 10.0];
+        let b = [5.0, 5.0, 15.0, 15.0];
+        assert!(boxes_overlap(&a, &b, 0.0));
+
+        let c = [20.0, 20.0, 30.0, 30.0];
+        assert!(!boxes_overlap(&a, &c, 0.0));
+    }
+}

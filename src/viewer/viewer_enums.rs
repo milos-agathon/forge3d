@@ -344,6 +344,28 @@ pub enum ViewerCmd {
         halo_color: Option<[f32; 4]>,
         halo_width: Option<f32>,
         priority: Option<i32>,
+        min_zoom: Option<f32>,
+        max_zoom: Option<f32>,
+        offset: Option<[f32; 2]>,
+        rotation: Option<f32>,
+        underline: Option<bool>,
+        small_caps: Option<bool>,
+        leader: Option<bool>,
+        horizon_fade_angle: Option<f32>,
+    },
+    /// Add a line label along a polyline
+    AddLineLabel {
+        text: String,
+        polyline: Vec<[f32; 3]>,
+        size: Option<f32>,
+        color: Option<[f32; 4]>,
+        halo_color: Option<[f32; 4]>,
+        halo_width: Option<f32>,
+        priority: Option<i32>,
+        placement: Option<String>,
+        repeat_distance: Option<f32>,
+        min_zoom: Option<f32>,
+        max_zoom: Option<f32>,
     },
     /// Remove a label by ID
     RemoveLabel { id: u64 },
@@ -355,6 +377,53 @@ pub enum ViewerCmd {
     LoadLabelAtlas {
         atlas_png_path: String,
         metrics_json_path: String,
+    },
+    /// Set zoom level for scale-dependent label visibility
+    SetLabelZoom { zoom: f32 },
+    /// Set maximum number of visible labels
+    SetMaxVisibleLabels { max: usize },
+
+    // === Plan 3: Premium Label Features ===
+
+    /// Add a curved label along a polyline path
+    AddCurvedLabel {
+        text: String,
+        polyline: Vec<[f32; 3]>,
+        size: Option<f32>,
+        color: Option<[f32; 4]>,
+        halo_color: Option<[f32; 4]>,
+        halo_width: Option<f32>,
+        priority: Option<i32>,
+        tracking: Option<f32>,
+        center_on_path: bool,
+    },
+    /// Add a callout box with pointer
+    AddCallout {
+        text: String,
+        anchor: [f32; 3],
+        offset: Option<[f32; 2]>,
+        background_color: Option<[f32; 4]>,
+        border_color: Option<[f32; 4]>,
+        border_width: Option<f32>,
+        corner_radius: Option<f32>,
+        padding: Option<f32>,
+        text_size: Option<f32>,
+        text_color: Option<[f32; 4]>,
+    },
+    /// Remove a callout by ID
+    RemoveCallout { id: u64 },
+    /// Set global typography settings
+    SetLabelTypography {
+        tracking: Option<f32>,
+        kerning: Option<bool>,
+        line_height: Option<f32>,
+        word_spacing: Option<f32>,
+    },
+    /// Set declutter algorithm
+    SetDeclutterAlgorithm {
+        algorithm: String,
+        seed: Option<u64>,
+        max_iterations: Option<usize>,
     },
 }
 

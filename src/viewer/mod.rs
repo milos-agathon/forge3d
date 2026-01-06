@@ -44,10 +44,9 @@ use viewer_types::{
     FogCameraUniforms, FogUpsampleParamsStd140, SkyUniforms, VolumetricUniformsStd140,
 };
 
-use hud::{
-    push_number as hud_push_number,
-    push_text_3x5 as hud_push_text_3x5,
-};
+// HUD push functions available for future use
+#[allow(unused_imports)]
+use hud::{push_number, push_text_3x5};
 use crate::core::shadows::CameraFrustum;
 #[cfg(feature = "extension-module")]
 use std::sync::Arc;

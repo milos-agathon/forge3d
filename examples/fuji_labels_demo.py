@@ -35,8 +35,15 @@ from forge3d.viewer_ipc import (
     find_viewer_binary,
     send_ipc,
     add_label,
+    add_line_label,
+    add_curved_label,
+    add_callout,
     clear_labels,
     set_labels_enabled,
+    set_label_zoom,
+    set_max_visible_labels,
+    set_label_typography,
+    set_declutter_algorithm,
     load_label_atlas,
 )
 from forge3d.interactive import run_interactive_loop
@@ -703,11 +710,15 @@ def main() -> int:
         print(f"Warning: Failed to open DEM with rasterio: {e}")
         dem_src = None
 
-    print("\nAdding labels...")
+    print("\nAdding labels with Plan 2 features...")
     set_labels_enabled(sock, True)
     time.sleep(0.2)
     
-    for place in places:
+    # Configure label system (Plan 2 features)
+    set_label_zoom(sock, 1.0)  # Default zoom level
+    set_max_visible_labels(sock, 100)  # Limit visible labels
+    
+    for i, place in enumerate(places):
         # Transform WGS84 coordinates to terrain-local coordinates
         local_x, local_z, _ = world_to_terrain_local(place["x"], place["y"])
         
@@ -730,8 +741,21 @@ def main() -> int:
         # Place labels at correct elevation
         # Viewer visual height = elevation * zscale
         # Add a small offset (e.g. 50m scaled) so it doesn't clip into steep terrain
-        # Note: If elevation is 0 (e.g. outside DEM), label might be low.
         local_y = (elevation * Z_SCALE) + (50.0 * Z_SCALE)
+        
+        # Assign priority based on elevation (higher places = higher priority)
+        # This demonstrates Plan 2's priority-based collision resolution
+        priority = int(elevation / 100) + 10
+        
+        # Demonstrate Plan 2 features: offset labels with leader lines for some places
+        use_offset = (i % 3 == 0) and elevation > 1000  # Every 3rd high-altitude label
+        offset_x = 30.0 if use_offset else 0.0
+        offset_y = -20.0 if use_offset else 0.0
+        
+        # Scale-dependent visibility: show high-altitude labels at all zooms,
+        # lower labels only when zoomed in
+        min_zoom = 0.0 if elevation > 2000 else 0.5
+        max_zoom = 10.0  # Always visible up to max zoom
         
         resp = add_label(
             sock,
@@ -741,15 +765,281 @@ def main() -> int:
             color=(0.1, 0.1, 0.1, 1.0),  # Dark text
             halo_color=(1.0, 1.0, 1.0, 0.9),  # White halo
             halo_width=2.0,
-            priority=10,
+            priority=priority,
+            # Plan 2 features:
+            min_zoom=min_zoom,
+            max_zoom=max_zoom,
+            offset=(offset_x, offset_y) if use_offset else None,
+            leader=use_offset,  # Show leader line when offset
+            horizon_fade_angle=10.0,  # Fade labels near horizon
         )
-        print(f"  Added label: {place['name']} at ({local_x:.0f}, {local_y:.0f}, {local_z:.0f}) [ele: {elevation:.1f}m] -> {resp}")
+        offset_info = f" [offset + leader]" if use_offset else ""
+        print(f"  Added label: {place['name']} pri={priority} zoom=[{min_zoom:.1f},{max_zoom:.1f}]{offset_info}")
     
     if dem_src:
         dem_src.close()
     
+    # === Plan 3 Features Demo ===
+    print("\n--- Plan 3: Premium Label Features ---")
+    
+    # Set typography with tracking (letter-spacing)
+    set_label_typography(sock, tracking=0.02, kerning=True, line_height=1.2)
+    print("  Typography: tracking=0.02, kerning=True, line_height=1.2")
+    
+    # Set declutter algorithm to greedy for fast placement
+    set_declutter_algorithm(sock, algorithm="greedy", seed=42)
+    print("  Declutter: algorithm=greedy, seed=42")
+    
+    # 1. Add a callout for Mount Fuji summit (main peak)
+    summit_local_x, summit_local_z, _ = world_to_terrain_local(138.7278, 35.3606)
+    summit_local_y = 3776.0 * Z_SCALE + 100.0 * Z_SCALE
+    
+    add_callout(
+        sock,
+        text="Mt. Fuji Summit\n3776m\nHighest Peak",
+        anchor=(summit_local_x, summit_local_y, summit_local_z),
+        offset=(0.0, -70.0),
+        background_color=(1.0, 1.0, 0.95, 0.95),
+        border_color=(0.8, 0.5, 0.0, 1.0),
+        border_width=2.0,
+        corner_radius=6.0,
+        padding=10.0,
+        text_size=18.0,
+        text_color=(0.0, 0.0, 0.0, 1.0),
+    )
+    print("  Added callout: Mt. Fuji Summit")
+    
+    # 2. Add special styled labels for different landmark types
+    print("\n--- Advanced Label Styling Examples ---")
+    
+    # Example: Large underlined label for a major landmark
+    major_landmark_x, major_landmark_z, _ = world_to_terrain_local(138.73, 35.35)
+    major_landmark_y = 2500.0 * Z_SCALE + 80.0 * Z_SCALE
+    add_label(
+        sock,
+        text="FIFTH STATION",
+        world_pos=(major_landmark_x, major_landmark_y, major_landmark_z),
+        size=24.0,
+        color=(0.0, 0.2, 0.5, 1.0),  # Blue text
+        halo_color=(1.0, 1.0, 1.0, 0.95),
+        halo_width=3.0,
+        priority=150,
+        underline=True,  # Underlined style
+        min_zoom=0.0,
+        max_zoom=5.0,
+    )
+    print("  Added underlined label: FIFTH STATION")
+    
+    # Example: Small caps label for geographic features
+    geo_feature_x, geo_feature_z, _ = world_to_terrain_local(138.75, 35.37)
+    geo_feature_y = 1800.0 * Z_SCALE + 60.0 * Z_SCALE
+    add_label(
+        sock,
+        text="Crater Lake",
+        world_pos=(geo_feature_x, geo_feature_y, geo_feature_z),
+        size=16.0,
+        color=(0.0, 0.4, 0.6, 1.0),  # Teal color
+        halo_color=(1.0, 1.0, 1.0, 0.9),
+        halo_width=2.0,
+        priority=100,
+        small_caps=True,  # Small caps style
+    )
+    print("  Added small-caps label: Crater Lake")
+    
+    # 3. Demonstrate rotated labels
+    print("\n--- Rotated Label Examples ---")
+    import math
+    
+    # Add rotated labels at different angles
+    for angle_deg, name in [(45, "Ridge NE"), (-30, "Valley SW"), (90, "North Face")]:
+        angle_rad = math.radians(angle_deg)
+        offset_dist = 0.02  # Offset in degrees
+        rot_x, rot_z, _ = world_to_terrain_local(
+            138.72 + offset_dist * math.cos(angle_rad),
+            35.36 + offset_dist * math.sin(angle_rad)
+        )
+        rot_y = 2200.0 * Z_SCALE + 70.0 * Z_SCALE
+        
+        add_label(
+            sock,
+            text=name,
+            world_pos=(rot_x, rot_y, rot_z),
+            size=14.0,
+            color=(0.3, 0.0, 0.3, 1.0),  # Purple
+            halo_color=(1.0, 1.0, 1.0, 0.85),
+            halo_width=1.5,
+            priority=80,
+            rotation=angle_rad,
+        )
+        print(f"  Added rotated label ({angle_deg}°): {name}")
+    
+    # 4. Line label examples (simulated paths)
+    print("\n--- Line Label Examples ---")
+    
+    # Create a simulated hiking trail path
+    trail_points = []
+    base_lon, base_lat = 138.71, 35.34
+    for i in range(8):
+        t = i / 7.0
+        lon = base_lon + 0.03 * t + 0.005 * math.sin(t * math.pi * 2)
+        lat = base_lat + 0.04 * t + 0.003 * math.cos(t * math.pi * 3)
+        elev = (1500.0 + 800.0 * t) * Z_SCALE + 60.0 * Z_SCALE
+        x, z, _ = world_to_terrain_local(lon, lat)
+        trail_points.append((x, elev, z))
+    
+    add_line_label(
+        sock,
+        text="Yoshida Trail",
+        polyline=trail_points,
+        size=16.0,
+        color=(0.6, 0.3, 0.0, 1.0),  # Brown
+        halo_color=(1.0, 1.0, 1.0, 0.9),
+        halo_width=2.0,
+        priority=120,
+        placement="along",
+        repeat_distance=0.0,
+    )
+    print("  Added line label: Yoshida Trail")
+    
+    # 5. Curved label along a terrain contour
+    print("\n--- Curved Label Example ---")
+    
+    # Create a curved path for a contour line
+    contour_points = []
+    center_lon, center_lat = 138.73, 35.355
+    radius_deg = 0.015
+    for i in range(12):
+        angle = (i / 11.0) * math.pi * 1.5  # 270 degrees
+        lon = center_lon + radius_deg * math.cos(angle)
+        lat = center_lat + radius_deg * math.sin(angle)
+        elev = 3000.0 * Z_SCALE + 70.0 * Z_SCALE
+        x, z, _ = world_to_terrain_local(lon, lat)
+        contour_points.append((x, elev, z))
+    
+    add_curved_label(
+        sock,
+        text="3000m CONTOUR",
+        polyline=contour_points,
+        size=14.0,
+        color=(0.4, 0.2, 0.0, 1.0),
+        halo_color=(1.0, 1.0, 1.0, 0.85),
+        halo_width=1.5,
+        priority=90,
+        tracking=0.05,
+        center_on_path=True,
+    )
+    print("  Added curved label: 3000m CONTOUR")
+    
+    # 6. Multiple callouts with different styles
+    print("\n--- Additional Callouts ---")
+    
+    # Information callout (white background)
+    info_x, info_z, _ = world_to_terrain_local(138.74, 35.34)
+    info_y = 1600.0 * Z_SCALE + 80.0 * Z_SCALE
+    add_callout(
+        sock,
+        text="Visitor Center\nOpen May-Sep",
+        anchor=(info_x, info_y, info_z),
+        offset=(40.0, 20.0),
+        background_color=(1.0, 1.0, 1.0, 0.92),
+        border_color=(0.0, 0.5, 0.8, 1.0),
+        border_width=1.5,
+        corner_radius=5.0,
+        padding=8.0,
+        text_size=13.0,
+        text_color=(0.0, 0.0, 0.0, 1.0),
+    )
+    print("  Added info callout: Visitor Center")
+    
+    # Warning callout (yellow background)
+    warning_x, warning_z, _ = world_to_terrain_local(138.72, 35.38)
+    warning_y = 3200.0 * Z_SCALE + 90.0 * Z_SCALE
+    add_callout(
+        sock,
+        text="⚠ Steep Slope\nCaution Required",
+        anchor=(warning_x, warning_y, warning_z),
+        offset=(-40.0, -40.0),
+        background_color=(1.0, 1.0, 0.0, 0.88),
+        border_color=(0.8, 0.0, 0.0, 1.0),
+        border_width=2.0,
+        corner_radius=4.0,
+        padding=9.0,
+        text_size=14.0,
+        text_color=(0.5, 0.0, 0.0, 1.0),
+    )
+    print("  Added warning callout: Steep Slope")
+    
+    # 7. Horizon fade demonstration with low-angle labels
+    print("\n--- Horizon Fade Examples ---")
+    
+    # Add labels at various distances to show horizon fade
+    for i, (distance_factor, fade_angle) in enumerate([(0.5, 15.0), (1.0, 10.0), (1.5, 5.0)]):
+        far_x, far_z, _ = world_to_terrain_local(
+            138.68 + distance_factor * 0.05,
+            35.32 + distance_factor * 0.03
+        )
+        far_y = 800.0 * Z_SCALE + 50.0 * Z_SCALE
+        
+        add_label(
+            sock,
+            text=f"Distant Peak {i+1}",
+            world_pos=(far_x, far_y, far_z),
+            size=15.0,
+            color=(0.4, 0.4, 0.5, 1.0),  # Gray-blue
+            halo_color=(1.0, 1.0, 1.0, 0.8),
+            halo_width=2.0,
+            priority=60 - i * 10,
+            horizon_fade_angle=fade_angle,
+        )
+        print(f"  Added horizon-fade label: Distant Peak {i+1} (fade_angle={fade_angle}°)")
+    
+    # 8. Scale-dependent visibility demonstration
+    print("\n--- Scale-Dependent Visibility Examples ---")
+    
+    # Detail labels only visible when zoomed in
+    for i in range(3):
+        detail_x, detail_z, _ = world_to_terrain_local(
+            138.725 + i * 0.005,
+            35.355 + i * 0.003
+        )
+        detail_y = 2800.0 * Z_SCALE + 65.0 * Z_SCALE
+        
+        add_label(
+            sock,
+            text=f"Detail {i+1}",
+            world_pos=(detail_x, detail_y, detail_z),
+            size=12.0,
+            color=(0.2, 0.5, 0.2, 1.0),  # Green
+            halo_color=(1.0, 1.0, 1.0, 0.85),
+            halo_width=1.0,
+            priority=40,
+            min_zoom=2.0,  # Only visible when zoomed in
+            max_zoom=10.0,
+        )
+        print(f"  Added detail label (zoom 2-10): Detail {i+1}")
+    
+    # 9. Priority comparison
+    print("\n--- Priority System Examples ---")
+    
+    # Add overlapping labels with different priorities
+    overlap_base_x, overlap_base_z, _ = world_to_terrain_local(138.76, 35.36)
+    overlap_base_y = 2000.0 * Z_SCALE + 75.0 * Z_SCALE
+    
+    for priority_val, offset_m, label_name in [(200, 0, "HIGH"), (100, 20, "MED"), (50, 40, "LOW")]:
+        add_label(
+            sock,
+            text=f"{label_name} Priority",
+            world_pos=(overlap_base_x, overlap_base_y, overlap_base_z + offset_m),
+            size=16.0,
+            color=(1.0 - priority_val/200.0, 0.0, priority_val/200.0, 1.0),
+            halo_color=(1.0, 1.0, 1.0, 0.9),
+            halo_width=2.0,
+            priority=priority_val,
+        )
+        print(f"  Added priority={priority_val} label: {label_name} Priority")
+    
     # Wait for all label commands to be processed
-    time.sleep(1.0)
+    time.sleep(1.5)
     
     # Take snapshot if requested
     if args.snapshot:

@@ -36,7 +36,7 @@ impl Viewer {
         }
 
         // Compute snapshot dimensions if requested (but don't resize yet - we'll render to offscreen)
-        let snapshot_dimensions = if self.snapshot_request.is_some() {
+        let _snapshot_dimensions = if self.snapshot_request.is_some() {
             let (req_w, req_h) = if let (Some(w), Some(h)) = (
                 self.view_config.snapshot_width,
                 self.view_config.snapshot_height,
@@ -1378,7 +1378,7 @@ impl Viewer {
                 );
                 
                 // If snapshot requested, also render to offscreen texture at snapshot dimensions
-                if let Some((snap_w, snap_h)) = snapshot_dimensions {
+                if let Some((snap_w, snap_h)) = _snapshot_dimensions {
                     let snap_tex = self.device.create_texture(&wgpu::TextureDescriptor {
                         label: Some("viewer.terrain.snapshot"),
                         size: wgpu::Extent3d {

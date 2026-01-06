@@ -8,6 +8,14 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ### Added
 
+## [1.9.1] - Snapshot Refactoring & Cleanup
+
+### Changed
+- Refactored snapshot rendering to separate it from window rendering.
+- Removed HUD overlay to simplify viewer.
+- Removed unused large data file `glad_cropland_2019.tif`.
+- Updated `fuji_labels.png` asset.
+
 ## [1.9.0] - Terrain Labels & Fuji Demo
 
 ### Added

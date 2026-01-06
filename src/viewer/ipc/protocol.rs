@@ -260,6 +260,53 @@ pub enum IpcRequest {
         halo_width: Option<f32>,
         #[serde(default)]
         priority: Option<i32>,
+        /// Plan 2: Scale-dependent visibility
+        #[serde(default)]
+        min_zoom: Option<f32>,
+        #[serde(default)]
+        max_zoom: Option<f32>,
+        /// Plan 2: Screen offset from anchor
+        #[serde(default)]
+        offset: Option<[f32; 2]>,
+        /// Plan 2: Rotation in radians
+        #[serde(default)]
+        rotation: Option<f32>,
+        /// Plan 2: Style flags
+        #[serde(default)]
+        underline: Option<bool>,
+        #[serde(default)]
+        small_caps: Option<bool>,
+        #[serde(default)]
+        leader: Option<bool>,
+        /// Plan 2: Horizon fade angle in degrees
+        #[serde(default)]
+        horizon_fade_angle: Option<f32>,
+    },
+    /// Add a line label along a polyline
+    AddLineLabel {
+        text: String,
+        /// Polyline vertices [[x, y, z], ...]
+        polyline: Vec<[f32; 3]>,
+        #[serde(default)]
+        size: Option<f32>,
+        #[serde(default)]
+        color: Option<[f32; 4]>,
+        #[serde(default)]
+        halo_color: Option<[f32; 4]>,
+        #[serde(default)]
+        halo_width: Option<f32>,
+        #[serde(default)]
+        priority: Option<i32>,
+        /// "center" or "along"
+        #[serde(default)]
+        placement: Option<String>,
+        /// Repeat distance in pixels (0 = no repeat)
+        #[serde(default)]
+        repeat_distance: Option<f32>,
+        #[serde(default)]
+        min_zoom: Option<f32>,
+        #[serde(default)]
+        max_zoom: Option<f32>,
     },
     /// Remove a label by ID
     RemoveLabel { id: u64 },
@@ -271,6 +318,74 @@ pub enum IpcRequest {
     LoadLabelAtlas {
         atlas_png_path: String,
         metrics_json_path: String,
+    },
+    /// Set zoom level for scale-dependent label visibility
+    SetLabelZoom { zoom: f32 },
+    /// Set maximum number of visible labels
+    SetMaxVisibleLabels { max: usize },
+
+    // === Plan 3: Premium Label Features ===
+
+    /// Add a curved label along a polyline path
+    AddCurvedLabel {
+        text: String,
+        polyline: Vec<[f32; 3]>,
+        #[serde(default)]
+        size: Option<f32>,
+        #[serde(default)]
+        color: Option<[f32; 4]>,
+        #[serde(default)]
+        halo_color: Option<[f32; 4]>,
+        #[serde(default)]
+        halo_width: Option<f32>,
+        #[serde(default)]
+        priority: Option<i32>,
+        #[serde(default)]
+        tracking: Option<f32>,
+        #[serde(default = "default_true")]
+        center_on_path: bool,
+    },
+    /// Add a callout box with pointer
+    AddCallout {
+        text: String,
+        anchor: [f32; 3],
+        #[serde(default)]
+        offset: Option<[f32; 2]>,
+        #[serde(default)]
+        background_color: Option<[f32; 4]>,
+        #[serde(default)]
+        border_color: Option<[f32; 4]>,
+        #[serde(default)]
+        border_width: Option<f32>,
+        #[serde(default)]
+        corner_radius: Option<f32>,
+        #[serde(default)]
+        padding: Option<f32>,
+        #[serde(default)]
+        text_size: Option<f32>,
+        #[serde(default)]
+        text_color: Option<[f32; 4]>,
+    },
+    /// Remove a callout by ID
+    RemoveCallout { id: u64 },
+    /// Set global typography settings
+    SetLabelTypography {
+        #[serde(default)]
+        tracking: Option<f32>,
+        #[serde(default)]
+        kerning: Option<bool>,
+        #[serde(default)]
+        line_height: Option<f32>,
+        #[serde(default)]
+        word_spacing: Option<f32>,
+    },
+    /// Set declutter algorithm
+    SetDeclutterAlgorithm {
+        algorithm: String,
+        #[serde(default)]
+        seed: Option<u64>,
+        #[serde(default)]
+        max_iterations: Option<usize>,
     },
 }
 
@@ -545,6 +660,10 @@ fn default_line_width() -> f32 {
 
 fn default_point_size() -> f32 {
     5.0
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// IPC response envelope
@@ -940,6 +1059,14 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             halo_color,
             halo_width,
             priority,
+            min_zoom,
+            max_zoom,
+            offset,
+            rotation,
+            underline,
+            small_caps,
+            leader,
+            horizon_fade_angle,
         } => Ok(Some(ViewerCmd::AddLabel {
             text: text.clone(),
             world_pos: *world_pos,
@@ -948,6 +1075,39 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             halo_color: *halo_color,
             halo_width: *halo_width,
             priority: *priority,
+            min_zoom: *min_zoom,
+            max_zoom: *max_zoom,
+            offset: *offset,
+            rotation: *rotation,
+            underline: *underline,
+            small_caps: *small_caps,
+            leader: *leader,
+            horizon_fade_angle: *horizon_fade_angle,
+        })),
+        IpcRequest::AddLineLabel {
+            text,
+            polyline,
+            size,
+            color,
+            halo_color,
+            halo_width,
+            priority,
+            placement,
+            repeat_distance,
+            min_zoom,
+            max_zoom,
+        } => Ok(Some(ViewerCmd::AddLineLabel {
+            text: text.clone(),
+            polyline: polyline.clone(),
+            size: *size,
+            color: *color,
+            halo_color: *halo_color,
+            halo_width: *halo_width,
+            priority: *priority,
+            placement: placement.clone(),
+            repeat_distance: *repeat_distance,
+            min_zoom: *min_zoom,
+            max_zoom: *max_zoom,
         })),
         IpcRequest::RemoveLabel { id } => Ok(Some(ViewerCmd::RemoveLabel { id: *id })),
         IpcRequest::ClearLabels => Ok(Some(ViewerCmd::ClearLabels)),
@@ -960,6 +1120,77 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
         } => Ok(Some(ViewerCmd::LoadLabelAtlas {
             atlas_png_path: atlas_png_path.clone(),
             metrics_json_path: metrics_json_path.clone(),
+        })),
+        IpcRequest::SetLabelZoom { zoom } => Ok(Some(ViewerCmd::SetLabelZoom { zoom: *zoom })),
+        IpcRequest::SetMaxVisibleLabels { max } => {
+            Ok(Some(ViewerCmd::SetMaxVisibleLabels { max: *max }))
+        }
+
+        // Plan 3: Premium Label Features
+        IpcRequest::AddCurvedLabel {
+            text,
+            polyline,
+            size,
+            color,
+            halo_color,
+            halo_width,
+            priority,
+            tracking,
+            center_on_path,
+        } => Ok(Some(ViewerCmd::AddCurvedLabel {
+            text: text.clone(),
+            polyline: polyline.clone(),
+            size: *size,
+            color: *color,
+            halo_color: *halo_color,
+            halo_width: *halo_width,
+            priority: *priority,
+            tracking: *tracking,
+            center_on_path: *center_on_path,
+        })),
+        IpcRequest::AddCallout {
+            text,
+            anchor,
+            offset,
+            background_color,
+            border_color,
+            border_width,
+            corner_radius,
+            padding,
+            text_size,
+            text_color,
+        } => Ok(Some(ViewerCmd::AddCallout {
+            text: text.clone(),
+            anchor: *anchor,
+            offset: *offset,
+            background_color: *background_color,
+            border_color: *border_color,
+            border_width: *border_width,
+            corner_radius: *corner_radius,
+            padding: *padding,
+            text_size: *text_size,
+            text_color: *text_color,
+        })),
+        IpcRequest::RemoveCallout { id } => Ok(Some(ViewerCmd::RemoveCallout { id: *id })),
+        IpcRequest::SetLabelTypography {
+            tracking,
+            kerning,
+            line_height,
+            word_spacing,
+        } => Ok(Some(ViewerCmd::SetLabelTypography {
+            tracking: *tracking,
+            kerning: *kerning,
+            line_height: *line_height,
+            word_spacing: *word_spacing,
+        })),
+        IpcRequest::SetDeclutterAlgorithm {
+            algorithm,
+            seed,
+            max_iterations,
+        } => Ok(Some(ViewerCmd::SetDeclutterAlgorithm {
+            algorithm: algorithm.clone(),
+            seed: *seed,
+            max_iterations: *max_iterations,
         })),
     }
 }

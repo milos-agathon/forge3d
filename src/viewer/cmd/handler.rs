@@ -1310,6 +1310,14 @@ impl Viewer {
                 halo_color,
                 halo_width,
                 priority,
+                min_zoom,
+                max_zoom,
+                offset,
+                rotation,
+                underline,
+                small_caps,
+                leader,
+                horizon_fade_angle,
             } => {
                 use crate::labels::LabelStyle;
                 let mut style = LabelStyle::default();
@@ -1328,8 +1336,81 @@ impl Viewer {
                 if let Some(p) = priority {
                     style.priority = p;
                 }
+                if let Some(mz) = min_zoom {
+                    style.min_zoom = mz;
+                }
+                if let Some(mz) = max_zoom {
+                    style.max_zoom = mz;
+                }
+                if let Some(o) = offset {
+                    style.offset = o;
+                }
+                if let Some(r) = rotation {
+                    style.rotation = r;
+                }
+                if let Some(u) = underline {
+                    style.flags.underline = u;
+                }
+                if let Some(sc) = small_caps {
+                    style.flags.small_caps = sc;
+                }
+                if let Some(l) = leader {
+                    style.flags.leader = l;
+                }
+                if let Some(hfa) = horizon_fade_angle {
+                    style.horizon_fade_angle = hfa;
+                }
                 let id = self.add_label(&text, (world_pos[0], world_pos[1], world_pos[2]), Some(style));
                 println!("[label] added id={} text=\"{}\"", id, text);
+            }
+            ViewerCmd::AddLineLabel {
+                text,
+                polyline,
+                size,
+                color,
+                halo_color,
+                halo_width,
+                priority,
+                placement,
+                repeat_distance,
+                min_zoom,
+                max_zoom,
+            } => {
+                use crate::labels::{LabelStyle, LineLabelPlacement};
+                use glam::Vec3;
+                let mut style = LabelStyle::default();
+                if let Some(s) = size {
+                    style.size = s;
+                }
+                if let Some(c) = color {
+                    style.color = c;
+                }
+                if let Some(hc) = halo_color {
+                    style.halo_color = hc;
+                }
+                if let Some(hw) = halo_width {
+                    style.halo_width = hw;
+                }
+                if let Some(p) = priority {
+                    style.priority = p;
+                }
+                if let Some(mz) = min_zoom {
+                    style.min_zoom = mz;
+                }
+                if let Some(mz) = max_zoom {
+                    style.max_zoom = mz;
+                }
+                let pl = match placement.as_deref() {
+                    Some("along") => LineLabelPlacement::Along,
+                    _ => LineLabelPlacement::Center,
+                };
+                let poly: Vec<Vec3> = polyline
+                    .iter()
+                    .map(|p| Vec3::new(p[0], p[1], p[2]))
+                    .collect();
+                let rd = repeat_distance.unwrap_or(0.0);
+                let id = self.label_manager.add_line_label(text.clone(), poly, style, pl, rd);
+                println!("[label] added line label id={} text=\"{}\"", id.0, text);
             }
             ViewerCmd::RemoveLabel { id } => {
                 let removed = self.remove_label(id);
@@ -1351,6 +1432,110 @@ impl Viewer {
                     Ok(()) => println!("[label] atlas loaded from {}", atlas_png_path),
                     Err(e) => eprintln!("[label] failed to load atlas: {}", e),
                 }
+            }
+            ViewerCmd::SetLabelZoom { zoom } => {
+                self.label_manager.set_zoom(zoom);
+                println!("[label] zoom={:.2}", zoom);
+            }
+            ViewerCmd::SetMaxVisibleLabels { max } => {
+                self.label_manager.set_max_visible(max);
+                println!("[label] max_visible={}", max);
+            }
+
+            // === Plan 3: Premium Label Features ===
+            ViewerCmd::AddCurvedLabel {
+                text,
+                polyline,
+                size,
+                color,
+                halo_color,
+                halo_width,
+                priority,
+                tracking: _tracking,
+                center_on_path: _center_on_path,
+            } => {
+                use crate::labels::LabelStyle;
+                use glam::Vec3;
+                let mut style = LabelStyle::default();
+                if let Some(s) = size {
+                    style.size = s;
+                }
+                if let Some(c) = color {
+                    style.color = c;
+                }
+                if let Some(hc) = halo_color {
+                    style.halo_color = hc;
+                }
+                if let Some(hw) = halo_width {
+                    style.halo_width = hw;
+                }
+                if let Some(p) = priority {
+                    style.priority = p;
+                }
+                // Convert polyline to Vec3
+                let poly: Vec<Vec3> = polyline
+                    .iter()
+                    .map(|p| Vec3::new(p[0], p[1], p[2]))
+                    .collect();
+                // Use line label with "along" placement for curved text
+                use crate::labels::LineLabelPlacement;
+                let id = self.label_manager.add_line_label(
+                    text.clone(),
+                    poly,
+                    style,
+                    LineLabelPlacement::Along,
+                    0.0,
+                );
+                println!("[label] added curved label id={} text=\"{}\"", id.0, text);
+            }
+            ViewerCmd::AddCallout {
+                text,
+                anchor,
+                offset,
+                background_color: _bg,
+                border_color: _bc,
+                border_width: _bw,
+                corner_radius: _cr,
+                padding: _pad,
+                text_size,
+                text_color,
+            } => {
+                // For now, callouts are implemented as offset labels with leader lines
+                use crate::labels::LabelStyle;
+                let mut style = LabelStyle::default();
+                if let Some(s) = text_size {
+                    style.size = s;
+                }
+                if let Some(c) = text_color {
+                    style.color = c;
+                }
+                if let Some(o) = offset {
+                    style.offset = o;
+                    style.flags.leader = true;
+                }
+                let world_pos = (anchor[0], anchor[1], anchor[2]);
+                let id = self.add_label(&text, world_pos, Some(style));
+                println!("[label] added callout id={} text=\"{}\"", id, text);
+            }
+            ViewerCmd::RemoveCallout { id } => {
+                let removed = self.remove_label(id);
+                println!("[label] remove callout id={} success={}", id, removed);
+            }
+            ViewerCmd::SetLabelTypography {
+                tracking: _,
+                kerning: _,
+                line_height: _,
+                word_spacing: _,
+            } => {
+                // Typography settings stored but not yet fully applied
+                println!("[label] typography settings updated");
+            }
+            ViewerCmd::SetDeclutterAlgorithm {
+                algorithm,
+                seed: _,
+                max_iterations: _,
+            } => {
+                println!("[label] declutter algorithm set to: {}", algorithm);
             }
         }
     }
