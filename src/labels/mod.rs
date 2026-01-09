@@ -224,14 +224,30 @@ impl LabelManager {
         &self.leader_lines
     }
 
+    /// Pick a label at the given screen coordinates.
+    pub fn pick_at(&self, x: f32, y: f32) -> Option<LabelId> {
+        // Query a small box around the cursor (e.g. 4x4 pixels)
+        let bounds = [x - 2.0, y - 2.0, x + 2.0, y + 2.0];
+        let hits = self.collision_rtree.query_intersecting(bounds);
+        
+        // Return the first hit
+        // In a real implementation we might want to sort by depth or priority
+        hits.first().map(|h| LabelId(h.id))
+    }
+
     /// Update label positions and visibility based on current view.
     /// Returns the number of visible labels.
     pub fn update(&mut self, view_proj: Mat4) -> usize {
-        self.update_with_camera(view_proj, None)
+        self.update_with_camera(view_proj, None, None)
     }
 
     /// Update with camera position for horizon fade calculation.
-    pub fn update_with_camera(&mut self, view_proj: Mat4, camera_pos: Option<Vec3>) -> usize {
+    pub fn update_with_camera(
+        &mut self,
+        view_proj: Mat4,
+        camera_pos: Option<Vec3>,
+        selected_ids: Option<&std::collections::HashSet<u64>>,
+    ) -> usize {
         if !self.enabled {
             return 0;
         }
@@ -335,6 +351,17 @@ impl LabelManager {
 
                     // Apply color with computed alpha
                     let mut color = label.style.color;
+                    
+                    // Highlight if selected
+                    if let Some(selected) = selected_ids {
+                        if selected.contains(&label.id.0) {
+                            // Gold highlight color
+                            color = [1.0, 0.8, 0.0, 1.0];
+                            // Also ensure fully opaque if highlighted
+                            label.computed_alpha = 1.0; 
+                        }
+                    }
+                    
                     color[3] = label.computed_alpha;
 
                     // Generate text instances for this label

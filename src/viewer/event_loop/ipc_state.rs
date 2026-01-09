@@ -7,13 +7,30 @@ use std::sync::{Mutex, OnceLock};
 
 use super::super::ipc::ViewerStats;
 use super::super::viewer_enums::ViewerCmd;
+use crate::picking::PickEvent;
 
 /// Global IPC command queue - static ensures visibility across threads
 static IPC_QUEUE: OnceLock<Mutex<VecDeque<ViewerCmd>>> = OnceLock::new();
 
+/// Global picking event queue for polling
+static PICK_EVENTS: OnceLock<Mutex<Vec<PickEvent>>> = OnceLock::new();
+
+/// Global lasso state string (simple shared state)
+static LASSO_STATE: OnceLock<Mutex<String>> = OnceLock::new();
+
 /// Get the global IPC command queue
 pub fn get_ipc_queue() -> &'static Mutex<VecDeque<ViewerCmd>> {
     IPC_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+/// Get the global picking event queue
+pub fn get_pick_events() -> &'static Mutex<Vec<PickEvent>> {
+    PICK_EVENTS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Get the global lasso state
+pub fn get_lasso_state() -> &'static Mutex<String> {
+    LASSO_STATE.get_or_init(|| Mutex::new("inactive".to_string()))
 }
 
 /// Global viewer stats for IPC queries

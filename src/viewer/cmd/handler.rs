@@ -1227,9 +1227,10 @@ impl Viewer {
                 if let Some(ref mut tv) = self.terrain_viewer {
                     use crate::viewer::terrain::vector_overlay::{VectorOverlayLayer, VectorVertex, OverlayPrimitive};
                     
-                    // Convert vertices from [x, y, z, r, g, b, a] to VectorVertex
+                    // Convert vertices from [x, y, z, r, g, b, a, feature_id?] to VectorVertex
                     let verts: Vec<VectorVertex> = vertices.iter().map(|v| {
-                        VectorVertex::new(v[0], v[1], v[2], v[3], v[4], v[5], v[6])
+                        let feature_id = if v.len() > 7 { v[7] as u32 } else { 0 };
+                        VectorVertex::with_feature_id(v[0], v[1], v[2], v[3], v[4], v[5], v[6], feature_id)
                     }).collect();
                     
                     let prim = OverlayPrimitive::from_str(&primitive).unwrap_or(OverlayPrimitive::Triangles);
@@ -1251,9 +1252,95 @@ impl Viewer {
                     
                     let id = tv.add_vector_overlay(layer);
                     println!("[vector_overlay] Added '{}' with {} vertices (id={})", name, vertices.len(), id);
+
+                    // Plan 3: Build BVH for picking if triangles
+                    if prim == OverlayPrimitive::Triangles && !indices.is_empty() {
+                        use crate::accel::cpu_bvh::{MeshCPU, build_bvh_cpu, BuildOptions};
+                        use crate::picking::LayerBvhData;
+                        use crate::accel::types::{BvhNode, Triangle, Aabb};
+
+                        let pos: Vec<[f32; 3]> = vertices.iter().map(|v| [v[0], v[1], v[2]]).collect();
+                        let tris_indices: Vec<[u32; 3]> = indices.chunks(3).filter_map(|c| {
+                            if c.len() == 3 { Some([c[0], c[1], c[2]]) } else { None }
+                        }).collect();
+
+                        let mesh = MeshCPU::new(pos.clone(), tris_indices.clone());
+                        if let Ok(bvh) = build_bvh_cpu(&mesh, &BuildOptions::default()) {
+                            let mut layer_data = LayerBvhData::new(id, name.clone());
+                            
+                            // Convert cpu_bvh::BvhNode to accel::types::BvhNode
+                            layer_data.cpu_nodes = bvh.nodes.iter().map(|n| {
+                                let kind = if n.is_leaf() { 1 } else { 0 };
+                                BvhNode {
+                                    aabb: Aabb::new(n.aabb_min, n.aabb_max),
+                                    kind,
+                                    left_idx: n.left,
+                                    right_idx: n.right,
+                                    parent_idx: 0, // Parent pointers not populated by default build
+                                }
+                            }).collect();
+
+                            layer_data.cpu_triangles = bvh.tri_indices.iter().map(|&tri_idx| {
+                                let idx = tri_idx as usize;
+                                if idx < tris_indices.len() {
+                                    let ti = tris_indices[idx];
+                                    let v0 = pos[ti[0] as usize];
+                                    let v1 = pos[ti[1] as usize];
+                                    let v2 = pos[ti[2] as usize];
+                                    Triangle::new(v0, v1, v2)
+                                } else {
+                                    Triangle::new([0.0; 3], [0.0; 3], [0.0; 3])
+                                }
+                            }).collect();
+
+                            // Feature IDs - extract from vertex data (index 7 is feature_id)
+                            // vertices format: [x, y, z, r, g, b, a, feature_id]
+                            layer_data.cpu_feature_ids = bvh.tri_indices.iter().map(|&tri_idx| {
+                                let idx = tri_idx as usize;
+                                if idx < tris_indices.len() {
+                                    let ti = tris_indices[idx];
+                                    // Use feature_id from first vertex of triangle
+                                    let v0_idx = ti[0] as usize;
+                                    if v0_idx < vertices.len() {
+                                        vertices[v0_idx][7] as u32
+                                    } else {
+                                        id // fallback to layer id
+                                    }
+                                } else {
+                                    id // fallback to layer id
+                                }
+                            }).collect();
+
+                            self.unified_picking.register_layer_bvh(layer_data);
+                            println!("[picking] Built BVH for layer {} ({} nodes)", id, bvh.nodes.len());
+                        }
+                    }
                 } else {
                     eprintln!("[vector_overlay] No terrain loaded - load terrain first");
                 }
+            }
+
+            // Picking commands
+            ViewerCmd::PollPickEvents => {
+                // Handled in server.rs, but we might want to do something here?
+                // The server directly accesses the shared queue.
+            }
+            ViewerCmd::SetLassoMode { enabled } => {
+                self.unified_picking.set_lasso_enabled(enabled);
+                let state = if enabled { "active" } else { "inactive" };
+                // Update shared lasso state
+                if let Ok(mut s) = crate::viewer::event_loop::get_lasso_state().lock() {
+                    *s = state.to_string();
+                }
+                println!("[picking] Lasso mode: {}", state);
+            }
+            ViewerCmd::GetLassoState => {
+                // Handled in server.rs
+            }
+            ViewerCmd::ClearSelection => {
+                // Clear selection in UnifiedPickingSystem
+                // self.unified_picking.clear_selection("default"); // Need to know set name
+                println!("[picking] Clear selection requested");
             }
             ViewerCmd::RemoveVectorOverlay { id } => {
                 if let Some(ref mut tv) = self.terrain_viewer {

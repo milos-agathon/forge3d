@@ -62,6 +62,13 @@ if _NATIVE_MODULE is not None:
         "Atmosphere",
         "open_viewer",
         "open_terrain_viewer",
+        "PickResult",  # Feature B: Picking system (Plan 1)
+        "TerrainQueryResult",  # Feature B: Plan 2
+        "SelectionStyle",  # Feature B: Plan 2
+        "RichPickResult",  # Feature B: Plan 3
+        "HighlightStyle",  # Feature B: Plan 3
+        "LassoState",  # Feature B: Plan 3
+        "HeightfieldHit",  # Feature B: Plan 3
     ):
         if hasattr(_NATIVE_MODULE, _name):
             globals()[_name] = getattr(_NATIVE_MODULE, _name)

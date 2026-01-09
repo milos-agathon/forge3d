@@ -82,7 +82,11 @@ impl Viewer {
         // Update labels with current camera (before any rendering)
         // Use terrain camera if terrain is loaded, otherwise use viewer camera
         {
-            let view_proj = if let Some(ref terrain_viewer) = self.terrain_viewer {
+            // Gather selected IDs for highlighting (labels use u64 IDs, picking uses u32)
+            let selected_u32 = self.unified_picking.selection_manager().get_selection();
+            let selected_ids: std::collections::HashSet<u64> = selected_u32.iter().map(|&id| id as u64).collect();
+
+            let (view_proj, camera_pos) = if let Some(ref terrain_viewer) = self.terrain_viewer {
                 if let Some(ref terrain) = terrain_viewer.terrain {
                     // Use terrain camera parameters
                     let phi = terrain.cam_phi_deg.to_radians();
@@ -109,22 +113,23 @@ impl Viewer {
                         1.0,
                         r * 10.0,
                     );
-                    proj * view_mat
+                    (proj * view_mat, Some(eye))
                 } else {
                     // No terrain data, use viewer camera
                     let aspect = self.config.width as f32 / self.config.height as f32;
                     let fov = self.view_config.fov_deg.to_radians();
                     let proj = Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
-                    proj * self.camera.view_matrix()
+                    (proj * self.camera.view_matrix(), Some(self.camera.eye()))
                 }
             } else {
                 // No terrain viewer, use viewer camera
                 let aspect = self.config.width as f32 / self.config.height as f32;
                 let fov = self.view_config.fov_deg.to_radians();
                 let proj = Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
-                proj * self.camera.view_matrix()
+                (proj * self.camera.view_matrix(), Some(self.camera.eye()))
             };
-            self.label_manager.update(view_proj);
+            
+            self.label_manager.update_with_camera(view_proj, camera_pos, Some(&selected_ids));
         }
 
         // Render sky background (compute) before opaques
@@ -1336,7 +1341,7 @@ impl Viewer {
             // Render to screen at window resolution
             // Note: Motion blur is too expensive for real-time rendering (N full renders per frame),
             // so we only apply it for snapshots. The interactive viewer shows a regular render.
-            terrain_rendered = tv.render(&mut encoder, &view, self.config.width, self.config.height);
+            terrain_rendered = tv.render(&mut encoder, &view, self.config.width, self.config.height, self.selected_feature_id);
 
             // Then render to offscreen texture at snapshot resolution (if requested)
             // This must be LAST so the uniform buffer has the correct aspect ratio for the snapshot
@@ -1356,7 +1361,7 @@ impl Viewer {
                     });
                 } else {
                     println!("[terrain] Rendering snapshot at {}x{}", snap_w, snap_h);
-                    if let Some(tex) = tv.render_to_texture(&mut encoder, self.config.format, snap_w, snap_h) {
+                    if let Some(tex) = tv.render_to_texture(&mut encoder, self.config.format, snap_w, snap_h, self.selected_feature_id) {
                         self.pending_snapshot_tex = Some(tex);
                     }
                 }

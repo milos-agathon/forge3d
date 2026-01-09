@@ -287,8 +287,8 @@ pub enum ViewerCmd {
     AddVectorOverlay {
         /// Unique name for this overlay layer
         name: String,
-        /// Vertices: list of [x, y, z, r, g, b, a]
-        vertices: Vec<[f32; 7]>,
+        /// Vertices: list of [x, y, z, r, g, b, a, feature_id]
+        vertices: Vec<[f32; 8]>,
         /// Indices for indexed drawing
         indices: Vec<u32>,
         /// Primitive type: "points", "lines", "line_strip", "triangles", "triangle_strip"
@@ -425,6 +425,17 @@ pub enum ViewerCmd {
         seed: Option<u64>,
         max_iterations: Option<usize>,
     },
+
+    // === Plan 3: Picking Commands ===
+    
+    /// Poll for pending pick events
+    PollPickEvents,
+    /// Set lasso selection mode
+    SetLassoMode { enabled: bool },
+    /// Get lasso selection state
+    GetLassoState,
+    /// Clear current selection
+    ClearSelection,
 }
 
 /// Heightfield ray-traced AO configuration for viewer

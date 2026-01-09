@@ -210,7 +210,7 @@ pub enum IpcRequest {
     /// Add a vector overlay layer with geometry
     AddVectorOverlay {
         name: String,
-        vertices: Vec<[f32; 7]>,
+        vertices: Vec<[f32; 8]>,
         indices: Vec<u32>,
         #[serde(default = "default_primitive")]
         primitive: String,
@@ -387,6 +387,17 @@ pub enum IpcRequest {
         #[serde(default)]
         max_iterations: Option<usize>,
     },
+
+    // === Plan 3: Picking Requests ===
+    
+    /// Poll for pending pick events
+    PollPickEvents,
+    /// Set lasso selection mode
+    SetLassoMode { enabled: bool },
+    /// Get lasso selection state
+    GetLassoState,
+    /// Clear current selection
+    ClearSelection,
 }
 
 /// Heightfield ray-traced AO configuration (IPC)
@@ -674,6 +685,10 @@ pub struct IpcResponse {
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<ViewerStats>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pick_events: Option<Vec<crate::picking::PickEvent>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lasso_state: Option<String>,
 }
 
 impl IpcResponse {
@@ -682,6 +697,8 @@ impl IpcResponse {
             ok: true,
             error: None,
             stats: None,
+            pick_events: None,
+            lasso_state: None,
         }
     }
 
@@ -690,6 +707,8 @@ impl IpcResponse {
             ok: false,
             error: Some(msg.into()),
             stats: None,
+            pick_events: None,
+            lasso_state: None,
         }
     }
 
@@ -698,6 +717,28 @@ impl IpcResponse {
             ok: true,
             error: None,
             stats: Some(stats),
+            pick_events: None,
+            lasso_state: None,
+        }
+    }
+
+    pub fn with_pick_events(events: Vec<crate::picking::PickEvent>) -> Self {
+        Self {
+            ok: true,
+            error: None,
+            stats: None,
+            pick_events: Some(events),
+            lasso_state: None,
+        }
+    }
+
+    pub fn with_lasso_state(state: String) -> Self {
+        Self {
+            ok: true,
+            error: None,
+            stats: None,
+            pick_events: None,
+            lasso_state: Some(state),
         }
     }
 }
@@ -712,6 +753,30 @@ pub fn parse_ipc_request(line: &str) -> Result<IpcRequest, String> {
 pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, String> {
     match req {
         IpcRequest::GetStats => Ok(None),
+        // Picking requests that return data are handled via ViewerCmd, 
+        // but the response needs to be constructed by the handler.
+        // For now, we map them to ViewerCmd and let the handler deal with response via a channel or similar?
+        // Actually, the current architecture has `cmd_sender` returning `Result<(), String>`.
+        // It doesn't return data. `GetStats` is special-cased in `server.rs`.
+        // To support `PollPickEvents` returning data, we might need to special-case it too in `server.rs`,
+        // OR rely on the fact that `PollPickEvents` is a request that *should* be handled by the main thread
+        // but we need the data back.
+        // The current `server.rs` implementation:
+        // `match ipc_request_to_viewer_cmd(&req) { Ok(Some(cmd)) => match cmd_sender(cmd) ...`
+        // `cmd_sender` is `move |cmd| { q.push_back(cmd); Ok(()) }`. It just pushes to a queue.
+        // The main thread processes the queue. It has no way to send data back to the specific TCP stream 
+        // that sent the request, because `cmd_sender` is fire-and-forget.
+        // `GetStats` works because it reads from a shared `Arc<Mutex<ViewerStats>>` *immediately* in the server thread.
+        // To support `PollPickEvents`, we need a shared `Arc<Mutex<Vec<PickEvent>>>` that the viewer writes to
+        // and the server reads from.
+        // Let's add `pick_events` to the shared state or similar.
+        
+        // For now, let's just map the commands.
+        IpcRequest::PollPickEvents => Ok(None), // Special handling in server.rs
+        IpcRequest::SetLassoMode { enabled } => Ok(Some(ViewerCmd::SetLassoMode { enabled: *enabled })),
+        IpcRequest::GetLassoState => Ok(None), // Special handling in server.rs
+        IpcRequest::ClearSelection => Ok(Some(ViewerCmd::ClearSelection)),
+
         IpcRequest::LoadObj { path } => Ok(Some(ViewerCmd::LoadObj(path.clone()))),
         IpcRequest::LoadGltf { path } => Ok(Some(ViewerCmd::LoadGltf(path.clone()))),
         IpcRequest::SetTransform {

@@ -10,6 +10,7 @@ use super::protocol::{
     ipc_request_to_viewer_cmd, parse_ipc_request, IpcRequest, IpcResponse, ViewerStats,
 };
 use crate::viewer::viewer_enums::ViewerCmd;
+use crate::viewer::event_loop::{get_pick_events, get_lasso_state};
 
 /// IPC server configuration
 pub struct IpcServerConfig {
@@ -142,26 +143,42 @@ where
                             eprintln!("[IPC] Parsed large request: {:?}", std::mem::discriminant(&req));
                         }
                         
-                        // Handle GetStats specially - it returns data directly
-                        if matches!(req, IpcRequest::GetStats) {
-                            IpcResponse::with_stats(stats_getter())
-                        } else {
-                            match ipc_request_to_viewer_cmd(&req) {
-                                Ok(Some(cmd)) => match cmd_sender(cmd) {
-                                    Ok(()) => IpcResponse::success(),
+                        // Handle special requests that return data directly
+                        match req {
+                            IpcRequest::GetStats => IpcResponse::with_stats(stats_getter()),
+                            IpcRequest::PollPickEvents => {
+                                if let Ok(mut events) = get_pick_events().lock() {
+                                    let result = events.clone();
+                                    events.clear();
+                                    IpcResponse::with_pick_events(result)
+                                } else {
+                                    IpcResponse::error("Failed to lock pick event queue")
+                                }
+                            }
+                            IpcRequest::GetLassoState => {
+                                if let Ok(state) = get_lasso_state().lock() {
+                                    IpcResponse::with_lasso_state(state.clone())
+                                } else {
+                                    IpcResponse::error("Failed to lock lasso state")
+                                }
+                            }
+                            _ => {
+                                match ipc_request_to_viewer_cmd(&req) {
+                                    Ok(Some(cmd)) => match cmd_sender(cmd) {
+                                        Ok(()) => IpcResponse::success(),
+                                        Err(e) => {
+                                            eprintln!("[IPC] Command error: {}", e);
+                                            IpcResponse::error(e)
+                                        },
+                                    },
+                                    Ok(None) => {
+                                        IpcResponse::error("Internal error: unhandled special request")
+                                    }
                                     Err(e) => {
-                                        eprintln!("[IPC] Command error: {}", e);
+                                        eprintln!("[IPC] Conversion error: {}", e);
                                         IpcResponse::error(e)
                                     },
-                                },
-                                Ok(None) => {
-                                    // Should not happen - GetStats is handled above
-                                    IpcResponse::error("Internal error: unhandled special request")
                                 }
-                                Err(e) => {
-                                    eprintln!("[IPC] Conversion error: {}", e);
-                                    IpcResponse::error(e)
-                                },
                             }
                         }
                     }

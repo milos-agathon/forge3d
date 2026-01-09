@@ -18,6 +18,7 @@ use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 use crate::core::shadows::{CsmConfig, CsmShadowMap};
 use crate::core::text_overlay::TextOverlayRenderer;
 use crate::labels::LabelManager;
+use crate::picking::UnifiedPickingSystem;
 use crate::p5::ssr::SsrScenePreset;
 use crate::passes::gi::GiPass;
 use crate::render::params::SsrParams;
@@ -225,6 +226,11 @@ pub struct Viewer {
     pub(crate) hud: TextOverlayRenderer,
     // Label manager for screen-space text labels
     pub(crate) label_manager: LabelManager,
+    // Unified picking system (Plan 3)
+    pub(crate) unified_picking: UnifiedPickingSystem,
+    // Currently selected feature for highlighting
+    pub(crate) selected_feature_id: u32,
+    pub(crate) selected_layer_name: String,
     pub(crate) ssr_scene_loaded: bool,
     pub(crate) ssr_scene_preset: Option<SsrScenePreset>,
     // Object transform (for IPC SetTransform command)

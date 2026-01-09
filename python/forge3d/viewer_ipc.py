@@ -15,6 +15,7 @@ import platform
 import re
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -165,6 +166,18 @@ def launch_viewer(
     if port is None:
         process.terminate()
         raise RuntimeError(f"Timeout waiting for viewer after {timeout}s")
+    
+    # Start background thread to keep draining stdout so the viewer doesn't block
+    def _drain_stdout():
+        try:
+            for line in process.stdout:
+                if print_output:
+                    print(f"  {line.rstrip()}")
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=_drain_stdout, daemon=True)
+    thread.start()
     
     # Connect socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -616,3 +629,149 @@ def set_declutter_algorithm(
         cmd["max_iterations"] = max_iterations
     
     return send_ipc(sock, cmd)
+
+
+# === VECTOR OVERLAY API ===
+
+def add_vector_overlay(
+    sock: socket.socket,
+    name: str,
+    vertices: list[list[float]],  # list of [x, y, z, r, g, b, a]
+    indices: list[int],
+    primitive: str = "triangles",
+    drape: bool = True,
+    drape_offset: float = 0.5,
+    opacity: float = 1.0,
+    depth_bias: float = 0.001,
+    line_width: float = 2.0,
+    point_size: float = 5.0,
+    z_order: int = 0,
+) -> Dict[str, Any]:
+    """Add a vector overlay with geometry.
+    
+    Args:
+        sock: Connected socket
+        name: Unique name for the layer
+        vertices: List of vertices, each is [x, y, z, r, g, b, a]
+        indices: List of vertex indices
+        primitive: "triangles", "lines", "points", etc.
+        drape: Whether to drape onto terrain
+        drape_offset: Height offset when draped
+        opacity: Layer opacity
+        depth_bias: Depth bias
+        line_width: Width for lines
+        point_size: Size for points
+        z_order: Draw order
+    """
+    return send_ipc(sock, {
+        "cmd": "add_vector_overlay",
+        "name": name,
+        "vertices": vertices,
+        "indices": indices,
+        "primitive": primitive,
+        "drape": drape,
+        "drape_offset": drape_offset,
+        "opacity": opacity,
+        "depth_bias": depth_bias,
+        "line_width": line_width,
+        "point_size": point_size,
+        "z_order": z_order,
+    })
+
+def set_vector_overlays_enabled(sock: socket.socket, enabled: bool) -> Dict[str, Any]:
+    return send_ipc(sock, {"cmd": "set_vector_overlays_enabled", "enabled": enabled})
+
+
+# === PICKING API (Plan 3) ===
+
+def poll_pick_events(sock: socket.socket) -> Dict[str, Any]:
+    """Poll for pending pick events.
+    
+    Returns a dict with 'pick_events': list of events.
+    """
+    return send_ipc(sock, {"cmd": "poll_pick_events"})
+
+def set_lasso_mode(sock: socket.socket, enabled: bool) -> Dict[str, Any]:
+    """Enable or disable lasso selection mode."""
+    return send_ipc(sock, {"cmd": "set_lasso_mode", "enabled": enabled})
+
+def get_lasso_state(sock: socket.socket) -> Dict[str, Any]:
+    """Get current lasso state ('inactive', 'drawing', 'complete')."""
+    return send_ipc(sock, {"cmd": "get_lasso_state"})
+
+def clear_selection(sock: socket.socket) -> Dict[str, Any]:
+    """Clear current selection."""
+    return send_ipc(sock, {"cmd": "clear_selection"})
+
+
+# === VECTOR OVERLAY API ===
+
+def add_vector_overlay(
+    sock: socket.socket,
+    name: str,
+    vertices: list[list[float]],  # list of [x, y, z, r, g, b, a]
+    indices: list[int],
+    primitive: str = "triangles",
+    drape: bool = True,
+    drape_offset: float = 0.5,
+    opacity: float = 1.0,
+    depth_bias: float = 0.001,
+    line_width: float = 2.0,
+    point_size: float = 5.0,
+    z_order: int = 0,
+) -> Dict[str, Any]:
+    """Add a vector overlay with geometry.
+    
+    Args:
+        sock: Connected socket
+        name: Unique name for the layer
+        vertices: List of vertices, each is [x, y, z, r, g, b, a]
+        indices: List of vertex indices
+        primitive: "triangles", "lines", "points", etc.
+        drape: Whether to drape onto terrain
+        drape_offset: Height offset when draped
+        opacity: Layer opacity
+        depth_bias: Depth bias
+        line_width: Width for lines
+        point_size: Size for points
+        z_order: Draw order
+    """
+    return send_ipc(sock, {
+        "cmd": "add_vector_overlay",
+        "name": name,
+        "vertices": vertices,
+        "indices": indices,
+        "primitive": primitive,
+        "drape": drape,
+        "drape_offset": drape_offset,
+        "opacity": opacity,
+        "depth_bias": depth_bias,
+        "line_width": line_width,
+        "point_size": point_size,
+        "z_order": z_order,
+    })
+
+def set_vector_overlays_enabled(sock: socket.socket, enabled: bool) -> Dict[str, Any]:
+    return send_ipc(sock, {"cmd": "set_vector_overlays_enabled", "enabled": enabled})
+
+
+# === PICKING API (Plan 3) ===
+
+def poll_pick_events(sock: socket.socket) -> Dict[str, Any]:
+    """Poll for pending pick events.
+    
+    Returns a dict with 'pick_events': list of events.
+    """
+    return send_ipc(sock, {"cmd": "poll_pick_events"})
+
+def set_lasso_mode(sock: socket.socket, enabled: bool) -> Dict[str, Any]:
+    """Enable or disable lasso selection mode."""
+    return send_ipc(sock, {"cmd": "set_lasso_mode", "enabled": enabled})
+
+def get_lasso_state(sock: socket.socket) -> Dict[str, Any]:
+    """Get current lasso state ('inactive', 'drawing', 'complete')."""
+    return send_ipc(sock, {"cmd": "get_lasso_state"})
+
+def clear_selection(sock: socket.socket) -> Dict[str, Any]:
+    """Clear current selection."""
+    return send_ipc(sock, {"cmd": "clear_selection"})

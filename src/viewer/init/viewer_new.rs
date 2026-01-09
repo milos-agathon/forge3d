@@ -16,6 +16,7 @@ use super::super::viewer_config::{FpsCounter, ViewerConfig};
 use super::super::viewer_enums::{FogMode, VizMode};
 use super::super::viewer_types::SkyUniforms;
 use super::super::Viewer;
+use crate::picking::UnifiedPickingSystem;
 use super::{
     create_device_and_surface, create_fallback_pipeline, create_fog_resources,
     create_gbuffer_resources, create_gi_baseline_resources, create_lit_resources,
@@ -111,8 +112,8 @@ impl Viewer {
         let mut viewer = Self {
             window,
             surface,
-            device,
-            queue,
+            device: device.clone(),
+            queue: queue.clone(),
             adapter,
             config: surface_config,
             camera: CameraController::new(),
@@ -275,6 +276,10 @@ impl Viewer {
             hud,
             // Label manager
             label_manager: crate::labels::LabelManager::new(width, height),
+            // Unified picking system
+            unified_picking: UnifiedPickingSystem::new(Arc::clone(&device), Arc::clone(&queue)),
+            selected_feature_id: 0,
+            selected_layer_name: String::new(),
             ssr_scene_loaded: false,
             ssr_scene_preset: None,
             // Object transform

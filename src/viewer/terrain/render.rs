@@ -98,6 +98,7 @@ impl ViewerTerrainScene {
         view: &wgpu::TextureView,
         width: u32,
         height: u32,
+        selected_feature_id: u32,
     ) -> bool {
         if self.terrain.is_none() {
             return false;
@@ -462,8 +463,17 @@ impl ViewerTerrainScene {
                 if let Some(ref stack) = self.vector_overlay_stack {
                     if stack.pipelines_ready() && stack.bind_group.is_some() {
                         let layer_count = stack.visible_layer_count();
+                        let highlight_color = [1.0, 0.8, 0.0, 0.5]; // Yellow highlight
                         for i in 0..layer_count {
-                            stack.render_layer(&mut pass, i, vo_view_proj, vo_sun_dir, vo_lighting);
+                            stack.render_layer_with_highlight(
+                                &mut pass, 
+                                i, 
+                                vo_view_proj, 
+                                vo_sun_dir, 
+                                vo_lighting,
+                                selected_feature_id,
+                                highlight_color
+                            );
                         }
                     }
                 }
@@ -593,6 +603,7 @@ impl ViewerTerrainScene {
         target_format: wgpu::TextureFormat,
         width: u32,
         height: u32,
+        selected_feature_id: u32,
     ) -> Option<wgpu::Texture> {
         if self.terrain.is_none() {
             return None;
@@ -908,8 +919,17 @@ impl ViewerTerrainScene {
                 if let Some(ref stack) = self.vector_overlay_stack {
                     if stack.pipelines_ready() && stack.bind_group.is_some() {
                         let layer_count = stack.visible_layer_count();
+                        let highlight_color = [1.0, 0.8, 0.0, 0.5]; // Yellow highlight
                         for i in 0..layer_count {
-                            stack.render_layer(&mut pass, i, vo_view_proj, vo_sun_dir, vo_lighting);
+                            stack.render_layer_with_highlight(
+                                &mut pass, 
+                                i, 
+                                vo_view_proj, 
+                                vo_sun_dir, 
+                                vo_lighting,
+                                selected_feature_id,
+                                highlight_color
+                            );
                         }
                     }
                 }
@@ -1111,7 +1131,7 @@ impl ViewerTerrainScene {
             let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("terrain_viewer.motion_blur_fallback"),
             });
-            let result = self.render_to_texture(&mut encoder, target_format, width, height);
+            let result = self.render_to_texture(&mut encoder, target_format, width, height, 0);
             self.queue.submit(std::iter::once(encoder.finish()));
             return result;
         }
@@ -1205,7 +1225,7 @@ impl ViewerTerrainScene {
                 label: Some("terrain_viewer.motion_blur_sample"),
             });
             
-            let frame_tex = self.render_to_texture(&mut encoder, target_format, width, height);
+            let frame_tex = self.render_to_texture(&mut encoder, target_format, width, height, 0);
             self.queue.submit(std::iter::once(encoder.finish()));
 
             // Add to accumulation (additive blend)
