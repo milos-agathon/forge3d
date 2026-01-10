@@ -36,6 +36,10 @@ Create smooth cinematic flyovers of your terrain with the new camera animation s
 python examples/camera_animation_demo.py --export ./frames --mp4 --sun-offset 150 --sun-intensity 1.5
 ```
 
+
+https://github.com/user-attachments/assets/2960245f-550f-489c-8cfb-4404ef53f643
+
+
 This renders a dramatic orbit animation with backlighting and exports it directly to MP4 (requires ffmpeg).
 
 <video width="1920" height="1800" src="https://raw.githubusercontent.com/milos-agathon/forge3d/refs/heads/main/assets/frames.mp4"></video>
