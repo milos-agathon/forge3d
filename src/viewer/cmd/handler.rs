@@ -1015,10 +1015,10 @@ impl Viewer {
                         exposure,
                         msaa,
                         normal_strength,
-                        height_ao,
-                        sun_visibility,
-                        materials,
-                        vector_overlay,
+                        *height_ao,
+                        *sun_visibility,
+                        *materials,
+                        *vector_overlay,
                         tonemap,
                     );
                     // Initialize PBR pipeline if enabling PBR mode
@@ -1039,7 +1039,7 @@ impl Viewer {
                 }
                 
                 // M3: Apply DoF config
-                if let Some(ref cfg) = dof {
+                if let Some(ref cfg) = *dof {
                     if let Some(ref mut tv) = self.terrain_viewer {
                         tv.pbr_config.apply_dof(
                             cfg.enabled,
@@ -1103,7 +1103,7 @@ impl Viewer {
                     }
                 }
                 // P5: Volumetrics config
-                if let Some(ref cfg) = volumetrics {
+                if let Some(ref cfg) = *volumetrics {
                     if let Some(ref mut tv) = self.terrain_viewer {
                         tv.pbr_config.apply_volumetrics(
                             cfg.enabled,

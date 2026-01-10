@@ -69,6 +69,8 @@ if _NATIVE_MODULE is not None:
         "HighlightStyle",  # Feature B: Plan 3
         "LassoState",  # Feature B: Plan 3
         "HeightfieldHit",  # Feature B: Plan 3
+        "CameraAnimation",  # Feature C: Camera animation (Plan 1 MVP)
+        "CameraState",  # Feature C: Camera animation (Plan 1 MVP)
     ):
         if hasattr(_NATIVE_MODULE, _name):
             globals()[_name] = getattr(_NATIVE_MODULE, _name)
@@ -102,6 +104,7 @@ from .terrain_params import (
     ClampSettings,
 )
 from . import presets
+from . import animation
 
 # -----------------------------------------------------------------------------
 # Core rendering API

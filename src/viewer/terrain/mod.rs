@@ -25,6 +25,6 @@ pub use scene::ViewerTerrainScene;
 pub use vector_overlay::{
     VectorOverlayStack, VectorOverlayLayer, VectorVertex, 
     OverlayPrimitive, VectorOverlayUniforms, VectorOverlayGpu,
-    drape_vertices, VECTOR_OVERLAY_SHADER,
+    drape_vertices, VECTOR_OVERLAY_SHADER, DrapeParams, RenderLayerParams,
 };
 

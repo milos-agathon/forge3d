@@ -6,7 +6,17 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.9.2] - Camera Animation System
+
 ### Added
+- **Feature C: Camera Path + Keyframe Animation**
+  - Keyframe-based camera animation system with cubic Hermite interpolation.
+  - Interactive preview in the viewer and offline rendering to PNG sequences.
+  - Direct MP4 video export via ffmpeg integration.
+  - Dynamic sun lighting that follows the camera for dramatic effect.
+  - `CameraAnimation` Python API for programmatic path creation.
+  - Three pre-built animation types: `orbit`, `flyover`, `sunrise`.
+  - Example: `examples/camera_animation_demo.py`.
 
 ## [1.9.1] - Snapshot Refactoring & Cleanup
 

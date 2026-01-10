@@ -38,6 +38,21 @@ pub struct ViewerTerrainData {
     pub water_color: [f32; 3],
 }
 
+impl ViewerTerrainData {
+    /// Set camera state from animation keyframe values
+    pub fn set_camera_state(&mut self, phi_deg: f32, theta_deg: f32, radius: f32, fov_deg: f32) {
+        self.cam_phi_deg = phi_deg;
+        self.cam_theta_deg = theta_deg;
+        self.cam_radius = radius;
+        self.cam_fov_deg = fov_deg;
+    }
+
+    /// Get current camera state as tuple (phi, theta, radius, fov)
+    pub fn get_camera_state(&self) -> (f32, f32, f32, f32) {
+        (self.cam_phi_deg, self.cam_theta_deg, self.cam_radius, self.cam_fov_deg)
+    }
+}
+
 /// Simple terrain scene for interactive viewer
 pub struct ViewerTerrainScene {
     pub(super) device: Arc<wgpu::Device>,
@@ -948,16 +963,16 @@ impl ViewerTerrainScene {
                 // Match terrain shader formula: world_y = (h - min_h) / h_range * terrain_width * z_scale * 0.001
                 let height_scale = terrain_width * terrain.z_scale * 0.001 / height_range.max(1.0);
                 
-                drape_vertices(
-                    &mut layer.vertices,
-                    &terrain.heightmap,
-                    terrain.dimensions,
+                drape_vertices(super::vector_overlay::DrapeParams {
+                    vertices: &mut layer.vertices,
+                    heightmap: &terrain.heightmap,
+                    dims: terrain.dimensions,
                     terrain_width,
-                    (0.0, 0.0),  // terrain origin
-                    layer.drape_offset,
-                    terrain.domain.0,  // height_min for normalization
+                    terrain_origin: (0.0, 0.0),
+                    height_offset: layer.drape_offset,
+                    height_min: terrain.domain.0,
                     height_scale,
-                );
+                });
             }
         }
         
@@ -978,16 +993,16 @@ impl ViewerTerrainScene {
                 // Match terrain shader formula: world_y = (h - min_h) / h_range * terrain_width * z_scale * 0.001
                 let height_scale = terrain_width * terrain.z_scale * 0.001 / height_range.max(1.0);
                 
-                drape_vertices(
-                    &mut vertices,
-                    &terrain.heightmap,
-                    terrain.dimensions,
+                drape_vertices(super::vector_overlay::DrapeParams {
+                    vertices: &mut vertices,
+                    heightmap: &terrain.heightmap,
+                    dims: terrain.dimensions,
                     terrain_width,
-                    (0.0, 0.0),
-                    drape_offset,
-                    terrain.domain.0,  // height_min for normalization
+                    terrain_origin: (0.0, 0.0),
+                    height_offset: drape_offset,
+                    height_min: terrain.domain.0,
                     height_scale,
-                );
+                });
             }
         }
         

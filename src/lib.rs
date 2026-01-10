@@ -1118,6 +1118,7 @@ pub mod util;
 pub mod vector;
 pub mod picking; // Feature picking and inspection system
 pub mod viewer; // Interactive windowed viewer (Workstream I1) // P5.2: render passes wrappers
+pub mod animation; // Feature C: Camera animation and keyframe interpolation
 
 // Re-export commonly used types
 pub use core::cloud_shadows::{
@@ -4697,6 +4698,10 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHighlightStyle>()?;
     m.add_class::<PyLassoState>()?;
     m.add_class::<PyHeightfieldHit>()?;
+
+    // Feature C: Camera animation classes (Plan 1 MVP)
+    m.add_class::<crate::animation::CameraAnimation>()?;
+    m.add_class::<crate::animation::CameraState>()?;
 
     Ok(())
 }

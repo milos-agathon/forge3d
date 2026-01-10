@@ -463,27 +463,44 @@ fn compute_terrain_normal(
     [-dh_dx / len, 1.0 / len, -dh_dz / len]
 }
 
+/// Parameters for drape_vertices
+pub struct DrapeParams<'a> {
+    pub vertices: &'a mut [VectorVertex],
+    pub heightmap: &'a [f32],
+    pub dims: (u32, u32),
+    pub terrain_width: f32,
+    pub terrain_origin: (f32, f32),
+    pub height_offset: f32,
+    pub height_min: f32,
+    pub height_scale: f32,
+}
+
+/// Parameters for render_layer_with_highlight
+pub struct RenderLayerParams {
+    pub layer_index: usize,
+    pub view_proj: [[f32; 4]; 4],
+    pub sun_dir: [f32; 3],
+    pub lighting: [f32; 4],
+    pub selected_feature_id: u32,
+    pub highlight_color: [f32; 4],
+}
+
 /// Drape vertices onto terrain surface
 /// 
 /// # Arguments
-/// * `vertices` - Mutable slice of vertices to drape
-/// * `heightmap` - Height values from terrain
-/// * `dims` - (width, height) of heightmap
-/// * `terrain_width` - World-space width of terrain
-/// * `terrain_origin` - World-space origin (x, z) of terrain
-/// * `height_offset` - Offset above terrain surface
-/// * `height_min` - Minimum height value in heightmap (for normalization)
-/// * `height_scale` - Scale factor for normalized height values
-pub fn drape_vertices(
-    vertices: &mut [VectorVertex],
-    heightmap: &[f32],
-    dims: (u32, u32),
-    terrain_width: f32,
-    terrain_origin: (f32, f32),
-    height_offset: f32,
-    height_min: f32,
-    height_scale: f32,
-) {
+/// * `params` - Struct containing all draping parameters
+pub fn drape_vertices(params: DrapeParams) {
+    let DrapeParams {
+        vertices,
+        heightmap,
+        dims,
+        terrain_width,
+        terrain_origin,
+        height_offset,
+        height_min,
+        height_scale,
+    } = params;
+
     if heightmap.is_empty() || dims.0 == 0 || dims.1 == 0 {
         // If no heightmap, just add offset to Y
         for v in vertices.iter_mut() {
@@ -939,18 +956,22 @@ impl VectorOverlayStack {
     pub fn layers(&self) -> &[VectorOverlayGpu] {
         &self.layers
     }
-    
+
     /// Render a single layer with highlight support for picking
     pub fn render_layer_with_highlight<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
-        layer_index: usize,
-        view_proj: [[f32; 4]; 4],
-        sun_dir: [f32; 3],
-        lighting: [f32; 4],
-        selected_feature_id: u32,
-        highlight_color: [f32; 4],
+        params: RenderLayerParams,
     ) -> bool {
+        let RenderLayerParams {
+            layer_index,
+            view_proj,
+            sun_dir,
+            lighting,
+            selected_feature_id,
+            highlight_color,
+        } = params;
+
         if !self.enabled {
             return false;
         }

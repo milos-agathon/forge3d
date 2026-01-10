@@ -205,6 +205,31 @@ class ViewerHandle:
         """Set terrain z-scale (height exaggeration). Only applies to terrain scenes."""
         self._send_command({"cmd": "set_z_scale", "value": float(value)})
     
+    def set_orbit_camera(
+        self,
+        phi_deg: float,
+        theta_deg: float,
+        radius: float,
+        fov_deg: Optional[float] = None,
+    ) -> None:
+        """Set orbit camera parameters (phi/theta/radius).
+        
+        Args:
+            phi_deg: Azimuth angle in degrees (horizontal rotation)
+            theta_deg: Elevation angle in degrees (vertical angle from horizon)
+            radius: Distance from target/center
+            fov_deg: Optional field of view in degrees
+        """
+        cmd: Dict[str, Any] = {
+            "cmd": "set_terrain_camera",
+            "phi_deg": float(phi_deg),
+            "theta_deg": float(theta_deg),
+            "radius": float(radius),
+        }
+        if fov_deg is not None:
+            cmd["fov_deg"] = float(fov_deg)
+        self._send_command(cmd)
+    
     def snapshot(
         self,
         path: Union[str, Path],
@@ -220,6 +245,68 @@ class ViewerHandle:
         self._send_command(cmd)
         # Give viewer time to write the file
         time.sleep(0.5)
+    
+    def render_animation(
+        self,
+        animation: "CameraAnimation",
+        output_dir: Union[str, Path],
+        fps: int = 30,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        progress_callback: Optional[callable] = None,
+    ) -> None:
+        """Render animation frames to disk.
+        
+        Iterates through the animation, setting camera state for each frame,
+        rendering, and saving to PNG files.
+        
+        Args:
+            animation: CameraAnimation with keyframes
+            output_dir: Directory to save frames (created if doesn't exist)
+            fps: Frames per second (determines total frame count)
+            width: Output width in pixels (optional, uses viewer size if None)
+            height: Output height in pixels (optional, uses viewer size if None)
+            progress_callback: Optional callback(frame, total_frames) for progress
+        
+        Example:
+            >>> anim = CameraAnimation()
+            >>> anim.add_keyframe(time=0.0, phi=0, theta=45, radius=5000, fov=60)
+            >>> anim.add_keyframe(time=5.0, phi=180, theta=30, radius=3000, fov=60)
+            >>> viewer.render_animation(anim, "./frames", fps=30)
+        """
+        from pathlib import Path as P
+        
+        output_path = P(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        total_frames = animation.get_frame_count(fps)
+        
+        for frame in range(total_frames):
+            # Calculate time for this frame
+            t = frame / fps
+            
+            # Get interpolated camera state
+            state = animation.evaluate(t)
+            if state is None:
+                continue
+            
+            # Set camera state
+            self.set_orbit_camera(
+                phi_deg=state.phi_deg,
+                theta_deg=state.theta_deg,
+                radius=state.radius,
+                fov_deg=state.fov_deg,
+            )
+            
+            # Generate frame path
+            frame_path = output_path / f"frame_{frame:04d}.png"
+            
+            # Render and save
+            self.snapshot(str(frame_path), width=width, height=height)
+            
+            # Progress callback
+            if progress_callback is not None:
+                progress_callback(frame, total_frames)
     
     def close(self) -> None:
         """Close the viewer window and terminate the subprocess."""
@@ -295,6 +382,7 @@ def open_viewer_async(
     title: str = "forge3d Interactive Viewer",
     obj_path: Optional[Union[str, Path]] = None,
     gltf_path: Optional[Union[str, Path]] = None,
+    terrain_path: Optional[Union[str, Path]] = None,
     fov_deg: float = 60.0,
     timeout: float = _DEFAULT_TIMEOUT,
     ipc_host: str = "127.0.0.1",
@@ -310,7 +398,8 @@ def open_viewer_async(
         height: Window height in pixels
         title: Window title
         obj_path: Optional OBJ file to load on startup
-        gltf_path: Optional glTF file to load on startup (mutually exclusive with obj_path)
+        gltf_path: Optional glTF file to load on startup (mutually exclusive)
+        terrain_path: Optional DEM file to load as terrain (mutually exclusive)
         fov_deg: Initial field of view in degrees
         timeout: Timeout for startup and commands in seconds
         ipc_host: Host for IPC server (default: 127.0.0.1)
@@ -326,8 +415,8 @@ def open_viewer_async(
         >>> v.snapshot("output.png", width=3840, height=2160)
         >>> v.close()
     """
-    if obj_path is not None and gltf_path is not None:
-        raise ValueError("obj_path and gltf_path are mutually exclusive")
+    if sum(x is not None for x in (obj_path, gltf_path, terrain_path)) > 1:
+        raise ValueError("obj_path, gltf_path, and terrain_path are mutually exclusive")
     
     binary = _find_viewer_binary()
     
@@ -342,8 +431,10 @@ def open_viewer_async(
     
     if obj_path is not None:
         cmd.extend(["--obj", str(obj_path)])
-    if gltf_path is not None:
+    elif gltf_path is not None:
         cmd.extend(["--gltf", str(gltf_path)])
+    elif terrain_path is not None:
+        cmd.extend(["--terrain", str(terrain_path)])
     
     # Start subprocess
     process = subprocess.Popen(

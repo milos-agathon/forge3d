@@ -467,12 +467,14 @@ impl ViewerTerrainScene {
                         for i in 0..layer_count {
                             stack.render_layer_with_highlight(
                                 &mut pass, 
-                                i, 
-                                vo_view_proj, 
-                                vo_sun_dir, 
-                                vo_lighting,
-                                selected_feature_id,
-                                highlight_color
+                                super::vector_overlay::RenderLayerParams {
+                                    layer_index: i,
+                                    view_proj: vo_view_proj,
+                                    sun_dir: vo_sun_dir,
+                                    lighting: vo_lighting,
+                                    selected_feature_id,
+                                    highlight_color,
+                                }
                             );
                         }
                     }
@@ -923,12 +925,14 @@ impl ViewerTerrainScene {
                         for i in 0..layer_count {
                             stack.render_layer_with_highlight(
                                 &mut pass, 
-                                i, 
-                                vo_view_proj, 
-                                vo_sun_dir, 
-                                vo_lighting,
-                                selected_feature_id,
-                                highlight_color
+                                super::vector_overlay::RenderLayerParams {
+                                    layer_index: i,
+                                    view_proj: vo_view_proj,
+                                    sun_dir: vo_sun_dir,
+                                    lighting: vo_lighting,
+                                    selected_feature_id,
+                                    highlight_color,
+                                }
                             );
                         }
                     }

@@ -41,56 +41,56 @@ impl Viewer {
                     &self.fog_zero_view
                 };
                 let mut raw_b = self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                    render_view_to_rgba8_ex(
-                        &self.device,
-                        &self.queue,
+                    render_view_to_rgba8_ex(super::super::viewer_render_helpers::RenderViewArgs {
+                        device: &self.device,
+                        queue: &self.queue,
                         comp_pl,
                         comp_bgl,
-                        &self.sky_output_view,
-                        &gi.gbuffer().depth_view,
-                        fog_v,
-                        self.config.format,
-                        self.config.width,
-                        self.config.height,
+                        sky_view: &self.sky_output_view,
+                        depth_view: &gi.gbuffer().depth_view,
+                        fog_view: fog_v,
+                        surface_format: self.config.format,
+                        width: self.config.width,
+                        height: self.config.height,
                         far,
-                        raw,
-                        3,
-                    )
+                        src_view: raw,
+                        mode: 3,
+                    })
                 })?;
                 add_debug_noise_rgba8(&mut raw_b, w, h, *tech);
                 let blur_v_b = self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                    render_view_to_rgba8_ex(
-                        &self.device,
-                        &self.queue,
+                    render_view_to_rgba8_ex(super::super::viewer_render_helpers::RenderViewArgs {
+                        device: &self.device,
+                        queue: &self.queue,
                         comp_pl,
                         comp_bgl,
-                        &self.sky_output_view,
-                        &gi.gbuffer().depth_view,
-                        fog_v,
-                        self.config.format,
-                        self.config.width,
-                        self.config.height,
+                        sky_view: &self.sky_output_view,
+                        depth_view: &gi.gbuffer().depth_view,
+                        fog_view: fog_v,
+                        surface_format: self.config.format,
+                        width: self.config.width,
+                        height: self.config.height,
                         far,
-                        blur_v,
-                        3,
-                    )
+                        src_view: blur_v,
+                        mode: 3,
+                    })
                 })?;
                 let temporal_b = self.with_comp_pipeline(|comp_pl, comp_bgl| {
-                    render_view_to_rgba8_ex(
-                        &self.device,
-                        &self.queue,
+                    render_view_to_rgba8_ex(super::super::viewer_render_helpers::RenderViewArgs {
+                        device: &self.device,
+                        queue: &self.queue,
                         comp_pl,
                         comp_bgl,
-                        &self.sky_output_view,
-                        &gi.gbuffer().depth_view,
-                        fog_v,
-                        self.config.format,
-                        self.config.width,
-                        self.config.height,
+                        sky_view: &self.sky_output_view,
+                        depth_view: &gi.gbuffer().depth_view,
+                        fog_view: fog_v,
+                        surface_format: self.config.format,
+                        width: self.config.width,
+                        height: self.config.height,
                         far,
-                        temporal,
-                        3,
-                    )
+                        src_view: temporal,
+                        mode: 3,
+                    })
                 })?;
                 let blur_b = flatten_rgba8_to_mean_luma(&blur_v_b, w, h);
                 let temporal_b_cpu = flatten_rgba8_to_mean_luma(&temporal_b, w, h);
@@ -273,21 +273,21 @@ impl Viewer {
                     } else {
                         &self.fog_zero_view
                     };
-                    render_view_to_rgba8_ex(
-                        &self.device,
-                        &self.queue,
+                    render_view_to_rgba8_ex(super::super::viewer_render_helpers::RenderViewArgs {
+                        device: &self.device,
+                        queue: &self.queue,
                         comp_pl,
                         comp_bgl,
-                        &self.sky_output_view,
+                        sky_view: &self.sky_output_view,
                         depth_view,
                         fog_view,
-                        self.config.format,
-                        self.config.width,
-                        self.config.height,
+                        surface_format: self.config.format,
+                        width: self.config.width,
+                        height: self.config.height,
                         far,
-                        tile_view,
-                        0,
-                    )
+                        src_view: tile_view,
+                        mode: 0,
+                    })
                 })?;
                 tiles.push(tile_bytes);
             }

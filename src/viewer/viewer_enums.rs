@@ -216,17 +216,17 @@ pub enum ViewerCmd {
         /// Terrain normal strength multiplier
         normal_strength: Option<f32>,
         /// Heightfield ray-traced AO settings
-        height_ao: Option<ViewerHeightAoConfig>,
+        height_ao: Box<Option<ViewerHeightAoConfig>>,
         /// Heightfield ray-traced sun visibility settings
-        sun_visibility: Option<ViewerSunVisConfig>,
+        sun_visibility: Box<Option<ViewerSunVisConfig>>,
         /// M4: Material layer settings (snow/rock/wetness)
-        materials: Option<ViewerMaterialLayerConfig>,
+        materials: Box<Option<ViewerMaterialLayerConfig>>,
         /// M5: Vector overlay settings (depth test, halos)
-        vector_overlay: Option<ViewerVectorOverlayConfig>,
+        vector_overlay: Box<Option<ViewerVectorOverlayConfig>>,
         /// M6: Tonemap settings (operator, white balance)
         tonemap: Option<ViewerTonemapConfig>,
         /// M3: Depth of Field settings
-        dof: Option<ViewerDofConfig>,
+        dof: Box<Option<ViewerDofConfig>>,
         /// M4: Motion blur settings
         motion_blur: Option<ViewerMotionBlurConfig>,
         /// M5: Lens effects settings
@@ -234,7 +234,7 @@ pub enum ViewerCmd {
         /// M5: Denoise settings
         denoise: Option<ViewerDenoiseConfig>,
         /// M6: Volumetrics settings
-        volumetrics: Option<ViewerVolumetricsConfig>,
+        volumetrics: Box<Option<ViewerVolumetricsConfig>>,
         /// M6: Sky settings
         sky: Option<ViewerSkyConfig>,
     },

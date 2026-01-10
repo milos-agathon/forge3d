@@ -5,23 +5,42 @@
 use crate::renderer::readback::read_texture_tight;
 use wgpu::util::DeviceExt;
 
+/// Arguments for render_view_to_rgba8_ex
+pub struct RenderViewArgs<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub comp_pl: &'a wgpu::RenderPipeline,
+    pub comp_bgl: &'a wgpu::BindGroupLayout,
+    pub sky_view: &'a wgpu::TextureView,
+    pub depth_view: &'a wgpu::TextureView,
+    pub fog_view: &'a wgpu::TextureView,
+    pub surface_format: wgpu::TextureFormat,
+    pub width: u32,
+    pub height: u32,
+    pub far: f32,
+    pub src_view: &'a wgpu::TextureView,
+    pub mode: u32,
+}
+
 /// Render a texture view through the compositor pipeline and return as RGBA8 bytes
-pub fn render_view_to_rgba8_ex(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    comp_pl: &wgpu::RenderPipeline,
-    comp_bgl: &wgpu::BindGroupLayout,
-    sky_view: &wgpu::TextureView,
-    depth_view: &wgpu::TextureView,
-    fog_view: &wgpu::TextureView,
-    surface_format: wgpu::TextureFormat,
-    width: u32,
-    height: u32,
-    far: f32,
-    src_view: &wgpu::TextureView,
-    mode: u32,
-) -> anyhow::Result<Vec<u8>> {
+pub fn render_view_to_rgba8_ex(args: RenderViewArgs) -> anyhow::Result<Vec<u8>> {
     use anyhow::Context;
+    let RenderViewArgs {
+        device,
+        queue,
+        comp_pl,
+        comp_bgl,
+        sky_view,
+        depth_view,
+        fog_view,
+        surface_format,
+        width,
+        height,
+        far,
+        src_view,
+        mode,
+    } = args;
+
     // Uniform for mode and far
     let params: [f32; 4] = [mode as f32, far, 0.0, 0.0];
     let ub = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

@@ -215,7 +215,7 @@ fn parse_single_initial_command(l: &str) -> Option<Vec<ViewerCmd>> {
         }
     }
 
-    // Load OBJ/glTF
+    // Load OBJ/glTF/Terrain
     if l.starts_with(":obj") || l.starts_with("obj ") {
         if let Some(path) = l.split_whitespace().nth(1) {
             return Some(vec![ViewerCmd::LoadObj(path.to_string())]);
@@ -224,6 +224,11 @@ fn parse_single_initial_command(l: &str) -> Option<Vec<ViewerCmd>> {
     if l.starts_with(":gltf") || l.starts_with("gltf ") {
         if let Some(path) = l.split_whitespace().nth(1) {
             return Some(vec![ViewerCmd::LoadGltf(path.to_string())]);
+        }
+    }
+    if l.starts_with(":terrain") || l.starts_with("terrain ") {
+        if let Some(path) = l.split_whitespace().nth(1) {
+            return Some(vec![ViewerCmd::LoadTerrain(path.to_string())]);
         }
     }
 

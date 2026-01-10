@@ -119,21 +119,21 @@ impl Viewer {
                 } else {
                     &self.fog_zero_view
                 };
-                render_view_to_rgba8_ex(
-                    &self.device,
-                    &self.queue,
+                render_view_to_rgba8_ex(super::super::viewer_render_helpers::RenderViewArgs {
+                    device: &self.device,
+                    queue: &self.queue,
                     comp_pl,
                     comp_bgl,
-                    &self.sky_output_view,
-                    &gi.gbuffer().depth_view,
+                    sky_view: &self.sky_output_view,
+                    depth_view: &gi.gbuffer().depth_view,
                     fog_view,
-                    self.config.format,
-                    capture_w,
-                    capture_h,
+                    surface_format: self.config.format,
+                    width: capture_w,
+                    height: capture_h,
                     far,
-                    &gi.gbuffer().material_view,
-                    0,
-                )
+                    src_view: &gi.gbuffer().material_view,
+                    mode: 0,
+                })
             })?
         };
 
@@ -159,21 +159,21 @@ impl Viewer {
                         } else {
                             &slf.fog_zero_view
                         };
-                        render_view_to_rgba8_ex(
-                            &slf.device,
-                            &slf.queue,
+                        render_view_to_rgba8_ex(super::super::viewer_render_helpers::RenderViewArgs {
+                            device: &slf.device,
+                            queue: &slf.queue,
                             comp_pl,
                             comp_bgl,
-                            &slf.sky_output_view,
-                            &gi.gbuffer().depth_view,
+                            sky_view: &slf.sky_output_view,
+                            depth_view: &gi.gbuffer().depth_view,
                             fog_view,
-                            slf.config.format,
-                            capture_w,
-                            capture_h,
+                            surface_format: slf.config.format,
+                            width: capture_w,
+                            height: capture_h,
                             far,
-                            view,
-                            0,
-                        )
+                            src_view: view,
+                            mode: 0,
+                        })
                     })?;
                     image_write::write_png_rgba8_small(
                         &out_dir.join(label),
@@ -203,21 +203,21 @@ impl Viewer {
                 } else {
                     &self.fog_zero_view
                 };
-                render_view_to_rgba8_ex(
-                    &self.device,
-                    &self.queue,
+                render_view_to_rgba8_ex(super::super::viewer_render_helpers::RenderViewArgs {
+                    device: &self.device,
+                    queue: &self.queue,
                     comp_pl,
                     comp_bgl,
-                    &self.sky_output_view,
-                    &gi.gbuffer().depth_view,
+                    sky_view: &self.sky_output_view,
+                    depth_view: &gi.gbuffer().depth_view,
                     fog_view,
-                    self.config.format,
-                    capture_w,
-                    capture_h,
+                    surface_format: self.config.format,
+                    width: capture_w,
+                    height: capture_h,
                     far,
-                    ssr_view,
-                    0,
-                )
+                    src_view: ssr_view,
+                    mode: 0,
+                })
             })?
         };
         Ok((reference_bytes, ssr_bytes))

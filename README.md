@@ -16,7 +16,7 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.9.0 — Terrain labels system with screen-space text anchored to world coordinates, plus a Mount Fuji demo showcasing OSM place name integration.
+Current release: 1.9.2 — Camera Animation System offering keyframe-based flyovers with MP4 export, dynamic lighting, and offline rendering queues.
 
 ## Installation
 
@@ -27,6 +27,19 @@ maturin develop --release
 # or via wheel (if provided)
 # pip install forge3d
 ```
+
+## Camera Animation Demo
+
+Create smooth cinematic flyovers of your terrain with the new camera animation system:
+
+```bash
+python examples/camera_animation_demo.py --export ./frames --mp4 --sun-offset 150 --sun-intensity 1.5
+```
+
+This renders a dramatic orbit animation with backlighting and exports it directly to MP4 (requires ffmpeg).
+
+[Watch Demo Video](assets/frames.mp4)
+
 
 ## Quick Start (< 10 minutes)
 

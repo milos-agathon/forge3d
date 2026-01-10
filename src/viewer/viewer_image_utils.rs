@@ -111,7 +111,7 @@ pub fn add_debug_noise_rgba8(buf: &mut [u8], w: u32, h: u32, seed: u32) {
 pub fn flatten_rgba8_to_mean_luma(src: &[u8], w: u32, h: u32) -> Vec<u8> {
     let w_us = w as usize;
     let h_us = h as usize;
-    let mut out = vec![0u8; (w_us * h_us * 4) as usize];
+    let mut out = vec![0u8; w_us * h_us * 4];
     if w_us == 0 || h_us == 0 {
         return out;
     }
@@ -149,7 +149,7 @@ pub fn flatten_rgba8_to_mean_luma(src: &[u8], w: u32, h: u32) -> Vec<u8> {
 pub fn blur_rgba8_box3x3(src: &[u8], w: u32, h: u32) -> Vec<u8> {
     let w_us = w as usize;
     let h_us = h as usize;
-    let mut out = vec![0u8; (w_us * h_us * 4) as usize];
+    let mut out = vec![0u8; w_us * h_us * 4];
     if w_us == 0 || h_us == 0 {
         return out;
     }

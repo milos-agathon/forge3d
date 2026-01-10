@@ -416,24 +416,24 @@ impl Viewer {
             } else {
                 &self.fog_zero_view
             };
-            render_view_to_rgba8_ex(
-                &self.device,
-                &self.queue,
+            render_view_to_rgba8_ex(crate::viewer::viewer_render_helpers::RenderViewArgs {
+                device: &self.device,
+                queue: &self.queue,
                 comp_pl,
                 comp_bgl,
-                &self.sky_output_view,
-                &gi.gbuffer().depth_view,
+                sky_view: &self.sky_output_view,
+                depth_view: &gi.gbuffer().depth_view,
                 fog_view,
-                self.config.format,
-                self.config.width,
-                self.config.height,
+                surface_format: self.config.format,
+                width: self.config.width,
+                height: self.config.height,
                 far,
-                gi.material_with_ssr_view()
+                src_view: gi.material_with_ssr_view()
                     .or_else(|| gi.material_with_ssgi_view())
                     .or_else(|| gi.material_with_ao_view())
                     .unwrap_or(&gi.gbuffer().material_view),
-                0,
-            )
+                mode: 0,
+            })
         })
     }
 

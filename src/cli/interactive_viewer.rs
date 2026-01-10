@@ -93,6 +93,11 @@ pub fn run_interactive_viewer_cli() -> Result<(), Box<dyn std::error::Error>> {
                     cmds.push(format!(":gltf {}", path));
                 }
             }
+            "--terrain" => {
+                if let Some(path) = args.next() {
+                    cmds.push(format!(":terrain {}", path));
+                }
+            }
             "--viz" => {
                 if let Some(mode) = args.next() {
                     cmds.push(format!(":viz {}", mode.to_lowercase()));
