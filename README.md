@@ -1,7 +1,3 @@
-
-
-https://github.com/user-attachments/assets/3ecbf842-7cf7-4f3b-806b-191087c23fb3
-
 <div align="center">
   <a href="./">
     <picture>
@@ -37,12 +33,12 @@ maturin develop --release
 Create smooth cinematic flyovers of your terrain with the new camera animation system:
 
 ```bash
-python examples/camera_animation_demo.py --export ./frames --mp4 --sun-offset 150 --sun-intensity 1.5
+python examples/camera_animation_demo.py --export ./frames --mp4 --sun-offset 150 --sun-intensity 1.5 --title "Mount Rainier"
 ```
 
 This renders a dramatic orbit animation with backlighting and exports it directly to MP4 (requires ffmpeg).
 
-https://github.com/user-attachments/assets/2960245f-550f-489c-8cfb-4404ef53f643
+https://github.com/user-attachments/assets/3ecbf842-7cf7-4f3b-806b-191087c23fb3
 
 ## Quick Start (< 10 minutes)
 
