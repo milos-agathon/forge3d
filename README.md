@@ -38,7 +38,7 @@ python examples/camera_animation_demo.py --export ./frames --mp4 --sun-offset 15
 
 This renders a dramatic orbit animation with backlighting and exports it directly to MP4 (requires ffmpeg).
 
-<video src="https://github.com/user-attachments/assets/d0c3580a-7cbc-4ab1-ad04-42d4e35166bc" width="352" height="720"></video>
+<video src="[https://github.com/user-attachments/assets/d0c3580a-7cbc-4ab1-ad04-42d4e35166bc](https://github.com/milos-agathon/forge3d/blob/main/assets/frames.mp4)" width="352" height="720"></video>
 
 [Watch Demo Video](assets/frames.mp4)
 
