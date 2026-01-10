@@ -338,6 +338,7 @@ def encode_frames_to_mp4(
     fps: int = 30,
     quality: str = "high",
     cleanup_frames: bool = False,
+    title: Optional[str] = None,
 ) -> bool:
     """Encode PNG frames to MP4 video using ffmpeg.
     
@@ -347,6 +348,7 @@ def encode_frames_to_mp4(
         fps: Frames per second
         quality: Quality preset ('high', 'medium', 'low')
         cleanup_frames: Delete PNG frames after encoding
+        title: Optional title text to overlay at top of video
     
     Returns:
         True if encoding succeeded, False otherwise
@@ -365,6 +367,8 @@ def encode_frames_to_mp4(
     
     print(f"\nEncoding MP4 video...")
     print(f"Quality: {quality} (CRF={crf})")
+    if title:
+        print(f"Title: {title}")
     print(f"Output: {output_path}")
     
     try:
@@ -374,13 +378,32 @@ def encode_frames_to_mp4(
             "-framerate", str(fps),
             "-pattern_type", "glob",
             "-i", str(frames_dir / "frame_*.png"),
+        ]
+        
+        # Add title overlay if specified
+        if title:
+            # Escape special characters for drawtext filter
+            title_escaped = title.replace(":", "\\:").replace("'", "'\\'")
+            drawtext_filter = (
+                f"drawtext="
+                f"text='{title_escaped}':"
+                f"fontsize=72:"
+                f"fontcolor=white:"
+                f"bordercolor=black:"
+                f"borderw=3:"
+                f"x=(w-text_w)/2:"
+                f"y=60"
+            )
+            cmd.extend(["-vf", drawtext_filter])
+        
+        cmd.extend([
             "-c:v", "libx264",
             "-crf", str(crf),
             "-pix_fmt", "yuv420p",
             "-preset", "medium",
             "-movflags", "+faststart",  # Web optimization
             str(output_path),
-        ]
+        ])
         
         result = subprocess.run(
             cmd,
@@ -430,6 +453,7 @@ def export_animation_frames(
     dynamic_sun: bool = True,
     sun_offset: float = 120.0,
     sun_intensity: float = 1.0,
+    title: Optional[str] = None,
 ):
     """Export animation frames to PNG files and optionally encode to MP4.
     
@@ -578,6 +602,7 @@ def export_animation_frames(
                 fps=fps,
                 quality=mp4_quality,
                 cleanup_frames=cleanup_frames,
+                title=title,
             )
             
             if success:
@@ -691,6 +716,10 @@ Examples:
         "--sun-intensity", type=float, default=1.0, metavar="FLOAT",
         help="Sun intensity multiplier (default: 1.0)"
     )
+    parser.add_argument(
+        "--title", type=str, metavar="TEXT",
+        help="Title text to overlay at top of video (MP4 export only)"
+    )
     
     args = parser.parse_args()
     
@@ -736,6 +765,7 @@ Examples:
             dynamic_sun=not args.static_sun,
             sun_offset=args.sun_offset,
             sun_intensity=args.sun_intensity,
+            title=args.title,
         )
     else:
         run_interactive_preview(
