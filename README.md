@@ -40,6 +40,9 @@ This renders a dramatic orbit animation with backlighting and exports it directl
 
 <video src="https://raw.githubusercontent.com/milos-agathon/forge3d/refs/heads/main/assets/frames.mp4" width="352" height="720"></video>
 
+<video width="1920" height="1800" src="https://raw.githubusercontent.com/milos-agathon/forge3d/refs/heads/main/assets/frames.mp4"></video>
+
+
 [Watch Demo Video](assets/frames.mp4)
 
 
