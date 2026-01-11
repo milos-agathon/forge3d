@@ -154,7 +154,7 @@ class TestAovRendering:
     ):
         """render_with_aov should return (Frame, AovFrame) tuple."""
         renderer, material_set, env_maps = renderer_setup
-        params = make_terrain_params_config(
+        config = make_terrain_params_config(
             size_px=(64, 64),
             render_scale=1.0,
             terrain_span=100.0,
@@ -163,6 +163,7 @@ class TestAovRendering:
             exposure=1.0,
             domain=(0.0, 100.0),
         )
+        params = f3d.TerrainRenderParams(config)
         
         frame, aov_frame = renderer.render_with_aov(
             material_set, env_maps, params, simple_heightmap
@@ -184,7 +185,7 @@ class TestAovRendering:
     ):
         """AovFrame should have working save methods."""
         renderer, material_set, env_maps = renderer_setup
-        params = make_terrain_params_config(
+        config = make_terrain_params_config(
             size_px=(64, 64),
             render_scale=1.0,
             terrain_span=100.0,
@@ -193,6 +194,7 @@ class TestAovRendering:
             exposure=1.0,
             domain=(0.0, 100.0),
         )
+        params = f3d.TerrainRenderParams(config)
         
         _, aov_frame = renderer.render_with_aov(
             material_set, env_maps, params, simple_heightmap
@@ -217,7 +219,7 @@ class TestAovRendering:
     ):
         """AovFrame.save_all should save all AOVs to directory."""
         renderer, material_set, env_maps = renderer_setup
-        params = make_terrain_params_config(
+        config = make_terrain_params_config(
             size_px=(64, 64),
             render_scale=1.0,
             terrain_span=100.0,
@@ -226,6 +228,7 @@ class TestAovRendering:
             exposure=1.0,
             domain=(0.0, 100.0),
         )
+        params = f3d.TerrainRenderParams(config)
         
         _, aov_frame = renderer.render_with_aov(
             material_set, env_maps, params, simple_heightmap
@@ -243,7 +246,7 @@ class TestAovRendering:
     ):
         """AOV outputs should have correct shapes."""
         renderer, material_set, env_maps = renderer_setup
-        params = make_terrain_params_config(
+        config = make_terrain_params_config(
             size_px=(128, 64),  # Non-square to test dimensions
             render_scale=1.0,
             terrain_span=100.0,
@@ -252,6 +255,7 @@ class TestAovRendering:
             exposure=1.0,
             domain=(0.0, 100.0),
         )
+        params = f3d.TerrainRenderParams(config)
         
         _, aov_frame = renderer.render_with_aov(
             material_set, env_maps, params, simple_heightmap

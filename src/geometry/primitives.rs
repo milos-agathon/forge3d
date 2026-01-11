@@ -403,7 +403,7 @@ pub fn generate_torus(
     mesh
 }
 
-/// Placeholder mesh for text extrusion until font pipeline is implemented.
+/// Fallback mesh for text extrusion until font pipeline is implemented.
 pub fn generate_text3d_stub() -> MeshBuffers {
     MeshBuffers::default()
 }

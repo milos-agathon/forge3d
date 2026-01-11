@@ -207,7 +207,7 @@ pub fn layout_curved_text(
             glyphs.push(CurvedGlyphInstance {
                 world_pos: point.position,
                 rotation,
-                uv_rect: [0.0, 0.0, 1.0, 1.0], // Placeholder, filled by atlas
+                uv_rect: [0.0, 0.0, 1.0, 1.0], // Filled by atlas after packing.
                 color,
                 scale: font_size,
                 path_offset: glyph_center_offset,

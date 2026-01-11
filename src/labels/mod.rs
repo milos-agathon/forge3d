@@ -422,8 +422,7 @@ impl LabelManager {
             line_label.visible = true;
             visible_count += 1;
 
-            // TODO: Generate rotated glyph instances for line labels
-            // For now, line labels are tracked but not rendered with rotation
+            // Line labels track rotation, but glyph rendering does not apply it yet.
         }
 
         self.visible_instances.len()
@@ -441,8 +440,8 @@ impl LabelManager {
             renderer.recreate_bind_group(device, Some(&atlas.view));
         }
 
-        // Use SDF mode (1 channel) for bitmap fonts, MSDF (3 channels) for proper MSDF atlases
-        // For now, default to SDF mode which works with simple bitmap fonts
+        // Use SDF mode (1 channel) for bitmap fonts, MSDF (3 channels) for proper MSDF atlases.
+        // Default to SDF because current atlases are single-channel bitmap fonts.
         renderer.set_channels(1);
         renderer.set_smoothing(2.0);
 

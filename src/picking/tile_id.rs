@@ -1,6 +1,6 @@
 // src/picking/tile_id.rs
 // Small-tile ID buffer rendering for efficient hover/pick operations
-// Part of Plan 2: Standard — GPU Ray Picking + Hover Support
+// Part of Plan 2: Standard GPU Ray Picking + Hover Support
 
 use wgpu::{
     BindGroup, BindGroupLayout, Buffer, Device, RenderPipeline, 
@@ -102,7 +102,7 @@ impl TileIdPass {
     pub fn new(device: &Device, tile_size: u32) -> Self {
         let tile_size = tile_size.max(16).min(256);
 
-        // Create tile-sized ID texture (R32Uint)
+        // R32Uint keeps full 32-bit feature IDs per pixel.
         let id_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("tile_id_texture"),
             size: wgpu::Extent3d {
@@ -120,7 +120,7 @@ impl TileIdPass {
 
         let id_view = id_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Create depth texture for tile
+        // Depth buffer matches tile size to cull occluded IDs.
         let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("tile_id_depth"),
             size: wgpu::Extent3d {
@@ -138,13 +138,11 @@ impl TileIdPass {
 
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Create shader module
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tile_id_shader"),
             source: wgpu::ShaderSource::Wgsl(TILE_ID_SHADER.into()),
         });
 
-        // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("tile_id_bind_group_layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -159,7 +157,6 @@ impl TileIdPass {
             }],
         });
 
-        // Create uniform buffer
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("tile_id_uniform_buffer"),
             size: std::mem::size_of::<TileIdUniforms>() as u64,
@@ -167,7 +164,6 @@ impl TileIdPass {
             mapped_at_creation: false,
         });
 
-        // Create bind group
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("tile_id_bind_group"),
             layout: &bind_group_layout,
@@ -177,7 +173,6 @@ impl TileIdPass {
             }],
         });
 
-        // Create pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("tile_id_pipeline_layout"),
             bind_group_layouts: &[&bind_group_layout],
@@ -202,7 +197,6 @@ impl TileIdPass {
             ],
         };
 
-        // Create render pipeline
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("tile_id_pipeline"),
             layout: Some(&pipeline_layout),

@@ -1,6 +1,6 @@
 // src/picking/selection.rs
 // Multi-select and selection set management
-// Part of Plan 2: Standard — GPU Ray Picking + Hover Support
+// Part of Plan 2: Standard - GPU Ray Picking + Hover Support
 
 use std::collections::{HashMap, HashSet};
 

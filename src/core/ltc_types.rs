@@ -33,7 +33,7 @@ pub struct RectAreaLight {
     /// Light emission power
     pub power: f32,
 
-    /// Light normal (computed from right × up)
+    /// Light normal (computed from right x up)
     pub normal: [f32; 3],
     /// Two-sided lighting flag
     pub two_sided: f32,

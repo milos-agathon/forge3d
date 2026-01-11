@@ -829,7 +829,7 @@ impl Viewer {
                 println!("Requested size {}x{} (resize via window manager)", w, h);
             }
             ViewerCmd::SetVizDepthMax(_v) => {
-                // placeholder for depth visualization range
+                // Depth visualization range is not wired yet; keep shader defaults.
             }
             ViewerCmd::SetTransform {
                 translation,
@@ -1338,8 +1338,7 @@ impl Viewer {
                 // Handled in server.rs
             }
             ViewerCmd::ClearSelection => {
-                // Clear selection in UnifiedPickingSystem
-                // self.unified_picking.clear_selection("default"); // Need to know set name
+                // ClearSelection is a no-op until a selection set name is provided.
                 println!("[picking] Clear selection requested");
             }
             ViewerCmd::RemoveVectorOverlay { id } => {
@@ -1587,7 +1586,7 @@ impl Viewer {
                 text_size,
                 text_color,
             } => {
-                // For now, callouts are implemented as offset labels with leader lines
+                // Callouts are implemented as offset labels with leader lines.
                 use crate::labels::LabelStyle;
                 let mut style = LabelStyle::default();
                 if let Some(s) = text_size {

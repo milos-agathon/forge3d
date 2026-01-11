@@ -247,7 +247,7 @@ impl OverlayRenderer {
                     binding: 5,
                     resource: pt_dummy.as_entire_binding(),
                 },
-                // M5: Depth texture (dummy for now, real texture bound at render time)
+                // M5: Depth texture is bound at render time; use a dummy view here.
                 BindGroupEntry {
                     binding: 6,
                     resource: wgpu::BindingResource::TextureView(&dummy_view),
@@ -386,8 +386,8 @@ impl OverlayRenderer {
         page_table: Option<&Buffer>,
         depth_view: Option<&TextureView>, // M5: Terrain depth texture for occlusion
     ) {
-        // fallback to dummy 1x1 white created via a small temporary texture
-        // Prefer provided view, then stored view, else dummy
+        // Use 1x1 fallback views when any overlay/height/depth view is missing.
+        // Prefer provided view, then stored view, else fallback.
         let use_overlay_view = overlay_view.or(self.overlay_view.as_ref());
         let (dummy_tex, dummy_view) = if use_overlay_view.is_none() || height_view.is_none() || depth_view.is_none() {
             let t = device.create_texture(&TextureDescriptor {
@@ -465,7 +465,7 @@ impl OverlayRenderer {
             ],
         });
 
-        // keep dummy_tex alive until function ends
+        // Keep dummy_tex alive so dummy_view stays valid.
         drop(dummy_tex);
     }
 

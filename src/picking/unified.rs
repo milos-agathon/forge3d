@@ -1,6 +1,6 @@
 // src/picking/unified.rs
 // Unified picking system with BVH-accelerated ray intersection
-// Part of Plan 3: Premium — Unified Picking with BVH + Python Callbacks
+// Part of Plan 3: Premium - Unified Picking with BVH + Python Callbacks
 
 use super::ray::Ray;
 use super::selection::{SelectionManager, SelectionStyle};
@@ -399,7 +399,7 @@ fn ray_aabb_intersect(ray: &Ray, aabb: &BvhAabb, max_t: f32) -> bool {
     true
 }
 
-/// Möller-Trumbore ray-triangle intersection
+/// Moller-Trumbore ray-triangle intersection
 fn ray_triangle_intersect(ray: &Ray, triangle: &Triangle) -> Option<f32> {
     const EPSILON: f32 = 1e-7;
 

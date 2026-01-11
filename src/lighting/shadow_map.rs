@@ -14,7 +14,7 @@ pub struct ShadowMap {
     pub sampled_view: TextureView,
     /// Sampler (comparison or regular depending on technique)
     pub sampler: wgpu::Sampler,
-    /// Resolution (square texture: res×res)
+    /// Resolution (square texture: res x res)
     pub resolution: u32,
     /// Shadow settings
     pub settings: ShadowSettings,
@@ -25,7 +25,7 @@ impl ShadowMap {
     pub fn new(device: &Device, settings: ShadowSettings) -> Self {
         let resolution = settings.map_res;
 
-        // Create depth texture (D32Float format, 4 bytes per pixel)
+        // D32Float keeps depth precision for shadow comparisons.
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Shadow Map Depth Texture"),
             size: wgpu::Extent3d {
@@ -107,7 +107,7 @@ impl ShadowMap {
         self.memory_bytes() as f64 / (1024.0 * 1024.0)
     }
 
-    /// Validate memory budget (should be ≤32 MiB for P0)
+    /// Validate memory budget (<= 32 MiB for P0).
     pub fn validate_budget(&self) -> Result<(), String> {
         let mb = self.memory_mb();
         if mb > 32.0 {
@@ -141,7 +141,8 @@ impl ShadowMatrixCalculator {
         let view = glam::Mat4::look_at_rh(
             light_pos,
             scene_bounds.center,
-            glam::Vec3::Y, // up vector (will fail if light_dir == Y, TODO: handle)
+            // Using +Y as up fails when light_dir aligns with Y; avoid that axis until we add a fallback.
+            glam::Vec3::Y,
         );
 
         // Orthographic projection to cover scene bounds

@@ -58,7 +58,7 @@ impl LightBuffer {
             Self::create_count_buffer(device, 1),
             Self::create_count_buffer(device, 2),
         ];
-        // P1-05: Environment params stub (zeros for now, full IBL in P4)
+        // P1-05: Environment params use zeros until full IBL data is wired.
         let environment_stub = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Light Environment Stub Buffer"),
             size: 16, // vec4<f32>
@@ -74,10 +74,7 @@ impl LightBuffer {
             seed[0].to_bits(),
             seed[1].to_bits(),
         ];
-        // Initialize the first count buffer with zero lights
-        // Note: We'll use a queue to write, but for initialization we can use write_buffer
-        // However, we need a queue. For now, create the default bind group after initialization.
-        // Actually, we can create it here since buffers are already created.
+        // Buffers are ready, so the default bind group can be created immediately.
 
         // Create default bind group with zero lights (neutral/empty state)
         let default_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {

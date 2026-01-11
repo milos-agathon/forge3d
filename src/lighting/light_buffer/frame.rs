@@ -74,7 +74,7 @@ impl LightBuffer {
         let light_buffer_size = (MAX_LIGHTS * std::mem::size_of::<Light>()) as u64;
         let count_buffer_size = 16u64;
 
-        // 3 buffers × (light_buffer + count_buffer)
+        // 3 buffers x (light_buffer + count_buffer)
         3 * (light_buffer_size + count_buffer_size) + 16
     }
 
@@ -103,7 +103,7 @@ impl LightBuffer {
         &self.count_buffers[self.frame_index]
     }
 
-    /// Get the environment buffer (stub for P1-05, full IBL in P4)
+    /// Get the environment buffer (zeroed for P1-05; full IBL in P4).
     pub fn environment_buffer(&self) -> &Buffer {
         &self.environment_stub
     }

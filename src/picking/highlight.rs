@@ -1,6 +1,6 @@
 // src/picking/highlight.rs
 // Highlight rendering styles (outline, glow, color tint)
-// Part of Plan 3: Premium — Unified Picking with BVH + Python Callbacks
+// Part of Plan 3: Premium - Unified Picking with BVH + Python Callbacks
 
 use bytemuck::{Pod, Zeroable};
 

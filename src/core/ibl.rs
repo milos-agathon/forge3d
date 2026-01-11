@@ -1011,7 +1011,7 @@ impl IBLRenderer {
             // Spec: mip0=1024, mip1=512, mip2=256, ... min 64
             let sample_count = (1024u32 >> mip).max(64);
             self.uniforms.sample_count = sample_count;
-            // Roughness mapping: mip = roughness² * (mipCount-1)
+            // Roughness mapping: mip = roughness^2 * (mipCount-1)
             // For prefilter, we use: roughness = sqrt(mip / (mipCount-1))
             self.uniforms.roughness = if mip_levels > 1 {
                 (mip as f32 / ((mip_levels - 1) as f32)).sqrt()

@@ -263,9 +263,8 @@ impl QueueBuffers {
         _queue: &Queue,
         _encoder: &mut CommandEncoder,
     ) -> Result<u32, Box<dyn std::error::Error>> {
-        // For now, return estimate based on capacity
-        // In full implementation, would do async readback
-        Ok(0) // Placeholder - triggers loop termination
+        // Return zero until async readback is implemented; this terminates the loop.
+        Ok(0)
     }
 
     /// Create bind group for raygen stage

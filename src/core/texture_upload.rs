@@ -44,8 +44,8 @@ impl HdrFormat {
 
     pub fn bytes_per_pixel(self) -> usize {
         match self {
-            HdrFormat::Rgba16Float => 8,  // 4 components × 2 bytes
-            HdrFormat::Rgba32Float => 16, // 4 components × 4 bytes
+            HdrFormat::Rgba16Float => 8,  // 4 components x 2 bytes
+            HdrFormat::Rgba32Float => 16, // 4 components x 4 bytes
         }
     }
 
@@ -418,8 +418,7 @@ mod tests {
         let rgb_data = vec![1.0, 0.5, 0.25, 0.75, 1.0, 0.5]; // 2 RGB pixels
         let alpha = 0.8;
 
-        // This would be tested with actual GPU context in integration tests
-        // For now, just verify the logic would work
+        // CPU-only check; GPU upload paths are covered in integration tests.
         let expected_rgba = vec![
             1.0, 0.5, 0.25, 0.8, // First pixel + alpha
             0.75, 1.0, 0.5, 0.8, // Second pixel + alpha
@@ -457,7 +456,7 @@ pub fn create_r32f_height_texture(
         )));
     }
 
-    // Check memory budget (≤ 512 MiB)
+    // Check memory budget (<= 512 MiB).
     let texture_bytes = (width as u64) * (height as u64) * 4; // R32Float = 4 bytes per pixel
     let limit_bytes = 512 * 1024 * 1024; // 512 MiB
     if texture_bytes > limit_bytes {

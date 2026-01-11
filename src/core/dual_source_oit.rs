@@ -371,7 +371,7 @@ impl DualSourceOITRenderer {
 
         // WebGPU doesn't directly expose dual-source blending in the standard API
         // This would typically require checking for specific extensions or backend capabilities
-        // For now, we'll use a conservative approach and detect based on backend
+        // Demo default: assume support to keep the path enabled.
 
         // In a real implementation, you'd check:
         // - Vulkan: VK_EXT_blend_operation_advanced or similar

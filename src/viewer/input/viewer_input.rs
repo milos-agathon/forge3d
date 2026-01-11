@@ -56,7 +56,7 @@ impl Viewer {
                     if !pressed {
                         if let Some((x, y)) = self.camera.last_mouse_pos {
                             // Only pick if lasso is not active (or handle picking separately)
-                            // For now, simple point click
+                            // Point click only; drag selection is handled by the lasso path.
                             
                             // Calculate matrices for unprojection
                             let aspect = self.config.width as f32 / self.config.height as f32;

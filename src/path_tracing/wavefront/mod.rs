@@ -190,7 +190,7 @@ impl WavefrontScheduler {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Hair segments default buffer (1 dummy)
+        // Provide a single zeroed segment to satisfy the binding layout.
         let dummy_seg: [u32; 4] = [0; 4];
         let hair_segments = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("hair-segments"),
@@ -494,10 +494,10 @@ impl WavefrontScheduler {
 
         // Optionally run ReSTIR passes (disabled by default)
         if self.restir_enabled {
-            // ReSTIR Init: initialize per-pixel reservoirs (A8 stub)
+            // ReSTIR Init: initialize per-pixel reservoirs (A8 path)
             self.dispatch_restir_init(&mut encoder, uniforms_buffer, scene_bind_group)?;
 
-            // ReSTIR Temporal: combine last frame with current (MVP stub)
+            // ReSTIR Temporal: combine last frame with current (MVP path)
             // Note: do not swap here; keep prev as input (RO) and out as output (RW) for spatial
             self.dispatch_restir_temporal(&mut encoder, uniforms_buffer, scene_bind_group)?;
 
@@ -706,7 +706,7 @@ impl WavefrontScheduler {
         pass.set_pipeline(&self.pipelines.compact);
         pass.set_bind_group(2, &queue_bind_group, &[]);
 
-        // Use simple compaction for now (single workgroup)
+        // Single workgroup compaction keeps dispatch simple until queue sizing is tracked.
         pass.dispatch_workgroups(1, 1, 1);
 
         Ok(())

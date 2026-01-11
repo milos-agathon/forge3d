@@ -227,8 +227,7 @@ trait ToPassHandle {
 
 impl ToPassHandle for super::types::PassType {
     fn to_pass_handle(&self) -> PassHandle {
-        // This is a placeholder - in a real implementation this would
-        // need to track the actual pass handle
+        // Legacy pass types do not track handles yet; use a dummy handle.
         PassHandle(0)
     }
 }

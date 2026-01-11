@@ -303,7 +303,7 @@ pub fn create_fog_resources(device: &Arc<Device>, width: u32, height: u32) -> Fo
         ..Default::default()
     });
 
-    // Shadow map placeholder
+    // Dummy shadow map until fog integrates with the shadow pipeline.
     let fog_shadow_map = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.fog.shadow.map"),
         size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 4 },

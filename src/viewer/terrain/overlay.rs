@@ -415,8 +415,7 @@ impl OverlayStack {
                     // Reload image (could cache this)
                     if let Ok(img) = image::open(path) {
                         let _rgba_img = img.to_rgba8();
-                        // This is inefficient - should use cached GPU readback
-                        continue; // Skip for now, use GPU-based compositing
+                        continue; // Skip CPU readback; use GPU compositing.
                     } else {
                         continue;
                     }

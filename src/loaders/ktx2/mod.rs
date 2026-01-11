@@ -59,7 +59,7 @@ mod tests {
         // Accessing private fields for testing requires these to be pub(crate) or similar
         // Or we just test public API behavior.
         // The original tests accessed private fields, so I might need to make them visible to tests.
-        // But for now, let's stick to public API or just basic creation.
+        // Stick to public API behavior or basic creation here.
         let _ = loader;
 
         let custom_formats = vec![wgpu::TextureFormat::Rgba8Unorm];

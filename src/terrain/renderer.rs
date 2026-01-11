@@ -3,13 +3,13 @@
 #![allow(deprecated)] // PyO3 GilRefs API deprecation - to be migrated to Bound API
 //!
 //! Implements a minimal-but-correct terrain rendering pipeline:
-//! - Heightmap upload (numpy → R32Float texture)
+//! - Heightmap upload (numpy -> R32Float texture)
 //! - Fullscreen triangle with triplanar PBR shading
 //! - Parallax Occlusion Mapping (POM) support
 //! - IBL (Image-Based Lighting) integration
 //! - Colormap overlay
 //!
-//! Memory budget: ≤512 MiB host-visible allocations
+//! Memory budget: <= 512 MiB host-visible allocations
 //!
 //! RELEVANT FILES: src/session.rs, src/material_set.rs, src/ibl_wrapper.rs,
 //! src/terrain_render_params.rs, src/shaders/terrain_pbr_pom.wgsl
@@ -1791,7 +1791,7 @@ impl TerrainScene {
                         binding: 2,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::StorageTexture {
-                            access: wgpu::StorageTextureAccess::ReadWrite,
+                            access: wgpu::StorageTextureAccess::WriteOnly,
                             format: wgpu::TextureFormat::Rgba32Float,
                             view_dimension: wgpu::TextureViewDimension::D2,
                         },
@@ -2391,7 +2391,7 @@ impl TerrainScene {
         if let Some(view) = view_guard.as_ref() {
             // Use a render pass to clear the storage texture
             // Note: Storage textures can't be directly cleared, so we use compute
-            // For now, just ensure texture exists - clearing happens via first sample write
+            // Texture clearing happens via first sample write; this only verifies allocation.
             let _ = view;
         }
 
@@ -3317,7 +3317,8 @@ impl TerrainScene {
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                            // Heightmap is R32Float (non-filterable), so we must use a non-filtering sampler
+                            resource: wgpu::BindingResource::Sampler(&self.ao_debug_sampler),
                         },
                     ],
                 });
@@ -3951,7 +3952,8 @@ impl TerrainScene {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                        // R32Float is not filterable, so we must use a non-filtering sampler
+                        resource: wgpu::BindingResource::Sampler(&self.ao_debug_sampler),
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
@@ -4064,7 +4066,8 @@ impl TerrainScene {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                        // R32Float is not filterable, so we must use a non-filtering sampler
+                        resource: wgpu::BindingResource::Sampler(&self.ao_debug_sampler),
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
@@ -4298,7 +4301,8 @@ impl TerrainScene {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                    // Heightmap is R32Float (non-filterable), so we must use a non-filtering sampler
+                    resource: wgpu::BindingResource::Sampler(&self.ao_debug_sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -5865,7 +5869,7 @@ impl TerrainScene {
                 occlusion_query_set: None,
             });
 
-            // For now, just clear to sky blue to indicate terrain scene is active
+            // Clear to sky blue to indicate the terrain scene is active.
             // Full terrain rendering would require the complete PBR pipeline setup
             // which is complex. This serves as a visible indicator that terrain is loaded.
         }

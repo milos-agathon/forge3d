@@ -217,7 +217,7 @@ impl GpuBvhBuilder {
         let prim_count = triangles.len() as u32;
         let node_count = 2 * prim_count - 1; // Complete binary tree
 
-        // Check memory budget (≤512 MiB host-visible heap)
+        // Check memory budget (<= 512 MiB host-visible heap).
         let estimated_memory = self.estimate_memory_usage(prim_count)?;
         if estimated_memory > 512 * 1024 * 1024 {
             anyhow::bail!(
@@ -301,7 +301,7 @@ impl GpuBvhBuilder {
                 usage: BufferUsages::STORAGE,
             });
 
-        // Execute refit passes (stubbed)
+        // Execute refit passes; GPU kernels are pending.
         self.execute_refit(
             &aabb_buffer,
             &gpu_data.nodes_buffer,
@@ -309,8 +309,7 @@ impl GpuBvhBuilder {
             gpu_data.primitive_count,
         )?;
 
-        // Minimal functional behavior: update world AABB on the handle so clients
-        // observe refit effects even while GPU kernels are stubbed.
+        // Keep handle AABB in sync on the CPU so callers see refit effects.
         let new_world = crate::accel::types::compute_scene_aabb(triangles);
         handle.world_aabb = new_world;
 
@@ -1042,7 +1041,7 @@ impl GpuBvhBuilder {
                 resource: ubuf.as_entire_binding(),
             }],
         });
-        // For refit_iterative, sorted_indices is not used; provide a small placeholder via sorted_indices_buffer
+        // refit_iterative ignores sorted_indices; bind a small buffer to satisfy the layout.
         let bg1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bvh-refit-bg1"),
             layout: &bgl1,

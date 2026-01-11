@@ -1345,7 +1345,7 @@ impl ViewerTerrainScene {
         _height: u32,
     ) {
         // Create a simple additive blit pipeline if needed
-        // For now, use a compute or render pass with additive blending
+        // Use a simple additive pass until a dedicated accumulation pipeline is wired.
         let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("motion_blur.accumulate_shader"),
             source: wgpu::ShaderSource::Wgsl(ACCUMULATE_SHADER.into()),

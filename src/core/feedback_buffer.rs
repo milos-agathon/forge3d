@@ -1,6 +1,6 @@
 //! GPU feedback buffer system for virtual texture streaming
 //!
-//! This module provides GPU → CPU communication for tile visibility feedback,
+//! This module provides GPU -> CPU communication for tile visibility feedback,
 //! allowing the virtual texture system to know which tiles are actually being used.
 
 use crate::core::tile_cache::TileId;

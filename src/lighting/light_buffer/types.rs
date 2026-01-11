@@ -16,7 +16,7 @@ pub struct LightBuffer {
     pub(crate) buffers: [Buffer; 3],
     /// Uniform buffer for light count (triple-buffered)
     pub(crate) count_buffers: [Buffer; 3],
-    /// Uniform buffer placeholder for environment lighting parameters (P1-05)
+    /// Uniform buffer reserved for environment lighting parameters (P1-05).
     pub(crate) environment_stub: Buffer,
     /// Current frame index (0, 1, 2)
     pub(crate) frame_index: usize,

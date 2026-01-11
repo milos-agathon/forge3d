@@ -90,7 +90,7 @@ pub fn build_light_samples_and_alias(
         samples.push(LightSample {
             position: a.position,
             light_index: idx,
-            // For area lights, direction is not a delta; leave as up-vector placeholder
+            // Area lights do not use a delta direction here; keep a fixed up-vector.
             direction: [0.0, 1.0, 0.0],
             // Store photometric intensity proxy
             intensity: (a.intensity * lum).max(0.0),

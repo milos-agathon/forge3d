@@ -1,5 +1,5 @@
 // src/core/text_overlay.rs
-// Native text overlay pass (rectangle placeholder for MSDF text).
+// Native text overlay pass using rectangle quads until MSDF glyphs are wired.
 // Renders screen-space quads (pixel coords) with alpha blending on top of the scene color target.
 
 use wgpu::{
@@ -106,7 +106,7 @@ impl TextOverlayRenderer {
             ],
         });
 
-        // Dummy 1x1 white atlas
+        // Fallback 1x1 white atlas for empty text.
         let dummy_tex = device.create_texture(&TextureDescriptor {
             label: Some("text_dummy_atlas"),
             size: wgpu::Extent3d {
@@ -285,7 +285,7 @@ impl TextOverlayRenderer {
     }
 
     pub fn recreate_bind_group(&mut self, device: &Device, atlas_view: Option<&TextureView>) {
-        // Fallback to dummy if needed
+        // Use 1x1 fallback atlas when no view is available.
         let (dummy_tex, dummy_view) = if atlas_view.is_none() && self.atlas_view.is_none() {
             let t = device.create_texture(&TextureDescriptor {
                 label: Some("text_dummy_atlas_tmp"),

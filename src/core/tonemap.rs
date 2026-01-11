@@ -1,4 +1,4 @@
-//! C8: Full linear→tonemap→sRGB pipeline
+//! C8: Full linear->tonemap->sRGB pipeline
 //!
 //! Provides a dedicated post-processing pass for tone mapping from HDR linear color
 //! to sRGB output with exposure control.

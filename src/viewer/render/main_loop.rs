@@ -608,7 +608,7 @@ impl Viewer {
                     bytemuck::bytes_of(&fog_params_packed),
                 );
 
-                // Select a light-space matrix for fog shadows. For now, use the
+                // Select a light-space matrix for fog shadows. Use the
                 // first CSM cascade's light_projection if available; otherwise
                 // fall back to identity. Depth still comes from fog_shadow_map,
                 // which is initialized to depth=1.0 until a real shadow pass

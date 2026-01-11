@@ -1,6 +1,6 @@
 // src/picking/terrain_query.rs
 // Terrain elevation and slope queries from depth buffer
-// Part of Plan 2: Standard — GPU Ray Picking + Hover Support
+// Part of Plan 2: Standard - GPU Ray Picking + Hover Support
 
 use super::ray::{invert_matrix, Ray};
 

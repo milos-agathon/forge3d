@@ -1,6 +1,6 @@
 // src/picking/lasso.rs
 // Lasso and box selection for multi-feature picking
-// Part of Plan 3: Premium — Unified Picking with BVH + Python Callbacks
+// Part of Plan 3: Premium - Unified Picking with BVH + Python Callbacks
 
 /// A 2D point in screen space
 #[derive(Debug, Clone, Copy)]
@@ -251,9 +251,7 @@ impl LassoSelection {
 
         let mut selected = Vec::new();
 
-        // This is a simple approach - in practice, you'd iterate over
-        // known feature IDs from the layer
-        // For now, we provide a method that takes a closure
+        // Closure-based iteration keeps this helper decoupled from layer storage.
         for id in 1..10000u32 {
             if let Some((x, y)) = feature_screen_positions(id) {
                 if self.contains_point(x, y) {

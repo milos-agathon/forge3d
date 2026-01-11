@@ -327,7 +327,7 @@ impl IndirectRenderer {
             cull_distance: 1000.0, // Max culling distance
             enable_frustum_cull: 1,
             enable_distance_cull: 1,
-            enable_occlusion_cull: 0, // Disabled for now
+            enable_occlusion_cull: 0, // Occlusion culling disabled in this path.
         };
 
         // Update uniforms buffer

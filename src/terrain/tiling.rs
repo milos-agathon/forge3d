@@ -389,7 +389,7 @@ impl TilingSystem {
         pixel_size < 0.1 // Arbitrary threshold for demo
     }
 
-    /// Load tile data (stub implementation)
+    /// Load tile data using synthetic heights until a backing dataset is wired.
     pub fn load_tile(&mut self, tile_id: TileId) -> Result<(), String> {
         if self.tile_cache.contains(&tile_id) {
             return Ok(()); // Already loaded
@@ -406,7 +406,7 @@ impl TilingSystem {
         Ok(())
     }
 
-    /// Generate synthetic height data for a tile (placeholder)
+    /// Generate synthetic heights to keep the demo path deterministic without a data source.
     fn generate_synthetic_heights(&self, tile_id: TileId, width: u32, height: u32) -> Vec<f32> {
         let mut heights = Vec::with_capacity((width * height) as usize);
         let bounds = QuadTreeNode::calculate_bounds(&self.root_bounds, tile_id, self.tile_size);

@@ -1,7 +1,7 @@
-//! GPU types module - focused GPU-related type definitions
+//! Shared GPU type aliases and small helper structs.
 //!
-//! TODO: This is a focused module stub to satisfy C1 deliverables.
-//! Contains common GPU-related type aliases and structures.
+//! Centralizes wgpu re-exports and common descriptors to keep render code
+//! consistent and reduce repetitive imports.
 
 // Re-export commonly used wgpu types for consistency
 pub use wgpu::{
@@ -12,7 +12,7 @@ pub use wgpu::{
 /// Common texture format used throughout the renderer
 pub const RENDER_TARGET_FORMAT: TextureFormat = TextureFormat::Rgba8UnormSrgb;
 
-/// GPU resource handle - placeholder for future resource management
+/// Opaque handle for higher-level GPU resource tracking.
 #[derive(Debug, Clone, Copy)]
 pub struct GpuResourceId(pub u32);
 

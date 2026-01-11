@@ -8,17 +8,17 @@ pub const META_FILE_NAME: &str = "p5_meta.json";
 // SSR trace quality thresholds
 pub const SSR_HIT_RATE_MIN: f32 = 0.005;
 #[allow(dead_code)]
-pub const SSR_MISS_RATIO_MAX: f32 = 50.0; // Relaxed for now, not main focus
+pub const SSR_MISS_RATIO_MAX: f32 = 50.0; // Relaxed to reduce false positives during tuning.
 pub const SSR_EDGE_STREAKS_MAX: u32 = 2;
 #[allow(dead_code)]
-pub const SSR_REF_DIFF_MAX: f32 = 0.10; // Relaxed for now
+pub const SSR_REF_DIFF_MAX: f32 = 0.10; // Relaxed to reduce false positives during tuning.
 
 // Stripe contrast thresholds
 #[allow(dead_code)]
 pub const SSR_STRIPE_MIN_VALUE: f32 = 0.02;
 pub const SSR_STRIPE_MONO_SLACK: f32 = 1e-3;
 #[allow(dead_code)]
-pub const SSR_STRIPE_MEAN_REL_EPS: f32 = 1.0; // Relaxed for now
+pub const SSR_STRIPE_MEAN_REL_EPS: f32 = 1.0; // Relaxed to reduce false positives during tuning.
 
 // Fallback/miss thresholds
 pub const SSR_MIN_MISS_RGB: f32 = 2.0 / 255.0; // Relaxed

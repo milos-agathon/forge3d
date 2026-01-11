@@ -31,7 +31,7 @@ pub struct HybridScene {
     pub mesh_buffers: Option<MeshBuffers>,
 }
 
-/// Provide a process-lifetime dummy storage buffer for bind group layout requirements
+/// Keep a process-lifetime storage buffer to satisfy bind group layout requirements.
 fn dummy_storage_buffer() -> &'static wgpu::Buffer {
     static DUMMY: OnceCell<wgpu::Buffer> = OnceCell::new();
     DUMMY.get_or_init(|| {
@@ -215,9 +215,7 @@ impl HybridScene {
 
     /// Intersect with mesh geometry using BVH
     fn intersect_mesh(&self, _ray: Ray) -> Option<HybridHitResult> {
-        // This would use the existing BVH traversal code
-        // For now, return None as a placeholder
-        // In a full implementation, this would traverse the BVH and test triangles
+        // Mesh intersection is not wired in the hybrid path yet; keep SDF-only behavior.
         None
     }
 

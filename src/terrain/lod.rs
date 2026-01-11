@@ -218,13 +218,7 @@ pub fn update_terrain_lod_with_timing(
         None
     };
 
-    // In a complete implementation, this would:
-    // 1. Perform frustum culling on GPU
-    // 2. Calculate screen-space error for visible tiles
-    // 3. Select appropriate LOD levels
-    // 4. Update mesh buffers with new geometry
-
-    // For now, return a placeholder result
+    // Stub update: return a small fixed set of tiles until GPU culling/LOD selection is wired.
     let updated_tiles = vec![
         TileId::new(0, 0, 0),
         TileId::new(1, 0, 0),

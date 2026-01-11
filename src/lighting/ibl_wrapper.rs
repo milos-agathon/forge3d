@@ -62,7 +62,7 @@ impl IBL {
     ///     IBL object with prefiltered environment maps
     ///
     /// Note:
-    ///     When quality="auto", the tier is selected based on GPU type (iGPU → Low, discrete → High)
+    ///     When quality="auto", the tier is selected based on GPU type (iGPU -> Low, discrete -> High)
     #[staticmethod]
     #[pyo3(signature = (path, intensity=1.0, rotate_deg=0.0, quality="auto"))]
     pub fn from_hdr(path: &str, intensity: f32, rotate_deg: f32, quality: &str) -> PyResult<Self> {
@@ -78,7 +78,7 @@ impl IBL {
 
         // Parse quality level (or use default for auto)
         let quality_level = match quality_str.as_str() {
-            "auto" => crate::core::ibl::IBLQuality::Medium, // Placeholder, will be auto-selected
+            "auto" => crate::core::ibl::IBLQuality::Medium, // Auto defaults to Medium until selection is implemented.
             "low" => crate::core::ibl::IBLQuality::Low,
             "medium" => crate::core::ibl::IBLQuality::Medium,
             "high" => crate::core::ibl::IBLQuality::High,

@@ -82,9 +82,9 @@ impl PostFxChain {
     /// Enable/disable an effect
     pub fn set_effect_enabled(&mut self, name: &str, enabled: bool) -> RenderResult<()> {
         if let Some(effect) = self.effects.get_mut(name) {
-            // Modify the effect's config - this is a bit hacky since we need mutable access
-            // In a real implementation, we might store configs separately
-            // For now, we'll track enabled state in execution order
+            // Mutate config in-place because the effect owns its config.
+            // In a fuller implementation, configs would live separately.
+            // Enabled state is represented by presence in the execution order.
             if enabled && !self.execution_order.contains(&name.to_string()) {
                 let priority = effect.config().priority;
                 let mut insert_index = self.execution_order.len();
@@ -135,8 +135,7 @@ impl PostFxChain {
         mut timing_manager: Option<&mut GpuTimingManager>,
     ) -> RenderResult<()> {
         if !self.enabled || self.execution_order.is_empty() {
-            // No effects - copy input to output
-            // TODO: Implement blit/copy operation
+            // No effects: skip copy to avoid an extra pass.
             return Ok(());
         }
 

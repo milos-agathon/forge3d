@@ -368,14 +368,4 @@ mod tests {
         assert_ne!(light1.energy_factor, light2.energy_factor);
     }
 
-    #[test]
-    fn test_light_manager() {
-        // Mock device creation would go here in real tests
-        // let device = ...;
-        // let mut manager = AreaLightManager::new(device, 4);
-        //
-        // let light = AreaLight::default();
-        // let index = manager.add_light(light).unwrap();
-        // assert_eq!(manager.light_count(), 1);
-    }
 }

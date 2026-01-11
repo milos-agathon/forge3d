@@ -189,7 +189,7 @@ impl CsmRenderer {
         self.evsm_maps.as_ref().map(|texture| {
             texture.create_view(&TextureViewDescriptor {
                 label: Some("csm_moment_texture_view"),
-                format: Some(TextureFormat::Rgba32Float),
+                format: Some(TextureFormat::Rgba16Float),
                 dimension: Some(TextureViewDimension::D2Array),
                 aspect: wgpu::TextureAspect::All,
                 base_mip_level: 0,
@@ -211,7 +211,7 @@ impl CsmRenderer {
             (self.config.shadow_map_size as u64)
                 * (self.config.shadow_map_size as u64)
                 * (self.config.cascade_count as u64)
-                * 16
+                * 8 // Rgba16Float = 8 bytes per pixel
         } else {
             0
         };
@@ -347,7 +347,7 @@ fn create_evsm_maps(device: &Device, config: &CsmConfig) -> Option<Texture> {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba32Float,
+            format: TextureFormat::Rgba16Float,
             usage: TextureUsages::RENDER_ATTACHMENT
                 | TextureUsages::TEXTURE_BINDING
                 | TextureUsages::STORAGE_BINDING,

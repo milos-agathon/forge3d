@@ -278,7 +278,7 @@ impl MsdfAtlas {
 
         // If no glyphs were parsed, create a basic ASCII set with fallback metrics
         if glyphs.is_empty() {
-            // Generate basic ASCII glyphs as placeholder
+            // Fallback ASCII metrics keep layout functional when glyph parsing fails.
             let glyph_w = font_size * 0.6;
             let glyph_h = font_size;
             for c in 32u32..127 {

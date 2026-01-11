@@ -461,7 +461,7 @@ fn render_brdf_tile_internal(
 
     // M7: Note: GPU timing readback would require async, so we skip it here
     // The timestamp queries are set up for future use with proper async infrastructure
-    // For now, timing is measured via wall-clock in Python layer
+    // Timing is measured via Python wall-clock until async GPU readback is wired.
 
     // Read back RGBA8 pixels
     let buffer = crate::renderer::readback::read_texture_tight(

@@ -88,7 +88,7 @@ impl Viewer {
         Ok(())
     }
 
-    /// Minimal stub for loading an albedo texture from disk
+    /// No-op loader until albedo textures are wired in.
     pub(crate) fn load_albedo_texture(&mut self, _path: &Path) -> anyhow::Result<()> {
         Ok(())
     }

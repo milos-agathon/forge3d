@@ -791,20 +791,21 @@ impl PbrPipelineWithShadows {
         // P1-06: Initialize light buffer for multi-light support
         let light_buffer = LightBuffer::new(device);
         // P4 spec: group(2) bindings - binding(0)=specular, binding(1)=irradiance, binding(2)=sampler, binding(3)=brdfLUT
-        // Note: Using fallback resources for now (will be replaced with IBLRenderer resources)
+        // Use fallback resources until the IBL renderer owns these textures.
         let ibl_bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("pbr_ibl_bind_group"),
             layout: &ibl_bind_group_layout,
             entries: &[
                 // @group(2) @binding(0) envSpecular : texture_cube<f32>
+                // Use 2D views until cubemap sampling is wired.
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&ibl_resources.prefilter_view), // TODO: Use cubemap
+                    resource: BindingResource::TextureView(&ibl_resources.prefilter_view),
                 },
                 // @group(2) @binding(1) envIrradiance : texture_cube<f32>
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(&ibl_resources.irradiance_view), // TODO: Use cubemap
+                    resource: BindingResource::TextureView(&ibl_resources.irradiance_view),
                 },
                 // @group(2) @binding(2) envSampler : sampler
                 BindGroupEntry {
@@ -1388,7 +1389,7 @@ impl PbrPipelineWithShadows {
                     },
                     count: None,
                 },
-                // P1-06: Binding 5 - Environment params uniform (stub for P4 IBL)
+                // P1-06: Binding 5 - Environment params uniform (zeroed until P4 IBL)
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1488,14 +1489,15 @@ impl PbrPipelineWithShadows {
                 layout: &self.ibl_bind_group_layout,
                 entries: &[
                     // @group(2) @binding(0) envSpecular : texture_cube<f32>
+                    // Use 2D views until cubemap sampling is wired.
                     BindGroupEntry {
                         binding: 0,
-                        resource: BindingResource::TextureView(&self.ibl_resources.prefilter_view), // TODO: Use cubemap
+                        resource: BindingResource::TextureView(&self.ibl_resources.prefilter_view),
                     },
                     // @group(2) @binding(1) envIrradiance : texture_cube<f32>
                     BindGroupEntry {
                         binding: 1,
-                        resource: BindingResource::TextureView(&self.ibl_resources.irradiance_view), // TODO: Use cubemap
+                        resource: BindingResource::TextureView(&self.ibl_resources.irradiance_view),
                     },
                     // @group(2) @binding(2) envSampler : sampler
                     BindGroupEntry {

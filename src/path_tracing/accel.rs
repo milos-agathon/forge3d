@@ -25,7 +25,7 @@ pub struct Ray {
 // ----------------------------------------------------------------------------
 /// Thin wrapper to expose GPU BVH refit to the path tracing layer.
 /// This starts wiring for A7 (LBVH/SAH builder & refit). The underlying builder
-/// stub exists in `src/accel/lbvh_gpu.rs`; this wrapper provides a stable API.
+/// is still partial in `src/accel/lbvh_gpu.rs`; this wrapper keeps the API stable.
 pub struct GpuBvhRefitter {
     inner: crate::accel::lbvh_gpu::GpuBvhBuilder,
 }
@@ -96,8 +96,7 @@ impl BvhTraverser {
         match &bvh.backend {
             BvhBackend::Cpu(cpu_data) => self.intersect_cpu(cpu_data, triangles, ray),
             BvhBackend::Gpu(_gpu_data) => {
-                // For GPU BVH, we'd need to copy data back to CPU for traversal
-                // or implement GPU-based traversal. For now, fall back to CPU.
+                // GPU traversal is not implemented; require the CPU backend.
                 anyhow::bail!("GPU BVH traversal not yet implemented - use CPU fallback")
             }
         }
@@ -128,7 +127,7 @@ impl BvhTraverser {
         true
     }
 
-    /// Ray-triangle intersection using Möller-Trumbore algorithm
+    /// Ray-triangle intersection using the Moller-Trumbore algorithm.
     fn ray_triangle_intersect(&self, ray: &Ray, triangle: &Triangle) -> Option<HitInfo> {
         let edge1 = [
             triangle.v1[0] - triangle.v0[0],
@@ -141,7 +140,7 @@ impl BvhTraverser {
             triangle.v2[2] - triangle.v0[2],
         ];
 
-        // Cross product: direction × edge2
+        // Cross product: direction x edge2
         let h = [
             ray.direction[1] * edge2[2] - ray.direction[2] * edge2[1],
             ray.direction[2] * edge2[0] - ray.direction[0] * edge2[2],
@@ -168,7 +167,7 @@ impl BvhTraverser {
             return None;
         }
 
-        // Cross product: s × edge1
+        // Cross product: s x edge1
         let q = [
             s[1] * edge1[2] - s[2] * edge1[1],
             s[2] * edge1[0] - s[0] * edge1[2],

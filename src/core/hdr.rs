@@ -257,14 +257,8 @@ impl HdrRenderTarget {
             occlusion_query_set: None,
         });
 
-        // This would use a fullscreen quad pipeline to apply tone mapping
-        // For now, we'll just record the pass setup
+        // Tonemap draw is not wired yet; keep the pass valid by binding resources.
         render_pass.set_bind_group(0, &self.tonemap_bind_group, &[]);
-
-        // Note: In a complete implementation, this would:
-        // 1. Set the tone mapping render pipeline
-        // 2. Draw a fullscreen triangle
-        // 3. The fragment shader would sample HDR and apply tone mapping
 
         // End render pass before ending timing scope
         drop(render_pass);

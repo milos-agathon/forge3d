@@ -25,7 +25,7 @@ pub use dof::{
     create_camera_dof_params,
 };
 
-/// Returns the GL→WGPU depth conversion matrix.
+/// Returns the GL->WGPU depth conversion matrix.
 /// Maps GL clip-space Z [-1,1] to WGPU/Vulkan/Metal [0,1].
 #[inline]
 fn gl_to_wgpu() -> Mat4 {

@@ -2907,7 +2907,7 @@ impl SsgiRenderer {
             scene_history[1].create_view(&TextureViewDescriptor::default()),
         ];
 
-        // Placeholder env cube texture (1x1x6 RGBA8)
+        // Fallback env cube texture (1x1x6 RGBA8).
         let env_texture = device.create_texture(&TextureDescriptor {
             label: Some("ssgi_env_cube"),
             size: Extent3d {

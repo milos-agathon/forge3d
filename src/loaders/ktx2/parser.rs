@@ -116,8 +116,8 @@ pub fn parse_data_format_descriptor(
     let version_number = read_u32_le(reader)?;
     let descriptor_block_size = read_u32_le(reader)?;
 
-    // Parse channels (simplified)
-    let channels = Vec::new(); // TODO: Parse channel information
+    // Channel metadata is currently ignored by the loader; keep it empty.
+    let channels = Vec::new();
 
     Ok(Ktx2DataFormatDescriptor {
         vendor_id,

@@ -81,8 +81,7 @@ impl IblResourceCache {
 
         let view = texture.create_view(&TextureViewDescriptor::default());
 
-        // TODO: Generate BRDF LUT via compute shader
-        // For P0, we'll upload a pre-computed LUT or generate on first use
+        // BRDF LUT compute path is not wired here; caller fills with precomputed data.
 
         self.brdf_lut = Some(texture);
         self.brdf_lut_view = Some(view);
@@ -113,7 +112,7 @@ impl IblResourceCache {
             ..Default::default()
         });
 
-        // TODO: Generate irradiance from environment map via compute/render
+        // Irradiance generation is handled by the caller; this allocates the target.
 
         self.irradiance_map = Some(texture);
         self.irradiance_map_view = Some(view);
@@ -146,7 +145,7 @@ impl IblResourceCache {
             ..Default::default()
         });
 
-        // TODO: Generate prefiltered specular mips via compute/render
+        // Prefiltered specular generation is handled by the caller; this allocates the target.
 
         self.specular_map = Some(texture);
         self.specular_map_view = Some(view);

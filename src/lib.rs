@@ -3930,8 +3930,8 @@ fn open_terrain_viewer(
         snapshot_height,
     };
 
-    // Map terrain-specific options into INITIAL_CMDS for now: snapshot and any
-    // extra commands (e.g., GI/fog toggles) are expressed as viewer commands.
+    // Map terrain-specific options into INITIAL_CMDS: snapshot and any extra
+    // commands (e.g., GI/fog toggles) are expressed as viewer commands.
     let mut cmds: Vec<String> = Vec::new();
     if let Some(path) = snapshot_path {
         cmds.push(format!(":snapshot {}", path));
@@ -4548,7 +4548,7 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         )?)?;
     }
 
-    // Native SDF placeholder renderer
+    // Native SDF renderer entrypoint.
     m.add_function(wrap_pyfunction!(hybrid_render, m)?)?;
 
     // IO: OBJ import/export

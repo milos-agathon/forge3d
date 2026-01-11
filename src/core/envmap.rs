@@ -267,7 +267,7 @@ impl EnvironmentMap {
                 height: self.height,
                 depth_or_array_layers: 1,
             },
-            mip_level_count: 1, // Single mip level for now
+            mip_level_count: 1, // Only base mip; downsample chain not wired.
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba32Float, // HDR format

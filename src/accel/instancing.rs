@@ -14,7 +14,7 @@ const MAX_INSTANCE_VRAM_BYTES: usize = 512 * 1024 * 1024;
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct InstanceData {
-    /// Object-to-world transform (column-major 4×4 matrix).
+    /// Object-to-world transform (column-major 4x4 matrix).
     pub transform: [f32; 16],
     /// World-to-object transform for ray transformation.
     pub inv_transform: [f32; 16],

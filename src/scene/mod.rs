@@ -143,7 +143,7 @@ pub struct Scene {
     overlay_renderer: Option<crate::core::overlays::OverlayRenderer>,
     overlay_enabled: bool,
 
-    // D: Native text overlay (rectangle placeholder)
+    // D: Native text overlay (rectangle quads until MSDF is wired)
     text_overlay_renderer: Option<crate::core::text_overlay::TextOverlayRenderer>,
     text_overlay_enabled: bool,
     text_overlay_alpha: f32,
@@ -847,7 +847,7 @@ impl Scene {
             height_filterable,
         );
 
-        // TEMPORARY: Handle SSAO creation failure gracefully
+        // SSAO can fail on some devices; fall back to disabled SSAO to keep rendering alive.
         let ssao = match SsaoResources::new(&g.device, &g.queue, width, height, &color, &normal) {
             Ok(ssao) => ssao,
             Err(_e) => {
@@ -1498,7 +1498,7 @@ impl Scene {
                 if let Some(ref soft_light_renderer) = self.soft_light_radius_renderer {
                     // Update soft light uniforms and render
                     soft_light_renderer.update_uniforms(&g.queue);
-                    soft_light_renderer.render(&mut rp, false); // No soft shadows for now
+                    soft_light_renderer.render(&mut rp, false); // Soft shadows disabled in this pass.
                 }
             }
 
@@ -1613,7 +1613,7 @@ impl Scene {
                 ov.render(&mut rp);
             }
 
-            // D: Render native text overlay (placeholder rects) on top of overlay
+            // D: Render native text overlay (rectangle quads) on top of overlay
             if self.text_overlay_enabled {
                 if let Some(ref mut tr) = self.text_overlay_renderer {
                     // Upload uniforms and instances before drawing
@@ -1999,7 +1999,7 @@ impl Scene {
                 if let Some(ref soft_light_renderer) = self.soft_light_radius_renderer {
                     // Update soft light uniforms and render
                     soft_light_renderer.update_uniforms(&g.queue);
-                    soft_light_renderer.render(&mut rp, false); // No soft shadows for now
+                    soft_light_renderer.render(&mut rp, false); // Soft shadows disabled in this pass.
                 }
             }
 
@@ -4797,8 +4797,7 @@ impl Scene {
         _premultiply_factor: f32,
     ) -> PyResult<()> {
         if let Some(ref mut _renderer) = self.dual_source_oit_renderer {
-            // Update uniforms would need to be exposed in the renderer
-            // For now, return success - this would be implemented in the renderer
+            // Renderer uniforms are not exposed yet; keep this API as a no-op.
             Ok(())
         } else {
             Err(pyo3::exceptions::PyRuntimeError::new_err(
@@ -4973,7 +4972,7 @@ impl Scene {
     }
 
     // -----------------------------
-    // D: Native text overlay APIs (rectangle placeholder)
+    // D: Native text overlay APIs (rectangle quads until MSDF is wired)
     // -----------------------------
     #[pyo3(text_signature = "($self)")]
     pub fn enable_native_text(&mut self) -> PyResult<()> {
@@ -5848,7 +5847,7 @@ impl Scene {
     ///     - gpu_memory_peak_mb: float - Peak GPU memory usage in MiB (estimated)
     ///     - gpu_memory_budget_mb: float - GPU memory budget in MiB
     ///     - gpu_utilization: float - Memory utilization (0.0 to 1.0+)
-    ///     - frame_time_ms: float - Last frame time in milliseconds (placeholder: 0.0)
+    ///     - frame_time_ms: float - Last frame time in milliseconds (0.0 if unavailable)
     ///     - passes_enabled: list[str] - List of enabled rendering passes
     ///
     /// Notes
@@ -5908,7 +5907,7 @@ impl Scene {
         dict.set_item("gpu_memory_peak_mb", total_mb)?; // No tracking yet, use current
         dict.set_item("gpu_memory_budget_mb", budget_mb)?;
         dict.set_item("gpu_utilization", total_mb / budget_mb)?;
-        dict.set_item("frame_time_ms", 0.0)?; // Placeholder, no timing yet
+        dict.set_item("frame_time_ms", 0.0)?; // Timing not captured here; report 0.
 
         // Collect enabled passes
         let mut passes: Vec<&str> = Vec::new();

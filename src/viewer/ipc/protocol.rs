@@ -755,7 +755,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
         IpcRequest::GetStats => Ok(None),
         // Picking requests that return data are handled via ViewerCmd, 
         // but the response needs to be constructed by the handler.
-        // For now, we map them to ViewerCmd and let the handler deal with response via a channel or similar?
+        // We map them to ViewerCmd and let the handler deal with response via a channel or similar.
         // Actually, the current architecture has `cmd_sender` returning `Result<(), String>`.
         // It doesn't return data. `GetStats` is special-cased in `server.rs`.
         // To support `PollPickEvents` returning data, we might need to special-case it too in `server.rs`,
@@ -771,7 +771,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
         // and the server reads from.
         // Let's add `pick_events` to the shared state or similar.
         
-        // For now, let's just map the commands.
+        // Default behavior is to map the commands.
         IpcRequest::PollPickEvents => Ok(None), // Special handling in server.rs
         IpcRequest::SetLassoMode { enabled } => Ok(Some(ViewerCmd::SetLassoMode { enabled: *enabled })),
         IpcRequest::GetLassoState => Ok(None), // Special handling in server.rs

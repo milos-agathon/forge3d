@@ -97,7 +97,7 @@ impl VectorApi {
         polygons: Vec<PolygonDef>,
         crs: CrsType,
     ) -> Result<Vec<VectorId>, RenderError> {
-        // Validate CRS (must be planar for now)
+        // Validate CRS (planar-only).
         if crs != CrsType::Planar {
             return Err(RenderError::Upload(
                 "Only planar CRS supported; geographic projections not implemented".to_string(),

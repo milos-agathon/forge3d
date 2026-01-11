@@ -205,7 +205,7 @@ pub struct SamplerModeMatrix {
 
 impl SamplerModeMatrix {
     /// Generate the complete matrix of sampler modes
-    /// 3 address modes × 2 mag filters × 2 min filters × 2 mip filters = 24 combinations
+    /// 3 address modes x 2 mag filters x 2 min filters x 2 mip filters = 24 combinations
     pub fn generate_full() -> Self {
         let mut configs = Vec::new();
         let mut by_name = HashMap::new();
@@ -228,7 +228,7 @@ impl SamplerModeMatrix {
     }
 
     /// Generate a reduced matrix with commonly used combinations
-    /// 3 address modes × 2 filters × 2 mip filters = 12 combinations
+    /// 3 address modes x 2 filters x 2 mip filters = 12 combinations
     /// (mag_filter = min_filter for simplicity)
     pub fn generate_reduced() -> Self {
         let mut configs = Vec::new();
@@ -435,7 +435,7 @@ mod tests {
     fn test_sampler_matrix_generation() {
         let matrix = SamplerModeMatrix::generate_reduced();
 
-        // Should have 3 address modes × 2 filters × 2 mip filters = 12 combinations
+        // Should have 3 address modes x 2 filters x 2 mip filters = 12 combinations
         assert_eq!(matrix.len(), 12);
 
         // All configs should have unique names

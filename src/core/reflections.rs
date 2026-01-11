@@ -268,7 +268,7 @@ impl PlanarReflectionRenderer {
         base_cost * resolution_factor * blur_factor
     }
 
-    /// Check if estimated frame cost meets B5 requirement (≤15%)
+    /// Check if estimated frame cost meets B5 requirement (<= 15%).
     pub fn meets_performance_requirement(&self) -> bool {
         self.estimate_frame_cost() <= 15.0
     }

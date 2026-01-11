@@ -11,7 +11,7 @@ pub struct Ktx2Loader {
     /// Supported target formats
     #[allow(dead_code)]
     target_formats: Vec<wgpu::TextureFormat>,
-    /// Basis universal transcoder (placeholder)
+    /// Optional Basis transcoder (not wired yet).
     #[allow(dead_code)]
     basis_transcoder: Option<BasisTranscoder>,
 }
@@ -99,7 +99,7 @@ impl Ktx2Loader {
         header: &Ktx2Header,
         level_indices: &[Ktx2LevelIndex],
     ) -> Result<Vec<u8>, String> {
-        // For now, extract only the base level (mip 0)
+        // Extract only the base level until mip handling is wired.
         if level_indices.is_empty() {
             return Err("No texture data found".to_string());
         }
@@ -133,22 +133,19 @@ impl Ktx2Loader {
         _data: Vec<u8>,
         _header: &Ktx2Header,
     ) -> Result<Vec<u8>, String> {
-        // Placeholder for Basis Universal transcoding
-        // In practice, integrate with basis_universal crate or C library
+        // Stub for Basis Universal transcoding; returns an error until integrated.
         Err("Basis Universal transcoding not implemented".to_string())
     }
 
     /// Decompress ZSTD data
     fn decompress_zstd(&self, _data: Vec<u8>) -> Result<Vec<u8>, String> {
-        // Placeholder for ZSTD decompression
-        // In practice, use zstd crate
+        // Stub for ZSTD decompression; returns an error until integrated.
         Err("ZSTD decompression not implemented".to_string())
     }
 
     /// Decompress ZLIB data
     fn decompress_zlib(&self, _data: Vec<u8>) -> Result<Vec<u8>, String> {
-        // Placeholder for ZLIB decompression
-        // In practice, use flate2 crate
+        // Stub for ZLIB decompression; returns an error until integrated.
         Err("ZLIB decompression not implemented".to_string())
     }
 
@@ -201,7 +198,7 @@ impl Ktx2Loader {
     }
 }
 
-/// Placeholder for Basis Universal transcoder
+/// Stub for Basis Universal transcoder.
 pub struct BasisTranscoder {
     // Transcoder state
 }

@@ -4,7 +4,7 @@
 //! the PostFx resource pool system. Designed for offline rendering where
 //! we have full control over texture allocation.
 //!
-//! Pipeline: Input HDR → Brightpass → H Blur → V Blur → Composite → Output
+//! Pipeline: Input HDR -> Brightpass -> H Blur -> V Blur -> Composite -> Output
 
 use anyhow::{anyhow, Result};
 use std::borrow::Cow;
@@ -438,8 +438,8 @@ impl TerrainBloomProcessor {
         height: u32,
     ) -> Result<()> {
         if !config.enabled {
-            // Bloom disabled - would need a copy pass here if we wanted passthrough
-            // For now, caller should skip this entirely when disabled
+            // Bloom disabled - passthrough would need a copy pass.
+            // Caller skips this path when disabled.
             return Ok(());
         }
 

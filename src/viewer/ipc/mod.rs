@@ -1,6 +1,6 @@
 // src/viewer/ipc_split/mod.rs
 // IPC module for non-blocking viewer control via TCP + NDJSON
-// Split from ipc.rs for ≤300 LOC per file
+// Split from ipc.rs for <= 300 LOC per file
 
 mod protocol;
 mod server;

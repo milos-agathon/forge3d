@@ -98,9 +98,7 @@ impl FenceTracker {
         // Poll for completed submissions
         self.device.poll(wgpu::Maintain::Poll);
 
-        // Note: In a real implementation, you'd have a way to query completion status
-        // For now, we'll keep all fences as WGPU doesn't provide direct completion queries
-        // This is a simplified implementation
+        // WGPU does not expose completion queries here; keep fences until explicit waits.
     }
 
     /// Get the number of pending fences

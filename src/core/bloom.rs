@@ -3,7 +3,7 @@
 //! Implements bloom effect with bright-pass filtering and dual blur passes.
 //! Can be used standalone or integrated with the post-processing chain system.
 //!
-//! Pipeline: Input HDR → Brightpass → H Blur → V Blur → Composite → Output
+//! Pipeline: Input HDR -> Brightpass -> H Blur -> V Blur -> Composite -> Output
 
 use super::error::{RenderError, RenderResult};
 use crate::core::gpu_timing::GpuTimingManager;
@@ -342,12 +342,7 @@ impl PostFxEffect for BloomEffect {
             .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom effect not initialized".to_string()))?;
 
-        // Create temporary textures (in a real implementation, these would come from resource pool)
-        // For now, we'll copy input to output as a placeholder
-        // TODO: Implement full bloom pipeline with resource pool integration
-
-        // Placeholder implementation - just copy input to output
-        // This should be replaced with the full 3-pass bloom implementation
+        // Bloom is a no-op until the resource pool exists; output matches input.
 
         // End timing scope
         let _ = timing_scope;

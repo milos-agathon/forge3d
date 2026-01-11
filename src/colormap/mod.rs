@@ -1,6 +1,6 @@
 //! Central colormap registry.
 //! - Single source for supported names
-//! - Embedded 256×1 PNG bytes via `include_bytes!`
+//! - Embedded 256x1 PNG bytes via `include_bytes!`
 //! - Small helpers (enum mapping + PyO3 error)
 
 // PyO3 colormap wrapper for height-based 1D lookup tables
@@ -12,7 +12,7 @@ pub use colormap1d::Colormap1D;
 /// Built-in colormap names (case-sensitive).
 pub static SUPPORTED: [&str; 3] = ["viridis", "magma", "terrain"];
 
-/// Resolve embedded 256×1 PNG bytes for the given name.
+/// Resolve embedded 256x1 PNG bytes for the given name.
 pub fn resolve_bytes(name: &str) -> Result<&'static [u8], String> {
     match name {
         "viridis" => Ok(include_bytes!("assets/viridis_256x1.png")),
@@ -71,7 +71,7 @@ pub fn decode_png_rgba8(name: &str) -> Result<Vec<u8>, String> {
     Ok(rgba.as_raw().clone())
 }
 
-/// Convert sRGB RGBA8 bytes to linear RGBA8 (apply sRGB→linear curve to RGB channels only)
+/// Convert sRGB RGBA8 bytes to linear RGBA8 (apply sRGB->linear curve to RGB channels only)
 pub fn to_linear_u8_rgba(src_srgb_rgba8: &[u8]) -> Vec<u8> {
     let mut result = Vec::with_capacity(src_srgb_rgba8.len());
 

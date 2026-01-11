@@ -222,7 +222,7 @@ fn test_seed_encoding_roundtrip() {
     assert_eq!(seed[1], decoded_y);
 }
 
-// P1-05: Environment stub buffer tests
+// P1-05: Environment buffer size tests
 
 #[test]
 fn test_environment_stub_size() {

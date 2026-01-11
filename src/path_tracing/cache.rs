@@ -2,7 +2,7 @@
 //!
 //! Implements caching of BVH structures, material data, and texture bindings
 //! to accelerate repeated renders with identical scene configurations.
-//! Target: ≥30% faster re-renders with pixel-perfect identical output.
+//! Target: >= 30% faster re-renders with pixel-perfect identical output.
 
 use std::collections::HashMap;
 use wgpu::*;
@@ -211,14 +211,6 @@ impl SceneCacheBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_cache_creation() {
-        // Mock device creation would go here
-        // let device = ...;
-        // let cache = SceneCache::new(device);
-        // assert_eq!(cache.entries.len(), 0);
-    }
 
     #[test]
     fn test_hash_computation() {

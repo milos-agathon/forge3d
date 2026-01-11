@@ -1,6 +1,6 @@
 // src/picking/ray.rs
 // Ray unprojection utilities for GPU ray picking
-// Part of Plan 2: Standard — GPU Ray Picking + Hover Support
+// Part of Plan 2: Standard - GPU Ray Picking + Hover Support
 
 /// A ray in 3D space defined by an origin and direction
 #[derive(Debug, Clone, Copy)]

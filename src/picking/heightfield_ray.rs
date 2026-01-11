@@ -1,6 +1,6 @@
 // src/picking/heightfield_ray.rs
 // Ray-heightfield intersection for terrain picking
-// Part of Plan 3: Premium — Unified Picking with BVH + Python Callbacks
+// Part of Plan 3: Premium - Unified Picking with BVH + Python Callbacks
 
 use super::ray::Ray;
 

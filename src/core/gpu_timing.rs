@@ -134,7 +134,7 @@ impl GpuTimingManager {
 
         // Get timestamp period from device limits (if supported)
         let timestamp_period = if supports_timestamps {
-            // wgpu doesn't expose timestamp period directly, assume 1ns for now
+            // wgpu doesn't expose timestamp period directly; assume 1ns.
             1.0
         } else {
             1.0
@@ -377,7 +377,7 @@ impl GpuTimingManager {
                 name,
                 gpu_time_ms: duration_ms as f32,
                 timestamp_valid: true,
-                pipeline_stats: None, // TODO: Read pipeline stats
+                pipeline_stats: None, // Pipeline stats are not collected yet.
             });
         }
 

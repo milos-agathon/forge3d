@@ -93,7 +93,7 @@ impl DeviceCaps {
         Ok(DeviceCaps {
             backend: format!("{:?}", adapter_info.backend).to_lowercase(),
             adapter_name: adapter_info.name.clone(),
-            device_name: adapter_info.name.clone(), // Same as adapter for now
+            device_name: adapter_info.name.clone(), // Matches adapter name in wgpu.
             max_texture_dimension_2d: device_limits.max_texture_dimension_2d,
             max_buffer_size: device_limits.max_buffer_size,
             msaa_supported,

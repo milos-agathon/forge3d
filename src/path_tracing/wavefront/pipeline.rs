@@ -348,7 +348,7 @@ impl WavefrontPipelines {
     ) -> Result<ComputePipeline, Box<dyn std::error::Error>> {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("restir-temporal-pipeline-layout"),
-            // 0=uniforms, 1=scene placeholder, 2=temporal buffers
+            // 0=uniforms, 1=scene group (reserved), 2=temporal buffers
             bind_group_layouts: &[uniforms_layout, scene_layout, restir_temporal_layout],
             push_constant_ranges: &[],
         });
@@ -1253,7 +1253,7 @@ impl WavefrontPipelines {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("compact-pipeline-layout"),
-            // Align to WGSL groups: 0=uniforms, 1=scene (placeholder), 2=queues
+            // Align to WGSL groups: 0=uniforms, 1=scene group (reserved), 2=queues
             bind_group_layouts: &[uniforms_layout, scene_layout, &queue_layout],
             push_constant_ranges: &[],
         });

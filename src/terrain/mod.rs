@@ -18,7 +18,7 @@ pub use scene::TerrainScene;
 
 // E1/E3: streaming mosaics
 pub mod stream;
-// E1 (scaffolding): GPU page table for tile→slot mapping
+// E1 (scaffolding): GPU page table for tile->slot mapping
 pub mod page_table;
 pub use page_table::PageTable;
 
@@ -289,7 +289,7 @@ impl ColormapLUT {
             (wgpu::TextureFormat::Rgba8Unorm, "Rgba8Unorm", palette)
         };
 
-        // 256×1 RGBA8
+        // 256x1 RGBA8
         let tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("colormap-lut"),
             size: wgpu::Extent3d {
@@ -346,7 +346,7 @@ impl ColormapLUT {
     }
 
     /// Create a multi-palette LUT supporting runtime palette selection
-    /// Creates a 256×N texture where N is the number of palettes
+    /// Creates a 256xN texture where N is the number of palettes
     pub fn new_multi_palette(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -377,7 +377,7 @@ impl ColormapLUT {
             "Rgba8Unorm"
         };
 
-        // Create 256×N texture for N palettes
+        // Create 256xN texture for N palettes
         let tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("colormap-lut-multi"),
             size: wgpu::Extent3d {
