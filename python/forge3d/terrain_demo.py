@@ -30,8 +30,8 @@ from .render import (
 from .lighting import sun_direction_from_angles as _sun_direction_from_angles
 
 
-DEFAULT_DEM = Path("assets/Gore_Range_Albers_1m.tif")
-DEFAULT_HDR = Path("assets/snow_field_4k.hdr")
+DEFAULT_DEM = Path("assets/tif/Gore_Range_Albers_1m.tif")
+DEFAULT_HDR = Path("assets/hdri/snow_field_4k.hdr")
 DEFAULT_OUTPUT = Path("examples/out/terrain_demo.png")
 DEFAULT_SIZE = (1920, 1080)
 DEFAULT_DOMAIN = (200.0, 2200.0)

@@ -198,7 +198,7 @@ class TestRenderConfig:
         assert config.fps == 60
         assert config.width == 3840
         assert config.height == 2160
-        assert str(config.output_dir) == "/tmp/test_frames"
+        assert config.output_dir == Path("/tmp/test_frames")
 
     def test_frame_path_generation(self):
         """Frame paths are generated with correct formatting."""
