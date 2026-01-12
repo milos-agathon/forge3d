@@ -4686,6 +4686,10 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // P6 Atmospherics classes
     m.add_class::<crate::lighting::PySkySettings>()?;
     m.add_class::<crate::lighting::PyVolumetricSettings>()?;
+    // P0.3/M2: Sun ephemeris
+    m.add_class::<crate::lighting::py_bindings::PySunPosition>()?;
+    m.add_function(wrap_pyfunction!(crate::lighting::py_bindings::sun_position, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::lighting::py_bindings::sun_position_utc, m)?)?;
     // M1: AOV frame class
     m.add_class::<AovFrame>()?;
     

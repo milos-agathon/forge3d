@@ -6,6 +6,22 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.9.4] - Sun Ephemeris & Time-of-Day Controls
+
+### Added
+- **P0.3 / M2 — Sun Ephemeris + Time-of-Day Controls**
+  - Deterministic sun position calculation from geographic coordinates and UTC datetime.
+  - Python API: `sun_position(lat, lon, datetime)` returns accurate azimuth and elevation angles.
+  - Viewer/preset configuration keys: `--sun-lat`, `--sun-lon`, `--sun-datetime` for precise solar positioning.
+  - Automatic sun angle computation for realistic lighting at any location and time.
+  - Validation against NOAA solar calculator reference data for accuracy.
+  - Measurable shadow direction changes based on temporal and geographic parameters.
+  - Interactive viewer integration with ephemeris-driven lighting controls.
+
+### Documentation
+- Added sun ephemeris usage examples with coordinate and datetime inputs.
+- Updated viewer documentation with time-of-day lighting configuration.
+
 ## [1.9.3] - Transparency & OIT Productization
 
 ### Added

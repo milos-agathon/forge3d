@@ -16,6 +16,9 @@ from typing import Any
 import forge3d.terrain_pbr_pom as _impl  # type: ignore[import]
 from forge3d.terrain_pbr_pom import render_sunrise_to_noon_sequence
 
+# P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
+from forge3d import sun_position, sun_position_utc, SunPosition
+
 
 # Re-export selected symbols for tests and external callers
 DEFAULT_DEM = _impl.DEFAULT_DEM
@@ -64,6 +67,9 @@ def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit
         "sun_intensity": ("sun_intensity", "--sun-intensity"),
         "gi": ("gi", "--gi"),
         "sun_azimuth": ("sun_azimuth", "--sun-azimuth"), "sun_elevation": ("sun_elevation", "--sun-elevation"),
+        # P0.3/M2: Sun ephemeris config keys
+        "sun_lat": ("sun_lat", "--sun-lat"), "sun_lon": ("sun_lon", "--sun-lon"),
+        "sun_datetime": ("sun_datetime", "--sun-datetime"),
         "shadows": ("shadows", "--shadows"), "cascades": ("cascades", "--cascades"),
         "colormap": ("colormap", "--colormap"), "colormap_strength": ("colormap_strength", "--colormap-strength"),
         "albedo_mode": ("albedo_mode", "--albedo-mode"), "normal_strength": ("normal_strength", "--normal-strength"),
@@ -150,6 +156,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--sun-azimuth", type=float, help="Sun azimuth angle in degrees.")
     parser.add_argument("--sun-elevation", type=float, help="Sun elevation angle in degrees.")
     parser.add_argument("--sun-intensity", type=float, help="Sun light intensity multiplier.")
+    # P0.3/M2: Sun ephemeris config keys
+    parser.add_argument("--sun-lat", type=float, default=None,
+                        help="Observer latitude for ephemeris calculation (-90 to 90).")
+    parser.add_argument("--sun-lon", type=float, default=None,
+                        help="Observer longitude for ephemeris calculation (-180 to 180).")
+    parser.add_argument("--sun-datetime", type=str, default=None,
+                        help="UTC datetime for ephemeris (ISO 8601: YYYY-MM-DDTHH:MM:SS).")
     parser.add_argument(
         "--sun-color",
         type=float,
@@ -407,6 +420,8 @@ def main() -> int:
             "--albedo-mode": "albedo_mode", "--colormap": "colormap",
             # P6.1: Color space correctness toggles
             "--colormap-srgb": "colormap_srgb", "--output-srgb-eotf": "output_srgb_eotf",
+            # P0.3/M2: Sun ephemeris
+            "--sun-lat": "sun_lat", "--sun-lon": "sun_lon", "--sun-datetime": "sun_datetime",
         }
         import sys
         for flag, arg_name in cli_flag_to_arg.items():
@@ -418,6 +433,19 @@ def main() -> int:
         
         # Log resolved GI modes after preset application
         print(f"[GI] modes={args.gi}")
+
+    # P0.3/M2: Compute sun position from ephemeris if location/time provided
+    if args.sun_lat is not None and args.sun_lon is not None and args.sun_datetime is not None:
+        try:
+            pos = sun_position(args.sun_lat, args.sun_lon, args.sun_datetime)
+            args.sun_azimuth = pos.azimuth
+            args.sun_elevation = pos.elevation
+            print(f"[SUN EPHEMERIS] lat={args.sun_lat}, lon={args.sun_lon}, datetime={args.sun_datetime}")
+            print(f"  -> azimuth={pos.azimuth:.1f}°, elevation={pos.elevation:.1f}°")
+            if not pos.is_daytime():
+                print("  Warning: Sun is below horizon (nighttime)")
+        except Exception as e:
+            print(f"Warning: Failed to compute sun ephemeris: {e}")
 
     # Basic validation for a few key numeric flags (delegating the rest).
     if not 0.0 <= args.colormap_strength <= 1.0:

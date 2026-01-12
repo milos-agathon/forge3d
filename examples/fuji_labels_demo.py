@@ -48,6 +48,9 @@ from forge3d.viewer_ipc import (
 )
 from forge3d.interactive import run_interactive_loop
 
+# P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
+from forge3d import sun_position, sun_position_utc, SunPosition
+
 # Asset paths
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 DEM_PATH = ASSETS_DIR / "tif" / "Mount_Fuji_30m.tif"
@@ -241,6 +244,13 @@ def main() -> int:
                            help="Sun elevation angle in degrees (default: 35.0)")
     sun_group.add_argument("--sun-intensity", type=float, default=1.0,
                            help="Sun light intensity (default: 1.0)")
+    # P0.3/M2: Sun ephemeris - compute sun position from location and time
+    sun_group.add_argument("--sun-lat", type=float, default=None,
+                           help="Observer latitude for ephemeris calculation (-90 to 90)")
+    sun_group.add_argument("--sun-lon", type=float, default=None,
+                           help="Observer longitude for ephemeris calculation (-180 to 180)")
+    sun_group.add_argument("--sun-datetime", type=str, default=None,
+                           help="UTC datetime for ephemeris (ISO 8601: YYYY-MM-DDTHH:MM:SS)")
     
     # Heightfield Ray AO options
     ao_group = parser.add_argument_group("Heightfield AO", "Terrain ambient occlusion from heightfield ray-tracing")
@@ -416,6 +426,17 @@ def main() -> int:
                            help="Sky brightness adjustment (default: 1.0)")
     
     args = parser.parse_args()
+    
+    # P0.3/M2: Compute sun position from ephemeris if location/time provided
+    if args.sun_lat is not None and args.sun_lon is not None and args.sun_datetime is not None:
+        try:
+            pos = sun_position(args.sun_lat, args.sun_lon, args.sun_datetime)
+            args.sun_azimuth = pos.azimuth
+            args.sun_elevation = pos.elevation
+            print(f"Sun ephemeris: lat={args.sun_lat}, lon={args.sun_lon}, datetime={args.sun_datetime}")
+            print(f"  -> azimuth={pos.azimuth:.1f}°, elevation={pos.elevation:.1f}°")
+        except Exception as e:
+            print(f"Warning: Failed to compute sun ephemeris: {e}")
     
     # Apply preset settings (overrides individual flags)
     if args.preset:

@@ -34,6 +34,9 @@ from forge3d.viewer_ipc import (
     clear_selection,
 )
 
+# P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
+from forge3d import sun_position, sun_position_utc, SunPosition
+
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 DEM_PATH = ASSETS_DIR / "tif" / "Mount_Fuji_30m.tif"
 

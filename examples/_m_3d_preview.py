@@ -29,8 +29,13 @@ except Exception:
 
 try:
     import forge3d.geometry as fgeo
+    # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
+    from forge3d import sun_position, sun_position_utc, SunPosition
 except Exception:
     fgeo = None  # type: ignore
+    sun_position = None  # type: ignore
+    sun_position_utc = None  # type: ignore
+    SunPosition = None  # type: ignore
 
 
 def _figure_inches(width: int, height: int, dpi: int) -> tuple[float, float]:

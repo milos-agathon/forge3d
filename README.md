@@ -16,11 +16,11 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.9.3 — Order-Independent Transparency (OIT) productization delivering artifact-free rendering of overlapping transparent surfaces through unified compositor with automatic hardware-adaptive fallback.
+Current release: 1.9.4 — Sun ephemeris and time-of-day controls enabling astronomically accurate lighting for any geographic location and UTC datetime with deterministic solar positioning.
 
-## Latest Feature: Transparency & OIT
+## Latest Feature: Sun Ephemeris & Time-of-Day Controls
 
-**forge3d** now provides production-ready Order-Independent Transparency (OIT) for rendering complex transparent surfaces without sorting artifacts. The system automatically detects hardware capabilities and selects the optimal transparency strategy—dual-source blending for maximum quality on supported GPUs, or Weighted Blended OIT (WBOIT) as a high-quality fallback. This unified compositor handles water surfaces, volumetric fog, and vector overlays through a single pipeline, ensuring consistent and artifact-free rendering of overlapping transparent layers. Enable OIT programmatically via `scene.enable_oit()` or let the automatic mode handle hardware detection for you.
+**forge3d** now calculates precise sun positions from geographic coordinates and datetime inputs, bringing astronomically accurate lighting to terrain visualization. The new `sun_position(lat, lon, datetime)` API returns azimuth and elevation angles validated against NOAA solar calculator reference data. Configure realistic lighting for any location and time using `--sun-lat`, `--sun-lon`, and `--sun-datetime` parameters in the viewer, enabling dramatic shadows and lighting that match real-world solar geometry. Whether you're visualizing seasonal changes, studying shadow patterns, or creating time-lapse sequences, the deterministic ephemeris engine ensures your renders reflect actual sun angles with measurable accuracy.
 
 ## Installation
 

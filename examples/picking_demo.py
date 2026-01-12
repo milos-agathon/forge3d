@@ -48,6 +48,9 @@ from forge3d.viewer_ipc import (
     set_max_visible_labels,
 )
 
+# P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
+from forge3d import sun_position, sun_position_utc, SunPosition
+
 # Asset paths
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 DEFAULT_GPKG = ASSETS_DIR / "gpkg" / "Mount_Fuji_places.gpkg"

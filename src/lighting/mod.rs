@@ -5,6 +5,7 @@
 
 // Focused submodules (refactored from types.rs)
 pub mod atmospherics;
+pub mod ephemeris;
 pub mod light;
 pub mod material;
 pub mod screen_space;

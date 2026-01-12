@@ -71,6 +71,9 @@ if _NATIVE_MODULE is not None:
         "HeightfieldHit",  # Feature B: Plan 3
         "CameraAnimation",  # Feature C: Camera animation (Plan 1 MVP)
         "CameraState",  # Feature C: Camera animation (Plan 1 MVP)
+        "SunPosition",  # P0.3/M2: Sun ephemeris
+        "sun_position",  # P0.3/M2: Sun ephemeris function
+        "sun_position_utc",  # P0.3/M2: Sun ephemeris function (components)
     ):
         if hasattr(_NATIVE_MODULE, _name):
             globals()[_name] = getattr(_NATIVE_MODULE, _name)
@@ -270,6 +273,10 @@ __all__ = [
     "OverlayLayer",
     "TerrainRenderParams",
     "TerrainRenderer",
+    # P0.3/M2: Sun ephemeris
+    "SunPosition",
+    "sun_position",
+    "sun_position_utc",
     # Configuration
     "RendererConfig",
     "TerrainRenderParamsConfig",

@@ -14,6 +14,8 @@ import numpy as np
 
 try:
     import forge3d as f3d
+    # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
+    from forge3d import sun_position, sun_position_utc, SunPosition
 except Exception as exc:  # pragma: no cover
     raise ImportError("forge3d Python API is required. Ensure package is installed or built.") from exc
 
