@@ -720,6 +720,11 @@ Examples:
         "--title", type=str, metavar="TEXT",
         help="Title text to overlay at top of video (MP4 export only)"
     )
+    # P0.1/M1: OIT
+    parser.add_argument(
+        "--oit", type=str, choices=["auto", "wboit", "dual_source", "off"],
+        default=None, help="OIT mode for transparent surfaces (default: off)"
+    )
     
     args = parser.parse_args()
     

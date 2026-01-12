@@ -138,6 +138,17 @@ impl ViewerTerrainScene {
         if (needs_post_process || needs_volumetrics) && self.post_process.is_none() {
             self.init_post_process();
         }
+        
+        // P0.1/M1: Check if OIT is needed and initialize WBOIT resources early
+        let has_vector_overlays_early = self.vector_overlay_stack.as_ref()
+            .map(|s| s.visible_layer_count() > 0)
+            .unwrap_or(false);
+        if has_vector_overlays_early && self.oit_enabled {
+            // Ensure WBOIT is fully initialized including textures and bind groups
+            if self.wboit_compose_bind_group.is_none() || self.wboit_size != (width, height) {
+                self.init_wboit(width, height);
+            }
+        }
         if needs_post_process || needs_volumetrics {
             if let Some(ref mut pp) = self.post_process {
                 let _ = pp.get_intermediate_view(width, height, self.surface_format);
@@ -389,7 +400,8 @@ impl ViewerTerrainScene {
             
             // Initialize vector overlay pipelines if not yet done
             if let Some(ref mut stack) = self.vector_overlay_stack {
-                if !stack.pipelines_ready() {
+                // P0.1/M1: For OIT mode, ensure OIT pipelines are initialized
+                if !stack.pipelines_ready() || (self.oit_enabled && !stack.oit_pipelines_ready()) {
                     stack.init_pipelines(self.surface_format);
                 }
                 
@@ -459,11 +471,13 @@ impl ViewerTerrainScene {
             pass.draw_indexed(0..terrain.index_count, 0, 0..1);
             
             // Option B: Render vector overlays after terrain
-            if has_vector_overlays {
+            // P0.1/M1: Use OIT rendering if enabled, otherwise standard alpha blending
+            if has_vector_overlays && !self.oit_enabled {
+                // Standard alpha blending path
                 if let Some(ref stack) = self.vector_overlay_stack {
                     if stack.pipelines_ready() && stack.bind_group.is_some() {
                         let layer_count = stack.visible_layer_count();
-                        let highlight_color = [1.0, 0.8, 0.0, 0.5]; // Yellow highlight
+                        let highlight_color = [1.0, 0.8, 0.0, 0.5];
                         for i in 0..layer_count {
                             stack.render_layer_with_highlight(
                                 &mut pass, 
@@ -480,6 +494,97 @@ impl ViewerTerrainScene {
                     }
                 }
             }
+        }
+        
+        // P0.1/M1: OIT rendering path - render overlays to WBOIT accumulation buffers
+        if has_vector_overlays && self.oit_enabled {
+            let depth_view = self.depth_view.as_ref().unwrap();
+            
+            // OIT accumulation pass
+            if let (Some(color_view), Some(reveal_view)) = 
+                (self.wboit_color_view.as_ref(), self.wboit_reveal_view.as_ref()) 
+            {
+                let mut oit_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("terrain_viewer.wboit.accumulation_pass"),
+                    color_attachments: &[
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: color_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: reveal_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color { r: 1.0, g: 0.0, b: 0.0, a: 0.0 }),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                    ],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load, // Preserve terrain depth
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                
+                if let Some(ref stack) = self.vector_overlay_stack {
+                    if stack.oit_pipelines_ready() && stack.bind_group.is_some() {
+                        let layer_count = stack.visible_layer_count();
+                        let highlight_color = [1.0, 0.8, 0.0, 0.5];
+                        for i in 0..layer_count {
+                            stack.render_layer_oit(
+                                &mut oit_pass,
+                                super::vector_overlay::RenderLayerParams {
+                                    layer_index: i,
+                                    view_proj: vo_view_proj,
+                                    sun_dir: vo_sun_dir,
+                                    lighting: vo_lighting,
+                                    selected_feature_id,
+                                    highlight_color,
+                                }
+                            );
+                        }
+                    }
+                }
+            }
+            
+            // OIT compose pass - blend accumulated transparency onto scene
+            if let (Some(pipeline), Some(bind_group)) = 
+                (self.wboit_compose_pipeline.as_ref(), self.wboit_compose_bind_group.as_ref())
+            {
+                let mut compose_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("terrain_viewer.wboit.compose_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: render_target,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load, // Preserve scene
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                
+                compose_pass.set_pipeline(pipeline);
+                compose_pass.set_bind_group(0, bind_group, &[]);
+                compose_pass.draw(0..3, 0..1); // Fullscreen triangle
+            }
+            
+            static OIT_LOG_ONCE: std::sync::Once = std::sync::Once::new();
+            OIT_LOG_ONCE.call_once(|| {
+                println!("[render] WBOIT active: mode={}", self.oit_mode);
+            });
         }
         
         // P5: Apply volumetrics pass if enabled (after main render, before DoF)
@@ -610,6 +715,16 @@ impl ViewerTerrainScene {
         if self.terrain.is_none() {
             return None;
         }
+        
+        // Ensure critical resources are initialized (needed when called without prior interactive rendering)
+        self.ensure_fallback_texture();
+        
+        // Ensure shared depth resources exist (used by compute shaders and PBR)
+        // Note: render_to_texture creates its own depth texture, but some systems need
+        // the shared depth_view to exist even if not directly used
+        if self.depth_view.is_none() {
+            self.ensure_depth(width, height);
+        }
 
         // Create offscreen color texture at requested resolution
         // Include TEXTURE_BINDING for DoF shader to sample from
@@ -647,6 +762,12 @@ impl ViewerTerrainScene {
         let depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Calculate all the same values as render() but with custom dimensions
+        // Ensure PBR pipeline is initialized if PBR mode is enabled
+        if self.pbr_config.enabled && self.pbr_pipeline.is_none() {
+            if let Err(e) = self.init_pbr_pipeline(target_format) {
+                eprintln!("[snapshot] Failed to initialize PBR pipeline: {}", e);
+            }
+        }
         let use_pbr = self.pbr_config.enabled && self.pbr_pipeline.is_some();
         let terrain = self.terrain.as_ref().unwrap();
 
@@ -805,7 +926,10 @@ impl ViewerTerrainScene {
 
         // Option B: Prepare vector overlay stack if it has visible layers (for snapshot path)
         let has_vector_overlays = if let Some(ref stack) = self.vector_overlay_stack {
-            stack.is_enabled() && stack.visible_layer_count() > 0
+            let enabled = stack.is_enabled();
+            let count = stack.visible_layer_count();
+            // println!("[snapshot] Checking overlays: enabled={}, visible={}", enabled, count);
+            enabled && count > 0
         } else {
             false
         };
@@ -845,14 +969,15 @@ impl ViewerTerrainScene {
             
             // Initialize vector overlay pipelines if not yet done
             if let Some(ref mut stack) = self.vector_overlay_stack {
-                if !stack.pipelines_ready() {
+                // P0.1/M1: For OIT snapshots, ensure OIT pipelines are initialized
+                if !stack.pipelines_ready() || (self.oit_enabled && !stack.oit_pipelines_ready()) {
                     stack.init_pipelines(self.surface_format);
                 }
                 
                 // Prepare bind group with sun visibility texture or fallback
-                let texture_view = self.sun_vis_view.as_ref()
-                    .or(self.fallback_texture_view.as_ref())
-                    .unwrap();
+                // For snapshots, force fallback texture (fully lit) to avoid potential issues with
+                // uninitialized or black sun visibility texture which would hide the overlays.
+                let texture_view = self.fallback_texture_view.as_ref().unwrap();
                 stack.prepare_bind_group(texture_view);
             }
         }
@@ -917,7 +1042,8 @@ impl ViewerTerrainScene {
             pass.draw_indexed(0..terrain.index_count, 0, 0..1);
             
             // Option B: Render vector overlays after terrain (snapshot path)
-            if has_vector_overlays {
+            // P0.1/M1: Use standard alpha blending if OIT is disabled
+            if has_vector_overlays && !self.oit_enabled {
                 if let Some(ref stack) = self.vector_overlay_stack {
                     if stack.pipelines_ready() && stack.bind_group.is_some() {
                         let layer_count = stack.visible_layer_count();
@@ -937,6 +1063,142 @@ impl ViewerTerrainScene {
                         }
                     }
                 }
+            }
+        }
+        
+        // P0.1/M1: OIT rendering path for snapshots - render overlays to temporary WBOIT accumulation buffers
+        if has_vector_overlays && self.oit_enabled {
+            // Ensure OIT compose pipeline is initialized (size-independent resources)
+            // This is safe to call from snapshot path as it doesn't corrupt interactive viewer state
+            self.init_wboit_pipeline();
+            
+            // Create temporary OIT accumulation textures at snapshot resolution
+            let oit_color_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.snapshot_oit_color"),
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let oit_color_view = oit_color_tex.create_view(&wgpu::TextureViewDescriptor::default());
+            
+            let oit_reveal_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.snapshot_oit_reveal"),
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R16Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let oit_reveal_view = oit_reveal_tex.create_view(&wgpu::TextureViewDescriptor::default());
+            
+            // OIT accumulation pass
+            {
+                let mut oit_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("terrain_viewer.snapshot_oit_accumulation"),
+                    color_attachments: &[
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &oit_color_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &oit_reveal_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color { r: 1.0, g: 0.0, b: 0.0, a: 0.0 }),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                    ],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load, // Preserve terrain depth
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                
+                if let Some(ref stack) = self.vector_overlay_stack {
+                    if stack.oit_pipelines_ready() && stack.bind_group.is_some() {
+                        let layer_count = stack.visible_layer_count();
+                        let highlight_color = [1.0, 0.8, 0.0, 0.5];
+                        for i in 0..layer_count {
+                            stack.render_layer_oit(
+                                &mut oit_pass,
+                                super::vector_overlay::RenderLayerParams {
+                                    layer_index: i,
+                                    view_proj: vo_view_proj,
+                                    sun_dir: vo_sun_dir,
+                                    lighting: vo_lighting,
+                                    selected_feature_id,
+                                    highlight_color,
+                                }
+                            );
+                        }
+                    } else {
+                        println!("[snapshot] OIT skip: pipelines_ready={} bind_group={}", stack.oit_pipelines_ready(), stack.bind_group.is_some());
+                    }
+                }
+            }
+            
+            // Create temporary OIT compose bind group
+            // Note: compose pipeline is initialized by render() method when OIT is first enabled
+            if let (Some(ref pipeline), Some(ref sampler)) = 
+                (self.wboit_compose_pipeline.as_ref(), self.wboit_sampler.as_ref()) 
+            {
+                println!("[snapshot] Compositing OIT result");
+                let layout = &pipeline.get_bind_group_layout(0);
+                let compose_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("terrain_viewer.snapshot_oit_compose_bind_group"),
+                    layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&oit_color_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&oit_reveal_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(sampler),
+                        },
+                    ],
+                });
+                
+                // OIT compose pass - blend accumulated transparency onto scene
+                let mut compose_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("terrain_viewer.snapshot_oit_compose"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load, // Preserve scene
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                
+                compose_pass.set_pipeline(pipeline);
+                compose_pass.set_bind_group(0, &compose_bind_group, &[]);
+                compose_pass.draw(0..3, 0..1); // Fullscreen triangle
             }
         }
 

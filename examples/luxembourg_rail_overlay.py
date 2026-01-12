@@ -333,7 +333,8 @@ def _add_linestring_as_quads(coords: list, color: list, vertices: list, indices:
     
     # Add all strip vertices
     for vx, vz in strip_vertices:
-        vertices.append([vx, 0.0, vz] + color)
+        # P0.1/M1: Add feature_id=0 to vertex data (x, y, z, r, g, b, a, feature_id)
+        vertices.append([vx, 0.0, vz] + color + [0])
     
     # Create triangles connecting the strip
     # Strip vertices are: L0, R0, L1, R1, L2, R2, ...
@@ -370,10 +371,10 @@ def create_demo_lines(terrain_width: float, line_width: float = 15.0) -> Tuple[L
             # Create quad vertices (perpendicular to line direction)
             v_idx = len(vertices)
             vertices.extend([
-                [x1, 0.0, z - half_line] + color,  # BL
-                [x1, 0.0, z + half_line] + color,  # BR
-                [x2, 0.0, z - half_line] + color,  # TL
-                [x2, 0.0, z + half_line] + color,  # TR
+                [x1, 0.0, z - half_line] + color + [0],  # BL
+                [x1, 0.0, z + half_line] + color + [0],  # BR
+                [x2, 0.0, z - half_line] + color + [0],  # TL
+                [x2, 0.0, z + half_line] + color + [0],  # TR
             ])
             indices.extend([v_idx, v_idx + 1, v_idx + 2, v_idx + 1, v_idx + 3, v_idx + 2])
     
@@ -386,10 +387,10 @@ def create_demo_lines(terrain_width: float, line_width: float = 15.0) -> Tuple[L
             # Create quad vertices (perpendicular to line direction)
             v_idx = len(vertices)
             vertices.extend([
-                [x - half_line, 0.0, z1] + color,  # BL
-                [x + half_line, 0.0, z1] + color,  # BR
-                [x - half_line, 0.0, z2] + color,  # TL
-                [x + half_line, 0.0, z2] + color,  # TR
+                [x - half_line, 0.0, z1] + color + [0],  # BL
+                [x + half_line, 0.0, z1] + color + [0],  # BR
+                [x - half_line, 0.0, z2] + color + [0],  # TL
+                [x + half_line, 0.0, z2] + color + [0],  # TR
             ])
             indices.extend([v_idx, v_idx + 1, v_idx + 2, v_idx + 1, v_idx + 3, v_idx + 2])
     
@@ -775,6 +776,10 @@ def main() -> int:
     sky_group.add_argument("--sky-exposure", type=float, default=1.0,
                            help="Sky brightness adjustment (default: 1.0)")
     
+    # P0.1/M1: OIT
+    parser.add_argument("--oit", type=str, choices=["auto", "wboit", "dual_source", "off"],
+                        default=None, help="OIT mode for transparent surfaces (default: off)")
+    
     args = parser.parse_args()
     
     # Apply preset settings (overrides individual flags)
@@ -1076,6 +1081,18 @@ def main() -> int:
             if args.sky:
                 features.append("sky=on")
             print(f"PBR mode enabled: {', '.join(features)}")
+
+    # P0.1/M1: Enable OIT if requested
+    if args.oit and args.oit != "off":
+        resp = send_ipc(sock, {
+            "cmd": "set_oit_enabled",
+            "enabled": True,
+            "mode": args.oit,
+        })
+        if resp.get("ok"):
+            print(f"OIT enabled: mode={args.oit}")
+        else:
+            print(f"Warning: OIT config failed: {resp.get('error')}")
     
     # Parse line color from hex
     try:

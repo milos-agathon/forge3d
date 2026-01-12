@@ -329,6 +329,9 @@ def main():
     parser.add_argument("--gpkg", type=Path, default=DEFAULT_GPKG)
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
+    # P0.1/M1: OIT
+    parser.add_argument("--oit", type=str, choices=["auto", "wboit", "dual_source", "off"],
+                        default=None, help="OIT mode for transparent surfaces (default: off)")
     args = parser.parse_args()
 
     # Launch viewer

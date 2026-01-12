@@ -288,6 +288,9 @@ impl Viewer {
             object_scale: glam::Vec3::ONE,
             object_transform: glam::Mat4::IDENTITY,
             transform_version: 0,
+            // P0.1/M1: OIT (Order-Independent Transparency) - disabled by default
+            oit_enabled: false,
+            oit_mode: "auto".to_string(),
         };
 
         viewer.sync_ssr_params_to_gi();

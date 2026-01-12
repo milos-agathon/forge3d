@@ -16,7 +16,11 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.9.2 — Camera Animation System offering keyframe-based flyovers with MP4 export, dynamic lighting, and offline rendering queues.
+Current release: 1.9.3 — Order-Independent Transparency (OIT) productization delivering artifact-free rendering of overlapping transparent surfaces through unified compositor with automatic hardware-adaptive fallback.
+
+## Latest Feature: Transparency & OIT
+
+**forge3d** now provides production-ready Order-Independent Transparency (OIT) for rendering complex transparent surfaces without sorting artifacts. The system automatically detects hardware capabilities and selects the optimal transparency strategy—dual-source blending for maximum quality on supported GPUs, or Weighted Blended OIT (WBOIT) as a high-quality fallback. This unified compositor handles water surfaces, volumetric fog, and vector overlays through a single pipeline, ensuring consistent and artifact-free rendering of overlapping transparent layers. Enable OIT programmatically via `scene.enable_oit()` or let the automatic mode handle hardware detection for you.
 
 ## Installation
 

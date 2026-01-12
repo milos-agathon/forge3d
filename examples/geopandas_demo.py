@@ -164,6 +164,9 @@ def main() -> int:
     parser.add_argument("--water-max-slope-deg", type=float, default=6.0, help="Max slope for water")
     parser.add_argument("--water-min-depth", type=float, default=0.1, help="Min water depth")
     parser.add_argument("--water-debug", action="store_true", help="Water detection debug info")
+    # P0.1/M1: OIT
+    parser.add_argument("--oit", type=str, choices=["auto", "wboit", "dual_source", "off"],
+                        default=None, help="OIT mode for transparent surfaces (default: off)")
     
     args = parser.parse_args()
 

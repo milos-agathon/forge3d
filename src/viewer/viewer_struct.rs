@@ -240,4 +240,7 @@ pub struct Viewer {
     pub(crate) object_transform: glam::Mat4,
     // Transform version counter for IPC ack (incremented on each set_transform)
     pub(crate) transform_version: u64,
+    // P0.1/M1: OIT (Order-Independent Transparency)
+    pub(crate) oit_enabled: bool,
+    pub(crate) oit_mode: String,
 }

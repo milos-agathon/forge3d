@@ -72,6 +72,8 @@ def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit
         # P6.1: Color space correctness toggles
         "colormap_srgb": ("colormap_srgb", "--colormap-srgb"),
         "output_srgb_eotf": ("output_srgb_eotf", "--output-srgb-eotf"),
+        # P0.1/M1: OIT
+        "oit": ("oit", "--oit"),
     }
     
     # Get the project root for resolving relative paths
@@ -358,6 +360,14 @@ def _parse_args() -> argparse.Namespace:
         "--output-srgb-eotf",
         action="store_true",
         help="P6.1: Use exact linear_to_srgb() for output encoding instead of pow-gamma.",
+    )
+    # P0.1/M1: Order-Independent Transparency
+    parser.add_argument(
+        "--oit",
+        type=str,
+        choices=["auto", "wboit", "dual_source", "off"],
+        default=None,
+        help="P0.1: OIT mode for transparent surfaces ('auto', 'wboit', 'dual_source', 'off'). Default: off.",
     )
 
     return parser.parse_args()

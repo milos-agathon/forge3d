@@ -544,6 +544,9 @@ def main() -> int:
                            help="Sun azimuth angle in degrees (default: 135.0)")
     sun_group.add_argument("--sun-elevation", type=float, default=35.0,
                            help="Sun elevation angle in degrees (default: 35.0)")
+    # P0.1/M1: OIT
+    parser.add_argument("--oit", type=str, choices=["auto", "wboit", "dual_source", "off"],
+                        default=None, help="OIT mode for transparent surfaces (default: off)")
     
     args = parser.parse_args()
     

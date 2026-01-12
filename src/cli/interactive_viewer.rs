@@ -194,6 +194,13 @@ pub fn run_interactive_viewer_cli() -> Result<(), Box<dyn std::error::Error>> {
                     cmds.push(format!(":fog-temporal {}", v));
                 }
             }
+            // P0.1/M1: OIT (Order-Independent Transparency)
+            "--oit" => {
+                if let Some(mode) = args.next() {
+                    let m = mode.to_lowercase();
+                    cmds.push(format!(":oit {}", m));
+                }
+            }
             // GI parameter flags are handled via GiCliConfig; skip here.
             "--ssao-radius"
             | "--ssao-intensity"

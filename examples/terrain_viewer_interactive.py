@@ -108,6 +108,9 @@ def main() -> int:
                            help="IBL intensity multiplier (default: 1.0)")
     pbr_group.add_argument("--normal-strength", type=float, default=1.0,
                            help="Terrain normal strength (default: 1.0)")
+    # P0.1/M1: OIT
+    pbr_group.add_argument("--oit", type=str, choices=["auto", "wboit", "dual_source", "off"],
+                           default=None, help="OIT mode for transparent surfaces (default: off)")
     
     # Sun/lighting options
     sun_group = parser.add_argument_group("Sun Lighting", "Directional sun light parameters")
@@ -595,6 +598,18 @@ def main() -> int:
             if args.sky:
                 features.append("sky=on")
             print(f"PBR mode enabled: {', '.join(features)}")
+    
+    # P0.1/M1: Enable OIT if requested
+    if args.oit and args.oit != "off":
+        resp = send_ipc(sock, {
+            "cmd": "set_oit_enabled",
+            "enabled": True,
+            "mode": args.oit,
+        })
+        if resp.get("ok"):
+            print(f"OIT enabled: mode={args.oit}")
+        else:
+            print(f"Warning: OIT config failed: {resp.get('error')}")
     
     # Snapshot mode
     if args.snapshot:

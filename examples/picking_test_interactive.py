@@ -216,6 +216,9 @@ def main():
     parser = argparse.ArgumentParser(description="Interactive Picking Test")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--keep-open", action="store_true", help="Keep viewer open after tests")
+    # P0.1/M1: OIT
+    parser.add_argument("--oit", type=str, choices=["auto", "wboit", "dual_source", "off"],
+                        default=None, help="OIT mode for transparent surfaces (default: off)")
     args = parser.parse_args()
     
     print("=" * 60)

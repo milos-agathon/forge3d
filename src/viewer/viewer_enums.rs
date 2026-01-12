@@ -436,6 +436,16 @@ pub enum ViewerCmd {
     GetLassoState,
     /// Clear current selection
     ClearSelection,
+
+    // === P0.1/M1: OIT (Order-Independent Transparency) ===
+
+    /// Enable or disable OIT with specified mode
+    SetOitEnabled {
+        enabled: bool,
+        mode: String,
+    },
+    /// Get current OIT mode
+    GetOitMode,
 }
 
 /// Heightfield ray-traced AO configuration for viewer

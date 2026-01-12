@@ -105,9 +105,25 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
         return parse_float_or_query(l, ViewerCmd::SetGiSsrWeight, || ViewerCmd::QueryGiSsrWeight, "ssr-weight <float 0..1>");
     }
 
-    // Snapshot
-    if l.starts_with(":snapshot") || l.starts_with("snapshot") {
-        let path = l.split_whitespace().nth(1).map(|s| s.to_string());
+    // Snapshot - supports "snap path.png" or "snap path.png 1920x1920"
+    if l.starts_with(":snap") || l.starts_with("snap") || l.starts_with(":snapshot") || l.starts_with("snapshot") {
+        let mut tokens = l.split_whitespace();
+        let _ = tokens.next(); // skip command name
+        let path = tokens.next().map(|s| s.to_string());
+        
+        // Check for size parameter (e.g., "1920x1920")
+        if let Some(size_str) = tokens.next() {
+            if let Some((w_str, h_str)) = size_str.split_once('x').or_else(|| size_str.split_once('X')) {
+                if let (Ok(width), Ok(height)) = (w_str.parse::<u32>(), h_str.parse::<u32>()) {
+                    return Some(vec![ViewerCmd::SnapshotWithSize {
+                        path: path.unwrap_or_else(|| "snapshot.png".to_string()),
+                        width: Some(width),
+                        height: Some(height),
+                    }]);
+                }
+            }
+        }
+        
         return Some(vec![ViewerCmd::Snapshot(path)]);
     }
 
@@ -449,6 +465,25 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
         }
     }
 
+    // P0.1/M1: OIT (Order-Independent Transparency)
+    if l.starts_with(":oit") || l.starts_with("oit ") {
+        let toks: Vec<&str> = l.trim_start_matches(":").split_whitespace().collect();
+        if toks.len() >= 2 {
+            let mode = toks[1].to_lowercase();
+            let enabled = !matches!(mode.as_str(), "off" | "disabled" | "standard" | "0" | "false");
+            let mode_str = match mode.as_str() {
+                "on" | "1" | "true" | "auto" => "auto".to_string(),
+                "wboit" => "wboit".to_string(),
+                "dual_source" | "dualsource" => "dual_source".to_string(),
+                "off" | "disabled" | "standard" | "0" | "false" => "standard".to_string(),
+                other => other.to_string(),
+            };
+            return Some(vec![ViewerCmd::SetOitEnabled { enabled, mode: mode_str }]);
+        } else {
+            return Some(vec![ViewerCmd::GetOitMode]);
+        }
+    }
+
     None
 }
 
@@ -519,6 +554,6 @@ where
 
 fn print_help() {
     println!(
-        "Commands:\n  :gi <ssao|ssgi|ssr> <on|off>\n  :viz <material|normal|depth|gi|lit>\n  :viz-depth-max <float>\n  :ibl <on|off|load <path>|intensity <f>|rotate <deg>|cache <dir>|res <u32>>\n  :brdf <lambert|phong|ggx|disney>\n  :snapshot [path]\n  :obj <path> | :gltf <path>\n  :sky off|on|preetham|hosek-wilkie | :sky-turbidity <f> | :sky-ground <f> | :sky-exposure <f> | :sky-sun <f>\n  :fog <on|off> | :fog-density <f> | :fog-g <f> | :fog-steps <u32> | :fog-shadow <on|off> | :fog-temporal <0..0.9> | :fog-mode <raymarch|froxels> | :fog-preset <low|med|high>\n  Lit:  :lit-sun <float> | :lit-ibl <float>\n  SSAO: :ssao-technique <ssao|gtao> | :ssao-radius <f> | :ssao-intensity <f> | :ssao-composite <on|off> | :ssao-mul <0..1>\n  SSGI: :ssgi-steps <u32> | :ssgi-radius <f> | :ssgi-half <on|off> | :ssgi-temporal <on|off> | :ssgi-temporal-alpha <0..1> | :ssgi-edges <on|off> | :ssgi-upsample-sigma-depth <f> | :ssgi-upsample-sigma-normal <f>\n  SSR:  :ssr-max-steps <u32> | :ssr-thickness <f>\n  P5:   :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy|ssr-thickness>\n  :quit"
+        "Commands:\n  :gi <ssao|ssgi|ssr> <on|off>\n  :viz <material|normal|depth|gi|lit>\n  :viz-depth-max <float>\n  :ibl <on|off|load <path>|intensity <f>|rotate <deg>|cache <dir>|res <u32>>\n  :brdf <lambert|phong|ggx|disney>\n  :snapshot [path]\n  :obj <path> | :gltf <path>\n  :sky off|on|preetham|hosek-wilkie | :sky-turbidity <f> | :sky-ground <f> | :sky-exposure <f> | :sky-sun <f>\n  :fog <on|off> | :fog-density <f> | :fog-g <f> | :fog-steps <u32> | :fog-shadow <on|off> | :fog-temporal <0..0.9> | :fog-mode <raymarch|froxels> | :fog-preset <low|med|high>\n  :oit <auto|wboit|dual_source|off> (Order-Independent Transparency)\n  Lit:  :lit-sun <float> | :lit-ibl <float>\n  SSAO: :ssao-technique <ssao|gtao> | :ssao-radius <f> | :ssao-intensity <f> | :ssao-composite <on|off> | :ssao-mul <0..1>\n  SSGI: :ssgi-steps <u32> | :ssgi-radius <f> | :ssgi-half <on|off> | :ssgi-temporal <on|off> | :ssgi-temporal-alpha <0..1> | :ssgi-edges <on|off> | :ssgi-upsample-sigma-depth <f> | :ssgi-upsample-sigma-normal <f>\n  SSR:  :ssr-max-steps <u32> | :ssr-thickness <f>\n  P5:   :p5 <cornell|grid|sweep|ssgi-cornell|ssgi-temporal|ssr-glossy|ssr-thickness>\n  :quit"
     );
 }

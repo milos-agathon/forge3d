@@ -775,3 +775,38 @@ def get_lasso_state(sock: socket.socket) -> Dict[str, Any]:
 def clear_selection(sock: socket.socket) -> Dict[str, Any]:
     """Clear current selection."""
     return send_ipc(sock, {"cmd": "clear_selection"})
+
+# === OIT (Order-Independent Transparency) API (P0.1/M1) ===
+
+def set_oit_enabled(sock: socket.socket, enabled: bool, mode: str = "auto") -> Dict[str, Any]:
+    """Enable or disable Order-Independent Transparency.
+    
+    OIT provides correct rendering of overlapping transparent surfaces
+    (water, volumetrics, vector overlays) without sorting artifacts.
+    
+    Args:
+        sock: Connected socket to viewer
+        enabled: Whether to enable OIT
+        mode: OIT mode - 'auto' (default), 'wboit', 'dual_source', or 'standard'
+              'auto' selects dual-source if hardware supports it, else WBOIT
+              'wboit' forces weighted-blended OIT
+              'dual_source' forces dual-source blending (may fail on some hardware)
+              'standard' disables OIT (uses regular alpha blending)
+        
+    Returns:
+        Response dict with 'ok' status
+    """
+    return send_ipc(sock, {
+        "cmd": "set_oit_enabled",
+        "enabled": enabled,
+        "mode": mode,
+    })
+
+
+def get_oit_mode(sock: socket.socket) -> Dict[str, Any]:
+    """Get current OIT mode.
+    
+    Returns:
+        Response dict with 'mode' key containing current OIT mode string
+    """
+    return send_ipc(sock, {"cmd": "get_oit_mode"})

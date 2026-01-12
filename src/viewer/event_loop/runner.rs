@@ -306,6 +306,7 @@ pub fn run_viewer_with_ipc(
             }
             Event::AboutToWait => {
                 // Poll global IPC queue for commands
+                let mut has_pending_snapshot = false;
                 if let Some(viewer) = viewer_opt.as_mut() {
                     if let Ok(mut q) = get_ipc_queue().lock() {
                         while let Some(cmd) = q.pop_front() {
@@ -324,8 +325,13 @@ pub fn run_viewer_with_ipc(
                             }
                         }
                     }
+                    has_pending_snapshot = viewer.snapshot_request.is_some();
                 }
                 window.request_redraw();
+                // If snapshot is pending, keep requesting redraws until it's captured
+                if has_pending_snapshot {
+                    window.request_redraw();
+                }
             }
             Event::WindowEvent {
                 event: WindowEvent::RedrawRequested,

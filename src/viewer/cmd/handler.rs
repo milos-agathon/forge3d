@@ -1623,6 +1623,20 @@ impl Viewer {
             } => {
                 println!("[label] declutter algorithm set to: {}", algorithm);
             }
+
+            // P0.1/M1: OIT (Order-Independent Transparency)
+            ViewerCmd::SetOitEnabled { enabled, mode } => {
+                self.oit_enabled = enabled;
+                self.oit_mode = mode.clone();
+                // Wire to terrain scene if available
+                if let Some(ref mut terrain) = self.terrain_viewer {
+                    terrain.set_oit_mode(enabled, &mode);
+                }
+                println!("[oit] enabled={} mode={}", enabled, mode);
+            }
+            ViewerCmd::GetOitMode => {
+                println!("[oit] enabled={} mode={}", self.oit_enabled, self.oit_mode);
+            }
         }
     }
 }

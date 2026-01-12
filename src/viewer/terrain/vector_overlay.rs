@@ -229,6 +229,11 @@ pub struct VectorOverlayStack {
     pub id_bind_group_layout: Option<wgpu::BindGroupLayout>,
     pub id_uniform_buffer: Option<wgpu::Buffer>,
     pub id_bind_group: Option<wgpu::BindGroup>,
+    
+    // P0.1/M1: OIT pipelines with WBOIT blend states
+    pub oit_pipeline_triangles: Option<wgpu::RenderPipeline>,
+    pub oit_pipeline_lines: Option<wgpu::RenderPipeline>,
+    pub oit_pipeline_points: Option<wgpu::RenderPipeline>,
 }
 
 impl VectorOverlayStack {
@@ -255,6 +260,9 @@ impl VectorOverlayStack {
             id_bind_group_layout: None,
             id_uniform_buffer: None,
             id_bind_group: None,
+            oit_pipeline_triangles: None,
+            oit_pipeline_lines: None,
+            oit_pipeline_points: None,
         }
     }
     
@@ -630,6 +638,57 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     return vec4<f32>(lit_color, in.color.a * opacity);
 }
+
+// P0.1/M1: OIT fragment shader for WBOIT accumulation
+// Outputs to two render targets: color accumulation and reveal accumulation
+struct OitOutput {
+    @location(0) color_accum: vec4<f32>,
+    @location(1) reveal_accum: f32,
+}
+
+@fragment
+fn fs_main_oit(in: VertexOutput) -> OitOutput {
+    let opacity = u.layer_params.x;
+    let sun_intensity = u.lighting.x;
+    let ambient = u.lighting.y;
+    let shadow_strength = u.lighting.z;
+    let terrain_width = u.lighting.w;
+    
+    let normal = normalize(in.normal);
+    let sun_dir = normalize(u.sun_dir.xyz);
+    let ndotl = max(dot(normal, sun_dir), 0.0);
+    let diffuse = ndotl * sun_intensity;
+    
+    let uv = clamp(vec2<f32>(
+        (in.world_pos.x / terrain_width),
+        (in.world_pos.z / terrain_width)
+    ), vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
+    let sun_vis = textureSampleLevel(sun_vis_tex, sun_vis_sampler, uv, 0.0).r;
+    let shadow = mix(1.0, sun_vis, shadow_strength);
+    let light = ambient + diffuse * shadow;
+    
+    var lit_color = in.color.rgb * light;
+    
+    if (u.selected_feature_id != 0u && in.feature_id == u.selected_feature_id) {
+        lit_color = mix(lit_color, u.highlight_color.rgb, u.highlight_color.a);
+    }
+    
+    let alpha = in.color.a * opacity;
+    
+    // WBOIT weight calculation based on depth and alpha
+    // Weight formula: alpha * max(min(1.0, pow(clip_z, 3)), 0.01)
+    let clip_z = in.clip_pos.z / in.clip_pos.w;
+    let depth_weight = clamp(pow(1.0 - clip_z, 3.0), 0.01, 1.0);
+    let weight = alpha * depth_weight * 8.0 + 0.01;
+    
+    var out: OitOutput;
+    // Color accumulation: premultiplied color * weight, weight sum in alpha
+    out.color_accum = vec4<f32>(lit_color * alpha * weight, alpha * weight);
+    // Reveal accumulation: product of (1 - alpha) via multiplicative blending
+    out.reveal_accum = alpha;
+    
+    return out;
+}
 "#;
 
 // ============================================================================
@@ -809,11 +868,242 @@ impl VectorOverlayStack {
 
         self.bind_group_layout = Some(bind_group_layout);
         self.uniform_buffer = Some(uniform_buffer);
+        
+        // P0.1/M1: Initialize OIT pipelines with WBOIT blend states
+        self.init_oit_pipelines(&shader, &pipeline_layout);
+    }
+    
+    /// P0.1/M1: Initialize OIT pipelines with WBOIT blend states for transparent rendering
+    fn init_oit_pipelines(&mut self, shader: &wgpu::ShaderModule, pipeline_layout: &wgpu::PipelineLayout) {
+        // WBOIT color accumulation blend state (additive)
+        let accum_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+        
+        // WBOIT reveal blend state (multiplicative for alpha product)
+        let reveal_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Zero,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Zero,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+        
+        // Depth stencil for OIT (read only, no write)
+        let depth_stencil = Some(wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: false,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState {
+                constant: -100,
+                slope_scale: -10.0,
+                clamp: 0.0,
+            },
+        });
+        
+        // OIT Triangle pipeline (MRT: color accum + reveal)
+        self.oit_pipeline_triangles = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("vector_overlay_oit_triangles_pipeline"),
+            layout: Some(pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_main",
+                buffers: &[VectorVertex::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: "fs_main_oit",
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        blend: Some(accum_blend),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R16Float,
+                        blend: Some(reveal_blend),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: depth_stencil.clone(),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        }));
+        
+        // OIT Lines pipeline
+        self.oit_pipeline_lines = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("vector_overlay_oit_lines_pipeline"),
+            layout: Some(pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_main",
+                buffers: &[VectorVertex::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: "fs_main_oit",
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        blend: Some(accum_blend),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R16Float,
+                        blend: Some(reveal_blend),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: depth_stencil.clone(),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        }));
+        
+        // OIT Points pipeline
+        self.oit_pipeline_points = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("vector_overlay_oit_points_pipeline"),
+            layout: Some(pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_main",
+                buffers: &[VectorVertex::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: "fs_main_oit",
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        blend: Some(accum_blend),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R16Float,
+                        blend: Some(reveal_blend),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::PointList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        }));
+        
+        println!("[vector_overlay] OIT pipelines initialized");
     }
     
     /// Check if pipelines are initialized
     pub fn pipelines_ready(&self) -> bool {
         self.pipeline_triangles.is_some() && self.bind_group_layout.is_some()
+    }
+    
+    /// P0.1/M1: Check if OIT pipelines are ready
+    pub fn oit_pipelines_ready(&self) -> bool {
+        self.oit_pipeline_triangles.is_some()
+    }
+    
+    /// P0.1/M1: Render a layer using OIT pipelines to WBOIT accumulation buffers
+    pub fn render_layer_oit<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        params: RenderLayerParams,
+    ) -> bool {
+        let visible_layers: Vec<_> = self.visible_layers().collect();
+        if params.layer_index >= visible_layers.len() {
+            return false;
+        }
+        
+        let layer = visible_layers[params.layer_index];
+        if layer.index_count == 0 {
+            return false;
+        }
+        
+        // Update uniforms
+        let uniforms = VectorOverlayUniforms {
+            view_proj: params.view_proj,
+            sun_dir: [params.sun_dir[0], params.sun_dir[1], params.sun_dir[2], 0.0],
+            lighting: params.lighting,
+            layer_params: [layer.config.opacity, 0.0, 0.0, 0.0],
+            selected_feature_id: params.selected_feature_id,
+            highlight_color: params.highlight_color,
+            _pad: [0; 7],
+        };
+        
+        if let Some(ref buf) = self.uniform_buffer {
+            self.queue.write_buffer(buf, 0, bytemuck::bytes_of(&uniforms));
+        }
+        
+        // Set bind group
+        if let Some(ref bg) = self.bind_group {
+            pass.set_bind_group(0, bg, &[]);
+        } else {
+            return false;
+        }
+        
+        // Select OIT pipeline based on primitive type
+        let pipeline = match layer.config.primitive {
+            OverlayPrimitive::Triangles | OverlayPrimitive::TriangleStrip => {
+                self.oit_pipeline_triangles.as_ref()
+            }
+            OverlayPrimitive::Lines | OverlayPrimitive::LineStrip => {
+                self.oit_pipeline_lines.as_ref()
+            }
+            OverlayPrimitive::Points => self.oit_pipeline_points.as_ref(),
+        };
+        
+        if let Some(pipe) = pipeline {
+            pass.set_pipeline(pipe);
+            pass.set_vertex_buffer(0, layer.vertex_buffer.slice(..));
+            pass.set_index_buffer(layer.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..layer.index_count, 0, 0..1);
+            true
+        } else {
+            false
+        }
     }
     
     /// Prepare bind group for rendering (call before render pass)

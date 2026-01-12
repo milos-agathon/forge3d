@@ -6,6 +6,23 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.9.3] - Transparency & OIT Productization
+
+### Added
+- **P0.1 — Order-Independent Transparency (OIT) Productization**
+  - Unified transparency strategy selection for the main rendering pipeline.
+  - Three OIT modes: Standard alpha blending, Weighted Blended OIT (WBOIT), and Dual-Source blending with automatic fallback.
+  - Dual-source OIT renderer with hardware detection and WBOIT fallback (`src/core/dual_source_oit.rs`).
+  - Integration of vector overlays and multi-layer transparent draw calls through unified OIT compositor.
+  - Python API: `enable_oit()` method for programmatic transparency mode control.
+  - Transparency modes exposed via `DualSourceOITMode` enum (Disabled, DualSource, WBOITFallback, Automatic).
+  - Backend-specific hardware detection for dual-source blending support across Vulkan, Metal, and DX12.
+  - Improved rendering quality for overlapping transparent surfaces (water, volumetrics, vector overlays).
+
+### Documentation
+- Added transparency/OIT usage examples and API reference.
+- Updated rendering pipeline documentation with OIT integration details.
+
 ## [1.9.2] - Camera Animation System
 
 ### Added

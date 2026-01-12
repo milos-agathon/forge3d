@@ -4786,6 +4786,74 @@ impl Scene {
         }
     }
 
+    // P0.1/M1: Simple OIT API (alias for enable_dual_source_oit with sensible defaults)
+    /// Enable Order-Independent Transparency for correct rendering of overlapping
+    /// transparent surfaces (water, volumetrics, vector overlays).
+    ///
+    /// This is the recommended way to enable OIT. It automatically selects
+    /// dual-source blending if hardware supports it, otherwise falls back to WBOIT.
+    ///
+    /// Args:
+    ///     mode: Optional transparency mode ('standard', 'wboit', 'auto'). Default: 'auto'
+    ///
+    /// Example:
+    ///     scene.enable_oit()  # automatic mode selection
+    ///     scene.enable_oit('wboit')  # force weighted-blended OIT
+    #[pyo3(text_signature = "($self, mode='auto')")]
+    pub fn enable_oit(&mut self, mode: Option<&str>) -> PyResult<()> {
+        let oit_mode = match mode {
+            Some("standard") | Some("disabled") => {
+                // Standard alpha blending (disable OIT)
+                self.dual_source_oit_enabled = false;
+                self.dual_source_oit_renderer = None;
+                return Ok(());
+            }
+            Some("wboit") => Some("wboit_fallback"),
+            Some("dual_source") => Some("dual_source"),
+            Some("auto") | None => Some("automatic"),
+            Some(other) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Invalid OIT mode '{}'. Use 'standard', 'wboit', 'dual_source', or 'auto'.",
+                    other
+                )))
+            }
+        };
+        // Delegate to the full implementation with medium quality
+        self.enable_dual_source_oit(oit_mode, Some("medium"))
+    }
+
+    /// Disable Order-Independent Transparency, reverting to standard alpha blending.
+    #[pyo3(text_signature = "($self)")]
+    pub fn disable_oit(&mut self) {
+        self.dual_source_oit_enabled = false;
+        self.dual_source_oit_renderer = None;
+    }
+
+    /// Check if Order-Independent Transparency is currently enabled.
+    #[pyo3(text_signature = "($self)")]
+    pub fn is_oit_enabled(&self) -> bool {
+        self.dual_source_oit_enabled && self.dual_source_oit_renderer.is_some()
+    }
+
+    /// Get current OIT mode as a string ('auto', 'wboit', 'dual_source', or 'disabled').
+    #[pyo3(text_signature = "($self)")]
+    pub fn get_oit_mode(&self) -> String {
+        if !self.dual_source_oit_enabled {
+            return "disabled".to_string();
+        }
+        if let Some(ref renderer) = self.dual_source_oit_renderer {
+            match renderer.get_operating_mode() {
+                crate::core::dual_source_oit::DualSourceOITMode::DualSource => "dual_source",
+                crate::core::dual_source_oit::DualSourceOITMode::WBOITFallback => "wboit",
+                crate::core::dual_source_oit::DualSourceOITMode::Automatic => "auto",
+                crate::core::dual_source_oit::DualSourceOITMode::Disabled => "disabled",
+            }
+            .to_string()
+        } else {
+            "disabled".to_string()
+        }
+    }
+
     #[pyo3(
         text_signature = "($self, alpha_correction, depth_weight_scale, max_fragments, premultiply_factor)"
     )]

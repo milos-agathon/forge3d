@@ -8,6 +8,53 @@ use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
+/// P0.1/M1: WBOIT compose shader for final compositing of accumulation buffers
+const WBOIT_COMPOSE_SHADER: &str = r#"
+// WBOIT Compose Shader - composites accumulation buffers to final output
+
+@group(0) @binding(0)
+var color_accumulation: texture_2d<f32>;
+
+@group(0) @binding(1)
+var reveal_accumulation: texture_2d<f32>;
+
+@group(0) @binding(2)
+var tex_sampler: sampler;
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+    var out: VertexOutput;
+    // Generate fullscreen triangle
+    let x = f32((vertex_index << 1u) & 2u) * 2.0 - 1.0;
+    let y = f32(vertex_index & 2u) * 2.0 - 1.0;
+    out.clip_position = vec4<f32>(x, y, 0.0, 1.0);
+    out.uv = vec2<f32>(x, -y) * 0.5 + 0.5;
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let accum_color = textureSample(color_accumulation, tex_sampler, in.uv);
+    let reveal = textureSample(reveal_accumulation, tex_sampler, in.uv).r;
+    
+    let epsilon = 1e-5;
+    var final_color: vec3<f32>;
+    if (accum_color.a > epsilon) {
+        final_color = accum_color.rgb / accum_color.a;
+    } else {
+        final_color = vec3<f32>(0.0);
+    }
+    
+    let final_alpha = 1.0 - reveal;
+    return vec4<f32>(final_color, final_alpha);
+}
+"#;
+
 /// Stored terrain data for interactive viewer rendering
 pub struct ViewerTerrainData {
     pub heightmap: Vec<f32>,
@@ -98,6 +145,19 @@ pub struct ViewerTerrainScene {
     pub overlay_stack: Option<super::overlay::OverlayStack>,
     // Option B: Vector overlay geometry stack
     pub vector_overlay_stack: Option<VectorOverlayStack>,
+    // P0.1/M1: OIT mode for transparent overlay rendering
+    pub oit_enabled: bool,
+    pub oit_mode: String,
+    // P0.1/M1: WBOIT accumulation resources
+    pub(super) wboit_color_texture: Option<wgpu::Texture>,
+    pub(super) wboit_color_view: Option<wgpu::TextureView>,
+    pub(super) wboit_reveal_texture: Option<wgpu::Texture>,
+    pub(super) wboit_reveal_view: Option<wgpu::TextureView>,
+    pub(super) wboit_compose_pipeline: Option<wgpu::RenderPipeline>,
+    pub(super) wboit_compose_bind_group: Option<wgpu::BindGroup>,
+    pub(super) wboit_compose_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    pub(super) wboit_sampler: Option<wgpu::Sampler>,
+    pub(super) wboit_size: (u32, u32),
 }
 
 impl ViewerTerrainScene {
@@ -235,9 +295,218 @@ impl ViewerTerrainScene {
             surface_format: target_format,
             overlay_stack: None,
             vector_overlay_stack: None,
+            oit_enabled: false,
+            oit_mode: "off".to_string(),
+            wboit_color_texture: None,
+            wboit_color_view: None,
+            wboit_reveal_texture: None,
+            wboit_reveal_view: None,
+            wboit_compose_pipeline: None,
+            wboit_compose_bind_group: None,
+            wboit_compose_bind_group_layout: None,
+            wboit_sampler: None,
+            wboit_size: (0, 0),
         })
     }
     
+    /// P0.1/M1: Set OIT mode for transparent overlay rendering
+    pub fn set_oit_mode(&mut self, enabled: bool, mode: &str) {
+        self.oit_enabled = enabled;
+        self.oit_mode = mode.to_string();
+        println!("[terrain_scene] OIT set: enabled={} mode={}", enabled, mode);
+    }
+
+    /// P0.1/M1: Initialize size-independent WBOIT resources (pipeline, layout, sampler)
+    /// Safe to call from snapshot path as it doesn't corrupt interactive viewer state
+    pub fn init_wboit_pipeline(&mut self) {
+        if self.wboit_compose_pipeline.is_some() {
+            return; // Already initialized
+        }
+        
+        // Create sampler if not already created
+        if self.wboit_sampler.is_none() {
+            self.wboit_sampler = Some(self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("terrain_viewer.wboit.sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            }));
+        }
+        
+        // Create compose bind group layout if not already created
+        if self.wboit_compose_bind_group_layout.is_none() {
+            self.wboit_compose_bind_group_layout = Some(self.device.create_bind_group_layout(
+                &wgpu::BindGroupLayoutDescriptor {
+                    label: Some("terrain_viewer.wboit.compose_bind_group_layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                    ],
+                },
+            ));
+        }
+        
+        // Create compose pipeline
+        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain_viewer.wboit.compose_shader"),
+            source: wgpu::ShaderSource::Wgsl(WBOIT_COMPOSE_SHADER.into()),
+        });
+
+        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain_viewer.wboit.compose_pipeline_layout"),
+            bind_group_layouts: &[self.wboit_compose_bind_group_layout.as_ref().unwrap()],
+            push_constant_ranges: &[],
+        });
+
+        self.wboit_compose_pipeline = Some(self.device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("terrain_viewer.wboit.compose_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.surface_format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+            },
+        ));
+    }
+    
+    /// P0.1/M1: Initialize WBOIT resources for given dimensions
+    /// Creates size-dependent textures and bind group for interactive rendering
+    pub fn init_wboit(&mut self, width: u32, height: u32) {
+        if self.wboit_size == (width, height) && self.wboit_color_texture.is_some() {
+            return; // Already initialized at correct size
+        }
+        
+        // First ensure pipeline/layout/sampler exist
+        self.init_wboit_pipeline();
+
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        // Create color accumulation texture (Rgba16Float for weighted color)
+        let color_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain_viewer.wboit.color_accum"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Create reveal accumulation texture (R16Float for alpha product)
+        let reveal_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain_viewer.wboit.reveal_accum"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R16Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let reveal_view = reveal_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Now create size-dependent resources (textures)
+
+        // Create compose bind group
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain_viewer.wboit.compose_bind_group"),
+            layout: self.wboit_compose_bind_group_layout.as_ref().unwrap(),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&reveal_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(self.wboit_sampler.as_ref().unwrap()),
+                },
+            ],
+        });
+
+        // Create bind group with new textures
+
+        self.wboit_color_texture = Some(color_texture);
+        self.wboit_color_view = Some(color_view);
+        self.wboit_reveal_texture = Some(reveal_texture);
+        self.wboit_reveal_view = Some(reveal_view);
+        self.wboit_compose_bind_group = Some(bind_group);
+        self.wboit_size = (width, height);
+
+        println!("[terrain_scene] WBOIT initialized: {}x{}", width, height);
+    }
+
     /// Initialize post-process pass (called lazily when lens effects enabled)
     pub fn init_post_process(&mut self) {
         if self.post_process.is_none() {

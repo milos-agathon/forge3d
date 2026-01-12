@@ -1348,8 +1348,6 @@ impl Viewer {
             if let Some((snap_w, snap_h)) = terrain_snap_size {
                 // P4: Use motion blur rendering if enabled
                 if tv.pbr_config.motion_blur.enabled && tv.pbr_config.motion_blur.samples > 1 {
-                    println!("[terrain] Rendering motion blur snapshot at {}x{} ({} samples)", 
-                        snap_w, snap_h, tv.pbr_config.motion_blur.samples);
                     // Motion blur handles its own encoder internally
                     self.queue.submit(std::iter::once(encoder.finish()));
                     if let Some(tex) = tv.render_with_motion_blur(self.config.format, snap_w, snap_h) {
@@ -1360,7 +1358,6 @@ impl Viewer {
                         label: Some("viewer.render.post_motion_blur"),
                     });
                 } else {
-                    println!("[terrain] Rendering snapshot at {}x{}", snap_w, snap_h);
                     if let Some(tex) = tv.render_to_texture(&mut encoder, self.config.format, snap_w, snap_h, self.selected_feature_id) {
                         self.pending_snapshot_tex = Some(tex);
                     }
@@ -1500,25 +1497,24 @@ impl Viewer {
         }
     }
 
-    // Snapshot if requested (read back the swapchain texture before present)
-    if let Some(path) = self.snapshot_request.take() {
-        // Prefer offscreen snapshot texture if we rendered one; otherwise fallback to surface texture
+    // Snapshot if requested (read back the texture before present)
+    // CRITICAL: Only write the file when we have the offscreen texture.
+    // The Python script waits for the file to appear and stabilize, so writing
+    // a black swapchain texture would cause it to exit prematurely before
+    // the retry logic can render the proper offscreen texture.
+    if self.snapshot_request.is_some() {
         if let Some(tex) = self.pending_snapshot_tex.take() {
-            let dims = tex.size();
-            println!("[snapshot] Using offscreen tex {}x{}", dims.width, dims.height);
+            let path = self.snapshot_request.clone().unwrap();
             if let Err(e) = self.snapshot_swapchain_to_png(&tex, &path) {
                 eprintln!("Snapshot failed: {}", e);
             } else {
                 println!("Saved snapshot to {}", path);
             }
-        } else {
-            println!("[snapshot] Using swapchain texture (no offscreen)");
-            if let Err(e) = self.snapshot_swapchain_to_png(&output.texture, &path) {
-                eprintln!("Snapshot failed: {}", e);
-            } else {
-                println!("Saved snapshot to {}", path);
-            }
+            // Clear the request only after successful offscreen snapshot
+            self.snapshot_request = None;
         }
+        // If no offscreen texture yet, keep the request and don't write any file.
+        // This forces the waiting script to continue waiting while we retry.
     }
     output.present();
 

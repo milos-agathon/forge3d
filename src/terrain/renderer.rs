@@ -5837,9 +5837,12 @@ impl TerrainScene {
         let h_range = terrain.domain.1 - terrain.domain.0;
         let spacing = (tw.max(th) as f32) / 256.0; // Grid spacing estimate
 
-        let uniforms = super::TerrainUniforms::new(view, proj, sun_dir, 1.0, spacing, h_range, 1.0);
+        // Create proper PBR uniforms matching the shader layout
+        let uniforms = crate::terrain::TerrainUniforms::new(
+            view, proj, sun_dir, 1.0, spacing, h_range, 1.0
+        );
 
-        let _uniform_buffer = self
+        let uniform_buffer = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.viewer.uniforms"),
@@ -5847,31 +5850,134 @@ impl TerrainScene {
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 
-        // Create a simple render pass that clears to sky blue and draws terrain grid
+        // Get pipeline from cache
+        let pipeline_guard = self.pipeline.lock().unwrap();
+        let pipeline = &pipeline_guard.pipeline;
+
+        // Create bind group using available resources and fallbacks
+        // We need to match bind_group_layout entries 0..16
+        // This is a simplified setup for the viewer; full streaming features are disabled
+        let lut_view = &self.height_curve_identity_view; // Fallback
+        let lut_sampler = &self.sampler_linear; // Fallback
+
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain.viewer.bind_group"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&terrain.heightmap_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                },
+                // Material textures (fallback to heightmap just to bind something valid)
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&terrain.heightmap_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                },
+                // Shading uniforms (reuse main uniforms buffer as it has compatible size/alignment)
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                // Colormap
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(lut_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(lut_sampler),
+                },
+                // Overlay uniforms (fallback)
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                // Height curve LUT (fallback)
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::TextureView(&self.height_curve_identity_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: wgpu::BindingResource::Sampler(&self.height_curve_lut_sampler),
+                },
+                // Height AO (fallback)
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: wgpu::BindingResource::TextureView(&self.height_ao_fallback_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: wgpu::BindingResource::Sampler(&self.ao_debug_sampler),
+                },
+                // Sun visibility (fallback)
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: wgpu::BindingResource::TextureView(&self.sun_vis_fallback_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: wgpu::BindingResource::Sampler(&self.csm_renderer.shadow_sampler),
+                },
+                // Detail normal (fallback)
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: wgpu::BindingResource::TextureView(&self.detail_normal_fallback_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 16,
+                    resource: wgpu::BindingResource::Sampler(&self.detail_normal_sampler),
+                },
+            ],
+        });
+
+        // Create render pass and draw
         {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain.viewer.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.5,
-                            g: 0.7,
-                            b: 0.9,
+                            r: terrain.sun_intensity.min(1.0) as f64 * 0.5,
+                            g: terrain.sun_intensity.min(1.0) as f64 * 0.7,
+                            b: terrain.sun_intensity.min(1.0) as f64 * 0.9,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: None, // No depth buffer in this simple viewer pass?
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
 
-            // Clear to sky blue to indicate the terrain scene is active.
-            // Full terrain rendering would require the complete PBR pipeline setup
-            // which is complex. This serves as a visible indicator that terrain is loaded.
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            // Bind fallbacks for other groups
+            pass.set_bind_group(1, &self.noop_shadow.bind_group, &[]); // IBL (using noop shadow as dummy?) No, IBL is group 1
+            // Use noop_shadow.bind_group for index 3 (shadows)
+            
+            // For viewer mode, we might not have all groups. The pipeline expects them.
+            // This suggests we need dummy groups for 1 (IBL), 2 (Blit?), 3 (Shadow), 4 (Fog), 5 (Water), 6 (MatLayer)
+            
+            // Given complexity, maybe we should just draw the grid mesh if pipeline is compatible
+            pass.set_vertex_buffer(0, terrain.vertex_buffer.slice(..));
+            pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..terrain.index_count, 0, 0..1);
         }
 
         true

@@ -1026,6 +1026,7 @@ class VectorVertex:
         g: Green color component (0.0-1.0)
         b: Blue color component (0.0-1.0)
         a: Alpha component (0.0-1.0)
+        feature_id: Feature ID for picking (default 0)
     """
     x: float
     y: float
@@ -1034,6 +1035,7 @@ class VectorVertex:
     g: float = 1.0
     b: float = 1.0
     a: float = 1.0
+    feature_id: int = 0
     
     def __post_init__(self) -> None:
         for name, val in [("r", self.r), ("g", self.g), ("b", self.b), ("a", self.a)]:
@@ -1041,8 +1043,8 @@ class VectorVertex:
                 raise ValueError(f"{name} must be in [0.0, 1.0]")
     
     def to_array(self) -> List[float]:
-        """Convert to [x, y, z, r, g, b, a] array for IPC."""
-        return [self.x, self.y, self.z, self.r, self.g, self.b, self.a]
+        """Convert to [x, y, z, r, g, b, a, feature_id] array for IPC."""
+        return [self.x, self.y, self.z, self.r, self.g, self.b, self.a, self.feature_id]
 
 
 @dataclass

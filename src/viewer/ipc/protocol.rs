@@ -398,6 +398,21 @@ pub enum IpcRequest {
     GetLassoState,
     /// Clear current selection
     ClearSelection,
+
+    // === P0.1/M1: OIT (Order-Independent Transparency) ===
+    
+    /// Enable or disable OIT with specified mode
+    SetOitEnabled {
+        enabled: bool,
+        #[serde(default = "default_oit_mode")]
+        mode: String,
+    },
+    /// Get current OIT mode
+    GetOitMode,
+}
+
+fn default_oit_mode() -> String {
+    "auto".to_string()
 }
 
 /// Heightfield ray-traced AO configuration (IPC)
@@ -776,6 +791,13 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
         IpcRequest::SetLassoMode { enabled } => Ok(Some(ViewerCmd::SetLassoMode { enabled: *enabled })),
         IpcRequest::GetLassoState => Ok(None), // Special handling in server.rs
         IpcRequest::ClearSelection => Ok(Some(ViewerCmd::ClearSelection)),
+
+        // P0.1/M1: OIT (Order-Independent Transparency)
+        IpcRequest::SetOitEnabled { enabled, mode } => Ok(Some(ViewerCmd::SetOitEnabled {
+            enabled: *enabled,
+            mode: mode.clone(),
+        })),
+        IpcRequest::GetOitMode => Ok(Some(ViewerCmd::GetOitMode)),
 
         IpcRequest::LoadObj { path } => Ok(Some(ViewerCmd::LoadObj(path.clone()))),
         IpcRequest::LoadGltf { path } => Ok(Some(ViewerCmd::LoadGltf(path.clone()))),
