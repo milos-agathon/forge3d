@@ -70,7 +70,9 @@ def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit
         # P0.3/M2: Sun ephemeris config keys
         "sun_lat": ("sun_lat", "--sun-lat"), "sun_lon": ("sun_lon", "--sun-lon"),
         "sun_datetime": ("sun_datetime", "--sun-datetime"),
-        "shadows": ("shadows", "--shadows"), "cascades": ("cascades", "--cascades"),
+        "shadow_technique": ("shadow_technique", "--shadow-technique"),
+        "shadows": ("shadow_technique", "--shadows"),  # alias maps to shadow_technique
+        "cascades": ("cascades", "--cascades"),
         "colormap": ("colormap", "--colormap"), "colormap_strength": ("colormap_strength", "--colormap-strength"),
         "albedo_mode": ("albedo_mode", "--albedo-mode"), "normal_strength": ("normal_strength", "--normal-strength"),
         "lambert_contrast": ("lambert_contrast", "--lambert-contrast"), "unsharp_strength": ("unsharp_strength", "--unsharp-strength"),
@@ -251,15 +253,23 @@ def _parse_args() -> argparse.Namespace:
         help="High-level preset (studio_pbr, outdoor_sun, toon_viz, rainier_showcase, rainier_relief).",
     )
     parser.add_argument(
+        "--shadow-technique",
+        dest="shadow_technique",
+        type=str,
+        choices=["none", "hard", "pcf", "pcss", "vsm", "evsm", "msm"],
+        help=(
+            "P0.2/M3: Shadow filtering technique. "
+            "none=disabled, hard=single-sample, pcf=percentage-closer filtering, "
+            "pcss=percentage-closer soft shadows, vsm=variance shadow maps, "
+            "evsm=exponential variance shadow maps, msm=moment shadow maps. "
+            "VSM/EVSM/MSM use moment-based filtering for soft shadows with configurable leak control."
+        ),
+    )
+    parser.add_argument(
         "--shadows",
         type=str,
-        choices=["none", "hard", "pcf", "pcss"],
-        help=(
-            "Shadow technique for terrain rendering. "
-            "Supported: none, hard, pcf, pcss. "
-            "NOT supported: vsm, evsm, msm, csm (moment-based shadows not implemented for terrain). "
-            "'none' disables shadows."
-        ),
+        choices=["none", "hard", "pcf", "pcss", "vsm", "evsm", "msm"],
+        help="Alias for --shadow-technique (deprecated, use --shadow-technique instead).",
     )
     parser.add_argument("--shadow-map-res", dest="shadow_map_res", type=int, help="Shadow map resolution.")
     parser.add_argument("--cascades", type=int, help="Cascade count for cascaded shadow maps.")
@@ -416,7 +426,8 @@ def main() -> int:
             "--unsharp-strength": "unsharp_strength", "--detail-strength": "detail_strength",
             "--colormap-strength": "colormap_strength", "--normal-strength": "normal_strength",
             "--lambert-contrast": "lambert_contrast", "--msaa": "msaa",
-            "--shadows": "shadows", "--cascades": "cascades",
+            "--shadow-technique": "shadow_technique", "--shadows": "shadow_technique",
+            "--cascades": "cascades",
             "--albedo-mode": "albedo_mode", "--colormap": "colormap",
             # P6.1: Color space correctness toggles
             "--colormap-srgb": "colormap_srgb", "--output-srgb-eotf": "output_srgb_eotf",
@@ -434,6 +445,11 @@ def main() -> int:
         # Log resolved GI modes after preset application
         print(f"[GI] modes={args.gi}")
 
+    # P0.2/M3: Handle --shadows as alias for --shadow-technique
+    # --shadow-technique takes precedence if both are set
+    if getattr(args, "shadow_technique", None) is None and getattr(args, "shadows", None) is not None:
+        args.shadow_technique = args.shadows
+    
     # P0.3/M2: Compute sun position from ephemeris if location/time provided
     if args.sun_lat is not None and args.sun_lon is not None and args.sun_datetime is not None:
         try:

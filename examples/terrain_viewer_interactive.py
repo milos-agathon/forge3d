@@ -99,8 +99,12 @@ def main() -> int:
                            help="Enable PBR+POM rendering mode (default: legacy simple shader)")
     pbr_group.add_argument("--hdr", type=Path,
                            help="HDR environment map for IBL lighting")
-    pbr_group.add_argument("--shadows", choices=["none", "hard", "pcf", "pcss"], default="pcss",
-                           help="Shadow technique (default: pcss)")
+    pbr_group.add_argument("--shadow-technique", dest="shadow_technique",
+                           choices=["none", "hard", "pcf", "pcss", "vsm", "evsm", "msm"], default="pcss",
+                           help="P0.2/M3: Shadow filtering technique (default: pcss)")
+    pbr_group.add_argument("--shadows", dest="shadows",
+                           choices=["none", "hard", "pcf", "pcss", "vsm", "evsm", "msm"],
+                           help="Alias for --shadow-technique (deprecated)")
     pbr_group.add_argument("--shadow-map-res", type=int, default=2048,
                            help="Shadow map resolution (default: 2048)")
     pbr_group.add_argument("--exposure", type=float, default=1.0,
@@ -111,6 +115,9 @@ def main() -> int:
                            help="IBL intensity multiplier (default: 1.0)")
     pbr_group.add_argument("--normal-strength", type=float, default=1.0,
                            help="Terrain normal strength (default: 1.0)")
+    # P6.2: Debug visualization mode
+    pbr_group.add_argument("--debug-mode", type=int, default=0,
+                           help="Debug visualization mode (0=off, 33=shadow technique colors, etc.)")
     # P0.1/M1: OIT
     pbr_group.add_argument("--oit", type=str, choices=["auto", "wboit", "dual_source", "off"],
                            default=None, help="OIT mode for transparent surfaces (default: off)")
@@ -454,16 +461,22 @@ def main() -> int:
     
     # Configure PBR rendering if requested
     if args.pbr:
+        # P0.2/M3: Handle shadow_technique vs shadows alias
+        # Prioritize --shadows if explicitly provided, otherwise use --shadow-technique
+        shadow_tech = args.shadows if args.shadows else args.shadow_technique
         pbr_cmd = {
             "cmd": "set_terrain_pbr",
             "enabled": True,
-            "shadow_technique": args.shadows,
+            "shadow_technique": shadow_tech,
             "shadow_map_res": args.shadow_map_res,
             "exposure": args.exposure,
             "msaa": args.msaa,
             "ibl_intensity": args.ibl_intensity,
             "normal_strength": args.normal_strength,
         }
+        # Only include debug_mode if explicitly set (non-zero)
+        if args.debug_mode != 0:
+            pbr_cmd["debug_mode"] = args.debug_mode
         if args.hdr:
             pbr_cmd["hdr_path"] = str(args.hdr.resolve())
         
@@ -597,7 +610,7 @@ def main() -> int:
         if not resp.get("ok"):
             print(f"Warning: PBR config failed: {resp.get('error')}")
         else:
-            features = [f"shadows={args.shadows}", f"exposure={args.exposure}"]
+            features = [f"shadows={shadow_tech}", f"exposure={args.exposure}"]
             if args.height_ao:
                 features.append("height_ao=on")
             if args.sun_vis:

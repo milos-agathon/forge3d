@@ -237,6 +237,8 @@ pub enum ViewerCmd {
         volumetrics: Box<Option<ViewerVolumetricsConfig>>,
         /// M6: Sky settings
         sky: Option<ViewerSkyConfig>,
+        /// P6.2: Debug visualization mode (0=off, 33=shadow technique, etc.)
+        debug_mode: Option<u32>,
     },
     /// Load an overlay texture from an image file
     LoadOverlay {

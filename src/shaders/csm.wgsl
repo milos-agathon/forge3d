@@ -5,6 +5,7 @@
 // Shadow cascade data structure
 struct ShadowCascade {
     light_projection: mat4x4<f32>,  // Light-space projection matrix for this cascade
+    light_view_proj: mat4x4<f32>,   // Combined light_view_proj matrix (projection * view)
     near_distance: f32,             // Near plane distance in view space
     far_distance: f32,              // Far plane distance in view space
     texel_size: f32,                // Texel size in world space for this cascade
@@ -18,6 +19,17 @@ struct CsmUniforms {
     cascades: array<ShadowCascade, 4>, // Up to 4 shadow cascades
     cascade_count: u32,             // Number of active cascades (3-4)
     pcf_kernel_size: u32,           // PCF kernel size: 1=none, 3=3x3, 5=5x5, 7=poisson
+    technique_flags: u32,           // Technique feature flags
+    _pad1a: f32,
+    _pad1b: f32,
+    _pad1c: f32,
+    technique_params: vec4<f32>,    // [pcss_blocker_radius, pcss_filter_radius, moment_bias, light_size]
+    technique_reserved: vec4<f32>,  // Reserved for future use
+    cascade_blend_range: f32,       // Cascade blend range
+    _pad2a: f32,
+    _pad2b: f32,
+    _pad2c: f32,
+    _pad2d: array<vec4<f32>, 6>,
     depth_bias: f32,                // Base depth bias to prevent shadow acne
     slope_bias: f32,                // Slope-scaled bias factor
     shadow_map_size: f32,           // Shadow map resolution (e.g., 2048.0)

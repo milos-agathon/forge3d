@@ -1,7 +1,7 @@
-"""P6.2 Shadow Technique Selection Tests.
+"""P0.2/M3 Shadow Technique Selection Tests.
 
 Tests that shadow technique CLI validation works correctly and that
-different techniques produce visually different outputs.
+different techniques (including VSM/EVSM/MSM) produce visually different outputs.
 """
 
 import hashlib
@@ -18,10 +18,10 @@ from forge3d.config import ShadowParams, _SHADOW_TECHNIQUES, validate_shadow_tec
 class TestShadowTechniqueValidation:
     """Test shadow technique validation in terrain_params.py."""
 
-    # Supported techniques for terrain rendering (HARD/PCF/PCSS + NONE)
-    SUPPORTED_TECHNIQUES = ["hard", "pcf", "pcss", "none"]
-    # Unsupported techniques that should raise clear errors
-    UNSUPPORTED_TECHNIQUES = ["vsm", "evsm", "msm", "csm"]
+    # P0.2/M3: All shadow techniques are now supported (including VSM/EVSM/MSM)
+    SUPPORTED_TECHNIQUES = ["hard", "pcf", "pcss", "vsm", "evsm", "msm", "none"]
+    # CSM is the pipeline, not a technique - should raise clear error
+    UNSUPPORTED_TECHNIQUES = ["csm"]
 
     def _make_shadow_settings(self, technique: str) -> ShadowSettings:
         """Helper to create ShadowSettings with given technique."""
@@ -75,20 +75,17 @@ class TestShadowTechniqueValidation:
 class TestShadowConfigValidation:
     """Test shadow technique validation in config.py ShadowParams."""
 
-    @pytest.mark.parametrize("technique", ["hard", "pcf", "pcss"])
+    @pytest.mark.parametrize("technique", ["hard", "pcf", "pcss", "vsm", "evsm", "msm"])
     def test_shadow_params_from_mapping_supported(self, technique: str):
-        """ShadowParams.from_mapping should accept supported techniques."""
+        """P0.2/M3: ShadowParams.from_mapping should accept all techniques including VSM/EVSM/MSM."""
         params = ShadowParams.from_mapping({"technique": technique})
         assert params.technique == technique  # config.py uses lowercase
 
     @pytest.mark.parametrize("technique", ["vsm", "evsm", "msm"])
-    def test_shadow_params_from_mapping_rejects_unsupported(self, technique: str):
-        """ShadowParams.from_mapping should reject VSM/EVSM/MSM with clear error."""
-        with pytest.raises(ValueError) as exc_info:
-            ShadowParams.from_mapping({"technique": technique})
-        
-        error_msg = str(exc_info.value)
-        assert "not implemented" in error_msg or "not supported" in error_msg.lower()
+    def test_shadow_params_requires_moments(self, technique: str):
+        """P0.2/M3: VSM/EVSM/MSM techniques should require moment maps."""
+        params = ShadowParams.from_mapping({"technique": technique})
+        assert params.requires_moments() is True
 
     def test_shadow_params_from_mapping_rejects_csm(self):
         """ShadowParams.from_mapping should reject 'csm' with explanation."""
@@ -100,8 +97,8 @@ class TestShadowConfigValidation:
         assert "pipeline" in error_msg.lower() or "not a valid filter" in error_msg.lower()
 
     def test_shadow_techniques_dict_complete(self):
-        """_SHADOW_TECHNIQUES dict should include supported techniques."""
-        expected = {"none", "hard", "pcf", "pcss"}
+        """P0.2/M3: _SHADOW_TECHNIQUES dict should include all techniques including VSM/EVSM/MSM."""
+        expected = {"none", "hard", "pcf", "pcss", "vsm", "evsm", "msm"}
         actual = set(_SHADOW_TECHNIQUES.keys())
         assert expected == actual, f"Expected {expected}, got {actual}"
 
@@ -114,23 +111,11 @@ class TestShadowConfigValidation:
 class TestValidateShadowTechnique:
     """Test the validate_shadow_technique function directly."""
 
-    @pytest.mark.parametrize("technique", ["hard", "pcf", "pcss", "none"])
+    @pytest.mark.parametrize("technique", ["hard", "pcf", "pcss", "vsm", "evsm", "msm", "none"])
     def test_accepts_supported_techniques(self, technique: str):
-        """Should accept supported techniques."""
+        """P0.2/M3: Should accept all techniques including VSM/EVSM/MSM."""
         result = validate_shadow_technique(technique)
         assert result == technique
-
-    @pytest.mark.parametrize("technique", ["vsm", "evsm", "msm"])
-    def test_rejects_moment_techniques(self, technique: str):
-        """Should reject VSM/EVSM/MSM with clear error."""
-        with pytest.raises(ValueError) as exc_info:
-            validate_shadow_technique(technique)
-        
-        error_msg = str(exc_info.value)
-        assert "not implemented" in error_msg
-        assert "moment-based" in error_msg.lower()
-        # Should list supported alternatives
-        assert "hard" in error_msg or "pcf" in error_msg
 
     def test_rejects_csm_with_explanation(self):
         """Should reject 'csm' with explanation that it's the pipeline, not a filter."""

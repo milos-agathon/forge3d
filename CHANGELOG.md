@@ -6,6 +6,28 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.9.5] - Shadow System Productization
+
+### Added
+- **P0.2 / M3 — Shadow Filtering Productization (VSM/EVSM/MSM)**
+  - Production-ready Variance Shadow Maps (VSM), Exponential Variance Shadow Maps (EVSM), and Moment Shadow Maps (MSM) techniques fully integrated and validated.
+  - Aligned Python configuration validation with Rust implementation: VSM, EVSM, and MSM now properly accepted in `ShadowSettings`.
+  - Implemented separable Gaussian blur pass for moment-based shadow maps with configurable kernel size.
+  - Added light bleeding reduction controls: EVSM positive/negative exponents, moment bias parameters, and memory budget enforcement.
+  - CLI shadow technique selection via `--shadow-technique` flag supporting all seven methods: Hard, PCF, PCSS, VSM, EVSM, MSM, CSM.
+  - Forced-edge regression test suite with per-technique validation and penumbra/leak metrics.
+  - Shadow technique A/B comparison renders demonstrating quality differences across all filtering methods.
+  - Memory budget tracking ensures moment-based shadow maps respect ≤512 MiB host-visible memory constraint.
+  - Integration tests for each shadow technique with non-trivial numeric diff validation.
+
+### Fixed
+- Python config validation no longer incorrectly rejects VSM, EVSM, and MSM shadow techniques.
+- Moment blur path properly integrated into shadow pipeline with depth-aware edge preservation.
+
+### Documentation
+- Added shadow technique comparison documentation with quality/performance characteristics.
+- Updated rendering options guide with complete shadow filtering reference.
+
 ## [1.9.4] - Sun Ephemeris & Time-of-Day Controls
 
 ### Added

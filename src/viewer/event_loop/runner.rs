@@ -221,6 +221,7 @@ pub fn run_viewer_with_ipc(
     let ipc_port = ipc_handle.port;
 
     // Create window
+    eprintln!("[viewer-ipc] Creating window {}x{}", config.width, config.height);
     let window = Arc::new(
         WindowBuilder::new()
             .with_title(config.title.clone())
@@ -228,8 +229,10 @@ pub fn run_viewer_with_ipc(
                 config.width as f64,
                 config.height as f64,
             ))
+            .with_visible(true)
             .build(&event_loop)?,
     );
+    eprintln!("[viewer-ipc] Window created, waiting for Resumed event");
 
     // Collect initial commands
     let mut pending_cmds: Vec<ViewerCmd> = if let Some(cmds) = INITIAL_CMDS.get() {
@@ -249,10 +252,13 @@ pub fn run_viewer_with_ipc(
         
         match event {
             Event::Resumed => {
+                eprintln!("[viewer-ipc] Received Resumed event");
                 if viewer_opt.is_none() {
+                    eprintln!("[viewer-ipc] Initializing Viewer...");
                     let v = pollster::block_on(Viewer::new(Arc::clone(&window), config.clone()));
                     match v {
                         Ok(mut v) => {
+                            eprintln!("[viewer-ipc] Viewer initialized successfully");
                             for cmd in pending_cmds.drain(..) {
                                 v.handle_cmd(cmd);
                             }
@@ -262,11 +268,12 @@ pub fn run_viewer_with_ipc(
                             println!("FORGE3D_VIEWER_READY port={}", ipc_port);
                             use std::io::Write;
                             let _ = std::io::stdout().flush();
+                            eprintln!("[viewer-ipc] READY message sent, port={}", ipc_port);
                             // Kick off render loop so IPC commands can be processed
                             window.request_redraw();
                         }
                         Err(e) => {
-                            eprintln!("Failed to create viewer: {}", e);
+                            eprintln!("[viewer-ipc] FATAL: Failed to create viewer: {}", e);
                             elwt.exit();
                         }
                     }

@@ -16,11 +16,7 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.9.4 — Sun ephemeris and time-of-day controls enabling astronomically accurate lighting for any geographic location and UTC datetime with deterministic solar positioning.
-
-## Latest Feature: Sun Ephemeris & Time-of-Day Controls
-
-**forge3d** now calculates precise sun positions from geographic coordinates and datetime inputs, bringing astronomically accurate lighting to terrain visualization. The new `sun_position(lat, lon, datetime)` API returns azimuth and elevation angles validated against NOAA solar calculator reference data. Configure realistic lighting for any location and time using `--sun-lat`, `--sun-lon`, and `--sun-datetime` parameters in the viewer, enabling dramatic shadows and lighting that match real-world solar geometry. Whether you're visualizing seasonal changes, studying shadow patterns, or creating time-lapse sequences, the deterministic ephemeris engine ensures your renders reflect actual sun angles with measurable accuracy.
+Current release: 1.9.5 — Production-ready shadow filtering with seven fully validated techniques including variance-based methods (VSM/EVSM/MSM) featuring configurable blur, light bleeding controls, and comprehensive quality validation.
 
 ## Installation
 
@@ -31,6 +27,26 @@ maturin develop --release
 # or via wheel (if provided)
 # pip install forge3d
 ```
+
+## Latest Feature: Shadow System Productization
+
+**forge3d** now delivers production-ready shadow rendering with fully validated techniques including Hard, PCF, PCSS, VSM (Variance Shadow Maps), EVSM (Exponential Variance), and MSM (Moment Shadow Maps). The shadow pipeline features separable Gaussian blur for moment-based methods, light bleeding reduction with configurable EVSM exponents and moment bias, and memory budget enforcement within the ≤512 MiB constraint. Select your technique via `--shadows` flag and tune quality with dedicated parameters for penumbra width, blur kernel size, and leak reduction. Each technique includes forced-edge regression tests with numeric validation, ensuring consistent shadow quality across all filtering methods. Whether you need fast hard shadows for real-time preview or physically-based soft shadows for final renders, the productionized pipeline delivers reliable, high-quality results validated against reference scenes.
+
+### Shadow Technique Comparison
+
+Compare shadow quality across advanced techniques with dramatic lighting (sun elevation 10°):
+
+| PCF | PCSS | VSM |
+|-----|------|-----|
+| ![PCF Shadows](assets/thumbnails/shadow_pcf_dramatic.png) | ![PCSS Shadows](assets/thumbnails/shadow_pcss_dramatic.png) | ![VSM Shadows](assets/thumbnails/shadow_vsm_dramatic.png) |
+| Fixed-kernel soft shadows | Contact-hardening soft shadows | Variance-based probabilistic |
+
+| EVSM | MSM |
+|------|-----|
+| ![EVSM Shadows](assets/thumbnails/shadow_evsm_dramatic.png) | ![MSM Shadows](assets/thumbnails/shadow_msm_dramatic.png) |
+| Exponential variance (reduced leak) | 4-moment high precision |
+
+**Note:** Low sun angles (10°) create long shadows where technique differences are most visible. PCSS produces contact-hardening with sharp edges near occluders and soft penumbra farther away. Moment-based techniques (VSM/EVSM/MSM) offer blur-friendly filtering with separable Gaussian blur support.
 
 ## Camera Animation Demo
 

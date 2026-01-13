@@ -86,7 +86,7 @@ python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif -
 | `--normal-strength` | Float | 1.0 | Terrain normal amplification |
 | `--ibl-intensity` | Float | 1.0 | Ambient/IBL lighting intensity |
 | `--hdr` | Path | - | HDR environment map for IBL |
-| `--shadows` | String | "pcss" | Shadow technique (none/hard/pcf/pcss) |
+| `--shadows` | String | "pcss" | Shadow technique (none/hard/pcf/pcss/vsm/evsm/msm) |
 | `--shadow-map-res` | Int | 2048 | Shadow map resolution |
 | `--msaa` | Int | 1 | MSAA samples (1, 4, or 8) |
 
@@ -326,6 +326,45 @@ python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif -
 # Half-resolution volumetrics (performance mode)
 python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --volumetrics --vol-density 0.02 --vol-half-res
 ```
+
+#### Shadow Techniques
+
+The PBR renderer supports multiple shadow mapping techniques, each with different characteristics for shadow edge quality and performance.
+
+| Technique | Description | Best For |
+|-----------|-------------|----------|
+| **PCF** | Percentage-Closer Filtering - fixed kernel soft shadows | Balanced quality/performance |
+| **PCSS** | Percentage-Closer Soft Shadows - contact-hardening shadows | Realistic shadow penumbra |
+| **VSM** | Variance Shadow Maps - probabilistic soft shadows | Fast, blur-friendly |
+| **EVSM** | Exponential Variance Shadow Maps - improved VSM | Reduced light bleeding |
+
+```bash
+# PCF - Percentage-Closer Filtering (fixed soft shadows)
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --shadows pcf --sun-elevation 15
+
+# PCSS - Percentage-Closer Soft Shadows (contact-hardening)
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --shadows pcss --sun-elevation 15
+
+# VSM - Variance Shadow Maps (fast probabilistic)
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --shadows vsm --sun-elevation 15
+
+# EVSM - Exponential Variance Shadow Maps (reduced light bleeding)
+python examples/terrain_viewer_interactive.py --dem assets/tif/dem_rainier.tif --pbr --shadows evsm --sun-elevation 15
+```
+
+**Shadow Technique Comparison (sun elevation 15°):**
+
+| PCF | PCSS |
+|-----|------|
+| ![PCF Shadows](../assets/thumbnails/shadow_pcf.png) | ![PCSS Shadows](../assets/thumbnails/shadow_pcss.png) |
+| Fixed-kernel soft shadows | Contact-hardening soft shadows |
+
+| VSM | EVSM |
+|-----|------|
+| ![VSM Shadows](../assets/thumbnails/shadow_vsm.png) | ![EVSM Shadows](../assets/thumbnails/shadow_evsm.png) |
+| Variance-based soft shadows | Exponential variance (brighter, softer) |
+
+**Note:** EVSM produces noticeably brighter results with softer shadow falloff due to its exponential depth distribution. Low sun angles (15°) create longer shadows where technique differences are most visible.
 
 #### Combined Post-Processing Scenes
 

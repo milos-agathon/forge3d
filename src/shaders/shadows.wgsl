@@ -15,6 +15,7 @@
 // Shadow cascade data
 struct ShadowCascade {
     light_projection: mat4x4<f32>,  // Light-space projection matrix
+    light_view_proj: mat4x4<f32>,   // Combined light_view_proj matrix
     near_distance: f32,             // Near plane distance
     far_distance: f32,              // Far plane distance
     texel_size: f32,                // Texel size in world space
@@ -39,10 +40,16 @@ struct CsmUniforms {
     depth_clip_factor: f32,         // Depth clipping distance factor
     technique: u32,                 // Active shadow technique (Hard=0, PCF=1, PCSS=2, VSM=3, EVSM=4, MSM=5)
     technique_flags: u32,           // Technique feature flags
+    _pad1a: f32,
+    _pad1b: f32,
+    _pad1c: f32,
     technique_params: vec4<f32>,    // [pcss_blocker_radius, pcss_filter_radius, moment_bias, light_size]
     technique_reserved: vec4<f32>,  // Reserved for future use
     cascade_blend_range: f32,       // Cascade blend range (0.0 = no blend, 0.1 = 10% blend)
-    _padding2: vec3<f32>,           // Padding for alignment
+    _pad2a: f32,
+    _pad2b: f32,
+    _pad2c: f32,
+    _pad2d: array<vec4<f32>, 6>,
 }
 
 // Bind group for shadow resources

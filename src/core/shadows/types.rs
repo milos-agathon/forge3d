@@ -72,6 +72,7 @@ pub struct ShadowCascade {
 }
 
 /// CSM uniform buffer data sent to GPU
+/// P0.2/M3: Must match shader std140 layout (816 bytes)
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CsmUniforms {
@@ -93,8 +94,27 @@ pub struct CsmUniforms {
     pub shadow_map_size: f32,
     /// Debug visualization mode (0=off, 1=cascade colors)
     pub debug_mode: u32,
-    /// Padding for alignment
-    pub _padding: [f32; 2],
+    /// P0.2/M3: EVSM exponents
+    pub evsm_positive_exp: f32,
+    pub evsm_negative_exp: f32,
+    /// Peter-panning prevention offset
+    pub peter_panning_offset: f32,
+    /// Enable unclipped depth
+    pub enable_unclipped_depth: u32,
+    /// Depth clip factor
+    pub depth_clip_factor: f32,
+    /// P0.2/M3: Active shadow technique (Hard=0, PCF=1, PCSS=2, VSM=3, EVSM=4, MSM=5)
+    pub technique: u32,
+    /// Technique feature flags
+    pub technique_flags: u32,
+    /// Technique parameters: [pcss_blocker_radius, pcss_filter_radius, moment_bias, light_size]
+    pub technique_params: [f32; 4],
+    /// Reserved for future technique parameters
+    pub technique_reserved: [f32; 4],
+    /// Cascade blend range (0.0 = no blend, 0.1 = 10% blend at boundaries)
+    pub cascade_blend_range: f32,
+    /// Padding for std430 alignment (storage buffer) - 14 floats to match shader
+    pub _padding2: [f32; 14],
 }
 
 /// Directional light configuration for shadow casting

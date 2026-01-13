@@ -3,7 +3,7 @@
 // This compute shader populates the moment atlas used by variance-based shadow techniques
 
 @group(0) @binding(0) var depth_texture: texture_depth_2d_array;
-@group(0) @binding(1) var moment_texture: texture_storage_2d_array<rgba32float, write>;
+@group(0) @binding(1) var moment_texture: texture_storage_2d_array<rgba16float, write>;
 @group(0) @binding(2) var<uniform> params: MomentGenParams;
 
 struct MomentGenParams {

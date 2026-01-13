@@ -49,6 +49,8 @@ pub struct ViewerTerrainPbrConfig {
     pub overlay: OverlayConfig,
     /// Enable vector overlay geometry system (Option B) - default OFF
     pub vector_overlays_enabled: bool,
+    /// P6.2: Debug visualization mode (0=off, 33=shadow technique, etc.)
+    pub debug_mode: u32,
 }
 
 /// Internal heightfield AO configuration
@@ -309,6 +311,7 @@ impl Default for ViewerTerrainPbrConfig {
             volumetrics: VolumetricsConfig::default(),
             overlay: OverlayConfig::new(),  // DEFAULT OFF per AGENTS.md
             vector_overlays_enabled: false, // DEFAULT OFF per plan Section 11
+            debug_mode: 0,
         }
     }
 }
@@ -331,6 +334,7 @@ impl ViewerTerrainPbrConfig {
         materials: Option<ViewerMaterialLayerConfig>,
         vector_overlay: Option<ViewerVectorOverlayConfig>,
         tonemap: Option<ViewerTonemapConfig>,
+        debug_mode: Option<u32>,
     ) {
         if let Some(v) = enabled {
             self.enabled = v;
@@ -343,7 +347,8 @@ impl ViewerTerrainPbrConfig {
         }
         if let Some(t) = shadow_technique {
             let t_lower = t.to_lowercase();
-            if ["none", "hard", "pcf", "pcss"].contains(&t_lower.as_str()) {
+            // P6.2: Include VSM/EVSM/MSM variance-based shadow techniques
+            if ["none", "hard", "pcf", "pcss", "vsm", "evsm", "msm"].contains(&t_lower.as_str()) {
                 self.shadow_technique = t_lower;
             }
         }
@@ -409,6 +414,10 @@ impl ViewerTerrainPbrConfig {
             self.tonemap.white_balance_enabled = tm.white_balance_enabled;
             self.tonemap.temperature = tm.temperature.clamp(2000.0, 12000.0);
             self.tonemap.tint = tm.tint.clamp(-1.0, 1.0);
+        }
+        // P6.2: Debug visualization mode
+        if let Some(d) = debug_mode {
+            self.debug_mode = d;
         }
     }
     

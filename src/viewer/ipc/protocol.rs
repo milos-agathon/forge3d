@@ -158,6 +158,9 @@ pub enum IpcRequest {
         /// M6: Sky settings
         #[serde(default)]
         sky: Option<IpcSkyConfig>,
+        /// P6.2: Debug visualization mode (0=off, 33=shadow technique, etc.)
+        #[serde(default)]
+        debug_mode: Option<u32>,
     },
     /// Load an overlay texture from an image file
     LoadOverlay {
@@ -909,6 +912,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             denoise,
             volumetrics,
             sky,
+            debug_mode,
         } => {
             use crate::viewer::viewer_enums::{
                 ViewerHeightAoConfig, ViewerSunVisConfig,
@@ -1049,6 +1053,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 denoise: denoise_config,
                 volumetrics: Box::new(volumetrics_config),
                 sky: sky_config,
+                debug_mode: *debug_mode,
             }))
         },
         IpcRequest::LoadOverlay {

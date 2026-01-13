@@ -538,8 +538,12 @@ def main() -> int:
                            help="ACES exposure multiplier (default: 1.0)")
     pbr_group.add_argument("--msaa", type=int, choices=[1, 4, 8], default=1,
                            help="MSAA samples (default: 1)")
-    pbr_group.add_argument("--shadows", choices=["none", "hard", "pcf", "pcss"], default="pcss",
-                           help="Shadow technique (default: pcss)")
+    pbr_group.add_argument("--shadow-technique", dest="shadow_technique",
+                           choices=["none", "hard", "pcf", "pcss", "vsm", "evsm", "msm"], default="pcss",
+                           help="P0.2/M3: Shadow filtering technique (default: pcss)")
+    pbr_group.add_argument("--shadows", dest="shadows",
+                           choices=["none", "hard", "pcf", "pcss", "vsm", "evsm", "msm"],
+                           help="Alias for --shadow-technique (deprecated)")
     
     # Sun/lighting options
     sun_group = parser.add_argument_group("Sun Lighting", "Directional sun light parameters")
@@ -797,10 +801,12 @@ def main() -> int:
     })
     
     # Configure PBR rendering
+    # P0.2/M3: Handle shadow_technique vs shadows alias
+    shadow_tech = args.shadow_technique if args.shadow_technique else (args.shadows or "pcss")
     pbr_cmd = {
         "cmd": "set_terrain_pbr",
         "enabled": True,
-        "shadow_technique": args.shadows,
+        "shadow_technique": shadow_tech,
         "shadow_map_res": 4096,
         "exposure": args.exposure,
         "msaa": args.msaa,

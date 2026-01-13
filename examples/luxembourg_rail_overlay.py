@@ -562,8 +562,12 @@ def main() -> int:
                            help="Disable PBR rendering")
     pbr_group.add_argument("--hdr", type=Path,
                            help="HDR environment map for IBL lighting")
-    pbr_group.add_argument("--shadows", choices=["none", "hard", "pcf", "pcss"], default="pcss",
-                           help="Shadow technique (default: pcss)")
+    pbr_group.add_argument("--shadow-technique", dest="shadow_technique",
+                           choices=["none", "hard", "pcf", "pcss", "vsm", "evsm", "msm"], default="pcss",
+                           help="P0.2/M3: Shadow filtering technique (default: pcss)")
+    pbr_group.add_argument("--shadows", dest="shadows",
+                           choices=["none", "hard", "pcf", "pcss", "vsm", "evsm", "msm"],
+                           help="Alias for --shadow-technique (deprecated)")
     pbr_group.add_argument("--shadow-map-res", type=int, default=4096,
                            help="Shadow map resolution (default: 4096)")
     pbr_group.add_argument("--exposure", type=float, default=1.2,
@@ -933,11 +937,13 @@ def main() -> int:
     
     # Enable PBR mode with high-quality effects
     if args.pbr:
+        # P0.2/M3: Handle shadow_technique vs shadows alias
+        shadow_tech = args.shadow_technique if args.shadow_technique else (args.shadows or "pcss")
         pbr_config = {
             "cmd": "set_terrain_pbr",
             "enabled": True,
             "exposure": args.exposure,
-            "shadow_technique": args.shadows,
+            "shadow_technique": shadow_tech,
             "shadow_map_res": args.shadow_map_res,
             "ibl_intensity": args.ibl_intensity,
             "normal_strength": args.normal_strength,
@@ -1077,7 +1083,7 @@ def main() -> int:
         if not resp.get("ok"):
             print(f"PBR config warning: {resp.get('error')}")
         else:
-            features = [f"shadows={args.shadows}", f"exposure={args.exposure}"]
+            features = [f"shadows={shadow_tech}", f"exposure={args.exposure}"]
             if args.height_ao:
                 features.append("height_ao=on")
             if args.sun_vis:

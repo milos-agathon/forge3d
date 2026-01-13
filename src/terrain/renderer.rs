@@ -92,8 +92,10 @@ pub struct TerrainScene {
     shadow_depth_bind_group_layout: wgpu::BindGroupLayout,
     shadow_bind_group_layout: wgpu::BindGroupLayout,
     shadow_pcss_radius: f32,
-    /// P6.2: Shadow technique for terrain shader (0=Hard, 1=PCF, 2=PCSS)
+    /// P6.2: Shadow technique for terrain shader (0=Hard, 1=PCF, 2=PCSS, 3=VSM, 4=EVSM, 5=MSM)
     shadow_technique: u32,
+    /// P6.2: Moment generation pass for VSM/EVSM/MSM techniques
+    moment_pass: Option<crate::shadows::MomentGenerationPass>,
     // P2: Fog bind group layout and buffer
     fog_bind_group_layout: wgpu::BindGroupLayout,
     fog_uniform_buffer: wgpu::Buffer,
@@ -1844,12 +1846,11 @@ impl TerrainScene {
             cascade_count: 4,      // Default, can be overridden by recreating renderer
             shadow_map_size: 2048, // Default, can be overridden by recreating renderer
             max_shadow_distance: 3000.0,
-            cascade_splits: vec![], // Auto-calculate
-            pcf_kernel_size: 3,     // 3x3 PCF for soft shadows
+            pcf_kernel_size: 3,
             depth_bias: 0.0005,     // Will be updated from params at render time
             slope_bias: 0.001,      // Will be updated from params at render time
             peter_panning_offset: 0.0002,
-            enable_evsm: false,
+            enable_evsm: true, // P6.2: Always create moment maps texture for VSM/EVSM/MSM support
             stabilize_cascades: true,
             cascade_blend_range: 0.1,
             debug_mode: shadow_debug_mode, // From FORGE3D_TERRAIN_SHADOW_DEBUG env var
@@ -1931,6 +1932,7 @@ impl TerrainScene {
             shadow_bind_group_layout,
             shadow_pcss_radius: 0.0,
             shadow_technique: 1, // Default to PCF
+            moment_pass: None, // Initialized later when VSM/EVSM/MSM is used
             // P2: Fog bind group layout and buffer
             fog_bind_group_layout,
             fog_uniform_buffer,
@@ -2500,16 +2502,22 @@ impl TerrainScene {
             slope_bias: 0.0,
             shadow_map_size: 1.0,
             debug_mode: 0,
+            evsm_positive_exp: 40.0,
+            evsm_negative_exp: 5.0,
             peter_panning_offset: 0.0,
-            pcss_light_radius: 0.0,
-            cascade_blend_range: 0.0, // No blending needed for noop
+            enable_unclipped_depth: 0,
+            depth_clip_factor: 1.0,
             technique: 1,             // Default to PCF
-            _padding: [0.0; 2],
+            technique_flags: 0,
+            technique_params: [0.0; 4],
+            technique_reserved: [0.0; 4],
+            cascade_blend_range: 0.0, // No blending needed for noop
+            _padding2: [0.0; 14],
         };
         let csm_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain.noop_shadow.csm_uniforms"),
             contents: bytemuck::bytes_of(&csm_uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
+            usage: wgpu::BufferUsages::STORAGE,
         });
 
         // Create 1x1 depth texture array (binding 1: shadow_maps)
@@ -2695,15 +2703,15 @@ impl TerrainScene {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain_pbr_pom.shadow_bind_group_layout"),
             entries: &[
-                // @binding(0): CSM uniforms
-                // Note: no min_binding_size to allow buffers larger than shader struct
+                // @binding(0): CSM uniforms (storage buffer for std430 layout)
+                // Using storage buffer avoids complex std140 alignment issues with arrays of structs
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: None, // Shader validates at bind time
+                        min_binding_size: None,
                     },
                     count: None,
                 },
@@ -3436,21 +3444,27 @@ impl TerrainScene {
             slope_bias: csm.slope_bias,
             shadow_map_size: csm.shadow_map_size,
             debug_mode: csm.debug_mode,
+            evsm_positive_exp: csm.evsm_positive_exp,
+            evsm_negative_exp: csm.evsm_negative_exp,
             peter_panning_offset: csm.peter_panning_offset,
-            pcss_light_radius: self.shadow_pcss_radius,
-            cascade_blend_range: csm.cascade_blend_range,
-            // P6.2: Shadow technique (kept for future use, dispatch now uses pcf_kernel_size)
+            enable_unclipped_depth: csm.enable_unclipped_depth,
+            depth_clip_factor: csm.depth_clip_factor,
+            // P0.2/M3: Shadow technique (VSM/EVSM/MSM now supported)
             technique: self.shadow_technique,
-            _padding: [0.0; 2],
+            technique_flags: csm.technique_flags,
+            technique_params: csm.technique_params,
+            technique_reserved: csm.technique_reserved,
+            cascade_blend_range: csm.cascade_blend_range,
+            _padding2: [0.0; 14],
         };
 
-        // Create buffer with the terrain-compatible uniforms
+        // Create buffer with the terrain-compatible uniforms (storage for std430 layout)
         let terrain_csm_buffer =
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("terrain.shadow.csm_uniforms"),
                     contents: bytemuck::bytes_of(&terrain_csm_uniforms),
-                    usage: wgpu::BufferUsages::UNIFORM,
+                    usage: wgpu::BufferUsages::STORAGE,
                 });
 
         // Create full shadow texture view (array view for all cascades)
@@ -4187,6 +4201,9 @@ impl TerrainScene {
             "HARD" => ShadowTechnique::Hard, // 0 - single sample, hard edges
             "PCF" => ShadowTechnique::PCF,   // 1 - 3x3 kernel, soft edges
             "PCSS" => ShadowTechnique::PCSS, // 2 - 5x5 kernel with light radius scaling
+            "VSM" => ShadowTechnique::VSM,   // 3 - Variance Shadow Maps
+            "EVSM" => ShadowTechnique::EVSM, // 4 - Exponential Variance Shadow Maps
+            "MSM" => ShadowTechnique::MSM,   // 5 - Moment Shadow Maps
             _ => {
                 log::warn!(
                     target: "terrain.shadow",
@@ -4199,6 +4216,24 @@ impl TerrainScene {
         self.csm_renderer.uniforms.technique = technique_enum.as_u32();
         // P6.2: Store technique directly in TerrainScene for reliable passing to shader
         self.shadow_technique = technique_enum.as_u32();
+        
+        // P6.2: Create moment generation pass for VSM/EVSM/MSM if needed
+        let requires_moments = matches!(
+            technique_enum,
+            ShadowTechnique::VSM | ShadowTechnique::EVSM | ShadowTechnique::MSM
+        );
+        if requires_moments && self.moment_pass.is_none() {
+            self.moment_pass = Some(crate::shadows::MomentGenerationPass::new(&self.device));
+            log::info!(
+                target: "terrain.shadow",
+                "Created moment generation pass for technique: {:?}",
+                technique_enum
+            );
+        } else if !requires_moments && self.moment_pass.is_some() {
+            self.moment_pass = None;
+            log::info!(target: "terrain.shadow", "Removed moment generation pass");
+        }
+        
         // Set PCF kernel size based on technique (hard=1, others=3 for soft edges)
         // IMPORTANT: Must set config.pcf_kernel_size because render_shadow_depth_passes
         // copies config.pcf_kernel_size to uniforms.pcf_kernel_size
@@ -4262,6 +4297,40 @@ impl TerrainScene {
                 shadow_far,
                 height_curve,
             );
+            
+            // P6.2: Run moment generation pass for VSM/EVSM/MSM techniques
+            if let Some(ref mut moment_pass) = self.moment_pass {
+                if let Some(moment_texture) = &self.csm_renderer.evsm_maps {
+                    let depth_view = self.csm_renderer.shadow_texture_view();
+                    let moment_view = crate::shadows::create_moment_storage_view(
+                        moment_texture,
+                        self.csm_renderer.config.cascade_count,
+                    );
+                    
+                    moment_pass.prepare_bind_group(&self.device, &depth_view, &moment_view);
+                    
+                    // Convert u32 back to ShadowTechnique for execute call
+                    let technique = ShadowTechnique::from_u32(self.shadow_technique);
+                    
+                    moment_pass.execute(
+                        &self.queue,
+                        &mut encoder,
+                        technique,
+                        self.csm_renderer.config.cascade_count,
+                        self.csm_renderer.config.shadow_map_size,
+                        self.csm_renderer.uniforms.evsm_positive_exp,
+                        self.csm_renderer.uniforms.evsm_negative_exp,
+                    );
+                    
+                    log::debug!(
+                        target: "terrain.shadow",
+                        "Executed moment generation pass for technique {} with {} cascades",
+                        self.shadow_technique,
+                        self.csm_renderer.config.cascade_count
+                    );
+                }
+            }
+            
             _shadow_bind_group_owned = Some(bg);
             _shadow_bind_group_owned.as_ref().unwrap()
         } else {

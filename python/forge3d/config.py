@@ -63,34 +63,30 @@ _BRDF_MODELS: Dict[str, str] = {
 }
 
 # Supported shadow techniques for terrain rendering
-# Note: VSM/EVSM/MSM require moment-based shadow maps not implemented for terrain
+# P0.2/M3: VSM/EVSM/MSM now fully supported with moment-based shadow maps
 _SHADOW_TECHNIQUES: Dict[str, str] = {
     "none": "none",  # P0: Disable shadows entirely
     "hard": "hard",  # Single-sample, hard-edged shadows
     "pcf": "pcf",    # Percentage-closer filtering (soft edges)
     "pcss": "pcss",  # Percentage-closer soft shadows (variable penumbra)
+    "vsm": "vsm",    # Variance shadow maps (soft shadows, potential light leaks)
+    "evsm": "evsm",  # Exponential variance shadow maps (reduced light leaks)
+    "msm": "msm",    # Moment shadow maps (high quality, 4 moments)
 }
 
-# Unsupported techniques that require moment-based shadow maps
-_UNSUPPORTED_SHADOW_TECHNIQUES: set = {"vsm", "evsm", "msm", "csm"}
+# CSM is a pipeline, not a filter technique - provide clear error message
+_UNSUPPORTED_SHADOW_TECHNIQUES: set = {"csm"}
 
 def validate_shadow_technique(technique: str) -> str:
     """Validate shadow technique and provide clear error for unsupported ones."""
     key = _normalize_key(technique)
     if key in _UNSUPPORTED_SHADOW_TECHNIQUES:
         supported = ", ".join(sorted(_SHADOW_TECHNIQUES.keys()))
-        if key == "csm":
-            raise ValueError(
-                f"Shadow technique 'csm' is not a valid filter option. "
-                f"CSM (Cascaded Shadow Maps) is the underlying pipeline used by all techniques. "
-                f"Use --shadows with one of: {supported}"
-            )
-        else:
-            raise ValueError(
-                f"Shadow technique '{technique}' is not implemented for terrain rendering. "
-                f"VSM/EVSM/MSM require moment-based shadow map formats not yet supported. "
-                f"Supported techniques: {supported}"
-            )
+        raise ValueError(
+            f"Shadow technique 'csm' is not a valid filter option. "
+            f"CSM (Cascaded Shadow Maps) is the underlying pipeline used by all techniques. "
+            f"Use --shadow-technique with one of: {supported}"
+        )
     return _normalize_choice(technique, _SHADOW_TECHNIQUES, "shadow technique")
 
 _GI_MODES: Dict[str, str] = {
@@ -466,9 +462,8 @@ class ShadowParams:
         return base
 
     def requires_moments(self) -> bool:
-        # Note: VSM/EVSM/MSM are not supported for terrain rendering
-        # This method returns False for all supported techniques
-        return False
+        """Return True if technique requires moment-based shadow maps (VSM/EVSM/MSM)."""
+        return self.technique in {"vsm", "evsm", "msm"}
 
     def atlas_memory_bytes(self) -> int:
         bpp = 8 if self.requires_moments() else 4
@@ -537,10 +532,8 @@ class RendererConfig:
                 raise ValueError("shadows.map_size must be greater than zero when shadows are enabled")
             if self.shadows.map_size & (self.shadows.map_size - 1) != 0:
                 raise ValueError("shadows.map_size must be a power of two")
-            if self.shadows.technique in {"pcss", "pcf", "vsm", "evsm", "msm", "csm"} and self.shadows.map_size < 256:
+            if self.shadows.technique in {"pcss", "pcf", "vsm", "evsm", "msm"} and self.shadows.map_size < 256:
                 raise ValueError("shadows.map_size should be at least 256 for filtered techniques")
-            if self.shadows.technique == "csm" and self.shadows.cascades < 2:
-                raise ValueError("shadows.cascades must be >= 2 when using cascaded shadow maps")
             if not (1 <= self.shadows.cascades <= 4):
                 raise ValueError("shadows.cascades must be within [1, 4]")
             if self.shadows.technique == "pcss":

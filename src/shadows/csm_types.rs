@@ -86,14 +86,16 @@ pub struct CsmUniforms {
     pub technique: u32,
     /// Technique feature flags (bitmask)
     pub technique_flags: u32,
+    /// Padding to align technique_params to 16-byte boundary
+    pub _padding1: [f32; 3],
     /// Primary technique parameters (pcss radius/filter, moment bias, light size)
     pub technique_params: [f32; 4],
     /// Reserved for future expansions (e.g., MSM tuning)
     pub technique_reserved: [f32; 4],
     /// Cascade blend range (0.0 = no blend, 0.1 = 10% blend at boundaries)
     pub cascade_blend_range: f32,
-    /// Padding for alignment
-    pub _padding2: [f32; 3],
+    /// Padding for std430 alignment (storage buffer) - must reach 864 bytes total
+    pub _padding2: [f32; 27],  // Additional padding: 108 bytes to reach 864 total
 }
 
 impl Default for CsmUniforms {
@@ -122,10 +124,11 @@ impl Default for CsmUniforms {
             depth_clip_factor: 1.0,
             technique: ShadowTechnique::PCF.as_u32(),
             technique_flags: 0,
-            technique_params: [0.0; 4],
+            _padding1: [0.0; 3],
+            technique_params: [0.0, 0.0, 0.0005, 1.0],
             technique_reserved: [0.0; 4],
-            cascade_blend_range: 0.0,
-            _padding2: [0.0; 3],
+            cascade_blend_range: 0.1,
+            _padding2: [0.0; 27],
         }
     }
 }

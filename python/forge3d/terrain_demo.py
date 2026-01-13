@@ -167,8 +167,10 @@ def _build_renderer_config(args: Any):
     overrides["exposure"] = float(args.exposure)
     if getattr(args, "brdf", None):
         overrides["brdf"] = args.brdf
-    if getattr(args, "shadows", None):
-        overrides["shadows"] = args.shadows
+    # P0.2/M3: Handle shadow_technique (new) or shadows (legacy alias)
+    shadow_tech = getattr(args, "shadow_technique", None) or getattr(args, "shadows", None)
+    if shadow_tech:
+        overrides["shadows"] = shadow_tech
     if getattr(args, "shadow_map_res", None) is not None:
         overrides["shadow_map_res"] = int(args.shadow_map_res)
     if getattr(args, "cascades", None) is not None:

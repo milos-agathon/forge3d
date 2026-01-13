@@ -127,8 +127,16 @@ impl CsmRenderer {
         let near_dist = splits[idx];
         let far_dist = splits[idx + 1];
 
+        // Convert view distances to NDC depth for WGPU's [0,1] depth range
+        // For perspective projection: ndc_z = (far * (z - near)) / (z * (far - near))
+        // Using near=1.0 (matches render_shadow_passes) and far=far_plane
+        let proj_near = 1.0_f32;
+        let proj_far = far_plane;
+        let near_ndc = (proj_far * (near_dist - proj_near)) / (near_dist * (proj_far - proj_near));
+        let far_ndc = (proj_far * (far_dist - proj_near)) / (far_dist * (proj_far - proj_near));
+        
         let frustum_corners =
-            calculate_frustum_corners(inv_view_proj, near_dist / far_plane, far_dist / far_plane);
+            calculate_frustum_corners(inv_view_proj, near_ndc.clamp(0.0, 1.0), far_ndc.clamp(0.0, 1.0));
 
         let (mut min_bounds, mut max_bounds) =
             calculate_light_space_bounds(&frustum_corners, light_view);
@@ -141,13 +149,18 @@ impl CsmRenderer {
                 snap_bounds_to_texel_grid(min_bounds, max_bounds, self.config.shadow_map_size);
         }
 
+        // Expand bounds significantly to include shadow casters behind the camera frustum
+        // For terrain, objects far from the camera can still cast shadows into the visible area
+        let z_expansion = (max_bounds.z - min_bounds.z).abs().max(1000.0) * 2.0;
+        let xy_expansion = (max_bounds.x - min_bounds.x).abs().max(500.0) * 0.5;
+        
         let light_projection = Mat4::orthographic_rh(
-            min_bounds.x,
-            max_bounds.x,
-            min_bounds.y,
-            max_bounds.y,
-            -max_bounds.z - 50.0,
-            -min_bounds.z,
+            min_bounds.x - xy_expansion,
+            max_bounds.x + xy_expansion,
+            min_bounds.y - xy_expansion,
+            max_bounds.y + xy_expansion,
+            -max_bounds.z - z_expansion,
+            -min_bounds.z + z_expansion,
         );
 
         let light_view_proj = light_projection * light_view;
@@ -347,6 +360,7 @@ fn create_evsm_maps(device: &Device, config: &CsmConfig) -> Option<Texture> {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
+            // Use Rgba16Float for moment maps (VSM/EVSM/MSM)
             format: TextureFormat::Rgba16Float,
             usage: TextureUsages::RENDER_ATTACHMENT
                 | TextureUsages::TEXTURE_BINDING

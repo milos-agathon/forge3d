@@ -69,7 +69,7 @@ impl MomentGenerationPass {
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba32Float,
+                        format: TextureFormat::Rgba16Float,
                         view_dimension: TextureViewDimension::D2Array,
                     },
                     count: None,
@@ -201,7 +201,7 @@ impl MomentGenerationPass {
 pub fn create_moment_storage_view(moment_texture: &Texture, cascade_count: u32) -> TextureView {
     moment_texture.create_view(&wgpu::TextureViewDescriptor {
         label: Some("moment_storage_view"),
-        format: Some(TextureFormat::Rgba32Float),
+        format: Some(TextureFormat::Rgba16Float),
         dimension: Some(TextureViewDimension::D2Array),
         aspect: wgpu::TextureAspect::All,
         base_mip_level: 0,

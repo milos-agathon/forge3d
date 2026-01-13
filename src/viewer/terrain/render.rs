@@ -2,6 +2,8 @@
 // Terrain rendering for the interactive viewer
 
 use super::scene::ViewerTerrainScene;
+use crate::lighting::shadow::ShadowTechnique;
+use crate::shadows::CsmUniforms;
 
 /// Shader for accumulating frames (additive blend)
 const ACCUMULATE_SHADER: &str = r#"
@@ -39,6 +41,17 @@ pub(super) struct TerrainUniforms {
     pub lighting: [f32; 4],
     pub background: [f32; 4],
     pub water_color: [f32; 4],
+}
+
+/// Shadow pass uniforms for depth-only terrain rendering (per cascade)
+/// Must match ShadowPassUniforms in terrain_shadow_depth.wgsl exactly (112 bytes)
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ShadowPassUniforms {
+    pub light_view_proj: [[f32; 4]; 4],  // 64 bytes
+    pub terrain_params: [f32; 4],         // 16 bytes: spacing, height_exag, height_min, height_max
+    pub grid_params: [f32; 4],            // 16 bytes: grid_resolution, _pad, _pad, _pad
+    pub height_curve: [f32; 4],           // 16 bytes: mode, strength, power, _pad
 }
 
 /// Extended uniforms for PBR terrain shader
@@ -88,6 +101,155 @@ impl ViewerTerrainScene {
             }));
             self.depth_texture = Some(tex);
             self.depth_size = (width, height);
+        }
+    }
+
+    /// Render shadow depth passes for all cascades
+    /// Must be called before the main terrain render pass
+    pub fn render_shadow_passes(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        camera_view: glam::Mat4,
+        camera_proj: glam::Mat4,
+        sun_direction: glam::Vec3,
+    ) {
+        // Early exit if shadow infrastructure not ready
+        let csm = match self.csm_renderer.as_mut() {
+            Some(c) => c,
+            None => return,
+        };
+        
+        let terrain = match self.terrain.as_ref() {
+            Some(t) => t,
+            None => return,
+        };
+        
+        if self.shadow_pipeline.is_none() || self.shadow_bind_groups.is_empty() {
+            return;
+        }
+        
+        let cascade_count = csm.config.cascade_count;
+        let shadow_map_size = csm.config.shadow_map_size;
+        
+        // Mark that shadow passes are running (will be copied to csm_uniforms later)
+        csm.uniforms.technique_reserved[0] = 1.0; // Flag: shadow passes executed
+        
+        // Update CSM cascade matrices based on camera and light
+        let near_plane = 1.0;
+        let far_plane = csm.config.max_shadow_distance;
+        csm.update_cascades(camera_view, camera_proj, sun_direction, near_plane, far_plane);
+        
+        // Get terrain parameters for shadow pass uniforms
+        let (min_h, max_h) = terrain.domain;
+        let terrain_span = terrain.dimensions.0.max(terrain.dimensions.1) as f32;
+        
+        let z_scale = terrain.z_scale;
+        let grid_res = 512u32; // Shadow pass grid resolution
+        
+        // Height curve params: use linear (mode=0) with no curve transformation
+        // This matches the default terrain rendering behavior
+        let height_curve_mode = 0.0_f32;    // 0=linear
+        let height_curve_strength = 0.0_f32; // No curve applied
+        let height_curve_power = 1.0_f32;    // Default power
+        
+        // Compute a terrain-covering light view-projection matrix
+        // The cascade's light_view_proj is based on camera frustum which doesn't cover full terrain
+        // We need a projection that covers the entire terrain from light's perspective
+        let terrain_height = (max_h - min_h) * z_scale;
+        let terrain_center = glam::Vec3::new(terrain_span * 0.5, terrain_height * 0.5, terrain_span * 0.5);
+        let light_distance = terrain_span * 2.0;  // Place light far enough to see entire terrain
+        let light_pos = terrain_center - sun_direction * light_distance;
+        let light_view = glam::Mat4::look_at_rh(light_pos, terrain_center, glam::Vec3::Y);
+        
+        // Orthographic projection covering terrain bounds with margin
+        let half_extent = terrain_span * 0.75;  // Cover terrain with some margin
+        let terrain_light_proj = glam::Mat4::orthographic_rh(
+            -half_extent, half_extent,
+            -half_extent, half_extent,
+            0.1, light_distance * 2.0 + terrain_span,
+        );
+        let terrain_light_view_proj = terrain_light_proj * light_view;
+        let terrain_light_view_proj_arr = terrain_light_view_proj.to_cols_array_2d();
+        
+        // Render each cascade
+        for cascade_idx in 0..cascade_count as usize {
+            if cascade_idx >= self.shadow_bind_groups.len() || cascade_idx >= self.shadow_uniform_buffers.len() {
+                break;
+            }
+            
+            // Use terrain-covering projection for shadow depth pass
+            // This ensures the entire terrain is rendered to shadow map, not just camera frustum portion
+            let light_view_proj = terrain_light_view_proj_arr;
+            
+            // Build shadow pass uniforms
+            // Match main shader terrain_params layout: [min_h, h_range, terrain_width, z_scale]
+            let shadow_uniforms = ShadowPassUniforms {
+                light_view_proj,
+                terrain_params: [min_h, max_h - min_h, terrain_span, z_scale],
+                grid_params: [grid_res as f32, 0.0, 0.0, 0.0],
+                height_curve: [height_curve_mode, height_curve_strength, height_curve_power, 0.0],
+            };
+            
+            // Upload uniforms
+            self.queue.write_buffer(
+                &self.shadow_uniform_buffers[cascade_idx],
+                0,
+                bytemuck::cast_slice(&[shadow_uniforms]),
+            );
+            
+            // Get shadow map view for this cascade
+            let shadow_map_view = &csm.shadow_map_views[cascade_idx];
+            
+            // Begin depth-only render pass for this cascade
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some(&format!("shadow_depth_pass_cascade_{}", cascade_idx)),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: shadow_map_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            
+            render_pass.set_pipeline(self.shadow_pipeline.as_ref().unwrap());
+            render_pass.set_bind_group(0, &self.shadow_bind_groups[cascade_idx], &[]);
+            
+            // Draw terrain grid (6 vertices per quad, (grid_res-1)^2 quads)
+            let vertex_count = 6 * (grid_res - 1) * (grid_res - 1);
+            render_pass.draw(0..vertex_count, 0..1);
+        }
+        
+        // Execute moment generation pass for VSM/EVSM/MSM techniques
+        // This converts the depth maps into moment statistics
+        let technique = match self.pbr_config.shadow_technique.to_lowercase().as_str() {
+            "vsm" => crate::lighting::shadow::ShadowTechnique::VSM,
+            "evsm" => crate::lighting::shadow::ShadowTechnique::EVSM,
+            "msm" => crate::lighting::shadow::ShadowTechnique::MSM,
+            _ => return, // No moment generation needed for HARD/PCF/PCSS
+        };
+        
+        // Prepare and execute moment pass if we have the resources
+        if let (Some(ref mut moment_pass), Some(ref csm)) = (&mut self.moment_pass, &self.csm_renderer) {
+            if let Some(ref moment_texture) = csm.evsm_maps {
+                let depth_view = csm.shadow_texture_view();
+                let moment_view = crate::shadows::create_moment_storage_view(moment_texture, cascade_count);
+                
+                moment_pass.prepare_bind_group(&self.device, &depth_view, &moment_view);
+                moment_pass.execute(
+                    &self.queue,
+                    encoder,
+                    technique,
+                    cascade_count,
+                    shadow_map_size,
+                    csm.config.evsm_positive_exp,
+                    csm.config.evsm_negative_exp,
+                );
+            }
         }
     }
 
@@ -155,18 +317,29 @@ impl ViewerTerrainScene {
             }
         }
         
-        let terrain = self.terrain.as_ref().unwrap();
-
-        let phi = terrain.cam_phi_deg.to_radians();
-        let theta = terrain.cam_theta_deg.to_radians();
-        let r = terrain.cam_radius;
-        let (tw, th) = terrain.dimensions;
+        // Extract all terrain values we need before any mutable operations
+        let (phi, theta, r, tw, th, terrain_z_scale, domain, fov_deg, sun_azimuth_deg, sun_elevation_deg) = {
+            let terrain = self.terrain.as_ref().unwrap();
+            (
+                terrain.cam_phi_deg.to_radians(),
+                terrain.cam_theta_deg.to_radians(),
+                terrain.cam_radius,
+                terrain.dimensions.0,
+                terrain.dimensions.1,
+                terrain.z_scale,
+                terrain.domain,
+                terrain.cam_fov_deg,
+                terrain.sun_azimuth_deg,
+                terrain.sun_elevation_deg,
+            )
+        };
+        
         let terrain_width = tw.max(th) as f32;
-        let h_range = terrain.domain.1 - terrain.domain.0;
-        let legacy_z_scale = terrain.z_scale * h_range * 1000.0 / terrain_width.max(1.0);
-        let shader_z_scale = if use_pbr { terrain.z_scale } else { legacy_z_scale };
+        let h_range = domain.1 - domain.0;
+        let legacy_z_scale = terrain_z_scale * h_range * 1000.0 / terrain_width.max(1.0);
+        let shader_z_scale = if use_pbr { terrain_z_scale } else { legacy_z_scale };
         let center_y = if use_pbr {
-            h_range * terrain.z_scale * 0.5
+            h_range * terrain_z_scale * 0.5
         } else {
             terrain_width * legacy_z_scale * 0.001 * 0.5
         };
@@ -184,15 +357,15 @@ impl ViewerTerrainScene {
 
         let view_mat = glam::Mat4::look_at_rh(eye, center, glam::Vec3::Y);
         let proj = glam::Mat4::perspective_rh(
-            terrain.cam_fov_deg.to_radians(),
+            fov_deg.to_radians(),
             width as f32 / height as f32,
             1.0,
             r * 10.0,
         );
         let view_proj = proj * view_mat;
 
-        let sun_az = terrain.sun_azimuth_deg.to_radians();
-        let sun_el = terrain.sun_elevation_deg.to_radians();
+        let sun_az = sun_azimuth_deg.to_radians();
+        let sun_el = sun_elevation_deg.to_radians();
         let sun_dir = glam::Vec3::new(
             sun_el.cos() * sun_az.sin(),
             sun_el.sin(),
@@ -200,19 +373,35 @@ impl ViewerTerrainScene {
         )
         .normalize();
 
+        // Initialize shadow depth pipeline if PBR mode with shadows enabled
+        if use_pbr && self.shadow_pipeline.is_none() {
+            self.init_shadow_depth_pipeline();
+            self.update_shadow_bind_groups();
+        }
+        
+        // Render shadow depth passes before main terrain render
+        if use_pbr && self.shadow_pipeline.is_some() {
+            self.render_shadow_passes(encoder, view_mat, proj, -sun_dir);
+        } else if use_pbr {
+            eprintln!("[render] Skipping shadow passes: pipeline={}", self.shadow_pipeline.is_some());
+        }
+        
         // Debug: print uniform values on first render
         static ONCE: std::sync::Once = std::sync::Once::new();
         ONCE.call_once(|| {
             println!("[render] terrain_params: min_h={:.1}, h_range={:.1}, width={:.1}, z_scale={:.2}",
-                terrain.domain.0, h_range, terrain_width, shader_z_scale);
+                domain.0, h_range, terrain_width, shader_z_scale);
             let max_y = if use_pbr {
-                h_range * terrain.z_scale
+                h_range * terrain_z_scale
             } else {
                 terrain_width * legacy_z_scale * 0.001
             };
             println!("[render] Expected Y range: 0 to {:.1}", max_y);
             println!("[render] Camera center: ({:.1}, {:.1}, {:.1})", center.x, center.y, center.z);
         });
+        
+        // Re-borrow terrain for the remaining operations
+        let terrain = self.terrain.as_ref().unwrap();
 
         let uniforms = TerrainUniforms {
             view_proj: view_proj.to_cols_array_2d(),
@@ -1823,9 +2012,129 @@ impl ViewerTerrainScene {
         // Get overlay view and sampler from stack
         // ensure_fallback_texture() guarantees composite_view is Some (either actual composite or RGBA fallback)
         let overlay_stack = self.overlay_stack.as_ref().unwrap();
-        let overlay_view = overlay_stack.composite_view()
+        let overlay_view = overlay_stack
+            .composite_view()
             .expect("overlay composite_view should exist after ensure_fallback_texture");
         let overlay_sampler = overlay_stack.sampler();
+
+        // Get CSM shadow resources - create fallbacks if they don't exist
+        let (shadow_view, moment_view, shadow_sampler) = if let Some(csm) = self.csm_renderer.as_ref() {
+            let shadow_view = csm.shadow_texture_view();
+            if let Some(moment_view) = csm.moment_texture_view() {
+                (shadow_view, moment_view, &csm.shadow_sampler)
+            } else {
+                eprintln!("[WARN] CSM moment maps not created - using fallback");
+                // Create fallback moment texture
+                let fallback = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("csm_moment_fallback"),
+                    size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 4 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let moment_view = fallback.create_view(&wgpu::TextureViewDescriptor {
+                    dimension: Some(wgpu::TextureViewDimension::D2Array),
+                    ..Default::default()
+                });
+                (shadow_view, moment_view, &csm.shadow_sampler)
+            }
+        } else {
+            eprintln!("[ERROR] CSM renderer not initialized - cannot create PBR bind group");
+            return;
+        };
+        
+        // Moment sampler (Filtering)
+        // We can use the existing pbr sampler (linear) or create a new one. 
+        // csm_renderer doesn't expose a dedicated moment sampler, but it uses Linear/Linear.
+        // Let's use the one we created above 'sampler' which is Linear/Nearest/Clamp.
+        // Or better, creating a dedicated one matching CSM requirements.
+        
+        let moment_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("csm.moment.sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let csm_buffer = if let Some(buf) = &self.csm_uniform_buffer {
+            buf
+        } else {
+            return;
+        };
+        
+        // P6.2: Write CSM uniforms with technique value from pbr_config
+        // Map shadow technique string to enum value
+        let technique = match self.pbr_config.shadow_technique.to_lowercase().as_str() {
+            "hard" => ShadowTechnique::Hard,
+            "pcf" => ShadowTechnique::PCF,
+            "pcss" => ShadowTechnique::PCSS,
+            "vsm" => ShadowTechnique::VSM,
+            "evsm" => ShadowTechnique::EVSM,
+            "msm" => ShadowTechnique::MSM,
+            _ => ShadowTechnique::PCF, // default
+        };
+        
+        // Build CSM uniforms with current technique
+        // Use cascade data from CSM renderer if shadow depth passes have been rendered
+        let debug_mode = self.pbr_config.debug_mode;
+        let csm_uniforms = if let Some(ref csm) = self.csm_renderer {
+            // Copy uniforms from CSM renderer (populated by render_shadow_passes)
+            let mut u = csm.uniforms;
+            u.technique = technique.as_u32();
+            u.pcf_kernel_size = match technique {
+                ShadowTechnique::Hard => 1,
+                ShadowTechnique::PCSS => 5,
+                _ => 3,
+            };
+            u.technique_params = [0.0, 0.0, 0.0005, 1.0]; // moment_bias, light_size
+            u.debug_mode = debug_mode; // P6.2: Debug visualization from pbr_config
+            u
+        } else {
+            // Fallback: no shadow depth passes, cascade_count=0 triggers soft shadow fallback
+            let mut u = CsmUniforms::default();
+            u.technique = technique.as_u32();
+            u.cascade_count = 0;
+            u.shadow_map_size = self.pbr_config.shadow_map_res as f32;
+            u.pcf_kernel_size = match technique {
+                ShadowTechnique::Hard => 1,
+                ShadowTechnique::PCSS => 5,
+                _ => 3,
+            };
+            u.depth_bias = 0.005;
+            u.slope_bias = 0.01;
+            u.peter_panning_offset = 0.001;
+            u.evsm_positive_exp = 40.0;
+            u.evsm_negative_exp = 5.0;
+            u.technique_params = [0.0, 0.0, 0.0005, 1.0];
+            u.debug_mode = debug_mode; // P6.2: Debug visualization from pbr_config
+            
+            // Set up default cascade far distances for cascade selection
+            let terrain_scale = terrain.dimensions.0.max(terrain.dimensions.1) as f32;
+            let base_distance = terrain_scale * 0.1;
+            for (i, cascade) in u.cascades.iter_mut().enumerate() {
+                cascade.far_distance = base_distance * (2.0_f32).powi(i as i32 + 1);
+            }
+            u
+        };
+        
+        // Write CSM uniforms to buffer
+        // Debug: log uniform values
+        static CSM_ONCE: std::sync::Once = std::sync::Once::new();
+        CSM_ONCE.call_once(|| {
+            println!("[csm_uniforms] cascade_count={}, technique={}, shadow_map_size={}", 
+                csm_uniforms.cascade_count, csm_uniforms.technique, csm_uniforms.shadow_map_size);
+            for (i, c) in csm_uniforms.cascades.iter().enumerate().take(csm_uniforms.cascade_count as usize) {
+                println!("[csm_uniforms] cascade[{}] far_distance={:.1}", i, c.far_distance);
+            }
+        });
+        self.queue.write_buffer(csm_buffer, 0, bytemuck::cast_slice(&[csm_uniforms]));
         
         if let Some(ref buf) = self.pbr_uniform_buffer {
             self.pbr_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1859,6 +2168,26 @@ impl ViewerTerrainScene {
                     wgpu::BindGroupEntry {
                         binding: 6,
                         resource: wgpu::BindingResource::Sampler(overlay_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::TextureView(&shadow_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::Sampler(shadow_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: wgpu::BindingResource::TextureView(&moment_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: wgpu::BindingResource::Sampler(&moment_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: csm_buffer.as_entire_binding(),
                     },
                 ],
             }));

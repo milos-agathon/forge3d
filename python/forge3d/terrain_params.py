@@ -68,12 +68,11 @@ class ShadowSettings:
     pcss_light_radius: float = 0.0
 
     # Shadow technique constants matching Rust ShadowTechnique enum
-    # ALL_TECHNIQUES: Full set recognized by config layer (for forward compatibility)
+    # ALL_TECHNIQUES: Full set recognized by config layer
     ALL_TECHNIQUES = {"NONE", "HARD", "PCF", "PCSS", "VSM", "EVSM", "MSM"}
-    # TERRAIN_SUPPORTED_TECHNIQUES: Actually implemented in terrain_pbr_pom.wgsl
-    # VSM/EVSM/MSM require moment-map sampling which is NOT implemented in terrain shader
-    # Note: CSM is the pipeline, not a filter - use HARD/PCF/PCSS as the technique
-    TERRAIN_SUPPORTED_TECHNIQUES = {"NONE", "HARD", "PCF", "PCSS"}
+    # P0.2/M3: TERRAIN_SUPPORTED_TECHNIQUES now includes VSM/EVSM/MSM
+    # Note: CSM is the pipeline, not a filter - use HARD/PCF/PCSS/VSM/EVSM/MSM as the technique
+    TERRAIN_SUPPORTED_TECHNIQUES = {"NONE", "HARD", "PCF", "PCSS", "VSM", "EVSM", "MSM"}
     # Alias for backwards compatibility
     SUPPORTED_TECHNIQUES = ALL_TECHNIQUES
     # Memory budget: 512 MiB host-visible heap (AGENTS.md constraint)

@@ -193,12 +193,17 @@ impl ShadowMapping {
                 slope_bias: self.config.slope_bias,
                 shadow_map_size: self.config.shadow_map_size as f32,
                 debug_mode: self.config.debug_mode,
-                peter_panning_offset: 0.001, // Default peter-panning offset
-                pcss_light_radius: 0.0,
-                cascade_blend_range: 0.1, // 10% blend at cascade boundaries
-                // P6.2: Shadow technique (default to PCF)
+                evsm_positive_exp: 40.0,
+                evsm_negative_exp: 5.0,
+                peter_panning_offset: 0.001,
+                enable_unclipped_depth: 0,
+                depth_clip_factor: 1.0,
                 technique: 1, // PCF
-                _padding: [0.0; 2],
+                technique_flags: 0,
+                technique_params: [0.0; 4],
+                technique_reserved: [0.0; 4],
+                cascade_blend_range: 0.1,
+                _padding2: [0.0; 14],
             };
 
             queue.write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));

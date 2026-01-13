@@ -4,6 +4,7 @@
 use super::render::TerrainUniforms;
 use super::shader::TERRAIN_SHADER;
 use super::vector_overlay::{VectorOverlayStack, VectorOverlayLayer, VectorVertex, drape_vertices};
+use crate::shadows::{CsmConfig, CsmRenderer};
 use anyhow::Result;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -158,6 +159,15 @@ pub struct ViewerTerrainScene {
     pub(super) wboit_compose_bind_group_layout: Option<wgpu::BindGroupLayout>,
     pub(super) wboit_sampler: Option<wgpu::Sampler>,
     pub(super) wboit_size: (u32, u32),
+    // P6.2: Shadow mapping support
+    pub(super) csm_renderer: Option<crate::shadows::CsmRenderer>,
+    pub(super) moment_pass: Option<crate::shadows::MomentGenerationPass>,
+    pub(super) csm_uniform_buffer: Option<wgpu::Buffer>,
+    
+    // Shadow rendering resources
+    pub(super) shadow_pipeline: Option<wgpu::RenderPipeline>,
+    pub(super) shadow_uniform_buffers: Vec<wgpu::Buffer>, // One per cascade
+    pub(super) shadow_bind_groups: Vec<wgpu::BindGroup>,  // One per cascade
 }
 
 impl ViewerTerrainScene {
@@ -306,6 +316,12 @@ impl ViewerTerrainScene {
             wboit_compose_bind_group_layout: None,
             wboit_sampler: None,
             wboit_size: (0, 0),
+            csm_renderer: None,
+            moment_pass: None,
+            csm_uniform_buffer: None,
+            shadow_pipeline: None,
+            shadow_uniform_buffers: Vec::new(),
+            shadow_bind_groups: Vec::new(),
         })
     }
     
@@ -430,6 +446,292 @@ impl ViewerTerrainScene {
             },
         ));
     }
+
+    /// P6.2: Initialize Shadow Mapping (CSM) resources
+    pub fn init_shadows(&mut self) {
+        if self.csm_renderer.is_some() {
+            return;
+        }
+
+        // Create CSM renderer with default configuration
+        let shadow_debug_mode = crate::core::shadows::parse_shadow_debug_env();
+        let csm_config = CsmConfig {
+            cascade_count: 4,
+            shadow_map_size: 2048, // Matches default in PbrConfig
+            max_shadow_distance: 50000.0, // Large enough to cover terrain at any camera distance
+            pcf_kernel_size: 3,
+            depth_bias: 0.0005,
+            slope_bias: 0.001,
+            peter_panning_offset: 0.0002,
+            enable_evsm: true, // P6.2: Enable moment maps for VSM/EVSM/MSM
+            stabilize_cascades: true,
+            cascade_blend_range: 0.1,
+            debug_mode: shadow_debug_mode,
+            ..Default::default()
+        };
+
+        let csm = CsmRenderer::new(&self.device, csm_config);
+        println!("[terrain_scene] CSM renderer created, has_moment_maps={}", csm.evsm_maps.is_some());
+        self.csm_renderer = Some(csm);
+        
+        // Create CSM uniform buffer - must match WGSL CsmUniforms struct size
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("terrain_viewer.csm_uniforms"),
+            size: std::mem::size_of::<crate::shadows::CsmUniforms>() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, // ReadOnlyStorage in shader
+            mapped_at_creation: false,
+        });
+        self.csm_uniform_buffer = Some(buffer);
+        
+        // Initialize MomentGenerationPass for VSM/EVSM/MSM techniques
+        self.moment_pass = Some(crate::shadows::MomentGenerationPass::new(&self.device));
+        
+        println!("[terrain_scene] Shadows initialized (VSM/EVSM/MSM enabled)");
+    }
+    
+    /// Initialize shadow depth render pipeline for CSM shadow passes
+    pub fn init_shadow_depth_pipeline(&mut self) {
+        if self.shadow_pipeline.is_some() {
+            return;
+        }
+        
+        // Must have CSM renderer initialized first
+        if self.csm_renderer.is_none() {
+            self.init_shadows();
+        }
+        
+        let csm = self.csm_renderer.as_ref().unwrap();
+        let cascade_count = csm.config.cascade_count as usize;
+        
+        // Create bind group layout for shadow depth pass
+        let shadow_bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain_viewer.shadow_depth.bind_group_layout"),
+            entries: &[
+                // Uniform buffer (ShadowPassUniforms)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Heightmap texture (R32Float is non-filterable, use textureLoad in shader)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Heightmap sampler (non-filtering for R32Float compatibility)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+            ],
+        });
+        
+        // Create shader module
+        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain_viewer.shadow_depth.shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/terrain_shadow_depth.wgsl").into()),
+        });
+        
+        // Create pipeline layout
+        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain_viewer.shadow_depth.pipeline_layout"),
+            bind_group_layouts: &[&shadow_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        
+        // Create depth-only render pipeline
+        let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("terrain_viewer.shadow_depth.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_shadow",
+                buffers: &[], // Vertices generated procedurally from vertex_index
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_shadow",
+                targets: &[], // Depth-only, no color attachments
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,  // Disable culling - light view may flip winding
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 2, // Small bias to prevent shadow acne
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+        
+        self.shadow_pipeline = Some(pipeline);
+        
+        // Create per-cascade uniform buffers
+        self.shadow_uniform_buffers.clear();
+        for i in 0..cascade_count {
+            let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("terrain_viewer.shadow_uniforms_{}", i)),
+                size: std::mem::size_of::<super::render::ShadowPassUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.shadow_uniform_buffers.push(buffer);
+        }
+        
+        // Create sampler for heightmap (non-filtering for R32Float compatibility)
+        let height_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain_viewer.shadow_depth.height_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        
+        // Create per-cascade bind groups (will be recreated when terrain loads)
+        // For now, store the layout for later use
+        self.shadow_bind_groups.clear();
+        
+        // Store layout for bind group creation when terrain is available
+        if let Some(ref terrain) = self.terrain {
+            for i in 0..cascade_count {
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("terrain_viewer.shadow_bind_group_{}", i)),
+                    layout: &shadow_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: self.shadow_uniform_buffers[i].as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&terrain.heightmap_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&height_sampler),
+                        },
+                    ],
+                });
+                self.shadow_bind_groups.push(bind_group);
+            }
+        }
+        
+        println!("[terrain_scene] Shadow depth pipeline initialized ({} cascades)", cascade_count);
+    }
+    
+    /// Recreate shadow bind groups when terrain is loaded/changed
+    pub fn update_shadow_bind_groups(&mut self) {
+        let terrain = match self.terrain.as_ref() {
+            Some(t) => t,
+            None => return,
+        };
+        
+        let csm = match self.csm_renderer.as_ref() {
+            Some(c) => c,
+            None => return,
+        };
+        
+        if self.shadow_pipeline.is_none() || self.shadow_uniform_buffers.is_empty() {
+            return;
+        }
+        
+        let cascade_count = csm.config.cascade_count as usize;
+        
+        // Recreate bind group layout (needed for bind group creation)
+        let shadow_bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain_viewer.shadow_depth.bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+            ],
+        });
+        
+        let height_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain_viewer.shadow_depth.height_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        
+        self.shadow_bind_groups.clear();
+        for i in 0..cascade_count {
+            if i >= self.shadow_uniform_buffers.len() {
+                break;
+            }
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("terrain_viewer.shadow_bind_group_{}", i)),
+                layout: &shadow_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.shadow_uniform_buffers[i].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&terrain.heightmap_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&height_sampler),
+                    },
+                ],
+            });
+            self.shadow_bind_groups.push(bind_group);
+        }
+    }
     
     /// P0.1/M1: Initialize WBOIT resources for given dimensions
     /// Creates size-dependent textures and bind group for interactive rendering
@@ -553,6 +855,9 @@ impl ViewerTerrainScene {
             return Ok(()); // Already initialized
         }
 
+        // P6.2: Initialize shadows
+        self.init_shadows();
+
         let pbr_bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain_viewer_pbr.bind_group_layout"),
             entries: &[
@@ -620,6 +925,53 @@ impl ViewerTerrainScene {
                     binding: 6,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // P6.2: Shadow Map Array (Depth)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // P6.2: Shadow Sampler (Comparison)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+                // P6.2: Moment Map Array (Float, for VSM/EVSM/MSM)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // P6.2: Moment Sampler (Filtering)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // P6.2: CSM Uniforms (Storage Buffer)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     count: None,
                 },
             ],

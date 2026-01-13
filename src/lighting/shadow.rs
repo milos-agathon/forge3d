@@ -21,6 +21,19 @@ impl ShadowTechnique {
     pub fn as_u32(self) -> u32 {
         self as u32
     }
+    
+    pub fn from_u32(value: u32) -> Self {
+        match value {
+            0 => ShadowTechnique::Hard,
+            1 => ShadowTechnique::PCF,
+            2 => ShadowTechnique::PCSS,
+            3 => ShadowTechnique::VSM,
+            4 => ShadowTechnique::EVSM,
+            5 => ShadowTechnique::MSM,
+            6 => ShadowTechnique::CSM,
+            _ => ShadowTechnique::PCF, // Default fallback
+        }
+    }
 
     pub fn name(&self) -> &'static str {
         match self {

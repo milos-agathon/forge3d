@@ -291,6 +291,16 @@ fn build_csm_uniforms(
         slope_bias: config.slope_bias,
         shadow_map_size: config.shadow_map_size as f32,
         debug_mode,
-        _padding: [0.0; 2],
+        evsm_positive_exp: 40.0,
+        evsm_negative_exp: 5.0,
+        peter_panning_offset: 0.001,
+        enable_unclipped_depth: 0,
+        depth_clip_factor: 1.0,
+        technique: 1, // PCF
+        technique_flags: 0,
+        technique_params: [0.0; 4],
+        technique_reserved: [0.0; 4],
+        cascade_blend_range: 0.0,
+        _padding2: [0.0; 14],
     }
 }
