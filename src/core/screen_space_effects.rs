@@ -491,8 +491,15 @@ pub struct CameraParams {
     pub inv_view_matrix: [[f32; 4]; 4],
     pub proj_matrix: [[f32; 4]; 4],
     pub inv_proj_matrix: [[f32; 4]; 4],
+    /// P1.1: Previous frame's view_proj matrix for motion vector computation
+    pub prev_view_proj_matrix: [[f32; 4]; 4],
     pub camera_pos: [f32; 3],
-    pub _pad: f32,
+    /// Frame index for temporal effects
+    pub frame_index: u32,
+    /// P1.2: Sub-pixel jitter offset for TAA (in pixel units, [-0.5, 0.5])
+    pub jitter_offset: [f32; 2],
+    /// Padding to maintain 16-byte alignment
+    pub _pad_jitter: [f32; 2],
 }
 
 impl Default for CameraParams {
@@ -508,8 +515,11 @@ impl Default for CameraParams {
             inv_view_matrix: identity,
             proj_matrix: identity,
             inv_proj_matrix: identity,
+            prev_view_proj_matrix: identity,
             camera_pos: [0.0, 0.0, 0.0],
-            _pad: 0.0,
+            frame_index: 0,
+            jitter_offset: [0.0, 0.0],
+            _pad_jitter: [0.0, 0.0],
         }
     }
 }

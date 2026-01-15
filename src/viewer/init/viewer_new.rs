@@ -291,6 +291,12 @@ impl Viewer {
             // P0.1/M1: OIT (Order-Independent Transparency) - disabled by default
             oit_enabled: false,
             oit_mode: "auto".to_string(),
+            // P1.1: Previous frame view-projection matrix for motion vectors
+            prev_view_proj: glam::Mat4::IDENTITY,
+            // P1.2: TAA jitter state (disabled by default, enable via IPC or config)
+            taa_jitter: crate::core::jitter::JitterState::new(),
+            // P1.3: TAA renderer (initialized lazily when enabled)
+            taa_renderer: None,
         };
 
         viewer.sync_ssr_params_to_gi();

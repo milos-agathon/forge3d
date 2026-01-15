@@ -16,21 +16,11 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.9.5 — Production-ready shadow filtering with seven fully validated techniques including variance-based methods (VSM/EVSM/MSM) featuring configurable blur, light bleeding controls, and comprehensive quality validation.
+Current release: 1.9.6 — Temporal Anti-Aliasing (TAA) foundation with motion vectors, Halton jitter sequences, and history buffer reprojection enabling shimmer-free rendering on thin geometry and camera motion.
 
-## Installation
+## Latest Feature: TAA Foundation & Motion Vectors
 
-```bash
-# from source
-pip install -U maturin
-maturin develop --release
-# or via wheel (if provided)
-# pip install forge3d
-```
-
-## Latest Feature: Shadow System Productization
-
-**forge3d** now delivers production-ready shadow rendering with fully validated techniques including Hard, PCF, PCSS, VSM (Variance Shadow Maps), EVSM (Exponential Variance), and MSM (Moment Shadow Maps). The shadow pipeline features separable Gaussian blur for moment-based methods, light bleeding reduction with configurable EVSM exponents and moment bias, and memory budget enforcement within the ≤512 MiB constraint. Select your technique via `--shadows` flag and tune quality with dedicated parameters for penumbra width, blur kernel size, and leak reduction. Each technique includes forced-edge regression tests with numeric validation, ensuring consistent shadow quality across all filtering methods. Whether you need fast hard shadows for real-time preview or physically-based soft shadows for final renders, the productionized pipeline delivers reliable, high-quality results validated against reference scenes.
+**forge3d** now delivers temporal anti-aliasing through a complete motion vector and reprojection pipeline. The TAA system eliminates temporal aliasing and shimmer on thin features (power lines, fences, foliage edges) using Halton 2,3 sub-pixel jittering and history buffer accumulation with neighborhood clamping. Motion vectors capture per-pixel velocity enabling proper temporal reprojection for both camera and object motion, while YCoCg color space conversion reduces ghosting artifacts during history rejection. Enable TAA with the `--taa` flag and experience measurable variance reduction versus traditional spatial anti-aliasing—demonstrated through convergence tests showing significant quality improvement in thin-feature scenes. The foundation supports reactive masks for transparent surfaces and handles fast camera motion without ghosting through proper velocity buffer generation, making it ideal for cinematic terrain flyovers and interactive exploration where temporal stability matters.
 
 ### Shadow Technique Comparison
 

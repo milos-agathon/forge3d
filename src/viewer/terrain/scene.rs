@@ -168,6 +168,15 @@ pub struct ViewerTerrainScene {
     pub(super) shadow_pipeline: Option<wgpu::RenderPipeline>,
     pub(super) shadow_uniform_buffers: Vec<wgpu::Buffer>, // One per cascade
     pub(super) shadow_bind_groups: Vec<wgpu::BindGroup>,  // One per cascade
+    
+    // P1.4: TAA support for terrain viewer
+    pub(super) taa_renderer: Option<crate::core::taa::TaaRenderer>,
+    pub(super) taa_jitter: crate::core::jitter::JitterState,
+    pub(super) prev_view_proj: glam::Mat4,
+    pub(super) velocity_texture: Option<wgpu::Texture>,
+    pub(super) velocity_view: Option<wgpu::TextureView>,
+    pub(super) velocity_pipeline: Option<wgpu::ComputePipeline>,
+    pub(super) velocity_bind_group_layout: Option<wgpu::BindGroupLayout>,
 }
 
 impl ViewerTerrainScene {
@@ -322,6 +331,14 @@ impl ViewerTerrainScene {
             shadow_pipeline: None,
             shadow_uniform_buffers: Vec::new(),
             shadow_bind_groups: Vec::new(),
+            // P1.4: TAA support
+            taa_renderer: None,
+            taa_jitter: crate::core::jitter::JitterState::new(),
+            prev_view_proj: glam::Mat4::IDENTITY,
+            velocity_texture: None,
+            velocity_view: None,
+            velocity_pipeline: None,
+            velocity_bind_group_layout: None,
         })
     }
     
@@ -330,6 +347,141 @@ impl ViewerTerrainScene {
         self.oit_enabled = enabled;
         self.oit_mode = mode.to_string();
         println!("[terrain_scene] OIT set: enabled={} mode={}", enabled, mode);
+    }
+
+    /// P1.4: Enable or disable TAA for terrain viewer
+    pub fn set_taa_enabled(&mut self, enabled: bool) {
+        if enabled && self.taa_renderer.is_none() {
+            // Get current dimensions from depth texture or use defaults
+            let (width, height) = if self.depth_size.0 > 0 {
+                self.depth_size
+            } else {
+                (1920, 1080) // Default, will resize on first render
+            };
+            
+            match crate::core::taa::TaaRenderer::new(&self.device, width, height) {
+                Ok(renderer) => {
+                    self.taa_renderer = Some(renderer);
+                    println!("[terrain_taa] TAA renderer initialized ({}x{})", width, height);
+                }
+                Err(e) => {
+                    eprintln!("[terrain_taa] Failed to create TAA renderer: {}", e);
+                    return;
+                }
+            }
+        }
+
+        if let Some(ref mut taa) = self.taa_renderer {
+            taa.set_enabled(enabled);
+        }
+
+        // Enable/disable jitter
+        if enabled {
+            self.taa_jitter = crate::core::jitter::JitterState::enabled();
+            println!("[terrain_taa] TAA enabled with jitter");
+        } else {
+            self.taa_jitter = crate::core::jitter::JitterState::new();
+            println!("[terrain_taa] TAA disabled");
+        }
+    }
+
+    /// P1.4: Check if TAA is enabled
+    pub fn is_taa_enabled(&self) -> bool {
+        self.taa_renderer.as_ref().map(|t| t.is_enabled()).unwrap_or(false)
+    }
+
+    /// P1.4: Initialize velocity compute pipeline for TAA
+    pub(super) fn init_velocity_pipeline(&mut self) {
+        if self.velocity_pipeline.is_some() {
+            return;
+        }
+
+        let shader_src = include_str!("../../shaders/terrain_velocity.wgsl");
+        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain_velocity.shader"),
+            source: wgpu::ShaderSource::Wgsl(shader_src.into()),
+        });
+
+        let bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain_velocity.bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rg16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain_velocity.pipeline_layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("terrain_velocity.pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "generate_velocity",
+        });
+
+        self.velocity_bind_group_layout = Some(bind_group_layout);
+        self.velocity_pipeline = Some(pipeline);
+    }
+
+    /// P1.4: Ensure velocity texture exists at given dimensions
+    pub(super) fn ensure_velocity_texture(&mut self, width: u32, height: u32) {
+        let needs_create = self.velocity_texture.as_ref()
+            .map(|t| {
+                let size = t.size();
+                size.width != width || size.height != height
+            })
+            .unwrap_or(true);
+
+        if needs_create {
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("terrain_velocity.texture"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rg16Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            self.velocity_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+            self.velocity_texture = Some(texture);
+        }
     }
 
     /// P0.1/M1: Initialize size-independent WBOIT resources (pipeline, layout, sampler)

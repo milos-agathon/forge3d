@@ -1639,6 +1639,17 @@ impl Viewer {
             ViewerCmd::GetOitMode => {
                 println!("[oit] enabled={} mode={}", self.oit_enabled, self.oit_mode);
             }
+
+            // P1.3: TAA (Temporal Anti-Aliasing)
+            ViewerCmd::SetTaaEnabled { enabled } => {
+                self.set_taa_enabled(enabled);
+                println!("[taa] enabled={}", enabled);
+            }
+            ViewerCmd::GetTaaStatus => {
+                let taa_enabled = self.taa_renderer.as_ref().map(|t| t.is_enabled()).unwrap_or(false);
+                let jitter_enabled = self.taa_jitter.enabled;
+                println!("[taa] enabled={} jitter_enabled={}", taa_enabled, jitter_enabled);
+            }
         }
     }
 }

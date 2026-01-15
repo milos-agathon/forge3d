@@ -508,15 +508,22 @@ impl Viewer {
                 let inv_proj = proj.inverse();
                 let eye = self.camera.eye();
                 let inv_model_view = model_view.inverse();
+                let view_proj = proj * model_view;
                 let cam = crate::core::screen_space_effects::CameraParams {
                     view_matrix: to_arr4(model_view),
                     inv_view_matrix: to_arr4(inv_model_view),
                     proj_matrix: to_arr4(proj),
                     inv_proj_matrix: to_arr4(inv_proj),
+                    prev_view_proj_matrix: to_arr4(self.prev_view_proj),
                     camera_pos: [eye.x, eye.y, eye.z],
-                    _pad: 0.0,
+                    frame_index: self.frame_count as u32,
+                    // P1.2: Pass jitter offset to shaders for TAA unjitter
+                    jitter_offset: self.taa_jitter.offset_array(),
+                    _pad_jitter: [0.0, 0.0],
                 };
                 gi_mgr.update_camera(&self.queue, &cam);
+                // P1.1: Store current view_proj for next frame's motion vectors
+                self.prev_view_proj = view_proj;
             }
         }
 

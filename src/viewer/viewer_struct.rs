@@ -243,4 +243,10 @@ pub struct Viewer {
     // P0.1/M1: OIT (Order-Independent Transparency)
     pub(crate) oit_enabled: bool,
     pub(crate) oit_mode: String,
+    // P1.1: Previous frame view-projection matrix for motion vectors
+    pub(crate) prev_view_proj: glam::Mat4,
+    // P1.2: TAA jitter state
+    pub(crate) taa_jitter: crate::core::jitter::JitterState,
+    // P1.3: TAA renderer
+    pub(crate) taa_renderer: Option<crate::core::taa::TaaRenderer>,
 }

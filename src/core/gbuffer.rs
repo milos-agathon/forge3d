@@ -7,6 +7,7 @@
 //!                         perceptual roughness in `w` (both mapped to [0,1])
 //!   - `material_texture`: `Rgba8Unorm` with diffuse/base color in `rgb` and
 //!                         metallic factor in `a` (both in [0,1])
+//!   - `velocity_texture`: `Rg16Float` screen-space motion vectors for TAA (P1.1)
 
 use super::error::RenderResult;
 use wgpu::*;
@@ -24,6 +25,8 @@ pub struct GBufferConfig {
     pub normal_format: TextureFormat,
     /// Format for material/albedo buffer
     pub material_format: TextureFormat,
+    /// Format for velocity buffer (P1.1: motion vectors for TAA)
+    pub velocity_format: TextureFormat,
     /// Whether to use half-precision formats
     pub use_half_precision: bool,
 }
@@ -38,6 +41,8 @@ impl Default for GBufferConfig {
             depth_format: TextureFormat::R32Float,
             normal_format: TextureFormat::Rgba16Float,
             material_format: TextureFormat::Rgba8Unorm,
+            // P1.1: Rg16Float for 2D screen-space velocity (sufficient precision for TAA)
+            velocity_format: TextureFormat::Rg16Float,
             use_half_precision: true,
         }
     }
@@ -56,6 +61,10 @@ pub struct GBuffer {
     /// Material/albedo texture (diffuse/base color in RGB, metallic in alpha)
     pub material_texture: Texture,
     pub material_view: TextureView,
+
+    /// P1.1: Velocity texture (screen-space motion vectors for TAA/motion blur)
+    pub velocity_texture: Texture,
+    pub velocity_view: TextureView,
 
     /// Optional position reconstruction texture (if not reconstructing from depth)
     pub position_texture: Option<Texture>,
@@ -134,6 +143,25 @@ impl GBuffer {
         });
         let material_view = material_texture.create_view(&TextureViewDescriptor::default());
 
+        // P1.1: Create velocity texture for motion vectors
+        let velocity_texture = device.create_texture(&TextureDescriptor {
+            label: Some("gbuffer_velocity"),
+            size: Extent3d {
+                width: config.width,
+                height: config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: config.velocity_format,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let velocity_view = velocity_texture.create_view(&TextureViewDescriptor::default());
+
         Ok(Self {
             depth_texture,
             depth_view,
@@ -141,6 +169,8 @@ impl GBuffer {
             normal_view,
             material_texture,
             material_view,
+            velocity_texture,
+            velocity_view,
             position_texture: None,
             position_view: None,
             config,

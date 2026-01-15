@@ -172,6 +172,9 @@ def run_interactive_preview(
     dynamic_sun: bool = True,
     sun_offset: float = 120.0,
     sun_intensity: float = 1.0,
+    debug_velocity: bool = False,
+    taa_enabled: bool = False,
+    taa_history_weight: float = 0.9,
 ):
     """Run animation preview in the interactive viewer.
     
@@ -263,6 +266,11 @@ def run_interactive_preview(
         
         # Set terrain parameters
         send_cmd({"cmd": "set_terrain", "zscale": z_scale})
+        
+        # P1.3/P1.4: Enable TAA if requested
+        if taa_enabled:
+            send_cmd({"cmd": "set_taa_enabled", "enabled": True})
+            print(f"[P1.3] TAA enabled (history_weight={taa_history_weight})")
         
         # Set initial camera position before waiting
         first_state = anim.evaluate(0.0)
@@ -457,6 +465,9 @@ def export_animation_frames(
     sun_offset: float = 120.0,
     sun_intensity: float = 1.0,
     title: Optional[str] = None,
+    debug_velocity: bool = False,
+    taa_enabled: bool = False,
+    taa_history_weight: float = 0.9,
 ):
     """Export animation frames to PNG files and optionally encode to MP4.
     
@@ -543,6 +554,11 @@ def export_animation_frames(
         # Set terrain params
         send_cmd({"cmd": "set_terrain", "zscale": z_scale})
         time.sleep(0.5)  # Let terrain load
+        
+        # P1.3/P1.4: Enable TAA if requested
+        if taa_enabled:
+            send_cmd({"cmd": "set_taa_enabled", "enabled": True})
+            print(f"[P1.3] TAA enabled (history_weight={taa_history_weight})")
         
         # Render each frame
         total_frames = anim.get_frame_count(fps)
@@ -741,6 +757,33 @@ Examples:
         "--oit", type=str, choices=["auto", "wboit", "dual_source", "off"],
         default=None, help="OIT mode for transparent surfaces (default: off)"
     )
+    # P1.1: Motion vector debug visualization
+    parser.add_argument(
+        "--debug-velocity", action="store_true",
+        help="Enable motion vector debug visualization (P1.1)"
+    )
+    # P1.3/P1.4: Temporal Anti-Aliasing
+    parser.add_argument(
+        "--taa", action="store_true",
+        help="Enable Temporal Anti-Aliasing (reduces shimmer, improves quality)"
+    )
+    parser.add_argument(
+        "--no-taa", action="store_true",
+        help="Explicitly disable TAA (default is disabled)"
+    )
+    parser.add_argument(
+        "--taa-history-weight", type=float, default=0.9, metavar="FLOAT",
+        help="TAA history blend weight 0.0-0.99 (default: 0.9, higher=smoother but more ghosting)"
+    )
+    # P1.2: Jitter control (usually auto-enabled with TAA)
+    parser.add_argument(
+        "--jitter", action="store_true",
+        help="Enable sub-pixel jitter (auto-enabled with --taa)"
+    )
+    parser.add_argument(
+        "--no-jitter", action="store_true",
+        help="Disable sub-pixel jitter even with TAA"
+    )
     
     args = parser.parse_args()
     
@@ -781,6 +824,19 @@ Examples:
     if args.preview_only:
         return
     
+    # P1.1: Print velocity debug info if enabled
+    if args.debug_velocity:
+        print("\n[P1.1] Motion vector debug visualization enabled")
+        print("  Velocity buffer: Rg16Float (screen-space motion vectors)")
+        print("  Debug mode shows velocity as RG color (gray=static, colored=motion)")
+    
+    # P1.3/P1.4: Determine TAA state
+    taa_enabled = args.taa and not args.no_taa
+    if taa_enabled:
+        print(f"\n[P1.3] TAA enabled (history_weight={args.taa_history_weight})")
+        print("  Temporal Anti-Aliasing reduces shimmer and improves quality")
+        print("  Jitter sequence: Halton 2,3 (auto-enabled with TAA)")
+    
     # Run interactive or export
     if args.export:
         export_animation_frames(
@@ -799,6 +855,9 @@ Examples:
             sun_offset=args.sun_offset,
             sun_intensity=args.sun_intensity,
             title=args.title,
+            debug_velocity=args.debug_velocity,
+            taa_enabled=taa_enabled,
+            taa_history_weight=args.taa_history_weight,
         )
     else:
         run_interactive_preview(
@@ -808,6 +867,9 @@ Examples:
             dynamic_sun=not args.static_sun,
             sun_offset=args.sun_offset,
             sun_intensity=args.sun_intensity,
+            debug_velocity=args.debug_velocity,
+            taa_enabled=taa_enabled,
+            taa_history_weight=args.taa_history_weight,
         )
 
 

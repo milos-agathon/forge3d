@@ -281,8 +281,21 @@ impl Viewer {
             // Update geometry camera uniform (view, proj)
             let aspect = self.config.width as f32 / self.config.height as f32;
             let fov = self.view_config.fov_deg.to_radians();
-            let proj =
+            let proj_base =
                 Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
+            
+            // P1.2: Apply TAA jitter to projection matrix
+            let proj = if self.taa_jitter.enabled {
+                crate::core::jitter::apply_jitter(
+                    proj_base,
+                    self.taa_jitter.offset.0,
+                    self.taa_jitter.offset.1,
+                    self.config.width,
+                    self.config.height,
+                )
+            } else {
+                proj_base
+            };
             // Apply object transform to create model-view matrix
             let view_mat = self.camera.view_matrix();
             let model_view = view_mat * self.object_transform;
@@ -329,15 +342,24 @@ impl Viewer {
             let inv_proj = proj.inverse();
             let eye = self.camera.eye();
             let inv_model_view = model_view.inverse();
+            let view_proj = proj * model_view;
             let cam = crate::core::screen_space_effects::CameraParams {
                 view_matrix: to_arr4(model_view),
                 inv_view_matrix: to_arr4(inv_model_view),
                 proj_matrix: to_arr4(proj),
                 inv_proj_matrix: to_arr4(inv_proj),
+                prev_view_proj_matrix: to_arr4(self.prev_view_proj),
                 camera_pos: [eye.x, eye.y, eye.z],
-                _pad: 0.0,
+                frame_index: self.frame_count as u32,
+                // P1.2: Pass jitter offset to shaders for TAA unjitter
+                jitter_offset: self.taa_jitter.offset_array(),
+                _pad_jitter: [0.0, 0.0],
             };
             gi.update_camera(&self.queue, &cam);
+            // P1.1: Store current view_proj for next frame's motion vectors
+            self.prev_view_proj = view_proj;
+            // P1.2: Advance jitter sequence for next frame
+            self.taa_jitter.advance();
 
             // Geometry bind group (camera + albedo)
             let bg_ref = match self.geom_bind_group.as_ref() {
@@ -1072,6 +1094,32 @@ impl Viewer {
                         cpass.dispatch_workgroups(gx, gy, 1);
                     }
                 }
+
+                // P1.3: Execute TAA resolve if enabled
+                let taa_applied = if let Some(ref mut taa) = self.taa_renderer {
+                    if taa.is_enabled() {
+                        // Update TAA settings with current jitter
+                        taa.update_settings(
+                            &self.queue,
+                            self.taa_jitter.offset_array(),
+                            self.frame_count as u32,
+                        );
+                        // Execute TAA resolve
+                        taa.execute(
+                            &self.device,
+                            &mut encoder,
+                            &self.queue,
+                            &self.lit_output_view,
+                            &gi.gbuffer().velocity_view,
+                            &gi.gbuffer().depth_view,
+                        )
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
                 // When taking snapshot, use raw GBuffer to avoid SSR/SSAO temporal caching issues
                 let use_raw_gbuffer = self.snapshot_request.is_some();
                 let (mode_u32, src_view) = match self.viz_mode {
@@ -1123,7 +1171,18 @@ impl Viewer {
                             }
                         }
                     },
-                    VizMode::Lit => (0u32, &self.lit_output_view),
+                    VizMode::Lit => {
+                        // P1.3: Use TAA output if TAA was applied
+                        if taa_applied {
+                            if let Some(ref taa) = self.taa_renderer {
+                                (0u32, taa.output_view())
+                            } else {
+                                (0u32, &self.lit_output_view)
+                            }
+                        } else {
+                            (0u32, &self.lit_output_view)
+                        }
+                    }
                 };
                 // Prepare comp uniform (mode, far)
                 let params: [f32; 4] = [

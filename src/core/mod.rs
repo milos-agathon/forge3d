@@ -42,6 +42,12 @@ pub mod tonemap;
 // C9: Matrix stack utility
 pub mod matrix_stack;
 
+// P1.2: TAA jitter sequence
+pub mod jitter;
+
+// P1.3: Temporal Anti-Aliasing
+pub mod taa;
+
 // C10: Hierarchical scene graph
 pub mod scene_graph;
 

@@ -71,6 +71,55 @@ impl Viewer {
         self.queue
             .write_buffer(&self.fog_shadow_matrix, 0, bytemuck::bytes_of(&mat));
     }
+
+    /// P1.3: Enable or disable Temporal Anti-Aliasing
+    pub fn set_taa_enabled(&mut self, enabled: bool) {
+        // P1.4: If terrain viewer is active, delegate TAA to terrain viewer
+        let terrain_active = self.terrain_viewer.as_ref().map(|tv| tv.has_terrain()).unwrap_or(false);
+        if terrain_active {
+            if let Some(ref mut tv) = self.terrain_viewer {
+                tv.set_taa_enabled(enabled);
+            }
+            // Don't enable main viewer's jitter when terrain is active
+            return;
+        }
+
+        // Initialize TAA renderer if not already done
+        if enabled && self.taa_renderer.is_none() {
+            match crate::core::taa::TaaRenderer::new(
+                &self.device,
+                self.config.width,
+                self.config.height,
+            ) {
+                Ok(renderer) => {
+                    self.taa_renderer = Some(renderer);
+                }
+                Err(e) => {
+                    eprintln!("[taa] Failed to create TAA renderer: {}", e);
+                    return;
+                }
+            }
+        }
+
+        // Enable/disable TAA and jitter together
+        if let Some(ref mut taa) = self.taa_renderer {
+            taa.set_enabled(enabled);
+        }
+        
+        // P1.2: Enable jitter when TAA is enabled (only for main viewer, not terrain)
+        self.taa_jitter.enabled = enabled;
+        if enabled {
+            // Use enabled() to get proper initial offset
+            self.taa_jitter = crate::core::jitter::JitterState::enabled();
+        } else {
+            self.taa_jitter = crate::core::jitter::JitterState::new();
+        }
+    }
+
+    /// P1.3: Check if TAA is enabled
+    pub fn is_taa_enabled(&self) -> bool {
+        self.taa_renderer.as_ref().map(|t| t.is_enabled()).unwrap_or(false)
+    }
 }
 
 // Types moved to viewer_types.rs (including P51CornellSceneState)

@@ -7,9 +7,9 @@
 * **Transparency/OIT**: Weighted blended OIT exists for vectors (`src/vector/oit/*`, feature `weighted-oit`).
 * There’s also a **dual-source OIT renderer with WBOIT fallback**:
 
-  * [src/core/dual_source_oit.rs](cci:7://file:///Users/mpopovic3/forge3d/src/core/dual_source_oit.rs:0:0-0:0)
-  * Exposed on [Scene](cci:2://file:///Users/mpopovic3/forge3d/src/scene/mod.rs:47:0-161:1)
-  * Python binding in [src/scene/mod.rs](cci:7://file:///Users/mpopovic3/forge3d/src/scene/mod.rs:0:0-0:0)
+  * [src/core/dual_source_oit.rs](cci:7://file:////forge3d/src/core/dual_source_oit.rs:0:0-0:0)
+  * Exposed on [Scene](cci:2://file:////forge3d/src/scene/mod.rs:47:0-161:1)
+  * Python binding in [src/scene/mod.rs](cci:7://file:////forge3d/src/scene/mod.rs:0:0-0:0)
 
 **Evidence excerpt (preserved):**
 
@@ -48,17 +48,17 @@ The engine already has **VSM/EVSM/MSM plumbing**:
 
 * `ShadowTechnique` includes `VSM/EVSM/MSM`:
 
-  * [src/lighting/shadow.rs](cci:7://file:///Users/mpopovic3/forge3d/src/lighting/shadow.rs:0:0-0:0)
+  * [src/lighting/shadow.rs](cci:7://file:////forge3d/src/lighting/shadow.rs:0:0-0:0)
 * Moment generation compute pass exists:
 
-  * [src/shadows/moment_pass.rs](cci:7://file:///Users/mpopovic3/forge3d/src/shadows/moment_pass.rs:0:0-0:0)
-  * [src/shaders/moment_generation.wgsl](cci:7://file:///Users/mpopovic3/forge3d/src/shaders/moment_generation.wgsl:0:0-0:0)
+  * [src/shadows/moment_pass.rs](cci:7://file:////forge3d/src/shadows/moment_pass.rs:0:0-0:0)
+  * [src/shaders/moment_generation.wgsl](cci:7://file:////forge3d/src/shaders/moment_generation.wgsl:0:0-0:0)
 * Filtering code lives in:
 
-  * [src/shaders/shadows.wgsl](cci:7://file:///Users/mpopovic3/forge3d/src/shaders/shadows.wgsl:0:0-0:0)
+  * [src/shaders/shadows.wgsl](cci:7://file:////forge3d/src/shaders/shadows.wgsl:0:0-0:0)
 * Runtime manager exists:
 
-  * [src/shadows/manager/system.rs](cci:7://file:///Users/mpopovic3/forge3d/src/shadows/manager/system.rs:0:0-0:0)
+  * [src/shadows/manager/system.rs](cci:7://file:////forge3d/src/shadows/manager/system.rs:0:0-0:0)
 
 **Evidence excerpts (preserved):**
 
@@ -99,7 +99,7 @@ The engine already has **VSM/EVSM/MSM plumbing**:
 * Tile/mosaic/page-table scaffolding exists:
 
   * `src/terrain/stream/*`
-  * [src/terrain/page_table.rs](cci:7://file:///Users/mpopovic3/forge3d/src/terrain/page_table.rs:0:0-0:0)
+  * [src/terrain/page_table.rs](cci:7://file:////forge3d/src/terrain/page_table.rs:0:0-0:0)
 * **Not geometry clipmaps** (explicitly missing nested regular grid, seam handling, morphing).
 
 ---
@@ -108,7 +108,7 @@ The engine already has **VSM/EVSM/MSM plumbing**:
 
 * Temporal AO resolve exists:
 
-  * [src/shaders/temporal/resolve_ao.wgsl](cci:7://file:///Users/mpopovic3/forge3d/src/shaders/temporal/resolve_ao.wgsl:0:0-0:0)
+  * [src/shaders/temporal/resolve_ao.wgsl](cci:7://file:////forge3d/src/shaders/temporal/resolve_ao.wgsl:0:0-0:0)
 * There are various temporal SSR/SSGI codepaths, but **no full-frame TAA** module.
 
 **Evidence excerpt (preserved):**
@@ -195,12 +195,12 @@ We preserve both views and present a unified table.
 * **Motion Vectors / Velocity Buffer** (Impact 5 / Effort 2): foundation for TAA, motion blur, temporal effects.
 * **GPU-Driven Rendering / Indirect Draw** (Impact 4 / Effort 3):
 
-  * Note: partial support in [src/vector/indirect.rs](cci:7://file:///Users/mpopovic3/forge3d/src/vector/indirect.rs:0:0-0:0) (21KB)
+  * Note: partial support in [src/vector/indirect.rs](cci:7://file:////forge3d/src/vector/indirect.rs:0:0-0:0) (21KB)
 * **Async Compute Overlap** (Impact 3 / Effort 2): better GPU utilization, parallel shadow/main pass.
 * **Deferred Decals** (Impact 3 / Effort 2): terrain annotations / road markings / labels without geometry.
 * **Exposure / Auto-Exposure Histogram** (Impact 3 / Effort 2):
 
-  * Note: tonemap exists in [src/core/tonemap.rs](cci:7://file:///Users/mpopovic3/forge3d/src/core/tonemap.rs:0:0-0:0)
+  * Note: tonemap exists in [src/core/tonemap.rs](cci:7://file:////forge3d/src/core/tonemap.rs:0:0-0:0)
 
 ---
 
@@ -241,7 +241,7 @@ All milestones must follow forge3d rules:
 
 **Deliverables (merged):**
 
-* Align Python config validation ([python/forge3d/config.py](cci:7://file:///Users/mpopovic3/forge3d/python/forge3d/config.py:0:0-0:0)) with actual Rust support (stop incorrectly rejecting VSM/EVSM/MSM).
+* Align Python config validation ([python/forge3d/config.py](cci:7://file:////forge3d/python/forge3d/config.py:0:0-0:0)) with actual Rust support (stop incorrectly rejecting VSM/EVSM/MSM).
 * Implement/verify **moment blur path** + leak controls:
 
   * EVSM exponents

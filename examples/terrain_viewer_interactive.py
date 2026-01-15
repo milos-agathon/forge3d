@@ -121,6 +121,9 @@ def main() -> int:
     # P0.1/M1: OIT
     pbr_group.add_argument("--oit", type=str, choices=["auto", "wboit", "dual_source", "off"],
                            default=None, help="OIT mode for transparent surfaces (default: off)")
+    # P1.3: TAA (Temporal Anti-Aliasing)
+    pbr_group.add_argument("--taa", action="store_true",
+                           help="Enable Temporal Anti-Aliasing (reduces shimmer/aliasing)")
     
     # Sun/lighting options
     sun_group = parser.add_argument_group("Sun Lighting", "Directional sun light parameters")
@@ -647,6 +650,17 @@ def main() -> int:
             print(f"OIT enabled: mode={args.oit}")
         else:
             print(f"Warning: OIT config failed: {resp.get('error')}")
+    
+    # P1.3: Enable TAA if requested
+    if args.taa:
+        resp = send_ipc(sock, {
+            "cmd": "set_taa_enabled",
+            "enabled": True,
+        })
+        if resp.get("ok"):
+            print("TAA enabled (Temporal Anti-Aliasing)")
+        else:
+            print(f"Warning: TAA config failed: {resp.get('error')}")
     
     # Snapshot mode
     if args.snapshot:

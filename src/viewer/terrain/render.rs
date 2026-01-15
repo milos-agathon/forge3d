@@ -356,12 +356,24 @@ impl ViewerTerrainScene {
         );
 
         let view_mat = glam::Mat4::look_at_rh(eye, center, glam::Vec3::Y);
-        let proj = glam::Mat4::perspective_rh(
+        let proj_base = glam::Mat4::perspective_rh(
             fov_deg.to_radians(),
             width as f32 / height as f32,
             1.0,
             r * 10.0,
         );
+        // P1.4: Apply TAA jitter to projection matrix
+        let proj = if self.taa_jitter.enabled {
+            crate::core::jitter::apply_jitter(
+                proj_base,
+                self.taa_jitter.offset.0,
+                self.taa_jitter.offset.1,
+                width,
+                height,
+            )
+        } else {
+            proj_base
+        };
         let view_proj = proj * view_mat;
 
         let sun_az = sun_azimuth_deg.to_radians();
@@ -987,12 +999,24 @@ impl ViewerTerrainScene {
 
         let view_mat = glam::Mat4::look_at_rh(eye, center, glam::Vec3::Y);
         // Use requested width/height for aspect ratio
-        let proj = glam::Mat4::perspective_rh(
+        let proj_base = glam::Mat4::perspective_rh(
             terrain.cam_fov_deg.to_radians(),
             width as f32 / height as f32,
             1.0,
             r * 10.0,
         );
+        // P1.4: Apply TAA jitter to projection matrix (snapshot path)
+        let proj = if self.taa_jitter.enabled {
+            crate::core::jitter::apply_jitter(
+                proj_base,
+                self.taa_jitter.offset.0,
+                self.taa_jitter.offset.1,
+                width,
+                height,
+            )
+        } else {
+            proj_base
+        };
         let view_proj = proj * view_mat;
 
         let sun_az = terrain.sun_azimuth_deg.to_radians();
@@ -1393,6 +1417,12 @@ impl ViewerTerrainScene {
 
         let mut out_tex = color_tex;
         let mut out_view = color_view;
+
+        // P1.4: TAA is disabled for render_to_texture snapshots
+        // TAA requires temporal history between consecutive frames with small camera deltas.
+        // For animation exports, each frame is rendered independently at potentially large
+        // camera deltas, so TAA temporal accumulation doesn't apply correctly.
+        // TAA is only used for the interactive render() path where frames are consecutive.
 
         // P5: Apply volumetrics pass if enabled (after main render, before DoF)
         let needs_volumetrics = self.pbr_config.volumetrics.enabled && 

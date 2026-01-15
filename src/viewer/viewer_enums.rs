@@ -448,6 +448,15 @@ pub enum ViewerCmd {
     },
     /// Get current OIT mode
     GetOitMode,
+
+    // === P1.3: TAA (Temporal Anti-Aliasing) ===
+
+    /// Enable or disable TAA
+    SetTaaEnabled {
+        enabled: bool,
+    },
+    /// Get current TAA status
+    GetTaaStatus,
 }
 
 /// Heightfield ray-traced AO configuration for viewer

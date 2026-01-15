@@ -18,8 +18,13 @@ struct CameraParams {
     inv_view_matrix: mat4x4<f32>,
     proj_matrix: mat4x4<f32>,
     inv_proj_matrix: mat4x4<f32>,
+    // P1.1: Previous frame view-projection for motion vectors
+    prev_view_proj_matrix: mat4x4<f32>,
     camera_pos: vec3<f32>,
-    _pad: f32,
+    frame_index: u32,
+    // P1.2: Sub-pixel jitter offset for TAA (pixel units, [-0.5, 0.5])
+    jitter_offset: vec2<f32>,
+    _pad_jitter: vec2<f32>,
 }
 
 @group(0) @binding(0) var scene_color: texture_2d<f32>;

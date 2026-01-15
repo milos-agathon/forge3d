@@ -412,6 +412,15 @@ pub enum IpcRequest {
     },
     /// Get current OIT mode
     GetOitMode,
+
+    // === P1.3/P1.4: TAA (Temporal Anti-Aliasing) ===
+
+    /// Enable or disable TAA
+    SetTaaEnabled {
+        enabled: bool,
+    },
+    /// Get current TAA status
+    GetTaaStatus,
 }
 
 fn default_oit_mode() -> String {
@@ -801,6 +810,12 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             mode: mode.clone(),
         })),
         IpcRequest::GetOitMode => Ok(Some(ViewerCmd::GetOitMode)),
+
+        // P1.3/P1.4: TAA (Temporal Anti-Aliasing)
+        IpcRequest::SetTaaEnabled { enabled } => Ok(Some(ViewerCmd::SetTaaEnabled {
+            enabled: *enabled,
+        })),
+        IpcRequest::GetTaaStatus => Ok(Some(ViewerCmd::GetTaaStatus)),
 
         IpcRequest::LoadObj { path } => Ok(Some(ViewerCmd::LoadObj(path.clone()))),
         IpcRequest::LoadGltf { path } => Ok(Some(ViewerCmd::LoadGltf(path.clone()))),

@@ -6,6 +6,31 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.9.6] - TAA Foundation & Motion Vectors
+
+### Added
+- **Phase 1 — TAA Foundation (Temporal Anti-Aliasing)**
+  - Motion vectors / velocity buffer system enabling temporal reprojection for camera and object motion.
+  - GBuffer velocity channel with shader output capturing per-pixel motion information.
+  - Halton 2,3 sequence jitter for sub-pixel sampling and temporal convergence.
+  - Projection matrix jitter integration for TAA sample distribution.
+  - TAA resolve pass with history color buffer reprojection using depth and camera matrices.
+  - Neighborhood clamping for history rejection preventing ghosting artifacts.
+  - Reactive mask support for overlays and water to handle transparency correctly.
+  - YCoCg color space conversion for improved temporal clamping and reduced color bleeding.
+  - Demonstrable shimmer reduction in thin-feature scenes (power lines, fences, foliage edges).
+  - CLI integration via `--taa` flag with preset support for easy configuration.
+  - Variance reduction metrics vs no-TAA baseline showing measurable quality improvement.
+  - Python tests: `test_motion_vectors.py`, `test_jitter_sequence.py`, `test_taa_convergence.py`, `test_taa_toggle.py`.
+
+### Fixed
+- Camera motion ghosting eliminated through proper motion vector generation.
+- Temporal aliasing on thin geometry reduced via sub-pixel jittering and accumulation.
+
+### Documentation
+- Added TAA usage examples with quality/performance trade-offs.
+- Updated rendering pipeline documentation with motion vector and temporal resolve integration.
+
 ## [1.9.5] - Shadow System Productization
 
 ### Added
