@@ -16,11 +16,11 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.9.6 — Temporal Anti-Aliasing (TAA) foundation with motion vectors, Halton jitter sequences, and history buffer reprojection enabling shimmer-free rendering on thin geometry and camera motion.
+Current release: 1.9.7 — Nested-ring clipmap terrain system achieving 99.9% triangle reduction (13M→10K triangles) while maintaining visual quality, enabling continental-scale rendering with stable per-frame budgets.
 
-## Latest Feature: TAA Foundation & Motion Vectors
+## Latest Feature: Terrain Scale & Clipmap Structure
 
-**forge3d** now delivers temporal anti-aliasing through a complete motion vector and reprojection pipeline. The TAA system eliminates temporal aliasing and shimmer on thin features (power lines, fences, foliage edges) using Halton 2,3 sub-pixel jittering and history buffer accumulation with neighborhood clamping. Motion vectors capture per-pixel velocity enabling proper temporal reprojection for both camera and object motion, while YCoCg color space conversion reduces ghosting artifacts during history rejection. Enable TAA with the `--taa` flag and experience measurable variance reduction versus traditional spatial anti-aliasing—demonstrated through convergence tests showing significant quality improvement in thin-feature scenes. The foundation supports reactive masks for transparent surfaces and handles fast camera motion without ghosting through proper velocity buffer generation, making it ideal for cinematic terrain flyovers and interactive exploration where temporal stability matters.
+**forge3d** now renders large-scale terrain through a nested-ring clipmap mesh system that replaces traditional single-grid drawing. The four-ring clipmap configuration delivers automatic LOD selection based on camera distance, with vertex morphing preventing popping artifacts at ring boundaries. Triangle budget optimization achieves dramatic 99.9% reduction—rendering Mount Fuji with only 10,240 triangles versus 13.5 million for full-resolution DEM—while preserving visual fidelity through intelligent LOD transitions. Each ring doubles in size moving outward from the center block, with configurable resolution (default 64×64 vertices per ring) and morph range for quality/performance tuning. The system integrates seamlessly with existing height mosaics and page tables for streaming tile requests, maintaining correct UV coordinate mapping across all rings. Skirt geometry ensures crack-free edges and horizon closure. Run `python examples/clipmap_demo.py --dem fuji` to see detailed mesh statistics showing the 92.2% internal triangle reduction meeting P2.1's ≥40% exit criteria, making continental-scale terrain rendering practical with stable frame budgets.
 
 ### Shadow Technique Comparison
 

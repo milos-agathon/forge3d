@@ -74,6 +74,10 @@ if _NATIVE_MODULE is not None:
         "SunPosition",  # P0.3/M2: Sun ephemeris
         "sun_position",  # P0.3/M2: Sun ephemeris function
         "sun_position_utc",  # P0.3/M2: Sun ephemeris function (components)
+        "ClipmapConfig",  # P2.1/M5: Clipmap terrain
+        "ClipmapMesh",  # P2.1/M5: Clipmap terrain
+        "clipmap_generate_py",  # P2.1/M5: Clipmap generation function
+        "calculate_triangle_reduction_py",  # P2.1/M5: Triangle reduction calculation
     ):
         if hasattr(_NATIVE_MODULE, _name):
             globals()[_name] = getattr(_NATIVE_MODULE, _name)
