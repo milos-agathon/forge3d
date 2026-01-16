@@ -22,6 +22,12 @@ pub mod stream;
 pub mod page_table;
 pub use page_table::PageTable;
 
+// P3: Cloud Optimized GeoTIFF streaming
+#[cfg(feature = "cog_streaming")]
+pub mod cog;
+#[cfg(feature = "cog_streaming")]
+pub use cog::{CogHeightReader, CogTileCache, CogCacheStats, CogError};
+
 // B11-BEGIN:tiling-mod
 pub mod tiling;
 pub use tiling::{

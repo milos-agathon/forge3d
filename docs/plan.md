@@ -411,6 +411,15 @@ All milestones must follow forge3d rules:
 
 #### Option B: PMTiles
 
+> **STATUS (2025-01-16):** PMTiles deferred. COG streaming (Option A) was selected as the
+> M6 direction. P3.1-P3.3 are now implemented with:
+> - HTTP range requests via `reqwest`
+> - IFD parsing and overview selection  
+> - LRU cache with memory budget
+> - Native + rasterio fallback
+> 
+> PMTiles (P3.4-P3.6) remains in backlog for future work.
+
 **GPT direction (preserved):**
 
 * Start with local PMTiles decode + style rules; then add HTTP range.

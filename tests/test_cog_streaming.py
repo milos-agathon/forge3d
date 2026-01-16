@@ -1,0 +1,465 @@
+"""P3: COG streaming tests.
+
+Tests for Cloud Optimized GeoTIFF streaming functionality including:
+- P3.1: Range reads
+- P3.2: Overview detection  
+- P3.3: Cache eviction
+- Remote COG integration tests (network-dependent)
+"""
+
+from __future__ import annotations
+
+import os
+import socket
+import pytest
+import numpy as np
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).parent.parent
+
+AVAILABLE_DEMS = {
+    "fuji": PROJECT_ROOT / "assets/tif/Mount_Fuji_30m.tif",
+    "rainier": PROJECT_ROOT / "assets/tif/dem_rainier.tif",
+}
+
+PUBLIC_COG_URLS = [
+    "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/1/C/CV/2023/1/S2B_1CCV_20230101_0_L2A/B04.tif",
+]
+
+
+def has_network_access(timeout: float = 2.0) -> bool:
+    """Check if we have network access to run remote tests."""
+    try:
+        socket.create_connection(("sentinel-cogs.s3.us-west-2.amazonaws.com", 443), timeout=timeout)
+        return True
+    except (socket.timeout, socket.error, OSError):
+        return False
+
+
+def skip_if_no_network():
+    """Pytest skip decorator for network-dependent tests."""
+    return pytest.mark.skipif(
+        not has_network_access() or os.environ.get("FORGE3D_SKIP_NETWORK_TESTS", "0") == "1",
+        reason="Network access unavailable or FORGE3D_SKIP_NETWORK_TESTS=1"
+    )
+
+
+def get_test_dem() -> Path:
+    """Get a local DEM for testing."""
+    for name, path in AVAILABLE_DEMS.items():
+        if path.exists():
+            return path
+    pytest.skip("No test DEM available in assets/tif/")
+
+
+@pytest.fixture
+def local_dem_url():
+    """Fixture providing a file:// URL to a local DEM."""
+    dem_path = get_test_dem()
+    return f"file://{dem_path.absolute()}"
+
+
+def cog_available():
+    """Check if COG streaming is available."""
+    try:
+        from forge3d.cog import is_cog_available
+        return is_cog_available()
+    except ImportError:
+        return False
+
+
+def rasterio_available():
+    """Check if rasterio fallback is available."""
+    try:
+        import rasterio
+        return True
+    except ImportError:
+        return False
+
+
+class TestCogApi:
+    """Test COG Python API."""
+    
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_open_cog(self, local_dem_url):
+        """Test opening a COG dataset."""
+        from forge3d.cog import open_cog
+        
+        ds = open_cog(local_dem_url, cache_size_mb=64)
+        assert ds is not None
+        assert ds.url == local_dem_url
+    
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_bounds(self, local_dem_url):
+        """Test bounds property."""
+        from forge3d.cog import open_cog
+        
+        ds = open_cog(local_dem_url, cache_size_mb=64)
+        bounds = ds.bounds
+        
+        assert isinstance(bounds, tuple)
+        assert len(bounds) == 4
+        minx, miny, maxx, maxy = bounds
+        assert maxx > minx or maxx == minx == 0
+        assert maxy > miny or maxy == miny == 0
+    
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_overview_count(self, local_dem_url):
+        """Test overview count."""
+        from forge3d.cog import open_cog
+        
+        ds = open_cog(local_dem_url, cache_size_mb=64)
+        count = ds.overview_count
+        
+        assert isinstance(count, int)
+        assert count >= 1
+
+
+class TestCogRangeRead:
+    """P3.1: Test COG range read functionality."""
+    
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_read_tile_basic(self, local_dem_url):
+        """Test basic tile read."""
+        from forge3d.cog import open_cog
+        
+        ds = open_cog(local_dem_url, cache_size_mb=64)
+        
+        tile = ds.read_tile(0, 0, lod=0)
+        
+        assert isinstance(tile, np.ndarray)
+        assert tile.dtype == np.float32
+        assert tile.ndim == 2
+        assert tile.shape[0] > 0
+        assert tile.shape[1] > 0
+    
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_read_tile_deterministic(self, local_dem_url):
+        """Test that reading the same tile twice returns identical data."""
+        from forge3d.cog import open_cog
+        
+        ds = open_cog(local_dem_url, cache_size_mb=64)
+        
+        tile1 = ds.read_tile(0, 0, lod=0)
+        tile2 = ds.read_tile(0, 0, lod=0)
+        
+        np.testing.assert_array_equal(tile1, tile2)
+    
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_read_multiple_tiles(self, local_dem_url):
+        """Test reading multiple tiles."""
+        from forge3d.cog import open_cog
+        
+        ds = open_cog(local_dem_url, cache_size_mb=64)
+        info = ds.ifd_info(0)
+        
+        tiles_to_read = min(4, info.tiles_across * info.tiles_down)
+        tiles = []
+        
+        for i in range(tiles_to_read):
+            x = i % max(1, info.tiles_across)
+            y = i // max(1, info.tiles_across)
+            if x < info.tiles_across and y < info.tiles_down:
+                tile = ds.read_tile(x, y, lod=0)
+                tiles.append(tile)
+        
+        assert len(tiles) > 0
+        for tile in tiles:
+            assert tile.dtype == np.float32
+
+
+class TestCogOverviews:
+    """P3.2: Test COG overview detection and selection."""
+    
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_ifd_info(self, local_dem_url):
+        """Test IFD info retrieval."""
+        from forge3d.cog import open_cog, IfdInfo
+        
+        ds = open_cog(local_dem_url, cache_size_mb=64)
+        info = ds.ifd_info(0)
+        
+        assert isinstance(info, IfdInfo)
+        assert info.width > 0
+        assert info.height > 0
+        assert info.tile_width > 0
+        assert info.tile_height > 0
+    
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_overview_dimensions_decrease(self, local_dem_url):
+        """Test that overview dimensions decrease with level."""
+        from forge3d.cog import open_cog
+        
+        ds = open_cog(local_dem_url, cache_size_mb=64)
+        
+        if ds.overview_count < 2:
+            pytest.skip("COG has no overviews")
+        
+        info0 = ds.ifd_info(0)
+        info1 = ds.ifd_info(1)
+        
+        assert info1.width <= info0.width
+        assert info1.height <= info0.height
+
+
+class TestCogCache:
+    """P3.3: Test COG cache functionality."""
+    
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_cache_stats(self, local_dem_url):
+        """Test cache statistics."""
+        from forge3d.cog import open_cog, CogStats
+        
+        ds = open_cog(local_dem_url, cache_size_mb=64)
+        
+        _ = ds.read_tile(0, 0, lod=0)
+        
+        stats = ds.stats()
+        
+        assert isinstance(stats, CogStats)
+        assert stats.cache_misses >= 1
+        assert stats.memory_budget_bytes == 64 * 1024 * 1024
+    
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_cache_hit(self, local_dem_url):
+        """Test that repeated reads hit cache."""
+        from forge3d.cog import open_cog
+        
+        ds = open_cog(local_dem_url, cache_size_mb=64)
+        
+        _ = ds.read_tile(0, 0, lod=0)
+        stats_after_first = ds.stats()
+        
+        _ = ds.read_tile(0, 0, lod=0)
+        stats_after_second = ds.stats()
+        
+        assert stats_after_second.cache_hits > stats_after_first.cache_hits
+    
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_cache_memory_budget(self, local_dem_url):
+        """Test that cache respects memory budget."""
+        from forge3d.cog import open_cog
+        
+        budget_mb = 8
+        ds = open_cog(local_dem_url, cache_size_mb=budget_mb)
+        
+        info = ds.ifd_info(0)
+        
+        tiles_to_read = min(100, info.tiles_across * info.tiles_down)
+        for i in range(tiles_to_read):
+            x = i % max(1, info.tiles_across)
+            y = i // max(1, info.tiles_across)
+            if x < info.tiles_across and y < info.tiles_down:
+                try:
+                    _ = ds.read_tile(x, y, lod=0)
+                except Exception:
+                    pass
+        
+        stats = ds.stats()
+        
+        tolerance = 1.2
+        assert stats.memory_used_bytes <= budget_mb * 1024 * 1024 * tolerance
+
+
+class TestCogDataclasses:
+    """Test COG dataclass helpers."""
+    
+    def test_cog_stats_from_dict(self):
+        """Test CogStats.from_dict."""
+        from forge3d.cog import CogStats
+        
+        d = {
+            "cache_hits": 100.0,
+            "cache_misses": 50.0,
+            "cache_evictions": 10.0,
+            "memory_used_bytes": 1024000.0,
+            "memory_budget_bytes": 2048000.0,
+            "hit_rate_percent": 66.7,
+        }
+        
+        stats = CogStats.from_dict(d)
+        
+        assert stats.cache_hits == 100
+        assert stats.cache_misses == 50
+        assert stats.cache_evictions == 10
+        assert stats.memory_used_bytes == 1024000
+        assert stats.memory_budget_bytes == 2048000
+        assert stats.hit_rate_percent == 66.7
+    
+    def test_ifd_info_from_dict(self):
+        """Test IfdInfo.from_dict."""
+        from forge3d.cog import IfdInfo
+        
+        d = {
+            "width": 1024,
+            "height": 768,
+            "tile_width": 256,
+            "tile_height": 256,
+            "tiles_across": 4,
+            "tiles_down": 3,
+            "bits_per_sample": 32,
+            "compression": 8,
+            "tile_count": 12,
+        }
+        
+        info = IfdInfo.from_dict(d)
+        
+        assert info.width == 1024
+        assert info.height == 768
+        assert info.tile_width == 256
+        assert info.tile_height == 256
+        assert info.tiles_across == 4
+        assert info.tiles_down == 3
+        assert info.bits_per_sample == 32
+        assert info.compression == 8
+        assert info.tile_count == 12
+
+
+class TestCogAvailability:
+    """Test COG availability checking."""
+    
+    def test_is_cog_available(self):
+        """Test is_cog_available function."""
+        from forge3d.cog import is_cog_available
+        
+        result = is_cog_available()
+        assert isinstance(result, bool)
+    
+    def test_cog_dataset_unavailable_error(self):
+        """Test error when COG not available and no fallback."""
+        from forge3d.cog import is_cog_available, CogDataset
+        
+        if is_cog_available():
+            pytest.skip("COG is available")
+        
+        with pytest.raises(RuntimeError, match="COG streaming is not available"):
+            CogDataset("file:///nonexistent.tif")
+
+
+class TestRemoteCog:
+    """Remote COG integration tests (network-dependent).
+    
+    These tests require network access and will be skipped in CI
+    unless FORGE3D_SKIP_NETWORK_TESTS=0 is set.
+    """
+    
+    @skip_if_no_network()
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_remote_cog_open(self):
+        """Test opening a remote COG via HTTP."""
+        from forge3d.cog import open_cog
+        
+        url = PUBLIC_COG_URLS[0]
+        ds = open_cog(url, cache_size_mb=32)
+        
+        assert ds is not None
+        assert ds.overview_count >= 1
+    
+    @skip_if_no_network()
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_remote_cog_bounds(self):
+        """Test bounds from remote COG."""
+        from forge3d.cog import open_cog
+        
+        url = PUBLIC_COG_URLS[0]
+        ds = open_cog(url, cache_size_mb=32)
+        bounds = ds.bounds
+        
+        assert isinstance(bounds, tuple)
+        assert len(bounds) == 4
+    
+    @skip_if_no_network()
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_remote_cog_tile_read(self):
+        """Test reading a tile from remote COG."""
+        from forge3d.cog import open_cog
+        
+        url = PUBLIC_COG_URLS[0]
+        ds = open_cog(url, cache_size_mb=32)
+        
+        tile = ds.read_tile(0, 0, lod=0)
+        
+        assert isinstance(tile, np.ndarray)
+        assert tile.ndim == 2
+        assert tile.shape[0] > 0
+        assert tile.shape[1] > 0
+    
+    @skip_if_no_network()
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_remote_cog_deterministic(self):
+        """Test that remote tile reads are deterministic."""
+        from forge3d.cog import open_cog
+        
+        url = PUBLIC_COG_URLS[0]
+        ds = open_cog(url, cache_size_mb=32)
+        
+        tile1 = ds.read_tile(0, 0, lod=0)
+        tile2 = ds.read_tile(0, 0, lod=0)
+        
+        np.testing.assert_array_equal(tile1, tile2)
+    
+    @skip_if_no_network()
+    @pytest.mark.skipif(
+        not cog_available() and not rasterio_available(),
+        reason="Neither native COG nor rasterio available"
+    )
+    def test_remote_cog_cache_stats(self):
+        """Test cache stats with remote COG."""
+        from forge3d.cog import open_cog
+        
+        url = PUBLIC_COG_URLS[0]
+        ds = open_cog(url, cache_size_mb=32)
+        
+        _ = ds.read_tile(0, 0, lod=0)
+        stats1 = ds.stats()
+        
+        _ = ds.read_tile(0, 0, lod=0)
+        stats2 = ds.stats()
+        
+        assert stats1.cache_misses >= 1
+        assert stats2.cache_hits > stats1.cache_hits

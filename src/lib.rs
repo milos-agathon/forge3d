@@ -4658,6 +4658,9 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(crate::geometry::grid::grid_generate, m)?)?;
     // P2.1/M5: Clipmap terrain system
     crate::terrain::clipmap::py_bindings::register_clipmap_bindings(m)?;
+    // P3: COG streaming
+    #[cfg(feature = "cog_streaming")]
+    crate::terrain::cog::py_bindings::register_cog_bindings(m)?;
     // Path tracing (GPU MVP)
     m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
     // P7-05: Offscreen BRDF tile renderer

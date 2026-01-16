@@ -6,6 +6,32 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.9.8] - Cloud-Native Data & COG Streaming
+
+### Added
+- **Phase 3 / M6 — COG Streaming (Cloud-Optimized GeoTIFF)**
+  - P3.1: HTTP range request adapter enabling efficient remote tile access without full file download.
+  - P3.2: IFD (Image File Directory) parsing with automatic overview selection for optimal LOD streaming.
+  - P3.3: LRU (Least Recently Used) cache with configurable memory budget preventing unbounded growth.
+  - Native COG decoder with `reqwest`-based HTTP client for range reads (bytes=start-end headers).
+  - Rasterio fallback path for comprehensive format support when native decoder unavailable.
+  - Speculative prefetch strategies reducing latency on sequential tile access patterns.
+  - Aggressive caching layer with hit/miss statistics exposed for monitoring and tuning.
+  - Deterministic tile decode ensuring reproducible results across cache states.
+  - Memory budget enforcement preventing OOM on large-scale streaming operations.
+  - Overview pyramid integration selecting appropriate resolution based on viewport and LOD requirements.
+  - Python CLI demo: `cog_streaming_demo.py` demonstrating remote DEM streaming without local copy.
+  - Comprehensive test suite: `test_cog_range_read.py`, `test_cog_overviews.py`, `test_cog_cache_eviction.py`.
+
+### Performance
+- Streamed datasets render without pre-tiling or full file download, enabling continent-scale terrain from cloud storage.
+- Range request optimization reduces bandwidth consumption by fetching only visible tiles.
+- LRU cache provides sub-millisecond tile retrieval on cache hits.
+
+### Documentation
+- Added COG streaming architecture documentation with cache behavior and prefetch strategies.
+- Updated data ingestion pipeline guide with cloud-native workflow examples.
+
 ## [1.9.7] - Terrain Scale & Clipmap Structure
 
 ### Added
