@@ -14,6 +14,8 @@
 //! Center (LOD 0): 1x spacing          ██
 //! ```
 
+pub mod geomorph;
+pub mod gpu_lod;
 pub mod level;
 #[cfg(feature = "extension-module")]
 pub mod py_bindings;
