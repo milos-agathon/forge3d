@@ -335,6 +335,24 @@ pub enum ViewerCmd {
         opacity: f32,
     },
 
+    // === POINT CLOUDS ===
+
+    /// Load a point cloud from LAZ/LAS file
+    LoadPointCloud {
+        path: String,
+        point_size: f32,
+        max_points: u64,
+        color_mode: Option<String>,
+    },
+    /// Clear loaded point cloud
+    ClearPointCloud,
+    /// Set point cloud rendering parameters
+    SetPointCloudParams {
+        point_size: Option<f32>,
+        visible: Option<bool>,
+        color_mode: Option<String>,
+    },
+
     // === LABELS ===
 
     /// Add a text label at a world position

@@ -1499,6 +1499,92 @@ impl Viewer {
         }
     }
 
+    // P5: Render point cloud (after terrain, before labels)
+    if let Some(ref pc) = self.point_cloud {
+        if pc.visible && pc.point_count > 0 && pc.instance_buffer.is_some() {
+            // Points are centered at origin, compute extent for camera distance
+            let extent_x = pc.bounds_max[0] - pc.bounds_min[0];
+            let extent_y = pc.bounds_max[1] - pc.bounds_min[1];
+            let extent_z = pc.bounds_max[2] - pc.bounds_min[2];
+            let extent = extent_x.max(extent_y).max(extent_z).max(100.0);
+            
+            // Use orbit camera state from point cloud
+            let base_radius = extent * 2.0;
+            let r = base_radius * pc.cam_radius;
+            let center = glam::Vec3::ZERO;
+            // Spherical coords from point cloud camera state
+            let eye = glam::Vec3::new(
+                r * pc.cam_theta.cos() * pc.cam_phi.cos(),
+                r * pc.cam_theta.sin(),
+                r * pc.cam_theta.cos() * pc.cam_phi.sin(),
+            );
+            
+            let view_mat = Mat4::look_at_rh(eye, center, glam::Vec3::Y);
+            let aspect = self.config.width as f32 / self.config.height.max(1) as f32;
+            let near = extent * 0.01;
+            let far = extent * 10.0;
+            let proj = Mat4::perspective_rh(45.0_f32.to_radians(), aspect, near, far);
+            let view_proj = proj * view_mat;
+
+            // Simple render pass - clear to dark background for point cloud
+            {
+                let mut pc_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("viewer.pointcloud.pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.1, g: 0.1, b: 0.15, a: 1.0 }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                pc.render(
+                    &mut pc_pass,
+                    &self.queue,
+                    view_proj.to_cols_array_2d(),
+                    [self.config.width as f32, self.config.height as f32],
+                );
+            }
+            
+            // Also render point cloud to snapshot texture if one exists
+            if let Some(ref snap_tex) = self.pending_snapshot_tex {
+                let snap_view = snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let snap_w = snap_tex.width() as f32;
+                let snap_h = snap_tex.height() as f32;
+                let snap_aspect = snap_w / snap_h.max(1.0);
+                let snap_proj = Mat4::perspective_rh(45.0_f32.to_radians(), snap_aspect, near, far);
+                let snap_view_proj = snap_proj * view_mat;
+                
+                let mut pc_snap_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("viewer.pointcloud.pass.snapshot"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &snap_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.1, g: 0.1, b: 0.15, a: 1.0 }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                
+                pc.render(
+                    &mut pc_snap_pass,
+                    &self.queue,
+                    snap_view_proj.to_cols_array_2d(),
+                    [snap_w, snap_h],
+                );
+            }
+        }
+    }
+
     // Render labels (screen-space text overlay) - AFTER terrain so labels appear on top
     if self.label_manager.is_enabled() && self.label_manager.visible_count() > 0 {
         self.label_manager.upload_to_renderer(&self.device, &self.queue, &mut self.hud);

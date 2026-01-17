@@ -6,6 +6,30 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.10.0] - 3D Tiles & Point Cloud Platform
+
+### Added
+- **Phase 5 / P5 — 3D Geospatial Platform (3D Tiles & Point Clouds)**
+  - **3D Tiles Support** (OGC Standard)
+    - Native `tileset.json` parser with hierarchical traversal support.
+    - B3DM (Batched 3D Model) payload decoder with glTF 2.0 integration.
+    - PNTS (Point Cloud) payload decoder with feature table parsing.
+    - Screen-Space Error (SSE) based LOD selection (`compute_sse`, `should_refine`).
+    - Hierarchical culling and traversal iterator (`TilesetTraverser`).
+  - **Point Cloud System** (Massive Dataset Support)
+    - COPC (Cloud Optimized Point Cloud) reader with LAZ 1.4 decompression.
+    - EPT (Entwine Point Tile) schema support for octree-based streaming.
+    - Out-of-core octree traversal with frustum culling and LOD management.
+    - Quantitative attribute extraction (intensity, classification, color).
+  - **Python API Bindings**
+    - `Tiles3dRenderer` and `PointCloudRenderer` for high-performance drawing.
+    - `Tileset` and `CopcDataset` classes for asset management.
+    - Comprehensive test suite coverage: `test_3dtiles_parse.py`, `test_copc_parse.py`.
+
+### Documentation
+- Added Phase 5 implementation plan details to `docs/plan.md`.
+- Updated API reference with new geospatial modules.
+
 ## [1.9.9] - Creator Workflow & Map Plate Compositor
 
 ### Added

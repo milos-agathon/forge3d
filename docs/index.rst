@@ -35,6 +35,7 @@ Welcome to the forge3d documentation. This is a high-performance Rust-first WebG
    :caption: Advanced Features:
 
    viewer/interactive_viewer
+   user/point_cloud_viewer
    postfx/index
    user/ibl_overview
    p5_gi_passes

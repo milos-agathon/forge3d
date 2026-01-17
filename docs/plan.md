@@ -161,7 +161,6 @@ We preserve both views and present a unified table.
 | 7  | **COG streaming (HTTP range + overviews + cache)**      |          0 | ~25% (local tile streaming) |                5 |                         **4–5** | GPT said 0% because no HTTP range infra; Claude notes local tile streaming exists. Plan phases local → HTTP range. |
 | 8  | **PMTiles vector streaming + styling/declutter**        |          0 |                          0% |                4 |                         **4–5** | Needs tile index reading, decode, styling DSL, label declutter integration.                                        |
 | 9  | **3D Tiles import/export**                              |          0 |                          0% |                4 |                           **5** | Large: tileset.json, payload formats, metadata, bounding volumes, LOD; b3dm/pnts parsing etc.                      |
-| 10 | **Point clouds (EPT/COPC) + splats**                    |          0 |   ~10% (basic point render) |                5 |                          **5+** | Full subsystem: streaming, LOD, rendering, picking, memory budgets; optional Gaussian splat path.                  |
 
 ---
 

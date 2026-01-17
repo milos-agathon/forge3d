@@ -16,13 +16,25 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.9.9 — Map Plate Compositor with professional cartographic layout system featuring auto-generated legends, scale bars, north arrows, and flexible region positioning for publication-ready output up to 16K resolution.
+Current release: 1.10.0 — 3D Geospatial Platform featuring native OGC 3D Tiles support (B3DM/PNTS), Cloud-Optimized Point Cloud (COPC) streaming, and hierarchical LOD systems for massive dataset visualization.
 
-## Latest Feature: Creator Workflow & Map Plate Compositor
+## Latest Feature: 3D Geospatial Platform (Phase 5)
 
-**forge3d** now delivers professional cartographic output through the Map Plate Compositor (P4.1–P4.3), transforming raw terrain renders into publication-ready maps with legends, scale bars, titles, and attribution. The `MapPlate` class provides a flexible layout engine with percentage-based or absolute region positioning—define your main map area, legend zone, scale bar placement, and title block in a single configuration. Auto-generated legends extract colormap information with customizable styling, while scale bars automatically select appropriate units (meters/kilometers) based on map extent. Export to PNG or PDF at resolutions up to 16K while maintaining plate region proportions. Use the interactive viewer's `map_plate` command for immediate visual feedback: `map_plate output.png title="Mount Rainier" width=3200 height=2400` generates a complete cartographic composition. The template system enables reusable configurations across different datasets—define your house style once, apply it everywhere. Batch workflows support generating multiple map variants from a single terrain render. Perfect for academic publications, presentation materials, and print media requiring professional cartographic standards.
+**forge3d** now powers massive geospatial visualization with a native **3D Tiles and Point Cloud engine**. The new Phase 5 platform introduces high-performance streaming and rendering for OGC 3D Tiles (including B3DM and PNTS payloads) and Cloud-Optimized Point Clouds (COPC/LAZ). The system features a hierarchical Screen-Space Error (SSE) traversal engine that automatically manages Level of Detail (LOD) to render city-scale datasets and billion-point clouds within a fixed memory budget.
 
-### Shadow Technique Comparison
+*   **3D Tiles**: Full hierarchy traversal, geometric error-based refinement, and glTF integration for B3DM.
+*   **Point Clouds**: Direct COPC/EPT support with out-of-core octree streaming and attribute styling.
+*   **Performance**: Rust-native multithreaded decoding and WGPU-accelerated rendering.
+
+```bash
+# Preview a local 3D Tileset
+python examples/tiles3d_demo.py --tileset assets/city/tileset.json --sse 16
+
+# Stream a massive point cloud
+python examples/pointcloud_viewer_interactive.py --copc https://s3.amazonaws.com/data/autzen.copc.laz
+```
+
+### Map Plate Compositor
 
 Compare shadow quality across advanced techniques with dramatic lighting (sun elevation 10°):
 

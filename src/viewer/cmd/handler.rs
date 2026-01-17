@@ -1650,6 +1650,72 @@ impl Viewer {
                 let jitter_enabled = self.taa_jitter.enabled;
                 println!("[taa] enabled={} jitter_enabled={}", taa_enabled, jitter_enabled);
             }
+
+            // P5: Point cloud commands
+            ViewerCmd::LoadPointCloud { path, point_size, max_points, color_mode } => {
+                use super::super::pointcloud::{PointCloudState, ColorMode};
+                
+                eprintln!("[pointcloud] Loading: {} (size={}, max={}, mode={:?})",
+                    path, point_size, max_points, color_mode);
+                
+                // Initialize point cloud state if needed
+                if self.point_cloud.is_none() {
+                    eprintln!("[pointcloud] Creating PointCloudState...");
+                    let depth_format = wgpu::TextureFormat::Depth32Float;
+                    self.point_cloud = Some(PointCloudState::new(
+                        &self.device,
+                        self.config.format,
+                        depth_format,
+                    ));
+                    eprintln!("[pointcloud] PointCloudState created");
+                }
+                
+                if let Some(ref mut pc) = self.point_cloud {
+                    let mode = color_mode.as_ref()
+                        .map(|s| ColorMode::from_str(s))
+                        .unwrap_or(ColorMode::Elevation);
+                    
+                    pc.set_point_size(point_size);
+                    eprintln!("[pointcloud] Loading file...");
+                    
+                    match pc.load_from_file(&self.device, &self.queue, &path, max_points, mode) {
+                        Ok(()) => {
+                            eprintln!("[pointcloud] Loaded {} points", pc.point_count);
+                            eprintln!("[pointcloud] Bounds: ({:.1}, {:.1}, {:.1}) - ({:.1}, {:.1}, {:.1})",
+                                pc.bounds_min[0], pc.bounds_min[1], pc.bounds_min[2],
+                                pc.bounds_max[0], pc.bounds_max[1], pc.bounds_max[2]);
+                            eprintln!("[pointcloud] Center: ({:.1}, {:.1}, {:.1})",
+                                pc.center[0], pc.center[1], pc.center[2]);
+                            eprintln!("[pointcloud] Load complete, returning to render loop");
+                        }
+                        Err(e) => {
+                            eprintln!("[pointcloud] Error: {}", e);
+                        }
+                    }
+                }
+            }
+            ViewerCmd::ClearPointCloud => {
+                if let Some(ref mut pc) = self.point_cloud {
+                    pc.clear();
+                }
+                println!("[pointcloud] Cleared");
+            }
+            ViewerCmd::SetPointCloudParams { point_size, visible, color_mode } => {
+                if let Some(ref mut pc) = self.point_cloud {
+                    if let Some(size) = point_size {
+                        pc.set_point_size(size);
+                    }
+                    if let Some(vis) = visible {
+                        pc.set_visible(vis);
+                    }
+                    if let Some(mode) = color_mode {
+                        use super::super::pointcloud::ColorMode;
+                        pc.color_mode = ColorMode::from_str(&mode);
+                    }
+                    println!("[pointcloud] Params updated: size={}, visible={}, mode={:?}",
+                        pc.point_size, pc.visible, pc.color_mode);
+                }
+            }
         }
     }
 }

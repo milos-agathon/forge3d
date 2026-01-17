@@ -5,9 +5,7 @@ use pyo3::exceptions::PyRuntimeError;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::cache::CogCacheStats;
 use super::cog_reader::CogHeightReader;
-use super::error::CogError;
 
 /// Python wrapper for COG dataset.
 #[pyclass(module = "forge3d._forge3d", name = "CogDataset")]
@@ -93,7 +91,7 @@ impl PyCogDataset {
             )));
         }
 
-        let arr = numpy::PyArray2::from_vec2(py, &vec_to_2d(&heights, tile_height, tile_width))
+        let arr = numpy::PyArray2::from_vec2_bound(py, &vec_to_2d(&heights, tile_height, tile_width))
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to create numpy array: {}", e)))?;
         
         Ok(arr)

@@ -249,4 +249,6 @@ pub struct Viewer {
     pub(crate) taa_jitter: crate::core::jitter::JitterState,
     // P1.3: TAA renderer
     pub(crate) taa_renderer: Option<crate::core::taa::TaaRenderer>,
+    // P5: Point cloud state
+    pub(crate) point_cloud: Option<super::pointcloud::PointCloudState>,
 }

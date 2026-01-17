@@ -297,6 +297,8 @@ impl Viewer {
             taa_jitter: crate::core::jitter::JitterState::new(),
             // P1.3: TAA renderer (initialized lazily when enabled)
             taa_renderer: None,
+            // P5: Point cloud state (initialized lazily when loaded)
+            point_cloud: None,
         };
 
         viewer.sync_ssr_params_to_gi();

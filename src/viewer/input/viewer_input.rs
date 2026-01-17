@@ -153,40 +153,52 @@ impl Viewer {
                 let new_x = position.x as f32;
                 let new_y = position.y as f32;
                 
-                // If terrain viewer is active and mouse is pressed, orbit the terrain camera
+                // Check what's active
+                let pc_count = self.point_cloud.as_ref().map_or(0, |pc| pc.point_count);
+                
+                // If mouse is pressed, orbit the appropriate camera
                 if self.camera.mouse_pressed {
-                    if let Some(ref mut tv) = self.terrain_viewer {
-                        if tv.has_terrain() {
-                            if let Some((last_x, last_y)) = self.camera.last_mouse_pos {
-                                let dx = new_x - last_x;
-                                let dy = new_y - last_y;
+                    if let Some((last_x, last_y)) = self.camera.last_mouse_pos {
+                        let dx = new_x - last_x;
+                        let dy = new_y - last_y;
+                        
+                        // Check if terrain viewer is active
+                        let terrain_active = self.terrain_viewer.as_ref()
+                            .map_or(false, |tv| tv.has_terrain());
+                        
+                        if terrain_active {
+                            if let Some(ref mut tv) = self.terrain_viewer {
                                 tv.handle_mouse_drag(dx, dy);
+                            }
+                        } else if pc_count > 0 {
+                            if let Some(ref mut pc) = self.point_cloud {
+                                pc.handle_mouse_drag(dx, dy);
                             }
                         }
                     }
                 }
                 
-                self.camera
-                    .handle_mouse_move(new_x, new_y);
+                self.camera.handle_mouse_move(new_x, new_y);
                 true
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let scroll = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => {
-                        println!("[scroll] LineDelta x={} y={}", x, y);
-                        *y * 3.0
-                    }
-                    MouseScrollDelta::PixelDelta(pos) => {
-                        println!("[scroll] PixelDelta x={} y={}", pos.x, pos.y);
-                        pos.y as f32 * 0.02
-                    }
+                    MouseScrollDelta::LineDelta(_x, y) => *y * 3.0,
+                    MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.02,
                 };
-                println!("[scroll] final={}", scroll);
                 
-                // If terrain viewer is active, zoom the terrain camera
-                if let Some(ref mut tv) = self.terrain_viewer {
-                    if tv.has_terrain() {
+                // Check what's active
+                let terrain_active = self.terrain_viewer.as_ref()
+                    .map_or(false, |tv| tv.has_terrain());
+                let pc_count = self.point_cloud.as_ref().map_or(0, |pc| pc.point_count);
+                
+                if terrain_active {
+                    if let Some(ref mut tv) = self.terrain_viewer {
                         tv.handle_scroll(scroll);
+                    }
+                } else if pc_count > 0 {
+                    if let Some(ref mut pc) = self.point_cloud {
+                        pc.handle_scroll(scroll);
                     }
                 } else {
                     self.camera.handle_mouse_scroll(scroll);
@@ -225,10 +237,17 @@ impl Viewer {
         }
 
         // If terrain viewer is active, route input to terrain camera
+        // Otherwise, if point cloud is active, route to point cloud camera
         let terrain_active = self.terrain_viewer.as_ref().map_or(false, |tv| tv.has_terrain());
+        let pc_active = self.point_cloud.as_ref().map_or(false, |pc| pc.point_count > 0);
+        
         if terrain_active {
             if let Some(ref mut tv) = self.terrain_viewer {
                 tv.handle_keys(forward, right, up);
+            }
+        } else if pc_active {
+            if let Some(ref mut pc) = self.point_cloud {
+                pc.handle_keys(forward, right, up);
             }
         } else {
             self.camera.update_fps(dt, forward, right, up);

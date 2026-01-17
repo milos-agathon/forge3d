@@ -10,6 +10,7 @@ pub mod camera_controller;
 mod cmd;
 mod event_loop;
 pub mod hud;
+pub mod pointcloud;
 pub mod image_analysis;
 mod init;
 mod input;

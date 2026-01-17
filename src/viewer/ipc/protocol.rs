@@ -245,6 +245,34 @@ pub enum IpcRequest {
     /// Set global vector overlay opacity multiplier
     SetGlobalVectorOverlayOpacity { opacity: f32 },
 
+    // === POINT CLOUDS ===
+
+    /// Load a point cloud from LAZ/LAS file
+    LoadPointCloud {
+        /// Path to LAZ/LAS file
+        path: String,
+        /// Point size in pixels (default: 2.0)
+        #[serde(default = "default_point_size")]
+        point_size: f32,
+        /// Maximum points to load (default: 5,000,000)
+        #[serde(default = "default_max_points")]
+        max_points: u64,
+        /// Color mode: "rgb", "elevation", "intensity" (default: "elevation")
+        #[serde(default)]
+        color_mode: Option<String>,
+    },
+    /// Clear loaded point cloud
+    ClearPointCloud,
+    /// Set point cloud rendering parameters
+    SetPointCloudParams {
+        #[serde(default)]
+        point_size: Option<f32>,
+        #[serde(default)]
+        visible: Option<bool>,
+        #[serde(default)]
+        color_mode: Option<String>,
+    },
+
     // === LABELS ===
 
     /// Add a text label at a world position
@@ -698,6 +726,10 @@ fn default_line_width() -> f32 {
 
 fn default_point_size() -> f32 {
     5.0
+}
+
+fn default_max_points() -> u64 {
+    5_000_000
 }
 
 fn default_true() -> bool {
@@ -1155,6 +1187,24 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
         }
         IpcRequest::SetGlobalVectorOverlayOpacity { opacity } => {
             Ok(Some(ViewerCmd::SetGlobalVectorOverlayOpacity { opacity: *opacity }))
+        }
+
+        // Point cloud commands
+        IpcRequest::LoadPointCloud { path, point_size, max_points, color_mode } => {
+            Ok(Some(ViewerCmd::LoadPointCloud {
+                path: path.clone(),
+                point_size: *point_size,
+                max_points: *max_points,
+                color_mode: color_mode.clone(),
+            }))
+        }
+        IpcRequest::ClearPointCloud => Ok(Some(ViewerCmd::ClearPointCloud)),
+        IpcRequest::SetPointCloudParams { point_size, visible, color_mode } => {
+            Ok(Some(ViewerCmd::SetPointCloudParams {
+                point_size: *point_size,
+                visible: *visible,
+                color_mode: color_mode.clone(),
+            }))
         }
 
         // Label commands

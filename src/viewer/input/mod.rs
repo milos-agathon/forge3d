@@ -11,6 +11,7 @@ pub use mouse::{handle_cursor_move, handle_mouse_input, handle_scroll};
 // viewer_input exports Viewer::handle_input() and Viewer::update() impl directly
 
 use super::camera_controller::CameraController;
+use super::pointcloud::PointCloudState;
 use super::terrain::ViewerTerrainScene;
 use std::collections::HashSet;
 use winit::event::WindowEvent;
@@ -26,6 +27,7 @@ pub fn handle_input(
     event: &WindowEvent,
     camera: &mut CameraController,
     terrain_viewer: &mut Option<ViewerTerrainScene>,
+    point_cloud: &mut Option<PointCloudState>,
     keys_pressed: &mut HashSet<KeyCode>,
     shift_pressed: &mut bool,
 ) -> bool {
@@ -37,9 +39,9 @@ pub fn handle_input(
             handle_mouse_input(*state, *button, camera)
         }
         WindowEvent::CursorMoved { position, .. } => {
-            handle_cursor_move(position.x as f32, position.y as f32, camera, terrain_viewer)
+            handle_cursor_move(position.x as f32, position.y as f32, camera, terrain_viewer, point_cloud)
         }
-        WindowEvent::MouseWheel { delta, .. } => handle_scroll(delta, camera, terrain_viewer),
+        WindowEvent::MouseWheel { delta, .. } => handle_scroll(delta, camera, terrain_viewer, point_cloud),
         _ => false,
     }
 }

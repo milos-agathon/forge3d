@@ -1119,6 +1119,8 @@ pub mod vector;
 pub mod picking; // Feature picking and inspection system
 pub mod viewer; // Interactive windowed viewer (Workstream I1) // P5.2: render passes wrappers
 pub mod animation; // Feature C: Camera animation and keyframe interpolation
+pub mod tiles3d; // P5: 3D Tiles support (tileset.json, b3dm, pnts)
+pub mod pointcloud; // P5: Point Cloud support (COPC, EPT)
 
 // Re-export commonly used types
 pub use core::cloud_shadows::{
