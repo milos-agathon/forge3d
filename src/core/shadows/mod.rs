@@ -298,9 +298,10 @@ fn build_csm_uniforms(
         depth_clip_factor: 1.0,
         technique: 1, // PCF
         technique_flags: 0,
+        _padding1: [0.0; 3],
         technique_params: [0.0; 4],
         technique_reserved: [0.0; 4],
         cascade_blend_range: 0.0,
-        _padding2: [0.0; 14],
+        _padding2: [0.0; 27],
     }
 }

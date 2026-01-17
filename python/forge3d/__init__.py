@@ -245,6 +245,14 @@ from . import geometry
 from . import io
 
 # -----------------------------------------------------------------------------
+# P4: Map Plate / Creator Workflow
+# -----------------------------------------------------------------------------
+from .map_plate import MapPlate, MapPlateConfig, BBox, PlateRegion
+from .legend import Legend, LegendConfig
+from .scale_bar import ScaleBar, ScaleBarConfig
+from .north_arrow import NorthArrow, NorthArrowConfig
+
+# -----------------------------------------------------------------------------
 # Helpers (offscreen rendering, frame dumping)
 # -----------------------------------------------------------------------------
 from .helpers.offscreen import (
@@ -314,6 +322,17 @@ __all__ = [
     # Modules
     "geometry",
     "io",
+    # P4: Map Plate / Creator Workflow
+    "MapPlate",
+    "MapPlateConfig",
+    "BBox",
+    "PlateRegion",
+    "Legend",
+    "LegendConfig",
+    "ScaleBar",
+    "ScaleBarConfig",
+    "NorthArrow",
+    "NorthArrowConfig",
     # Viewer utilities
     "viewer_ipc",
     "colors",

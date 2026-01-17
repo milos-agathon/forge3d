@@ -2509,10 +2509,11 @@ impl TerrainScene {
             depth_clip_factor: 1.0,
             technique: 1,             // Default to PCF
             technique_flags: 0,
+            _padding1: [0.0; 3],
             technique_params: [0.0; 4],
             technique_reserved: [0.0; 4],
             cascade_blend_range: 0.0, // No blending needed for noop
-            _padding2: [0.0; 14],
+            _padding2: [0.0; 27],
         };
         let csm_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain.noop_shadow.csm_uniforms"),
@@ -3452,10 +3453,11 @@ impl TerrainScene {
             // P0.2/M3: Shadow technique (VSM/EVSM/MSM now supported)
             technique: self.shadow_technique,
             technique_flags: csm.technique_flags,
+            _padding1: [0.0; 3],
             technique_params: csm.technique_params,
             technique_reserved: csm.technique_reserved,
             cascade_blend_range: csm.cascade_blend_range,
-            _padding2: [0.0; 14],
+            _padding2: [0.0; 27],
         };
 
         // Create buffer with the terrain-compatible uniforms (storage for std430 layout)

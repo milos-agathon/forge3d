@@ -6,6 +6,30 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.9.9] - Creator Workflow & Map Plate Compositor
+
+### Added
+- **Phase 4 / P4.1–P4.3 — Map Plate Compositor (Creator Workflow)**
+  - P4.1: `MapPlate` class with configurable region layout for professional cartographic output.
+  - Map plate region system supporting main map area, legend, scale bar, title, and attribution zones.
+  - Flexible layout engine with percentage-based or absolute positioning for each plate region.
+  - P4.2: Auto-generated legends from colormap with customizable styling and positioning.
+  - Scale bar generation with automatic unit selection (meters, kilometers) based on map extent.
+  - North arrow integration with configurable style and placement within plate layout.
+  - P4.3: Export pipeline supporting PNG and PDF output formats with embedded layout metadata.
+  - High-resolution export capability (up to 16K) maintaining plate region proportions.
+  - Batch export workflows for generating multiple map variants from single configuration.
+  - Title and attribution text rendering with configurable fonts, sizes, and alignment.
+  - Interactive viewer integration via `map_plate` command for immediate visual feedback.
+  - Template system for reusable map plate configurations across different datasets.
+  - Professional-grade output suitable for publication, presentation, and print media.
+  - Python API: `render_map_plate(terrain, layout_config, output_path)` with full customization.
+  - Comprehensive test suite: `test_map_plate_layout.py`, `test_legend_generation.py`, `test_plate_export.py`.
+
+### Documentation
+- Added map plate compositor guide with layout examples and best practices.
+- Updated creator workflow documentation with template library and styling reference.
+
 ## [1.9.8] - Cloud-Native Data & COG Streaming
 
 ### Added

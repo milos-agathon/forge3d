@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import re
 import socket
+import tempfile
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
+
+import numpy as np
 
 from .viewer_ipc import send_ipc
 
@@ -72,6 +75,301 @@ def parse_set_command(args: str, key_map: Optional[Dict[str, str]] = None) -> Di
                 params[ipc_key] = val
     
     return params
+
+
+def handle_map_plate_command(
+    sock: socket.socket,
+    args: str,
+    dem_info: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Handle map_plate command: map_plate <path> [title="..."] [width=1600] [height=1200]
+    
+    Captures a high-quality snapshot and composes it into a map plate with
+    title, legend, scale bar, and north arrow.
+    
+    Args:
+        sock: Connected socket
+        args: Command arguments
+        dem_info: Optional DEM metadata (bbox, domain, meters_per_pixel)
+        
+    Returns:
+        True if command was handled
+    """
+    from PIL import Image
+    from .map_plate import MapPlate, MapPlateConfig, BBox
+    from .legend import Legend, LegendConfig
+    from .scale_bar import ScaleBar, ScaleBarConfig
+    from .north_arrow import NorthArrow, NorthArrowConfig
+    
+    if not args:
+        print("Usage: map_plate <output.png> [title=\"...\"] [width=1600] [height=1200]")
+        return True
+    
+    # Parse arguments
+    parts = args.split()
+    output_path = Path(parts[0]).resolve()
+    
+    # Default settings
+    title = "3D Terrain Map"
+    plate_width = 1600
+    plate_height = 1200
+    
+    # Parse key=value or title="..." arguments
+    i = 1
+    while i < len(parts):
+        part = parts[i]
+        if part.startswith('title="'):
+            # Handle quoted title
+            title_parts = [part[7:]]
+            while i < len(parts) - 1 and not title_parts[-1].endswith('"'):
+                i += 1
+                title_parts.append(parts[i])
+            title = " ".join(title_parts).rstrip('"')
+        elif "=" in part:
+            key, val = part.split("=", 1)
+            if key == "width":
+                plate_width = int(val)
+            elif key == "height":
+                plate_height = int(val)
+            elif key == "title":
+                title = val.strip('"')
+        i += 1
+    
+    # Calculate map region size (leave margins for legend, title, etc.)
+    margin_top, margin_right, margin_bottom, margin_left = 70, 200, 80, 40
+    map_width = plate_width - margin_left - margin_right
+    map_height = plate_height - margin_top - margin_bottom
+    
+    # Take high-res snapshot to temp file
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        tmp_path = tmp.name
+    
+    print(f"Capturing {map_width}x{map_height} snapshot...")
+    snap_cmd = {
+        "cmd": "snapshot",
+        "path": tmp_path,
+        "width": map_width,
+        "height": map_height,
+    }
+    resp = send_ipc(sock, snap_cmd)
+    if not resp.get("ok"):
+        print(f"Snapshot failed: {resp.get('error')}")
+        return True
+    
+    # Wait for file to be written (viewer writes asynchronously)
+    import time
+    tmp_file = Path(tmp_path)
+    for _ in range(50):  # Wait up to 5 seconds
+        time.sleep(0.1)
+        if tmp_file.exists() and tmp_file.stat().st_size > 0:
+            break
+    else:
+        print(f"Snapshot timed out - file not created")
+        return True
+    
+    # Small additional delay to ensure file is fully written
+    time.sleep(0.2)
+    
+    # Load the snapshot
+    try:
+        snap_img = Image.open(tmp_path)
+        snap_rgba = np.array(snap_img)
+        tmp_file.unlink()  # Clean up temp file
+    except Exception as e:
+        print(f"Failed to load snapshot: {e}")
+        return True
+    
+    print("Composing map plate...")
+    
+    # Create map plate
+    plate = MapPlate(MapPlateConfig(
+        width=plate_width,
+        height=plate_height,
+        margin=(margin_top, margin_right, margin_bottom, margin_left),
+        background=(245, 245, 245, 255),
+    ))
+    
+    # Use DEM info if available, otherwise use defaults
+    if dem_info:
+        bbox = dem_info.get("bbox", BBox(west=-121.9, south=46.7, east=-121.6, north=46.9))
+        domain = dem_info.get("domain", (0.0, 4000.0))
+        mpp = dem_info.get("meters_per_pixel")
+    else:
+        bbox = BBox(west=-121.9, south=46.7, east=-121.6, north=46.9)
+        domain = (0.0, 4000.0)
+        mpp = None
+    
+    plate.set_map_region(snap_rgba, bbox)
+    plate.add_title(title, font_size=28)
+    
+    # Extract terrain colors from the snapshot, excluding background
+    h, w = snap_rgba.shape[:2]
+    img_float = snap_rgba[:, :, :3].astype(np.float32) / 255.0
+    
+    # Detect background color from top corners (sky)
+    # We ignore bottom corners as they might be terrain
+    corner_size = 30
+    top_corners = [
+        img_float[:corner_size, :corner_size],           # top-left
+        img_float[:corner_size, -corner_size:],          # top-right
+    ]
+    bg_color = np.mean([np.mean(c, axis=(0, 1)) for c in top_corners], axis=0)
+    
+    # Calculate distance from background color
+    diff = img_float - bg_color
+    dist_sq = np.sum(diff ** 2, axis=2)
+    
+    # Check if background is "blue sky" (B > R and B > G)
+    bg_is_blue = (bg_color[2] > bg_color[0] + 0.05) and (bg_color[2] > bg_color[1] + 0.05)
+    
+    if bg_is_blue:
+        # If sky is blue, we can use a simpler color distance
+        # But we must be careful not to exclude water if it looks like sky
+        # For map plates, we assume main subject is terrain
+        is_terrain = dist_sq > 0.04  # 0.2^2
+    else:
+        # If sky is not clearly blue (e.g. white/grey), it's harder.
+        # Use position heuristic: terrain is usually not at the very top
+        # and has different texture/variance.
+        # For now, use a tighter threshold
+        is_terrain = dist_sq > 0.01
+        
+    # Explicitly preserve SNOW: High brightness, low saturation
+    # (unless sky is also exactly white, but even then snow has shading)
+    lum = 0.299 * img_float[:,:,0] + 0.587 * img_float[:,:,1] + 0.114 * img_float[:,:,2]
+    sat = np.max(img_float, axis=2) - np.min(img_float, axis=2)
+    is_snow = (lum > 0.8) & (sat < 0.1)
+    
+    # If background is NOT white (high lum, low sat), then keep snow
+    bg_lum = 0.299 * bg_color[0] + 0.587 * bg_color[1] + 0.114 * bg_color[2]
+    bg_sat = np.max(bg_color) - np.min(bg_color)
+    bg_is_white = (bg_lum > 0.9) and (bg_sat < 0.1)
+    
+    if not bg_is_white:
+        is_terrain = is_terrain | is_snow
+
+    # Get all terrain pixel colors
+    terrain_pixels = img_float[is_terrain]
+    
+    if len(terrain_pixels) < 1000:
+        # Fallback to center crop if masking failed
+        h, w = img_float.shape[:2]
+        terrain_pixels = img_float[h//3:2*h//3, w//3:2*w//3].reshape(-1, 3)
+
+    # Sort terrain colors by luminance (dark=low elevation, bright=high/snow)
+    luminance = 0.299 * terrain_pixels[:, 0] + 0.587 * terrain_pixels[:, 1] + 0.114 * terrain_pixels[:, 2]
+    sorted_idx = np.argsort(luminance)
+    sorted_pixels = terrain_pixels[sorted_idx]
+    sorted_lum = luminance[sorted_idx]
+    
+    # "Luminance-Linear Sampling"
+    # Instead of binning (which is biased by frequency), we define N target luminances
+    # linearly spaced from the absolute darkest to absolute brightest terrain pixel.
+    # We then find the specific pixels that match these luminance values.
+    # This forces the legend to show the full spectral range regardless of how rare a color is.
+    
+    # Robust min/max: use 0.1% and 99.9% percentiles to avoid outliers
+    n_pix = len(sorted_pixels)
+    if n_pix > 1000:
+        idx_min = int(n_pix * 0.001)
+        idx_max = int(n_pix * 0.999)
+        l_min = sorted_lum[idx_min]
+        l_max = sorted_lum[idx_max]
+    elif n_pix > 0:
+        l_min = sorted_lum[0]
+        l_max = sorted_lum[-1]
+    else:
+        l_min, l_max = 0.0, 1.0
+        
+    if l_max <= l_min:
+        l_max = l_min + 1e-6
+        
+    n_stops = 64  # High resolution sampling
+    target_lums = np.linspace(l_min, l_max, n_stops)
+    stops_colors = []
+    
+    # For each target luminance, find the index in sorted array using binary search
+    # This is fast and accurate
+    import bisect
+    for t in target_lums:
+        idx = bisect.bisect_left(sorted_lum, t)
+        idx = min(idx, n_pix - 1)
+        
+        # Smooth: take average of a small window around the found index
+        # Window size inversely proportional to slope? Just use fixed small window.
+        w_size = max(1, n_pix // 1000) # e.g. 1000 pixels -> window 1
+        s = max(0, idx - w_size)
+        e = min(n_pix, idx + w_size + 1)
+        
+        stops_colors.append(np.mean(sorted_pixels[s:e], axis=0))
+    
+    stops_colors = np.array(stops_colors)
+    
+    # Interpolate these stops to 256 values for the legend texture
+    legend_rgba = np.zeros((256, 4), dtype=np.float32)
+    x_stops = np.linspace(0, 1, n_stops)
+    x_vals = np.linspace(0, 1, 256)
+    
+    for c in range(3):
+        legend_rgba[:, c] = np.interp(x_vals, x_stops, stops_colors[:, c])
+    legend_rgba[:, 3] = 1.0
+    
+    # Apply slight smoothing to the legend to remove banding
+    # (since we sampled specific pixels)
+    kernel_size = 5
+    kernel = np.ones(kernel_size) / kernel_size
+    for c in range(3):
+        legend_rgba[:, c] = np.convolve(legend_rgba[:, c], kernel, mode='same')
+        # Fix edges
+        legend_rgba[:kernel_size, c] = legend_rgba[kernel_size, c]
+        legend_rgba[-kernel_size:, c] = legend_rgba[-kernel_size-1, c]
+
+    legend = Legend(
+        colormap_rgba=legend_rgba,
+        domain=domain,
+        config=LegendConfig(
+            bar_height=350,
+            bar_width=30,
+            tick_count=6,
+            label_format="{:.0f}",
+            label_suffix=" m",
+            title="Elevation",
+            title_font_size=16,
+            font_size=13,
+        ),
+    )
+    plate.add_legend(legend.render(), position="right")
+    
+    # Generate scale bar
+    if mpp is not None:
+        meters_per_px = mpp
+    else:
+        meters_per_px = ScaleBar.compute_meters_per_pixel(bbox, map_width)
+    
+    scale_bar = ScaleBar(
+        meters_per_pixel=meters_per_px,
+        config=ScaleBarConfig(
+            units="km",
+            style="alternating",
+            width_px=200,
+            divisions=4,
+        ),
+    )
+    plate.add_scale_bar(scale_bar.render(), position="bottom-left")
+    
+    # Generate north arrow (larger and more visible)
+    north_arrow = NorthArrow(NorthArrowConfig(
+        style="compass",
+        size=80,
+        rotation_deg=0.0,
+    ))
+    plate.add_north_arrow(north_arrow.render(), position="top-right")
+    
+    # Export
+    plate.export_png(output_path)
+    print(f"Map plate saved: {output_path}")
+    
+    return True
 
 
 def handle_snapshot_command(
@@ -191,9 +489,13 @@ def print_terrain_help(title: str = "TERRAIN VIEWER") -> None:
     print("  set background=0.2,0.3,0.5")
     print("  set water=1500 water_color=0.1,0.3,0.5")
     print()
+    print("Snapshot commands:")
+    print("  snap <path> [<width>x<height>]  - Take raw screenshot")
+    print("  map_plate <path> [title=\"...\"] [width=1600] [height=1200]")
+    print("                                  - Export with legend, scale bar, north arrow")
+    print()
     print("Other commands:")
     print("  params         - Show current parameters")
-    print("  snap <path> [<width>x<height>]  - Take snapshot")
     print("  pbr on/off     - Toggle PBR rendering mode")
     print("  pbr shadows=pcss exposure=1.5 ibl=2.0")
     print("  quit           - Close viewer")
@@ -206,10 +508,11 @@ def run_interactive_loop(
     title: str = "TERRAIN VIEWER",
     extra_commands: Optional[Dict[str, Callable[[socket.socket, str], bool]]] = None,
     post_snapshot_callback: Optional[Callable[[Path], None]] = None,
+    dem_info: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Run interactive command loop for terrain viewer.
     
-    Handles standard commands: quit, set, params, snap, pbr, cam, sun
+    Handles standard commands: quit, set, params, snap, map_plate, pbr, cam, sun
     
     Args:
         sock: Connected socket
@@ -217,6 +520,7 @@ def run_interactive_loop(
         title: Title for help display
         extra_commands: Dict of command_name -> handler(sock, args) for custom commands
         post_snapshot_callback: Optional callback after successful snapshot
+        dem_info: Optional DEM metadata for map plate (bbox, domain, meters_per_pixel)
     """
     print_terrain_help(title)
     
@@ -260,6 +564,9 @@ def run_interactive_loop(
             elif name == "snap":
                 handle_snapshot_command(sock, cmd_args, post_snapshot_callback)
             
+            elif name == "map_plate":
+                handle_map_plate_command(sock, cmd_args, dem_info)
+            
             elif name == "pbr":
                 handle_pbr_command(sock, cmd_args)
             
@@ -293,7 +600,7 @@ def run_interactive_loop(
                     print("Usage: sun <azimuth> <elevation> <intensity>")
             
             else:
-                print("Unknown command. Type 'set', 'params', 'snap', 'pbr', or 'quit'")
+                print("Unknown command. Type 'set', 'params', 'snap', 'map_plate', 'pbr', or 'quit'")
     
     except KeyboardInterrupt:
         pass

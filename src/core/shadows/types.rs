@@ -107,14 +107,16 @@ pub struct CsmUniforms {
     pub technique: u32,
     /// Technique feature flags
     pub technique_flags: u32,
+    /// Padding to align technique_params to 16-byte boundary
+    pub _padding1: [f32; 3],
     /// Technique parameters: [pcss_blocker_radius, pcss_filter_radius, moment_bias, light_size]
     pub technique_params: [f32; 4],
     /// Reserved for future technique parameters
     pub technique_reserved: [f32; 4],
     /// Cascade blend range (0.0 = no blend, 0.1 = 10% blend at boundaries)
     pub cascade_blend_range: f32,
-    /// Padding for std430 alignment (storage buffer) - 14 floats to match shader
-    pub _padding2: [f32; 14],
+    /// Padding for std430 alignment (storage buffer) - 27 floats to reach 864 total bytes
+    pub _padding2: [f32; 27],
 }
 
 /// Directional light configuration for shadow casting

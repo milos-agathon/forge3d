@@ -70,6 +70,8 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
+
 # Import shared utilities from forge3d package
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 from forge3d.viewer_ipc import find_viewer_binary, send_ipc
@@ -680,6 +682,46 @@ def main() -> int:
             return 0
         return 1
     
+    # Extract DEM info for map plate composition
+    dem_info = None
+    try:
+        import rasterio
+        with rasterio.open(dem_path) as src:
+            bounds = src.bounds
+            dem_data = src.read(1)
+            crs = src.crs
+            transform = src.transform
+            nodata = src.nodata
+            
+            # Calculate elevation domain
+            valid_mask = dem_data != nodata if nodata is not None else ~np.isnan(dem_data)
+            if valid_mask.any():
+                vmin = float(np.nanmin(dem_data[valid_mask]))
+                vmax = float(np.nanmax(dem_data[valid_mask]))
+            else:
+                vmin, vmax = 0.0, 1000.0
+            
+            # Calculate meters per pixel
+            is_projected = crs and crs.is_projected
+            if is_projected:
+                mpp = abs(transform.a)
+            else:
+                mpp = None
+            
+            from forge3d.map_plate import BBox
+            dem_info = {
+                "bbox": BBox(
+                    west=bounds.left, south=bounds.bottom,
+                    east=bounds.right, north=bounds.top,
+                    crs=str(crs) if crs else "EPSG:4326"
+                ),
+                "domain": (vmin, vmax),
+                "meters_per_pixel": mpp,
+            }
+            print(f"DEM info: elevation {vmin:.0f}-{vmax:.0f}m")
+    except Exception as e:
+        print(f"Note: Could not extract DEM metadata ({e})")
+    
     # Interactive mode - use shared interactive loop
     print("\nWindow controls:")
     print("  Mouse drag     - Orbit camera")
@@ -688,7 +730,7 @@ def main() -> int:
     print("  A/D or ←/→     - Rotate camera left/right")
     print("  Q/E            - Zoom out/in")
     
-    run_interactive_loop(sock, process, title="INTERACTIVE TERRAIN VIEWER")
+    run_interactive_loop(sock, process, title="INTERACTIVE TERRAIN VIEWER", dem_info=dem_info)
     
     sock.close()
     process.terminate()
