@@ -6,6 +6,22 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.10.1] - OIT Transparency & Shadow Quality
+
+### Added
+- **Order-Independent Transparency (OIT)**
+  - Implemented Weighted Blended OIT (WBOIT) for correct rendering of overlapping transparent surfaces (e.g., vector overlays).
+  - Added `enable_oit()` and `disable_oit()` methods to `Scene` and `Viewer`.
+  - Dual-source blending pipeline integration for `VectorOverlayStack`.
+- **Shadow Quality Improvements**
+  - Added compute-shader based separable Gaussian blur pass for VSM/EVSM/MSM moment maps.
+  - Improved shadow softness and reduced artifacts in variance shadow maps.
+
+### Fixed
+- **Terrain Rendering**
+  - Fixed "edge cliff" artifacts by correcting UV clamping in `terrain.wgsl`.
+  - Added deterministic analytic height fallback for sentinel tiles to prevent flat shading anomalies.
+
 ## [1.10.0] - 3D Tiles & Point Cloud Platform
 
 ### Added

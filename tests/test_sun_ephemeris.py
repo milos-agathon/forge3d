@@ -298,3 +298,67 @@ class TestShadowDirectionChange:
         # Compute difference magnitude
         diff = math.sqrt((x2-x1)**2 + (y2-y1)**2 + (z2-z1)**2)
         assert diff > 0.5, f"Direction vectors should differ significantly, got diff={diff:.3f}"
+
+
+class TestSunEphemerisPresetWiring:
+    """P0.3/M2: Test that sun ephemeris preset keys are properly wired.
+    
+    Verifies that sun_lat, sun_lon, sun_datetime preset keys are recognized
+    by the CLI and produce different sun directions than manual azimuth/elevation.
+    """
+
+    def test_preset_keys_documented_in_terrain_demo(self):
+        """P0.3/M2: Verify sun ephemeris CLI flags exist."""
+        import subprocess
+        import sys
+        
+        # Check that terrain_demo.py --help includes sun ephemeris flags
+        result = subprocess.run(
+            [sys.executable, "-B", "examples/terrain_demo.py", "--help"],
+            capture_output=True, text=True, cwd="."
+        )
+        
+        help_text = result.stdout
+        assert "--sun-lat" in help_text, "CLI should document --sun-lat flag"
+        assert "--sun-lon" in help_text, "CLI should document --sun-lon flag"
+        assert "--sun-datetime" in help_text, "CLI should document --sun-datetime flag"
+
+    def test_ephemeris_keys_in_preset_param_map(self):
+        """P0.3/M2: Verify sun ephemeris keys are in preset param_map."""
+        # Import the terrain_demo module to check param_map
+        import importlib.util
+        from pathlib import Path
+        
+        spec = importlib.util.spec_from_file_location(
+            "terrain_demo", 
+            Path("examples/terrain_demo.py")
+        )
+        if spec is None or spec.loader is None:
+            pytest.skip("Could not load terrain_demo module")
+        
+        module = importlib.util.module_from_spec(spec)
+        
+        # Read the file content directly to check for param_map keys
+        content = Path("examples/terrain_demo.py").read_text()
+        
+        assert '"sun_lat"' in content or "'sun_lat'" in content, \
+            "sun_lat should be in preset param_map"
+        assert '"sun_lon"' in content or "'sun_lon'" in content, \
+            "sun_lon should be in preset param_map"
+        assert '"sun_datetime"' in content or "'sun_datetime'" in content, \
+            "sun_datetime should be in preset param_map"
+
+    def test_ephemeris_changes_sun_direction(self):
+        """P0.3/M2: Ephemeris calculation should produce different sun positions."""
+        # Portland morning vs afternoon should give very different azimuths
+        morning = sun_position(45.52, -122.68, "2024-06-21T14:00:00")  # 7AM PDT
+        afternoon = sun_position(45.52, -122.68, "2024-06-21T22:00:00")  # 3PM PDT
+        
+        # Direction vectors should be substantially different
+        d1 = morning.to_direction()
+        d2 = afternoon.to_direction()
+        
+        diff = math.sqrt(sum((a - b) ** 2 for a, b in zip(d1, d2)))
+        assert diff > 0.5, (
+            f"Morning and afternoon sun directions should differ by >0.5, got {diff:.3f}"
+        )

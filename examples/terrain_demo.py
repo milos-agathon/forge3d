@@ -82,6 +82,9 @@ def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit
         "output_srgb_eotf": ("output_srgb_eotf", "--output-srgb-eotf"),
         # P0.1/M1: OIT
         "oit": ("oit", "--oit"),
+        # P1.4: TAA
+        "taa": ("taa", "--taa"),
+        "taa_history_weight": ("taa_history_weight", "--taa-history-weight"),
     }
     
     # Get the project root for resolving relative paths
@@ -391,6 +394,19 @@ def _parse_args() -> argparse.Namespace:
         choices=["auto", "wboit", "dual_source", "off"],
         default=None,
         help="P0.1: OIT mode for transparent surfaces ('auto', 'wboit', 'dual_source', 'off'). Default: off.",
+    )
+    # P1.4: Temporal Anti-Aliasing
+    parser.add_argument(
+        "--taa",
+        action="store_true",
+        default=False,
+        help="P1.4: Enable Temporal Anti-Aliasing (TAA) for reduced aliasing and shimmer.",
+    )
+    parser.add_argument(
+        "--taa-history-weight",
+        type=float,
+        default=0.9,
+        help="P1.4: TAA history blend factor (0.0-0.99). Higher = more temporal stability but more ghosting.",
     )
 
     return parser.parse_args()

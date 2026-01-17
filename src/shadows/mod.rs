@@ -8,6 +8,7 @@ mod csm_depth_control;
 mod csm_renderer;
 mod csm_types;
 
+pub mod blur_pass;
 pub mod manager;
 pub mod moment_pass;
 pub mod state;
@@ -17,6 +18,7 @@ pub use cascade_math::detect_peter_panning;
 pub use csm_renderer::CsmRenderer;
 pub use csm_types::{CascadeStatistics, CsmConfig, CsmUniforms, ShadowCascade};
 
+pub use blur_pass::ShadowBlurPass;
 pub use manager::{ShadowManager, ShadowManagerConfig};
 pub use moment_pass::{create_moment_storage_view, MomentGenerationPass};
 

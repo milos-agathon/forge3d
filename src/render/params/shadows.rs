@@ -170,6 +170,7 @@ impl ShadowParams {
             pcss_filter_radius: self.pcss_filter_radius,
             light_size: self.light_size,
             moment_bias: self.moment_bias,
+            blur_kernel_radius: 3, // P0.2/M3: Default blur radius for VSM/EVSM/MSM
             max_memory_bytes: 256 * 1024 * 1024, // 256 MiB budget
         }
     }

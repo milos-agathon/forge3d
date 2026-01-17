@@ -1,4 +1,4 @@
-use super::super::{CsmRenderer, CsmUniforms, MomentGenerationPass};
+use super::super::{CsmRenderer, CsmUniforms, MomentGenerationPass, ShadowBlurPass};
 use super::budget;
 use super::types::*;
 use crate::lighting::types::ShadowTechnique;
@@ -18,6 +18,8 @@ pub struct ShadowManager {
     moment_sampler: Sampler,
     fallback_moment_texture: Option<Texture>,
     moment_pass: Option<MomentGenerationPass>,
+    /// P0.2/M3: Blur pass for VSM/EVSM/MSM soft shadows
+    blur_pass: Option<ShadowBlurPass>,
     requires_moments: bool,
     memory_bytes: u64,
 }
@@ -55,9 +57,16 @@ impl ShadowManager {
 
         let memory_bytes = renderer.total_memory_bytes();
 
-        // Create moment generation pass if needed
+        // Create moment generation and blur passes if needed
         let moment_pass = if requires_moments {
             Some(MomentGenerationPass::new(device))
+        } else {
+            None
+        };
+
+        // P0.2/M3: Create blur pass for VSM/EVSM/MSM soft shadows
+        let blur_pass = if requires_moments {
+            Some(ShadowBlurPass::new(device))
         } else {
             None
         };
@@ -68,6 +77,7 @@ impl ShadowManager {
             moment_sampler,
             fallback_moment_texture,
             moment_pass,
+            blur_pass,
             requires_moments,
             memory_bytes,
         };
@@ -327,6 +337,21 @@ impl ShadowManager {
             self.config.csm.evsm_positive_exp,
             self.config.csm.evsm_negative_exp,
         );
+
+        // P0.2/M3: Apply Gaussian blur to moment maps for soft shadows
+        if let Some(blur_pass) = &mut self.blur_pass {
+            let moment_sample_view = self.renderer.moment_texture_view().unwrap();
+            blur_pass.execute(
+                device,
+                queue,
+                encoder,
+                &moment_sample_view,
+                moment_texture,
+                self.config.csm.cascade_count,
+                self.config.csm.shadow_map_size,
+                self.config.blur_kernel_radius,
+            );
+        }
     }
 
     /// Returns true if the active technique reads the moment atlas.

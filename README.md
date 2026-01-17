@@ -16,7 +16,7 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.10.0 — 3D Geospatial Platform featuring native OGC 3D Tiles support (B3DM/PNTS), Cloud-Optimized Point Cloud (COPC) streaming, and hierarchical LOD systems for massive dataset visualization.
+Current release: 1.10.1 — 3D Geospatial Platform featuring native OGC 3D Tiles support (B3DM/PNTS), Cloud-Optimized Point Cloud (COPC) streaming, and hierarchical LOD systems for massive dataset visualization.
 
 ## Latest Feature: 3D Geospatial Platform (Phase 5)
 

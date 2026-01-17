@@ -14,6 +14,8 @@ pub struct ShadowManagerConfig {
     pub pcss_filter_radius: f32,
     pub light_size: f32,
     pub moment_bias: f32,
+    /// P0.2/M3: Blur kernel radius for VSM/EVSM/MSM moment maps (2-4 typical)
+    pub blur_kernel_radius: u32,
     pub max_memory_bytes: u64,
 }
 
@@ -26,6 +28,7 @@ impl Default for ShadowManagerConfig {
             pcss_filter_radius: 0.06,
             light_size: 0.25,
             moment_bias: 0.0005,
+            blur_kernel_radius: 3, // P0.2/M3: Default blur radius for VSM/EVSM/MSM
             max_memory_bytes: DEFAULT_MEMORY_BUDGET_BYTES,
         }
     }

@@ -192,6 +192,16 @@ def _build_renderer_config(args: Any):
         overrides["hdr"] = args.hdr
     if getattr(args, "volumetric", None):
         overrides["volumetric"] = _parse_volumetric_spec(str(args.volumetric))
+    # P0.1/M1: Wire OIT mode to renderer config
+    oit_mode = getattr(args, "oit", None)
+    if oit_mode is not None:
+        overrides["oit_mode"] = oit_mode
+    # P1.4: Wire TAA settings to renderer config
+    if getattr(args, "taa", False):
+        overrides["taa_enabled"] = True
+    taa_weight = getattr(args, "taa_history_weight", None)
+    if taa_weight is not None:
+        overrides["taa_history_weight"] = float(taa_weight)
     if getattr(args, "preset", None):
         try:
             from . import presets as _presets
