@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "name": "new_scene",
+  "created_at": "2026-01-18T14:16:30.031708+00:00",
+  "checksums": {
+    "terrain/Mount_Fuji_30m.tif": "cff39b4e02d7ba13c48f3d8b1a4080d40ada753ade62fa951459fe4e01e98b48",
+    "render/preset.json": "4db3105eb2eb13ded3af2d01f43e593198404f03b76d6ee85137232e8257cb3c"
+  },
+  "terrain": {
+    "dem_path": "terrain/Mount_Fuji_30m.tif"
+  },
+  "preset": {
+    "z_scale": 2.0,
+    "exposure": 1.0,
+    "sun_azimuth": 135.0,
+    "sun_elevation": 35.0,
+    "cam_phi": 30.0,
+    "cam_theta": 45.0,
+    "cam_radius": 3800.0,
+    "cam_fov": 30.0
+  }
+}

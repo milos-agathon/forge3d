@@ -814,6 +814,19 @@ impl Viewer {
                 }
                 self.snapshot_request = Some(path);
             }
+            ViewerCmd::SaveBundle { path, name } => {
+                // Bundle saving is handled via Python; this just acknowledges the command
+                let bundle_name = name.as_deref().unwrap_or("scene");
+                println!("SaveBundle requested: {} (name: {})", path, bundle_name);
+                // Store the request for Python-side handling
+                self.pending_bundle_save = Some((path, name));
+            }
+            ViewerCmd::LoadBundle { path } => {
+                // Bundle loading is handled via Python; this just acknowledges the command
+                println!("LoadBundle requested: {}", path);
+                // Store the request for Python-side handling
+                self.pending_bundle_load = Some(path);
+            }
             ViewerCmd::SetFov(fov) => {
                 self.view_config.fov_deg = fov.clamp(1.0, 179.0);
                 println!("FOV set to {:.1}°", self.view_config.fov_deg);

@@ -251,4 +251,7 @@ pub struct Viewer {
     pub(crate) taa_renderer: Option<crate::core::taa::TaaRenderer>,
     // P5: Point cloud state
     pub(crate) point_cloud: Option<super::pointcloud::PointCloudState>,
+    // Scene bundle save/load requests (handled by Python-side)
+    pub(crate) pending_bundle_save: Option<(String, Option<String>)>,
+    pub(crate) pending_bundle_load: Option<String>,
 }

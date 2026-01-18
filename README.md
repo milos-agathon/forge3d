@@ -16,7 +16,11 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.10.1 — 3D Geospatial Platform featuring native OGC 3D Tiles support (B3DM/PNTS), Cloud-Optimized Point Cloud (COPC) streaming, and hierarchical LOD systems for massive dataset visualization.
+Current release: 1.11.0 — Scene Bundle (.forge3d) support for reproducible scene sharing, plus 3D Geospatial Platform (3D Tiles/COPC).
+
+## Latest Feature: Scene Bundle (1.11.0)
+
+**forge3d** now supports a native **Scene Bundle** format (`.forge3d`) for reproducible research and artifact sharing. A bundle encapsulates the entire scene state—terrain data, overlays, camera bookmarks, and render settings—into a single directory or archive with a validated manifest.
 
 ## Latest Feature: 3D Geospatial Platform (Phase 5)
 

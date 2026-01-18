@@ -18,7 +18,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.10.1"
+__version__ = "1.11.0"
 version = __version__
 
 import numpy as np
@@ -263,6 +263,20 @@ from .helpers.offscreen import (
 from .helpers.frame_dump import FrameDumper, dump_frame_sequence
 
 # -----------------------------------------------------------------------------
+# Scene Bundle (.forge3d)
+# -----------------------------------------------------------------------------
+from .bundle import (
+    save_bundle,
+    load_bundle,
+    is_bundle,
+    BundleManifest,
+    LoadedBundle,
+    CameraBookmark,
+    TerrainMeta,
+    BUNDLE_VERSION,
+)
+
+# -----------------------------------------------------------------------------
 # Public API
 # -----------------------------------------------------------------------------
 __all__ = [
@@ -337,4 +351,13 @@ __all__ = [
     "viewer_ipc",
     "colors",
     "interactive",
+    # Scene Bundle
+    "save_bundle",
+    "load_bundle",
+    "is_bundle",
+    "BundleManifest",
+    "LoadedBundle",
+    "CameraBookmark",
+    "TerrainMeta",
+    "BUNDLE_VERSION",
 ]

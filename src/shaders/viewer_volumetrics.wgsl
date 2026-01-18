@@ -341,9 +341,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let near = get_near();
     let far = get_far();
     
-    // Detect sky pixels (at or very close to far plane in reverse-Z)
-    // In reverse-Z: ndc_depth near 0 means far plane (sky)
-    let is_sky = ndc_depth < 0.001;
+    // Detect sky pixels (at or very close to far plane in Standard Z)
+    // In Standard Z (used by wgpu default): ndc_depth near 1.0 means far plane (sky)
+    let is_sky = ndc_depth > 0.999;
     
     // For sky pixels, skip volumetric processing to avoid artifacts
     if is_sky {
@@ -406,94 +406,97 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if mode == 0u {
         // ===== UNIFORM FOG (10/10 QUALITY) =====
         // Multi-layer atmospheric simulation with aerial perspective
-        
+            
         // Layer 1: Ground-level haze (primary fog)
-        let fog_optical_depth = density * 22.0 * dist_normalized * density_noise;
+        // Scalar 1.0 provides subtle atmospheric depth at density=0.01
+        let fog_optical_depth = density * 1.0 * dist_normalized * density_noise;
         let primary_fog = 1.0 - exp(-fog_optical_depth);
-        
+            
         // Layer 2: Aerial perspective (increases with distance for depth perception)
         // Creates the characteristic "bluing" of distant objects
-        let aerial_factor = 1.0 - exp(-dist_normalized * 0.8);
-        
+        let aerial_factor = 1.0 - exp(-dist_normalized * 0.02);
+            
         // Layer 3: Horizon enhancement (fog is denser near horizon)
         let horizon_density = horizon_factor * horizon_factor * 0.25;
-        
+            
         // Combine layers with proper weighting
-        fog_amount = primary_fog * (1.0 + horizon_density) + aerial_factor * 0.15;
-        
+        fog_amount = primary_fog * (1.0 + horizon_density) + aerial_factor * 0.05;
+            
     } else {
         // ===== HEIGHT FOG (10/10 QUALITY) =====
         // Realistic low-lying fog with layering and organic variation
-        
+            
         let height_falloff = get_height_falloff();
-        
+            
         // Layer 1: Dense ground fog (concentrated in valleys)
         // Exponential falloff from terrain base
         let ground_fog_height = 0.25;  // Fog concentrated in bottom 25% of terrain
         let ground_factor = exp(-max(height_norm - 0.0, 0.0) / ground_fog_height * height_falloff * 2.0);
-        
+            
         // Layer 2: Mid-level haze (subtle, extends higher)
         let mid_haze_factor = exp(-max(height_norm, 0.0) * height_falloff * 0.8);
-        
+            
         // Layer 3: Fog density variation (thicker in low spots, thinner on ridges)
         // Creates more organic, cloud-like appearance
         let layer_variation = density_noise * (0.7 + 0.3 * ground_factor);
-        
+            
         // Distance-based optical depth
-        let fog_optical_depth = density * 28.0 * dist_normalized * layer_variation;
+        // Scalar 1.0 provides consistent behavior with uniform mode
+        let fog_optical_depth = density * 1.0 * dist_normalized * layer_variation;
         let base_fog = 1.0 - exp(-fog_optical_depth);
-        
+            
         // Combine height factors: heavy ground fog + subtle mid-level haze
         let combined_height_factor = ground_factor * 0.85 + mid_haze_factor * 0.15;
-        
+            
         // Apply height modulation with minimum visibility at all levels
         fog_amount = base_fog * (0.12 + 0.88 * combined_height_factor);
-        
+            
         // Enhance fog when looking down into valleys
         if is_looking_down && height_norm < 0.5 {
             let valley_enhance = (0.5 - height_norm) * 0.3;
             fog_amount = fog_amount + valley_enhance * base_fog;
         }
     }
-    
+        
     // Clamp fog to preserve scene visibility while allowing dramatic effect
-    fog_amount = clamp(fog_amount, 0.0, 0.82);
-    
+    fog_amount = clamp(fog_amount, 0.0, 0.6);
+        
     // ===== ADVANCED FOG COLOR CALCULATION =====
     let sun_dir = normalize(u.sun_direction.xyz);
     let cos_angle = dot(ray_dir, sun_dir);
     let scattering = get_scattering();
-    
+        
     // Cornette-Shanks phase function for realistic scattering
     let g = clamp(scattering + 0.1, 0.0, 0.9);
     let g2 = g * g;
     let cs_denom = 1.0 + g2 - 2.0 * g * cos_angle;
     let phase = 1.5 * (1.0 - g2) * (1.0 + cos_angle * cos_angle) / ((2.0 + g2) * pow(cs_denom, 1.5));
-    
+        
     // ===== MULTI-COLOR ATMOSPHERE =====
-    
+        
     // Cool distant color (Rayleigh-like blue for aerial perspective)
     let aerial_color = vec3<f32>(0.55, 0.68, 0.88);
-    
+        
     // Neutral mid-distance fog color
     let fog_mid_color = vec3<f32>(0.72, 0.78, 0.86);
-    
+        
     // Warm near color (subtle warmth from ground-reflected light)
     let fog_near_color = vec3<f32>(0.82, 0.82, 0.80);
-    
+        
     // Sun-influenced color (warm golden for forward scatter)
     let sun_color = vec3<f32>(1.0, 0.92, 0.78);
-    
+        
     // Sky contribution (adds subtle blue from above)
     let sky_contribution = vec3<f32>(0.4, 0.55, 0.75);
-    
+        
     // ===== COLOR BLENDING =====
-    
+        
     // Distance-based color gradation (aerial perspective)
     let distance_blend = clamp(dist_normalized, 0.0, 1.0);
     var fog_color = mix(fog_near_color, fog_mid_color, distance_blend * 0.6);
-    fog_color = mix(fog_color, aerial_color, distance_blend * distance_blend * 0.35);
-    
+    // Subtle aerial perspective (5%) for depth without washout
+    fog_color = mix(fog_color, aerial_color, distance_blend * distance_blend * 0.05);
+        
     // Height-based color modulation (higher = bluer, lower = neutral/warm)
     if mode == 1u {
         // Height fog: add subtle warmth in valleys, cooler at elevation

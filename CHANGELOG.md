@@ -6,6 +6,16 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.11.0] - Scene Bundle & Reproducible Artifacts
+
+### Added
+- **Priority 1 — Scene Bundle (.forge3d) Support**
+  - Implemented reproducible scene archive format containing terrain, overlays, camera state, and render settings.
+  - New `src/bundle` module with `BundleManifest` schema and checksum validation.
+  - Python API: `save_bundle()`, `load_bundle()`, `is_bundle()` for easy artifact management.
+  - Interactive Viewer integration: Save and load full scene state via IPC commands.
+  - CLI integration: `--save-bundle` and `--load-bundle` flags for batch processing and restoration.
+
 ## [1.10.1] - OIT Transparency & Shadow Quality
 
 ### Added

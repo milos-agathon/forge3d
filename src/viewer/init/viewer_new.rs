@@ -299,6 +299,9 @@ impl Viewer {
             taa_renderer: None,
             // P5: Point cloud state (initialized lazily when loaded)
             point_cloud: None,
+            // Scene bundle save/load requests (handled by Python-side)
+            pending_bundle_save: None,
+            pending_bundle_load: None,
         };
 
         viewer.sync_ssr_params_to_gi();

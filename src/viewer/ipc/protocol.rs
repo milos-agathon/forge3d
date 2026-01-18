@@ -56,6 +56,14 @@ pub enum IpcRequest {
     },
     /// Close the viewer
     Close,
+    /// Save current scene to a bundle (.forge3d)
+    SaveBundle {
+        path: String,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Load a scene bundle (.forge3d)
+    LoadBundle { path: String },
     /// Load terrain DEM file for interactive viewing
     LoadTerrain { path: String },
     /// Set terrain camera parameters
@@ -888,6 +896,11 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             height: *height,
         })),
         IpcRequest::Close => Ok(Some(ViewerCmd::Quit)),
+        IpcRequest::SaveBundle { path, name } => Ok(Some(ViewerCmd::SaveBundle {
+            path: path.clone(),
+            name: name.clone(),
+        })),
+        IpcRequest::LoadBundle { path } => Ok(Some(ViewerCmd::LoadBundle { path: path.clone() })),
         IpcRequest::LoadTerrain { path } => Ok(Some(ViewerCmd::LoadTerrain(path.clone()))),
         IpcRequest::SetTerrainCamera {
             phi_deg,

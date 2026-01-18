@@ -135,6 +135,8 @@ def main() -> int:
                            help="Sun elevation angle in degrees (default: 35.0)")
     sun_group.add_argument("--sun-intensity", type=float, default=1.0,
                            help="Sun light intensity (default: 1.0)")
+    sun_group.add_argument("--ambient", type=float, default=None,
+                           help="Ambient light intensity (default: 0.05 for PBR, 0.3 for Legacy)")
     # P0.3/M2: Sun ephemeris - compute sun position from location and time
     sun_group.add_argument("--sun-lat", type=float, default=None,
                            help="Observer latitude for ephemeris calculation (-90 to 90)")
@@ -342,6 +344,7 @@ def main() -> int:
                            help="Sky brightness adjustment (default: 1.0)")
     
     args = parser.parse_args()
+    print(f"DEBUG: args keys = {vars(args).keys()}")
     
     # P0.3/M2: Compute sun position from ephemeris if location/time provided
     if args.sun_lat is not None and args.sun_lon is not None and args.sun_datetime is not None:
@@ -455,6 +458,13 @@ def main() -> int:
     # Set initial camera and terrain params
     # z_scale controls height exaggeration: world_y = h_norm * terrain_width * z_scale * 0.1
     # z_scale=1.0 gives 10% height-to-width ratio - good balance of relief
+    
+    # Determine ambient default based on mode
+    # PBR needs low ambient (0.05) to avoid washout, Legacy needs higher (0.3)
+    ambient = args.ambient
+    if ambient is None:
+        ambient = 0.05 if args.pbr else 0.3
+        
     send_ipc(sock, {
         "cmd": "set_terrain",
         "phi": 30.0, "theta": 45.0, "radius": 3800.0, "fov": 30.0,
@@ -462,6 +472,7 @@ def main() -> int:
         "sun_azimuth": args.sun_azimuth,
         "sun_elevation": args.sun_elevation,
         "sun_intensity": args.sun_intensity,
+        "ambient": ambient,
     })
     
     # Configure PBR rendering if requested

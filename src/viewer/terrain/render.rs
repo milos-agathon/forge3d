@@ -284,21 +284,29 @@ impl ViewerTerrainScene {
         let needs_volumetrics = self.pbr_config.volumetrics.enabled && 
             self.pbr_config.volumetrics.density > 0.0001;
         
+        // We need PostProcess pass (for intermediate texture) if PP is active OR Volumetrics is active (since Vol reads from PP intermediate)
+        if (needs_post_process || needs_volumetrics) && self.post_process.is_none() {
+            self.init_post_process();
+        }
+
+        // We need DoF pass if DoF is active OR (Volumetrics AND PP are active) - for scratch buffer
+        // Case: Vol+PP (no DoF) needs a scratch buffer for Vol output before PP reads it. We reuse DoF input buffer.
+        let needs_dof_scratch = needs_volumetrics && needs_post_process && !needs_dof;
+        
+        if (needs_dof || needs_dof_scratch) && self.dof_pass.is_none() {
+            self.init_dof_pass();
+        }
+        
         // Initialize volumetrics pass if needed
         if needs_volumetrics && self.volumetrics_pass.is_none() {
             self.init_volumetrics_pass();
         }
-        if needs_dof && self.dof_pass.is_none() {
-            self.init_dof_pass();
-        }
-        if needs_dof {
+
+        // Ensure textures exist for active passes
+        if needs_dof || needs_dof_scratch {
             if let Some(ref mut dof) = self.dof_pass {
                 let _ = dof.get_input_view(width, height, self.surface_format);
             }
-        }
-        
-        if (needs_post_process || needs_volumetrics) && self.post_process.is_none() {
-            self.init_post_process();
         }
         
         // P0.1/M1: Check if OIT is needed and initialize WBOIT resources early
@@ -311,6 +319,7 @@ impl ViewerTerrainScene {
                 self.init_wboit(width, height);
             }
         }
+        
         if needs_post_process || needs_volumetrics {
             if let Some(ref mut pp) = self.post_process {
                 let _ = pp.get_intermediate_view(width, height, self.surface_format);
@@ -526,28 +535,20 @@ impl ViewerTerrainScene {
         // Run compute passes for heightfield AO and sun visibility before render
         self.dispatch_heightfield_compute(encoder, terrain_width, sun_dir);
         
-        // Ensure DoF textures are allocated before scene render if DoF is enabled
-        if needs_dof {
-            if let Some(ref mut dof) = self.dof_pass {
-                // This allocates textures if they don't exist or size changed
-                let _ = dof.get_input_view(width, height, self.surface_format);
-            }
-        }
-        
         // Re-borrow terrain after mutable operations
-        // Get render target after mutable borrows complete
-        // Priority: DoF needs its own input -> post-process intermediate -> final view
-        // P5: Volumetrics will be applied as a post-process step after main render
-        let render_target: &wgpu::TextureView = if needs_dof {
-            // When DoF enabled, render to DoF input texture first
-            self.dof_pass.as_ref()
-                .and_then(|dof| dof.input_view.as_ref())
-                .unwrap_or(view)
-        } else if needs_post_process || needs_volumetrics {
-            // Need intermediate for post-process or volumetrics
-            self.post_process.as_ref()
-                .and_then(|pp| pp.intermediate_view.as_ref())
-                .unwrap_or(view)
+        // Determine primary render target based on active effects
+        // Logic:
+        // - If Volumetrics active: Scene -> PP Intermediate (so Vol can read it)
+        // - Else if DoF active: Scene -> DoF Input
+        // - Else if PP active: Scene -> PP Intermediate
+        // - Else: Scene -> Final View
+        
+        let render_target: &wgpu::TextureView = if needs_volumetrics {
+            self.post_process.as_ref().unwrap().intermediate_view.as_ref().unwrap()
+        } else if needs_dof {
+            self.dof_pass.as_ref().unwrap().input_view.as_ref().unwrap()
+        } else if needs_post_process {
+            self.post_process.as_ref().unwrap().intermediate_view.as_ref().unwrap()
         } else {
             view
         };
@@ -792,25 +793,15 @@ impl ViewerTerrainScene {
         if needs_volumetrics {
             if let Some(ref vol_pass) = self.volumetrics_pass {
                 let depth_view = self.depth_view.as_ref().unwrap();
-                let color_input = match self.post_process.as_ref().and_then(|pp| pp.intermediate_view.as_ref()) {
-                    Some(v) => v,
-                    None => {
-                        eprintln!("[volumetrics] ERROR: intermediate_view is None, skipping volumetrics pass");
-                        return false;
-                    }
-                };
+                let color_input = self.post_process.as_ref().unwrap().intermediate_view.as_ref().unwrap();
                 
-                // Determine volumetrics output target:
-                // - If DoF enabled: output to DoF input texture
-                // - If lens effects enabled (but no DoF): output to final view (lens will read from intermediate)
-                // - Otherwise: output to final view
-                let vol_output = if needs_dof {
-                    // Output to DoF input
-                    self.dof_pass.as_ref()
-                        .and_then(|dof| dof.input_view.as_ref())
-                        .unwrap_or(view)
+                // Determine volumetrics output target with robust chaining:
+                // - If DoF enabled: output to DoF input
+                // - If DoF disabled but PP enabled: output to DoF input (as scratch buffer)
+                // - Otherwise: output to Final View
+                let vol_output = if needs_dof || needs_post_process {
+                    self.dof_pass.as_ref().unwrap().input_view.as_ref().unwrap()
                 } else {
-                    // Output directly to final view
                     view
                 };
                 
@@ -840,12 +831,16 @@ impl ViewerTerrainScene {
         
         // Apply DoF pass if enabled (before other post-process effects)
         if needs_dof {
-            // DoF uses its input_view as source (scene rendered there)
-            // and outputs to either post-process intermediate or final view
+            // DoF input source:
+            // - If Volumetrics enabled: Read from DoF Input (Volumetrics wrote here)
+            // - Else: Read from DoF Input (Scene wrote here)
+            // Note: In both cases, data is already in dof.input_view
+            
+            // DoF output target:
+            // - If PP enabled: Output to PP Intermediate (so PP can read it)
+            // - Else: Output to Final View
             let dof_output = if needs_post_process {
-                self.post_process.as_ref()
-                    .and_then(|pp| pp.intermediate_view.as_ref())
-                    .unwrap_or(view)
+                self.post_process.as_ref().unwrap().intermediate_view.as_ref().unwrap()
             } else {
                 view
             };
@@ -865,6 +860,7 @@ impl ViewerTerrainScene {
                     tilt_yaw: self.pbr_config.dof.tilt_yaw,
                 };
                 
+                // We use apply_from_input to explicit chaining from dof.input_view
                 dof.apply_from_input(
                     encoder,
                     &self.queue,
@@ -882,20 +878,49 @@ impl ViewerTerrainScene {
         
         // Apply post-process pass if needed (distortion, CA, vignette)
         if needs_post_process {
+            // Determine if we need to read from an external source (scratch buffer)
+            // This happens when Volumetrics + PP are active but DoF is not.
+            // In that case, Volumetrics wrote to DoF Input (as scratch), so we read from there.
+            // In all other cases (including DoF+PP), the input is in our own intermediate_view.
+            let external_input = if !needs_dof && needs_volumetrics {
+                self.dof_pass.as_ref().and_then(|dof| dof.input_view.as_ref())
+            } else {
+                None
+            };
+
             if let Some(ref mut pp) = self.post_process {
                 let lens = &self.pbr_config.lens_effects;
-                pp.apply(
-                    encoder,
-                    &self.queue,
-                    view,
-                    width,
-                    height,
-                    lens.distortion,
-                    lens.chromatic_aberration,
-                    lens.vignette_strength,
-                    lens.vignette_radius,
-                    lens.vignette_softness,
-                );
+                
+                if let Some(input_view) = external_input {
+                    // Read from external texture (DoF scratch)
+                    pp.apply_from_input(
+                        encoder,
+                        &self.queue,
+                        input_view,
+                        view,
+                        width,
+                        height,
+                        lens.distortion,
+                        lens.chromatic_aberration,
+                        lens.vignette_strength,
+                        lens.vignette_radius,
+                        lens.vignette_softness,
+                    );
+                } else {
+                    // Read from internal intermediate texture (Standard path)
+                    pp.apply(
+                        encoder,
+                        &self.queue,
+                        view,
+                        width,
+                        height,
+                        lens.distortion,
+                        lens.chromatic_aberration,
+                        lens.vignette_strength,
+                        lens.vignette_radius,
+                        lens.vignette_softness,
+                    );
+                }
             }
         }
 

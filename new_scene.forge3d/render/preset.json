@@ -1,0 +1,10 @@
+{
+  "z_scale": 2.0,
+  "exposure": 1.0,
+  "sun_azimuth": 135.0,
+  "sun_elevation": 35.0,
+  "cam_phi": 30.0,
+  "cam_theta": 45.0,
+  "cam_radius": 3800.0,
+  "cam_fov": 30.0
+}

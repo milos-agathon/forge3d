@@ -12,6 +12,15 @@ pub enum ViewerCmd {
     Snapshot(Option<String>),
     DumpGbuffer,
     Quit,
+    /// Save current scene to a bundle (.forge3d)
+    SaveBundle {
+        path: String,
+        name: Option<String>,
+    },
+    /// Load a scene bundle (.forge3d)
+    LoadBundle {
+        path: String,
+    },
     LoadObj(String),
     LoadGltf(String),
     SetViz(String),

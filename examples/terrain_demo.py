@@ -123,6 +123,17 @@ def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit
             args.detail_strength = detail_normals["detail_strength"]
 
 
+def _was_cli_set(args: argparse.Namespace, arg_name: str) -> bool:
+    """Check if an argument was explicitly set on the command line."""
+    import sys
+    # Map arg_name to CLI flag variants
+    flag_variants = [
+        f"--{arg_name.replace('_', '-')}",
+        f"--{arg_name}",
+    ]
+    return any(flag in sys.argv for flag in flag_variants)
+
+
 def _parse_args() -> argparse.Namespace:
     """Create the argparse namespace used by ``main``.
 
@@ -408,6 +419,19 @@ def _parse_args() -> argparse.Namespace:
         default=0.9,
         help="P1.4: TAA history blend factor (0.0-0.99). Higher = more temporal stability but more ghosting.",
     )
+    # Scene Bundle (.forge3d)
+    parser.add_argument(
+        "--save-bundle",
+        type=Path,
+        default=None,
+        help="Save the current scene to a .forge3d bundle directory.",
+    )
+    parser.add_argument(
+        "--load-bundle",
+        type=Path,
+        default=None,
+        help="Load a scene from a .forge3d bundle directory. Overrides --preset; explicit CLI args still take precedence.",
+    )
 
     return parser.parse_args()
 
@@ -420,6 +444,32 @@ def main() -> int:
     """
 
     args = _parse_args()
+
+    # Handle --load-bundle: load scene from bundle, apply preset from bundle
+    if args.load_bundle:
+        from forge3d.bundle import load_bundle, is_bundle
+        bundle_path = Path(args.load_bundle)
+        if not is_bundle(bundle_path):
+            raise SystemExit(f"Error: Not a valid bundle: {bundle_path}")
+        print(f"[BUNDLE] Loading scene from: {bundle_path}")
+        bundle = load_bundle(bundle_path)
+        
+        # Apply bundle settings (CLI args still take precedence)
+        if bundle.dem_path and not _was_cli_set(args, "dem"):
+            args.dem = bundle.dem_path
+        if bundle.hdr_path and not _was_cli_set(args, "hdr"):
+            args.hdr = bundle.hdr_path
+        if bundle.preset:
+            # Apply preset from bundle (CLI args override)
+            for key, val in bundle.preset.items():
+                arg_name = key.replace("-", "_")
+                if hasattr(args, arg_name) and not _was_cli_set(args, arg_name):
+                    setattr(args, arg_name, val)
+        if bundle.manifest.terrain:
+            if bundle.manifest.terrain.domain and not _was_cli_set(args, "colormap_domain"):
+                args.colormap_domain = list(bundle.manifest.terrain.domain)
+            if bundle.manifest.terrain.colormap and not _was_cli_set(args, "colormap"):
+                args.colormap = bundle.manifest.terrain.colormap
 
     # Handle JSON preset file (--preset path/to/preset.json)
     if args.preset and (args.preset.endswith('.json') or '/' in args.preset or '\\' in args.preset):
@@ -500,7 +550,43 @@ def main() -> int:
         os.environ["VF_COLOR_DEBUG_MODE"] = str(debug_mode)
         print(f"[DEBUG] Setting VF_COLOR_DEBUG_MODE={debug_mode}")
 
-    return _impl.run(args)
+    # Run the rendering
+    result = _impl.run(args)
+    
+    # Handle --save-bundle: save scene to bundle after rendering
+    if args.save_bundle:
+        from forge3d.bundle import save_bundle
+        bundle_path = Path(args.save_bundle)
+        print(f"[BUNDLE] Saving scene to: {bundle_path}")
+        
+        # Collect current settings as preset
+        preset = {
+            "z_scale": getattr(args, "z_scale", 2.0),
+            "cam_radius": getattr(args, "cam_radius", None),
+            "cam_phi": getattr(args, "cam_phi", None),
+            "cam_theta": getattr(args, "cam_theta", None),
+            "cam_fov": getattr(args, "cam_fov", None),
+            "exposure": getattr(args, "exposure", 1.0),
+            "ibl_intensity": getattr(args, "ibl_intensity", 1.0),
+            "colormap": getattr(args, "colormap", "terrain"),
+            "colormap_strength": getattr(args, "colormap_strength", 0.5),
+            "normal_strength": getattr(args, "normal_strength", 1.0),
+        }
+        # Remove None values
+        preset = {k: v for k, v in preset.items() if v is not None}
+        
+        save_bundle(
+            bundle_path,
+            name=bundle_path.stem,
+            dem_path=args.dem if args.dem else None,
+            colormap_name=getattr(args, "colormap", None),
+            domain=tuple(args.colormap_domain) if getattr(args, "colormap_domain", None) else None,
+            preset=preset,
+            hdr_path=args.hdr if args.hdr else None,
+        )
+        print(f"[BUNDLE] Saved: {bundle_path}")
+    
+    return result
 
 
 if __name__ == "__main__":  # pragma: no cover
