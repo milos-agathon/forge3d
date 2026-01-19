@@ -1,0 +1,66 @@
+{
+  "version": 8,
+  "name": "Sample Style",
+  "sources": {
+    "rail": {
+      "type": "vector"
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#f8f4f0"
+      }
+    },
+    {
+      "id": "rail-lines",
+      "type": "line",
+      "source": "rail",
+      "paint": {
+        "line-color": "#FFD700",
+        "line-width": 12,
+        "line-opacity": 1.0
+      }
+    },
+    {
+      "id": "rail-major",
+      "type": "line",
+      "source": "rail",
+      "filter": ["==", "railway", "rail"],
+      "paint": {
+        "line-color": "#FFA500",
+        "line-width": 15
+      }
+    },
+    {
+      "id": "stations",
+      "type": "circle",
+      "source": "rail",
+      "filter": ["==", "$type", "Point"],
+      "paint": {
+        "circle-color": "#d32f2f",
+        "circle-radius": 5,
+        "circle-opacity": 0.8
+      }
+    },
+    {
+      "id": "station-labels",
+      "type": "symbol",
+      "source": "rail",
+      "filter": ["has", "name"],
+      "layout": {
+        "text-field": "{name}",
+        "text-size": 12,
+        "text-anchor": "top",
+        "text-offset": [0, 0.5]
+      },
+      "paint": {
+        "text-color": "#333333",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.5
+      }
+    }
+  ]
+}

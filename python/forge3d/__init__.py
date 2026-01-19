@@ -277,6 +277,26 @@ from .bundle import (
 )
 
 # -----------------------------------------------------------------------------
+# Mapbox Style Spec Import
+# -----------------------------------------------------------------------------
+from .style import (
+    load_style,
+    parse_style,
+    apply_style,
+    parse_color,
+    paint_to_vector_style,
+    layout_to_label_style,
+    layer_to_vector_style,
+    layer_to_label_style,
+    StyleSpec,
+    StyleLayer,
+    VectorStyle as StyleVectorStyle,
+    LabelStyle as StyleLabelStyle,
+    PaintProps,
+    LayoutProps,
+)
+
+# -----------------------------------------------------------------------------
 # Public API
 # -----------------------------------------------------------------------------
 __all__ = [
@@ -360,4 +380,19 @@ __all__ = [
     "CameraBookmark",
     "TerrainMeta",
     "BUNDLE_VERSION",
+    # Mapbox Style Spec
+    "load_style",
+    "parse_style",
+    "apply_style",
+    "parse_color",
+    "paint_to_vector_style",
+    "layout_to_label_style",
+    "layer_to_vector_style",
+    "layer_to_label_style",
+    "StyleSpec",
+    "StyleLayer",
+    "StyleVectorStyle",
+    "StyleLabelStyle",
+    "PaintProps",
+    "LayoutProps",
 ]

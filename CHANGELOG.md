@@ -6,7 +6,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
-## [1.11.0] - Scene Bundle & Reproducible Artifacts
+## [1.11.0] - Scene Bundle & Style Spec
 
 ### Added
 - **Priority 1 — Scene Bundle (.forge3d) Support**
@@ -15,6 +15,21 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
   - Python API: `save_bundle()`, `load_bundle()`, `is_bundle()` for easy artifact management.
   - Interactive Viewer integration: Save and load full scene state via IPC commands.
   - CLI integration: `--save-bundle` and `--load-bundle` flags for batch processing and restoration.
+
+- **Priority 2 — Mapbox Style Spec Import**
+  - Full Mapbox GL Style Spec (v8) JSON parser for ecosystem compatibility.
+  - New `src/style` module with types, parser, converters, expressions, and sprite loading.
+  - Supported layer types: `fill`, `line`, `symbol`, `background`, `circle`.
+  - Paint properties: `fill-color`, `fill-opacity`, `line-color`, `line-width`, `text-color`, `text-halo-*`.
+  - Filter expressions: `==`, `!=`, `all`, `any`, `has`, `!`, `in`.
+  - CSS color parsing: hex (`#RGB`, `#RRGGBB`), `rgb()`, `rgba()`, `hsl()`, named colors.
+  - **Data-driven expression evaluation**: `interpolate`, `step`, `match`, `case`, `coalesce`.
+  - **Math/logic operators**: `+`, `-`, `*`, `/`, `%`, `^`, `sqrt`, comparison, boolean logic.
+  - **Sprite atlas loading**: Load sprite.json metadata and atlas image dimensions.
+  - **Glyph/font support**: PBF glyph range management for Mapbox fonts.
+  - Python API: `load_style()`, `apply_style()`, `parse_color()`, `evaluate_color_expr()`, `evaluate_number_expr()`.
+  - Visual diff tests for data-driven styling verification.
+  - Interactive viewer example: `examples/style_viewer_interactive.py`.
 
 ## [1.10.1] - OIT Transparency & Shadow Quality
 

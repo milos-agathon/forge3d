@@ -1122,6 +1122,7 @@ pub mod animation; // Feature C: Camera animation and keyframe interpolation
 pub mod tiles3d; // P5: 3D Tiles support (tileset.json, b3dm, pnts)
 pub mod pointcloud; // P5: Point Cloud support (COPC, EPT)
 pub mod bundle; // Scene bundle (.forge3d) for portable scene packages
+pub mod style; // Mapbox Style Spec import for vector/label styling
 
 // Re-export commonly used types
 pub use core::cloud_shadows::{
