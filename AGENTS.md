@@ -1448,15 +1448,6 @@ def get_pixel_size_meters(dem_path: Path) -> float:
             return pixel_x  # Already in meters
 ```
 
-**Common DEM shortcuts in examples:**
-```python
-DEM_SHORTCUTS = {
-    "fuji": "assets/tif/Mount_Fuji_30m.tif",
-    "rainier": "assets/tif/Mount_Rainier_30m.tif",
-    # ...
-}
-```
-
 ### 19.6 Visualization and statistics patterns
 
 When implementing visualization for terrain systems:
@@ -1554,4 +1545,14 @@ python examples/clipmap_demo.py --dem fuji
 ## Reflections
 
 - Keep viewer TAA plumbing aligned with core structs (use setters/getters) and avoid borrow conflicts in render passes by splitting field borrows or moving temporary views out before mutating other fields.
+
+## Session Learnings (2026-01-19)
+
+- Avoid top-level imports in `examples/` that require the native extension; use lazy imports or guard with `if __name__ == "__main__"` to keep module import side-effect free.
+- When tests import example modules by path, gate heavy work in `main()`/`run()` and avoid import-time GPU or file IO.
+- In PowerShell, avoid bash heredocs (`<<`); use here-strings (`@'...'@ | python -`) for inline scripts.
+- When using `rg` with patterns that start with `--`, pass `--` before the pattern (e.g., `rg -n -- "--flag"`).
+- If build errors are reported, request the full command and raw stderr (including warnings) before diagnosing; do not infer from summary lines.
+- Keep "Completed Work" entries aligned with code evidence and tests; do not mark a feature done if it is only a stub or fail-fast.
+- PowerShell profile errors can prefix command output; preserve them in raw output blocks instead of trimming.
 
