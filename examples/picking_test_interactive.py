@@ -32,6 +32,7 @@ from forge3d.viewer_ipc import (
     set_lasso_mode,
     get_lasso_state,
     clear_selection,
+    set_oit_enabled,
 )
 
 # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
@@ -262,6 +263,15 @@ def main():
             "radius": 15000.0,
             "fov_deg": 45.0
         })
+
+        # Set OIT mode
+        if args.oit:
+            if args.oit == "off":
+                set_oit_enabled(sock, False)
+                print("OIT disabled")
+            else:
+                set_oit_enabled(sock, True, args.oit)
+                print(f"OIT enabled (mode={args.oit})")
         
         # Run tests
         results = []

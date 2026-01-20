@@ -3,6 +3,7 @@
 // Split from viewer_terrain.rs as part of the viewer refactoring
 
 mod dof;
+pub mod denoise;
 mod motion_blur;
 pub mod overlay;
 mod pbr_renderer;

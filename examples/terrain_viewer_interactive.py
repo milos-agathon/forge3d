@@ -344,7 +344,6 @@ def main() -> int:
                            help="Sky brightness adjustment (default: 1.0)")
     
     args = parser.parse_args()
-    print(f"DEBUG: args keys = {vars(args).keys()}")
     
     # P0.3/M2: Compute sun position from ephemeris if location/time provided
     if args.sun_lat is not None and args.sun_lon is not None and args.sun_datetime is not None:

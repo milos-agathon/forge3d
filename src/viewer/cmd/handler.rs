@@ -10,7 +10,7 @@ use std::path::Path;
 use wgpu::util::DeviceExt;
 
 use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
-use crate::viewer::event_loop::update_ipc_transform_stats;
+use crate::viewer::event_loop::{update_ipc_transform_stats, set_pending_bundle_save, set_pending_bundle_load};
 use crate::viewer::terrain;
 use crate::cli::gi_types::GiVizMode;
 use crate::viewer::viewer_enums::{CaptureKind, FogMode, ViewerCmd, VizMode};
@@ -818,14 +818,18 @@ impl Viewer {
                 // Bundle saving is handled via Python; this just acknowledges the command
                 let bundle_name = name.as_deref().unwrap_or("scene");
                 println!("SaveBundle requested: {} (name: {})", path, bundle_name);
-                // Store the request for Python-side handling
-                self.pending_bundle_save = Some((path, name));
+                // Store the request for Python-side handling (local struct)
+                self.pending_bundle_save = Some((path.clone(), name.clone()));
+                // Also set global IPC state for polling from server thread
+                set_pending_bundle_save(path, name);
             }
             ViewerCmd::LoadBundle { path } => {
                 // Bundle loading is handled via Python; this just acknowledges the command
                 println!("LoadBundle requested: {}", path);
-                // Store the request for Python-side handling
-                self.pending_bundle_load = Some(path);
+                // Store the request for Python-side handling (local struct)
+                self.pending_bundle_load = Some(path.clone());
+                // Also set global IPC state for polling from server thread
+                set_pending_bundle_load(path);
             }
             ViewerCmd::SetFov(fov) => {
                 self.view_config.fov_deg = fov.clamp(1.0, 179.0);
@@ -1020,7 +1024,7 @@ impl Viewer {
                 debug_mode,
             } => {
                 if let Some(ref mut tv) = self.terrain_viewer {
-                    tv.pbr_config.apply_updates(
+                    tv.set_terrain_pbr(
                         enabled,
                         hdr_path,
                         ibl_intensity,
@@ -1034,107 +1038,13 @@ impl Viewer {
                         *materials,
                         *vector_overlay,
                         tonemap,
+                        lens_effects,
+                        *dof,
+                        motion_blur,
+                        *volumetrics,
+                        denoise,
                         debug_mode,
                     );
-                    // Initialize PBR pipeline if enabling PBR mode
-                    if tv.pbr_config.enabled && tv.pbr_pipeline.is_none() {
-                        if let Err(e) = tv.init_pbr_pipeline(self.config.format) {
-                            eprintln!("[terrain] Failed to init PBR pipeline: {}", e);
-                        }
-                    }
-                    // Initialize compute pipelines for heightfield effects
-                    if tv.pbr_config.height_ao.enabled || tv.pbr_config.sun_visibility.enabled {
-                        if let Err(e) = tv.init_heightfield_compute_pipelines() {
-                            eprintln!("[terrain] Failed to init heightfield compute pipelines: {}", e);
-                        }
-                    }
-                    println!("[terrain] {}", tv.pbr_config.to_display_string());
-                } else {
-                    eprintln!("[terrain] No terrain loaded - load terrain first with load_terrain");
-                }
-                
-                // M3: Apply DoF config
-                if let Some(ref cfg) = *dof {
-                    if let Some(ref mut tv) = self.terrain_viewer {
-                        tv.pbr_config.apply_dof(
-                            cfg.enabled,
-                            cfg.f_stop,
-                            cfg.focus_distance,
-                            cfg.focal_length,
-                            &cfg.quality,
-                            cfg.tilt_pitch,
-                            cfg.tilt_yaw,
-                        );
-                        if cfg.enabled {
-                            // cfg.tilt_pitch/yaw are in degrees from IPC, show them directly
-                            let tilt_info = if cfg.tilt_pitch.abs() > 0.001 || cfg.tilt_yaw.abs() > 0.001 {
-                                format!(" tilt_pitch={:.1}° tilt_yaw={:.1}°", cfg.tilt_pitch, cfg.tilt_yaw)
-                            } else {
-                                String::new()
-                            };
-                            println!("[terrain] DoF enabled: f_stop={:.1} focus={:.0} focal_length={:.0}mm quality={}{}", 
-                                cfg.f_stop, cfg.focus_distance, cfg.focal_length, cfg.quality, tilt_info);
-                        }
-                    }
-                }
-                // P4: Apply motion blur config
-                if let Some(ref cfg) = motion_blur {
-                    if let Some(ref mut tv) = self.terrain_viewer {
-                        tv.pbr_config.apply_motion_blur(
-                            cfg.enabled,
-                            cfg.samples,
-                            cfg.shutter_open,
-                            cfg.shutter_close,
-                            cfg.cam_phi_delta,
-                            cfg.cam_theta_delta,
-                            cfg.cam_radius_delta,
-                        );
-                        if cfg.enabled {
-                            println!("[terrain] Motion blur enabled: samples={} shutter={:.2}-{:.2} cam_delta=({:.1}, {:.1}, {:.1})", 
-                                cfg.samples, cfg.shutter_open, cfg.shutter_close,
-                                cfg.cam_phi_delta, cfg.cam_theta_delta, cfg.cam_radius_delta);
-                        }
-                    }
-                }
-                if let Some(ref cfg) = lens_effects {
-                    if let Some(ref mut tv) = self.terrain_viewer {
-                        tv.pbr_config.apply_lens_effects(
-                            cfg.enabled,
-                            cfg.vignette_strength,
-                            cfg.vignette_radius,
-                            cfg.vignette_softness,
-                            cfg.distortion,
-                            cfg.chromatic_aberration,
-                        );
-                        if cfg.enabled {
-                            println!("[terrain] Lens effects: vignette={:.2} radius={:.2} softness={:.2}", 
-                                cfg.vignette_strength, cfg.vignette_radius, cfg.vignette_softness);
-                        }
-                    }
-                }
-                if let Some(ref cfg) = denoise {
-                    if cfg.enabled {
-                        eprintln!("[terrain] Denoise requested but render pass not implemented (config received: method={})", cfg.method);
-                    }
-                }
-                // P5: Volumetrics config
-                if let Some(ref cfg) = *volumetrics {
-                    if let Some(ref mut tv) = self.terrain_viewer {
-                        tv.pbr_config.apply_volumetrics(
-                            cfg.enabled,
-                            &cfg.mode,
-                            cfg.density,
-                            cfg.scattering,
-                            cfg.absorption,
-                            cfg.light_shafts,
-                            cfg.shaft_intensity,
-                            cfg.half_res,
-                        );
-                        if cfg.enabled {
-                            println!("[terrain] Volumetrics enabled: mode={} density={:.4} scattering={:.2} light_shafts={}", 
-                                cfg.mode, cfg.density, cfg.scattering, cfg.light_shafts);
-                        }
-                    }
                 }
                 
                 // M6: Wire sky config to existing viewer sky system
@@ -1402,6 +1312,8 @@ impl Viewer {
                 }
             }
 
+
+
             // === LABELS ===
             ViewerCmd::AddLabel {
                 text,
@@ -1662,6 +1574,42 @@ impl Viewer {
                 let taa_enabled = self.taa_renderer.as_ref().map(|t| t.is_enabled()).unwrap_or(false);
                 let jitter_enabled = self.taa_jitter.enabled;
                 println!("[taa] enabled={} jitter_enabled={}", taa_enabled, jitter_enabled);
+            }
+            ViewerCmd::SetTaaParams {
+                history_weight,
+                jitter_scale,
+                enable_jitter,
+            } => {
+                // Check if we should delegate to terrain viewer
+                let terrain_active = self.terrain_viewer.as_ref().map(|tv| tv.has_terrain()).unwrap_or(false);
+                
+                if terrain_active {
+                    if let Some(ref mut tv) = self.terrain_viewer {
+                         tv.set_taa_params(history_weight, jitter_scale);
+                         // Note: explicit jitter enable not yet supported for terrain viewer delegation via this command
+                    }
+                } else {
+                    // Main viewer logic
+                    if let Some(w) = history_weight {
+                        if let Some(ref mut taa) = self.taa_renderer {
+                             taa.set_history_weight(w);
+                        }
+                    }
+                    if let Some(scale) = jitter_scale {
+                         self.taa_jitter.set_scale(scale);
+                    }
+                    if let Some(enabled) = enable_jitter {
+                         self.taa_jitter.set_enabled(enabled);
+                    } else if let Some(scale) = jitter_scale {
+                         if scale > 0.0 && !self.taa_jitter.enabled {
+                             self.taa_jitter.set_enabled(true);
+                         }
+                    }
+                    
+                    let taa_weight = self.taa_renderer.as_ref().map(|t| t.history_weight()).unwrap_or(0.0);
+                    println!("[taa] params updated: weight={:.2} jitter_scale={:.2} jitter_enabled={}", 
+                        taa_weight, self.taa_jitter.scale, self.taa_jitter.enabled);
+                }
             }
 
             // P5: Point cloud commands

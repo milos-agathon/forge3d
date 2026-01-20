@@ -210,6 +210,7 @@ def save_bundle(
     (bundle_path / "camera").mkdir(exist_ok=True)
     (bundle_path / "render").mkdir(exist_ok=True)
     (bundle_path / "assets").mkdir(exist_ok=True)
+    (bundle_path / "assets" / "hdri").mkdir(exist_ok=True)
     
     # Create manifest
     manifest = BundleManifest.new(name or bundle_path.stem)
@@ -230,10 +231,10 @@ def save_bundle(
     
     # Save overlays
     if overlays:
-        overlays_path = bundle_path / "overlays" / "vectors.json"
+        overlays_path = bundle_path / "overlays" / "vectors.geojson"
         with open(overlays_path, "w") as f:
             json.dump(overlays, f, indent=2)
-        manifest.checksums["overlays/vectors.json"] = _compute_sha256(overlays_path)
+        manifest.checksums["overlays/vectors.geojson"] = _compute_sha256(overlays_path)
     
     # Save labels
     if labels:
@@ -253,9 +254,9 @@ def save_bundle(
     # Copy HDR if provided
     if hdr_path:
         hdr_src = Path(hdr_path)
-        hdr_dst = bundle_path / "assets" / hdr_src.name
+        hdr_dst = bundle_path / "assets" / "hdri" / hdr_src.name
         shutil.copy2(hdr_src, hdr_dst)
-        rel_path = f"assets/{hdr_src.name}"
+        rel_path = f"assets/hdri/{hdr_src.name}"
         manifest.checksums[rel_path] = _compute_sha256(hdr_dst)
     
     # Add camera bookmarks
@@ -323,7 +324,7 @@ def load_bundle(path: Union[str, Path], verify_checksums: bool = True) -> Loaded
             result.dem_path = dem_file
     
     # Load overlays
-    overlays_path = bundle_path / "overlays" / "vectors.json"
+    overlays_path = bundle_path / "overlays" / "vectors.geojson"
     if overlays_path.exists():
         with open(overlays_path) as f:
             result.overlays = json.load(f)
@@ -343,10 +344,10 @@ def load_bundle(path: Union[str, Path], verify_checksums: bool = True) -> Loaded
         result.preset = manifest.preset
     
     # Find HDR file
-    assets_dir = bundle_path / "assets"
-    if assets_dir.exists():
+    hdri_dir = bundle_path / "assets" / "hdri"
+    if hdri_dir.exists():
         for ext in (".hdr", ".exr"):
-            for hdr_file in assets_dir.glob(f"*{ext}"):
+            for hdr_file in hdri_dir.glob(f"*{ext}"):
                 result.hdr_path = hdr_file
                 break
     

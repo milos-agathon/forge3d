@@ -15,6 +15,7 @@ from functools import lru_cache
 from typing import Any, Dict, Optional, Sequence, Tuple, Union
 import importlib
 import io
+import itertools
 import math
 import os as _os
 import warnings
@@ -1910,6 +1911,8 @@ def render_polygons(
     transform: Optional[Tuple[float, float, float, float]] = None,
     return_pick: bool = False,
     base_pick_id: int = 1,
+    style: Optional[Any] = None,
+    style_layer: Optional[str] = None,
 ) -> Union[np.ndarray, tuple[np.ndarray, np.ndarray]]:
     """Render 2D polygons with GPU fill when available, falling back to stroke-only OIT.
 
@@ -1945,6 +1948,10 @@ def render_polygons(
         If True, also returns a pick map (R32Uint) alongside the RGBA image
     base_pick_id : int
         Base pick id used when return_pick is True
+    style : StyleSpec | None
+        Optional Mapbox GL Style Spec object to apply styling.
+    style_layer : str | None
+        Source layer name to match against style rules. Required if style is provided.
 
     Returns
     -------
@@ -1953,6 +1960,81 @@ def render_polygons(
 
     """
     from .vector import VectorScene
+
+    # Handle style-based rendering via recursion
+    if style is not None:
+        if style_layer is None:
+            raise ValueError("style_layer is required when style is provided")
+        if return_pick:
+            raise NotImplementedError("Picking not supported with style")
+        if not isinstance(polygons, (str, Path)):
+            raise NotImplementedError("Styling currently only supports vector file inputs (str/Path)")
+
+        import geopandas as gpd  # type: ignore
+        import tempfile
+        from .style import apply_style
+
+        # Load vector data
+        gdf = gpd.read_file(str(polygons))
+        if gdf.empty:
+            return np.zeros((int(size[1]), int(size[0]), 4), dtype=np.uint8)
+
+        # Create features with attached shapely geometry for restoration
+        features = []
+        for _, row in gdf.iterrows():
+            props = row.drop("geometry").to_dict()
+            features.append({
+                "type": "Feature",
+                "properties": props,
+                "geometry": row.geometry.__geo_interface__ if row.geometry else None,
+                "_shapely": row.geometry
+            })
+
+        # Match styles
+        styled_results = apply_style(style, features, source_layer=style_layer)
+        
+        # Sort by style params for grouping
+        def _style_key(item):
+            s = item[1]
+            return (s.fill_color, s.stroke_color, s.stroke_width)
+        
+        styled_results.sort(key=_style_key)
+
+        # Render groups
+        canvas = np.zeros((int(size[1]), int(size[0]), 4), dtype=np.uint8)
+        
+        for vstyle, group in itertools.groupby(styled_results, key=lambda x: x[1]):
+            # Collect geometries for this style
+            geoms = [item[0]["_shapely"] for item in group if item[0]["_shapely"] is not None]
+            if not geoms:
+                continue
+
+            sub_gdf = gpd.GeoDataFrame(geometry=geoms)
+            
+            # Save to temporary file for recursive render
+            with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp:
+                tmp_name = tmp.name
+            
+            try:
+                sub_gdf.to_file(tmp_name, driver="GPKG")
+                # Recursive call with specific style
+                img = render_polygons(
+                    tmp_name,
+                    size=size,
+                    fill_rgba=vstyle.fill_color,
+                    stroke_rgba=vstyle.stroke_color,
+                    stroke_width=vstyle.stroke_width,
+                    transform=transform,
+                )
+                canvas = _alpha_over(canvas, img)
+            finally:
+                if _os.path.exists(tmp_name):
+                    try:
+                        _os.unlink(tmp_name)
+                    except Exception:
+                        pass
+                        
+        return canvas
 
     def _iter_polys(src: Union[np.ndarray, dict, list, str, Path]):
         # New: accept vector file paths or a dict with {'path','layer'}

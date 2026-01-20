@@ -457,6 +457,25 @@ pub enum IpcRequest {
     },
     /// Get current TAA status
     GetTaaStatus,
+    /// Set TAA parameters
+    SetTaaParams {
+        /// History blending weight (0.0 - 0.99)
+        #[serde(default)]
+        history_weight: Option<f32>,
+        /// Jitter scale (0.0 = off, 1.0 = standard)
+        #[serde(default)]
+        jitter_scale: Option<f32>,
+        /// Whether to enable jitter explicitly
+        #[serde(default)]
+        enable_jitter: Option<bool>,
+    },
+
+    // === BUNDLE POLLING (for Python-side orchestration) ===
+    
+    /// Poll for pending bundle save request (from SaveBundle)
+    PollPendingBundleSave,
+    /// Poll for pending bundle load request (from LoadBundle)
+    PollPendingBundleLoad,
 }
 
 fn default_oit_mode() -> String {
@@ -744,6 +763,30 @@ fn default_true() -> bool {
     true
 }
 
+/// Bundle request data for poll responses
+#[derive(Debug, Clone, Serialize)]
+pub struct BundleRequest {
+    pub pending: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl BundleRequest {
+    pub fn none() -> Self {
+        Self { pending: false, path: None, name: None }
+    }
+    
+    pub fn save(path: String, name: Option<String>) -> Self {
+        Self { pending: true, path: Some(path), name }
+    }
+    
+    pub fn load(path: String) -> Self {
+        Self { pending: true, path: Some(path), name: None }
+    }
+}
+
 /// IPC response envelope
 #[derive(Debug, Clone, Serialize)]
 pub struct IpcResponse {
@@ -756,6 +799,8 @@ pub struct IpcResponse {
     pub pick_events: Option<Vec<crate::picking::PickEvent>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lasso_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bundle_request: Option<BundleRequest>,
 }
 
 impl IpcResponse {
@@ -766,6 +811,7 @@ impl IpcResponse {
             stats: None,
             pick_events: None,
             lasso_state: None,
+            bundle_request: None,
         }
     }
 
@@ -776,6 +822,7 @@ impl IpcResponse {
             stats: None,
             pick_events: None,
             lasso_state: None,
+            bundle_request: None,
         }
     }
 
@@ -786,6 +833,7 @@ impl IpcResponse {
             stats: Some(stats),
             pick_events: None,
             lasso_state: None,
+            bundle_request: None,
         }
     }
 
@@ -796,6 +844,18 @@ impl IpcResponse {
             stats: None,
             pick_events: Some(events),
             lasso_state: None,
+            bundle_request: None,
+        }
+    }
+
+    pub fn with_bundle_request(req: BundleRequest) -> Self {
+        Self {
+            ok: true,
+            error: None,
+            stats: None,
+            pick_events: None,
+            lasso_state: None,
+            bundle_request: Some(req),
         }
     }
 
@@ -806,6 +866,7 @@ impl IpcResponse {
             stats: None,
             pick_events: None,
             lasso_state: Some(state),
+            bundle_request: None,
         }
     }
 }
@@ -856,6 +917,19 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             enabled: *enabled,
         })),
         IpcRequest::GetTaaStatus => Ok(Some(ViewerCmd::GetTaaStatus)),
+        IpcRequest::SetTaaParams {
+            history_weight,
+            jitter_scale,
+            enable_jitter,
+        } => Ok(Some(ViewerCmd::SetTaaParams {
+            history_weight: *history_weight,
+            jitter_scale: *jitter_scale,
+            enable_jitter: *enable_jitter,
+        })),
+
+        // Bundle polling (special handling in server.rs)
+        IpcRequest::PollPendingBundleSave => Ok(None),
+        IpcRequest::PollPendingBundleLoad => Ok(None),
 
         IpcRequest::LoadObj { path } => Ok(Some(ViewerCmd::LoadObj(path.clone()))),
         IpcRequest::LoadGltf { path } => Ok(Some(ViewerCmd::LoadGltf(path.clone()))),
@@ -1362,5 +1436,6 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             seed: *seed,
             max_iterations: *max_iterations,
         })),
+
     }
 }

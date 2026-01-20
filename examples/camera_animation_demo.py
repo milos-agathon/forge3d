@@ -29,9 +29,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
 from forge3d.animation import CameraAnimation, RenderConfig
+from forge3d.viewer_ipc import set_oit_enabled
 
 # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
-from forge3d import sun_position, sun_position_utc, SunPosition
+try:
+    from forge3d import sun_position, sun_position_utc, SunPosition
+    HAS_EPHEMERIS = True
+except ImportError:
+    HAS_EPHEMERIS = False
+    # Mock for type hints or fallback
+    def sun_position(*args, **kwargs): raise NotImplementedError("Ephemeris not available")
+    def sun_position_utc(*args, **kwargs): raise NotImplementedError("Ephemeris not available")
+    class SunPosition: pass
 
 # Asset paths
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
@@ -175,6 +184,9 @@ def run_interactive_preview(
     debug_velocity: bool = False,
     taa_enabled: bool = False,
     taa_history_weight: float = 0.9,
+    oit_mode: str | None = None,
+    static_sun_azimuth: float | None = None,
+    static_sun_elevation: float | None = None,
 ):
     """Run animation preview in the interactive viewer.
     
@@ -182,6 +194,9 @@ def run_interactive_preview(
         dem_path: Path to DEM file
         anim: CameraAnimation to preview
         z_scale: Terrain height exaggeration
+        dynamic_sun: If True, sun moves with camera. If False, use static sun.
+        static_sun_azimuth: Static sun azimuth when dynamic_sun=False (from ephemeris)
+        static_sun_elevation: Static sun elevation when dynamic_sun=False (from ephemeris)
     """
     from forge3d.viewer import open_viewer_async
     
@@ -271,6 +286,24 @@ def run_interactive_preview(
         if taa_enabled:
             send_cmd({"cmd": "set_taa_enabled", "enabled": True})
             print(f"[P1.3] TAA enabled (history_weight={taa_history_weight})")
+        
+        # Set OIT mode if specified
+        if oit_mode and oit_mode != "off":
+            set_oit_enabled(sock, True, oit_mode)
+            print(f"OIT enabled (mode={oit_mode})")
+        elif oit_mode == "off":
+            set_oit_enabled(sock, False)
+            print("OIT disabled")
+        
+        # Set static sun if dynamic sun is disabled and ephemeris values provided
+        if not dynamic_sun and static_sun_azimuth is not None and static_sun_elevation is not None:
+            send_cmd({
+                "cmd": "set_terrain_sun",
+                "azimuth_deg": static_sun_azimuth,
+                "elevation_deg": static_sun_elevation,
+                "intensity": sun_intensity,
+            })
+            print(f"Static sun set: azimuth={static_sun_azimuth:.1f}°, elevation={static_sun_elevation:.1f}°")
         
         # Set initial camera position before waiting
         first_state = anim.evaluate(0.0)
@@ -468,6 +501,9 @@ def export_animation_frames(
     debug_velocity: bool = False,
     taa_enabled: bool = False,
     taa_history_weight: float = 0.9,
+    oit_mode: str | None = None,
+    static_sun_azimuth: float | None = None,
+    static_sun_elevation: float | None = None,
 ):
     """Export animation frames to PNG files and optionally encode to MP4.
     
@@ -560,6 +596,24 @@ def export_animation_frames(
             send_cmd({"cmd": "set_taa_enabled", "enabled": True})
             print(f"[P1.3] TAA enabled (history_weight={taa_history_weight})")
         
+        # Set OIT mode if specified
+        if oit_mode and oit_mode != "off":
+            set_oit_enabled(sock, True, oit_mode)
+            print(f"OIT enabled (mode={oit_mode})")
+        elif oit_mode == "off":
+            set_oit_enabled(sock, False)
+            print("OIT disabled")
+        
+        # Set static sun if dynamic sun is disabled and ephemeris values provided
+        if not dynamic_sun and static_sun_azimuth is not None and static_sun_elevation is not None:
+            send_cmd({
+                "cmd": "set_terrain_sun",
+                "azimuth_deg": static_sun_azimuth,
+                "elevation_deg": static_sun_elevation,
+                "intensity": sun_intensity,
+            })
+            print(f"Static sun set: azimuth={static_sun_azimuth:.1f}°, elevation={static_sun_elevation:.1f}°")
+
         # Render each frame
         total_frames = anim.get_frame_count(fps)
         start_time = time.time()
@@ -789,15 +843,18 @@ Examples:
     
     # P0.3/M2: Compute sun position from ephemeris if location/time provided
     if args.sun_lat is not None and args.sun_lon is not None and args.sun_datetime is not None:
-        try:
-            pos = sun_position(args.sun_lat, args.sun_lon, args.sun_datetime)
-            print(f"Sun ephemeris: lat={args.sun_lat}, lon={args.sun_lon}, datetime={args.sun_datetime}")
-            print(f"  -> azimuth={pos.azimuth:.1f}°, elevation={pos.elevation:.1f}°")
-            # Store computed values for use in animation
-            args.ephemeris_azimuth = pos.azimuth
-            args.ephemeris_elevation = pos.elevation
-        except Exception as e:
-            print(f"Warning: Failed to compute sun ephemeris: {e}")
+        if HAS_EPHEMERIS:
+            try:
+                pos = sun_position(args.sun_lat, args.sun_lon, args.sun_datetime)
+                print(f"Sun ephemeris: lat={args.sun_lat}, lon={args.sun_lon}, datetime={args.sun_datetime}")
+                print(f"  -> azimuth={pos.azimuth:.1f}°, elevation={pos.elevation:.1f}°")
+                # Store computed values for use in animation
+                args.ephemeris_azimuth = pos.azimuth
+                args.ephemeris_elevation = pos.elevation
+            except Exception as e:
+                print(f"Warning: Failed to compute sun ephemeris: {e}")
+        else:
+            print("Warning: Ephemeris support not available (native extension missing)")
     
     # Validate DEM path
     if not args.dem.exists():
@@ -858,6 +915,9 @@ Examples:
             debug_velocity=args.debug_velocity,
             taa_enabled=taa_enabled,
             taa_history_weight=args.taa_history_weight,
+            oit_mode=args.oit,
+            static_sun_azimuth=getattr(args, 'ephemeris_azimuth', None),
+            static_sun_elevation=getattr(args, 'ephemeris_elevation', None),
         )
     else:
         run_interactive_preview(
@@ -870,6 +930,9 @@ Examples:
             debug_velocity=args.debug_velocity,
             taa_enabled=taa_enabled,
             taa_history_weight=args.taa_history_weight,
+            oit_mode=args.oit,
+            static_sun_azimuth=getattr(args, 'ephemeris_azimuth', None),
+            static_sun_elevation=getattr(args, 'ephemeris_elevation', None),
         )
 
 

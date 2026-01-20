@@ -181,8 +181,14 @@ def fetch_tile_grid(dataset, num_tiles: int, lod: int) -> np.ndarray:
     return combined
 
 
-def visualize_heightmap(heightmap: np.ndarray, output_path: Path):
-    """Save heightmap as grayscale PNG."""
+def visualize_heightmap(heightmap: np.ndarray, output_path: Path, output_size: tuple[int, int] | None = None):
+    """Save heightmap as grayscale PNG, optionally resized to output_size.
+    
+    Args:
+        heightmap: 2D numpy array of elevation values
+        output_path: Path to save PNG
+        output_size: Optional (width, height) tuple to resize output
+    """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
     valid = heightmap[np.isfinite(heightmap)]
@@ -204,6 +210,13 @@ def visualize_heightmap(heightmap: np.ndarray, output_path: Path):
     try:
         from PIL import Image
         img = Image.fromarray(img_data, mode='L')
+        
+        # Resize to output_size if specified
+        if output_size is not None:
+            w, h = output_size
+            img = img.resize((w, h), Image.LANCZOS)
+            print(f"[OUTPUT] Resampled to {w}x{h}")
+        
         img.save(output_path)
         print(f"[OUTPUT] Saved heightmap to {output_path}")
     except ImportError:
@@ -337,7 +350,7 @@ def main() -> int:
     print(f"[DATA] Combined heightmap shape: {heightmap.shape}")
     print(f"[DATA] Height range: {np.nanmin(heightmap):.1f} - {np.nanmax(heightmap):.1f}")
     
-    visualize_heightmap(heightmap, args.output)
+    visualize_heightmap(heightmap, args.output, output_size=tuple(args.size))
     
     if args.stats:
         print_stats(dataset)

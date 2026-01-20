@@ -130,6 +130,7 @@ Every new rendering feature must be incorporated into the interactive viewer flo
 **Implementation Requirements:**
 * **Model Example:** Examples for new features must be modeled after `examples/terrain_viewer_interactive.py`.
 * **Terminal Control:** Ensure parameters can be adjusted via terminal commands during the session.
+* **Enrich Knowledge Base:** After every debugging, implementation or any other action in the codebase, you must always add a reflection to `AGENTS.md` in order to improve your efficiency and avoid repeating the same mistakes in the future. After you make changes you must make sure to deduplicate the file. Never remove the existing content, which is not duplicated.
 
 ### 3.5 Documentation and Release Standards
 
@@ -1549,4 +1550,8 @@ python examples/clipmap_demo.py --dem fuji
 4. **Not accounting for ring doubling:** Cell size doubles each ring: `cell_size(ring) = base_cell_size * 2^ring`
 
 5. **Geographic CRS pixel size:** Always convert degrees to meters when DEM uses EPSG:4326.
+
+## Reflections
+
+- Keep viewer TAA plumbing aligned with core structs (use setters/getters) and avoid borrow conflicts in render passes by splitting field borrows or moving temporary views out before mutating other fields.
 

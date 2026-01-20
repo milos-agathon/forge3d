@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use crate::viewer::viewer_enums::{
     ViewerHeightAoConfig, ViewerSunVisConfig,
-    ViewerMaterialLayerConfig, ViewerVectorOverlayConfig, ViewerTonemapConfig,
+    ViewerMaterialLayerConfig, ViewerVectorOverlayConfig, ViewerTonemapConfig, ViewerDenoiseConfig,
 };
 use super::overlay::OverlayConfig;
 
@@ -45,6 +45,8 @@ pub struct ViewerTerrainPbrConfig {
     pub motion_blur: MotionBlurConfig,
     /// P5: Volumetrics settings
     pub volumetrics: VolumetricsConfig,
+    /// M5: Denoise settings
+    pub denoise: DenoiseConfig,
     /// Overlay system settings (lit texture overlays)
     pub overlay: OverlayConfig,
     /// Enable vector overlay geometry system (Option B) - default OFF
@@ -277,6 +279,28 @@ impl Default for VolumetricsConfig {
     }
 }
 
+
+
+/// M5: Internal denoise configuration
+#[derive(Debug, Clone)]
+pub struct DenoiseConfig {
+    pub enabled: bool,
+    pub method: String,
+    pub iterations: u32,
+    pub sigma_color: f32,
+}
+
+impl Default for DenoiseConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            method: "atrous".to_string(),
+            iterations: 3,
+            sigma_color: 10.0,
+        }
+    }
+}
+
 impl Default for TonemapConfig {
     fn default() -> Self {
         Self {
@@ -309,6 +333,7 @@ impl Default for ViewerTerrainPbrConfig {
             dof: DofConfig::default(),
             motion_blur: MotionBlurConfig::default(),
             volumetrics: VolumetricsConfig::default(),
+            denoise: DenoiseConfig::default(),
             overlay: OverlayConfig::new(),  // DEFAULT OFF per AGENTS.md
             vector_overlays_enabled: false, // DEFAULT OFF per plan Section 11
             debug_mode: 0,
@@ -334,6 +359,7 @@ impl ViewerTerrainPbrConfig {
         materials: Option<ViewerMaterialLayerConfig>,
         vector_overlay: Option<ViewerVectorOverlayConfig>,
         tonemap: Option<ViewerTonemapConfig>,
+        denoise: Option<ViewerDenoiseConfig>,
         debug_mode: Option<u32>,
     ) {
         if let Some(v) = enabled {
@@ -414,6 +440,13 @@ impl ViewerTerrainPbrConfig {
             self.tonemap.white_balance_enabled = tm.white_balance_enabled;
             self.tonemap.temperature = tm.temperature.clamp(2000.0, 12000.0);
             self.tonemap.tint = tm.tint.clamp(-1.0, 1.0);
+        }
+        // M5: Denoise config
+        if let Some(dn) = denoise {
+            self.denoise.enabled = dn.enabled;
+            self.denoise.method = dn.method;
+            self.denoise.iterations = dn.iterations.clamp(1, 8);
+            self.denoise.sigma_color = dn.sigma_color.max(0.1);
         }
         // P6.2: Debug visualization mode
         if let Some(d) = debug_mode {

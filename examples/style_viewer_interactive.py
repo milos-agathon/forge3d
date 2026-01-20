@@ -489,7 +489,17 @@ def main() -> int:
             color = (0.9, 0.3, 0.1, 1.0)  # Default orange
             line_width = 15.0
             
-            for layer in spec.layers:
+            # Filter layers by source-layer if specified
+            layers_to_check = spec.layers
+            if args.source_layer:
+                layers_to_check = [l for l in spec.layers if l.source_layer == args.source_layer]
+                if layers_to_check:
+                    print(f"  Filtered to {len(layers_to_check)} layers matching source-layer '{args.source_layer}'")
+                else:
+                    print(f"  Warning: No layers match source-layer '{args.source_layer}', using all layers")
+                    layers_to_check = spec.layers
+            
+            for layer in layers_to_check:
                 if layer.layer_type in ("line", "fill", "circle"):
                     vs = layer_to_vector_style(layer)
                     if vs:

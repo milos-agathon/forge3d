@@ -370,6 +370,157 @@ pub fn features_from_lines(
         .collect()
 }
 
+// === MAPBOX STYLE SPEC INTEGRATION ===
+
+/// Mapbox-style symbol layer configuration.
+/// 
+/// This wraps the essential properties from a Mapbox GL Style Spec
+/// symbol layer for integration with forge3d's label system.
+#[derive(Debug, Clone, Default)]
+pub struct MapboxSymbolLayer {
+    /// Layer ID (from style spec).
+    pub id: String,
+    /// Source layer name (for filtering features).
+    pub source_layer: String,
+    /// Text field property (e.g., "name", or expression result).
+    pub text_field: String,
+    /// Text size in pixels.
+    pub text_size: f32,
+    /// Text color as RGBA (0-1).
+    pub text_color: [f32; 4],
+    /// Halo/outline color as RGBA (0-1).
+    pub text_halo_color: [f32; 4],
+    /// Halo width in pixels.
+    pub text_halo_width: f32,
+    /// Minimum zoom for visibility.
+    pub min_zoom: f32,
+    /// Maximum zoom for visibility.
+    pub max_zoom: f32,
+    /// Symbol placement: "point" or "line".
+    pub symbol_placement: String,
+}
+
+impl MapboxSymbolLayer {
+    /// Create a new symbol layer with defaults.
+    pub fn new(id: &str, source_layer: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            source_layer: source_layer.to_string(),
+            text_field: "name".to_string(),
+            text_size: 14.0,
+            text_color: [0.1, 0.1, 0.1, 1.0],
+            text_halo_color: [1.0, 1.0, 1.0, 0.8],
+            text_halo_width: 1.5,
+            min_zoom: 0.0,
+            max_zoom: f32::MAX,
+            symbol_placement: "point".to_string(),
+        }
+    }
+    
+    /// Convert to LabelLayerConfig.
+    pub fn to_label_config(&self) -> LabelLayerConfig {
+        let mut config = LabelLayerConfig::default();
+        config.label_field = self.text_field.clone();
+        config.min_zoom = self.min_zoom;
+        config.max_zoom = self.max_zoom;
+        config.base_style.size = self.text_size as f32;
+        config.base_style.color = self.text_color;
+        config.base_style.halo_color = self.text_halo_color;
+        config.base_style.halo_width = self.text_halo_width;
+        
+        // Set placement based on symbol_placement
+        config.placement = match self.symbol_placement.as_str() {
+            "line" | "line-center" => PlacementStrategy::AlongLine,
+            _ => PlacementStrategy::Centroid,
+        };
+        
+        config
+    }
+}
+
+/// Create a LabelLayer from a MapboxSymbolLayer configuration.
+/// 
+/// # Example
+/// ```ignore
+/// use forge3d::labels::layer::{MapboxSymbolLayer, label_layer_from_mapbox_style};
+/// 
+/// let symbol = MapboxSymbolLayer::new("place-labels", "place_label")
+///     .with_text_size(16.0)
+///     .with_text_color([0.2, 0.2, 0.2, 1.0]);
+/// 
+/// let layer = label_layer_from_mapbox_style(1, &symbol);
+/// ```
+pub fn label_layer_from_mapbox_style(
+    layer_id: u64,
+    mapbox_layer: &MapboxSymbolLayer,
+) -> LabelLayer {
+    let config = mapbox_layer.to_label_config();
+    LabelLayer::new(layer_id, &mapbox_layer.id, config)
+}
+
+/// Apply Mapbox-style text formatting to a label style.
+/// 
+/// Converts Mapbox style properties to forge3d LabelStyle.
+pub fn apply_mapbox_text_style(
+    style: &mut LabelStyle,
+    text_size: Option<f32>,
+    text_color: Option<[f32; 4]>,
+    text_halo_color: Option<[f32; 4]>,
+    text_halo_width: Option<f32>,
+) {
+    if let Some(size) = text_size {
+        style.size = size;
+    }
+    if let Some(color) = text_color {
+        style.color = color;
+    }
+    if let Some(halo) = text_halo_color {
+        style.halo_color = halo;
+    }
+    if let Some(width) = text_halo_width {
+        style.halo_width = width;
+    }
+}
+
+impl MapboxSymbolLayer {
+    /// Set text size.
+    pub fn with_text_size(mut self, size: f32) -> Self {
+        self.text_size = size;
+        self
+    }
+    
+    /// Set text color.
+    pub fn with_text_color(mut self, color: [f32; 4]) -> Self {
+        self.text_color = color;
+        self
+    }
+    
+    /// Set text halo color.
+    pub fn with_text_halo_color(mut self, color: [f32; 4]) -> Self {
+        self.text_halo_color = color;
+        self
+    }
+    
+    /// Set text halo width.
+    pub fn with_text_halo_width(mut self, width: f32) -> Self {
+        self.text_halo_width = width;
+        self
+    }
+    
+    /// Set zoom range.
+    pub fn with_zoom_range(mut self, min: f32, max: f32) -> Self {
+        self.min_zoom = min;
+        self.max_zoom = max;
+        self
+    }
+    
+    /// Set symbol placement.
+    pub fn with_placement(mut self, placement: &str) -> Self {
+        self.symbol_placement = placement.to_string();
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

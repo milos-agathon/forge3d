@@ -283,6 +283,9 @@ impl ViewerTerrainScene {
         // P5: Volumetrics pass
         let needs_volumetrics = self.pbr_config.volumetrics.enabled && 
             self.pbr_config.volumetrics.density > 0.0001;
+            
+        // M5: Denoise pass
+        let needs_denoise = self.pbr_config.denoise.enabled;
         
         // We need PostProcess pass (for intermediate texture) if PP is active OR Volumetrics is active (since Vol reads from PP intermediate)
         if (needs_post_process || needs_volumetrics) && self.post_process.is_none() {
@@ -301,8 +304,18 @@ impl ViewerTerrainScene {
         if needs_volumetrics && self.volumetrics_pass.is_none() {
             self.init_volumetrics_pass();
         }
+        
+        if needs_denoise && self.denoise_pass.is_none() {
+            self.init_denoise_pass();
+        }
 
         // Ensure textures exist for active passes
+        if needs_denoise {
+             if let Some(ref mut denoise) = self.denoise_pass {
+                 // Denoise pass manages its own ping-pong resources
+                 let _ = denoise.get_input_view(width, height);
+             }
+        }
         if needs_dof || needs_dof_scratch {
             if let Some(ref mut dof) = self.dof_pass {
                 let _ = dof.get_input_view(width, height, self.surface_format);
@@ -543,7 +556,15 @@ impl ViewerTerrainScene {
         // - Else if PP active: Scene -> PP Intermediate
         // - Else: Scene -> Final View
         
-        let render_target: &wgpu::TextureView = if needs_volumetrics {
+        // - If Denoise active: Scene -> Denoise Input
+        // - Else if Volumetrics active: Scene -> PP Intermediate (so Vol can read it)
+        // - Else if DoF active: Scene -> DoF Input
+        // - Else if PP active: Scene -> PP Intermediate
+        // - Else: Scene -> Final View
+        
+        let render_target: &wgpu::TextureView = if needs_denoise {
+            self.denoise_pass.as_mut().unwrap().get_input_view(width, height)
+        } else if needs_volumetrics {
             self.post_process.as_ref().unwrap().intermediate_view.as_ref().unwrap()
         } else if needs_dof {
             self.dof_pass.as_ref().unwrap().input_view.as_ref().unwrap()
@@ -787,6 +808,73 @@ impl ViewerTerrainScene {
             OIT_LOG_ONCE.call_once(|| {
                 println!("[render] WBOIT active: mode={}", self.oit_mode);
             });
+        }
+        
+        // M5: Apply Denoise pass if enabled (after scene render, before effects)
+        if needs_denoise {
+            let (iterations, sigma_color) = {
+                let config = &self.pbr_config.denoise;
+                (config.iterations, config.sigma_color)
+            };
+
+            let ViewerTerrainScene {
+                denoise_pass,
+                post_process,
+                dof_pass,
+                depth_view,
+                queue,
+                device,
+                surface_format,
+                ..
+            } = self;
+
+            if let Some(denoise) = denoise_pass.as_mut() {
+                let depth_view = depth_view.as_ref().unwrap();
+                denoise.apply(encoder, depth_view, iterations, sigma_color);
+
+                let denoise_result = denoise
+                    .get_last_result_view(iterations)
+                    .unwrap_or(denoise.view_a.as_ref().unwrap());
+
+                if post_process.is_none() {
+                    *post_process = Some(super::post_process::PostProcessPass::new(
+                        device.clone(),
+                        *surface_format,
+                    ));
+                }
+
+                let post_process = post_process.as_mut().unwrap();
+                let mut intermediate_view = None;
+                let next_target = if needs_volumetrics {
+                    intermediate_view = post_process.intermediate_view.take();
+                    intermediate_view.as_ref().unwrap()
+                } else if needs_dof {
+                    dof_pass.as_ref().unwrap().input_view.as_ref().unwrap()
+                } else if needs_post_process {
+                    intermediate_view = post_process.intermediate_view.take();
+                    intermediate_view.as_ref().unwrap()
+                } else {
+                    view
+                };
+
+                post_process.apply_from_input(
+                    encoder,
+                    queue,
+                    denoise_result,
+                    next_target,
+                    width,
+                    height,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                );
+
+                if let Some(view) = intermediate_view {
+                    post_process.intermediate_view = Some(view);
+                }
+            }
         }
         
         // P5: Apply volumetrics pass if enabled (after main render, before DoF)

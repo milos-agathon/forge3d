@@ -45,7 +45,9 @@ from forge3d.viewer_ipc import (
     add_label,
     load_label_atlas,
     set_label_zoom,
+    set_label_zoom,
     set_max_visible_labels,
+    set_oit_enabled,
 )
 
 # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
@@ -385,6 +387,15 @@ def main():
         "sun_intensity": 1.0
     })
     
+    # Set OIT mode
+    if args.oit:
+        if args.oit == "off":
+            set_oit_enabled(sock, False)
+            print("OIT disabled")
+        else:
+            set_oit_enabled(sock, True, args.oit)
+            print(f"OIT enabled (mode={args.oit})")
+
     # Add layers
     create_test_triangle_layer(sock)
     if args.gpkg.exists():

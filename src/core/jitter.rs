@@ -88,7 +88,7 @@ pub fn apply_jitter(
 }
 
 /// TAA jitter state for a frame.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct JitterState {
     /// Whether TAA jitter is enabled
     pub enabled: bool,
@@ -96,8 +96,16 @@ pub struct JitterState {
     pub index: u32,
     /// Length of the jitter sequence before repeating
     pub sequence_length: u32,
+    /// Scale factor for the jitter offset (1.0 = default amplitude)
+    pub scale: f32,
     /// Current jitter offset in pixel units [-0.5, 0.5]
     pub offset: (f32, f32),
+}
+
+impl Default for JitterState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl JitterState {
@@ -107,34 +115,57 @@ impl JitterState {
             enabled: false,
             index: 0,
             sequence_length: DEFAULT_JITTER_SEQUENCE_LENGTH,
+            scale: 1.0,
             offset: (0.0, 0.0),
         }
     }
 
     /// Create jitter state with TAA enabled.
     pub fn enabled() -> Self {
-        Self {
+        let mut state = Self {
             enabled: true,
             index: 0,
             sequence_length: DEFAULT_JITTER_SEQUENCE_LENGTH,
-            offset: halton_2_3(0, DEFAULT_JITTER_SEQUENCE_LENGTH),
-        }
+            scale: 1.0,
+            offset: (0.0, 0.0),
+        };
+        state.refresh_offset();
+        state
     }
 
     /// Advance to the next frame and compute new jitter offset.
     pub fn advance(&mut self) {
         if self.enabled {
             self.index = (self.index + 1) % self.sequence_length;
-            self.offset = halton_2_3(self.index, self.sequence_length);
-        } else {
-            self.offset = (0.0, 0.0);
         }
+        self.refresh_offset();
+    }
+
+    /// Update jitter scale and recompute the current offset.
+    pub fn set_scale(&mut self, scale: f32) {
+        self.scale = scale.max(0.0);
+        self.refresh_offset();
+    }
+
+    /// Enable or disable jitter without resetting the sequence index.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+        self.refresh_offset();
     }
 
     /// Get current jitter offset as an array for GPU upload.
     #[inline]
     pub fn offset_array(&self) -> [f32; 2] {
         [self.offset.0, self.offset.1]
+    }
+
+    fn refresh_offset(&mut self) {
+        if self.enabled {
+            let (x, y) = halton_2_3(self.index, self.sequence_length);
+            self.offset = (x * self.scale, y * self.scale);
+        } else {
+            self.offset = (0.0, 0.0);
+        }
     }
 }
 

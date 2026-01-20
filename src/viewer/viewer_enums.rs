@@ -484,6 +484,12 @@ pub enum ViewerCmd {
     },
     /// Get current TAA status
     GetTaaStatus,
+    /// Set TAA parameters
+    SetTaaParams {
+        history_weight: Option<f32>,
+        jitter_scale: Option<f32>,
+        enable_jitter: Option<bool>,
+    },
 }
 
 /// Heightfield ray-traced AO configuration for viewer

@@ -54,7 +54,7 @@ import numpy as np
 
 # Import shared utilities from forge3d package
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
-from forge3d.viewer_ipc import find_viewer_binary, send_ipc
+from forge3d.viewer_ipc import find_viewer_binary, send_ipc, set_oit_enabled
 from forge3d.colors import hex_to_rgb
 from forge3d.interactive import run_interactive_loop, parse_set_command, handle_snapshot_command
 
@@ -888,7 +888,15 @@ def main() -> int:
     else:
         print("PBR rendering enabled")
     
-    # Load overlay if available
+    # Configure OIT
+    if args.oit:
+        if args.oit == "off":
+            set_oit_enabled(sock, False)
+            print("OIT disabled")
+        else:
+            set_oit_enabled(sock, True, args.oit)
+            print(f"OIT enabled (mode={args.oit})")
+
     if overlay_png_path and overlay_png_path.exists():
         print(f"Loading land cover overlay: {overlay_png_path}")
         resp = send_ipc(sock, {

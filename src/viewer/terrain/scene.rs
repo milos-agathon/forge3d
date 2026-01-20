@@ -4,6 +4,7 @@
 use super::render::TerrainUniforms;
 use super::shader::TERRAIN_SHADER;
 use super::vector_overlay::{VectorOverlayStack, VectorOverlayLayer, VectorVertex, drape_vertices};
+use super::denoise::DenoisePass;
 use crate::shadows::{CsmConfig, CsmRenderer};
 use anyhow::Result;
 use std::sync::Arc;
@@ -141,6 +142,8 @@ pub struct ViewerTerrainScene {
     pub(super) motion_blur_pass: Option<super::motion_blur::MotionBlurAccumulator>,
     // P5: Volumetrics pass
     pub(super) volumetrics_pass: Option<super::volumetrics::VolumetricsPass>,
+    // M5: Denoise pass
+    pub(super) denoise_pass: Option<DenoisePass>,
     pub(super) surface_format: wgpu::TextureFormat,
     // Overlay layer stack for lit draped overlays
     pub overlay_stack: Option<super::overlay::OverlayStack>,
@@ -311,6 +314,7 @@ impl ViewerTerrainScene {
             dof_pass: None,
             motion_blur_pass: None,
             volumetrics_pass: None,
+            denoise_pass: None,
             surface_format: target_format,
             overlay_stack: None,
             vector_overlay_stack: None,
@@ -341,6 +345,8 @@ impl ViewerTerrainScene {
             velocity_bind_group_layout: None,
         })
     }
+
+
     
     /// P0.1/M1: Set OIT mode for transparent overlay rendering
     pub fn set_oit_mode(&mut self, enabled: bool, mode: &str) {
@@ -383,6 +389,111 @@ impl ViewerTerrainScene {
             self.taa_jitter = crate::core::jitter::JitterState::new();
             println!("[terrain_taa] TAA disabled");
         }
+    }
+
+    /// P1.4: Set TAA parameters (history weight, jitter scale)
+    pub fn set_taa_params(&mut self, history_weight: Option<f32>, jitter_scale: Option<f32>) {
+        if let Some(w) = history_weight {
+            if let Some(ref mut taa) = self.taa_renderer {
+                 taa.set_history_weight(w);
+            }
+        }
+        
+        if let Some(scale) = jitter_scale {
+             self.taa_jitter.set_scale(scale);
+             // Note: we don't automatically disable jitter if scale is 0 here,
+             // as the user might want to temporarily zero the scale but keep state enabled.
+        }
+        
+        let current_weight = self.taa_renderer.as_ref().map(|t| t.history_weight()).unwrap_or(0.0);
+        println!("[terrain_taa] params updated: weight={:.2} jitter_scale={:.2}", 
+            current_weight, self.taa_jitter.scale);
+    }
+
+    
+    /// Configure PBR terrain rendering
+    pub fn set_terrain_pbr(
+        &mut self,
+        enabled: Option<bool>,
+        hdr_path: Option<String>,
+        ibl_intensity: Option<f32>,
+        shadow_technique: Option<String>,
+        shadow_map_res: Option<u32>,
+        exposure: Option<f32>,
+        msaa: Option<u32>,
+        normal_strength: Option<f32>,
+        height_ao: Option<crate::viewer::viewer_enums::ViewerHeightAoConfig>,
+        sun_visibility: Option<crate::viewer::viewer_enums::ViewerSunVisConfig>,
+        materials: Option<crate::viewer::viewer_enums::ViewerMaterialLayerConfig>,
+        vector_overlay: Option<crate::viewer::viewer_enums::ViewerVectorOverlayConfig>,
+        tonemap: Option<crate::viewer::viewer_enums::ViewerTonemapConfig>,
+        lens_effects: Option<crate::viewer::viewer_enums::ViewerLensEffectsConfig>,
+        dof: Option<crate::viewer::viewer_enums::ViewerDofConfig>,
+        motion_blur: Option<crate::viewer::viewer_enums::ViewerMotionBlurConfig>,
+        volumetrics: Option<crate::viewer::viewer_enums::ViewerVolumetricsConfig>,
+        denoise: Option<crate::viewer::viewer_enums::ViewerDenoiseConfig>,
+        debug_mode: Option<u32>,
+    ) {
+        // Update config
+        self.pbr_config.apply_updates(
+            enabled,
+            hdr_path,
+            ibl_intensity,
+            shadow_technique,
+            shadow_map_res,
+            exposure,
+            msaa,
+            normal_strength,
+            height_ao,
+            sun_visibility,
+            materials,
+            vector_overlay,
+            tonemap,
+            denoise.clone(),
+            debug_mode,
+        );
+        
+        // Handle specialized config updates
+        if let Some(lens) = lens_effects {
+            self.pbr_config.apply_lens_effects(
+                lens.enabled, lens.vignette_strength, lens.vignette_radius, 
+                lens.vignette_softness, lens.distortion, lens.chromatic_aberration
+            );
+        }
+        
+        if let Some(d) = dof {
+            self.pbr_config.apply_dof(
+                d.enabled, d.f_stop, d.focus_distance, d.focal_length, 
+                &d.quality, d.tilt_pitch, d.tilt_yaw
+            );
+        }
+
+        if let Some(mb) = motion_blur {
+            self.pbr_config.apply_motion_blur(
+                mb.enabled, mb.samples, mb.shutter_open, mb.shutter_close,
+                mb.cam_phi_delta, mb.cam_theta_delta, mb.cam_radius_delta
+            );
+        }
+        
+        if let Some(v) = volumetrics {
+            self.pbr_config.apply_volumetrics(
+                v.enabled, &v.mode, v.density, v.scattering, 
+                v.absorption, v.light_shafts, v.shaft_intensity, v.half_res
+            );
+        }
+        
+        // Re-init specialized passes if enabled
+        if self.pbr_config.lens_effects.enabled {
+            self.init_post_process();
+        }
+        if self.pbr_config.dof.enabled {
+            self.init_dof_pass();
+        }
+        if self.pbr_config.denoise.enabled {
+            self.init_denoise_pass();
+        }
+        
+        println!("[terrain_pbr] updated: {}", self.pbr_config.to_display_string());
     }
 
     /// P1.4: Check if TAA is enabled
@@ -974,10 +1085,16 @@ impl ViewerTerrainScene {
     /// Initialize DoF pass (called lazily when DoF enabled)
     pub fn init_dof_pass(&mut self) {
         if self.dof_pass.is_none() {
-            self.dof_pass = Some(super::dof::DofPass::new(
-                self.device.clone(),
-                self.surface_format,
-            ));
+            self.dof_pass = Some(super::dof::DofPass::new(self.device.clone(), self.surface_format));
+            println!("[terrain] DoF pass initialized");
+        }
+    }
+    
+    /// Initialize Denoise pass (called lazily when enabled)
+    pub fn init_denoise_pass(&mut self) {
+        if self.denoise_pass.is_none() {
+            self.denoise_pass = Some(DenoisePass::new(self.device.clone()));
+            println!("[terrain] Denoise pass initialized");
         }
     }
     

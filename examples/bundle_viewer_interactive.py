@@ -439,6 +439,32 @@ def main() -> int:
         "sun_elevation": args.sun_elevation,
     })
     
+    # Apply render overrides via PBR config
+    pbr_cmd = {
+        "cmd": "set_terrain_pbr",
+        "enabled": True,
+        "exposure": args.exposure,
+    }
+    if args.ibl_intensity is not None:
+        pbr_cmd["ibl_intensity"] = args.ibl_intensity
+    if args.normal_strength is not None:
+        pbr_cmd["normal_strength"] = args.normal_strength
+    if args.hdr:
+        pbr_cmd["hdr_path"] = str(args.hdr.resolve())
+    
+    resp = send_ipc(sock, pbr_cmd)
+    if resp.get("ok"):
+        overrides = [f"exposure={args.exposure}"]
+        if args.ibl_intensity is not None:
+            overrides.append(f"ibl_intensity={args.ibl_intensity}")
+        if args.normal_strength is not None:
+            overrides.append(f"normal_strength={args.normal_strength}")
+        if args.hdr:
+            overrides.append(f"hdr={args.hdr.name}")
+        print(f"PBR enabled: {', '.join(overrides)}")
+    else:
+        print(f"Warning: PBR config failed: {resp.get('error')}")
+
     # Snapshot mode
     if args.snapshot:
         time.sleep(0.5)

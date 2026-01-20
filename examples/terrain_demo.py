@@ -17,8 +17,6 @@ import forge3d.terrain_pbr_pom as _impl  # type: ignore[import]
 from forge3d.terrain_pbr_pom import render_sunrise_to_noon_sequence
 
 # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
-from forge3d import sun_position, sun_position_utc, SunPosition
-
 
 # Re-export selected symbols for tests and external callers
 DEFAULT_DEM = _impl.DEFAULT_DEM
@@ -36,6 +34,17 @@ def _build_renderer_config(args: argparse.Namespace):
     """
 
     return _impl._build_renderer_config(args)
+
+
+def _require_sun_position():
+    try:
+        from forge3d import sun_position as _sun_position
+    except Exception as exc:
+        raise SystemExit(
+            "Error: sun ephemeris requested but sun_position is unavailable. "
+            "Rebuild the extension with `maturin develop --release`."
+        ) from exc
+    return _sun_position
 
 
 def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit: set[str] | None = None) -> None:
@@ -519,6 +528,7 @@ def main() -> int:
     # P0.3/M2: Compute sun position from ephemeris if location/time provided
     if args.sun_lat is not None and args.sun_lon is not None and args.sun_datetime is not None:
         try:
+            sun_position = _require_sun_position()
             pos = sun_position(args.sun_lat, args.sun_lon, args.sun_datetime)
             args.sun_azimuth = pos.azimuth
             args.sun_elevation = pos.elevation

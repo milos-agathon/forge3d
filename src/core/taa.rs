@@ -268,6 +268,10 @@ impl TaaRenderer {
         self.settings.history_weight = weight.clamp(0.0, 0.99);
     }
 
+    pub fn history_weight(&self) -> f32 {
+        self.settings.history_weight
+    }
+
     /// Get current history view (read)
     pub fn history_view(&self) -> &TextureView {
         &self.history_views[self.read_index]

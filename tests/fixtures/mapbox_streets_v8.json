@@ -1,0 +1,157 @@
+{
+  "version": 8,
+  "name": "Mapbox Streets v8 (Simplified)",
+  "metadata": {
+    "mapbox:type": "template",
+    "mapbox:sdk-support": {
+      "android": "10.0.0",
+      "ios": "10.0.0",
+      "js": "2.0.0"
+    }
+  },
+  "sources": {
+    "mapbox-streets-v8": {
+      "type": "vector",
+      "url": "mapbox://mapbox.mapbox-streets-v8"
+    }
+  },
+  "sprite": "mapbox://sprites/mapbox/streets-v12",
+  "glyphs": "mapbox://fonts/mapbox/{fontstack}/{range}.pbf",
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#f8f4f0"
+      }
+    },
+    {
+      "id": "water",
+      "type": "fill",
+      "source": "mapbox-streets-v8",
+      "source-layer": "water",
+      "paint": {
+        "fill-color": "#a0cfdf",
+        "fill-opacity": 1.0
+      }
+    },
+    {
+      "id": "landuse-park",
+      "type": "fill",
+      "source": "mapbox-streets-v8",
+      "source-layer": "landuse",
+      "filter": ["==", ["get", "class"], "park"],
+      "paint": {
+        "fill-color": "#c8df9f",
+        "fill-opacity": 0.8
+      }
+    },
+    {
+      "id": "landuse-residential",
+      "type": "fill",
+      "source": "mapbox-streets-v8",
+      "source-layer": "landuse",
+      "filter": ["==", ["get", "class"], "residential"],
+      "paint": {
+        "fill-color": "#ede8dc",
+        "fill-opacity": 0.6
+      }
+    },
+    {
+      "id": "landuse-industrial",
+      "type": "fill",
+      "source": "mapbox-streets-v8",
+      "source-layer": "landuse",
+      "filter": ["==", ["get", "class"], "industrial"],
+      "paint": {
+        "fill-color": "#d4d0c8"
+      }
+    },
+    {
+      "id": "building",
+      "type": "fill",
+      "source": "mapbox-streets-v8",
+      "source-layer": "building",
+      "minzoom": 14,
+      "paint": {
+        "fill-color": "#d6d6d6",
+        "fill-opacity": 0.8
+      }
+    },
+    {
+      "id": "road-secondary",
+      "type": "line",
+      "source": "mapbox-streets-v8",
+      "source-layer": "road",
+      "filter": ["==", ["get", "class"], "secondary"],
+      "paint": {
+        "line-color": "#ffffff",
+        "line-width": 2
+      }
+    },
+    {
+      "id": "road-primary",
+      "type": "line",
+      "source": "mapbox-streets-v8",
+      "source-layer": "road",
+      "filter": ["==", ["get", "class"], "primary"],
+      "paint": {
+        "line-color": "#ffc107",
+        "line-width": 4
+      }
+    },
+    {
+      "id": "road-motorway",
+      "type": "line",
+      "source": "mapbox-streets-v8",
+      "source-layer": "road",
+      "filter": ["==", ["get", "class"], "motorway"],
+      "paint": {
+        "line-color": "#fc8d59",
+        "line-width": 6
+      }
+    },
+    {
+      "id": "place-labels",
+      "type": "symbol",
+      "source": "mapbox-streets-v8",
+      "source-layer": "place_label",
+      "layout": {
+        "text-field": ["get", "name"],
+        "text-font": ["DIN Pro Regular", "Arial Unicode MS Regular"],
+        "text-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          6, 10,
+          12, 14,
+          18, 24
+        ],
+        "text-anchor": "center"
+      },
+      "paint": {
+        "text-color": "#333333",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.0
+      }
+    },
+    {
+      "id": "road-labels",
+      "type": "symbol",
+      "source": "mapbox-streets-v8",
+      "source-layer": "road",
+      "minzoom": 12,
+      "layout": {
+        "text-field": ["get", "name"],
+        "text-font": ["DIN Pro Regular", "Arial Unicode MS Regular"],
+        "text-size": 12,
+        "symbol-placement": "line"
+      },
+      "paint": {
+        "text-color": "#555555",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.5
+      }
+    }
+  ]
+}

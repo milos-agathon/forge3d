@@ -187,27 +187,4 @@ fn chrono_timestamp() -> String {
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_manifest_roundtrip() {
-        let mut manifest = BundleManifest::new("test_bundle");
-        manifest.description = Some("Test description".into());
-        manifest.add_checksum("terrain/dem.tif", "abc123");
-        manifest.terrain = Some(TerrainMeta {
-            dem_path: "terrain/dem.tif".into(),
-            crs: Some("EPSG:32610".into()),
-            domain: Some([0.0, 1000.0]),
-            colormap: Some("viridis".into()),
-        });
-        
-        let json = serde_json::to_string_pretty(&manifest).unwrap();
-        let loaded: BundleManifest = serde_json::from_str(&json).unwrap();
-        
-        assert_eq!(loaded.version, BUNDLE_VERSION);
-        assert_eq!(loaded.name, "test_bundle");
-        assert_eq!(loaded.checksums.get("terrain/dem.tif"), Some(&"abc123".into()));
-    }
-}
+

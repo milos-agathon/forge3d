@@ -7,10 +7,13 @@ use std::sync::mpsc;
 use std::thread;
 
 use super::protocol::{
-    ipc_request_to_viewer_cmd, parse_ipc_request, IpcRequest, IpcResponse, ViewerStats,
+    ipc_request_to_viewer_cmd, parse_ipc_request, IpcRequest, IpcResponse, ViewerStats, BundleRequest,
 };
 use crate::viewer::viewer_enums::ViewerCmd;
-use crate::viewer::event_loop::{get_pick_events, get_lasso_state};
+use crate::viewer::event_loop::{
+    get_pick_events, get_lasso_state,
+    take_pending_bundle_save, take_pending_bundle_load,
+};
 
 /// IPC server configuration
 pub struct IpcServerConfig {
@@ -160,6 +163,20 @@ where
                                     IpcResponse::with_lasso_state(state.clone())
                                 } else {
                                     IpcResponse::error("Failed to lock lasso state")
+                                }
+                            }
+                            IpcRequest::PollPendingBundleSave => {
+                                if let Some((path, name)) = take_pending_bundle_save() {
+                                    IpcResponse::with_bundle_request(BundleRequest::save(path, name))
+                                } else {
+                                    IpcResponse::with_bundle_request(BundleRequest::none())
+                                }
+                            }
+                            IpcRequest::PollPendingBundleLoad => {
+                                if let Some(path) = take_pending_bundle_load() {
+                                    IpcResponse::with_bundle_request(BundleRequest::load(path))
+                                } else {
+                                    IpcResponse::with_bundle_request(BundleRequest::none())
                                 }
                             }
                             _ => {

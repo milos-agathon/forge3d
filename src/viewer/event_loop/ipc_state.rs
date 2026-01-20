@@ -58,3 +58,67 @@ pub fn update_ipc_transform_stats(transform_version: u64, transform_is_identity:
         stats.transform_is_identity = transform_is_identity;
     }
 }
+
+/// Bundle save request: (path, optional name)
+static PENDING_BUNDLE_SAVE: OnceLock<Mutex<Option<(String, Option<String>)>>> = OnceLock::new();
+
+/// Bundle load request: path
+static PENDING_BUNDLE_LOAD: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+/// Get the pending bundle save request (path, optional name).
+/// Calling this clears the pending request.
+pub fn take_pending_bundle_save() -> Option<(String, Option<String>)> {
+    let lock = PENDING_BUNDLE_SAVE.get_or_init(|| Mutex::new(None));
+    if let Ok(mut guard) = lock.lock() {
+        guard.take()
+    } else {
+        None
+    }
+}
+
+/// Peek the pending bundle save request without consuming it.
+pub fn peek_pending_bundle_save() -> Option<(String, Option<String>)> {
+    let lock = PENDING_BUNDLE_SAVE.get_or_init(|| Mutex::new(None));
+    if let Ok(guard) = lock.lock() {
+        guard.clone()
+    } else {
+        None
+    }
+}
+
+/// Set a pending bundle save request.
+pub fn set_pending_bundle_save(path: String, name: Option<String>) {
+    let lock = PENDING_BUNDLE_SAVE.get_or_init(|| Mutex::new(None));
+    if let Ok(mut guard) = lock.lock() {
+        *guard = Some((path, name));
+    }
+}
+
+/// Get the pending bundle load request (path).
+/// Calling this clears the pending request.
+pub fn take_pending_bundle_load() -> Option<String> {
+    let lock = PENDING_BUNDLE_LOAD.get_or_init(|| Mutex::new(None));
+    if let Ok(mut guard) = lock.lock() {
+        guard.take()
+    } else {
+        None
+    }
+}
+
+/// Peek the pending bundle load request without consuming it.
+pub fn peek_pending_bundle_load() -> Option<String> {
+    let lock = PENDING_BUNDLE_LOAD.get_or_init(|| Mutex::new(None));
+    if let Ok(guard) = lock.lock() {
+        guard.clone()
+    } else {
+        None
+    }
+}
+
+/// Set a pending bundle load request.
+pub fn set_pending_bundle_load(path: String) {
+    let lock = PENDING_BUNDLE_LOAD.get_or_init(|| Mutex::new(None));
+    if let Ok(mut guard) = lock.lock() {
+        *guard = Some(path);
+    }
+}

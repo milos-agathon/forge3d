@@ -302,6 +302,9 @@ def decode_b3dm(data: bytes) -> Dict[str, Any]:
 
     Returns:
         Dict with positions, normals, colors, indices
+        
+    Raises:
+        NotImplementedError: glTF mesh extraction is not yet implemented
     """
     if len(data) < 28:
         raise ValueError("B3DM file too small")
@@ -315,6 +318,7 @@ def decode_b3dm(data: bytes) -> Dict[str, Any]:
         raise ValueError(f"Unsupported B3DM version: {version}")
 
     # Parse header
+    byte_length = int.from_bytes(data[8:12], "little")
     ft_json_len = int.from_bytes(data[12:16], "little")
     ft_bin_len = int.from_bytes(data[16:20], "little")
     bt_json_len = int.from_bytes(data[20:24], "little")
@@ -322,15 +326,27 @@ def decode_b3dm(data: bytes) -> Dict[str, Any]:
 
     offset = 28 + ft_json_len + ft_bin_len + bt_json_len + bt_bin_len
     gltf_data = data[offset:]
-
-    # Simplified: return placeholder for now
-    return {
-        "positions": np.array([], dtype=np.float32),
-        "normals": None,
-        "colors": None,
-        "indices": np.array([], dtype=np.uint32),
-        "gltf_size": len(gltf_data),
-    }
+    
+    # Validate that glTF data is present
+    if len(gltf_data) < 12:
+        raise ValueError(f"B3DM contains no valid glTF data (size={len(gltf_data)})")
+    
+    # Check for glTF magic (binary glTF starts with "glTF")
+    gltf_magic = gltf_data[0:4]
+    if gltf_magic != b"glTF":
+        raise ValueError(f"Embedded content is not glTF (magic={gltf_magic!r})")
+    
+    # glTF mesh extraction requires a full glTF parser to extract:
+    # - accessor data for POSITION, NORMAL, TEXCOORD attributes
+    # - buffer views and buffer data
+    # - mesh primitives and indices
+    # This is deferred until a glTF parsing library is integrated.
+    raise NotImplementedError(
+        f"B3DM glTF mesh extraction not implemented. "
+        f"Found {len(gltf_data)} bytes of glTF data. "
+        f"Use a glTF library (e.g., pygltflib) to extract mesh geometry, "
+        f"or use the Rust renderer which has native glTF support."
+    )
 
 
 def decode_pnts(data: bytes) -> Dict[str, Any]:

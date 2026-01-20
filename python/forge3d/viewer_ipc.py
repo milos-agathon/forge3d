@@ -704,78 +704,6 @@ def clear_selection(sock: socket.socket) -> Dict[str, Any]:
     return send_ipc(sock, {"cmd": "clear_selection"})
 
 
-# === VECTOR OVERLAY API ===
-
-def add_vector_overlay(
-    sock: socket.socket,
-    name: str,
-    vertices: list[list[float]],  # list of [x, y, z, r, g, b, a]
-    indices: list[int],
-    primitive: str = "triangles",
-    drape: bool = True,
-    drape_offset: float = 0.5,
-    opacity: float = 1.0,
-    depth_bias: float = 0.001,
-    line_width: float = 2.0,
-    point_size: float = 5.0,
-    z_order: int = 0,
-) -> Dict[str, Any]:
-    """Add a vector overlay with geometry.
-    
-    Args:
-        sock: Connected socket
-        name: Unique name for the layer
-        vertices: List of vertices, each is [x, y, z, r, g, b, a]
-        indices: List of vertex indices
-        primitive: "triangles", "lines", "points", etc.
-        drape: Whether to drape onto terrain
-        drape_offset: Height offset when draped
-        opacity: Layer opacity
-        depth_bias: Depth bias
-        line_width: Width for lines
-        point_size: Size for points
-        z_order: Draw order
-    """
-    return send_ipc(sock, {
-        "cmd": "add_vector_overlay",
-        "name": name,
-        "vertices": vertices,
-        "indices": indices,
-        "primitive": primitive,
-        "drape": drape,
-        "drape_offset": drape_offset,
-        "opacity": opacity,
-        "depth_bias": depth_bias,
-        "line_width": line_width,
-        "point_size": point_size,
-        "z_order": z_order,
-    })
-
-def set_vector_overlays_enabled(sock: socket.socket, enabled: bool) -> Dict[str, Any]:
-    return send_ipc(sock, {"cmd": "set_vector_overlays_enabled", "enabled": enabled})
-
-
-# === PICKING API (Plan 3) ===
-
-def poll_pick_events(sock: socket.socket) -> Dict[str, Any]:
-    """Poll for pending pick events.
-    
-    Returns a dict with 'pick_events': list of events.
-    """
-    return send_ipc(sock, {"cmd": "poll_pick_events"})
-
-def set_lasso_mode(sock: socket.socket, enabled: bool) -> Dict[str, Any]:
-    """Enable or disable lasso selection mode."""
-    return send_ipc(sock, {"cmd": "set_lasso_mode", "enabled": enabled})
-
-def get_lasso_state(sock: socket.socket) -> Dict[str, Any]:
-    """Get current lasso state ('inactive', 'drawing', 'complete')."""
-    return send_ipc(sock, {"cmd": "get_lasso_state"})
-
-def clear_selection(sock: socket.socket) -> Dict[str, Any]:
-    """Clear current selection."""
-    return send_ipc(sock, {"cmd": "clear_selection"})
-
 # === OIT (Order-Independent Transparency) API (P0.1/M1) ===
 
 def set_oit_enabled(sock: socket.socket, enabled: bool, mode: str = "auto") -> Dict[str, Any]:
@@ -810,3 +738,204 @@ def get_oit_mode(sock: socket.socket) -> Dict[str, Any]:
         Response dict with 'mode' key containing current OIT mode string
     """
     return send_ipc(sock, {"cmd": "get_oit_mode"})
+
+
+# === BUNDLE API ===
+
+def save_bundle(
+    sock: socket.socket,
+    path: str,
+    name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Save current scene state to a bundle.
+    
+    Args:
+        sock: Connected socket to viewer
+        path: Output bundle path (will create directory with .forge3d suffix)
+        name: Optional bundle name (defaults to filename)
+        
+    Returns:
+        Response dict with 'ok' status and 'path' to created bundle
+        
+    Example:
+        >>> response = save_bundle(sock, "output/my_scene.forge3d", name="Mountain View")
+        >>> print(response['path'])
+        'output/my_scene.forge3d'
+    """
+    cmd: Dict[str, Any] = {
+        "cmd": "SaveBundle",
+        "path": str(path),
+    }
+    if name is not None:
+        cmd["name"] = name
+    return send_ipc(sock, cmd)
+
+
+def load_bundle(
+    sock: socket.socket,
+    path: str,
+) -> Dict[str, Any]:
+    """Load a bundle into the viewer.
+    
+    Args:
+        sock: Connected socket to viewer
+        path: Path to bundle directory (.forge3d)
+        
+    Returns:
+        Response dict with 'ok' status
+        
+    Example:
+        >>> response = load_bundle(sock, "scenes/my_scene.forge3d")
+        >>> if response.get('ok'):
+        ...     print("Bundle loaded successfully")
+    """
+    return send_ipc(sock, {
+        "cmd": "LoadBundle",
+        "path": str(path),
+    })
+
+
+def poll_pending_bundle_save(sock: socket.socket) -> Dict[str, Any]:
+    """Poll for pending bundle save request.
+    
+    Used by scripts to check if user requested a bundle save via IPC.
+    
+    Returns:
+        Response dict with 'pending' (bool) and optionally 'path' and 'name'
+    """
+    return send_ipc(sock, {"cmd": "poll_pending_bundle_save"})
+
+
+def poll_pending_bundle_load(sock: socket.socket) -> Dict[str, Any]:
+    """Poll for pending bundle load request.
+    
+    Used by scripts to check if user requested a bundle load via IPC.
+    
+    Returns:
+        Response dict with 'pending' (bool) and optionally 'path'
+    """
+    return send_ipc(sock, {"cmd": "poll_pending_bundle_load"})
+
+
+# === TAA API (P1.3) ===
+
+def set_taa_enabled(sock: socket.socket, enabled: bool) -> Dict[str, Any]:
+    """Enable or disable Temporal Anti-Aliasing (TAA).
+    
+    Args:
+        sock: Connected socket to viewer
+        enabled: Whether to enable TAA
+        
+    Returns:
+        Response dict with 'ok' status
+    """
+    return send_ipc(sock, {"cmd": "set_taa_enabled", "enabled": enabled})
+
+
+def get_taa_status(sock: socket.socket) -> Dict[str, Any]:
+    """Get current TAA status.
+    
+    Returns:
+        Response dict with status info
+    """
+    return send_ipc(sock, {"cmd": "get_taa_status"})
+
+
+def set_taa_params(
+    sock: socket.socket,
+    history_weight: Optional[float] = None,
+    jitter_scale: Optional[float] = None,
+    enable_jitter: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Set TAA parameters.
+    
+    Args:
+        sock: Connected socket to viewer
+        history_weight: History blending weight (0.0-0.99)
+        jitter_scale: Jitter scale factor (1.0 = standard)
+        enable_jitter: Explicitly enable/disable jitter
+        
+    Returns:
+        Response dict with 'ok' status
+    """
+    cmd: Dict[str, Any] = {"cmd": "set_taa_params"}
+    if history_weight is not None:
+        cmd["history_weight"] = history_weight
+    if jitter_scale is not None:
+        cmd["jitter_scale"] = jitter_scale
+    if enable_jitter is not None:
+        cmd["enable_jitter"] = enable_jitter
+    return send_ipc(sock, cmd)
+
+
+def set_terrain_pbr(
+    sock: socket.socket,
+    enabled: Optional[bool] = None,
+    hdr_path: Optional[str] = None,
+    ibl_intensity: Optional[float] = None,
+    shadow_technique: Optional[str] = None,
+    shadow_map_res: Optional[int] = None,
+    exposure: Optional[float] = None,
+    msaa: Optional[int] = None,
+    normal_strength: Optional[float] = None,
+    height_ao: Optional[Dict[str, Any]] = None,
+    sun_visibility: Optional[Dict[str, Any]] = None,
+    materials: Optional[Dict[str, Any]] = None,
+    vector_overlay: Optional[Dict[str, Any]] = None,
+    tonemap: Optional[Dict[str, Any]] = None,
+    lens_effects: Optional[Dict[str, Any]] = None,
+    dof: Optional[Dict[str, Any]] = None,
+    motion_blur: Optional[Dict[str, Any]] = None,
+    volumetrics: Optional[Dict[str, Any]] = None,
+    denoise: Optional[Dict[str, Any]] = None,
+    sky: Optional[Dict[str, Any]] = None,
+    debug_mode: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Configure terrain PBR/advanced rendering mode settings.
+    
+    Args:
+        sock: Connected socket
+        enabled: Enable PBR mode
+        hdr_path: Path to HDR environment map
+        ibl_intensity: Intensity of IBL lighting
+        shadow_technique: Shadow mode ("none", "hard", "pcf", "pcss", "vsm", "evsm")
+        shadow_map_res: Resolution of shadow maps
+        exposure: Exposure value
+        msaa: MSAA sample count (1, 4, 8)
+        normal_strength: Normal map strength
+        height_ao: Dict of height-based AO settings
+        sun_visibility: Dict of sun visibility settings
+        materials: Dict of material settings (snow, rock, wetness)
+        vector_overlay: Dict of vector overlay settings
+        tonemap: Dict of tonemapping settings
+        lens_effects: Dict of lens effects settings (vignette, distortion)
+        dof: Dict of Depth of Field settings
+        motion_blur: Dict of motion blur settings
+        volumetrics: Dict of volumetric lighting settings
+        denoise: Dict of denoise settings
+        sky: Dict of sky settings
+        debug_mode: Debug visualization mode
+    """
+    cmd: Dict[str, Any] = {"cmd": "set_terrain_pbr"}
+    if enabled is not None: cmd["enabled"] = enabled
+    if hdr_path is not None: cmd["hdr_path"] = hdr_path
+    if ibl_intensity is not None: cmd["ibl_intensity"] = ibl_intensity
+    if shadow_technique is not None: cmd["shadow_technique"] = shadow_technique
+    if shadow_map_res is not None: cmd["shadow_map_res"] = shadow_map_res
+    if exposure is not None: cmd["exposure"] = exposure
+    if msaa is not None: cmd["msaa"] = msaa
+    if normal_strength is not None: cmd["normal_strength"] = normal_strength
+    if height_ao is not None: cmd["height_ao"] = height_ao
+    if sun_visibility is not None: cmd["sun_visibility"] = sun_visibility
+    if materials is not None: cmd["materials"] = materials
+    if vector_overlay is not None: cmd["vector_overlay"] = vector_overlay
+    if tonemap is not None: cmd["tonemap"] = tonemap
+    if lens_effects is not None: cmd["lens_effects"] = lens_effects
+    if dof is not None: cmd["dof"] = dof
+    if motion_blur is not None: cmd["motion_blur"] = motion_blur
+    if volumetrics is not None: cmd["volumetrics"] = volumetrics
+    if denoise is not None: cmd["denoise"] = denoise
+    if sky is not None: cmd["sky"] = sky
+    if debug_mode is not None: cmd["debug_mode"] = debug_mode
+    
+    return send_ipc(sock, cmd)

@@ -786,3 +786,206 @@ def _evaluate_filter(expr: list, props: dict[str, Any]) -> bool:
 
     # Unknown operators pass through
     return True
+
+
+# === SPRITE ATLAS API ===
+
+@dataclass
+class SpriteEntry:
+    """A single sprite entry in an atlas."""
+    name: str
+    x: int
+    y: int
+    width: int
+    height: int
+    pixel_ratio: float = 1.0
+    sdf: bool = False
+
+
+@dataclass
+class SpriteAtlas:
+    """Sprite atlas for icons and patterns.
+    
+    Contains sprite metadata and image data for rendering icons
+    defined in Mapbox GL Style Spec.
+    """
+    entries: dict[str, SpriteEntry]
+    image_path: Optional[Path] = None
+    image_data: Optional[bytes] = None
+    width: int = 0
+    height: int = 0
+    
+    def get_sprite(self, name: str) -> Optional[SpriteEntry]:
+        """Get a sprite entry by name."""
+        return self.entries.get(name)
+    
+    def sprite_names(self) -> list[str]:
+        """Get list of all sprite names."""
+        return list(self.entries.keys())
+
+
+def load_sprite_atlas(
+    json_path: Path | str,
+    image_path: Optional[Path | str] = None,
+) -> SpriteAtlas:
+    """Load a sprite atlas from JSON and optional PNG.
+    
+    Args:
+        json_path: Path to sprite JSON metadata file.
+        image_path: Path to sprite PNG image (defaults to json_path with .png).
+        
+    Returns:
+        SpriteAtlas with entries loaded.
+        
+    Example:
+        >>> atlas = load_sprite_atlas("sprites@2x.json")
+        >>> icon = atlas.get_sprite("park")
+        >>> print(f"Park icon: {icon.width}x{icon.height}")
+    """
+    json_path = Path(json_path)
+    with open(json_path) as f:
+        data = json.load(f)
+    
+    entries = {}
+    for name, props in data.items():
+        entries[name] = SpriteEntry(
+            name=name,
+            x=props.get("x", 0),
+            y=props.get("y", 0),
+            width=props.get("width", 0),
+            height=props.get("height", 0),
+            pixel_ratio=props.get("pixelRatio", 1.0),
+            sdf=props.get("sdf", False),
+        )
+    
+    # Determine image path
+    if image_path is None:
+        image_path = json_path.with_suffix(".png")
+    else:
+        image_path = Path(image_path)
+    
+    # Read image data if exists
+    image_data = None
+    width = height = 0
+    if image_path.exists():
+        image_data = image_path.read_bytes()
+        # Try to get dimensions from PNG header
+        try:
+            # PNG header: 8 bytes magic, then IHDR chunk
+            if image_data[:8] == b'\x89PNG\r\n\x1a\n':
+                width = int.from_bytes(image_data[16:20], 'big')
+                height = int.from_bytes(image_data[20:24], 'big')
+        except Exception:
+            pass
+    
+    return SpriteAtlas(
+        entries=entries,
+        image_path=image_path if image_path.exists() else None,
+        image_data=image_data,
+        width=width,
+        height=height,
+    )
+
+
+# === GLYPH / FONT API ===
+
+@dataclass
+class GlyphRange:
+    """A range of glyphs from a font.
+    
+    Glyph ranges are typically 256 characters each (e.g., 0-255, 256-511).
+    """
+    start: int
+    end: int
+    font_stack: str
+    data: Optional[bytes] = None
+    
+    @property
+    def range_id(self) -> str:
+        """Get range identifier (e.g., '0-255')."""
+        return f"{self.start}-{self.end}"
+
+
+@dataclass
+class FontStack:
+    """Font stack for text rendering.
+    
+    A font stack is an ordered list of font names to try when rendering
+    text. The first available font is used.
+    """
+    fonts: list[str]
+    glyph_ranges: dict[str, GlyphRange] = field(default_factory=dict)
+    
+    @property
+    def name(self) -> str:
+        """Get font stack name (comma-joined font names)."""
+        return ",".join(self.fonts)
+    
+    def has_range(self, start: int, end: int) -> bool:
+        """Check if glyph range is loaded."""
+        return f"{start}-{end}" in self.glyph_ranges
+    
+    def add_range(self, glyph_range: GlyphRange) -> None:
+        """Add a glyph range to the font stack."""
+        self.glyph_ranges[glyph_range.range_id] = glyph_range
+
+
+def parse_glyph_url(
+    template: str,
+    font_stack: str,
+    range_start: int,
+    range_end: int,
+) -> str:
+    """Parse a glyph URL template.
+    
+    Args:
+        template: URL template with {fontstack} and {range} placeholders.
+        font_stack: Font stack name (comma-separated font names).
+        range_start: Start of glyph range.
+        range_end: End of glyph range.
+        
+    Returns:
+        Resolved URL string.
+        
+    Example:
+        >>> url = parse_glyph_url(
+        ...     "https://example.com/fonts/{fontstack}/{range}.pbf",
+        ...     "Open Sans Regular",
+        ...     0, 255
+        ... )
+        >>> print(url)
+        'https://example.com/fonts/Open%20Sans%20Regular/0-255.pbf'
+    """
+    import urllib.parse
+    encoded_stack = urllib.parse.quote(font_stack, safe="")
+    return (
+        template
+        .replace("{fontstack}", encoded_stack)
+        .replace("{range}", f"{range_start}-{range_end}")
+    )
+
+
+def get_required_glyph_ranges(text: str) -> list[tuple[int, int]]:
+    """Get glyph ranges needed to render text.
+    
+    Glyph ranges are 256 characters each.
+    
+    Args:
+        text: Text to analyze.
+        
+    Returns:
+        List of (start, end) tuples for required glyph ranges.
+        
+    Example:
+        >>> ranges = get_required_glyph_ranges("Hello")
+        >>> print(ranges)
+        [(0, 255)]
+    """
+    ranges = set()
+    for char in text:
+        code = ord(char)
+        start = (code // 256) * 256
+        end = start + 255
+        ranges.add((start, end))
+    return sorted(ranges)
+
