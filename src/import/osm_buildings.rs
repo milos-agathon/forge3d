@@ -1,12 +1,164 @@
 // src/import/osm_buildings.rs
-// Minimal OSM buildings ingest helper (Phase 5 F2): accepts a Python list of features
+// OSM buildings ingest helper with extended support for roof types, materials, and LOD.
+// Accepts a Python list of features or GeoJSON FeatureCollection.
 // Each feature: {"coords": np.ndarray (N,2) float32 in XY, "height": float}
 // Returns a merged MeshBuffers extruded with given or default height.
+//
+// P4.1: Added RoofType inference from OSM tags
+
+use std::collections::HashMap;
 
 #[cfg(feature = "extension-module")]
 use crate::geometry::{extrude_polygon_with_options, ExtrudeOptions, MeshBuffers};
-#[cfg(feature = "extension-module")]
 use serde_json::Value as JsonValue;
+
+// ============================================================================
+// P4.1: Roof Type Inference
+// ============================================================================
+
+/// Roof shape categories supported by the building pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RoofType {
+    /// Flat roof (default for most commercial/industrial buildings)
+    #[default]
+    Flat,
+    /// Gabled roof (pitched with two slopes meeting at a ridge)
+    Gabled,
+    /// Hipped roof (pitched with slopes on all sides)
+    Hipped,
+    /// Pyramidal roof (four triangular faces meeting at apex)
+    Pyramidal,
+    /// Dome roof (curved)
+    Dome,
+    /// Mansard roof (four-sided with double slope)
+    Mansard,
+    /// Shed/lean-to roof (single slope)
+    Shed,
+    /// Gambrel roof (barn-style with two slopes per side)
+    Gambrel,
+    /// Onion dome (bulbous, typical of Orthodox churches)
+    Onion,
+    /// Skillion roof (single slanting surface)
+    Skillion,
+}
+
+impl RoofType {
+    /// Parse from OSM roof:shape tag value
+    pub fn from_osm_tag(value: &str) -> Self {
+        match value.to_lowercase().trim() {
+            "flat" => RoofType::Flat,
+            "gabled" => RoofType::Gabled,
+            "hipped" => RoofType::Hipped,
+            "pyramidal" => RoofType::Pyramidal,
+            "dome" => RoofType::Dome,
+            "mansard" => RoofType::Mansard,
+            "shed" | "lean_to" | "lean-to" => RoofType::Shed,
+            "gambrel" => RoofType::Gambrel,
+            "onion" => RoofType::Onion,
+            "skillion" => RoofType::Skillion,
+            _ => RoofType::Flat,
+        }
+    }
+
+    /// Estimate roof height multiplier based on type (relative to base height)
+    pub fn height_multiplier(&self) -> f32 {
+        match self {
+            RoofType::Flat => 0.0,
+            RoofType::Gabled | RoofType::Shed | RoofType::Skillion => 0.25,
+            RoofType::Hipped => 0.2,
+            RoofType::Pyramidal => 0.4,
+            RoofType::Dome | RoofType::Onion => 0.35,
+            RoofType::Mansard => 0.3,
+            RoofType::Gambrel => 0.35,
+        }
+    }
+}
+
+/// Infer roof type from OSM tags.
+///
+/// Checks common OSM tags in priority order:
+/// 1. `building:roof:shape` (explicit roof shape)
+/// 2. `roof:shape` (alternative tag)
+/// 3. `building` type (heuristic inference)
+///
+/// # Example
+/// ```
+/// use forge3d::import::osm_buildings::{infer_roof_type, RoofType};
+/// use std::collections::HashMap;
+///
+/// let mut tags = HashMap::new();
+/// tags.insert("building:roof:shape".to_string(), "gabled".to_string());
+/// assert_eq!(infer_roof_type(&tags), RoofType::Gabled);
+/// ```
+pub fn infer_roof_type(tags: &HashMap<String, String>) -> RoofType {
+    // Priority 1: Explicit roof shape tags
+    if let Some(shape) = tags.get("building:roof:shape")
+        .or_else(|| tags.get("roof:shape"))
+        .or_else(|| tags.get("roof_shape"))
+    {
+        return RoofType::from_osm_tag(shape);
+    }
+
+    // Priority 2: Infer from building type
+    if let Some(building_type) = tags.get("building") {
+        return match building_type.to_lowercase().as_str() {
+            // Typically flat roofs
+            "industrial" | "warehouse" | "retail" | "commercial" | "office"
+            | "parking" | "garages" | "hangar" | "bunker" => RoofType::Flat,
+
+            // Typically gabled roofs
+            "house" | "detached" | "semidetached_house" | "terrace"
+            | "residential" | "bungalow" | "cabin" | "farm" | "barn" => RoofType::Gabled,
+
+            // Hipped roofs common
+            "apartments" | "dormitory" | "hotel" => RoofType::Hipped,
+
+            // Special building types
+            "church" | "cathedral" | "chapel" | "mosque" => {
+                // Check for onion dome (Orthodox churches)
+                if tags.get("religion").map(|r| r == "christian") == Some(true)
+                    && tags.get("denomination").map(|d| d.contains("orthodox")).unwrap_or(false)
+                {
+                    RoofType::Onion
+                } else {
+                    RoofType::Gabled
+                }
+            }
+
+            "temple" | "shrine" => RoofType::Hipped,
+            "greenhouse" | "shed" | "carport" => RoofType::Shed,
+
+            // Default to flat for unknown
+            _ => RoofType::Flat,
+        };
+    }
+
+    RoofType::Flat
+}
+
+/// Infer roof type from GeoJSON properties
+pub fn infer_roof_type_from_json(properties: Option<&JsonValue>) -> RoofType {
+    let props = match properties {
+        Some(JsonValue::Object(map)) => map,
+        _ => return RoofType::Flat,
+    };
+
+    // Build HashMap from JSON properties
+    let tags: HashMap<String, String> = props
+        .iter()
+        .filter_map(|(k, v)| {
+            let val = match v {
+                JsonValue::String(s) => s.clone(),
+                JsonValue::Number(n) => n.to_string(),
+                JsonValue::Bool(b) => b.to_string(),
+                _ => return None,
+            };
+            Some((k.clone(), val))
+        })
+        .collect();
+
+    infer_roof_type(&tags)
+}
 
 #[cfg(feature = "extension-module")]
 use numpy::{PyReadonlyArray2, PyUntypedArrayMethods};
@@ -185,4 +337,56 @@ pub fn import_osm_buildings_from_geojson_py(
 
     let merged = merge_meshes(&meshes);
     Python::with_gil(|py| crate::geometry::mesh_to_python(py, &merged))
+}
+
+/// P4.1: Python binding for roof type inference from GeoJSON properties
+#[cfg(feature = "extension-module")]
+#[pyfunction(signature = (properties_json))]
+pub fn infer_roof_type_py(properties_json: &str) -> PyResult<String> {
+    let props: JsonValue = serde_json::from_str(properties_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid JSON: {e}")))?;
+    let roof_type = infer_roof_type_from_json(Some(&props));
+    Ok(format!("{:?}", roof_type).to_lowercase())
+}
+
+// ============================================================================
+// Unit tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_roof_type_from_osm_tag() {
+        assert_eq!(RoofType::from_osm_tag("gabled"), RoofType::Gabled);
+        assert_eq!(RoofType::from_osm_tag("HIPPED"), RoofType::Hipped);
+        assert_eq!(RoofType::from_osm_tag("flat"), RoofType::Flat);
+        assert_eq!(RoofType::from_osm_tag("unknown"), RoofType::Flat);
+    }
+
+    #[test]
+    fn test_infer_roof_type_explicit() {
+        let mut tags = HashMap::new();
+        tags.insert("building:roof:shape".to_string(), "gabled".to_string());
+        assert_eq!(infer_roof_type(&tags), RoofType::Gabled);
+    }
+
+    #[test]
+    fn test_infer_roof_type_from_building_type() {
+        let mut tags = HashMap::new();
+        tags.insert("building".to_string(), "house".to_string());
+        assert_eq!(infer_roof_type(&tags), RoofType::Gabled);
+
+        tags.clear();
+        tags.insert("building".to_string(), "warehouse".to_string());
+        assert_eq!(infer_roof_type(&tags), RoofType::Flat);
+    }
+
+    #[test]
+    fn test_roof_height_multiplier() {
+        assert_eq!(RoofType::Flat.height_multiplier(), 0.0);
+        assert!(RoofType::Gabled.height_multiplier() > 0.0);
+        assert!(RoofType::Pyramidal.height_multiplier() > RoofType::Gabled.height_multiplier());
+    }
 }

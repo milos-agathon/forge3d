@@ -1094,6 +1094,7 @@ pub mod converters; // Geometry converters (e.g., MultipolygonZ -> OBJ)
 pub mod core;
 pub mod external_image;
 pub mod formats;
+pub mod geo; // P3-reproject: Geographic utilities (CRS reprojection)
 pub mod geometry;
 pub mod import; // Importers: OSM buildings, etc.
 pub mod io; // IO: OBJ/PLY/glTF readers/writers
@@ -1123,6 +1124,7 @@ pub mod tiles3d; // P5: 3D Tiles support (tileset.json, b3dm, pnts)
 pub mod pointcloud; // P5: Point Cloud support (COPC, EPT)
 pub mod bundle; // Scene bundle (.forge3d) for portable scene packages
 pub mod style; // Mapbox Style Spec import for vector/label styling
+pub mod export; // P5-export: Vector export (SVG/PDF) for print-grade overlays
 
 // Re-export commonly used types
 pub use core::cloud_shadows::{
@@ -4572,6 +4574,25 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         crate::import::osm_buildings::import_osm_buildings_from_geojson_py,
         m
     )?)?;
+    // P4.1: Roof type inference
+    m.add_function(wrap_pyfunction!(
+        crate::import::osm_buildings::infer_roof_type_py,
+        m
+    )?)?;
+    // P4.2: Building materials
+    m.add_function(wrap_pyfunction!(
+        crate::import::building_materials::material_from_tags_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::import::building_materials::material_from_name_py,
+        m
+    )?)?;
+    // P4.3: CityJSON parser
+    m.add_function(wrap_pyfunction!(
+        crate::import::cityjson::parse_cityjson_py,
+        m
+    )?)?;
 
     // GPU utilities (adapter enumeration and probe)
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
@@ -4715,6 +4736,10 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Feature C: Camera animation classes (Plan 1 MVP)
     m.add_class::<crate::animation::CameraAnimation>()?;
     m.add_class::<crate::animation::CameraState>()?;
+
+    // P3-reproject: CRS reprojection functions
+    m.add_function(wrap_pyfunction!(crate::geo::reproject::proj_available_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::geo::reproject::reproject_coords_py, m)?)?;
 
     Ok(())
 }

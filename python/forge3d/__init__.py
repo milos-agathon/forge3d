@@ -18,7 +18,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.11.0"
+__version__ = "1.12.1"
 version = __version__
 
 import numpy as np
@@ -253,6 +253,23 @@ from .scale_bar import ScaleBar, ScaleBarConfig
 from .north_arrow import NorthArrow, NorthArrowConfig
 
 # -----------------------------------------------------------------------------
+# P5-export: Vector Export (SVG/PDF)
+# -----------------------------------------------------------------------------
+from .export import (
+    VectorScene,
+    VectorStyle as ExportVectorStyle,
+    LabelStyle as ExportLabelStyle,
+    Polygon as ExportPolygon,
+    Polyline as ExportPolyline,
+    Label as ExportLabel,
+    Bounds as ExportBounds,
+    generate_svg,
+    export_svg,
+    export_pdf,
+    validate_svg,
+)
+
+# -----------------------------------------------------------------------------
 # Helpers (offscreen rendering, frame dumping)
 # -----------------------------------------------------------------------------
 from .helpers.offscreen import (
@@ -274,6 +291,33 @@ from .bundle import (
     CameraBookmark,
     TerrainMeta,
     BUNDLE_VERSION,
+)
+
+# -----------------------------------------------------------------------------
+# P3-reproject: CRS utilities
+# -----------------------------------------------------------------------------
+from .crs import (
+    proj_available,
+    transform_coords,
+    reproject_geom,
+    crs_to_epsg,
+    get_crs_from_rasterio,
+    get_crs_from_geopandas,
+)
+
+# -----------------------------------------------------------------------------
+# P4: 3D Buildings Pipeline
+# -----------------------------------------------------------------------------
+from .buildings import (
+    Building,
+    BuildingLayer,
+    BuildingMaterial,
+    add_buildings,
+    add_buildings_cityjson,
+    add_buildings_3dtiles,
+    infer_roof_type,
+    material_from_tags,
+    material_from_name,
 )
 
 # -----------------------------------------------------------------------------
@@ -395,4 +439,21 @@ __all__ = [
     "StyleLabelStyle",
     "PaintProps",
     "LayoutProps",
+    # P3-reproject: CRS utilities
+    "proj_available",
+    "transform_coords",
+    "reproject_geom",
+    "crs_to_epsg",
+    "get_crs_from_rasterio",
+    "get_crs_from_geopandas",
+    # P4: 3D Buildings Pipeline
+    "Building",
+    "BuildingLayer",
+    "BuildingMaterial",
+    "add_buildings",
+    "add_buildings_cityjson",
+    "add_buildings_3dtiles",
+    "infer_roof_type",
+    "material_from_tags",
+    "material_from_name",
 ]

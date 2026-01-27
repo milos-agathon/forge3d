@@ -510,9 +510,9 @@ pub fn drape_vertices(params: DrapeParams) {
     } = params;
 
     if heightmap.is_empty() || dims.0 == 0 || dims.1 == 0 {
-        // If no heightmap, just add offset to Y
+        // If no heightmap, just add offset to original Y
         for v in vertices.iter_mut() {
-            v.position[1] = height_offset;
+            v.position[1] += height_offset;
             v.normal = [0.0, 1.0, 0.0];
         }
         return;
@@ -533,8 +533,9 @@ pub fn drape_vertices(params: DrapeParams) {
         let h = sample_heightmap_bilinear(heightmap, dims, u, vv);
         let terrain_height = (h - height_min) * height_scale;
         
-        // Set vertex Y to terrain height + offset
-        v.position[1] = terrain_height + height_offset;
+        // Set vertex Y to terrain height + offset + original vertex height
+        // This preserves building extrusion heights when draping
+        v.position[1] = terrain_height + height_offset + v.position[1];
         
         // Compute normal from terrain gradient for proper lighting
         v.normal = compute_terrain_normal(heightmap, dims, u, vv, terrain_width);

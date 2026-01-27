@@ -6,6 +6,74 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.12.1] - Vector Export (SVG/PDF)
+
+### Added
+- **Priority 5 — Vector Export for Print-Grade Overlays**
+  - New `src/export` module with projection, SVG, and label text generation.
+  - `project_3d_to_2d()`: 3D to 2D projection with view-projection matrix.
+  - `project_2d_to_screen()`: 2D bounds to screen coordinate mapping.
+  - `Bounds2D`: Axis-aligned bounding box for coordinate mapping.
+  - `vectors_to_svg()`: Generate SVG from polygon and polyline definitions.
+  - `labels_to_svg_text()`: Generate SVG text elements with halo support.
+  - `SvgExportConfig`: Configuration for SVG export (precision, background, line styles).
+  - New `python/forge3d/export.py` module with pure-Python API.
+  - `VectorScene`: Container class for collecting polygons, polylines, and labels.
+  - `generate_svg()`: Generate SVG string from VectorScene.
+  - `export_svg()`: Export VectorScene to SVG file.
+  - `export_pdf()`: Export to PDF via optional cairosvg dependency.
+  - `validate_svg()`: XML structure validation for SVG output.
+  - Support for polygons with holes (evenodd fill-rule).
+  - Label halo rendering via stroke for better readability.
+  - New example: `examples/vector_export_demo.py` with 4 demo types (simple, contours, features, full).
+  - 47 new tests for SVG generation and coordinate projection.
+
+## [1.12.0] - 3D Buildings Pipeline
+
+### Added
+- **Priority 4 — 3D Buildings Pipeline**
+  - **Roof Type Inference (M4.1)**: `RoofType` enum with 10 roof shapes (flat, gabled, hipped, pyramidal, dome, mansard, shed, gambrel, onion, skillion).
+  - `infer_roof_type()` function to infer roof type from OSM tags (`building:roof:shape`, `roof:shape`, building type).
+  - Height multiplier per roof type for realistic building extrusion.
+  - **Material Presets (M4.2)**: `BuildingMaterial` struct with PBR properties (albedo, roughness, metallic, IOR, emissive).
+  - 18 material presets: brick, concrete, glass, steel, aluminum, wood, plaster, stone, sandstone, granite, marble, and roof materials.
+  - `material_from_tags()` to infer materials from OSM tags (`building:material`, `building:facade:material`).
+  - `material_from_name()` for preset lookup.
+  - CSS color parsing (`#RGB`, `#RRGGBB`, named colors) for building colors.
+  - **CityJSON Parser (M4.3)**: Full CityJSON 1.1 format parser (`parse_cityjson()`).
+  - Support for Building and BuildingPart city objects.
+  - LOD selection (prefers highest available LOD).
+  - Transform (scale/translate) application to vertices.
+  - CRS extraction from metadata.
+  - Automatic normal generation for parsed geometry.
+  - **Terrain Integration (M4.4)**: `BuildingRenderData` struct for GPU-ready building batches.
+  - `Tiles3dRenderer::prepare_buildings()` and `get_visible_buildings()` methods.
+  - Distance-based building culling.
+  - **Python API (M4.5)**: New `forge3d.buildings` module.
+  - `Building`, `BuildingLayer`, `BuildingMaterial` dataclasses.
+  - `add_buildings()` - Load buildings from GeoJSON with extrusion.
+  - `add_buildings_cityjson()` - Load buildings from CityJSON.
+  - `add_buildings_3dtiles()` - Load building metadata from 3D Tiles.
+  - Python bindings: `infer_roof_type_py()`, `material_from_tags_py()`, `material_from_name_py()`, `parse_cityjson_py()`.
+  - 44 new tests covering extrusion, materials, CityJSON parsing, and roof inference.
+
+## [1.11.1] - CRS Reprojection Support
+
+### Added
+- **Priority 3 — On-the-fly CRS Reprojection (PROJ)**
+  - Feature-gated PROJ library integration (`proj` Cargo feature).
+  - New `src/geo` module with `reproject_coords`, `reproject_point`, `validate_crs`, `crs_equal` functions.
+  - Python bindings: `proj_available()`, `reproject_coords()` exposed to Python.
+  - Python wrapper module `python/forge3d/crs.py` with pyproj fallback.
+  - `transform_coords()`: Transform coordinate arrays between CRS (e.g., WGS84 to UTM).
+  - `reproject_geom()`: Reproject Shapely geometries.
+  - `crs_to_epsg()`: Parse EPSG codes from CRS strings.
+  - `get_crs_from_rasterio()`, `get_crs_from_geopandas()`: Extract CRS from geospatial files.
+  - `render_polygons()` now accepts `target_crs` parameter for automatic reprojection.
+  - `TerrainRenderParams` now includes `terrain_crs` field for terrain coordinate system.
+  - Support for both modern pyproj (>= 2.0) and legacy pyproj APIs.
+  - Comprehensive test suite: `test_crs_reproject.py`, `test_crs_auto.py`.
+
 ## [1.11.0] - Scene Bundle & Style Spec
 
 ### Added

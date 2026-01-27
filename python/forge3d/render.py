@@ -1913,6 +1913,7 @@ def render_polygons(
     base_pick_id: int = 1,
     style: Optional[Any] = None,
     style_layer: Optional[str] = None,
+    target_crs: Optional[str] = None,
 ) -> Union[np.ndarray, tuple[np.ndarray, np.ndarray]]:
     """Render 2D polygons with GPU fill when available, falling back to stroke-only OIT.
 
@@ -1952,6 +1953,11 @@ def render_polygons(
         Optional Mapbox GL Style Spec object to apply styling.
     style_layer : str | None
         Source layer name to match against style rules. Required if style is provided.
+    target_crs : str | None
+        Target CRS for reprojection (e.g., "EPSG:4326", "EPSG:32654").
+        If provided and the source data has a different CRS, coordinates
+        will be automatically reprojected to match the target CRS.
+        Requires pyproj or native proj feature.
 
     Returns
     -------
@@ -2025,6 +2031,7 @@ def render_polygons(
                     stroke_rgba=vstyle.stroke_color,
                     stroke_width=vstyle.stroke_width,
                     transform=transform,
+                    target_crs=target_crs,
                 )
                 canvas = _alpha_over(canvas, img)
             finally:
@@ -2108,6 +2115,24 @@ def render_polygons(
                 return np.ascontiguousarray(a2[:, :2])  # drop Z if present
 
             gdf = gpd.read_file(str(src_path), layer=src_layer) if src_layer is not None else gpd.read_file(str(src_path))
+
+            # P3-reproject: Auto-reproject if target_crs is specified and differs from source
+            if target_crs is not None and gdf.crs is not None:
+                try:
+                    from .crs import crs_to_epsg
+                    src_epsg = crs_to_epsg(gdf.crs)
+                    tgt_epsg = crs_to_epsg(target_crs)
+                    if src_epsg is not None and tgt_epsg is not None and src_epsg != tgt_epsg:
+                        gdf = gdf.to_crs(target_crs)
+                    elif str(gdf.crs).upper() != target_crs.upper():
+                        # Fallback: attempt reprojection if EPSG codes couldn't be compared
+                        try:
+                            gdf = gdf.to_crs(target_crs)
+                        except Exception:
+                            pass  # Keep original CRS if reprojection fails
+                except ImportError:
+                    pass  # pyproj/native proj not available, skip reprojection
+
             polys: list[dict] = []
             lines: list[np.ndarray] = []
             pts: list[tuple[float, float]] = []

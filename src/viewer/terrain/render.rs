@@ -267,7 +267,15 @@ impl ViewerTerrainScene {
         }
 
         self.ensure_depth(width, height);
-        
+
+        // Initialize PBR pipeline if enabled but not yet created
+        // This ensures overlays work in interactive mode, not just snapshots
+        if self.pbr_config.enabled && self.pbr_pipeline.is_none() {
+            if let Err(e) = self.init_pbr_pipeline(self.surface_format) {
+                eprintln!("[render] Failed to initialize PBR pipeline: {}", e);
+            }
+        }
+
         // Pre-compute values needed for PBR bind group before borrowing terrain
         let use_pbr = self.pbr_config.enabled && self.pbr_pipeline.is_some();
         
@@ -1026,7 +1034,9 @@ impl ViewerTerrainScene {
         height: u32,
         selected_feature_id: u32,
     ) -> Option<wgpu::Texture> {
+        eprintln!("[DEBUG render_to_texture ENTRY] {}x{}", width, height);
         if self.terrain.is_none() {
+            eprintln!("[DEBUG render_to_texture] No terrain, returning None");
             return None;
         }
         
@@ -1244,6 +1254,12 @@ impl ViewerTerrainScene {
                     if self.pbr_config.overlay.solid { 1.0 } else { 0.0 },
                 ],
             };
+            // DEBUG: Print overlay_params values
+            eprintln!("[DEBUG render_to_texture] overlay_params: enabled={}, opacity={}, blend={}, solid={}",
+                pbr_uniforms.overlay_params[0],
+                pbr_uniforms.overlay_params[1],
+                pbr_uniforms.overlay_params[2],
+                pbr_uniforms.overlay_params[3]);
             self.prepare_pbr_bind_group_internal(&pbr_uniforms);
         }
 

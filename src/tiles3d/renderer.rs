@@ -1,4 +1,5 @@
 //! 3D Tiles renderer with caching
+//! Extended with P4: 3D Buildings Pipeline support
 
 use glam::{Mat4, Vec3};
 use std::collections::HashMap;
@@ -10,6 +11,8 @@ use super::pnts::decode_pnts;
 use super::sse::SseParams;
 use super::tileset::Tileset;
 use super::traversal::{TilesetTraverser, VisibleTile};
+use crate::import::building_materials::BuildingMaterial;
+use crate::import::cityjson::BuildingGeom;
 
 /// Cached tile content
 #[derive(Debug)]
@@ -213,5 +216,187 @@ impl CacheStats {
     pub fn hit_rate(&self) -> f32 {
         let total = self.hits + self.misses;
         if total == 0 { 0.0 } else { self.hits as f32 / total as f32 }
+    }
+}
+
+// ============================================================================
+// P4: 3D Buildings Pipeline - Building Render Data
+// ============================================================================
+
+/// Prepared building data for GPU rendering
+#[derive(Debug, Clone)]
+pub struct BuildingRenderData {
+    /// Flat position array [x, y, z, x, y, z, ...]
+    pub positions: Vec<f32>,
+    /// Flat normal array
+    pub normals: Vec<f32>,
+    /// Triangle indices
+    pub indices: Vec<u32>,
+    /// Per-building instance data (for instanced rendering)
+    pub instances: Vec<BuildingInstance>,
+    /// Total vertex count
+    pub vertex_count: usize,
+    /// Total triangle count
+    pub triangle_count: usize,
+}
+
+/// Per-building instance data
+#[derive(Debug, Clone, Copy)]
+pub struct BuildingInstance {
+    /// Index into positions/normals buffer
+    pub vertex_offset: u32,
+    /// Index into indices buffer
+    pub index_offset: u32,
+    /// Number of indices for this building
+    pub index_count: u32,
+    /// Building material properties
+    pub material: BuildingMaterial,
+}
+
+impl Default for BuildingRenderData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BuildingRenderData {
+    pub fn new() -> Self {
+        Self {
+            positions: Vec::new(),
+            normals: Vec::new(),
+            indices: Vec::new(),
+            instances: Vec::new(),
+            vertex_count: 0,
+            triangle_count: 0,
+        }
+    }
+
+    /// Create from a slice of BuildingGeom
+    pub fn from_buildings(buildings: &[BuildingGeom]) -> Self {
+        let mut data = Self::new();
+        data.add_buildings(buildings);
+        data
+    }
+
+    /// Add buildings to the render data
+    pub fn add_buildings(&mut self, buildings: &[BuildingGeom]) {
+        for building in buildings {
+            if building.is_empty() {
+                continue;
+            }
+
+            let vertex_offset = self.positions.len() as u32 / 3;
+            let index_offset = self.indices.len() as u32;
+
+            // Add positions
+            self.positions.extend_from_slice(&building.positions);
+
+            // Add normals (generate if missing)
+            if let Some(ref normals) = building.normals {
+                self.normals.extend_from_slice(normals);
+            } else {
+                // Pad with up-facing normals
+                let n_verts = building.vertex_count();
+                for _ in 0..n_verts {
+                    self.normals.extend_from_slice(&[0.0, 0.0, 1.0]);
+                }
+            }
+
+            // Add indices (offset by vertex base)
+            for &idx in &building.indices {
+                self.indices.push(idx + vertex_offset);
+            }
+
+            // Add instance
+            self.instances.push(BuildingInstance {
+                vertex_offset,
+                index_offset,
+                index_count: building.indices.len() as u32,
+                material: building.material,
+            });
+        }
+
+        self.vertex_count = self.positions.len() / 3;
+        self.triangle_count = self.indices.len() / 3;
+    }
+
+    /// Check if empty
+    pub fn is_empty(&self) -> bool {
+        self.positions.is_empty()
+    }
+
+    /// Get building count
+    pub fn building_count(&self) -> usize {
+        self.instances.len()
+    }
+
+    /// Get bounding box [min_x, min_y, min_z, max_x, max_y, max_z]
+    pub fn bounds(&self) -> Option<[f32; 6]> {
+        if self.positions.is_empty() {
+            return None;
+        }
+
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut min_z = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+        let mut max_z = f32::MIN;
+
+        for chunk in self.positions.chunks(3) {
+            if chunk.len() < 3 {
+                continue;
+            }
+            min_x = min_x.min(chunk[0]);
+            min_y = min_y.min(chunk[1]);
+            min_z = min_z.min(chunk[2]);
+            max_x = max_x.max(chunk[0]);
+            max_y = max_y.max(chunk[1]);
+            max_z = max_z.max(chunk[2]);
+        }
+
+        Some([min_x, min_y, min_z, max_x, max_y, max_z])
+    }
+}
+
+impl Tiles3dRenderer {
+    /// P4.4: Prepare building render data from BuildingGeom slice
+    ///
+    /// This batches multiple buildings into a single draw call-ready format.
+    /// Use with `get_building_render_data` to access the prepared data.
+    pub fn prepare_buildings(&self, buildings: &[BuildingGeom]) -> BuildingRenderData {
+        BuildingRenderData::from_buildings(buildings)
+    }
+
+    /// P4.4: Get render data for buildings visible from camera position
+    ///
+    /// Applies simple distance-based culling to filter buildings.
+    pub fn get_visible_buildings(
+        &self,
+        buildings: &[BuildingGeom],
+        camera_pos: Vec3,
+        max_distance: f32,
+    ) -> BuildingRenderData {
+        let max_dist_sq = max_distance * max_distance;
+
+        let visible: Vec<&BuildingGeom> = buildings
+            .iter()
+            .filter(|b| {
+                if b.positions.len() < 3 {
+                    return false;
+                }
+                // Use first vertex as building position
+                let bx = b.positions[0];
+                let by = b.positions[1];
+                let bz = b.positions[2];
+                let dist_sq = (bx - camera_pos.x).powi(2)
+                    + (by - camera_pos.y).powi(2)
+                    + (bz - camera_pos.z).powi(2);
+                dist_sq <= max_dist_sq
+            })
+            .collect();
+
+        let owned: Vec<BuildingGeom> = visible.into_iter().cloned().collect();
+        BuildingRenderData::from_buildings(&owned)
     }
 }

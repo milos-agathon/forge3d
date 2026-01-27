@@ -57,6 +57,20 @@ Interactive Commands:
     snapshot output.png                  Take screenshot
     quit                                 Exit viewer
 
+CRS Reprojection (P3):
+    # View CRS info for terrain and vectors
+    python examples/terrain_viewer_interactive.py --dem assets/dem.tif --show-crs-info
+
+    # Reproject DEM to a different CRS before loading (requires rasterio)
+    python examples/terrain_viewer_interactive.py --dem assets/dem_wgs84.tif --target-crs EPSG:32654
+
+    # Reproject Swiss DEM (LV95) to ETRS89-extended / LAEA Europe
+    python examples/terrain_viewer_interactive.py --dem assets/switzerland_dem.tif --target-crs EPSG:3035
+
+    # Reproject WGS84 vector overlay onto UTM terrain
+    python examples/terrain_viewer_interactive.py --dem assets/dem_utm.tif \\
+        --vector-overlay roads.geojson --vector-crs EPSG:4326 --terrain-crs EPSG:32654
+
 See docs/pbm_pom_viewer.md for full documentation.
 """
 
@@ -79,6 +93,9 @@ from forge3d.interactive import run_interactive_loop
 
 # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
 from forge3d import sun_position, sun_position_utc, SunPosition
+
+# P3: CRS reprojection utilities
+from forge3d.crs import proj_available, transform_coords, crs_to_epsg
 
 
 def main() -> int:
@@ -306,7 +323,18 @@ def main() -> int:
                           help="Enable vector overlay rendering (default: on)")
     vo_group.add_argument("--no-vo-enabled", action="store_false", dest="vo_enabled",
                           help="Disable vector overlay rendering")
-    
+
+    # P3: CRS Reprojection options
+    crs_group = parser.add_argument_group("CRS Reprojection (P3)", "On-the-fly coordinate system transformation")
+    crs_group.add_argument("--terrain-crs", type=str, default=None, metavar="CRS",
+                           help="Terrain CRS (e.g., 'EPSG:32654' for UTM zone 54N). Auto-detected from DEM if not specified.")
+    crs_group.add_argument("--vector-crs", type=str, default=None, metavar="CRS",
+                           help="Vector overlay source CRS. If different from terrain CRS, coordinates are reprojected.")
+    crs_group.add_argument("--target-crs", type=str, default=None, metavar="CRS",
+                           help="Target CRS for all data. Alias for --terrain-crs.")
+    crs_group.add_argument("--show-crs-info", action="store_true",
+                           help="Print CRS information for terrain and vector data")
+
     # M6: Volumetrics options
     vol_group = parser.add_argument_group("Volumetrics (M6)", "Volumetric fog and light shafts")
     vol_group.add_argument("--volumetrics", action="store_true",
@@ -409,11 +437,97 @@ def main() -> int:
     
     binary = find_viewer_binary()
     dem_path = args.dem.resolve()
-    
+
     if not dem_path.exists():
         print(f"Error: DEM file not found: {dem_path}")
         return 1
-    
+
+    # P3: Reproject DEM if --target-crs is specified and differs from source CRS
+    reprojected_dem_path = None
+    target_crs_arg = args.target_crs or args.terrain_crs
+    if target_crs_arg:
+        try:
+            import rasterio
+            from rasterio.warp import calculate_default_transform, reproject, Resampling
+            import tempfile
+
+            with rasterio.open(dem_path) as src:
+                src_crs = src.crs
+                src_epsg = src_crs.to_epsg() if src_crs else None
+
+                # Parse target EPSG
+                tgt_epsg = None
+                if target_crs_arg.upper().startswith("EPSG:"):
+                    try:
+                        tgt_epsg = int(target_crs_arg.split(":")[1])
+                    except (ValueError, IndexError):
+                        pass
+
+                # Check if reprojection is needed
+                if src_epsg and tgt_epsg and src_epsg != tgt_epsg:
+                    print(f"Reprojecting DEM from EPSG:{src_epsg} to EPSG:{tgt_epsg}...")
+
+                    # Calculate transform for target CRS
+                    dst_crs = f"EPSG:{tgt_epsg}"
+                    transform, width, height = calculate_default_transform(
+                        src.crs, dst_crs, src.width, src.height, *src.bounds
+                    )
+
+                    # Use a sensible nodata value for output (-9999 is standard for DEMs)
+                    src_nodata = src.nodata
+                    dst_nodata = -9999.0 if src_nodata is None or abs(src_nodata) > 1e30 else src_nodata
+
+                    # Update metadata for destination
+                    kwargs = src.meta.copy()
+                    kwargs.update({
+                        'crs': dst_crs,
+                        'transform': transform,
+                        'width': width,
+                        'height': height,
+                        'nodata': dst_nodata,
+                    })
+
+                    # Create temporary file for reprojected DEM
+                    tmp_file = tempfile.NamedTemporaryFile(suffix='.tif', delete=False)
+                    reprojected_dem_path = Path(tmp_file.name)
+                    tmp_file.close()
+
+                    with rasterio.open(reprojected_dem_path, 'w', **kwargs) as dst:
+                        for i in range(1, src.count + 1):
+                            reproject(
+                                source=rasterio.band(src, i),
+                                destination=rasterio.band(dst, i),
+                                src_transform=src.transform,
+                                src_crs=src.crs,
+                                dst_transform=transform,
+                                dst_crs=dst_crs,
+                                src_nodata=src_nodata,
+                                dst_nodata=dst_nodata,
+                                resampling=Resampling.bilinear
+                            )
+
+                    # Verify the output
+                    with rasterio.open(reprojected_dem_path) as check:
+                        data = check.read(1)
+                        valid = data[data != dst_nodata]
+                        if len(valid) > 0:
+                            print(f"  Reprojected: {src.width}x{src.height} -> {width}x{height}")
+                            print(f"  Elevation range: {valid.min():.1f} to {valid.max():.1f}m")
+                        else:
+                            print(f"  Warning: Reprojected DEM has no valid data!")
+
+                    dem_path = reprojected_dem_path
+                elif src_epsg == tgt_epsg:
+                    print(f"DEM already in target CRS (EPSG:{src_epsg}), no reprojection needed")
+                else:
+                    print(f"Warning: Could not determine CRS for reprojection (src={src_crs}, target={target_crs_arg})")
+        except ImportError:
+            print("Warning: rasterio not available, skipping DEM reprojection")
+        except Exception as e:
+            import traceback
+            print(f"Warning: DEM reprojection failed: {e}")
+            traceback.print_exc()
+
     # Start viewer with IPC
     cmd = [binary, "--ipc-port", "0", "--size", f"{args.width}x{args.height}"]
     process = subprocess.Popen(
@@ -686,14 +800,22 @@ def main() -> int:
         send_ipc(sock, {"cmd": "close"})
         sock.close()
         process.wait()
-        
+
+        # P3: Clean up temporary reprojected DEM file
+        if reprojected_dem_path and reprojected_dem_path.exists():
+            try:
+                reprojected_dem_path.unlink()
+            except Exception:
+                pass
+
         if args.snapshot.exists():
             print(f"Saved: {args.snapshot}")
             return 0
         return 1
     
-    # Extract DEM info for map plate composition
+    # Extract DEM info for map plate composition and CRS handling
     dem_info = None
+    terrain_crs = args.terrain_crs or args.target_crs  # --target-crs is alias for --terrain-crs
     try:
         import rasterio
         with rasterio.open(dem_path) as src:
@@ -702,7 +824,12 @@ def main() -> int:
             crs = src.crs
             transform = src.transform
             nodata = src.nodata
-            
+
+            # P3: Auto-detect terrain CRS from DEM if not specified
+            if terrain_crs is None and crs is not None:
+                epsg = crs.to_epsg()
+                terrain_crs = f"EPSG:{epsg}" if epsg else str(crs)
+
             # Calculate elevation domain
             valid_mask = dem_data != nodata if nodata is not None else ~np.isnan(dem_data)
             if valid_mask.any():
@@ -710,14 +837,14 @@ def main() -> int:
                 vmax = float(np.nanmax(dem_data[valid_mask]))
             else:
                 vmin, vmax = 0.0, 1000.0
-            
+
             # Calculate meters per pixel
             is_projected = crs and crs.is_projected
             if is_projected:
                 mpp = abs(transform.a)
             else:
                 mpp = None
-            
+
             from forge3d.map_plate import BBox
             dem_info = {
                 "bbox": BBox(
@@ -727,10 +854,34 @@ def main() -> int:
                 ),
                 "domain": (vmin, vmax),
                 "meters_per_pixel": mpp,
+                "terrain_crs": terrain_crs,
             }
             print(f"DEM info: elevation {vmin:.0f}-{vmax:.0f}m")
+
+            # P3: Print CRS info if requested
+            if args.show_crs_info:
+                print(f"\n=== CRS Information ===")
+                print(f"  Terrain CRS: {terrain_crs or 'Unknown'}")
+                if crs:
+                    print(f"  DEM native CRS: {crs}")
+                    if crs.is_projected:
+                        print(f"  CRS type: Projected (meters)")
+                    else:
+                        print(f"  CRS type: Geographic (degrees)")
+                if args.vector_crs:
+                    print(f"  Vector CRS: {args.vector_crs}")
+                    if terrain_crs and args.vector_crs != terrain_crs:
+                        print(f"  -> Will reproject vectors from {args.vector_crs} to {terrain_crs}")
+                print()
+
     except Exception as e:
         print(f"Note: Could not extract DEM metadata ({e})")
+        if args.show_crs_info:
+            print(f"\n=== CRS Information ===")
+            print(f"  Terrain CRS: {terrain_crs or 'Not specified'}")
+            if args.vector_crs:
+                print(f"  Vector CRS: {args.vector_crs}")
+            print()
     
     # Interactive mode - use shared interactive loop
     print("\nWindow controls:")
@@ -741,10 +892,18 @@ def main() -> int:
     print("  Q/E            - Zoom out/in")
     
     run_interactive_loop(sock, process, title="INTERACTIVE TERRAIN VIEWER", dem_info=dem_info)
-    
+
     sock.close()
     process.terminate()
     process.wait()
+
+    # P3: Clean up temporary reprojected DEM file
+    if reprojected_dem_path and reprojected_dem_path.exists():
+        try:
+            reprojected_dem_path.unlink()
+        except Exception:
+            pass
+
     return 0
 
 

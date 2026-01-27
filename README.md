@@ -16,9 +16,53 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.11.0 — Scene Bundle (.forge3d) support for reproducible scene sharing, plus 3D Geospatial Platform (3D Tiles/COPC).
+Current release: 1.12.1 — Vector Export (SVG/PDF) for print-grade terrain overlays with polygon, polyline, and label support.
 
-## Latest Feature: Scene Bundle (1.11.0)
+## Latest Feature: Vector Export (1.12.1)
+
+**forge3d** now includes **Vector Export** functionality for generating print-grade SVG and PDF maps from terrain overlays. Export polygons, polylines, and text labels with full styling control.
+
+```python
+from forge3d.export import VectorScene, export_svg, export_pdf
+
+# Create a scene with vector data
+scene = VectorScene()
+scene.add_polygon(
+    exterior=[(0, 0), (100, 0), (50, 100)],
+    fill_color=(0.8, 0.2, 0.2, 0.6),
+    stroke_width=2.0,
+)
+scene.add_polyline(path=[(0, 50), (100, 50)], stroke_color=(0, 0, 1, 1))
+scene.add_label("Peak", position=(50, 80), font_size=14, halo_width=2.0)
+
+# Export to SVG (vector format for print)
+export_svg(scene, "terrain_map.svg", width=800, height=600)
+
+# Export to PDF (requires cairosvg)
+export_pdf(scene, "terrain_map.pdf", dpi=300)
+```
+
+## Previous Feature: 3D Buildings Pipeline (1.12.0)
+
+**forge3d** now includes a comprehensive **3D Buildings Pipeline** for urban visualization. Load building footprints from GeoJSON, CityJSON, or 3D Tiles and render them with automatic roof type inference and PBR material assignment.
+
+*   **Roof Types**: Automatic inference of 10 roof shapes (flat, gabled, hipped, pyramidal, dome, etc.) from OSM tags.
+*   **Materials**: 18 PBR material presets (brick, glass, concrete, steel) with automatic inference from building attributes.
+*   **CityJSON**: Full CityJSON 1.1 parser with LOD selection and coordinate transforms.
+
+```python
+from forge3d.buildings import add_buildings, add_buildings_cityjson
+
+# Load from GeoJSON with automatic extrusion
+layer = add_buildings("buildings.geojson", default_height=12.0)
+print(f"Loaded {layer.building_count} buildings")
+
+# Load from CityJSON with LOD support
+layer = add_buildings_cityjson("3dbag_tile.json")
+print(f"Max LOD: {layer.max_lod}")
+```
+
+## Previous Feature: Scene Bundle (1.11.0)
 
 **forge3d** now supports a native **Scene Bundle** format (`.forge3d`) for reproducible research and artifact sharing. A bundle encapsulates the entire scene state—terrain data, overlays, camera bookmarks, and render settings—into a single directory or archive with a validated manifest.
 

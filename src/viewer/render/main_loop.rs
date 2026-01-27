@@ -1397,6 +1397,8 @@ impl Viewer {
 
     if let Some(ref mut tv) = self.terrain_viewer {
         if tv.has_terrain() {
+            eprintln!("[DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request={:?}, terrain_snap_size={:?}",
+                self.snapshot_request.is_some(), terrain_snap_size);
             // Render to screen at window resolution
             // Note: Motion blur is too expensive for real-time rendering (N full renders per frame),
             // so we only apply it for snapshots. The interactive viewer shows a regular render.

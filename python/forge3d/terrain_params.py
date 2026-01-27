@@ -1352,6 +1352,8 @@ class TerrainRenderParams:
     sky: Optional[SkySettings] = None
     # Overlay system settings (lit texture overlays draped on terrain)
     overlay: Optional[OverlaySettings] = None
+    # P3-reproject: Terrain CRS for auto-reprojection of vector overlays
+    terrain_crs: Optional[str] = None  # e.g., "EPSG:4326", "EPSG:32654"
 
     def __post_init__(self) -> None:
         # Default fog to disabled if not provided
@@ -1561,6 +1563,7 @@ def make_terrain_params_config(
     volumetrics: Optional[VolumetricsSettings] = None,  # M6: Volumetrics settings
     sky: Optional[SkySettings] = None,  # M6: Sky settings
     overlay: Optional[OverlaySettings] = None,  # Overlay settings (lit texture overlays)
+    terrain_crs: Optional[str] = None,  # P3-reproject: Terrain CRS for auto-reprojection
 ) -> TerrainRenderParams:
     light_color = [1.0, 1.0, 1.0]
     if sun_color is not None:
@@ -1706,6 +1709,7 @@ def make_terrain_params_config(
         volumetrics=volumetrics,
         sky=sky,
         overlay=overlay,
+        terrain_crs=terrain_crs,
     )
 
 

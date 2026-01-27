@@ -934,22 +934,32 @@ impl Viewer {
                 update_ipc_transform_stats(self.transform_version, is_identity);
             }
             ViewerCmd::LoadTerrain(path) => {
+                println!("[XYZZY_TERRAIN] LoadTerrain handler entry, path={}", path);
                 if self.terrain_viewer.is_none() {
+                    eprintln!("[DEBUG LoadTerrain] Creating new terrain_viewer");
                     match terrain::ViewerTerrainScene::new(
                         std::sync::Arc::clone(&self.device),
                         std::sync::Arc::clone(&self.queue),
                         self.config.format,
                     ) {
-                        Ok(scene) => self.terrain_viewer = Some(scene),
+                        Ok(scene) => {
+                            self.terrain_viewer = Some(scene);
+                            eprintln!("[DEBUG LoadTerrain] terrain_viewer created successfully");
+                        },
                         Err(e) => {
                             eprintln!("[terrain] Failed to create viewer: {}", e);
                             return;
                         }
                     }
+                } else {
+                    eprintln!("[DEBUG LoadTerrain] terrain_viewer already exists");
                 }
                 if let Some(ref mut tv) = self.terrain_viewer {
                     match tv.load_terrain(&path) {
-                        Ok(()) => println!("[terrain] Loaded: {}", path),
+                        Ok(()) => {
+                            println!("[terrain] Loaded: {}", path);
+                            eprintln!("[DEBUG LoadTerrain] terrain_viewer has_terrain={}", tv.has_terrain());
+                        },
                         Err(e) => eprintln!("[terrain] Failed to load {}: {}", path, e),
                     }
                 }

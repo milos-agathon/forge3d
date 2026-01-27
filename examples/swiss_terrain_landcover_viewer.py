@@ -79,6 +79,34 @@ try:
 except ImportError:
     HAS_PIL = False
 
+# Optional: matplotlib for interactive legend window
+HAS_MATPLOTLIB = False
+try:
+    import matplotlib
+    # Try different backends in order of preference
+    for backend in ['TkAgg', 'Qt5Agg', 'WXAgg', 'GTK3Agg']:
+        try:
+            matplotlib.use(backend)
+            import matplotlib.pyplot as plt
+            import matplotlib.patches as mpatches
+            HAS_MATPLOTLIB = True
+            break
+        except Exception:
+            continue
+    if not HAS_MATPLOTLIB:
+        # Fallback: try without specifying backend
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+        HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+except Exception as e:
+    print(f"Warning: matplotlib available but failed to initialize: {e}")
+    HAS_MATPLOTLIB = False
+
+# Global reference to legend figure (to prevent garbage collection)
+_legend_fig = None
+
 
 # Land cover legend configuration (matching R script colors)
 LANDCOVER_LEGEND = [
@@ -267,6 +295,62 @@ def add_legend_to_image(image_path: Path, output_path: Path = None,
 
 
 # find_viewer_binary and send_ipc imported from forge3d.viewer_ipc
+
+
+def show_legend_window() -> bool:
+    """Show the land cover legend in a separate matplotlib window.
+
+    Returns True if the window was shown, False if matplotlib is unavailable.
+    """
+    global _legend_fig
+
+    if not HAS_MATPLOTLIB:
+        print("  Legend window requires matplotlib: pip install matplotlib")
+        return False
+
+    # Close existing legend window if any
+    if _legend_fig is not None:
+        try:
+            plt.close(_legend_fig)
+        except Exception:
+            pass
+        _legend_fig = None
+
+    # Create legend figure
+    fig, ax = plt.subplots(figsize=(3, 4))
+    fig.canvas.manager.set_window_title("Land Cover Legend")
+
+    # Create legend patches
+    patches = []
+    for color, label in LANDCOVER_LEGEND:
+        patches.append(mpatches.Patch(color=color, label=label))
+
+    # Add legend to axes
+    ax.legend(handles=patches, loc='center', frameon=False, fontsize=10)
+    ax.axis('off')
+    ax.set_title("Land Cover", fontsize=12, fontweight='bold')
+
+    fig.tight_layout()
+
+    # Show non-blocking
+    plt.ion()
+    plt.show(block=False)
+    plt.pause(0.1)  # Allow window to render
+
+    _legend_fig = fig
+    return True
+
+
+def hide_legend_window() -> None:
+    """Hide/close the legend window."""
+    global _legend_fig
+
+    if _legend_fig is not None:
+        try:
+            plt.close(_legend_fig)
+        except Exception:
+            pass
+        _legend_fig = None
 
 
 def get_default_paths() -> tuple[Path, Path]:
@@ -961,6 +1045,25 @@ def main() -> int:
         else:
             print("Usage: overlay on|off|opacity=0.5")
         return True
+
+    # Legend window command handler
+    def handle_legend(s: socket.socket, cmd_args: str) -> bool:
+        if cmd_args.lower() in ("on", "show", "true", "1", ""):
+            if show_legend_window():
+                print("Legend window shown")
+            else:
+                print("Legend window unavailable (requires matplotlib)")
+        elif cmd_args.lower() in ("off", "hide", "false", "0"):
+            hide_legend_window()
+            print("Legend window hidden")
+        else:
+            print("Usage: legend [show|hide]")
+        return True
+
+    # Show legend window automatically if legend is enabled and matplotlib available
+    if args.legend and not args.no_overlay and HAS_MATPLOTLIB:
+        show_legend_window()
+        print("Legend window opened (use 'legend hide' to close)")
     
     # Snapshot callback to add legend
     def add_legend_callback(snap_path: Path) -> None:
@@ -1019,13 +1122,17 @@ def main() -> int:
     print("\nExtra commands:")
     print("  overlay on/off           - Toggle land cover overlay")
     print("  overlay opacity=0.5      - Set overlay opacity")
-    
+    print("  legend [show|hide]       - Show/hide legend window")
+
     run_interactive_loop(
         sock, process,
         title="SWISS TERRAIN VIEWER WITH LAND COVER OVERLAY",
-        extra_commands={"overlay": handle_overlay},
+        extra_commands={"overlay": handle_overlay, "legend": handle_legend},
         post_snapshot_callback=add_legend_callback,
     )
+
+    # Clean up legend window on exit
+    hide_legend_window()
     
     sock.close()
     process.terminate()

@@ -516,11 +516,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Sample overlay texture for solid check and blending
     let overlay = textureSample(overlay_tex, overlay_sampler, in.uv);
     
-    // When solid=false and overlay is enabled, discard fragments where overlay alpha is near 0
+    // When solid=false and overlay is enabled, discard fragments where overlay alpha is low
     // This hides the base surface outside the region of interest (like rayshader solid=FALSE)
-    // Use low threshold (0.01) - the overlay image should have alpha=1.0 for valid areas
-    // and alpha=0.0 for areas to hide. Only truly transparent pixels should be discarded.
-    if overlay_enabled && !solid_surface && overlay.a < 0.01 {
+    // Use threshold of 0.5 to account for bilinear filtering edge bleed - edge pixels between
+    // alpha=1.0 and alpha=0.0 can have intermediate values due to texture filtering
+    if overlay_enabled && !solid_surface && overlay.a < 0.5 {
         discard;
     }
     

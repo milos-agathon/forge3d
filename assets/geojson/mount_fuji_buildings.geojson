@@ -1,0 +1,562 @@
+{
+  "type": "FeatureCollection",
+  "name": "Mount Fuji Buildings",
+  "crs": {
+    "type": "name",
+    "properties": { "name": "urn:ogc:def:crs:EPSG::4326" }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1,
+        "name": "5th Station Visitor Center",
+        "building": "public",
+        "height": 8,
+        "building:levels": 2,
+        "roof:shape": "gabled",
+        "building:material": "wood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7326, 35.3545],
+          [138.7338, 35.3545],
+          [138.7338, 35.3555],
+          [138.7326, 35.3555],
+          [138.7326, 35.3545]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 2,
+        "name": "Mountain Lodge A",
+        "building": "hotel",
+        "height": 6,
+        "building:levels": 2,
+        "roof:shape": "gabled",
+        "building:material": "wood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7342, 35.3548],
+          [138.7352, 35.3548],
+          [138.7352, 35.3556],
+          [138.7342, 35.3556],
+          [138.7342, 35.3548]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 3,
+        "name": "Souvenir Shop 1",
+        "building": "retail",
+        "height": 4,
+        "building:levels": 1,
+        "roof:shape": "flat",
+        "building:material": "wood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7355, 35.3550],
+          [138.7362, 35.3550],
+          [138.7362, 35.3556],
+          [138.7355, 35.3556],
+          [138.7355, 35.3550]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 4,
+        "name": "Souvenir Shop 2",
+        "building": "retail",
+        "height": 4,
+        "building:levels": 1,
+        "roof:shape": "shed",
+        "building:material": "wood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7365, 35.3550],
+          [138.7372, 35.3550],
+          [138.7372, 35.3556],
+          [138.7365, 35.3556],
+          [138.7365, 35.3550]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 5,
+        "name": "Restaurant",
+        "building": "restaurant",
+        "height": 5,
+        "building:levels": 1,
+        "roof:shape": "hipped",
+        "building:material": "wood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7328, 35.3530],
+          [138.7340, 35.3530],
+          [138.7340, 35.3540],
+          [138.7328, 35.3540],
+          [138.7328, 35.3530]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 6,
+        "name": "Mountain Hut 6th Station",
+        "building": "hut",
+        "height": 3.5,
+        "building:levels": 1,
+        "roof:shape": "shed",
+        "building:material": "wood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7380, 35.3620],
+          [138.7388, 35.3620],
+          [138.7388, 35.3626],
+          [138.7380, 35.3626],
+          [138.7380, 35.3620]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 7,
+        "name": "Mountain Hut 7th Station",
+        "building": "hut",
+        "height": 3,
+        "building:levels": 1,
+        "roof:shape": "gabled",
+        "building:material": "wood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7420, 35.3680],
+          [138.7426, 35.3680],
+          [138.7426, 35.3685],
+          [138.7420, 35.3685],
+          [138.7420, 35.3680]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 8,
+        "name": "Emergency Shelter A",
+        "building": "shelter",
+        "height": 2.5,
+        "building:levels": 1,
+        "roof:shape": "dome",
+        "building:material": "steel"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7450, 35.3720],
+          [138.7455, 35.3720],
+          [138.7455, 35.3725],
+          [138.7450, 35.3725],
+          [138.7450, 35.3720]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 9,
+        "name": "Parking Structure",
+        "building": "parking",
+        "height": 6,
+        "building:levels": 2,
+        "roof:shape": "flat",
+        "building:material": "concrete"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7300, 35.3510],
+          [138.7318, 35.3510],
+          [138.7318, 35.3525],
+          [138.7300, 35.3525],
+          [138.7300, 35.3510]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 10,
+        "name": "Toll Gate Building",
+        "building": "service",
+        "height": 4,
+        "building:levels": 1,
+        "roof:shape": "flat",
+        "building:material": "concrete"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7290, 35.3500],
+          [138.7298, 35.3500],
+          [138.7298, 35.3508],
+          [138.7290, 35.3508],
+          [138.7290, 35.3500]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 11,
+        "name": "Subaru Line Bus Stop",
+        "building": "transportation",
+        "height": 3,
+        "building:levels": 1,
+        "roof:shape": "flat",
+        "building:material": "steel"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7320, 35.3538],
+          [138.7332, 35.3538],
+          [138.7332, 35.3544],
+          [138.7320, 35.3544],
+          [138.7320, 35.3538]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 12,
+        "name": "Restroom Facility",
+        "building": "toilets",
+        "height": 3,
+        "building:levels": 1,
+        "roof:shape": "flat",
+        "building:material": "concrete"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7345, 35.3542],
+          [138.7352, 35.3542],
+          [138.7352, 35.3548],
+          [138.7345, 35.3548],
+          [138.7345, 35.3542]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 13,
+        "name": "Shrine at 5th Station",
+        "building": "religious",
+        "height": 5,
+        "building:levels": 1,
+        "roof:shape": "hipped",
+        "building:material": "wood",
+        "building:colour": "#8B4513"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7358, 35.3560],
+          [138.7366, 35.3560],
+          [138.7366, 35.3568],
+          [138.7358, 35.3568],
+          [138.7358, 35.3560]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 14,
+        "name": "Medical Station",
+        "building": "hospital",
+        "height": 4,
+        "building:levels": 1,
+        "roof:shape": "flat",
+        "building:material": "concrete"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7370, 35.3545],
+          [138.7380, 35.3545],
+          [138.7380, 35.3553],
+          [138.7370, 35.3553],
+          [138.7370, 35.3545]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 15,
+        "name": "Fujisan Hotel",
+        "building": "hotel",
+        "height": 12,
+        "building:levels": 3,
+        "roof:shape": "gabled",
+        "building:material": "wood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7310, 35.3560],
+          [138.7325, 35.3560],
+          [138.7325, 35.3575],
+          [138.7310, 35.3575],
+          [138.7310, 35.3560]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 16,
+        "name": "Storage Warehouse",
+        "building": "warehouse",
+        "height": 5,
+        "building:levels": 1,
+        "roof:shape": "gabled",
+        "building:material": "steel"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7285, 35.3515],
+          [138.7298, 35.3515],
+          [138.7298, 35.3525],
+          [138.7285, 35.3525],
+          [138.7285, 35.3515]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 17,
+        "name": "Equipment Shed",
+        "building": "shed",
+        "height": 3,
+        "building:levels": 1,
+        "roof:shape": "shed",
+        "building:material": "steel"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7280, 35.3508],
+          [138.7288, 35.3508],
+          [138.7288, 35.3514],
+          [138.7280, 35.3514],
+          [138.7280, 35.3508]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 18,
+        "name": "Gift Shop Main",
+        "building": "retail",
+        "height": 5,
+        "building:levels": 1,
+        "roof:shape": "gabled",
+        "building:material": "wood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7340, 35.3560],
+          [138.7355, 35.3560],
+          [138.7355, 35.3570],
+          [138.7340, 35.3570],
+          [138.7340, 35.3560]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 19,
+        "name": "Observation Deck",
+        "building": "observation",
+        "height": 8,
+        "building:levels": 2,
+        "roof:shape": "flat",
+        "building:material": "glass"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7375, 35.3565],
+          [138.7385, 35.3565],
+          [138.7385, 35.3575],
+          [138.7375, 35.3575],
+          [138.7375, 35.3565]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 20,
+        "name": "Cafe Fuji",
+        "building": "cafe",
+        "height": 4,
+        "building:levels": 1,
+        "roof:shape": "hipped",
+        "building:material": "wood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.7390, 35.3555],
+          [138.7400, 35.3555],
+          [138.7400, 35.3563],
+          [138.7390, 35.3563],
+          [138.7390, 35.3555]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 21,
+        "name": "Lower Town House 1",
+        "building": "house",
+        "height": 6,
+        "building:levels": 2,
+        "roof:shape": "gabled",
+        "building:material": "wood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.6800, 35.2700],
+          [138.6808, 35.2700],
+          [138.6808, 35.2708],
+          [138.6800, 35.2708],
+          [138.6800, 35.2700]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 22,
+        "name": "Lower Town House 2",
+        "building": "house",
+        "height": 5.5,
+        "building:levels": 2,
+        "roof:shape": "hipped",
+        "building:material": "wood"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.6812, 35.2700],
+          [138.6820, 35.2700],
+          [138.6820, 35.2708],
+          [138.6812, 35.2708],
+          [138.6812, 35.2700]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 23,
+        "name": "Lower Town Shop",
+        "building": "retail",
+        "height": 4,
+        "building:levels": 1,
+        "roof:shape": "flat",
+        "building:material": "concrete"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.6824, 35.2700],
+          [138.6835, 35.2700],
+          [138.6835, 35.2710],
+          [138.6824, 35.2710],
+          [138.6824, 35.2700]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 24,
+        "name": "Lower Town Apartments",
+        "building": "apartments",
+        "height": 15,
+        "building:levels": 5,
+        "roof:shape": "flat",
+        "building:material": "concrete"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.6840, 35.2695],
+          [138.6855, 35.2695],
+          [138.6855, 35.2715],
+          [138.6840, 35.2715],
+          [138.6840, 35.2695]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 25,
+        "name": "Local Shrine",
+        "building": "temple",
+        "height": 8,
+        "building:levels": 1,
+        "roof:shape": "pyramidal",
+        "building:material": "wood",
+        "building:colour": "#A0522D"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [138.6860, 35.2720],
+          [138.6875, 35.2720],
+          [138.6875, 35.2735],
+          [138.6860, 35.2735],
+          [138.6860, 35.2720]
+        ]]
+      }
+    }
+  ]
+}
