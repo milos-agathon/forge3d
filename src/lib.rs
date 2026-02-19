@@ -4747,5 +4747,12 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(crate::geo::reproject::proj_available_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::geo::reproject::reproject_coords_py, m)?)?;
 
+    // P0.4: Mesh TBN generation wrappers
+    #[cfg(feature = "enable-tbn")]
+    {
+        m.add_function(wrap_pyfunction!(crate::mesh::tbn::mesh_generate_cube_tbn, m)?)?;
+        m.add_function(wrap_pyfunction!(crate::mesh::tbn::mesh_generate_plane_tbn, m)?)?;
+    }
+
     Ok(())
 }

@@ -5,6 +5,11 @@
 
 use glam::{Vec2, Vec3};
 
+#[cfg(feature = "extension-module")]
+use pyo3::prelude::*;
+#[cfg(feature = "extension-module")]
+use pyo3::types::PyDict;
+
 /// Vertex data required for TBN calculation
 #[derive(Debug, Clone)]
 pub struct TbnVertex {
@@ -389,6 +394,101 @@ pub fn generate_cube_tbn() -> (Vec<TbnVertex>, Vec<u32>, Vec<TbnData>) {
 
     let tbn_data = generate_tbn(&vertices, &indices);
     (vertices, indices, tbn_data)
+}
+
+// ---------------------------------------------------------------------------
+// PyO3 wrappers (P0.4) – exposed when building the Python extension
+// ---------------------------------------------------------------------------
+
+/// Convert TBN generation results to a Python dict matching mesh.py expectations.
+///
+/// Returns `{"vertices": [...], "indices": [...], "tbn_data": [...]}`.
+#[cfg(feature = "extension-module")]
+fn tbn_result_to_py_dict(
+    py: Python<'_>,
+    vertices: &[TbnVertex],
+    indices: &[u32],
+    tbn_data: &[TbnData],
+) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+
+    // vertices: list of dicts with position, normal, uv
+    let py_verts: Vec<PyObject> = vertices
+        .iter()
+        .map(|v| {
+            let d = PyDict::new_bound(py);
+            d.set_item(
+                "position",
+                vec![v.position.x as f64, v.position.y as f64, v.position.z as f64],
+            )?;
+            d.set_item(
+                "normal",
+                vec![v.normal.x as f64, v.normal.y as f64, v.normal.z as f64],
+            )?;
+            d.set_item("uv", vec![v.uv.x as f64, v.uv.y as f64])?;
+            Ok(d.into())
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    dict.set_item("vertices", py_verts)?;
+
+    // indices: list of ints
+    let py_indices: Vec<u32> = indices.to_vec();
+    dict.set_item("indices", py_indices)?;
+
+    // tbn_data: list of dicts with tangent, bitangent, normal, handedness
+    let py_tbn: Vec<PyObject> = tbn_data
+        .iter()
+        .map(|t| {
+            let d = PyDict::new_bound(py);
+            d.set_item(
+                "tangent",
+                vec![t.tangent.x as f64, t.tangent.y as f64, t.tangent.z as f64],
+            )?;
+            d.set_item(
+                "bitangent",
+                vec![
+                    t.bitangent.x as f64,
+                    t.bitangent.y as f64,
+                    t.bitangent.z as f64,
+                ],
+            )?;
+            d.set_item(
+                "normal",
+                vec![t.normal.x as f64, t.normal.y as f64, t.normal.z as f64],
+            )?;
+            d.set_item("handedness", t.handedness as f64)?;
+            Ok(d.into())
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    dict.set_item("tbn_data", py_tbn)?;
+
+    Ok(dict.into())
+}
+
+/// Generate TBN data for a unit cube (24 vertices, 36 indices, 24 TBN entries).
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub fn mesh_generate_cube_tbn(py: Python<'_>) -> PyResult<PyObject> {
+    let (verts, indices, tbn) = generate_cube_tbn();
+    tbn_result_to_py_dict(py, &verts, &indices, &tbn)
+}
+
+/// Generate TBN data for a planar grid of `width` x `height` vertices.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (width, height))]
+pub fn mesh_generate_plane_tbn(
+    py: Python<'_>,
+    width: u32,
+    height: u32,
+) -> PyResult<PyObject> {
+    if width < 2 || height < 2 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "width and height must be >= 2",
+        ));
+    }
+    let (verts, indices, tbn) = generate_plane_tbn(width, height);
+    tbn_result_to_py_dict(py, &verts, &indices, &tbn)
 }
 
 #[cfg(test)]

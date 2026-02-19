@@ -9,7 +9,7 @@ Tested contracts:
   - Scene class has render_rgba and set_msaa_samples instance methods
   - Scene class exposes key feature-enable/disable methods
   - Key native classes are registered and accessible
-  - TBN mesh functions are NOT yet exported (marked as future P0.4)
+  - TBN mesh functions are exported and return correct dict structure (P0.4)
   - Previously-orphaned pyclass types (Frame, SdfPrimitive, etc.) are now registered (P0.3)
 
 Each test is minimal and non-trivial: it asserts something specific about
@@ -92,6 +92,9 @@ class TestNativeModuleSymbols:
         "hybrid_render",
         "configure_csm",
         "global_memory_metrics",
+        # P0.4: TBN mesh generation
+        "mesh_generate_cube_tbn",
+        "mesh_generate_plane_tbn",
     ]
 
     @pytest.mark.parametrize("fn_name", EXPECTED_FUNCTIONS)
@@ -387,6 +390,115 @@ class TestTbnFunctionsNotExported:
     def test_mesh_generate_plane_tbn_not_exported(self):
         """mesh_generate_plane_tbn is NOT in the native module pre-P0.4."""
         assert not hasattr(_native, "mesh_generate_plane_tbn")
+
+
+# ===========================================================================
+# Section 5b: TBN mesh functions exported (P0.4)
+# ===========================================================================
+class TestTbnFunctionsExported:
+    """Verify that P0.4 TBN mesh functions are exported and return correct data.
+
+    These tests validate:
+    - Functions are registered on the native module
+    - Return dicts have correct keys (vertices, indices, tbn_data)
+    - Vertex/index counts match expected geometry
+    - The Python wrapper (forge3d.mesh) uses the native path
+    """
+
+    def test_mesh_generate_cube_tbn_registered(self):
+        """mesh_generate_cube_tbn must be a callable on the native module."""
+        assert hasattr(_native, "mesh_generate_cube_tbn"), (
+            "mesh_generate_cube_tbn not found -- P0.4 registration missing"
+        )
+        assert callable(getattr(_native, "mesh_generate_cube_tbn"))
+
+    def test_mesh_generate_plane_tbn_registered(self):
+        """mesh_generate_plane_tbn must be a callable on the native module."""
+        assert hasattr(_native, "mesh_generate_plane_tbn"), (
+            "mesh_generate_plane_tbn not found -- P0.4 registration missing"
+        )
+        assert callable(getattr(_native, "mesh_generate_plane_tbn"))
+
+    def test_cube_tbn_dict_keys(self):
+        """mesh_generate_cube_tbn returns dict with vertices, indices, tbn_data."""
+        result = _native.mesh_generate_cube_tbn()
+        assert isinstance(result, dict), f"Expected dict, got {type(result)}"
+        for key in ("vertices", "indices", "tbn_data"):
+            assert key in result, f"Missing key '{key}' in cube TBN result"
+
+    def test_cube_tbn_vertex_count(self):
+        """Cube has 24 vertices (6 faces x 4 vertices)."""
+        result = _native.mesh_generate_cube_tbn()
+        assert len(result["vertices"]) == 24
+
+    def test_cube_tbn_index_count(self):
+        """Cube has 36 indices (6 faces x 2 triangles x 3 vertices)."""
+        result = _native.mesh_generate_cube_tbn()
+        assert len(result["indices"]) == 36
+
+    def test_cube_tbn_data_count(self):
+        """Cube has 24 TBN entries (one per vertex)."""
+        result = _native.mesh_generate_cube_tbn()
+        assert len(result["tbn_data"]) == 24
+
+    def test_cube_vertex_dict_structure(self):
+        """Each vertex dict has position (3), normal (3), uv (2)."""
+        result = _native.mesh_generate_cube_tbn()
+        v = result["vertices"][0]
+        assert "position" in v and len(v["position"]) == 3
+        assert "normal" in v and len(v["normal"]) == 3
+        assert "uv" in v and len(v["uv"]) == 2
+
+    def test_cube_tbn_dict_structure(self):
+        """Each TBN dict has tangent (3), bitangent (3), normal (3), handedness."""
+        result = _native.mesh_generate_cube_tbn()
+        t = result["tbn_data"][0]
+        assert "tangent" in t and len(t["tangent"]) == 3
+        assert "bitangent" in t and len(t["bitangent"]) == 3
+        assert "normal" in t and len(t["normal"]) == 3
+        assert "handedness" in t
+        assert t["handedness"] in (1.0, -1.0)
+
+    def test_plane_tbn_4x4_vertex_count(self):
+        """4x4 plane has 16 vertices."""
+        result = _native.mesh_generate_plane_tbn(4, 4)
+        assert len(result["vertices"]) == 16
+
+    def test_plane_tbn_4x4_index_count_positive(self):
+        """4x4 plane has >0 indices."""
+        result = _native.mesh_generate_plane_tbn(4, 4)
+        assert len(result["indices"]) > 0
+
+    def test_plane_tbn_4x4_tbn_count(self):
+        """4x4 plane has 16 TBN entries (one per vertex)."""
+        result = _native.mesh_generate_plane_tbn(4, 4)
+        assert len(result["tbn_data"]) == 16
+
+    def test_plane_tbn_rejects_small_dimensions(self):
+        """mesh_generate_plane_tbn rejects width or height < 2."""
+        with pytest.raises((ValueError, Exception)):
+            _native.mesh_generate_plane_tbn(1, 4)
+        with pytest.raises((ValueError, Exception)):
+            _native.mesh_generate_plane_tbn(4, 1)
+
+    def test_python_wrapper_uses_native_path(self):
+        """forge3d.mesh._HAS_TBN is True and generate_cube_tbn uses native."""
+        from forge3d.mesh import _HAS_TBN, generate_cube_tbn
+        assert _HAS_TBN is True, (
+            "_HAS_TBN should be True when native TBN functions are exported"
+        )
+        verts, indices, tbn = generate_cube_tbn()
+        assert len(verts) == 24
+        assert len(indices) == 36
+        assert len(tbn) == 24
+
+    def test_python_wrapper_plane_native_path(self):
+        """forge3d.mesh.generate_plane_tbn uses the native path."""
+        from forge3d.mesh import generate_plane_tbn
+        verts, indices, tbn = generate_plane_tbn(3, 3)
+        assert len(verts) == 9
+        assert len(indices) > 0
+        assert len(tbn) == 9
 
 
 # ===========================================================================

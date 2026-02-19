@@ -13,3 +13,11 @@
 - When importing multiple types from the same module (e.g., `crate::sdf::py`), consolidate into a single `use` statement with a braced group rather than adding separate `use` lines per type.
 - Negative contract tests ("X is NOT registered") should be flipped to positive assertions ("X IS registered") when the registration is intentionally added. Also add construction tests that verify the class is not just importable but actually usable (constructible, methods callable).
 - The `EXPECTED_CLASSES` list in Section 1 of `test_api_contracts.py` must be updated whenever new `m.add_class` registrations are added, otherwise the parametrized existence test won't cover them.
+
+## P0.4: Resolve Mesh TBN Drift (2026-02-19)
+
+- When Rust code is gated behind a Cargo feature flag (e.g., `#[cfg(feature = "enable-tbn")]`), you must also add that feature to the maturin build features in `pyproject.toml`. Otherwise the module compiles but the functions are excluded from the extension. The `pyproject.toml` `[tool.maturin].features` list is the single source of truth for which features are included in the Python wheel.
+- PyO3 `#[pyfunction]` wrappers that convert Rust structs to Python dicts should use a shared helper function (e.g., `tbn_result_to_py_dict`) to avoid duplicating dict-building logic across multiple wrapper functions.
+- When the Python wrapper (e.g., `mesh.py`) has a feature-detection guard like `_HAS_TBN = hasattr(_forge3d, 'mesh_generate_cube_tbn')`, simply registering the function in the pymodule is enough to flip the flag. No changes to the Python wrapper itself are needed.
+- For feature-gated registrations in `lib.rs`, wrap related function registrations in a `#[cfg(feature = "...")]` block to keep them conditional, matching the module-level gating in `mod.rs`.
+- The `EXPECTED_FUNCTIONS` list in the contract tests should be updated alongside registration to maintain the contract lock.
