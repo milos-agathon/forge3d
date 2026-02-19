@@ -28,15 +28,8 @@ def set_msaa(samples: int) -> int:
     """Set the default MSAA sample count for newly created renderers.
 
     Sets the class-level default on ``Renderer`` so that future instances
-    pick up the requested sample count.
-
-    Note (P0.2): a previous version probed for a module-level
-    ``_forge3d.set_msaa_samples`` function.  That function never existed
-    -- ``set_msaa_samples`` is an *instance* method on ``Scene``
-    (src/scene/mod.rs), not a free function.  The dead probe has been
-    removed.  Per-scene MSAA is configured via ``Scene.set_msaa_samples``
-    after construction; this helper only sets the *default* for new
-    ``Renderer`` instances.
+    pick up the requested sample count.  Per-scene MSAA is configured via
+    ``Scene.set_msaa_samples`` after construction.
     """
     if samples not in _SUPPORTED_MSAA:
         raise ValueError(f"Unsupported MSAA sample count: {samples} (allowed: {_SUPPORTED_MSAA})")

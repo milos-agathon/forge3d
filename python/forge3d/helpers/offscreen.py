@@ -8,21 +8,20 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 import io
+import sys
+import warnings
 import numpy as np
 
 from ..path_tracing import render_rgba as _fallback_render_rgba
 
 # Resolve the native Scene class for isinstance checks.
-# Scene.render_rgba() is an *instance* method (src/scene/mod.rs:1721),
-# NOT a module-level function.  The old code probed for a module-level
-# ``_forge3d.render_rgba`` which never existed, so the native path was
-# unreachable.  Fixed in P0.2.
+# Scene.render_rgba() is an instance method, not a module-level function.
 try:
     from .._native import get_native_module as _get_native_module
-    _native_mod = _get_native_module()
-    _NativeScene = getattr(_native_mod, "Scene", None) if _native_mod else None
+    _nm = _get_native_module()
+    _NativeScene = getattr(_nm, "Scene", None) if _nm is not None else None
+    del _nm
 except Exception:
-    _native_mod = None
     _NativeScene = None
 
 
@@ -43,18 +42,17 @@ def render_offscreen_rgba(
 ) -> np.ndarray:
     """Render an RGBA image offscreen and return a numpy array.
 
-    Routing logic (P0.2):
-      1. If *scene* is a native ``Scene`` instance, call
-         ``scene.render_rgba()`` which renders at the resolution the
-         Scene was constructed with and returns an ``(H, W, 4)`` uint8
-         numpy array.  The *width*/*height* parameters are **ignored**
-         in this path because the native Scene owns its framebuffer
-         dimensions (set at construction time).
-      2. Otherwise, fall back to the deterministic CPU path tracer
-         (``forge3d.path_tracing.render_rgba``), which accepts
-         arbitrary width/height.
+    When *scene* is a native ``Scene`` instance, delegates to
+    ``scene.render_rgba()`` (GPU path).  The native Scene owns its
+    framebuffer dimensions, so *width*/*height* are only used by the
+    CPU fallback path.  A warning is emitted if the caller supplies
+    explicit dimensions that will be ignored on the native path.
+
+    Otherwise, falls back to the deterministic CPU path tracer
+    (``forge3d.path_tracing.render_rgba``).
     """
-    w = int(width); h = int(height)
+    w = int(width)
+    h = int(height)
     if w <= 0 or h <= 0:
         raise ValueError("width and height must be positive")
 
@@ -62,9 +60,11 @@ def render_offscreen_rgba(
     if _is_native_scene(scene):
         try:
             return scene.render_rgba()
-        except Exception:
-            # Fall back to Python path on any GPU/driver error.
-            pass
+        except (RuntimeError, OSError) as exc:
+            print(
+                f"[forge3d] native render_rgba failed, using CPU fallback: {exc}",
+                file=sys.stderr,
+            )
 
     # --- Fallback: deterministic CPU path tracer. ---
     return _fallback_render_rgba(w, h, scene=scene, camera=camera, seed=int(seed), frames=int(frames), denoiser=str(denoiser))
