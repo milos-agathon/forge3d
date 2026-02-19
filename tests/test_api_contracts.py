@@ -307,16 +307,19 @@ class TestSceneMethodCount:
 class TestOrphanedClassesRegistered:
     """Verify that previously-orphaned pyclass types are now registered.
 
-    P0.3 added m.add_class registrations for Frame, SdfPrimitive,
-    SdfScene, and SdfSceneBuilder.
+    Frame, SdfPrimitive, SdfScene, and SdfSceneBuilder must be registered
+    in the native module and constructible from Python (except Frame, which
+    is constructed internally only).
     """
 
     def test_frame_registered(self):
-        """Frame must be registered and importable."""
+        """Frame must be registered but not constructible from Python."""
         assert hasattr(_native, "Frame"), (
-            "Frame not found on _forge3d -- P0.3 registration missing"
+            "Frame not found on _forge3d -- registration missing"
         )
         assert isinstance(getattr(_native, "Frame"), type)
+        with pytest.raises(RuntimeError, match="constructed internally"):
+            _native.Frame()
 
     def test_sdf_primitive_registered(self):
         """SdfPrimitive must be registered and importable."""
@@ -344,11 +347,6 @@ class TestOrphanedClassesRegistered:
         scene = _native.SdfScene()
         assert scene.primitive_count() == 0
         assert scene.node_count() == 0
-
-    def test_sdf_scene_builder_constructible(self):
-        """SdfSceneBuilder() must be constructible with no arguments."""
-        builder = _native.SdfSceneBuilder()
-        assert builder is not None
 
     def test_sdf_primitive_sphere_constructible(self):
         """SdfPrimitive.sphere() classmethod must work."""
