@@ -1,0 +1,537 @@
+{
+  "generated_utc": "2026-02-19 08:44:09Z",
+  "commit": "988c9b525e262247db69aba966ad4df14f6ce56d",
+  "branch": "main",
+  "section1": {
+    "rust_source_files": 499,
+    "rust_top_level_modules": 40,
+    "python_package_files": 54,
+    "pyo3_classes": 38,
+    "pyo3_functions": 100,
+    "rust_files_with_pyo3_annotations": 33,
+    "test_files": 77,
+    "test_functions_total": 1450,
+    "test_functions_rust": 532,
+    "test_functions_python": 918,
+    "viewer_ipc_present": true,
+    "top_level_module_names": [
+      "accel",
+      "animation",
+      "bundle",
+      "camera",
+      "cli",
+      "colormap",
+      "converters",
+      "core",
+      "export",
+      "external_image",
+      "formats",
+      "geo",
+      "geometry",
+      "import",
+      "io",
+      "labels",
+      "lighting",
+      "loaders",
+      "math",
+      "mesh",
+      "offscreen",
+      "p5",
+      "passes",
+      "path_tracing",
+      "picking",
+      "pipeline",
+      "pointcloud",
+      "render",
+      "renderer",
+      "scene",
+      "sdf",
+      "shadows",
+      "style",
+      "terrain",
+      "textures",
+      "tiles3d",
+      "util",
+      "uv",
+      "vector",
+      "viewer"
+    ]
+  },
+  "section3": {
+    "module_count": 42,
+    "categories": {
+      "Orchestration": [
+        "__init__",
+        "render",
+        "terrain_demo",
+        "viewer"
+      ],
+      "Thin wrapper": [
+        "_gpu",
+        "_memory",
+        "_native",
+        "animation"
+      ],
+      "Pure Python": [
+        "_validate",
+        "bench",
+        "bundle",
+        "colors",
+        "config",
+        "denoise",
+        "export",
+        "guiding",
+        "interactive",
+        "legend",
+        "map_plate",
+        "materials",
+        "mem",
+        "north_arrow",
+        "pointcloud",
+        "presets",
+        "scale_bar",
+        "style",
+        "style_expressions",
+        "terrain_params",
+        "terrain_pbr_pom",
+        "textures",
+        "tiles3d",
+        "viewer_ipc"
+      ],
+      "Thick wrapper": [
+        "buildings",
+        "cog",
+        "crs",
+        "geometry",
+        "io",
+        "lighting",
+        "mesh",
+        "path_tracing",
+        "sdf",
+        "vector"
+      ]
+    },
+    "rows": [
+      {
+        "module": "__init__.py",
+        "category": "Orchestration",
+        "reason": "known workflow/entry module",
+        "line_count": 460,
+        "native_refs": 2,
+        "native_calls": 0
+      },
+      {
+        "module": "_gpu.py",
+        "category": "Thin wrapper",
+        "reason": "small module with limited native call surface",
+        "line_count": 90,
+        "native_refs": 4,
+        "native_calls": 0
+      },
+      {
+        "module": "_memory.py",
+        "category": "Thin wrapper",
+        "reason": "small module with limited native call surface",
+        "line_count": 127,
+        "native_refs": 4,
+        "native_calls": 0
+      },
+      {
+        "module": "_native.py",
+        "category": "Thin wrapper",
+        "reason": "small module with limited native call surface",
+        "line_count": 38,
+        "native_refs": 7,
+        "native_calls": 0
+      },
+      {
+        "module": "_validate.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 423,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "animation.py",
+        "category": "Thin wrapper",
+        "reason": "small module with limited native call surface",
+        "line_count": 205,
+        "native_refs": 2,
+        "native_calls": 0
+      },
+      {
+        "module": "bench.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 227,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "buildings.py",
+        "category": "Thick wrapper",
+        "reason": "non-trivial module with native integration",
+        "line_count": 574,
+        "native_refs": 1,
+        "native_calls": 5
+      },
+      {
+        "module": "bundle.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 361,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "cog.py",
+        "category": "Thick wrapper",
+        "reason": "non-trivial module with native integration",
+        "line_count": 378,
+        "native_refs": 3,
+        "native_calls": 0
+      },
+      {
+        "module": "colors.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 65,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "config.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 726,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "crs.py",
+        "category": "Thick wrapper",
+        "reason": "non-trivial module with native integration",
+        "line_count": 354,
+        "native_refs": 2,
+        "native_calls": 0
+      },
+      {
+        "module": "denoise.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 148,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "export.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 627,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "geometry.py",
+        "category": "Thick wrapper",
+        "reason": "non-trivial module with native integration",
+        "line_count": 577,
+        "native_refs": 26,
+        "native_calls": 21
+      },
+      {
+        "module": "guiding.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 47,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "interactive.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 607,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "io.py",
+        "category": "Thick wrapper",
+        "reason": "non-trivial module with native integration",
+        "line_count": 728,
+        "native_refs": 10,
+        "native_calls": 6
+      },
+      {
+        "module": "legend.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 178,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "lighting.py",
+        "category": "Thick wrapper",
+        "reason": "non-trivial module with native integration",
+        "line_count": 976,
+        "native_refs": 33,
+        "native_calls": 6
+      },
+      {
+        "module": "map_plate.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 357,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "materials.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 29,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "mem.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 74,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "mesh.py",
+        "category": "Thick wrapper",
+        "reason": "non-trivial module with native integration",
+        "line_count": 677,
+        "native_refs": 5,
+        "native_calls": 2
+      },
+      {
+        "module": "north_arrow.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 188,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "path_tracing.py",
+        "category": "Thick wrapper",
+        "reason": "non-trivial module with native integration",
+        "line_count": 798,
+        "native_refs": 1,
+        "native_calls": 0
+      },
+      {
+        "module": "pointcloud.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 691,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "presets.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 315,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "render.py",
+        "category": "Orchestration",
+        "reason": "known workflow/entry module",
+        "line_count": 2543,
+        "native_refs": 4,
+        "native_calls": 0
+      },
+      {
+        "module": "scale_bar.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 163,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "sdf.py",
+        "category": "Thick wrapper",
+        "reason": "non-trivial module with native integration",
+        "line_count": 555,
+        "native_refs": 7,
+        "native_calls": 1
+      },
+      {
+        "module": "style.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 992,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "style_expressions.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 718,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "terrain_demo.py",
+        "category": "Orchestration",
+        "reason": "known workflow/entry module",
+        "line_count": 1123,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "terrain_params.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 1746,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "terrain_pbr_pom.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 51,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "textures.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 105,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "tiles3d.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 405,
+        "native_refs": 0,
+        "native_calls": 0
+      },
+      {
+        "module": "vector.py",
+        "category": "Thick wrapper",
+        "reason": "non-trivial module with native integration",
+        "line_count": 448,
+        "native_refs": 1,
+        "native_calls": 0
+      },
+      {
+        "module": "viewer.py",
+        "category": "Orchestration",
+        "reason": "known workflow/entry module",
+        "line_count": 573,
+        "native_refs": 4,
+        "native_calls": 0
+      },
+      {
+        "module": "viewer_ipc.py",
+        "category": "Pure Python",
+        "reason": "no native binding references detected",
+        "line_count": 942,
+        "native_refs": 0,
+        "native_calls": 0
+      }
+    ]
+  },
+  "section5": {
+    "rows": [
+      {
+        "name": "SVG export",
+        "rust_present": true,
+        "python_present": true,
+        "rust_bound_to_python": false,
+        "python_public_api": true,
+        "python_native_call_signal": false,
+        "likely_route": "Python path (inferred)",
+        "confidence": "Medium"
+      },
+      {
+        "name": "Mapbox style parser",
+        "rust_present": true,
+        "python_present": true,
+        "rust_bound_to_python": false,
+        "python_public_api": true,
+        "python_native_call_signal": false,
+        "likely_route": "Python path (inferred)",
+        "confidence": "Medium"
+      },
+      {
+        "name": "3D Tiles parser",
+        "rust_present": true,
+        "python_present": true,
+        "rust_bound_to_python": false,
+        "python_public_api": false,
+        "python_native_call_signal": false,
+        "likely_route": "Unknown (trace call sites)",
+        "confidence": "Low"
+      },
+      {
+        "name": "Bundle format",
+        "rust_present": true,
+        "python_present": true,
+        "rust_bound_to_python": false,
+        "python_public_api": true,
+        "python_native_call_signal": false,
+        "likely_route": "Python path (inferred)",
+        "confidence": "Medium"
+      },
+      {
+        "name": "SDF raymarcher / hybrid render",
+        "rust_present": true,
+        "python_present": true,
+        "rust_bound_to_python": true,
+        "python_public_api": false,
+        "python_native_call_signal": true,
+        "likely_route": "Both (inferred)",
+        "confidence": "Medium"
+      },
+      {
+        "name": "Path tracer",
+        "rust_present": true,
+        "python_present": true,
+        "rust_bound_to_python": true,
+        "python_public_api": true,
+        "python_native_call_signal": true,
+        "likely_route": "Both (inferred)",
+        "confidence": "Medium"
+      },
+      {
+        "name": "Point cloud LOD/rendering",
+        "rust_present": true,
+        "python_present": true,
+        "rust_bound_to_python": true,
+        "python_public_api": false,
+        "python_native_call_signal": false,
+        "likely_route": "Rust-bound but not public API (inferred)",
+        "confidence": "Low"
+      },
+      {
+        "name": "Denoise",
+        "rust_present": true,
+        "python_present": true,
+        "rust_bound_to_python": false,
+        "python_public_api": false,
+        "python_native_call_signal": false,
+        "likely_route": "Unknown (trace call sites)",
+        "confidence": "Low"
+      }
+    ]
+  }
+}
