@@ -941,3 +941,100 @@ class TestBloomSettingsWiring:
         assert params.bloom.enabled is True
         assert params.bloom.threshold == 1.0
         assert params.bloom.intensity == 0.5
+
+
+# ===========================================================================
+# Section 16: P1.3 Terrain Analysis API (Option A: TerrainSpike methods)
+# ===========================================================================
+class TestTerrainAnalysisApi:
+    """Verify terrain analysis via TerrainSpike methods (Option A).
+
+    Decision: expose analysis through TerrainSpike instance methods rather
+    than module-level functions to avoid duplicate implementations.
+    The private ``_compute_slope_deg()`` in render.py stays private.
+    """
+
+    def _make_spike(self):
+        return _native.TerrainSpike(64, 64)
+
+    # ---- slope_aspect_compute ----
+
+    def test_slope_flat_surface(self):
+        """Flat surface produces zero slope everywhere."""
+        import numpy as np
+        ts = self._make_spike()
+        heights = np.zeros(64 * 64, dtype=np.float32)
+        slopes, aspects = ts.slope_aspect_compute(heights, 64, 64)
+        assert slopes.shape == (64 * 64,)
+        assert slopes.max() == pytest.approx(0.0, abs=1e-5)
+
+    def test_slope_east_ramp(self):
+        """East-facing ramp at 45 degrees produces slope ~45."""
+        import numpy as np
+        ts = self._make_spike()
+        heights = np.zeros(64 * 64, dtype=np.float32)
+        for y in range(64):
+            for x in range(64):
+                heights[y * 64 + x] = float(x)
+        slopes, _ = ts.slope_aspect_compute(heights, 64, 64)
+        assert slopes.min() == pytest.approx(45.0, abs=0.1)
+
+    def test_slope_rejects_wrong_size(self):
+        """slope_aspect_compute rejects array with wrong element count."""
+        import numpy as np
+        ts = self._make_spike()
+        heights = np.zeros(100, dtype=np.float32)  # wrong size for 64x64
+        with pytest.raises(Exception):
+            ts.slope_aspect_compute(heights, 64, 64)
+
+    def test_slope_rejects_small_grid(self):
+        """slope_aspect_compute rejects grids smaller than 3x3."""
+        import numpy as np
+        ts = self._make_spike()
+        heights = np.zeros(4, dtype=np.float32)
+        with pytest.raises(Exception):
+            ts.slope_aspect_compute(heights, 2, 2)
+
+    # ---- contour_extract ----
+
+    def test_contour_gaussian(self):
+        """Gaussian hill produces contours at requested levels."""
+        import numpy as np
+        import math
+        ts = self._make_spike()
+        heights = np.zeros(64 * 64, dtype=np.float32)
+        cx, cy = 32.0, 32.0
+        for y in range(64):
+            for x in range(64):
+                dx, dy = x - cx, y - cy
+                heights[y * 64 + x] = 100.0 * math.exp(-(dx * dx + dy * dy) / 200.0)
+        result = ts.contour_extract(heights, 64, 64, levels=[10.0, 50.0, 90.0])
+        assert isinstance(result, dict)
+        assert result["polyline_count"] > 0
+        assert result["total_points"] > 0
+        assert len(result["polylines"]) == result["polyline_count"]
+
+    def test_contour_rejects_empty_levels(self):
+        """contour_extract rejects empty levels list."""
+        import numpy as np
+        ts = self._make_spike()
+        heights = np.zeros(64 * 64, dtype=np.float32)
+        with pytest.raises(Exception):
+            ts.contour_extract(heights, 64, 64, levels=[])
+
+    def test_contour_no_crossing(self):
+        """Flat surface at 0 with level=50 produces no contours."""
+        import numpy as np
+        ts = self._make_spike()
+        heights = np.zeros(64 * 64, dtype=np.float32)
+        result = ts.contour_extract(heights, 64, 64, levels=[50.0])
+        assert result["polyline_count"] == 0
+        assert result["total_points"] == 0
+
+    # ---- API shape: Option A confirmation ----
+
+    def test_no_module_level_slope_function(self):
+        """No module-level slope/contour functions exist (Option A chosen)."""
+        assert not hasattr(_native, "compute_slope_aspect_py")
+        assert not hasattr(_native, "slope_aspect_compute")
+        assert not hasattr(_native, "contour_extract")

@@ -571,7 +571,26 @@ def vector_render_oit_and_pick_py(
 def composite_rgba_over(bottom: np.ndarray, top: np.ndarray, *, premultiplied: bool = ...) -> np.ndarray: ...  # (H,W,4) uint8
 
 # Optional export if compiled with --features terrain_spike
-class TerrainSpike: ...
+class TerrainSpike:
+    def __init__(self, width: int, height: int) -> None: ...
+    def slope_aspect_compute(
+        self,
+        heights: np.ndarray,
+        width: int,
+        height: int,
+        dx: float = ...,
+        dy: float = ...,
+    ) -> Tuple[np.ndarray, np.ndarray]: ...
+    def contour_extract(
+        self,
+        heights: np.ndarray,
+        width: int,
+        height: int,
+        dx: float = ...,
+        dy: float = ...,
+        *,
+        levels: Sequence[float],
+    ) -> Dict[str, Any]: ...
 
 def png_to_numpy(path: PathLikeStr) -> np.ndarray: ...          # (H,W,4) uint8
 def numpy_to_png(path: PathLikeStr, array: np.ndarray) -> None: ...
