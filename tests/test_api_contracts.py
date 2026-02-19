@@ -366,34 +366,8 @@ class TestOrphanedClassesRegistered:
 
 
 # ===========================================================================
-# Section 5: TBN mesh functions NOT yet exported (future P0.4)
 # ===========================================================================
-class TestTbnFunctionsNotExported:
-    """Verify that TBN mesh functions are not yet in the native module.
-
-    The Rust functions exist (src/mesh/tbn.rs) but have no PyO3 wrapper.
-    When P0.4 exposes them, flip these to positive assertions.
-    """
-
-    @pytest.mark.skipif(
-        hasattr(_native, "mesh_generate_cube_tbn"),
-        reason="mesh_generate_cube_tbn now exported (P0.4 complete)",
-    )
-    def test_mesh_generate_cube_tbn_not_exported(self):
-        """mesh_generate_cube_tbn is NOT in the native module pre-P0.4."""
-        assert not hasattr(_native, "mesh_generate_cube_tbn")
-
-    @pytest.mark.skipif(
-        hasattr(_native, "mesh_generate_plane_tbn"),
-        reason="mesh_generate_plane_tbn now exported (P0.4 complete)",
-    )
-    def test_mesh_generate_plane_tbn_not_exported(self):
-        """mesh_generate_plane_tbn is NOT in the native module pre-P0.4."""
-        assert not hasattr(_native, "mesh_generate_plane_tbn")
-
-
-# ===========================================================================
-# Section 5b: TBN mesh functions exported (P0.4)
+# Section 5: TBN mesh functions exported (P0.4)
 # ===========================================================================
 class TestTbnFunctionsExported:
     """Verify that P0.4 TBN mesh functions are exported and return correct data.
@@ -464,10 +438,10 @@ class TestTbnFunctionsExported:
         result = _native.mesh_generate_plane_tbn(4, 4)
         assert len(result["vertices"]) == 16
 
-    def test_plane_tbn_4x4_index_count_positive(self):
-        """4x4 plane has >0 indices."""
+    def test_plane_tbn_4x4_index_count(self):
+        """4x4 plane has 54 indices: (4-1)*(4-1)*2 triangles * 3 verts."""
         result = _native.mesh_generate_plane_tbn(4, 4)
-        assert len(result["indices"]) > 0
+        assert len(result["indices"]) == 54
 
     def test_plane_tbn_4x4_tbn_count(self):
         """4x4 plane has 16 TBN entries (one per vertex)."""
@@ -494,10 +468,11 @@ class TestTbnFunctionsExported:
 
     def test_python_wrapper_plane_native_path(self):
         """forge3d.mesh.generate_plane_tbn uses the native path."""
-        from forge3d.mesh import generate_plane_tbn
+        from forge3d.mesh import generate_plane_tbn, _HAS_TBN
+        assert _HAS_TBN is True, "native TBN path should be active"
         verts, indices, tbn = generate_plane_tbn(3, 3)
         assert len(verts) == 9
-        assert len(indices) > 0
+        assert len(indices) == 24  # (3-1)*(3-1)*2*3
         assert len(tbn) == 9
 
 
