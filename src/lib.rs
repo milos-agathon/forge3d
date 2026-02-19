@@ -641,6 +641,182 @@ impl From<crate::picking::HeightfieldHit> for PyHeightfieldHit {
     }
 }
 
+// P2.1: Point Cloud GPU rendering path – PyO3 bindings
+
+/// Python-visible point buffer with GPU interleaving support.
+#[cfg(feature = "extension-module")]
+#[pyclass(module = "forge3d._forge3d", name = "PointBuffer")]
+pub struct PyPointBuffer {
+    inner: crate::pointcloud::PointBuffer,
+}
+
+#[cfg(feature = "extension-module")]
+#[pymethods]
+impl PyPointBuffer {
+    /// Construct a PointBuffer from flat position and optional color arrays.
+    ///
+    /// * `positions` – flat f32 array [x,y,z, x,y,z, ...]
+    /// * `colors`    – optional flat u8 array [r,g,b, r,g,b, ...] (same point count)
+    #[new]
+    #[pyo3(signature = (positions, colors = None))]
+    fn new(positions: Vec<f32>, colors: Option<Vec<u8>>) -> PyResult<Self> {
+        if positions.len() % 3 != 0 {
+            return Err(PyValueError::new_err(
+                "positions length must be a multiple of 3",
+            ));
+        }
+        let point_count = positions.len() / 3;
+        if let Some(ref c) = colors {
+            if c.len() != point_count * 3 {
+                return Err(PyValueError::new_err(format!(
+                    "colors length {} does not match point_count*3 = {}",
+                    c.len(),
+                    point_count * 3
+                )));
+            }
+        }
+        Ok(Self {
+            inner: crate::pointcloud::PointBuffer {
+                positions,
+                colors,
+                point_count,
+            },
+        })
+    }
+
+    /// Number of points stored in this buffer.
+    #[getter]
+    fn point_count(&self) -> usize {
+        self.inner.point_count
+    }
+
+    /// Raw CPU byte size (positions + colors).
+    fn byte_size(&self) -> usize {
+        self.inner.byte_size()
+    }
+
+    /// Byte size of the interleaved GPU buffer that `create_gpu_buffer` produces.
+    fn gpu_byte_size(&self) -> usize {
+        self.inner.gpu_byte_size()
+    }
+
+    /// Create an interleaved GPU vertex buffer as a numpy float32 array.
+    ///
+    /// Layout per point: [x, y, z, r, g, b] (6 floats).
+    /// Colors are normalised from u8 to 0.0..1.0; white if absent.
+    fn create_gpu_buffer<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        let data = self.inner.create_gpu_buffer();
+        PyArray1::from_vec_bound(py, data)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PointBuffer(point_count={}, cpu_bytes={}, gpu_bytes={})",
+            self.inner.point_count,
+            self.inner.byte_size(),
+            self.inner.gpu_byte_size(),
+        )
+    }
+}
+
+/// Python-visible render statistics.
+#[cfg(feature = "extension-module")]
+#[pyclass(module = "forge3d._forge3d", name = "RenderStats")]
+pub struct PyRenderStats {
+    #[pyo3(get)]
+    pub nodes_rendered: usize,
+    #[pyo3(get)]
+    pub points_rendered: u64,
+    #[pyo3(get)]
+    pub cache_hits: usize,
+    #[pyo3(get)]
+    pub cache_misses: usize,
+}
+
+#[cfg(feature = "extension-module")]
+#[pymethods]
+impl PyRenderStats {
+    #[new]
+    #[pyo3(signature = (nodes_rendered = 0, points_rendered = 0, cache_hits = 0, cache_misses = 0))]
+    fn new(
+        nodes_rendered: usize,
+        points_rendered: u64,
+        cache_hits: usize,
+        cache_misses: usize,
+    ) -> Self {
+        Self { nodes_rendered, points_rendered, cache_hits, cache_misses }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "RenderStats(nodes={}, points={}, hits={}, misses={})",
+            self.nodes_rendered, self.points_rendered,
+            self.cache_hits, self.cache_misses,
+        )
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl From<crate::pointcloud::RenderStats> for PyRenderStats {
+    fn from(s: crate::pointcloud::RenderStats) -> Self {
+        Self {
+            nodes_rendered: s.nodes_rendered,
+            points_rendered: s.points_rendered,
+            cache_hits: s.cache_hits,
+            cache_misses: s.cache_misses,
+        }
+    }
+}
+
+/// Python-visible memory report for the point cloud cache.
+#[cfg(feature = "extension-module")]
+#[pyclass(module = "forge3d._forge3d", name = "MemoryReport")]
+pub struct PyMemoryReport {
+    #[pyo3(get)]
+    pub cache_used: usize,
+    #[pyo3(get)]
+    pub cache_budget: usize,
+    #[pyo3(get)]
+    pub utilization: f64,
+    #[pyo3(get)]
+    pub entry_count: usize,
+}
+
+#[cfg(feature = "extension-module")]
+#[pymethods]
+impl PyMemoryReport {
+    #[new]
+    #[pyo3(signature = (cache_used = 0, cache_budget = 0, utilization = 0.0, entry_count = 0))]
+    fn new(
+        cache_used: usize,
+        cache_budget: usize,
+        utilization: f64,
+        entry_count: usize,
+    ) -> Self {
+        Self { cache_used, cache_budget, utilization, entry_count }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "MemoryReport(used={}, budget={}, utilization={:.1}%, entries={})",
+            self.cache_used, self.cache_budget,
+            self.utilization * 100.0, self.entry_count,
+        )
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl From<crate::pointcloud::MemoryReport> for PyMemoryReport {
+    fn from(r: crate::pointcloud::MemoryReport) -> Self {
+        Self {
+            cache_used: r.cache_used,
+            cache_budget: r.cache_budget,
+            utilization: r.utilization,
+            entry_count: r.entry_count,
+        }
+    }
+}
+
 #[cfg(feature = "extension-module")]
 impl Frame {
     pub(crate) fn new(
@@ -4738,6 +4914,11 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHighlightStyle>()?;
     m.add_class::<PyLassoState>()?;
     m.add_class::<PyHeightfieldHit>()?;
+
+    // P2.1: Point Cloud GPU rendering path
+    m.add_class::<PyPointBuffer>()?;
+    m.add_class::<PyRenderStats>()?;
+    m.add_class::<PyMemoryReport>()?;
 
     // Feature C: Camera animation classes (Plan 1 MVP)
     m.add_class::<crate::animation::CameraAnimation>()?;

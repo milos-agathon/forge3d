@@ -1038,3 +1038,180 @@ class TestTerrainAnalysisApi:
         assert not hasattr(_native, "compute_slope_aspect_py")
         assert not hasattr(_native, "slope_aspect_compute")
         assert not hasattr(_native, "contour_extract")
+
+
+# ===========================================================================
+# Section 17: Point Cloud GPU Buffer (P2.1)
+# ===========================================================================
+class TestPointCloudGpuBuffer:
+    """P2.1: PointBuffer GPU interleaving, RenderStats, and MemoryReport."""
+
+    def test_point_buffer_registered(self):
+        """PointBuffer class is accessible from the native module."""
+        assert hasattr(_native, "PointBuffer")
+
+    def test_render_stats_registered(self):
+        """RenderStats class is accessible from the native module."""
+        assert hasattr(_native, "RenderStats")
+
+    def test_memory_report_registered(self):
+        """MemoryReport class is accessible from the native module."""
+        assert hasattr(_native, "MemoryReport")
+
+    # ---- PointBuffer GPU interleaving ----
+
+    def test_point_buffer_create_gpu_buffer_empty(self):
+        """Empty PointBuffer produces an empty GPU buffer."""
+        import numpy as np
+        pb = _native.PointBuffer([], None)
+        gpu = pb.create_gpu_buffer()
+        assert isinstance(gpu, np.ndarray)
+        assert gpu.dtype == np.float32
+        assert gpu.shape == (0,)
+
+    def test_point_buffer_create_gpu_buffer_positions_only(self):
+        """Positions without colors default to white (1.0, 1.0, 1.0)."""
+        import numpy as np
+        positions = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        pb = _native.PointBuffer(positions, None)
+        gpu = pb.create_gpu_buffer()
+        assert gpu.shape == (12,)  # 2 points * 6 floats
+        # Point 0: [1, 2, 3, 1, 1, 1]
+        assert gpu[0] == pytest.approx(1.0)
+        assert gpu[1] == pytest.approx(2.0)
+        assert gpu[2] == pytest.approx(3.0)
+        assert gpu[3] == pytest.approx(1.0)  # r = white
+        assert gpu[4] == pytest.approx(1.0)  # g = white
+        assert gpu[5] == pytest.approx(1.0)  # b = white
+        # Point 1: [4, 5, 6, 1, 1, 1]
+        assert gpu[6] == pytest.approx(4.0)
+        assert gpu[9] == pytest.approx(1.0)  # white default
+
+    def test_point_buffer_create_gpu_buffer_with_colors(self):
+        """Positions + colors are properly interleaved, colors normalised."""
+        import numpy as np
+        positions = [10.0, 20.0, 30.0]
+        colors = [255, 0, 128]  # one point: r=1.0, g=0.0, b≈0.502
+        pb = _native.PointBuffer(positions, colors)
+        gpu = pb.create_gpu_buffer()
+        assert gpu.shape == (6,)
+        assert gpu[0] == pytest.approx(10.0)
+        assert gpu[1] == pytest.approx(20.0)
+        assert gpu[2] == pytest.approx(30.0)
+        assert gpu[3] == pytest.approx(1.0)         # r
+        assert gpu[4] == pytest.approx(0.0)          # g
+        assert gpu[5] == pytest.approx(128 / 255.0, rel=1e-3)  # b
+
+    def test_point_buffer_gpu_byte_size(self):
+        """gpu_byte_size matches expected 6 floats * 4 bytes * point_count."""
+        pb = _native.PointBuffer([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], None)
+        assert pb.gpu_byte_size() == 2 * 6 * 4  # 48 bytes
+
+    def test_point_buffer_gpu_byte_size_empty(self):
+        """Empty buffer has zero GPU byte size."""
+        pb = _native.PointBuffer([], None)
+        assert pb.gpu_byte_size() == 0
+
+    def test_point_buffer_point_count(self):
+        """point_count property reflects the actual number of points."""
+        pb = _native.PointBuffer([0.0] * 9, None)
+        assert pb.point_count == 3
+
+    def test_point_buffer_byte_size(self):
+        """byte_size returns raw CPU storage size."""
+        pb = _native.PointBuffer([0.0] * 6, [0] * 6)
+        # 6 floats * 4 bytes + 6 color bytes = 30
+        assert pb.byte_size() == 30
+
+    def test_point_buffer_repr(self):
+        """PointBuffer has a useful repr."""
+        pb = _native.PointBuffer([1.0, 2.0, 3.0], None)
+        r = repr(pb)
+        assert "PointBuffer" in r
+        assert "point_count=1" in r
+
+    def test_point_buffer_validation_bad_positions(self):
+        """Positions length not divisible by 3 raises ValueError."""
+        with pytest.raises(ValueError, match="multiple of 3"):
+            _native.PointBuffer([1.0, 2.0], None)
+
+    def test_point_buffer_validation_bad_colors(self):
+        """Colors length mismatch raises ValueError."""
+        with pytest.raises(ValueError, match="does not match"):
+            _native.PointBuffer([1.0, 2.0, 3.0], [255, 0])
+
+    # ---- RenderStats ----
+
+    def test_render_stats_fields(self):
+        """RenderStats exposes all expected fields."""
+        rs = _native.RenderStats(
+            nodes_rendered=5,
+            points_rendered=100000,
+            cache_hits=3,
+            cache_misses=2,
+        )
+        assert rs.nodes_rendered == 5
+        assert rs.points_rendered == 100000
+        assert rs.cache_hits == 3
+        assert rs.cache_misses == 2
+
+    def test_render_stats_defaults(self):
+        """RenderStats defaults to zeros."""
+        rs = _native.RenderStats()
+        assert rs.nodes_rendered == 0
+        assert rs.points_rendered == 0
+        assert rs.cache_hits == 0
+        assert rs.cache_misses == 0
+
+    def test_render_stats_repr(self):
+        """RenderStats has a useful repr."""
+        rs = _native.RenderStats(nodes_rendered=1, points_rendered=42)
+        r = repr(rs)
+        assert "RenderStats" in r
+        assert "42" in r
+
+    # ---- MemoryReport ----
+
+    def test_memory_report_fields(self):
+        """MemoryReport exposes expected fields."""
+        mr = _native.MemoryReport(
+            cache_used=1024,
+            cache_budget=4096,
+            utilization=0.25,
+            entry_count=10,
+        )
+        assert mr.cache_used == 1024
+        assert mr.cache_budget == 4096
+        assert mr.utilization == pytest.approx(0.25)
+        assert mr.entry_count == 10
+
+    def test_memory_report_repr(self):
+        """MemoryReport repr includes utilization percentage."""
+        mr = _native.MemoryReport(
+            cache_used=512,
+            cache_budget=1024,
+            utilization=0.5,
+            entry_count=2,
+        )
+        r = repr(mr)
+        assert "MemoryReport" in r
+        assert "50.0%" in r
+
+    # ---- CPU fallback intact ----
+
+    def test_cpu_fallback_intact(self):
+        """Pure-Python PointCloudRenderer still importable and usable."""
+        from forge3d.pointcloud import PointCloudRenderer
+        renderer = PointCloudRenderer()
+        assert renderer.point_budget == 5_000_000
+
+    # ---- Fixture check ----
+
+    def test_fixture_exists(self):
+        """The MtStHelens.laz fixture file exists on disk."""
+        import os
+        fixture = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "assets", "lidar", "MtStHelens.laz",
+        )
+        assert os.path.isfile(fixture), f"Fixture missing: {fixture}"

@@ -800,3 +800,44 @@ class OnlineGuidingGrid:
     def update(self, x: int, y: int, bin_index: int, weight: float = ...) -> None: ...
     def pdf(self, x: int, y: int) -> np.ndarray: ...  # (B,) float32, sum=1
     def dims(self) -> Tuple[int, int, int]: ...
+
+# P2.1: Point Cloud GPU Rendering Path
+class PointBuffer:
+    """Point buffer with GPU interleaving support."""
+    point_count: int
+    def __init__(
+        self,
+        positions: Sequence[float],
+        colors: Optional[Sequence[int]] = ...,
+    ) -> None: ...
+    def byte_size(self) -> int: ...
+    def gpu_byte_size(self) -> int: ...
+    def create_gpu_buffer(self) -> np.ndarray: ...
+
+class RenderStats:
+    """Point cloud render statistics."""
+    nodes_rendered: int
+    points_rendered: int
+    cache_hits: int
+    cache_misses: int
+    def __init__(
+        self,
+        nodes_rendered: int = ...,
+        points_rendered: int = ...,
+        cache_hits: int = ...,
+        cache_misses: int = ...,
+    ) -> None: ...
+
+class MemoryReport:
+    """Point cloud cache memory report."""
+    cache_used: int
+    cache_budget: int
+    utilization: float
+    entry_count: int
+    def __init__(
+        self,
+        cache_used: int = ...,
+        cache_budget: int = ...,
+        utilization: float = ...,
+        entry_count: int = ...,
+    ) -> None: ...

@@ -15,4 +15,4 @@ pub use octree::{OctreeNode, OctreeKey, OctreeBounds};
 pub use copc::{CopcDataset, CopcHeader, CopcInfo};
 pub use ept::{EptDataset, EptSchema, EptInfo};
 pub use traversal::{PointCloudTraverser, VisibleNode, TraversalParams};
-pub use renderer::{PointCloudRenderer, PointBuffer, RenderStats};
+pub use renderer::{PointCloudRenderer, PointBuffer, RenderStats, MemoryReport};

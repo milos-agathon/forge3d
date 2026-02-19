@@ -16,6 +16,9 @@ pub struct PointBuffer {
     pub point_count: usize,
 }
 
+/// Number of floats per vertex in the interleaved GPU buffer: [x, y, z, r, g, b]
+const GPU_FLOATS_PER_VERTEX: usize = 6;
+
 impl PointBuffer {
     pub fn new() -> Self {
         Self { positions: Vec::new(), colors: None, point_count: 0 }
@@ -23,6 +26,51 @@ impl PointBuffer {
 
     pub fn byte_size(&self) -> usize {
         self.positions.len() * 4 + self.colors.as_ref().map_or(0, |c| c.len())
+    }
+
+    /// Create interleaved GPU vertex data: [x, y, z, r, g, b] per point.
+    ///
+    /// Positions are taken from `self.positions` (packed [x,y,z,x,y,z,...]).
+    /// Colors are taken from `self.colors` (packed [r,g,b,r,g,b,...] as u8, normalized to 0..1).
+    /// If no colors are present, defaults to white (1.0, 1.0, 1.0).
+    pub fn create_gpu_buffer(&self) -> Vec<f32> {
+        if self.point_count == 0 {
+            return Vec::new();
+        }
+        let mut out = Vec::with_capacity(self.point_count * GPU_FLOATS_PER_VERTEX);
+        let colors = self.colors.as_deref();
+
+        for i in 0..self.point_count {
+            let pi = i * 3;
+            // Position: x, y, z
+            let x = self.positions.get(pi).copied().unwrap_or(0.0);
+            let y = self.positions.get(pi + 1).copied().unwrap_or(0.0);
+            let z = self.positions.get(pi + 2).copied().unwrap_or(0.0);
+            out.push(x);
+            out.push(y);
+            out.push(z);
+
+            // Color: r, g, b (normalized from u8 or default white)
+            if let Some(cols) = colors {
+                let ci = i * 3;
+                let r = cols.get(ci).copied().unwrap_or(255) as f32 / 255.0;
+                let g = cols.get(ci + 1).copied().unwrap_or(255) as f32 / 255.0;
+                let b = cols.get(ci + 2).copied().unwrap_or(255) as f32 / 255.0;
+                out.push(r);
+                out.push(g);
+                out.push(b);
+            } else {
+                out.push(1.0);
+                out.push(1.0);
+                out.push(1.0);
+            }
+        }
+        out
+    }
+
+    /// Byte size of the interleaved GPU buffer that `create_gpu_buffer()` would produce.
+    pub fn gpu_byte_size(&self) -> usize {
+        self.point_count * GPU_FLOATS_PER_VERTEX * std::mem::size_of::<f32>()
     }
 }
 
@@ -42,6 +90,19 @@ pub struct RenderStats {
     pub points_rendered: u64,
     pub cache_hits: usize,
     pub cache_misses: usize,
+}
+
+/// Memory usage report for the point cloud cache.
+#[derive(Debug, Clone)]
+pub struct MemoryReport {
+    /// Bytes currently used by the LRU cache.
+    pub cache_used: usize,
+    /// Maximum cache budget in bytes.
+    pub cache_budget: usize,
+    /// Utilization as a fraction (0.0 .. 1.0).
+    pub utilization: f64,
+    /// Number of entries currently in the cache.
+    pub entry_count: usize,
 }
 
 /// Point cloud renderer
@@ -245,7 +306,28 @@ impl PointCloudRenderer {
     }
 
     pub fn stats(&self) -> &RenderStats { &self.stats }
-    
+
+    /// Cache budget in bytes.
+    pub fn cache_budget(&self) -> usize { self.cache_budget }
+
+    /// Current cache usage in bytes.
+    pub fn cache_used(&self) -> usize { self.cache_used }
+
+    /// Report on memory usage vs budget.
+    pub fn memory_report(&self) -> MemoryReport {
+        let utilization = if self.cache_budget > 0 {
+            self.cache_used as f64 / self.cache_budget as f64
+        } else {
+            0.0
+        };
+        MemoryReport {
+            cache_used: self.cache_used,
+            cache_budget: self.cache_budget,
+            utilization,
+            entry_count: self.cache.len(),
+        }
+    }
+
     pub fn clear_cache(&mut self) {
         self.cache.clear();
         self.cache_used = 0;
