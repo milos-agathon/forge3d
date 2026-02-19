@@ -26,9 +26,13 @@ pub trait PostFxEffect: Send + Sync {
     ) -> RenderResult<()>;
 
     /// Execute effect compute pass
+    ///
+    /// The `queue` handle is provided so effects can upload uniform data
+    /// (via `queue.write_buffer`) immediately before dispatching GPU work.
     fn execute(
         &self,
         device: &Device,
+        queue: &Queue,
         encoder: &mut CommandEncoder,
         input: &TextureView,
         output: &TextureView,

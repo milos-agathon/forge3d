@@ -95,6 +95,10 @@ pub struct Scene {
     ssr_enabled: bool,
     ssr_settings: crate::lighting::screen_space::SSRSettings,
 
+    // Bloom state tracking (P1.2)
+    bloom_enabled: bool,
+    bloom_config: crate::core::bloom::BloomConfig,
+
     // Toggle base terrain rendering
     terrain_enabled: bool,
 
@@ -1149,6 +1153,10 @@ impl Scene {
             ssr_enabled: false,
             ssr_settings: crate::lighting::screen_space::SSRSettings::default(),
 
+            // Bloom initially disabled with defaults (P1.2)
+            bloom_enabled: false,
+            bloom_config: crate::core::bloom::BloomConfig::default(),
+
             terrain_enabled: true,
 
             // B5: Planar reflections - initially disabled
@@ -1472,6 +1480,97 @@ impl Scene {
         dict.set_item("roughness_fade", self.ssr_settings.roughness_fade)?;
         dict.set_item("edge_fade", self.ssr_settings.edge_fade)?;
         dict.set_item("temporal_alpha", self.ssr_settings.temporal_alpha)?;
+        Ok(dict.into())
+    }
+
+    // ---- Bloom methods (P1.2) ----
+
+    /// Enable bloom post-processing.
+    #[pyo3(text_signature = "()")]
+    pub fn enable_bloom(&mut self) -> PyResult<()> {
+        self.bloom_enabled = true;
+        self.bloom_config.enabled = true;
+        Ok(())
+    }
+
+    /// Disable bloom post-processing.
+    #[pyo3(text_signature = "()")]
+    pub fn disable_bloom(&mut self) -> PyResult<()> {
+        self.bloom_enabled = false;
+        self.bloom_config.enabled = false;
+        Ok(())
+    }
+
+    /// Query whether bloom is enabled.
+    #[pyo3(text_signature = "()")]
+    pub fn is_bloom_enabled(&self) -> bool {
+        self.bloom_enabled
+    }
+
+    /// Apply bloom settings.
+    ///
+    /// Parameters
+    /// ----------
+    /// threshold : float
+    ///     Brightness threshold for bloom extraction (>= 0).
+    /// softness : float
+    ///     Threshold transition softness in [0, 1].
+    /// strength : float
+    ///     Bloom intensity when compositing (>= 0).
+    /// radius : float
+    ///     Blur radius multiplier (> 0).
+    #[pyo3(text_signature = "($self, threshold=1.5, softness=0.5, strength=0.3, radius=1.0)")]
+    pub fn set_bloom_settings(
+        &mut self,
+        threshold: Option<f32>,
+        softness: Option<f32>,
+        strength: Option<f32>,
+        radius: Option<f32>,
+    ) -> PyResult<()> {
+        if let Some(t) = threshold {
+            if t < 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "threshold must be >= 0",
+                ));
+            }
+            self.bloom_config.threshold = t;
+        }
+        if let Some(s) = softness {
+            if !(0.0..=1.0).contains(&s) {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "softness must be in [0, 1]",
+                ));
+            }
+            self.bloom_config.softness = s;
+        }
+        if let Some(st) = strength {
+            if st < 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "strength must be >= 0",
+                ));
+            }
+            self.bloom_config.strength = st;
+        }
+        if let Some(r) = radius {
+            if r <= 0.0 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "radius must be > 0",
+                ));
+            }
+            self.bloom_config.radius = r;
+        }
+        Ok(())
+    }
+
+    /// Return current bloom settings as a dict.
+    #[pyo3(text_signature = "()")]
+    pub fn get_bloom_settings(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("enabled", self.bloom_config.enabled)?;
+        dict.set_item("threshold", self.bloom_config.threshold)?;
+        dict.set_item("softness", self.bloom_config.softness)?;
+        dict.set_item("strength", self.bloom_config.strength)?;
+        dict.set_item("radius", self.bloom_config.radius)?;
         Ok(dict.into())
     }
 

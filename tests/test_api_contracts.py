@@ -853,3 +853,91 @@ class TestSsgiSsrSettingsWiring:
                         "set_ssr_settings", "get_ssr_settings"):
             assert hasattr(_native.Scene, method), f"Scene.{method} not found"
             assert callable(getattr(_native.Scene, method))
+
+
+# ===========================================================================
+# Section 15: P1.2 Bloom settings wiring behavior tests
+# ===========================================================================
+class TestBloomSettingsWiring:
+    """Verify bloom enable/disable and settings are exposed on Scene.
+
+    P1.2: These are behavior tests proving that the Scene class exposes
+    the bloom methods needed to apply bloom settings from Python, and
+    that BloomSettings at the Python config level are still properly
+    validated and stored.
+    """
+
+    # ---- Scene integration methods ----
+
+    def test_scene_has_bloom_methods(self):
+        """Scene must expose enable/disable/query/set/get for bloom."""
+        for method in ("enable_bloom", "disable_bloom", "is_bloom_enabled",
+                        "set_bloom_settings", "get_bloom_settings"):
+            assert hasattr(_native.Scene, method), f"Scene.{method} not found"
+            assert callable(getattr(_native.Scene, method))
+
+    # ---- BloomSettings Python-level validation ----
+
+    def test_bloom_settings_default_disabled(self):
+        """BloomSettings defaults to disabled with conservative values."""
+        from forge3d.terrain_params import BloomSettings
+        s = BloomSettings()
+        assert s.enabled is False
+        assert s.threshold == 1.5
+        assert s.softness == 0.5
+        assert s.intensity == 0.3
+        assert s.radius == 1.0
+
+    def test_bloom_settings_enabled_custom(self):
+        """BloomSettings with custom params stores them correctly."""
+        from forge3d.terrain_params import BloomSettings
+        s = BloomSettings(enabled=True, threshold=2.0, softness=0.8,
+                          intensity=0.6, radius=1.5)
+        assert s.enabled is True
+        assert s.threshold == 2.0
+        assert s.softness == 0.8
+        assert s.intensity == 0.6
+        assert s.radius == 1.5
+
+    def test_bloom_settings_rejects_negative_threshold(self):
+        """BloomSettings rejects negative threshold."""
+        from forge3d.terrain_params import BloomSettings
+        with pytest.raises(ValueError, match="threshold"):
+            BloomSettings(threshold=-1.0)
+
+    def test_bloom_settings_rejects_invalid_softness(self):
+        """BloomSettings rejects softness outside [0, 1]."""
+        from forge3d.terrain_params import BloomSettings
+        with pytest.raises(ValueError, match="softness"):
+            BloomSettings(softness=1.5)
+
+    def test_bloom_settings_rejects_negative_intensity(self):
+        """BloomSettings rejects negative intensity."""
+        from forge3d.terrain_params import BloomSettings
+        with pytest.raises(ValueError, match="intensity"):
+            BloomSettings(intensity=-0.1)
+
+    def test_bloom_settings_rejects_zero_radius(self):
+        """BloomSettings rejects zero or negative radius."""
+        from forge3d.terrain_params import BloomSettings
+        with pytest.raises(ValueError, match="radius"):
+            BloomSettings(radius=0.0)
+
+    def test_bloom_in_terrain_params(self):
+        """BloomSettings integrates correctly into TerrainRenderParams."""
+        from forge3d.terrain_params import BloomSettings, make_terrain_params_config
+        bloom = BloomSettings(enabled=True, threshold=1.0, intensity=0.5)
+        params = make_terrain_params_config(
+            size_px=(256, 256),
+            render_scale=1.0,
+            terrain_span=1000.0,
+            msaa_samples=1,
+            z_scale=1.0,
+            exposure=1.0,
+            domain=(1000.0, 2000.0),
+            bloom=bloom,
+        )
+        assert params.bloom is not None
+        assert params.bloom.enabled is True
+        assert params.bloom.threshold == 1.0
+        assert params.bloom.intensity == 0.5

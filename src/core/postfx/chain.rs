@@ -129,6 +129,7 @@ impl PostFxChain {
     pub fn execute_chain(
         &mut self,
         device: &Device,
+        queue: &Queue,
         encoder: &mut CommandEncoder,
         input: &TextureView,
         output: &TextureView,
@@ -168,6 +169,7 @@ impl PostFxChain {
 
                     effect.execute(
                         device,
+                        queue,
                         encoder,
                         effect_input,
                         output,
@@ -197,6 +199,7 @@ impl PostFxChain {
 
                     effect.execute(
                         device,
+                        queue,
                         encoder,
                         effect_input,
                         ping_pong_output,

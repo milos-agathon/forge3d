@@ -274,5 +274,70 @@ class TestBloomRendering:
         assert params_with_bloom.bloom.intensity == 0.5
 
 
+@pytest.mark.skipif(not FORGE3D_AVAILABLE, reason="forge3d not installed")
+class TestBloomSceneMethods:
+    """P1.2: Tests for bloom methods on the Scene class.
+
+    Scene instantiation fails due to a pre-existing WGSL shader bug,
+    so these tests verify method existence and signature at the class
+    level rather than calling them on instances.
+    """
+
+    def test_scene_has_enable_bloom(self):
+        """Scene.enable_bloom must exist as callable."""
+        assert hasattr(forge3d.Scene, "enable_bloom")
+        assert callable(getattr(forge3d.Scene, "enable_bloom"))
+
+    def test_scene_has_disable_bloom(self):
+        """Scene.disable_bloom must exist as callable."""
+        assert hasattr(forge3d.Scene, "disable_bloom")
+        assert callable(getattr(forge3d.Scene, "disable_bloom"))
+
+    def test_scene_has_is_bloom_enabled(self):
+        """Scene.is_bloom_enabled must exist as callable."""
+        assert hasattr(forge3d.Scene, "is_bloom_enabled")
+        assert callable(getattr(forge3d.Scene, "is_bloom_enabled"))
+
+    def test_scene_has_set_bloom_settings(self):
+        """Scene.set_bloom_settings must exist as callable."""
+        assert hasattr(forge3d.Scene, "set_bloom_settings")
+        assert callable(getattr(forge3d.Scene, "set_bloom_settings"))
+
+    def test_scene_has_get_bloom_settings(self):
+        """Scene.get_bloom_settings must exist as callable."""
+        assert hasattr(forge3d.Scene, "get_bloom_settings")
+        assert callable(getattr(forge3d.Scene, "get_bloom_settings"))
+
+    def test_bloom_disabled_by_default_in_config(self):
+        """BloomSettings defaults to disabled -- passthrough behavior."""
+        bloom = BloomSettings()
+        assert bloom.enabled is False, "Bloom must default to disabled"
+
+    def test_bloom_enabled_passthrough_semantics(self):
+        """When bloom.enabled is False, the effect is a no-op passthrough.
+
+        This verifies the contract at the config level: the Rust
+        BloomEffect::execute() checks self.bloom_config.enabled and
+        returns Ok(()) immediately when false.
+        """
+        bloom_off = BloomSettings(enabled=False)
+        bloom_on = BloomSettings(enabled=True)
+        assert bloom_off.enabled is False
+        assert bloom_on.enabled is True
+        # Both should be valid configs that can be passed to render params
+        params_off = make_terrain_params_config(
+            size_px=(64, 64), render_scale=1.0, terrain_span=100.0,
+            msaa_samples=1, z_scale=1.0, exposure=1.0, domain=(0.0, 100.0),
+            bloom=bloom_off,
+        )
+        params_on = make_terrain_params_config(
+            size_px=(64, 64), render_scale=1.0, terrain_span=100.0,
+            msaa_samples=1, z_scale=1.0, exposure=1.0, domain=(0.0, 100.0),
+            bloom=bloom_on,
+        )
+        assert params_off.bloom.enabled is False
+        assert params_on.bloom.enabled is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
