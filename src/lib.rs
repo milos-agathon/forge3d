@@ -48,7 +48,7 @@ use crate::renderer::readback::read_texture_tight;
 #[cfg(feature = "extension-module")]
 use crate::sdf::hybrid::Ray as HybridRay;
 #[cfg(feature = "extension-module")]
-use crate::sdf::py::PySdfScene;
+use crate::sdf::py::{PySdfPrimitive, PySdfScene, PySdfSceneBuilder};
 #[cfg(all(feature = "extension-module", feature = "images"))]
 use crate::util::exr_write;
 #[cfg(feature = "extension-module")]
@@ -4722,7 +4722,13 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(crate::lighting::py_bindings::sun_position_utc, m)?)?;
     // M1: AOV frame class
     m.add_class::<AovFrame>()?;
-    
+
+    // P0.3: Register previously-orphaned pyclasses
+    m.add_class::<Frame>()?;
+    m.add_class::<PySdfPrimitive>()?;
+    m.add_class::<PySdfScene>()?;
+    m.add_class::<PySdfSceneBuilder>()?;
+
     // Feature B: Picking system classes (Plan 1 + Plan 2 + Plan 3)
     m.add_class::<PyPickResult>()?;
     m.add_class::<PyTerrainQueryResult>()?;

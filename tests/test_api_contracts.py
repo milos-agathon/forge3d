@@ -10,7 +10,7 @@ Tested contracts:
   - Scene class exposes key feature-enable/disable methods
   - Key native classes are registered and accessible
   - TBN mesh functions are NOT yet exported (marked as future P0.4)
-  - Orphaned pyclass types (Frame, SdfPrimitive, etc.) are NOT registered
+  - Previously-orphaned pyclass types (Frame, SdfPrimitive, etc.) are now registered (P0.3)
 
 Each test is minimal and non-trivial: it asserts something specific about
 the current API surface, not just that imports succeed.
@@ -59,6 +59,11 @@ class TestNativeModuleSymbols:
         "ClipmapConfig",
         "ClipmapMesh",
         "SunPosition",
+        # P0.3: Previously-orphaned classes now registered
+        "Frame",
+        "SdfPrimitive",
+        "SdfScene",
+        "SdfSceneBuilder",
     ]
 
     @pytest.mark.parametrize("cls_name", EXPECTED_CLASSES)
@@ -297,38 +302,66 @@ class TestSceneMethodCount:
 
 
 # ===========================================================================
-# Section 4: Orphaned pyclass types NOT registered (negative tests)
+# Section 4: Previously-orphaned pyclass types now registered (P0.3)
 # ===========================================================================
-class TestOrphanedClassesNotRegistered:
-    """Verify that known orphaned pyclass types are NOT on the native module.
+class TestOrphanedClassesRegistered:
+    """Verify that previously-orphaned pyclass types are now registered.
 
-    These classes have #[pyclass] but no m.add_class registration.
-    When P0.3 registers them, these tests should be updated to expect them.
+    P0.3 added m.add_class registrations for Frame, SdfPrimitive,
+    SdfScene, and SdfSceneBuilder.
     """
 
-    def test_frame_not_registered(self):
-        """Frame has #[pyclass] but is NOT registered in pymodule."""
-        assert not hasattr(_native, "Frame"), (
-            "Frame is now registered -- update this test if intentional (P0.3)"
+    def test_frame_registered(self):
+        """Frame must be registered and importable."""
+        assert hasattr(_native, "Frame"), (
+            "Frame not found on _forge3d -- P0.3 registration missing"
         )
+        assert isinstance(getattr(_native, "Frame"), type)
 
-    def test_sdf_primitive_not_registered(self):
-        """SdfPrimitive has #[pyclass] but is NOT registered in pymodule."""
-        assert not hasattr(_native, "SdfPrimitive"), (
-            "SdfPrimitive is now registered -- update this test if intentional (P0.3)"
+    def test_sdf_primitive_registered(self):
+        """SdfPrimitive must be registered and importable."""
+        assert hasattr(_native, "SdfPrimitive"), (
+            "SdfPrimitive not found on _forge3d -- P0.3 registration missing"
         )
+        assert isinstance(getattr(_native, "SdfPrimitive"), type)
 
-    def test_sdf_scene_not_registered(self):
-        """SdfScene has #[pyclass] but is NOT registered in pymodule."""
-        assert not hasattr(_native, "SdfScene"), (
-            "SdfScene is now registered -- update this test if intentional (P0.3)"
+    def test_sdf_scene_registered(self):
+        """SdfScene must be registered and importable."""
+        assert hasattr(_native, "SdfScene"), (
+            "SdfScene not found on _forge3d -- P0.3 registration missing"
         )
+        assert isinstance(getattr(_native, "SdfScene"), type)
 
-    def test_sdf_scene_builder_not_registered(self):
-        """SdfSceneBuilder has #[pyclass] but is NOT registered in pymodule."""
-        assert not hasattr(_native, "SdfSceneBuilder"), (
-            "SdfSceneBuilder is now registered -- update this test if intentional (P0.3)"
+    def test_sdf_scene_builder_registered(self):
+        """SdfSceneBuilder must be registered and importable."""
+        assert hasattr(_native, "SdfSceneBuilder"), (
+            "SdfSceneBuilder not found on _forge3d -- P0.3 registration missing"
         )
+        assert isinstance(getattr(_native, "SdfSceneBuilder"), type)
+
+    def test_sdf_scene_constructible(self):
+        """SdfScene() must be constructible with no arguments."""
+        scene = _native.SdfScene()
+        assert scene.primitive_count() == 0
+        assert scene.node_count() == 0
+
+    def test_sdf_scene_builder_constructible(self):
+        """SdfSceneBuilder() must be constructible with no arguments."""
+        builder = _native.SdfSceneBuilder()
+        assert builder is not None
+
+    def test_sdf_primitive_sphere_constructible(self):
+        """SdfPrimitive.sphere() classmethod must work."""
+        prim = _native.SdfPrimitive.sphere((0.0, 0.0, 0.0), 1.0, 0)
+        assert prim.material_id == 0
+
+    def test_sdf_scene_builder_round_trip(self):
+        """SdfSceneBuilder can add a sphere and build a scene."""
+        builder = _native.SdfSceneBuilder()
+        node_id = builder.add_sphere((0.0, 0.0, 0.0), 1.0, 0)
+        assert isinstance(node_id, int)
+        scene = builder.build()
+        assert scene.primitive_count() >= 1
 
 
 # ===========================================================================
