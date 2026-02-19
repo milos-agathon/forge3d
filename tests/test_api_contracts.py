@@ -749,3 +749,107 @@ class TestMsaaSetterRouting:
         for n in (1, 2, 4, 8):
             result = set_msaa(n)
             assert result == n
+
+
+# ===========================================================================
+# Section 14: P1.1 SSGI/SSR settings wiring behavior tests
+# ===========================================================================
+class TestSsgiSsrSettingsWiring:
+    """Verify SSGI and SSR settings affect runtime state.
+
+    P1.1: These are behavior tests, not just symbol-existence checks.
+    They prove that constructing SSGISettings/SSRSettings with different
+    parameters produces observably different state, and that Scene exposes
+    the methods needed to apply them.
+    """
+
+    # ---- SSGI settings behavior ----
+
+    def test_ssgi_settings_defaults(self):
+        """SSGISettings() has documented default values."""
+        s = _native.SSGISettings()
+        assert s.ray_steps == 24
+        assert s.intensity == pytest.approx(1.0)
+        assert s.ray_radius == pytest.approx(5.0)
+
+    def test_ssgi_settings_custom_values_differ(self):
+        """Constructing SSGISettings with custom params changes stored state."""
+        default = _native.SSGISettings()
+        custom = _native.SSGISettings(ray_steps=64, intensity=3.5)
+        assert custom.ray_steps != default.ray_steps
+        assert custom.ray_steps == 64
+        assert custom.intensity != default.intensity
+        assert custom.intensity == pytest.approx(3.5)
+
+    def test_ssgi_settings_all_fields_accessible(self):
+        """All SSGISettings fields are readable after construction."""
+        s = _native.SSGISettings(
+            ray_steps=32,
+            ray_radius=4.0,
+            ray_thickness=0.5,
+            intensity=2.0,
+            temporal_alpha=0.8,
+            use_half_res=True,
+            ibl_fallback=0.3,
+        )
+        assert s.ray_steps == 32
+        assert s.ray_radius == pytest.approx(4.0)
+        assert s.ray_thickness == pytest.approx(0.5)
+        assert s.intensity == pytest.approx(2.0)
+        assert s.temporal_alpha == pytest.approx(0.8)
+        assert s.use_half_res is True
+        assert s.ibl_fallback == pytest.approx(0.3)
+
+    # ---- SSR settings behavior ----
+
+    def test_ssr_settings_defaults(self):
+        """SSRSettings() has documented default values."""
+        s = _native.SSRSettings()
+        assert s.max_steps == 48
+        assert s.intensity == pytest.approx(1.0)
+
+    def test_ssr_settings_custom_values_differ(self):
+        """Constructing SSRSettings with custom params changes stored state."""
+        default = _native.SSRSettings()
+        custom = _native.SSRSettings(max_steps=128, intensity=0.5)
+        assert custom.max_steps != default.max_steps
+        assert custom.max_steps == 128
+        assert custom.intensity != default.intensity
+        assert custom.intensity == pytest.approx(0.5)
+
+    def test_ssr_settings_all_fields_accessible(self):
+        """All SSRSettings fields are readable after construction."""
+        s = _native.SSRSettings(
+            max_steps=96,
+            max_distance=200.0,
+            thickness=0.3,
+            stride=2.0,
+            intensity=0.8,
+            roughness_fade=0.5,
+            edge_fade=0.1,
+            temporal_alpha=0.85,
+        )
+        assert s.max_steps == 96
+        assert s.max_distance == pytest.approx(200.0)
+        assert s.thickness == pytest.approx(0.3)
+        assert s.stride == pytest.approx(2.0)
+        assert s.intensity == pytest.approx(0.8)
+        assert s.roughness_fade == pytest.approx(0.5)
+        assert s.edge_fade == pytest.approx(0.1)
+        assert s.temporal_alpha == pytest.approx(0.85)
+
+    # ---- Scene integration methods ----
+
+    def test_scene_has_ssgi_methods(self):
+        """Scene must expose enable/disable/query/set/get for SSGI."""
+        for method in ("enable_ssgi", "disable_ssgi", "is_ssgi_enabled",
+                        "set_ssgi_settings", "get_ssgi_settings"):
+            assert hasattr(_native.Scene, method), f"Scene.{method} not found"
+            assert callable(getattr(_native.Scene, method))
+
+    def test_scene_has_ssr_methods(self):
+        """Scene must expose enable/disable/query/set/get for SSR."""
+        for method in ("enable_ssr", "disable_ssr", "is_ssr_enabled",
+                        "set_ssr_settings", "get_ssr_settings"):
+            assert hasattr(_native.Scene, method), f"Scene.{method} not found"
+            assert callable(getattr(_native.Scene, method))

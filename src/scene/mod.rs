@@ -89,6 +89,12 @@ pub struct Scene {
     ssao: SsaoResources,
     ssao_enabled: bool,
 
+    // P1.1: SSGI/SSR state tracking (settings only, no render pipeline integration)
+    ssgi_enabled: bool,
+    ssgi_settings: crate::lighting::screen_space::SSGISettings,
+    ssr_enabled: bool,
+    ssr_settings: crate::lighting::screen_space::SSRSettings,
+
     // Toggle base terrain rendering
     terrain_enabled: bool,
 
@@ -1136,6 +1142,13 @@ impl Scene {
             last_uniforms: uniforms,
             ssao,
             ssao_enabled: false,
+
+            // P1.1: SSGI/SSR initially disabled with defaults
+            ssgi_enabled: false,
+            ssgi_settings: crate::lighting::screen_space::SSGISettings::default(),
+            ssr_enabled: false,
+            ssr_settings: crate::lighting::screen_space::SSRSettings::default(),
+
             terrain_enabled: true,
 
             // B5: Planar reflections - initially disabled
@@ -1355,6 +1368,109 @@ impl Scene {
     #[pyo3(text_signature = "()")]
     pub fn get_ssao_parameters(&self) -> (f32, f32, f32) {
         self.ssao.params()
+    }
+
+    // ---- P1.1: SSGI methods ----
+
+    /// Enable screen-space global illumination.
+    #[pyo3(text_signature = "()")]
+    pub fn enable_ssgi(&mut self) -> PyResult<()> {
+        self.ssgi_enabled = true;
+        Ok(())
+    }
+
+    /// Disable screen-space global illumination.
+    #[pyo3(text_signature = "()")]
+    pub fn disable_ssgi(&mut self) {
+        self.ssgi_enabled = false;
+    }
+
+    /// Query whether SSGI is enabled.
+    #[pyo3(text_signature = "()")]
+    pub fn is_ssgi_enabled(&self) -> bool {
+        self.ssgi_enabled
+    }
+
+    /// Apply SSGI settings. Validates before storing.
+    ///
+    /// Parameters
+    /// ----------
+    /// settings : SSGISettings
+    ///     The SSGI configuration to apply.
+    #[pyo3(text_signature = "($self, settings)")]
+    pub fn set_ssgi_settings(
+        &mut self,
+        settings: crate::lighting::py_bindings::PySSGISettings,
+    ) -> PyResult<()> {
+        let native = settings.to_native()?;
+        self.ssgi_settings = native;
+        Ok(())
+    }
+
+    /// Return current SSGI settings as a dict.
+    #[pyo3(text_signature = "()")]
+    pub fn get_ssgi_settings(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("ray_steps", self.ssgi_settings.ray_steps)?;
+        dict.set_item("ray_radius", self.ssgi_settings.ray_radius)?;
+        dict.set_item("ray_thickness", self.ssgi_settings.ray_thickness)?;
+        dict.set_item("intensity", self.ssgi_settings.intensity)?;
+        dict.set_item("temporal_alpha", self.ssgi_settings.temporal_alpha)?;
+        dict.set_item("use_half_res", self.ssgi_settings.use_half_res != 0)?;
+        dict.set_item("ibl_fallback", self.ssgi_settings.ibl_fallback)?;
+        Ok(dict.into())
+    }
+
+    // ---- P1.1: SSR methods ----
+
+    /// Enable screen-space reflections.
+    #[pyo3(text_signature = "()")]
+    pub fn enable_ssr(&mut self) -> PyResult<()> {
+        self.ssr_enabled = true;
+        Ok(())
+    }
+
+    /// Disable screen-space reflections.
+    #[pyo3(text_signature = "()")]
+    pub fn disable_ssr(&mut self) {
+        self.ssr_enabled = false;
+    }
+
+    /// Query whether SSR is enabled.
+    #[pyo3(text_signature = "()")]
+    pub fn is_ssr_enabled(&self) -> bool {
+        self.ssr_enabled
+    }
+
+    /// Apply SSR settings. Validates before storing.
+    ///
+    /// Parameters
+    /// ----------
+    /// settings : SSRSettings
+    ///     The SSR configuration to apply.
+    #[pyo3(text_signature = "($self, settings)")]
+    pub fn set_ssr_settings(
+        &mut self,
+        settings: crate::lighting::py_bindings::PySSRSettings,
+    ) -> PyResult<()> {
+        let native = settings.to_native()?;
+        self.ssr_settings = native;
+        Ok(())
+    }
+
+    /// Return current SSR settings as a dict.
+    #[pyo3(text_signature = "()")]
+    pub fn get_ssr_settings(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("max_steps", self.ssr_settings.max_steps)?;
+        dict.set_item("max_distance", self.ssr_settings.max_distance)?;
+        dict.set_item("thickness", self.ssr_settings.thickness)?;
+        dict.set_item("stride", self.ssr_settings.stride)?;
+        dict.set_item("intensity", self.ssr_settings.intensity)?;
+        dict.set_item("roughness_fade", self.ssr_settings.roughness_fade)?;
+        dict.set_item("edge_fade", self.ssr_settings.edge_fade)?;
+        dict.set_item("temporal_alpha", self.ssr_settings.temporal_alpha)?;
+        Ok(dict.into())
     }
 
     /// Render the current frame to a PNG on disk.
