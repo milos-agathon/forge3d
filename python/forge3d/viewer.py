@@ -12,14 +12,8 @@ import socket
 import subprocess
 import sys
 import time
-import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
-
-try:
-    from . import _forge3d  # type: ignore[attr-defined]
-except ImportError:
-    _forge3d = None
 
 # Import Renderer and MSAA config with fallbacks for standalone testing
 try:
@@ -31,20 +25,24 @@ except ImportError:
 
 
 def set_msaa(samples: int) -> int:
-    """Set the default MSAA sample count for newly created renderers."""
+    """Set the default MSAA sample count for newly created renderers.
+
+    Sets the class-level default on ``Renderer`` so that future instances
+    pick up the requested sample count.
+
+    Note (P0.2): a previous version probed for a module-level
+    ``_forge3d.set_msaa_samples`` function.  That function never existed
+    -- ``set_msaa_samples`` is an *instance* method on ``Scene``
+    (src/scene/mod.rs), not a free function.  The dead probe has been
+    removed.  Per-scene MSAA is configured via ``Scene.set_msaa_samples``
+    after construction; this helper only sets the *default* for new
+    ``Renderer`` instances.
+    """
     if samples not in _SUPPORTED_MSAA:
         raise ValueError(f"Unsupported MSAA sample count: {samples} (allowed: {_SUPPORTED_MSAA})")
 
     if Renderer is not None:
         Renderer._set_default_msaa(samples)
-
-    if _forge3d is not None:
-        setter = getattr(_forge3d, "set_msaa_samples", None)
-        if setter is not None:
-            try:
-                setter(samples)
-            except Exception as exc:  # pragma: no cover - optional binding path
-                warnings.warn(f"forge3d.set_msaa_samples failed: {exc}")
 
     return samples
 

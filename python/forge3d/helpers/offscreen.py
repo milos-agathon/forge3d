@@ -12,10 +12,23 @@ import numpy as np
 
 from ..path_tracing import render_rgba as _fallback_render_rgba
 
+# Resolve the native Scene class for isinstance checks.
+# Scene.render_rgba() is an *instance* method (src/scene/mod.rs:1721),
+# NOT a module-level function.  The old code probed for a module-level
+# ``_forge3d.render_rgba`` which never existed, so the native path was
+# unreachable.  Fixed in P0.2.
 try:
-    from .. import _forge3d as _native  # type: ignore[attr-defined]
+    from .._native import get_native_module as _get_native_module
+    _native_mod = _get_native_module()
+    _NativeScene = getattr(_native_mod, "Scene", None) if _native_mod else None
 except Exception:
-    _native = None  # type: ignore
+    _native_mod = None
+    _NativeScene = None
+
+
+def _is_native_scene(obj: Any) -> bool:
+    """Return True if *obj* is a native (Rust/PyO3) Scene instance."""
+    return _NativeScene is not None and isinstance(obj, _NativeScene)
 
 
 def render_offscreen_rgba(
@@ -30,21 +43,30 @@ def render_offscreen_rgba(
 ) -> np.ndarray:
     """Render an RGBA image offscreen and return a numpy array.
 
-    Uses the native module when available; otherwise falls back to the
-    deterministic CPU path tracer for tests and notebooks.
+    Routing logic (P0.2):
+      1. If *scene* is a native ``Scene`` instance, call
+         ``scene.render_rgba()`` which renders at the resolution the
+         Scene was constructed with and returns an ``(H, W, 4)`` uint8
+         numpy array.  The *width*/*height* parameters are **ignored**
+         in this path because the native Scene owns its framebuffer
+         dimensions (set at construction time).
+      2. Otherwise, fall back to the deterministic CPU path tracer
+         (``forge3d.path_tracing.render_rgba``), which accepts
+         arbitrary width/height.
     """
     w = int(width); h = int(height)
     if w <= 0 or h <= 0:
         raise ValueError("width and height must be positive")
 
-    # Prefer native path if present (headless offscreen), else Python fallback
-    if _native is not None and hasattr(_native, "render_rgba"):
+    # --- Native path: Scene.render_rgba() is an instance method. ---
+    if _is_native_scene(scene):
         try:
-            return _native.render_rgba(w, h, scene=scene, camera=camera, seed=int(seed), frames=int(frames), denoiser=str(denoiser))
+            return scene.render_rgba()
         except Exception:
-            # Fall back silently to Python path
+            # Fall back to Python path on any GPU/driver error.
             pass
 
+    # --- Fallback: deterministic CPU path tracer. ---
     return _fallback_render_rgba(w, h, scene=scene, camera=camera, seed=int(seed), frames=int(frames), denoiser=str(denoiser))
 
 

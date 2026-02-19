@@ -519,3 +519,115 @@ class TestNativeModuleSymbolCount:
             f"Native module has only {len(public_symbols)} public symbols; "
             f"expected at least 100. Symbols may have been removed accidentally."
         )
+
+
+# ===========================================================================
+# Section 12: P0.2 Offscreen render routing contracts
+# ===========================================================================
+class TestOffscreenRenderRouting:
+    """Verify that render_offscreen_rgba routes correctly based on scene type.
+
+    P0.2 fix: The old code probed for a nonexistent module-level
+    ``_forge3d.render_rgba`` function, so the native path was never
+    reachable.  The corrected code checks whether ``scene`` is a native
+    ``Scene`` instance and calls ``scene.render_rgba()`` directly.
+    """
+
+    def test_native_scene_detected_correctly(self):
+        """_is_native_scene returns True for native Scene instances."""
+        from forge3d.helpers.offscreen import _is_native_scene, _NativeScene
+        # _NativeScene should be the native Scene class when extension is loaded
+        assert _NativeScene is not None, (
+            "_NativeScene is None -- native module failed to load"
+        )
+        assert _NativeScene is _native.Scene, (
+            "_NativeScene should be the same class as _native.Scene"
+        )
+
+    def test_non_native_scene_rejected(self):
+        """_is_native_scene returns False for non-native objects."""
+        from forge3d.helpers.offscreen import _is_native_scene
+        assert not _is_native_scene(None)
+        assert not _is_native_scene("not a scene")
+        assert not _is_native_scene(42)
+        assert not _is_native_scene({"fake": "scene"})
+
+    def test_fallback_used_when_no_scene(self):
+        """render_offscreen_rgba uses fallback when scene is None."""
+        from forge3d.helpers.offscreen import render_offscreen_rgba
+        import numpy as np
+        # With scene=None, fallback CPU path tracer is used.
+        # It returns a valid (H, W, 4) uint8 array.
+        result = render_offscreen_rgba(32, 32, scene=None)
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (32, 32, 4)
+        assert result.dtype == np.uint8
+
+    def test_fallback_used_for_non_native_scene(self):
+        """render_offscreen_rgba uses fallback for non-native scene objects."""
+        from forge3d.helpers.offscreen import render_offscreen_rgba
+        import numpy as np
+        # Passing a plain dict (not a native Scene) triggers fallback.
+        result = render_offscreen_rgba(16, 16, scene={"type": "fake"})
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (16, 16, 4)
+        assert result.dtype == np.uint8
+
+    def test_render_rgba_is_instance_method_not_module_function(self):
+        """render_rgba must be on Scene instances, NOT on the native module.
+
+        This is the root cause of the P0.2 bug: the old offscreen code
+        checked ``hasattr(_native, 'render_rgba')`` which was always
+        False because render_rgba is a Scene method, not a module-level
+        function.
+        """
+        # Module-level render_rgba must NOT exist
+        assert not hasattr(_native, "render_rgba"), (
+            "_forge3d.render_rgba should not exist at module level; "
+            "it is an instance method on Scene"
+        )
+        # Instance-level render_rgba MUST exist
+        assert hasattr(_native.Scene, "render_rgba"), (
+            "Scene.render_rgba must exist as an instance method"
+        )
+
+
+# ===========================================================================
+# Section 13: P0.2 MSAA setter routing contracts
+# ===========================================================================
+class TestMsaaSetterRouting:
+    """Verify that set_msaa_samples is NOT a module-level function.
+
+    P0.2 fix: viewer.py previously probed for ``_forge3d.set_msaa_samples``
+    at module level, which never existed.  ``set_msaa_samples`` is an
+    instance method on ``Scene``.  The dead probe has been removed.
+    """
+
+    def test_set_msaa_samples_not_on_module(self):
+        """_forge3d must NOT have a module-level set_msaa_samples."""
+        assert not hasattr(_native, "set_msaa_samples"), (
+            "_forge3d.set_msaa_samples should not exist at module level; "
+            "it is an instance method on Scene"
+        )
+
+    def test_set_msaa_samples_on_scene_class(self):
+        """Scene class must have set_msaa_samples as instance method."""
+        assert hasattr(_native.Scene, "set_msaa_samples"), (
+            "Scene.set_msaa_samples must exist as an instance method"
+        )
+
+    def test_viewer_set_msaa_validates_samples(self):
+        """viewer.set_msaa rejects invalid sample counts."""
+        from forge3d.viewer import set_msaa
+        import pytest as _pt
+        with _pt.raises(ValueError, match="Unsupported MSAA"):
+            set_msaa(3)
+        with _pt.raises(ValueError, match="Unsupported MSAA"):
+            set_msaa(16)
+
+    def test_viewer_set_msaa_accepts_valid_samples(self):
+        """viewer.set_msaa accepts standard MSAA sample counts."""
+        from forge3d.viewer import set_msaa
+        for n in (1, 2, 4, 8):
+            result = set_msaa(n)
+            assert result == n
