@@ -18,9 +18,6 @@ the current API surface, not just that imports succeed.
 
 from __future__ import annotations
 
-import inspect
-import sys
-
 import pytest
 
 import forge3d as f3d

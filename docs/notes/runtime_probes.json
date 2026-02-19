@@ -1,4 +1,5 @@
 {
+  "_regeneration": "python -c \"import forge3d._forge3d as f; ...\" -- see tests/test_api_contracts.py for authoritative probes",
   "generated_utc": "2026-02-19T08:47:08Z",
   "forge3d_version": "1.12.1",
   "python_version": "3.13.5",

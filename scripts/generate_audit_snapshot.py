@@ -5,8 +5,8 @@ Generate a reproducible audit snapshot for forge3d.
 This script generates three sections intended to be pasted into an audit doc:
 
 1. Codebase Scale Overview
-3. Python Wrapper Classification
-5. Duplicate Implementations (Rust vs Python)
+2. Python Wrapper Classification
+3. Duplicate Implementations (Rust vs Python)
 
 It is intentionally evidence-first: each section is derived from repository state
 instead of manual estimates.
