@@ -89,7 +89,7 @@ pub struct Scene {
     ssao: SsaoResources,
     ssao_enabled: bool,
 
-    // P1.1: SSGI/SSR state tracking (settings only, no render pipeline integration)
+    // SSGI/SSR state tracking
     ssgi_enabled: bool,
     ssgi_settings: crate::lighting::screen_space::SSGISettings,
     ssr_enabled: bool,
@@ -1143,7 +1143,7 @@ impl Scene {
             ssao,
             ssao_enabled: false,
 
-            // P1.1: SSGI/SSR initially disabled with defaults
+            // SSGI/SSR initially disabled with defaults
             ssgi_enabled: false,
             ssgi_settings: crate::lighting::screen_space::SSGISettings::default(),
             ssr_enabled: false,
@@ -1370,7 +1370,7 @@ impl Scene {
         self.ssao.params()
     }
 
-    // ---- P1.1: SSGI methods ----
+    // ---- SSGI methods ----
 
     /// Enable screen-space global illumination.
     #[pyo3(text_signature = "()")]
@@ -1381,8 +1381,9 @@ impl Scene {
 
     /// Disable screen-space global illumination.
     #[pyo3(text_signature = "()")]
-    pub fn disable_ssgi(&mut self) {
+    pub fn disable_ssgi(&mut self) -> PyResult<()> {
         self.ssgi_enabled = false;
+        Ok(())
     }
 
     /// Query whether SSGI is enabled.
@@ -1421,7 +1422,7 @@ impl Scene {
         Ok(dict.into())
     }
 
-    // ---- P1.1: SSR methods ----
+    // ---- SSR methods ----
 
     /// Enable screen-space reflections.
     #[pyo3(text_signature = "()")]
@@ -1432,8 +1433,9 @@ impl Scene {
 
     /// Disable screen-space reflections.
     #[pyo3(text_signature = "()")]
-    pub fn disable_ssr(&mut self) {
+    pub fn disable_ssr(&mut self) -> PyResult<()> {
         self.ssr_enabled = false;
+        Ok(())
     }
 
     /// Query whether SSR is enabled.
