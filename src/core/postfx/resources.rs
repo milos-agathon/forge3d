@@ -48,6 +48,16 @@ impl PostFxResourcePool {
         self.ping_pong_views.get(pair_index)?.get(prev_index)
     }
 
+    /// Pool width in pixels.
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Pool height in pixels.
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
     /// Swap ping-pong buffers
     pub fn swap_ping_pong(&mut self) {
         self.ping_pong_index = (self.ping_pong_index + 1) % 2;

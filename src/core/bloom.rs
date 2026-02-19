@@ -581,15 +581,13 @@ impl PostFxEffect for BloomEffect {
             bytemuck::bytes_of(&composite_uniforms),
         );
 
-        // Calculate workgroup counts (16x16 workgroups matching shader)
-        // Use input texture dimensions; fall back to a safe default.
-        // The resource pool tracks width/height but does not expose them,
-        // so we use a fixed dispatch that the shaders clamp via
-        // textureDimensions. We conservatively dispatch for 4096x4096 and
-        // let the shader early-return for out-of-bounds invocations.
-        // TODO: expose pool width/height or derive from input texture.
-        let workgroups_x = (4096 + 15) / 16;
-        let workgroups_y = (4096 + 15) / 16;
+        // Calculate workgroup counts (16x16 workgroups matching shader).
+        // Derive from resource pool dimensions; shaders clamp via
+        // textureDimensions for out-of-bounds invocations.
+        let pool_w = resource_pool.width().max(1);
+        let pool_h = resource_pool.height().max(1);
+        let workgroups_x = (pool_w + 15) / 16;
+        let workgroups_y = (pool_h + 15) / 16;
 
         // --- Pass 1: Bright-pass extraction ---
         {
