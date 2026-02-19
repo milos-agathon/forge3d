@@ -3,10 +3,9 @@
 # Exists to mirror runtime signatures for IDEs and keep tooling aligned
 # RELEVANT FILES: python/forge3d/__init__.py, python/forge3d/config.py, src/render/params.rs, examples/terrain_demo.py
 from __future__ import annotations
-from typing import Iterable, Tuple, Optional, Sequence, Any, overload, Union, Dict, Literal, Mapping, List
+from typing import Tuple, Optional, Sequence, Any, Dict, Literal, Mapping
 import os
 import numpy as np
-from . import geometry
 from .terrain_params import (
     LightSettings,
     IblSettings,
