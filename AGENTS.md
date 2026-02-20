@@ -44,3 +44,20 @@
 - Constructor validation for `PointBuffer` (positions length divisible by 3, colors matching point count) prevents downstream GPU buffer mismatches. Always validate at the boundary.
 - The `renderer.rs` file (353 lines) is slightly over the 300-line guideline due to pre-existing duplication between `load_copc_points` and `load_ept_points`. A future refactor could extract a common `load_points_generic` helper.
 - `MemoryReport` separates observation from policy: it reports cache_used, cache_budget, utilization, and entry_count without deciding what to do about high utilization. This keeps the renderer testable without GPU access.
+
+## P2.2: COPC LAZ Decompression Feature Gate (2026-02-20)
+
+- The `laz` crate is a transitive dependency via `las = { features = ["laz"] }` but must be added as a direct optional dependency (`laz = { version = "0.9", optional = true }`) to use its API directly in `copc_decode.rs`. A marker feature alone (`copc_laz = []`) is insufficient since `use laz::...` requires the crate to be a direct dependency.
+- When splitting a file to stay under 300 lines, the natural boundary for COPC is dataset/hierarchy (copc.rs) vs chunk decoding/parsing (copc_decode.rs). The decode module uses `pub(crate)` visibility to expose `decode_chunk` and `parse_uncompressed_points` only within the crate.
+- For feature-gated code using `#[cfg(feature = "copc_laz")]`, the non-feature path must explicitly suppress unused-variable warnings using `let _ = (data, point_count, ...)` or the compiler will warn about unused parameters.
+- The COPC file format stores LAZ compression parameters in a VLR with user_id "laszip encoded" and record_id 22204. The existing code only read the first VLR (COPC info); the fix iterates all `num_vlrs` VLRs to also capture the LAZ VLR.
+- The MtStHelens.laz fixture uses NAD83 State Plane Washington South coordinates (US feet), not UTM. Always check actual coordinate values before writing range assertions in tests.
+- When testing LAZ decompression end-to-end from Python, the `las::Reader` already decompresses LAZ transparently. Exposing a `read_laz_points_info()` PyO3 function that returns (count, coords, has_rgb) provides a lightweight fixture validation without requiring a COPC-specific fixture file.
+
+## P2.3: Labels Python Bindings (2026-02-20)
+
+- For PyO3 bindings of simple config structs like `LabelStyle`, follow the established `PySelectionStyle`/`PyHighlightStyle` pattern: separate `#[pyclass]` struct with `#[pyo3(get, set)]` on each field, a `#[new]` constructor with default values matching the Rust `Default` impl, bidirectional `From` conversions, and `__repr__`.
+- When exposing `[f32; 4]` color arrays to Python, convert to/from tuples `(f32, f32, f32, f32)` rather than `Vec<f32>` for consistency with other bindings (e.g., `PySelectionStyle.color`). Same for `[f32; 2]` offsets.
+- For `f32::MAX` default values in Rust, use the literal value `3.4028235e38` in the `#[pyo3(signature)]` since PyO3 doesn't evaluate Rust constants in signature defaults.
+- Nested PyO3 classes (e.g., `PyLabelFlags` inside `PyLabelStyle`) must also be registered with `m.add_class::<>()` and derive `Clone`. When used as a field in another `#[pyclass]`, the `#[pyo3(get, set)]` attribute works seamlessly.
+- New `py_bindings.rs` submodules should be declared unconditionally in `mod.rs` (not behind `cfg(feature)`), with the `#[cfg(feature = "extension-module")]` guard on individual items inside the file. This matches the pattern used by `lighting/py_bindings.rs` and `terrain/cog/py_bindings.rs`.

@@ -818,3 +818,50 @@ class PointBuffer:
         bounds_min: Sequence[float],
         bounds_max: Sequence[float],
     ) -> np.ndarray: ...
+
+# P2.3: Label style bindings
+class LabelFlags:
+    underline: bool
+    small_caps: bool
+    leader: bool
+    def __init__(
+        self,
+        underline: bool = ...,
+        small_caps: bool = ...,
+        leader: bool = ...,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class LabelStyle:
+    size: float
+    color: Tuple[float, float, float, float]
+    halo_color: Tuple[float, float, float, float]
+    halo_width: float
+    priority: int
+    min_depth: float
+    max_depth: float
+    depth_fade: float
+    min_zoom: float
+    max_zoom: float
+    rotation: float
+    offset: Tuple[float, float]
+    flags: LabelFlags
+    horizon_fade_angle: float
+    def __init__(
+        self,
+        size: float = ...,
+        color: Tuple[float, float, float, float] = ...,
+        halo_color: Tuple[float, float, float, float] = ...,
+        halo_width: float = ...,
+        priority: int = ...,
+        min_depth: float = ...,
+        max_depth: float = ...,
+        depth_fade: float = ...,
+        min_zoom: float = ...,
+        max_zoom: float = ...,
+        rotation: float = ...,
+        offset: Tuple[float, float] = ...,
+        flags: Optional[LabelFlags] = ...,
+        horizon_fade_angle: float = ...,
+    ) -> None: ...
+    def __repr__(self) -> str: ...

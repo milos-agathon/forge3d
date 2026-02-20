@@ -21,6 +21,7 @@ pub mod line_label;
 mod projection;
 pub mod rtree;
 pub mod typography;
+pub mod py_bindings;
 mod types;
 
 pub use atlas::{GlyphMetrics, MsdfAtlas};

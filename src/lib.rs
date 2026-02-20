@@ -4897,5 +4897,9 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(crate::mesh::tbn::mesh_generate_plane_tbn, m)?)?;
     }
 
+    // P2.3: Label style bindings
+    m.add_class::<crate::labels::py_bindings::PyLabelStyle>()?;
+    m.add_class::<crate::labels::py_bindings::PyLabelFlags>()?;
+
     Ok(())
 }

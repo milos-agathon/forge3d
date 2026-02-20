@@ -1276,3 +1276,132 @@ class TestCopcLazDecompression:
                 _native.read_laz_points_info(tmp)
         finally:
             os.unlink(tmp)
+
+
+# ===========================================================================
+# Section 19: Label Bindings (P2.3)
+# ===========================================================================
+class TestLabelBindings:
+    """P2.3: LabelStyle and LabelFlags PyO3 bindings."""
+
+    def test_label_style_registered(self):
+        """LabelStyle class is accessible from the native module."""
+        assert hasattr(_native, "LabelStyle")
+
+    def test_label_flags_registered(self):
+        """LabelFlags class is accessible from the native module."""
+        assert hasattr(_native, "LabelFlags")
+
+    def test_label_style_defaults(self):
+        """Default LabelStyle matches Rust LabelStyle::default() values."""
+        s = _native.LabelStyle()
+        assert s.size == pytest.approx(14.0)
+        assert s.color == pytest.approx((0.1, 0.1, 0.1, 1.0))
+        assert s.halo_color == pytest.approx((1.0, 1.0, 1.0, 0.8))
+        assert s.halo_width == pytest.approx(1.5)
+        assert s.priority == 0
+        assert s.min_depth == pytest.approx(0.0)
+        assert s.max_depth == pytest.approx(1.0)
+        assert s.depth_fade == pytest.approx(0.0)
+        assert s.min_zoom == pytest.approx(0.0)
+        assert s.max_zoom == pytest.approx(3.4028235e38)
+        assert s.rotation == pytest.approx(0.0)
+        assert s.offset == pytest.approx((0.0, 0.0))
+        assert s.horizon_fade_angle == pytest.approx(5.0)
+
+    def test_label_flags_defaults(self):
+        """Default LabelFlags are all False."""
+        f = _native.LabelFlags()
+        assert f.underline is False
+        assert f.small_caps is False
+        assert f.leader is False
+
+    def test_label_style_set_fields(self):
+        """Write and read back each LabelStyle field."""
+        s = _native.LabelStyle()
+        s.size = 24.0
+        assert s.size == pytest.approx(24.0)
+
+        s.color = (1.0, 0.0, 0.0, 0.5)
+        assert s.color == pytest.approx((1.0, 0.0, 0.0, 0.5))
+
+        s.halo_color = (0.0, 0.0, 0.0, 1.0)
+        assert s.halo_color == pytest.approx((0.0, 0.0, 0.0, 1.0))
+
+        s.halo_width = 3.0
+        assert s.halo_width == pytest.approx(3.0)
+
+        s.priority = 10
+        assert s.priority == 10
+
+        s.min_depth = 0.1
+        assert s.min_depth == pytest.approx(0.1)
+
+        s.max_depth = 0.9
+        assert s.max_depth == pytest.approx(0.9)
+
+        s.depth_fade = 0.5
+        assert s.depth_fade == pytest.approx(0.5)
+
+        s.min_zoom = 2.0
+        assert s.min_zoom == pytest.approx(2.0)
+
+        s.max_zoom = 100.0
+        assert s.max_zoom == pytest.approx(100.0)
+
+        s.rotation = 1.57
+        assert s.rotation == pytest.approx(1.57)
+
+        s.offset = (10.0, -5.0)
+        assert s.offset == pytest.approx((10.0, -5.0))
+
+        s.horizon_fade_angle = 15.0
+        assert s.horizon_fade_angle == pytest.approx(15.0)
+
+    def test_label_flags_set(self):
+        """Write and read back each LabelFlags field."""
+        f = _native.LabelFlags()
+        f.underline = True
+        assert f.underline is True
+        f.small_caps = True
+        assert f.small_caps is True
+        f.leader = True
+        assert f.leader is True
+
+    def test_label_style_color_tuple(self):
+        """Color is a 4-element tuple."""
+        s = _native.LabelStyle()
+        c = s.color
+        assert isinstance(c, tuple)
+        assert len(c) == 4
+
+    def test_label_style_repr(self):
+        """LabelStyle has a useful repr."""
+        s = _native.LabelStyle()
+        r = repr(s)
+        assert "LabelStyle" in r
+        assert "size=" in r
+
+    def test_label_style_from_kwargs(self):
+        """Construct LabelStyle with keyword arguments."""
+        flags = _native.LabelFlags(underline=True, leader=True)
+        s = _native.LabelStyle(
+            size=20.0,
+            color=(1.0, 0.5, 0.0, 1.0),
+            halo_width=2.0,
+            priority=5,
+            rotation=0.5,
+            offset=(8.0, 4.0),
+            flags=flags,
+            horizon_fade_angle=10.0,
+        )
+        assert s.size == pytest.approx(20.0)
+        assert s.color == pytest.approx((1.0, 0.5, 0.0, 1.0))
+        assert s.halo_width == pytest.approx(2.0)
+        assert s.priority == 5
+        assert s.rotation == pytest.approx(0.5)
+        assert s.offset == pytest.approx((8.0, 4.0))
+        assert s.flags.underline is True
+        assert s.flags.small_caps is False
+        assert s.flags.leader is True
+        assert s.horizon_fade_angle == pytest.approx(10.0)
