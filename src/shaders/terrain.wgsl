@@ -154,7 +154,7 @@ fn apply_planar_reflection(
   }
 
   // Main pass sampling path (mode 1)
-  let plane = reflection_uniforms.reflection_plane.plane_equation;
+  // Reuse the previously bound plane equation (WGSL disallows redefinition in scope).
   let reflected_pos = reflection_uniforms.reflection_plane.reflection_view * vec4<f32>(world_pos, 1.0);
   let projected = reflection_uniforms.reflection_plane.reflection_projection * reflected_pos;
   if projected.w == 0.0 {

@@ -96,19 +96,17 @@ fn sample_overlay_with_halo(uv: vec2<f32>) -> vec4<f32> {
   let tex_size = vec2<f32>(textureDimensions(overlay_tex));
   let pixel_offset = halo_width / tex_size;
   
-  // Sample 8 neighbors for halo detection
+  // Sample 8 neighbors for halo detection.
+  // Unrolled to avoid dynamic array indexing restrictions in some WGSL validators.
   var neighbor_alpha = 0.0;
-  let offsets = array<vec2<f32>, 8>(
-    vec2<f32>(-1.0, -1.0), vec2<f32>(0.0, -1.0), vec2<f32>(1.0, -1.0),
-    vec2<f32>(-1.0,  0.0),                        vec2<f32>(1.0,  0.0),
-    vec2<f32>(-1.0,  1.0), vec2<f32>(0.0,  1.0), vec2<f32>(1.0,  1.0)
-  );
-  
-  for (var i = 0; i < 8; i = i + 1) {
-    let sample_uv = uv_ov + offsets[i] * pixel_offset;
-    let neighbor = textureSample(overlay_tex, overlay_samp, sample_uv);
-    neighbor_alpha = max(neighbor_alpha, neighbor.a);
-  }
+  neighbor_alpha = max(neighbor_alpha, textureSample(overlay_tex, overlay_samp, uv_ov + vec2<f32>(-1.0, -1.0) * pixel_offset).a);
+  neighbor_alpha = max(neighbor_alpha, textureSample(overlay_tex, overlay_samp, uv_ov + vec2<f32>( 0.0, -1.0) * pixel_offset).a);
+  neighbor_alpha = max(neighbor_alpha, textureSample(overlay_tex, overlay_samp, uv_ov + vec2<f32>( 1.0, -1.0) * pixel_offset).a);
+  neighbor_alpha = max(neighbor_alpha, textureSample(overlay_tex, overlay_samp, uv_ov + vec2<f32>(-1.0,  0.0) * pixel_offset).a);
+  neighbor_alpha = max(neighbor_alpha, textureSample(overlay_tex, overlay_samp, uv_ov + vec2<f32>( 1.0,  0.0) * pixel_offset).a);
+  neighbor_alpha = max(neighbor_alpha, textureSample(overlay_tex, overlay_samp, uv_ov + vec2<f32>(-1.0,  1.0) * pixel_offset).a);
+  neighbor_alpha = max(neighbor_alpha, textureSample(overlay_tex, overlay_samp, uv_ov + vec2<f32>( 0.0,  1.0) * pixel_offset).a);
+  neighbor_alpha = max(neighbor_alpha, textureSample(overlay_tex, overlay_samp, uv_ov + vec2<f32>( 1.0,  1.0) * pixel_offset).a);
   
   // Halo appears where neighbors have alpha but center might not
   let halo_strength = max(0.0, neighbor_alpha - ov.a);
