@@ -813,31 +813,8 @@ class PointBuffer:
     def byte_size(self) -> int: ...
     def gpu_byte_size(self) -> int: ...
     def create_gpu_buffer(self) -> np.ndarray: ...
-
-class RenderStats:
-    """Point cloud render statistics."""
-    nodes_rendered: int
-    points_rendered: int
-    cache_hits: int
-    cache_misses: int
-    def __init__(
+    def create_viewer_gpu_buffer(
         self,
-        nodes_rendered: int = ...,
-        points_rendered: int = ...,
-        cache_hits: int = ...,
-        cache_misses: int = ...,
-    ) -> None: ...
-
-class MemoryReport:
-    """Point cloud cache memory report."""
-    cache_used: int
-    cache_budget: int
-    utilization: float
-    entry_count: int
-    def __init__(
-        self,
-        cache_used: int = ...,
-        cache_budget: int = ...,
-        utilization: float = ...,
-        entry_count: int = ...,
-    ) -> None: ...
+        bounds_min: Sequence[float],
+        bounds_max: Sequence[float],
+    ) -> np.ndarray: ...

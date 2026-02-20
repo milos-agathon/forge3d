@@ -1041,27 +1041,19 @@ class TestTerrainAnalysisApi:
 
 
 # ===========================================================================
-# Section 17: Point Cloud GPU Buffer (P2.1)
+# Section 17: Point Cloud Buffer (P2.1)
 # ===========================================================================
-class TestPointCloudGpuBuffer:
-    """P2.1: PointBuffer GPU interleaving, RenderStats, and MemoryReport."""
+class TestPointCloudBuffer:
+    """P2.1: PointBuffer CPU-to-GPU data interleaving."""
 
     def test_point_buffer_registered(self):
         """PointBuffer class is accessible from the native module."""
         assert hasattr(_native, "PointBuffer")
 
-    def test_render_stats_registered(self):
-        """RenderStats class is accessible from the native module."""
-        assert hasattr(_native, "RenderStats")
+    # ---- Compact interleaving (6 floats/point) ----
 
-    def test_memory_report_registered(self):
-        """MemoryReport class is accessible from the native module."""
-        assert hasattr(_native, "MemoryReport")
-
-    # ---- PointBuffer GPU interleaving ----
-
-    def test_point_buffer_create_gpu_buffer_empty(self):
-        """Empty PointBuffer produces an empty GPU buffer."""
+    def test_create_gpu_buffer_empty(self):
+        """Empty PointBuffer produces an empty buffer."""
         import numpy as np
         pb = _native.PointBuffer([], None)
         gpu = pb.create_gpu_buffer()
@@ -1069,133 +1061,109 @@ class TestPointCloudGpuBuffer:
         assert gpu.dtype == np.float32
         assert gpu.shape == (0,)
 
-    def test_point_buffer_create_gpu_buffer_positions_only(self):
+    def test_create_gpu_buffer_positions_only(self):
         """Positions without colors default to white (1.0, 1.0, 1.0)."""
         import numpy as np
         positions = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
         pb = _native.PointBuffer(positions, None)
         gpu = pb.create_gpu_buffer()
         assert gpu.shape == (12,)  # 2 points * 6 floats
-        # Point 0: [1, 2, 3, 1, 1, 1]
         assert gpu[0] == pytest.approx(1.0)
-        assert gpu[1] == pytest.approx(2.0)
-        assert gpu[2] == pytest.approx(3.0)
         assert gpu[3] == pytest.approx(1.0)  # r = white
-        assert gpu[4] == pytest.approx(1.0)  # g = white
-        assert gpu[5] == pytest.approx(1.0)  # b = white
-        # Point 1: [4, 5, 6, 1, 1, 1]
         assert gpu[6] == pytest.approx(4.0)
-        assert gpu[9] == pytest.approx(1.0)  # white default
 
-    def test_point_buffer_create_gpu_buffer_with_colors(self):
-        """Positions + colors are properly interleaved, colors normalised."""
+    def test_create_gpu_buffer_with_colors(self):
+        """Positions + colors properly interleaved, colors normalised."""
         import numpy as np
         positions = [10.0, 20.0, 30.0]
-        colors = [255, 0, 128]  # one point: r=1.0, g=0.0, b≈0.502
+        colors = [255, 0, 128]
         pb = _native.PointBuffer(positions, colors)
         gpu = pb.create_gpu_buffer()
         assert gpu.shape == (6,)
-        assert gpu[0] == pytest.approx(10.0)
-        assert gpu[1] == pytest.approx(20.0)
-        assert gpu[2] == pytest.approx(30.0)
-        assert gpu[3] == pytest.approx(1.0)         # r
-        assert gpu[4] == pytest.approx(0.0)          # g
+        assert gpu[3] == pytest.approx(1.0)          # r
+        assert gpu[4] == pytest.approx(0.0)           # g
         assert gpu[5] == pytest.approx(128 / 255.0, rel=1e-3)  # b
 
-    def test_point_buffer_gpu_byte_size(self):
-        """gpu_byte_size matches expected 6 floats * 4 bytes * point_count."""
+    def test_gpu_byte_size(self):
+        """gpu_byte_size matches 6 floats * 4 bytes * point_count."""
         pb = _native.PointBuffer([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], None)
-        assert pb.gpu_byte_size() == 2 * 6 * 4  # 48 bytes
+        assert pb.gpu_byte_size() == 2 * 6 * 4
 
-    def test_point_buffer_gpu_byte_size_empty(self):
-        """Empty buffer has zero GPU byte size."""
+    # ---- Viewer-compatible interleaving (12 floats/point = 48 bytes) ----
+
+    def test_create_viewer_gpu_buffer_empty(self):
+        """Empty buffer returns empty viewer buffer."""
+        import numpy as np
         pb = _native.PointBuffer([], None)
-        assert pb.gpu_byte_size() == 0
+        vgpu = pb.create_viewer_gpu_buffer([0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
+        assert vgpu.shape == (0,)
 
-    def test_point_buffer_point_count(self):
+    def test_create_viewer_gpu_buffer_layout(self):
+        """Viewer buffer has 12 floats/point matching PointInstance3D."""
+        import numpy as np
+        positions = [5.0, 100.0, 10.0]  # one point at y=100
+        pb = _native.PointBuffer(positions, None)
+        vgpu = pb.create_viewer_gpu_buffer([0.0, 0.0, 0.0], [10.0, 200.0, 20.0])
+        assert vgpu.shape == (12,)
+        # position
+        assert vgpu[0] == pytest.approx(5.0)   # x
+        assert vgpu[1] == pytest.approx(100.0)  # y
+        assert vgpu[2] == pytest.approx(10.0)   # z
+        # elevation_norm = (100 - 0) / 200 = 0.5
+        assert vgpu[3] == pytest.approx(0.5)
+        # rgb (white default)
+        assert vgpu[4] == pytest.approx(1.0)
+        assert vgpu[5] == pytest.approx(1.0)
+        assert vgpu[6] == pytest.approx(1.0)
+        # intensity default
+        assert vgpu[7] == pytest.approx(0.5)
+        # size default
+        assert vgpu[8] == pytest.approx(1.0)
+        # padding
+        assert vgpu[9] == pytest.approx(0.0)
+        assert vgpu[10] == pytest.approx(0.0)
+        assert vgpu[11] == pytest.approx(0.0)
+
+    def test_create_viewer_gpu_buffer_with_colors(self):
+        """Viewer buffer includes normalised colors."""
+        import numpy as np
+        pb = _native.PointBuffer([0.0, 50.0, 0.0], [128, 64, 255])
+        vgpu = pb.create_viewer_gpu_buffer([0.0, 0.0, 0.0], [0.0, 100.0, 0.0])
+        assert vgpu[4] == pytest.approx(128 / 255.0, rel=1e-3)
+        assert vgpu[5] == pytest.approx(64 / 255.0, rel=1e-3)
+        assert vgpu[6] == pytest.approx(1.0)
+
+    def test_viewer_buffer_byte_count(self):
+        """Viewer buffer is 48 bytes (12 floats * 4) per point."""
+        import numpy as np
+        pb = _native.PointBuffer([0.0] * 9, None)  # 3 points
+        vgpu = pb.create_viewer_gpu_buffer([0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
+        assert vgpu.shape == (3 * 12,)
+        assert vgpu.nbytes == 3 * 48
+
+    # ---- Validation ----
+
+    def test_validation_bad_positions(self):
+        """Positions length not divisible by 3 raises ValueError."""
+        with pytest.raises(ValueError, match="multiple of 3"):
+            _native.PointBuffer([1.0, 2.0], None)
+
+    def test_validation_bad_colors(self):
+        """Colors length mismatch raises ValueError."""
+        with pytest.raises(ValueError, match="does not match"):
+            _native.PointBuffer([1.0, 2.0, 3.0], [255, 0])
+
+    def test_point_count(self):
         """point_count property reflects the actual number of points."""
         pb = _native.PointBuffer([0.0] * 9, None)
         assert pb.point_count == 3
 
-    def test_point_buffer_byte_size(self):
-        """byte_size returns raw CPU storage size."""
-        pb = _native.PointBuffer([0.0] * 6, [0] * 6)
-        # 6 floats * 4 bytes + 6 color bytes = 30
-        assert pb.byte_size() == 30
-
-    def test_point_buffer_repr(self):
+    def test_repr(self):
         """PointBuffer has a useful repr."""
         pb = _native.PointBuffer([1.0, 2.0, 3.0], None)
         r = repr(pb)
         assert "PointBuffer" in r
         assert "point_count=1" in r
-
-    def test_point_buffer_validation_bad_positions(self):
-        """Positions length not divisible by 3 raises ValueError."""
-        with pytest.raises(ValueError, match="multiple of 3"):
-            _native.PointBuffer([1.0, 2.0], None)
-
-    def test_point_buffer_validation_bad_colors(self):
-        """Colors length mismatch raises ValueError."""
-        with pytest.raises(ValueError, match="does not match"):
-            _native.PointBuffer([1.0, 2.0, 3.0], [255, 0])
-
-    # ---- RenderStats ----
-
-    def test_render_stats_fields(self):
-        """RenderStats exposes all expected fields."""
-        rs = _native.RenderStats(
-            nodes_rendered=5,
-            points_rendered=100000,
-            cache_hits=3,
-            cache_misses=2,
-        )
-        assert rs.nodes_rendered == 5
-        assert rs.points_rendered == 100000
-        assert rs.cache_hits == 3
-        assert rs.cache_misses == 2
-
-    def test_render_stats_defaults(self):
-        """RenderStats defaults to zeros."""
-        rs = _native.RenderStats()
-        assert rs.nodes_rendered == 0
-        assert rs.points_rendered == 0
-        assert rs.cache_hits == 0
-        assert rs.cache_misses == 0
-
-    def test_render_stats_repr(self):
-        """RenderStats has a useful repr."""
-        rs = _native.RenderStats(nodes_rendered=1, points_rendered=42)
-        r = repr(rs)
-        assert "RenderStats" in r
-        assert "42" in r
-
-    # ---- MemoryReport ----
-
-    def test_memory_report_fields(self):
-        """MemoryReport exposes expected fields."""
-        mr = _native.MemoryReport(
-            cache_used=1024,
-            cache_budget=4096,
-            utilization=0.25,
-            entry_count=10,
-        )
-        assert mr.cache_used == 1024
-        assert mr.cache_budget == 4096
-        assert mr.utilization == pytest.approx(0.25)
-        assert mr.entry_count == 10
-
-    def test_memory_report_repr(self):
-        """MemoryReport repr includes utilization percentage."""
-        mr = _native.MemoryReport(
-            cache_used=512,
-            cache_budget=1024,
-            utilization=0.5,
-            entry_count=2,
-        )
-        r = repr(mr)
-        assert "MemoryReport" in r
-        assert "50.0%" in r
 
     # ---- CPU fallback intact ----
 

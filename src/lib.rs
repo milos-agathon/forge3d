@@ -709,6 +709,24 @@ impl PyPointBuffer {
         PyArray1::from_vec_bound(py, data)
     }
 
+    /// Create a viewer-compatible GPU buffer as a numpy float32 array.
+    ///
+    /// Layout per point: `[x, y, z, elevation_norm, r, g, b, intensity, size, pad, pad, pad]`
+    /// (12 floats = 48 bytes), matching the viewer's `PointInstance3D` struct.
+    ///
+    /// * `bounds_min` – `[min_x, min_y, min_z]` used for elevation normalisation
+    /// * `bounds_max` – `[max_x, max_y, max_z]` used for elevation normalisation
+    #[pyo3(signature = (bounds_min, bounds_max))]
+    fn create_viewer_gpu_buffer<'py>(
+        &self,
+        py: Python<'py>,
+        bounds_min: [f32; 3],
+        bounds_max: [f32; 3],
+    ) -> Bound<'py, PyArray1<f32>> {
+        let data = self.inner.create_viewer_gpu_buffer(bounds_min, bounds_max);
+        PyArray1::from_vec_bound(py, data)
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "PointBuffer(point_count={}, cpu_bytes={}, gpu_bytes={})",
@@ -719,103 +737,6 @@ impl PyPointBuffer {
     }
 }
 
-/// Python-visible render statistics.
-#[cfg(feature = "extension-module")]
-#[pyclass(module = "forge3d._forge3d", name = "RenderStats")]
-pub struct PyRenderStats {
-    #[pyo3(get)]
-    pub nodes_rendered: usize,
-    #[pyo3(get)]
-    pub points_rendered: u64,
-    #[pyo3(get)]
-    pub cache_hits: usize,
-    #[pyo3(get)]
-    pub cache_misses: usize,
-}
-
-#[cfg(feature = "extension-module")]
-#[pymethods]
-impl PyRenderStats {
-    #[new]
-    #[pyo3(signature = (nodes_rendered = 0, points_rendered = 0, cache_hits = 0, cache_misses = 0))]
-    fn new(
-        nodes_rendered: usize,
-        points_rendered: u64,
-        cache_hits: usize,
-        cache_misses: usize,
-    ) -> Self {
-        Self { nodes_rendered, points_rendered, cache_hits, cache_misses }
-    }
-
-    fn __repr__(&self) -> String {
-        format!(
-            "RenderStats(nodes={}, points={}, hits={}, misses={})",
-            self.nodes_rendered, self.points_rendered,
-            self.cache_hits, self.cache_misses,
-        )
-    }
-}
-
-#[cfg(feature = "extension-module")]
-impl From<crate::pointcloud::RenderStats> for PyRenderStats {
-    fn from(s: crate::pointcloud::RenderStats) -> Self {
-        Self {
-            nodes_rendered: s.nodes_rendered,
-            points_rendered: s.points_rendered,
-            cache_hits: s.cache_hits,
-            cache_misses: s.cache_misses,
-        }
-    }
-}
-
-/// Python-visible memory report for the point cloud cache.
-#[cfg(feature = "extension-module")]
-#[pyclass(module = "forge3d._forge3d", name = "MemoryReport")]
-pub struct PyMemoryReport {
-    #[pyo3(get)]
-    pub cache_used: usize,
-    #[pyo3(get)]
-    pub cache_budget: usize,
-    #[pyo3(get)]
-    pub utilization: f64,
-    #[pyo3(get)]
-    pub entry_count: usize,
-}
-
-#[cfg(feature = "extension-module")]
-#[pymethods]
-impl PyMemoryReport {
-    #[new]
-    #[pyo3(signature = (cache_used = 0, cache_budget = 0, utilization = 0.0, entry_count = 0))]
-    fn new(
-        cache_used: usize,
-        cache_budget: usize,
-        utilization: f64,
-        entry_count: usize,
-    ) -> Self {
-        Self { cache_used, cache_budget, utilization, entry_count }
-    }
-
-    fn __repr__(&self) -> String {
-        format!(
-            "MemoryReport(used={}, budget={}, utilization={:.1}%, entries={})",
-            self.cache_used, self.cache_budget,
-            self.utilization * 100.0, self.entry_count,
-        )
-    }
-}
-
-#[cfg(feature = "extension-module")]
-impl From<crate::pointcloud::MemoryReport> for PyMemoryReport {
-    fn from(r: crate::pointcloud::MemoryReport) -> Self {
-        Self {
-            cache_used: r.cache_used,
-            cache_budget: r.cache_budget,
-            utilization: r.utilization,
-            entry_count: r.entry_count,
-        }
-    }
-}
 
 #[cfg(feature = "extension-module")]
 impl Frame {
@@ -4917,8 +4838,6 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // P2.1: Point Cloud GPU rendering path
     m.add_class::<PyPointBuffer>()?;
-    m.add_class::<PyRenderStats>()?;
-    m.add_class::<PyMemoryReport>()?;
 
     // Feature C: Camera animation classes (Plan 1 MVP)
     m.add_class::<crate::animation::CameraAnimation>()?;

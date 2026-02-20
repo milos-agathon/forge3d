@@ -18,6 +18,8 @@ pub struct PointBuffer {
 
 /// Number of floats per vertex in the interleaved GPU buffer: [x, y, z, r, g, b]
 const GPU_FLOATS_PER_VERTEX: usize = 6;
+/// Matches the viewer's `PointInstance3D` layout (48 bytes / 12 floats).
+const VIEWER_FLOATS_PER_VERTEX: usize = 12;
 
 impl PointBuffer {
     pub fn new() -> Self {
@@ -71,6 +73,54 @@ impl PointBuffer {
     /// Byte size of the interleaved GPU buffer that `create_gpu_buffer()` would produce.
     pub fn gpu_byte_size(&self) -> usize {
         self.point_count * GPU_FLOATS_PER_VERTEX * std::mem::size_of::<f32>()
+    }
+
+    /// Create viewer-compatible GPU buffer matching `PointInstance3D` layout.
+    ///
+    /// Layout per point (12 floats = 48 bytes):
+    /// `[x, y, z, elevation_norm, r, g, b, intensity, size, pad, pad, pad]`
+    ///
+    /// `bounds_min`/`bounds_max` normalise elevation (Y axis) to \[0, 1\].
+    pub fn create_viewer_gpu_buffer(
+        &self,
+        bounds_min: [f32; 3],
+        bounds_max: [f32; 3],
+    ) -> Vec<f32> {
+        if self.point_count == 0 {
+            return Vec::new();
+        }
+        let elev_range = (bounds_max[1] - bounds_min[1]).max(0.001);
+        let mut out = Vec::with_capacity(self.point_count * VIEWER_FLOATS_PER_VERTEX);
+        let colors = self.colors.as_deref();
+
+        for i in 0..self.point_count {
+            let pi = i * 3;
+            let x = self.positions.get(pi).copied().unwrap_or(0.0);
+            let y = self.positions.get(pi + 1).copied().unwrap_or(0.0);
+            let z = self.positions.get(pi + 2).copied().unwrap_or(0.0);
+            let elev_norm = (y - bounds_min[1]) / elev_range;
+
+            let (r, g, b) = if let Some(cols) = colors {
+                let ci = i * 3;
+                (
+                    cols.get(ci).copied().unwrap_or(255) as f32 / 255.0,
+                    cols.get(ci + 1).copied().unwrap_or(255) as f32 / 255.0,
+                    cols.get(ci + 2).copied().unwrap_or(255) as f32 / 255.0,
+                )
+            } else {
+                (1.0, 1.0, 1.0)
+            };
+
+            out.extend_from_slice(&[
+                x, y, z,       // position
+                elev_norm,     // elevation_norm
+                r, g, b,       // rgb
+                0.5,           // intensity (default)
+                1.0,           // size (default)
+                0.0, 0.0, 0.0, // padding
+            ]);
+        }
+        out
     }
 }
 
