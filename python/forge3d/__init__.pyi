@@ -819,6 +819,10 @@ class PointBuffer:
         bounds_max: Sequence[float],
     ) -> np.ndarray: ...
 
+# P2.2: COPC LAZ decompression
+def copc_laz_enabled() -> bool: ...
+def read_laz_points_info(path: str) -> Tuple[int, list[float], bool]: ...
+
 # P2.3: Label style bindings
 class LabelFlags:
     underline: bool
