@@ -203,9 +203,12 @@ struct SsaoSettingsUniform {
     radius: f32,
     intensity: f32,
     bias: f32,
-    _pad0: f32,
+    num_samples: u32,
+    technique: u32,
+    frame_index: u32,
     inv_resolution: [f32; 2],
-    _pad1: [f32; 2],
+    proj_scale: f32,
+    ao_min: f32,
 }
 
 struct SsaoResources {
@@ -680,13 +683,17 @@ impl SsaoResources {
             1.0 / self.width.max(1) as f32,
             1.0 / self.height.max(1) as f32,
         ];
+        let proj_scale = 0.5 * self.height.max(1) as f32;
         let uniform = SsaoSettingsUniform {
             radius: self.radius,
             intensity: self.intensity,
             bias: self.bias,
-            _pad0: 0.0,
+            num_samples: 16,
+            technique: 0,
+            frame_index: 0,
             inv_resolution: inv_res,
-            _pad1: [0.0; 2],
+            proj_scale,
+            ao_min: 0.05,
         };
         queue.write_buffer(&self.settings_buffer, 0, bytemuck::bytes_of(&uniform));
         queue.write_buffer(&self.blur_settings_buffer, 0, bytemuck::bytes_of(&uniform));
@@ -6410,25 +6417,32 @@ impl Scene {
         let mut tmp = vec![0.0_f32; count * 3];
         let mut blurred = vec![0.0_f32; count * 3];
 
-        let threshold = (config.threshold / 4.0).clamp(0.0, 1.0);
-        let inv_threshold = (1.0 - threshold).max(1e-4);
+        let threshold = config.threshold.max(0.0);
+        let softness = config.softness.clamp(0.0, 1.0);
+        let knee = (threshold * softness).max(1e-5);
         for i in 0..count {
             let p = i * 4;
             let b = i * 3;
             let r = source[p] as f32 / 255.0;
             let g = source[p + 1] as f32 / 255.0;
             let bl = source[p + 2] as f32 / 255.0;
-            let luma = r.max(g).max(bl);
-            if luma > threshold {
-                let k = ((luma - threshold) / inv_threshold).clamp(0.0, 1.0);
-                bright[b] = r * k;
-                bright[b + 1] = g * k;
-                bright[b + 2] = bl * k;
+            let luma = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+            let brightness_factor = if luma < threshold - knee {
+                0.0
+            } else if luma < threshold + knee {
+                let t = ((luma - threshold + knee) / (2.0 * knee)).clamp(0.0, 1.0);
+                t * t
+            } else {
+                1.0
+            };
+            if brightness_factor > 0.0 {
+                bright[b] = r * brightness_factor;
+                bright[b + 1] = g * brightness_factor;
+                bright[b + 2] = bl * brightness_factor;
             }
         }
 
         let radius = config.radius.round().clamp(1.0, 6.0) as i32;
-        let softness = config.softness.clamp(0.0, 1.0);
 
         // Horizontal blur.
         for y in 0..height {
