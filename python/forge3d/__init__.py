@@ -18,7 +18,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.12.1"
+__version__ = "1.12.2"
 version = __version__
 
 import numpy as np

@@ -6,6 +6,22 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.12.2] - 2026-02-20
+
+### Added
+- **API consolidation execution coverage**
+  - Added Scene/runtime behavior tests for SSGI/SSR and bloom execution wiring.
+  - Added integration coverage for point-cloud GPU path and COPC/LAZ fixture gates.
+  - Added API docs pages for reflections and cloud shadows and refreshed audit snapshots.
+
+### Fixed
+- **Scene SSAO uniform wiring**
+  - Updated Scene-side SSAO uniform layout to match WGSL `SsaoSettings` (including sample count and projection parameters), preventing silent zero-sample occlusion.
+- **Bloom CPU fallback threshold behavior**
+  - Replaced threshold remap/clamp path with shader-consistent soft-threshold extraction to avoid collapse at higher threshold values.
+- **Test safety**
+  - Updated GPU scene probe helpers to catch `Exception` instead of `BaseException`, preserving `KeyboardInterrupt`/`SystemExit` semantics.
+
 ## [1.12.1] - Vector Export (SVG/PDF)
 
 ### Added

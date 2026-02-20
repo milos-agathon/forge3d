@@ -16,9 +16,13 @@
 
 Headless GPU rendering + PNG↔NumPy utilities (Rust + PyO3 + wgpu).
 
-Current release: 1.12.1 — Vector Export (SVG/PDF) for print-grade terrain overlays with polygon, polyline, and label support.
+Current release: 1.12.2 — API consolidation hardening with corrected SSAO uniform wiring, shader-consistent bloom CPU fallback, and expanded Scene/runtime contract coverage.
 
-## Latest Feature: Vector Export (1.12.1)
+## Latest Feature: API Consolidation & Runtime PostFX Hardening (1.12.2)
+
+**forge3d** 1.12.2 hardens Scene runtime behavior and API verification: SSAO uniforms now match WGSL layout, bloom CPU fallback uses shader-consistent soft-thresholding, and expanded tests/docs lock in SSGI/SSR/Bloom/point-cloud contracts.
+
+## Previous Feature: Vector Export (1.12.1)
 
 **forge3d** now includes **Vector Export** functionality for generating print-grade SVG and PDF maps from terrain overlays. Export polygons, polylines, and text labels with full styling control.
 
