@@ -98,7 +98,7 @@ impl PointBuffer {
             let x = self.positions.get(pi).copied().unwrap_or(0.0);
             let y = self.positions.get(pi + 1).copied().unwrap_or(0.0);
             let z = self.positions.get(pi + 2).copied().unwrap_or(0.0);
-            let elev_norm = (y - bounds_min[1]) / elev_range;
+            let elev_norm = ((y - bounds_min[1]) / elev_range).clamp(0.0, 1.0);
 
             let (r, g, b) = if let Some(cols) = colors {
                 let ci = i * 3;
@@ -221,83 +221,48 @@ impl PointCloudRenderer {
         )
     }
 
-    /// Load points for visible nodes from COPC
+    /// Load points for visible nodes from COPC.
     pub fn load_copc_points(
         &mut self,
         dataset: &CopcDataset,
         visible: &[VisibleNode],
     ) -> PointCloudResult<PointBuffer> {
-        self.stats = RenderStats::default();
-        let mut combined = PointBuffer::new();
-        let mut has_colors = false;
-        
-        for node in visible {
-            let cache_key = format!("copc:{}", node.key.to_string());
-            
-            if let Some(entry) = self.cache.get_mut(&cache_key) {
-                entry.last_used = std::time::Instant::now();
-                self.stats.cache_hits += 1;
-                
-                combined.positions.extend(&entry.buffer.positions);
-                if let Some(ref cols) = entry.buffer.colors {
-                    has_colors = true;
-                    combined.colors.get_or_insert_with(Vec::new).extend(cols);
-                }
-                combined.point_count += entry.buffer.point_count;
-            } else {
-                self.stats.cache_misses += 1;
-                
-                match dataset.read_points(&node.key) {
-                    Ok(data) => {
-                        let buffer = copc_to_buffer(data);
-                        let byte_size = buffer.byte_size();
-                        
-                        combined.positions.extend(&buffer.positions);
-                        if let Some(ref cols) = buffer.colors {
-                            has_colors = true;
-                            combined.colors.get_or_insert_with(Vec::new).extend(cols);
-                        }
-                        combined.point_count += buffer.point_count;
-                        
-                        self.ensure_cache_space(byte_size);
-                        self.cache.insert(cache_key, CacheEntry {
-                            buffer,
-                            last_used: std::time::Instant::now(),
-                        });
-                        self.cache_used += byte_size;
-                    }
-                    Err(_) => continue,
-                }
-            }
-        }
-        
-        if !has_colors {
-            combined.colors = None;
-        }
-        
-        self.stats.nodes_rendered = visible.len();
-        self.stats.points_rendered = combined.point_count as u64;
-        
-        Ok(combined)
+        self.load_points("copc", visible, |key| {
+            dataset.read_points(key).map(copc_to_buffer)
+        })
     }
 
-    /// Load points for visible nodes from EPT
+    /// Load points for visible nodes from EPT.
     pub fn load_ept_points(
         &mut self,
         dataset: &EptDataset,
         visible: &[VisibleNode],
     ) -> PointCloudResult<PointBuffer> {
+        self.load_points("ept", visible, |key| {
+            dataset.read_points(key).map(ept_to_buffer)
+        })
+    }
+
+    fn load_points<F>(
+        &mut self,
+        prefix: &str,
+        visible: &[VisibleNode],
+        read_fn: F,
+    ) -> PointCloudResult<PointBuffer>
+    where
+        F: Fn(&super::octree::OctreeKey) -> PointCloudResult<PointBuffer>,
+    {
         self.stats = RenderStats::default();
         let mut combined = PointBuffer::new();
         let mut has_colors = false;
-        
+
         for node in visible {
-            let cache_key = format!("ept:{}", node.key.to_string());
-            
+            let cache_key = format!("{}:{}", prefix, node.key.to_string());
+
             if let Some(entry) = self.cache.get_mut(&cache_key) {
                 entry.last_used = std::time::Instant::now();
                 self.stats.cache_hits += 1;
-                
+
                 combined.positions.extend(&entry.buffer.positions);
                 if let Some(ref cols) = entry.buffer.colors {
                     has_colors = true;
@@ -306,19 +271,17 @@ impl PointCloudRenderer {
                 combined.point_count += entry.buffer.point_count;
             } else {
                 self.stats.cache_misses += 1;
-                
-                match dataset.read_points(&node.key) {
-                    Ok(data) => {
-                        let buffer = ept_to_buffer(data);
+
+                match read_fn(&node.key) {
+                    Ok(buffer) => {
                         let byte_size = buffer.byte_size();
-                        
                         combined.positions.extend(&buffer.positions);
                         if let Some(ref cols) = buffer.colors {
                             has_colors = true;
                             combined.colors.get_or_insert_with(Vec::new).extend(cols);
                         }
                         combined.point_count += buffer.point_count;
-                        
+
                         self.ensure_cache_space(byte_size);
                         self.cache.insert(cache_key, CacheEntry {
                             buffer,
@@ -330,14 +293,12 @@ impl PointCloudRenderer {
                 }
             }
         }
-        
+
         if !has_colors {
             combined.colors = None;
         }
-        
         self.stats.nodes_rendered = visible.len();
         self.stats.points_rendered = combined.point_count as u64;
-        
         Ok(combined)
     }
 
