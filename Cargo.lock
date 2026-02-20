@@ -840,6 +840,7 @@ dependencies = [
  "half",
  "image",
  "las",
+ "laz",
  "log",
  "lyon_geom",
  "lyon_path",

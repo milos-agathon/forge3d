@@ -1,11 +1,14 @@
 //! COPC (Cloud Optimized Point Cloud) format support
 
+use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::collections::HashMap;
-use super::error::{PointCloudError, PointCloudResult};
-use super::octree::{OctreeKey, OctreeBounds, OctreeNode};
+
 use glam::Vec3;
+
+use super::copc_decode::decode_chunk;
+use super::error::{PointCloudError, PointCloudResult};
+use super::octree::{OctreeBounds, OctreeKey, OctreeNode};
 
 /// COPC file header info
 #[derive(Debug, Clone)]
@@ -17,6 +20,8 @@ pub struct CopcHeader {
     pub offset: [f64; 3],
     pub min_bounds: [f64; 3],
     pub max_bounds: [f64; 3],
+    /// Number of VLRs in the file
+    pub num_vlrs: u32,
 }
 
 /// COPC-specific info from VLR
@@ -31,6 +36,20 @@ pub struct CopcInfo {
     pub gpstime_maximum: f64,
 }
 
+/// Decoded point data
+#[derive(Debug)]
+pub struct PointData {
+    pub positions: Vec<f32>,
+    pub colors: Option<Vec<u8>>,
+    pub intensities: Option<Vec<u16>>,
+}
+
+/// Result of scanning all VLRs in a COPC file
+struct VlrScanResult {
+    copc_info: CopcInfo,
+    laz_vlr_data: Option<Vec<u8>>,
+}
+
 /// COPC dataset handle
 pub struct CopcDataset {
     path: std::path::PathBuf,
@@ -38,6 +57,8 @@ pub struct CopcDataset {
     pub info: CopcInfo,
     hierarchy: HashMap<OctreeKey, HierarchyEntry>,
     root_bounds: OctreeBounds,
+    /// Raw bytes of the LAZ VLR record data, needed for decompression
+    laz_vlr_data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,10 +73,11 @@ impl CopcDataset {
     pub fn open<P: AsRef<Path>>(path: P) -> PointCloudResult<Self> {
         let path = path.as_ref().to_path_buf();
         let mut file = std::fs::File::open(&path)?;
-        
+
         let header = read_las_header(&mut file)?;
-        let info = read_copc_vlr(&mut file, &header)?;
-        
+        let vlr_result = read_all_vlrs(&mut file, &header)?;
+
+        let info = vlr_result.copc_info;
         let root_bounds = OctreeBounds::new(
             Vec3::new(
                 (info.center[0] - info.halfsize) as f32,
@@ -75,19 +97,25 @@ impl CopcDataset {
             info,
             hierarchy: HashMap::new(),
             root_bounds,
+            laz_vlr_data: vlr_result.laz_vlr_data,
         };
-        
+
         dataset.load_root_hierarchy()?;
         Ok(dataset)
+    }
+
+    /// Whether the dataset contains a LAZ VLR (compressed point data)
+    pub fn has_laz_vlr(&self) -> bool {
+        self.laz_vlr_data.is_some()
     }
 
     fn load_root_hierarchy(&mut self) -> PointCloudResult<()> {
         let mut file = std::fs::File::open(&self.path)?;
         file.seek(SeekFrom::Start(self.info.root_hier_offset))?;
-        
+
         let mut buf = vec![0u8; self.info.root_hier_size as usize];
         file.read_exact(&mut buf)?;
-        
+
         self.parse_hierarchy_page(&buf)?;
         Ok(())
     }
@@ -95,19 +123,31 @@ impl CopcDataset {
     fn parse_hierarchy_page(&mut self, data: &[u8]) -> PointCloudResult<()> {
         let entry_size = 32;
         let count = data.len() / entry_size;
-        
+
         for i in 0..count {
-            let offset = i * entry_size;
-            let d = i32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]);
-            let x = i32::from_le_bytes([data[offset+4], data[offset+5], data[offset+6], data[offset+7]]);
-            let y = i32::from_le_bytes([data[offset+8], data[offset+9], data[offset+10], data[offset+11]]);
-            let z = i32::from_le_bytes([data[offset+12], data[offset+13], data[offset+14], data[offset+15]]);
-            let file_offset = u64::from_le_bytes([
-                data[offset+16], data[offset+17], data[offset+18], data[offset+19],
-                data[offset+20], data[offset+21], data[offset+22], data[offset+23],
+            let off = i * entry_size;
+            let d = i32::from_le_bytes([
+                data[off], data[off + 1], data[off + 2], data[off + 3],
             ]);
-            let byte_size = i32::from_le_bytes([data[offset+24], data[offset+25], data[offset+26], data[offset+27]]);
-            let point_count = i32::from_le_bytes([data[offset+28], data[offset+29], data[offset+30], data[offset+31]]);
+            let x = i32::from_le_bytes([
+                data[off + 4], data[off + 5], data[off + 6], data[off + 7],
+            ]);
+            let y = i32::from_le_bytes([
+                data[off + 8], data[off + 9], data[off + 10], data[off + 11],
+            ]);
+            let z = i32::from_le_bytes([
+                data[off + 12], data[off + 13], data[off + 14], data[off + 15],
+            ]);
+            let file_offset = u64::from_le_bytes([
+                data[off + 16], data[off + 17], data[off + 18], data[off + 19],
+                data[off + 20], data[off + 21], data[off + 22], data[off + 23],
+            ]);
+            let byte_size = i32::from_le_bytes([
+                data[off + 24], data[off + 25], data[off + 26], data[off + 27],
+            ]);
+            let point_count = i32::from_le_bytes([
+                data[off + 28], data[off + 29], data[off + 30], data[off + 31],
+            ]);
 
             if d >= 0 && point_count > 0 {
                 let key = OctreeKey::new(d as u32, x as u32, y as u32, z as u32);
@@ -136,7 +176,8 @@ impl CopcDataset {
             let child_key = key.child(octant);
             if let Some(entry) = self.hierarchy.get(&child_key) {
                 let bounds = self.bounds_for_key(&child_key);
-                let mut node = OctreeNode::new(child_key, bounds, entry.point_count as u64);
+                let mut node =
+                    OctreeNode::new(child_key, bounds, entry.point_count as u64);
                 for o in 0..8 {
                     let grandchild = node.key.child(o);
                     if self.hierarchy.contains_key(&grandchild) {
@@ -152,12 +193,12 @@ impl CopcDataset {
     fn bounds_for_key(&self, key: &OctreeKey) -> OctreeBounds {
         let mut bounds = self.root_bounds;
         let mut current = OctreeKey::root();
-        
+
         for d in 0..key.depth {
             let shift = key.depth - d - 1;
-            let octant = (((key.x >> shift) & 1) |
-                         (((key.y >> shift) & 1) << 1) |
-                         (((key.z >> shift) & 1) << 2)) as u8;
+            let octant = (((key.x >> shift) & 1)
+                | (((key.y >> shift) & 1) << 1)
+                | (((key.z >> shift) & 1) << 2)) as u8;
             bounds = bounds.child_bounds(octant);
             current = current.child(octant);
         }
@@ -166,43 +207,58 @@ impl CopcDataset {
 
     /// Read points for a node
     pub fn read_points(&self, key: &OctreeKey) -> PointCloudResult<PointData> {
-        let entry = self.hierarchy.get(key)
-            .ok_or_else(|| PointCloudError::InvalidCopc("Node not in hierarchy".into()))?;
-        
+        let entry = self.hierarchy.get(key).ok_or_else(|| {
+            PointCloudError::InvalidCopc("Node not in hierarchy".into())
+        })?;
+
         let mut file = std::fs::File::open(&self.path)?;
         file.seek(SeekFrom::Start(entry.offset))?;
-        
-        let mut compressed = vec![0u8; entry.byte_size as usize];
-        file.read_exact(&mut compressed)?;
-        
-        decode_laz_chunk(&compressed, entry.point_count, &self.header)
+
+        let mut chunk_data = vec![0u8; entry.byte_size as usize];
+        file.read_exact(&mut chunk_data)?;
+
+        decode_chunk(
+            &chunk_data,
+            entry.point_count,
+            &self.header,
+            &self.laz_vlr_data,
+        )
     }
 
-    pub fn node_count(&self) -> usize { self.hierarchy.len() }
-    pub fn total_points(&self) -> u64 { self.header.point_count }
-    pub fn bounds(&self) -> OctreeBounds { self.root_bounds }
+    pub fn node_count(&self) -> usize {
+        self.hierarchy.len()
+    }
+    pub fn total_points(&self) -> u64 {
+        self.header.point_count
+    }
+    pub fn bounds(&self) -> OctreeBounds {
+        self.root_bounds
+    }
 }
 
-/// Decoded point data
-#[derive(Debug)]
-pub struct PointData {
-    pub positions: Vec<f32>,
-    pub colors: Option<Vec<u8>>,
-    pub intensities: Option<Vec<u16>>,
-}
+// ---------------------------------------------------------------------------
+// Header & VLR reading
+// ---------------------------------------------------------------------------
 
-fn read_las_header<R: Read + Seek>(reader: &mut R) -> PointCloudResult<CopcHeader> {
+fn read_las_header<R: Read + Seek>(
+    reader: &mut R,
+) -> PointCloudResult<CopcHeader> {
     let mut buf = [0u8; 375];
     reader.read_exact(&mut buf)?;
-    
+
     if &buf[0..4] != b"LASF" {
         return Err(PointCloudError::InvalidCopc("Not a LAS file".into()));
     }
-    
+
+    let num_vlrs =
+        u32::from_le_bytes([buf[100], buf[101], buf[102], buf[103]]);
     let point_format = buf[104];
     let point_record_length = u16::from_le_bytes([buf[105], buf[106]]);
-    let point_count = u64::from_le_bytes([buf[247], buf[248], buf[249], buf[250], buf[251], buf[252], buf[253], buf[254]]);
-    
+    let point_count = u64::from_le_bytes([
+        buf[247], buf[248], buf[249], buf[250], buf[251], buf[252], buf[253],
+        buf[254],
+    ]);
+
     let scale = [
         f64::from_le_bytes(buf[131..139].try_into().unwrap()),
         f64::from_le_bytes(buf[139..147].try_into().unwrap()),
@@ -232,24 +288,59 @@ fn read_las_header<R: Read + Seek>(reader: &mut R) -> PointCloudResult<CopcHeade
         offset,
         min_bounds,
         max_bounds,
+        num_vlrs,
     })
 }
 
-fn read_copc_vlr<R: Read + Seek>(reader: &mut R, _header: &CopcHeader) -> PointCloudResult<CopcInfo> {
+/// Scan all VLRs, extracting the COPC info VLR and (optionally) the LAZ VLR.
+fn read_all_vlrs<R: Read + Seek>(
+    reader: &mut R,
+    header: &CopcHeader,
+) -> PointCloudResult<VlrScanResult> {
     reader.seek(SeekFrom::Start(375))?;
-    
-    let mut vlr_buf = [0u8; 54];
-    reader.read_exact(&mut vlr_buf)?;
-    
-    let user_id = std::str::from_utf8(&vlr_buf[2..18]).unwrap_or("").trim_end_matches('\0');
-    if user_id != "copc" {
-        return Err(PointCloudError::InvalidCopc("Missing COPC VLR".into()));
+
+    let mut copc_info: Option<CopcInfo> = None;
+    let mut laz_vlr_data: Option<Vec<u8>> = None;
+
+    for _ in 0..header.num_vlrs {
+        let mut vlr_header = [0u8; 54];
+        reader.read_exact(&mut vlr_header)?;
+
+        let user_id = std::str::from_utf8(&vlr_header[2..18])
+            .unwrap_or("")
+            .trim_end_matches('\0');
+        let record_id =
+            u16::from_le_bytes([vlr_header[18], vlr_header[19]]);
+        let content_size =
+            u16::from_le_bytes([vlr_header[20], vlr_header[21]]) as usize;
+
+        let mut content = vec![0u8; content_size];
+        reader.read_exact(&mut content)?;
+
+        if user_id == "copc" && record_id == 1 && copc_info.is_none() {
+            copc_info = Some(parse_copc_info(&content)?);
+        } else if user_id == "laszip encoded" && record_id == 22204 {
+            laz_vlr_data = Some(content);
+        }
     }
-    
-    let content_size = u16::from_le_bytes([vlr_buf[20], vlr_buf[21]]) as usize;
-    let mut content = vec![0u8; content_size];
-    reader.read_exact(&mut content)?;
-    
+
+    let copc_info = copc_info.ok_or_else(|| {
+        PointCloudError::InvalidCopc("Missing COPC VLR".into())
+    })?;
+
+    Ok(VlrScanResult {
+        copc_info,
+        laz_vlr_data,
+    })
+}
+
+fn parse_copc_info(content: &[u8]) -> PointCloudResult<CopcInfo> {
+    if content.len() < 72 {
+        return Err(PointCloudError::InvalidCopc(format!(
+            "COPC VLR too short: {} bytes (need 72)",
+            content.len(),
+        )));
+    }
     Ok(CopcInfo {
         center: [
             f64::from_le_bytes(content[0..8].try_into().unwrap()),
@@ -258,51 +349,17 @@ fn read_copc_vlr<R: Read + Seek>(reader: &mut R, _header: &CopcHeader) -> PointC
         ],
         halfsize: f64::from_le_bytes(content[24..32].try_into().unwrap()),
         spacing: f64::from_le_bytes(content[32..40].try_into().unwrap()),
-        root_hier_offset: u64::from_le_bytes(content[40..48].try_into().unwrap()),
-        root_hier_size: u64::from_le_bytes(content[48..56].try_into().unwrap()),
-        gpstime_minimum: f64::from_le_bytes(content[56..64].try_into().unwrap()),
-        gpstime_maximum: f64::from_le_bytes(content[64..72].try_into().unwrap()),
+        root_hier_offset: u64::from_le_bytes(
+            content[40..48].try_into().unwrap(),
+        ),
+        root_hier_size: u64::from_le_bytes(
+            content[48..56].try_into().unwrap(),
+        ),
+        gpstime_minimum: f64::from_le_bytes(
+            content[56..64].try_into().unwrap(),
+        ),
+        gpstime_maximum: f64::from_le_bytes(
+            content[64..72].try_into().unwrap(),
+        ),
     })
-}
-
-fn decode_laz_chunk(data: &[u8], point_count: u32, header: &CopcHeader) -> PointCloudResult<PointData> {
-    // Simplified: assume uncompressed for now (real impl would use laz-rs)
-    let record_len = header.point_record_length as usize;
-    let expected = point_count as usize * record_len;
-    
-    if data.len() < expected {
-        // Data is likely LAZ compressed - return placeholder
-        return Ok(PointData {
-            positions: vec![0.0; point_count as usize * 3],
-            colors: None,
-            intensities: None,
-        });
-    }
-    
-    let mut positions = Vec::with_capacity(point_count as usize * 3);
-    let has_rgb = header.point_format == 2 || header.point_format == 3 || 
-                  header.point_format == 5 || header.point_format >= 7;
-    let mut colors = if has_rgb { Some(Vec::with_capacity(point_count as usize * 3)) } else { None };
-    
-    for i in 0..point_count as usize {
-        let off = i * record_len;
-        let x = i32::from_le_bytes([data[off], data[off+1], data[off+2], data[off+3]]);
-        let y = i32::from_le_bytes([data[off+4], data[off+5], data[off+6], data[off+7]]);
-        let z = i32::from_le_bytes([data[off+8], data[off+9], data[off+10], data[off+11]]);
-        
-        positions.push((x as f64 * header.scale[0] + header.offset[0]) as f32);
-        positions.push((y as f64 * header.scale[1] + header.offset[1]) as f32);
-        positions.push((z as f64 * header.scale[2] + header.offset[2]) as f32);
-        
-        if let Some(ref mut cols) = colors {
-            let rgb_off = off + 20;
-            if rgb_off + 6 <= data.len() {
-                cols.push((u16::from_le_bytes([data[rgb_off], data[rgb_off+1]]) >> 8) as u8);
-                cols.push((u16::from_le_bytes([data[rgb_off+2], data[rgb_off+3]]) >> 8) as u8);
-                cols.push((u16::from_le_bytes([data[rgb_off+4], data[rgb_off+5]]) >> 8) as u8);
-            }
-        }
-    }
-    
-    Ok(PointData { positions, colors, intensities: None })
 }

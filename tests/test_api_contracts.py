@@ -1183,3 +1183,96 @@ class TestPointCloudBuffer:
             "assets", "lidar", "MtStHelens.laz",
         )
         assert os.path.isfile(fixture), f"Fixture missing: {fixture}"
+
+
+# ===========================================================================
+# Section 18: COPC LAZ Decompression (P2.2)
+# ===========================================================================
+class TestCopcLazDecompression:
+    """P2.2: LAZ decompression feature gate and fixture-based validation."""
+
+    # ---- Feature gate checks ----
+
+    def test_copc_laz_enabled_function_exists(self):
+        """copc_laz_enabled() is callable from the native module."""
+        assert hasattr(_native, "copc_laz_enabled")
+        result = _native.copc_laz_enabled()
+        assert isinstance(result, bool)
+
+    def test_copc_laz_feature_is_enabled(self):
+        """copc_laz feature is enabled in the default maturin build."""
+        assert _native.copc_laz_enabled() is True
+
+    def test_read_laz_points_info_function_exists(self):
+        """read_laz_points_info() is callable from the native module."""
+        assert hasattr(_native, "read_laz_points_info")
+
+    # ---- Fixture-based LAZ decompression validation ----
+
+    def _fixture_path(self):
+        import os
+        return os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "assets", "lidar", "MtStHelens.laz",
+        )
+
+    def test_fixture_exists(self):
+        """MtStHelens.laz fixture file exists."""
+        import os
+        assert os.path.isfile(self._fixture_path())
+
+    def test_read_laz_returns_tuple(self):
+        """read_laz_points_info returns (point_count, coords, has_rgb)."""
+        result = _native.read_laz_points_info(self._fixture_path())
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+
+    def test_decoded_point_count(self):
+        """LAZ fixture contains a positive number of points."""
+        point_count, _, _ = _native.read_laz_points_info(self._fixture_path())
+        assert isinstance(point_count, int)
+        assert point_count > 0
+
+    def test_sample_coordinates_valid(self):
+        """First decoded points have finite, non-zero coordinates."""
+        _, coords, _ = _native.read_laz_points_info(self._fixture_path())
+        # At least one point (3 coords)
+        assert len(coords) >= 3
+        import math
+        for c in coords:
+            assert math.isfinite(c), f"Non-finite coordinate: {c}"
+        # At least one coordinate should be non-zero
+        assert any(abs(c) > 0.0 for c in coords)
+
+    def test_sample_coordinates_in_expected_range(self):
+        """Mt St Helens coordinates are in a plausible geographic range."""
+        _, coords, _ = _native.read_laz_points_info(self._fixture_path())
+        x, y, z = coords[0], coords[1], coords[2]
+        # The fixture uses NAD83 State Plane Washington South (US feet).
+        # X (easting) ~1.2M, Y (northing) ~315K, Z (elevation) ~4K feet
+        assert 1_100_000 < x < 1_400_000, f"Unexpected X: {x}"
+        assert 200_000 < y < 500_000, f"Unexpected Y: {y}"
+        assert 0 < z < 15_000, f"Unexpected Z: {z}"
+
+    def test_multiple_points_decoded(self):
+        """At least 3 points are decoded from the fixture."""
+        _, coords, _ = _native.read_laz_points_info(self._fixture_path())
+        # 3 points * 3 coords = 9 values
+        assert len(coords) == 9
+
+    def test_read_laz_nonexistent_file_raises(self):
+        """Reading a nonexistent file raises IOError."""
+        with pytest.raises(IOError):
+            _native.read_laz_points_info("/nonexistent/path.laz")
+
+    def test_read_laz_invalid_file_raises(self):
+        """Reading a non-LAZ file raises an error."""
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".laz", delete=False) as f:
+            f.write(b"not a laz file at all")
+            tmp = f.name
+        try:
+            with pytest.raises(Exception):
+                _native.read_laz_points_info(tmp)
+        finally:
+            os.unlink(tmp)

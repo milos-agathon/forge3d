@@ -6,6 +6,7 @@
 mod error;
 mod octree;
 mod copc;
+mod copc_decode;
 mod ept;
 mod traversal;
 mod renderer;

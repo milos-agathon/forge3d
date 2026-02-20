@@ -41,6 +41,8 @@ enable-memory-pools = []
 enable-staging-rings = []
 # A14: AOV image format support
 images = ["dep:exr"]
+# P2.2: LAZ decompression in COPC reader
+copc_laz = ["dep:laz"]
 # P3: Cloud Optimized GeoTIFF streaming
 cog_streaming = ["dep:reqwest", "dep:async-trait", "dep:tokio", "dep:flate2"]
 # P3-reproject: On-the-fly CRS reprojection via PROJ
@@ -80,6 +82,8 @@ sha2 = "0.10"
 rstar = "0.11"
 # P5: LAS/LAZ point cloud support
 las = { version = "0.8", features = ["laz"] }
+# P2.2: Direct laz crate for COPC chunk decompression (optional, feature-gated)
+laz = { version = "0.9", optional = true }
 # P3: COG streaming dependencies (optional)
 reqwest = { version = "0.12", features = ["stream", "rustls-tls"], optional = true }
 async-trait = { version = "0.1", optional = true }
