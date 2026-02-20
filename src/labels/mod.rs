@@ -21,6 +21,7 @@ pub mod line_label;
 mod projection;
 pub mod rtree;
 pub mod typography;
+#[cfg(feature = "extension-module")]
 pub mod py_bindings;
 mod types;
 

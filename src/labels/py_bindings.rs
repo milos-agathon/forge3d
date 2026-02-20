@@ -117,7 +117,7 @@ impl PyLabelStyle {
         flags = None,
         horizon_fade_angle = 5.0,
     ))]
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)] // PyO3 constructor requires flat kwargs
     fn new(
         size: f32,
         color: (f32, f32, f32, f32),
