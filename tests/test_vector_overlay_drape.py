@@ -34,10 +34,10 @@ class TestVectorVertex:
         assert v.a == 0.5
 
     def test_to_array(self):
-        """to_array should return [x, y, z, r, g, b, a]."""
+        """to_array should return [x, y, z, r, g, b, a, feature_id]."""
         v = VectorVertex(x=1.0, y=2.0, z=3.0, r=0.5, g=0.6, b=0.7, a=0.8)
         arr = v.to_array()
-        assert arr == [1.0, 2.0, 3.0, 0.5, 0.6, 0.7, 0.8]
+        assert arr == [1.0, 2.0, 3.0, 0.5, 0.6, 0.7, 0.8, 0]
 
     def test_color_validation_r_out_of_range(self):
         """Color r must be in [0, 1]."""
@@ -128,7 +128,7 @@ class TestVectorOverlayConfig:
         assert d["drape"] is True
         assert d["opacity"] == 0.8
         assert len(d["vertices"]) == 2
-        assert d["vertices"][0] == [10, 0, 20, 1, 0, 0, 1]
+        assert d["vertices"][0] == [10, 0, 20, 1, 0, 0, 1, 0]
 
     def test_validation_empty_name(self):
         """Name must be non-empty."""

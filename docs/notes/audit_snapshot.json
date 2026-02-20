@@ -1,18 +1,18 @@
 {
-  "generated_utc": "2026-02-19 08:44:09Z",
-  "commit": "988c9b525e262247db69aba966ad4df14f6ce56d",
+  "generated_utc": "2026-02-20 13:45:43Z",
+  "commit": "9efc4c42e368ee337b869c4f52c434f4af9390c0",
   "branch": "main",
   "section1": {
-    "rust_source_files": 499,
+    "rust_source_files": 501,
     "rust_top_level_modules": 40,
     "python_package_files": 54,
-    "pyo3_classes": 38,
-    "pyo3_functions": 100,
-    "rust_files_with_pyo3_annotations": 33,
-    "test_files": 77,
-    "test_functions_total": 1450,
+    "pyo3_classes": 41,
+    "pyo3_functions": 104,
+    "rust_files_with_pyo3_annotations": 35,
+    "test_files": 85,
+    "test_functions_total": 1626,
     "test_functions_rust": 532,
-    "test_functions_python": 918,
+    "test_functions_python": 1094,
     "viewer_ipc_present": true,
     "top_level_module_names": [
       "accel",
@@ -436,8 +436,8 @@
         "module": "viewer.py",
         "category": "Orchestration",
         "reason": "known workflow/entry module",
-        "line_count": 573,
-        "native_refs": 4,
+        "line_count": 564,
+        "native_refs": 0,
         "native_calls": 0
       },
       {

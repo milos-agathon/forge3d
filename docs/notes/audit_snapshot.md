@@ -1,7 +1,7 @@
 # Audit Snapshot (Generated)
 
-- Generated (UTC): 2026-02-19 08:44:09Z
-- Commit: `988c9b525e262247db69aba966ad4df14f6ce56d`
+- Generated (UTC): 2026-02-20 13:45:43Z
+- Commit: `9efc4c42e368ee337b869c4f52c434f4af9390c0`
 - Branch: `main`
 - Script: `scripts/generate_audit_snapshot.py`
 
@@ -9,14 +9,14 @@
 
 | Metric | Count |
 |---|---:|
-| Rust source files (`src/**/*.rs`) | 499 |
+| Rust source files (`src/**/*.rs`) | 501 |
 | Rust top-level modules (`pub mod` in `src/lib.rs`) | 40 |
 | Python package files (`python/forge3d/**/*.py`) | 54 |
-| PyO3 classes (`pyclass`) | 38 |
-| PyO3 functions (`#[pyfunction]`) | 100 |
-| Rust files with PyO3 annotations | 33 (6.6% of Rust files) |
-| Test files (Rust + Python, naming/path heuristic) | 77 |
-| Test functions (Rust `#[test]` + Python `def test_*`) | 1450 |
+| PyO3 classes (`pyclass`) | 41 |
+| PyO3 functions (`#[pyfunction]`) | 104 |
+| Rust files with PyO3 annotations | 35 (7.0% of Rust files) |
+| Test files (Rust + Python, naming/path heuristic) | 85 |
+| Test functions (Rust `#[test]` + Python `def test_*`) | 1626 |
 
 Architecture signals:
 - Rust core + PyO3 bindings: detected
@@ -82,7 +82,7 @@ Per-module details:
 | `python/forge3d/textures.py` | Pure Python | 105 | 0 | 0 | no native binding references detected |
 | `python/forge3d/tiles3d.py` | Pure Python | 405 | 0 | 0 | no native binding references detected |
 | `python/forge3d/vector.py` | Thick wrapper | 448 | 1 | 0 | non-trivial module with native integration |
-| `python/forge3d/viewer.py` | Orchestration | 573 | 4 | 0 | known workflow/entry module |
+| `python/forge3d/viewer.py` | Orchestration | 564 | 0 | 0 | known workflow/entry module |
 | `python/forge3d/viewer_ipc.py` | Pure Python | 942 | 0 | 0 | no native binding references detected |
 
 ## Section 5: Duplicate Implementations (Rust vs Python)
