@@ -17,6 +17,8 @@ use wgpu::util::DeviceExt;
 
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const NORMAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+// Keep in sync with src/shaders/ssao.wgsl SsaoSettings.ao_min default comment.
+const SSAO_AO_MIN_DEFAULT: f32 = 0.35;
 
 #[derive(Debug, Clone)]
 pub struct SceneGlobals {
@@ -679,11 +681,15 @@ impl SsaoResources {
     }
 
     fn update_inv_resolution(&self, queue: &wgpu::Queue) {
+        let default_proj_scale = 0.5 * self.height.max(1) as f32;
+        self.write_settings_uniforms(queue, default_proj_scale, SSAO_AO_MIN_DEFAULT);
+    }
+
+    fn write_settings_uniforms(&self, queue: &wgpu::Queue, proj_scale: f32, ao_min: f32) {
         let inv_res = [
             1.0 / self.width.max(1) as f32,
             1.0 / self.height.max(1) as f32,
         ];
-        let proj_scale = 0.5 * self.height.max(1) as f32;
         let uniform = SsaoSettingsUniform {
             radius: self.radius,
             intensity: self.intensity,
@@ -693,7 +699,7 @@ impl SsaoResources {
             frame_index: 0,
             inv_resolution: inv_res,
             proj_scale,
-            ao_min: 0.05,
+            ao_min,
         };
         queue.write_buffer(&self.settings_buffer, 0, bytemuck::bytes_of(&uniform));
         queue.write_buffer(&self.blur_settings_buffer, 0, bytemuck::bytes_of(&uniform));
@@ -706,8 +712,11 @@ impl SsaoResources {
         encoder: &mut wgpu::CommandEncoder,
         normal_view: &wgpu::TextureView,
         color_texture: &wgpu::Texture,
+        projection: &glam::Mat4,
     ) -> Result<(), String> {
-        self.update_inv_resolution(queue);
+        // ssao.wgsl expects proj_scale = 0.5 * height * P[1][1].
+        let proj_scale = compute_ssao_proj_scale(self.height, projection);
+        self.write_settings_uniforms(queue, proj_scale, SSAO_AO_MIN_DEFAULT);
 
         // Group 0: matches cs_ssao bindings in ssao.wgsl.
         let ssao_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -859,6 +868,25 @@ fn create_ssao_texture(
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (texture, view)
+}
+
+fn compute_ssao_proj_scale(height: u32, projection: &glam::Mat4) -> f32 {
+    (0.5 * height.max(1) as f32 * projection.y_axis.y.abs()).max(1e-4)
+}
+
+#[cfg(test)]
+mod ssao_uniform_tests {
+    use super::compute_ssao_proj_scale;
+
+    #[test]
+    fn proj_scale_matches_documented_formula_for_fov() {
+        let fov_y = 60.0_f32.to_radians();
+        let h = 480u32;
+        let proj = crate::camera::perspective_wgpu(fov_y, 1.0, 0.1, 100.0);
+        let expected = 0.5 * h as f32 * (1.0 / (fov_y * 0.5).tan());
+        let got = compute_ssao_proj_scale(h, &proj);
+        assert!((got - expected).abs() < 1e-4 * expected.max(1.0));
+    }
 }
 
 #[cfg(feature = "extension-module")]
@@ -1902,6 +1930,7 @@ impl Scene {
                     &mut encoder,
                     &self.normal_view,
                     &self.color,
+                    &self.scene.proj,
                 )
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
         }
@@ -2334,6 +2363,7 @@ impl Scene {
                     &mut encoder,
                     &self.normal_view,
                     &self.color,
+                    &self.scene.proj,
                 )
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
         }
