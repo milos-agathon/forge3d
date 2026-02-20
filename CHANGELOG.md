@@ -17,6 +17,8 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ### Fixed
 - **Scene SSAO uniform wiring**
   - Updated Scene-side SSAO uniform layout to match WGSL `SsaoSettings` (including sample count and projection parameters), preventing silent zero-sample occlusion.
+  - Corrected runtime `proj_scale` upload to use the documented formula `0.5 * height * P[1][1]` from the active projection matrix so SSAO/GTAO screen-space radius tracks camera FOV.
+  - Aligned SSAO `ao_min` default to `0.35` (matching shader defaults/docs), restoring the intended ambient occlusion floor in rendered output.
 - **Bloom CPU fallback threshold behavior**
   - Replaced threshold remap/clamp path with shader-consistent soft-threshold extraction to avoid collapse at higher threshold values.
 - **Test safety**
