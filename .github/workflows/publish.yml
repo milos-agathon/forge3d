@@ -1,0 +1,226 @@
+name: Publish to PyPI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (build artifacts only, do not publish)
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-wheels:
+    name: Build Wheel (${{ matrix.platform.os }})
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os: windows
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: linux
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: linux-arm
+            runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: macos
+            runner: macos-latest
+            target: universal2-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          manylinux: auto
+          python-version: '3.11'
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform.os }}
+          path: dist/*.whl
+
+  build-sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install maturin
+        run: python -m pip install --upgrade maturin
+
+      - name: Build sdist
+        run: maturin sdist --out dist
+
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  smoke-test:
+    name: Smoke Test (${{ matrix.platform.os }})
+    needs: [build-wheels]
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os: windows
+            runner: windows-latest
+            artifact: wheels-windows
+          - os: linux
+            runner: ubuntu-latest
+            artifact: wheels-linux
+          - os: linux-arm
+            runner: ubuntu-latest
+            artifact: wheels-linux-arm
+          - os: macos
+            runner: macos-latest
+            artifact: wheels-macos
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        if: matrix.platform.os != 'linux-arm'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.platform.artifact }}
+          path: dist/
+
+      - name: Install wheel and run smoke tests
+        if: matrix.platform.os != 'linux-arm'
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install dist/*.whl
+          pytest tests/test_install_smoke.py -v --tb=short
+
+      - name: Set up QEMU
+        if: matrix.platform.os == 'linux-arm'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Run smoke test in arm64 container
+        if: matrix.platform.os == 'linux-arm'
+        shell: bash
+        run: |
+          docker run --rm --platform linux/arm64/v8 \
+            -v "${PWD}:/workspace" \
+            -w /workspace \
+            python:3.11-slim \
+            bash -lc "python -m pip install -U pip pytest && python -m pip install /workspace/dist/*.whl && FORGE3D_NO_BOOTSTRAP=1 pytest tests/test_install_smoke.py -v --tb=short"
+
+  release-assets:
+    name: Upload Release Assets
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-wheels, build-sdist, smoke-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate tag matches pyproject version
+        run: |
+          python -c "import tomllib; from pathlib import Path; version = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version']; tag = '${{ github.ref_name }}'.lstrip('v'); assert version == tag, f'{version}!={tag}'"
+
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist/
+
+      - name: Download sdist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist/
+
+      - name: Create GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+  publish:
+    name: Publish
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
+    needs: [build-wheels, build-sdist, smoke-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: pypi
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate tag matches pyproject version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          python -c "import tomllib; from pathlib import Path; version = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version']; tag = '${{ github.ref_name }}'.lstrip('v'); assert version == tag, f'{version}!={tag}'"
+
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist/
+
+      - name: Download sdist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

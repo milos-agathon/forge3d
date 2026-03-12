@@ -1,0 +1,69 @@
+{
+  "type": "FeatureCollection",
+  "name": "sample_boundaries",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "North Reserve",
+        "stroke": "#f7f7f7",
+        "fill": "#4d8c57"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [0.10, 0.72],
+            [0.34, 0.78],
+            [0.42, 0.66],
+            [0.31, 0.52],
+            [0.12, 0.57],
+            [0.10, 0.72]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Central Basin",
+        "stroke": "#f7f7f7",
+        "fill": "#c47a3f"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [0.26, 0.47],
+            [0.52, 0.55],
+            [0.60, 0.42],
+            [0.50, 0.28],
+            [0.29, 0.31],
+            [0.26, 0.47]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "South Ridge",
+        "stroke": "#f7f7f7",
+        "fill": "#496d9f"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [0.58, 0.64],
+            [0.86, 0.68],
+            [0.89, 0.45],
+            [0.74, 0.21],
+            [0.56, 0.30],
+            [0.58, 0.64]
+          ]
+        ]
+      }
+    }
+  ]
+}

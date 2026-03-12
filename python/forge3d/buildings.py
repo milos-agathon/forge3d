@@ -17,12 +17,10 @@ Example usage:
     print(f"LOD: {layer.max_lod}")
 """
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 
@@ -41,14 +39,14 @@ except ImportError:
 @dataclass
 class BuildingMaterial:
     """PBR material properties for a building surface."""
-    albedo: Tuple[float, float, float] = (0.7, 0.7, 0.7)
+    albedo: tuple[float, float, float] = (0.7, 0.7, 0.7)
     roughness: float = 0.6
     metallic: float = 0.0
     ior: float = 1.5
     emissive: float = 0.0
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "BuildingMaterial":
+    def from_dict(cls, d: dict[str, Any]) -> "BuildingMaterial":
         """Create from dictionary (e.g., from native module)."""
         return cls(
             albedo=tuple(d.get("albedo", (0.7, 0.7, 0.7))),
@@ -58,7 +56,7 @@ class BuildingMaterial:
             emissive=d.get("emissive", 0.0),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "albedo": self.albedo,
@@ -75,13 +73,13 @@ class Building:
     id: str
     positions: np.ndarray  # shape: (N, 3) or flat (N*3,)
     indices: np.ndarray    # shape: (M,) triangle indices
-    normals: Optional[np.ndarray] = None  # shape: (N, 3) or flat
-    height: Optional[float] = None
-    ground_height: Optional[float] = None
+    normals: np.ndarray | None = None  # shape: (N, 3) or flat
+    height: float | None = None
+    ground_height: float | None = None
     roof_type: str = "flat"
     material: BuildingMaterial = field(default_factory=BuildingMaterial)
     lod: int = 1
-    attributes: Dict[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict)
 
     @property
     def vertex_count(self) -> int:
@@ -95,7 +93,7 @@ class Building:
         """Number of triangles."""
         return len(self.indices) // 3
 
-    def bounds(self) -> Optional[Tuple[float, float, float, float, float, float]]:
+    def bounds(self) -> tuple[float, float, float, float, float, float] | None:
         """Get bounding box (min_x, min_y, min_z, max_x, max_y, max_z)."""
         if self.positions.size == 0:
             return None
@@ -110,8 +108,8 @@ class Building:
 class BuildingLayer:
     """A collection of buildings ready for rendering."""
     name: str
-    buildings: List[Building] = field(default_factory=list)
-    crs_epsg: Optional[int] = None
+    buildings: list[Building] = field(default_factory=list)
+    crs_epsg: int | None = None
     source_format: str = "unknown"
 
     @property
@@ -136,7 +134,7 @@ class BuildingLayer:
             return 0
         return max(b.lod for b in self.buildings)
 
-    def bounds(self) -> Optional[Tuple[float, float, float, float, float, float]]:
+    def bounds(self) -> tuple[float, float, float, float, float, float] | None:
         """Get combined bounding box of all buildings."""
         all_bounds = [b.bounds() for b in self.buildings if b.bounds() is not None]
         if not all_bounds:
@@ -154,7 +152,7 @@ class BuildingLayer:
 # Roof Type Inference
 # ============================================================================
 
-def infer_roof_type(properties: Dict[str, Any]) -> str:
+def infer_roof_type(properties: dict[str, Any]) -> str:
     """
     Infer roof type from OSM/building properties.
 
@@ -162,7 +160,7 @@ def infer_roof_type(properties: Dict[str, Any]) -> str:
         properties: Dictionary of building properties/tags
 
     Returns:
-        Roof type string: "flat", "gabled", "hipped", "pyramidal", etc.
+        A roof type string such as ``"flat"`` or ``"gabled"``.
 
     Example:
         roof = infer_roof_type({"building:roof:shape": "gabled"})
@@ -208,7 +206,7 @@ def _parse_roof_tag(value: str) -> str:
 # Material Inference
 # ============================================================================
 
-def material_from_tags(tags: Dict[str, Any]) -> BuildingMaterial:
+def material_from_tags(tags: dict[str, Any]) -> BuildingMaterial:
     """
     Infer building material from OSM tags.
 
@@ -260,11 +258,11 @@ def material_from_name(name: str) -> BuildingMaterial:
 # ============================================================================
 
 def add_buildings(
-    geojson_path: Union[str, Path],
+    geojson_path: str | Path,
     *,
     default_height: float = 10.0,
-    height_key: Optional[str] = None,
-    name: Optional[str] = None,
+    height_key: str | None = None,
+    name: str | None = None,
 ) -> BuildingLayer:
     """
     Load buildings from a GeoJSON file.
@@ -368,9 +366,9 @@ def add_buildings(
 # ============================================================================
 
 def add_buildings_cityjson(
-    cityjson_path: Union[str, Path],
+    cityjson_path: str | Path,
     *,
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> BuildingLayer:
     """
     Load buildings from a CityJSON file.
@@ -510,9 +508,9 @@ def add_buildings_cityjson(
 # ============================================================================
 
 def add_buildings_3dtiles(
-    tileset_path: Union[str, Path],
+    tileset_path: str | Path,
     *,
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> BuildingLayer:
     """
     Load buildings from a 3D Tiles tileset.

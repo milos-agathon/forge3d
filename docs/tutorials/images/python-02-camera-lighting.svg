@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="720" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14213d"/>
+      <stop offset="1" stop-color="#fca311"/>
+    </linearGradient>
+    <linearGradient id="flare" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e5e5e5" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#e5e5e5" stop-opacity="0.03"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="720" fill="url(#bg)"/>
+  <circle cx="980" cy="110" r="170" fill="url(#flare)"/>
+  <rect x="56" y="56" width="1088" height="608" rx="32" fill="#ffffff" fill-opacity="0.04" stroke="#ffffff" stroke-opacity="0.14"/>
+  <g><ellipse cx="610" cy="360" rx="270" ry="135" fill="none" stroke="#fca311" stroke-width="12" opacity="0.9"/><ellipse cx="610" cy="360" rx="190" ry="92" fill="none" stroke="#fca311" stroke-width="6" opacity="0.5"/></g>
+  <g><circle cx="880" cy="360" r="18" fill="#ffffff"/><path d="M340 360 L470 360" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/></g>
+  <text x="92" y="130" font-size="54" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#e5e5e5">Camera Flyover</text>
+  <text x="94" y="176" font-size="22" font-family="Consolas, Menlo, monospace" fill="#ffffff" fill-opacity="0.72">forge3d gallery</text>
+  <rect x="92" y="586" width="280" height="34" rx="17" fill="#000000" fill-opacity="0.22"/>
+  <text x="232" y="609" font-size="18" text-anchor="middle" font-family="Consolas, Menlo, monospace" fill="#ffffff">viewer + ipc + datasets</text>
+</svg>

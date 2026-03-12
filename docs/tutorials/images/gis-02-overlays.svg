@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="720" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#003049"/>
+      <stop offset="1" stop-color="#669bbc"/>
+    </linearGradient>
+    <linearGradient id="flare" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdf0d5" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#fdf0d5" stop-opacity="0.03"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="720" fill="url(#bg)"/>
+  <circle cx="980" cy="110" r="170" fill="url(#flare)"/>
+  <rect x="56" y="56" width="1088" height="608" rx="32" fill="#ffffff" fill-opacity="0.04" stroke="#ffffff" stroke-opacity="0.14"/>
+  <g><line x1="180" y1="170" x2="180" y2="540" stroke="#fdf0d5" stroke-opacity="0.28" stroke-width="3"/><line x1="275" y1="170" x2="275" y2="540" stroke="#fdf0d5" stroke-opacity="0.28" stroke-width="3"/><line x1="370" y1="170" x2="370" y2="540" stroke="#fdf0d5" stroke-opacity="0.28" stroke-width="3"/><line x1="465" y1="170" x2="465" y2="540" stroke="#fdf0d5" stroke-opacity="0.28" stroke-width="3"/><line x1="560" y1="170" x2="560" y2="540" stroke="#fdf0d5" stroke-opacity="0.28" stroke-width="3"/><line x1="655" y1="170" x2="655" y2="540" stroke="#fdf0d5" stroke-opacity="0.28" stroke-width="3"/><line x1="750" y1="170" x2="750" y2="540" stroke="#fdf0d5" stroke-opacity="0.28" stroke-width="3"/><line x1="845" y1="170" x2="845" y2="540" stroke="#fdf0d5" stroke-opacity="0.28" stroke-width="3"/><line x1="940" y1="170" x2="940" y2="540" stroke="#fdf0d5" stroke-opacity="0.28" stroke-width="3"/><line x1="1035" y1="170" x2="1035" y2="540" stroke="#fdf0d5" stroke-opacity="0.28" stroke-width="3"/><line x1="170" y1="190" x2="1040" y2="190" stroke="#fdf0d5" stroke-opacity="0.24" stroke-width="3"/><line x1="170" y1="265" x2="1040" y2="265" stroke="#fdf0d5" stroke-opacity="0.24" stroke-width="3"/><line x1="170" y1="340" x2="1040" y2="340" stroke="#fdf0d5" stroke-opacity="0.24" stroke-width="3"/><line x1="170" y1="415" x2="1040" y2="415" stroke="#fdf0d5" stroke-opacity="0.24" stroke-width="3"/><line x1="170" y1="490" x2="1040" y2="490" stroke="#fdf0d5" stroke-opacity="0.24" stroke-width="3"/></g>
+  <g><path d="M170 540 C280 440 350 360 450 340 C560 320 650 370 760 310 C860 255 940 230 1040 180" fill="none" stroke="#d62828" stroke-width="16" stroke-linecap="round" opacity="0.85"/></g>
+  <text x="92" y="130" font-size="54" font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#fdf0d5">Swiss Land-Cover</text>
+  <text x="94" y="176" font-size="22" font-family="Consolas, Menlo, monospace" fill="#ffffff" fill-opacity="0.72">forge3d gallery</text>
+  <rect x="92" y="586" width="280" height="34" rx="17" fill="#000000" fill-opacity="0.22"/>
+  <text x="232" y="609" font-size="18" text-anchor="middle" font-family="Consolas, Menlo, monospace" fill="#ffffff">viewer + ipc + datasets</text>
+</svg>

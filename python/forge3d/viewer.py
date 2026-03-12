@@ -11,9 +11,12 @@ import re
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+import numpy as np
 
 # Import Renderer and MSAA config with fallbacks for standalone testing
 try:
@@ -48,6 +51,57 @@ _READY_PATTERN = re.compile(r"FORGE3D_VIEWER_READY port=(\d+)")
 _DEFAULT_TIMEOUT = 30.0
 
 
+def _write_temp_tiff_from_array(heightmap: np.ndarray) -> Path:
+    """Write a float32 heightmap array to a temporary TIFF file."""
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise ImportError(
+            "Opening .npy terrain files requires Pillow. Install with: pip install pillow"
+        ) from exc
+
+    array = np.asarray(heightmap, dtype=np.float32)
+    if array.ndim != 2:
+        raise ValueError("terrain_path .npy files must contain a 2D array")
+    if array.size == 0:
+        raise ValueError("terrain_path .npy files must not be empty")
+
+    if not np.isfinite(array).all():
+        finite = array[np.isfinite(array)]
+        fill_value = float(finite.min()) if finite.size else 0.0
+        array = np.where(np.isfinite(array), array, fill_value).astype(np.float32)
+
+    handle, temp_path = tempfile.mkstemp(prefix="forge3d_dem_", suffix=".tif")
+    os.close(handle)
+    Image.fromarray(np.ascontiguousarray(array), mode="F").save(temp_path, format="TIFF")
+    return Path(temp_path)
+
+
+def _prepare_terrain_path(
+    terrain_path: Optional[Union[str, Path]],
+) -> Tuple[Optional[str], List[Path]]:
+    """Prepare a terrain path for the viewer, converting .npy arrays when needed."""
+    if terrain_path is None:
+        return None, []
+
+    path = Path(terrain_path)
+    if path.suffix.lower() != ".npy":
+        return str(path), []
+
+    array = np.load(path)
+    temp_tiff = _write_temp_tiff_from_array(array)
+    return str(temp_tiff), [temp_tiff]
+
+
+def _cleanup_paths(paths: List[Path]) -> None:
+    """Best-effort cleanup for temporary files created by the viewer wrapper."""
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 class ViewerError(Exception):
     """Error from viewer IPC communication."""
     pass
@@ -72,12 +126,14 @@ class ViewerHandle:
         host: str,
         port: int,
         timeout: float = 10.0,
+        cleanup_paths: Optional[List[Path]] = None,
     ):
         self._process = process
         self._host = host
         self._port = port
         self._timeout = timeout
         self._socket: Optional[socket.socket] = None
+        self._cleanup_paths = list(cleanup_paths or [])
         self._connect()
     
     def _connect(self) -> None:
@@ -114,17 +170,17 @@ class ViewerHandle:
             raise ViewerError(f"Viewer command failed: {error_msg}")
         
         return response
+
+    def send_ipc(self, cmd: Dict[str, Any]) -> Dict[str, Any]:
+        """Send a raw IPC command to the viewer and return the decoded response."""
+        return self._send_command(cmd)
     
     def get_stats(self) -> Dict[str, Any]:
         """Get viewer stats (geometry readiness, vertex/index counts).
-        
-        Returns:
-            Dict with keys:
-                - vb_ready: bool - whether vertex buffer is ready for drawing
-                - vertex_count: int - number of vertices in current mesh
-                - index_count: int - number of indices in current mesh
-                - scene_has_mesh: bool - whether scene has any mesh loaded
-        
+
+        Returns a dictionary containing ``vb_ready``, ``vertex_count``,
+        ``index_count``, and ``scene_has_mesh``.
+
         Raises:
             ViewerError: if stats unavailable or command fails
         """
@@ -141,6 +197,72 @@ class ViewerHandle:
     def load_gltf(self, path: Union[str, Path]) -> None:
         """Load a glTF/GLB file into the viewer."""
         self._send_command({"cmd": "load_gltf", "path": str(path)})
+
+    def load_terrain(self, path: Union[str, Path]) -> None:
+        """Load a terrain heightmap file into the viewer.
+
+        ``.npy`` heightmaps are converted to a temporary TIFF automatically so they
+        can be consumed by the current viewer binary.
+        """
+        actual_path, cleanup_paths = _prepare_terrain_path(path)
+        self._cleanup_paths.extend(cleanup_paths)
+        self._send_command({"cmd": "load_terrain", "path": actual_path})
+
+    def load_overlay(
+        self,
+        name: str,
+        path: Union[str, Path],
+        extent: Optional[Tuple[float, float, float, float]] = None,
+        opacity: Optional[float] = None,
+        z_order: Optional[int] = None,
+    ) -> None:
+        """Load an image overlay texture and drape it on the current terrain."""
+        cmd: Dict[str, Any] = {
+            "cmd": "load_overlay",
+            "name": str(name),
+            "path": str(path),
+        }
+        if extent is not None:
+            cmd["extent"] = list(extent)
+        if opacity is not None:
+            cmd["opacity"] = float(opacity)
+        if z_order is not None:
+            cmd["z_order"] = int(z_order)
+        self._send_command(cmd)
+
+    def load_point_cloud(
+        self,
+        path: Union[str, Path],
+        point_size: float = 2.0,
+        max_points: int = 500_000,
+        color_mode: Optional[str] = None,
+    ) -> None:
+        """Load a LAZ/LAS point cloud into the viewer."""
+        cmd: Dict[str, Any] = {
+            "cmd": "load_point_cloud",
+            "path": str(path),
+            "point_size": float(point_size),
+            "max_points": int(max_points),
+        }
+        if color_mode is not None:
+            cmd["color_mode"] = str(color_mode)
+        self._send_command(cmd)
+
+    def set_point_cloud_params(
+        self,
+        point_size: Optional[float] = None,
+        visible: Optional[bool] = None,
+        color_mode: Optional[str] = None,
+    ) -> None:
+        """Update point cloud rendering parameters."""
+        cmd: Dict[str, Any] = {"cmd": "set_point_cloud_params"}
+        if point_size is not None:
+            cmd["point_size"] = float(point_size)
+        if visible is not None:
+            cmd["visible"] = bool(visible)
+        if color_mode is not None:
+            cmd["color_mode"] = str(color_mode)
+        self._send_command(cmd)
     
     def set_transform(
         self,
@@ -322,6 +444,8 @@ class ViewerHandle:
                         self._process.kill()
                     except Exception:
                         pass
+            _cleanup_paths(self._cleanup_paths)
+            self._cleanup_paths.clear()
     
     def __enter__(self) -> "ViewerHandle":
         return self
@@ -410,57 +534,68 @@ def open_viewer_async(
         raise ValueError("obj_path, gltf_path, and terrain_path are mutually exclusive")
     
     binary = _find_viewer_binary()
+    prepared_terrain_path, cleanup_paths = _prepare_terrain_path(terrain_path)
     
-    # Build command line
-    cmd = [
-        binary,
-        "--ipc-host", ipc_host,
-        "--ipc-port", str(ipc_port),
-        "--size", f"{width}x{height}",
-        "--fov", str(fov_deg),
-    ]
-    
-    if obj_path is not None:
-        cmd.extend(["--obj", str(obj_path)])
-    elif gltf_path is not None:
-        cmd.extend(["--gltf", str(gltf_path)])
-    elif terrain_path is not None:
-        cmd.extend(["--terrain", str(terrain_path)])
-    
-    # Start subprocess
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-    
-    # Wait for READY line
-    start_time = time.time()
-    actual_port: Optional[int] = None
-    
-    while time.time() - start_time < timeout:
-        if process.poll() is not None:
-            # Process exited
-            output = process.stdout.read() if process.stdout else ""
-            raise ViewerError(f"Viewer process exited unexpectedly: {output}")
+    try:
+        # Build command line
+        cmd = [
+            binary,
+            "--ipc-host", ipc_host,
+            "--ipc-port", str(ipc_port),
+            "--size", f"{width}x{height}",
+            "--fov", str(fov_deg),
+        ]
         
-        line = process.stdout.readline() if process.stdout else ""
-        if not line:
-            time.sleep(0.01)
-            continue
+        if obj_path is not None:
+            cmd.extend(["--obj", str(obj_path)])
+        elif gltf_path is not None:
+            cmd.extend(["--gltf", str(gltf_path)])
+        elif prepared_terrain_path is not None:
+            cmd.extend(["--terrain", prepared_terrain_path])
         
-        match = _READY_PATTERN.search(line)
-        if match:
-            actual_port = int(match.group(1))
-            break
-    
-    if actual_port is None:
-        process.terminate()
-        raise ViewerError(f"Timed out waiting for viewer READY line after {timeout}s")
-    
-    return ViewerHandle(process, ipc_host, actual_port, timeout=timeout)
+        # Start subprocess
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        
+        # Wait for READY line
+        start_time = time.time()
+        actual_port: Optional[int] = None
+        
+        while time.time() - start_time < timeout:
+            if process.poll() is not None:
+                # Process exited
+                output = process.stdout.read() if process.stdout else ""
+                raise ViewerError(f"Viewer process exited unexpectedly: {output}")
+            
+            line = process.stdout.readline() if process.stdout else ""
+            if not line:
+                time.sleep(0.01)
+                continue
+            
+            match = _READY_PATTERN.search(line)
+            if match:
+                actual_port = int(match.group(1))
+                break
+        
+        if actual_port is None:
+            process.terminate()
+            raise ViewerError(f"Timed out waiting for viewer READY line after {timeout}s")
+        
+        return ViewerHandle(
+            process,
+            ipc_host,
+            actual_port,
+            timeout=timeout,
+            cleanup_paths=cleanup_paths,
+        )
+    except Exception:
+        _cleanup_paths(cleanup_paths)
+        raise
 
 
 def open_viewer(

@@ -1,189 +1,106 @@
 # Interactive Viewer
 
-> **Status:** ✅ Implemented
->
-> The forge3d interactive viewer provides a windowed application for exploring 3D scenes and terrain in real-time.
+> **Status:** implemented
 
-## Overview
-
-The interactive viewer supports both general 3D scene viewing and terrain DEM visualization with orbit camera controls, real-time parameter adjustments, and snapshot capture.
+The interactive viewer is the primary live-rendering path for forge3d. Python
+launches the Rust `interactive_viewer` binary, then drives it through TCP/NDJSON
+IPC with `ViewerHandle`.
 
 ## Quick Start
 
-### Interactive Terrain Viewer
+### Desktop viewer
 
 ```bash
-# Build the viewer binary
 cargo build --release --bin interactive_viewer
-
-# Launch with a DEM file (4K window by default)
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif
-
-# Enable PBR mode with sun controls
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif \
-    --pbr --sun-azimuth 135 --sun-elevation 45 --sun-intensity 1.0
-
-# Full PBR with HDR environment map
-python examples/terrain_viewer_interactive.py --dem assets/dem_rainier.tif \
-    --pbr --hdr assets/snow_field_4k.hdr --exposure 1.0 --msaa 8
 ```
-
-### Automatic Snapshot Mode
-
-```bash
-# Render terrain to PNG and exit
-python examples/terrain_viewer_interactive.py --dem path/to/dem.tif --snapshot output.png
-
-# High-resolution snapshot (up to 16K supported)
-python examples/terrain_viewer_interactive.py --dem path/to/dem.tif \
-    --snapshot output.png --width 8192 --height 8192
-```
-
-## Window Controls
-
-| Input | Action |
-|-------|--------|
-| **Mouse drag** | Orbit camera around terrain |
-| **Scroll wheel** | Zoom in/out |
-| **W/S** or **↑/↓** | Tilt camera up/down |
-| **A/D** or **←/→** | Rotate camera left/right |
-| **Q/E** | Zoom out/in |
-| **Shift** | Faster movement |
-| **Escape** | Close viewer |
-
-## Terminal Commands
-
-While the viewer window is open, you can type commands in the terminal to adjust parameters in real-time (similar to rayshader's `render_camera`):
-
-### Setting Multiple Parameters
-
-```bash
-# Camera controls
-set phi=45 theta=60 radius=2000 fov=55
-
-# Lighting
-set sun_az=135 sun_el=45 intensity=1.5 ambient=0.3
-
-# Terrain rendering
-set zscale=2.0 shadow=0.5
-
-# Background color (RGB 0-1)
-set background=0.2,0.3,0.5
-
-# Water (level in elevation units + color)
-set water=1500 water_color=0.1,0.3,0.5
-
-# Combine any parameters in one command
-set phi=90 theta=30 zscale=1.5 sun_el=60 ambient=0.4
-```
-
-### PBR Mode Commands
-
-```bash
-pbr on                        # Enable PBR rendering
-pbr off                       # Return to legacy mode
-pbr exposure=2.0              # Adjust exposure
-pbr shadows=pcss ibl=1.5      # Shadow technique + IBL intensity
-```
-
-### Snapshots (up to 16K)
-
-```bash
-snap output.png               # Snapshot at window size
-snap output.png 3840x2160     # Snapshot at 4K
-snap output.png 7680x4320     # Snapshot at 8K
-snap output.png 16384x16384   # Snapshot at 16K (max)
-```
-
-### Other Commands
-
-```bash
-params          # Show current parameters
-quit            # Close viewer
-```
-
-## Available Parameters
-
-| Parameter | Description | Range/Default |
-|-----------|-------------|---------------|
-| `phi` | Camera azimuth | degrees (default: 135°) |
-| `theta` | Camera elevation | 5-85° (default: 45°) |
-| `radius` | Camera distance | 100-50000 (auto from DEM) |
-| `fov` | Field of view | 10-120° (default: 55°) |
-| `sun_az` | Sun azimuth | degrees (default: 135°) |
-| `sun_el` | Sun elevation | -90 to 90° (default: 35°) |
-| `intensity` | Sun intensity | ≥0 (default: 1.0) |
-| `exposure` | PBR exposure | 0.1-5.0 (default: 1.0) |
-| `ibl` | IBL intensity | ≥0 (default: 1.0) |
-| `shadows` | Shadow technique | none/hard/pcf/pcss |
-| `ambient` | Ambient light | 0-1 (default: 0.3) |
-| `zscale` | Vertical exaggeration | ≥0.01 (default: 0.3) |
-| `shadow` | Shadow intensity | 0-1 (default: 0.5) |
-| `background` | Sky color RGB | 0-1,0-1,0-1 |
-| `water` | Water level | elevation units |
-| `water_color` | Water RGB | 0-1,0-1,0-1 |
-
-## IPC Protocol
-
-The viewer communicates via JSON over TCP. You can control it programmatically:
 
 ```python
-import json
-import socket
+import forge3d as f3d
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.connect(("127.0.0.1", port))
-
-# Send command
-cmd = {"cmd": "set_terrain", "phi": 45, "theta": 60, "zscale": 1.5}
-sock.sendall((json.dumps(cmd) + "\n").encode())
-
-# Receive response
-response = json.loads(sock.recv(4096).decode())
+with f3d.open_viewer_async(
+    terrain_path=f3d.fetch_dem("rainier"),
+    width=1440,
+    height=900,
+) as viewer:
+    viewer.set_orbit_camera(phi_deg=28, theta_deg=50, radius=5400, fov_deg=42)
+    viewer.set_sun(azimuth_deg=300, elevation_deg=26)
+    viewer.snapshot("rainier.png")
 ```
 
-### Available IPC Commands
+### Notebook widget
 
-- `load_terrain` — Load DEM file: `{"cmd": "load_terrain", "path": "/path/to/dem.tif"}`
-- `set_terrain` — Set parameters: `{"cmd": "set_terrain", "phi": 45, "zscale": 2.0, ...}`
-- `set_terrain_camera` — Camera only: `{"cmd": "set_terrain_camera", "phi_deg": 45, ...}`
-- `set_terrain_sun` — Sun only: `{"cmd": "set_terrain_sun", "azimuth_deg": 135, ...}`
-- `get_terrain_params` — Get current params: `{"cmd": "get_terrain_params"}`
-- `snapshot` — Capture frame: `{"cmd": "snapshot", "path": "/path/to/output.png"}`
-- `close` — Close viewer: `{"cmd": "close"}`
+```python
+import forge3d as f3d
 
-## Platform Support
+widget = f3d.ViewerWidget(
+    terrain_path=f3d.mini_dem_path(),
+    src=f3d.mini_dem_path(),
+    width=960,
+    height=600,
+)
+widget
+```
 
-- ✅ **macOS** — Metal backend
-- ✅ **Linux** — Vulkan backend (X11 and Wayland)
-- ✅ **Windows** — DX12/Vulkan backend
+## Core controls
 
-## Implementation Details
+`ViewerHandle` exposes the high-frequency controls directly:
 
-The terrain viewer uses a standalone WGSL shader with:
-- **4K default window** (3840×2160)
-- **Snapshots up to 16K** (16384×16384, 270 megapixels max)
-- Height-based terrain colormap (green valleys → brown slopes → white peaks)
-- Real-time normal calculation via screen-space derivatives
-- Configurable z-scale for vertical exaggeration
-- Diffuse lighting with shadow intensity control
-- Optional water plane with specular highlights
+- `load_terrain()`
+- `load_overlay()`
+- `load_point_cloud()`
+- `set_point_cloud_params()`
+- `set_orbit_camera()`
+- `set_camera_lookat()`
+- `set_sun()`
+- `snapshot()`
+- `send_ipc()`
 
-**PBR Mode** adds:
-- Blinn-Phong specular + diffuse lighting
-- Real-time CSM shadows (hard/pcf/pcss)
-- ACES filmic tonemapping
-- Configurable sun azimuth, elevation, intensity
-- HDR environment map support for IBL
+## Raw IPC example
 
-### Source Files
+Use raw IPC when you need commands that do not yet have convenience wrappers.
 
-- `src/viewer/viewer_terrain.rs` — Terrain viewer implementation
-- `src/viewer/mod.rs` — Main viewer with IPC handling
-- `src/viewer/ipc.rs` — IPC protocol definitions
-- `examples/terrain_viewer_interactive.py` — Python launcher script
+```python
+with f3d.open_viewer_async(terrain_path=f3d.mini_dem_path()) as viewer:
+    viewer.send_ipc({"cmd": "set_terrain", "phi": 45, "theta": 60, "zscale": 1.5})
+    viewer.send_ipc(
+        {
+            "cmd": "add_vector_overlay",
+            "name": "ridge-line",
+            "vertices": [
+                [0.0, 0.0, 0.0, 0.95, 0.3, 0.2, 1.0],
+                [50.0, 20.0, 0.0, 0.95, 0.3, 0.2, 1.0],
+                [90.0, 35.0, 0.0, 0.95, 0.3, 0.2, 1.0],
+            ],
+            "indices": [0, 1, 1, 2],
+            "primitive": "lines",
+            "drape": True,
+            "line_width": 3.0,
+        }
+    )
+```
 
-## See Also
+## Common IPC commands
 
-- [Terrain Rendering](../terrain/terrain_rendering.rst) — Offscreen terrain rendering API
-- [Terrain Demo Quickstart](../examples/terrain_demo_quickstart.rst) — Programmatic terrain rendering
+- `load_terrain`
+- `set_terrain`
+- `set_terrain_camera`
+- `lit_sun`
+- `load_overlay`
+- `load_point_cloud`
+- `set_point_cloud_params`
+- `snapshot`
+- `close`
+
+For script-friendly wrappers around these commands, see `forge3d.viewer_ipc`.
+
+## Platform support
+
+- macOS: Metal backend
+- Linux: Vulkan backend
+- Windows: DX12 or Vulkan backend
+
+## Related pages
+
+- [Quickstart](../quickstart.md)
+- [GIS Track](../tutorials/gis-track/index.md)
+- [Python Track](../tutorials/python-track/index.md)

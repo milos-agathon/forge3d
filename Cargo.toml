@@ -52,7 +52,7 @@ proj = ["dep:proj"]
 [dependencies]
 # Do NOT enable pyo3's extension-module by default; gate it via the Cargo feature above.
 # Enable `macros` so procedural attributes like #[pyclass], #[pymethods], and #[pyo3(signature=..)] work when the extension is built.
-pyo3  = { version = "0.21.2", features = ["abi3-py38", "macros"] }
+pyo3  = { version = "0.21.2", features = ["abi3-py310", "macros"] }
 numpy = "0.21"
 ndarray = "0.15"
 wgpu = "0.19"

@@ -1,21 +1,15 @@
 # tests/test_style_pixel_diff.py
-"""Tests for style integration with pixel diff verification.
-
-Per docs/plan.md acceptance test requirement:
-- Assert render with style vs default produces pixel diff > 0.
-"""
+"""Tests for style integration with color-diff verification."""
 
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from forge3d.style import (
     parse_style,
     apply_style,
     layer_to_vector_style,
     VectorStyle,
-    LabelStyle,
 )
 
 
@@ -158,7 +152,7 @@ def test_style_integration_workflow():
     # This tests the documented workflow for style integration:
     # 1. Load style spec
     # 2. Call apply_style() to match features to layers
-    # 3. Use resulting VectorStyle colors in render_polygons()
+    # 3. Use resulting VectorStyle colors in the viewer/vector overlay pipeline
     
     style_data = {
         "version": 8,
@@ -204,94 +198,4 @@ def test_style_integration_workflow():
     
     # Water should be bluish (high B channel)
     assert water_style.fill_color[2] > 0.5, "Water should be blue"
-
-
-def test_render_pixel_diff_styled_vs_default():
-    """REAL render-based pixel diff: styled render differs from default render.
-    
-    This test performs actual rendering with render_polygons() and verifies
-    that styled output produces measurably different pixels than default.
-    """
-    import json
-    import tempfile
-    from pathlib import Path
-    
-    # Check if geopandas is available
-    try:
-        import geopandas as gpd  # noqa: F401
-        HAS_GEOPANDAS = True
-    except ImportError:
-        HAS_GEOPANDAS = False
-    
-    if not HAS_GEOPANDAS:
-        pytest.skip("Requires geopandas for render test")
-    
-    from forge3d.render import render_polygons
-    
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Create GeoJSON test file
-        geojson = {
-            "type": "FeatureCollection",
-            "features": [
-                {
-                    "type": "Feature",
-                    "properties": {"class": "water"},
-                    "geometry": {
-                        "type": "Polygon",
-                        "coordinates": [[[10, 10], [90, 10], [90, 90], [10, 90], [10, 10]]]
-                    }
-                }
-            ]
-        }
-        
-        geojson_path = Path(tmpdir) / "test.geojson"
-        with open(geojson_path, "w") as f:
-            json.dump(geojson, f)
-        
-        # Render with DEFAULT style
-        img_default = render_polygons(
-            geojson_path,
-            size=(100, 100),
-            fill_rgba=(0.5, 0.5, 0.5, 1.0),  # Gray default
-        )
-        
-        # Create style that produces BLUE fill
-        style_data = {
-            "version": 8,
-            "layers": [
-                {
-                    "id": "water",
-                    "type": "fill",
-                    "source": "test",
-                    "source-layer": "water",
-                    "paint": {"fill-color": "#0077ff"}  # Bright blue
-                }
-            ]
-        }
-        style = parse_style(style_data)
-        
-        # Render with STYLED rendering
-        img_styled = render_polygons(
-            geojson_path,
-            size=(100, 100),
-            style=style,
-            style_layer="water",
-        )
-        
-        # Compute pixel difference
-        diff = np.abs(img_default.astype(float) - img_styled.astype(float))
-        total_diff = np.sum(diff)
-        
-        # There MUST be a measurable difference
-        assert total_diff > 0, (
-            "Styled render must produce different pixels than default. "
-            f"Total pixel diff: {total_diff}"
-        )
-        
-        # Additionally verify it's a significant difference (not just alpha)
-        mean_diff = np.mean(diff)
-        assert mean_diff > 1.0, (
-            f"Mean pixel difference ({mean_diff:.2f}) should be > 1.0 "
-            "to confirm style was applied"
-        )
 

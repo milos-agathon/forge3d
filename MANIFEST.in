@@ -13,8 +13,10 @@ include rust-toolchain.toml
 # Include source code
 recursive-include src *.rs *.wgsl *.md
 recursive-include python *.py *.pyi
+recursive-include python/forge3d/data *.npy *.geojson
 recursive-include tests *.py
 recursive-include examples *.py
+recursive-include examples *.ipynb
 
 # Include data files needed for the library
 recursive-include data *.rgba *.txt
@@ -29,6 +31,7 @@ recursive-include shaders *.wgsl *.spv
 
 # Include documentation source (but not built docs)
 recursive-include docs *.rst *.md *.py *.toml *.txt *.yml *.yaml
+recursive-include docs *.svg
 exclude docs/_build
 exclude docs/build
 prune docs/_build/

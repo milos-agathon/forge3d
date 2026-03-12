@@ -4,7 +4,8 @@
 forge3d - GPU-accelerated terrain rendering library.
 
 Core API:
-    render_raster       - High-level terrain rendering from DEM
+    open_viewer_async   - Launch the IPC-controlled interactive viewer
+    open_viewer         - Launch the blocking interactive viewer
     TerrainRenderer     - Native GPU terrain renderer
     Renderer            - Fallback CPU renderer
     
@@ -116,13 +117,29 @@ from . import animation
 # -----------------------------------------------------------------------------
 # Core rendering API
 # -----------------------------------------------------------------------------
-from .render import render_raster, render_polygons, render_raytrace_mesh
 from .path_tracing import PathTracer, make_camera
 
 # -----------------------------------------------------------------------------
 # Interactive Viewer API
 # -----------------------------------------------------------------------------
 from .viewer import open_viewer, open_viewer_async, ViewerHandle
+from . import viewer_ipc, colors, interactive, datasets, widgets
+from .datasets import (
+    available as available_datasets,
+    bundled as bundled_datasets,
+    dataset_info,
+    fetch as fetch_dataset,
+    fetch_cityjson,
+    fetch_copc,
+    fetch_dem,
+    list_datasets,
+    mini_dem,
+    mini_dem_path,
+    remote as remote_datasets,
+    sample_boundaries,
+    sample_boundaries_path,
+)
+from .widgets import ViewerWidget, widgets_available
 
 # -----------------------------------------------------------------------------
 # Fallback Renderer class
@@ -348,9 +365,6 @@ __all__ = [
     "__version__",
     "version",
     # Core rendering
-    "render_raster",
-    "render_polygons", 
-    "render_raytrace_mesh",
     "Renderer",
     "PathTracer",
     "make_camera",
@@ -400,6 +414,12 @@ __all__ = [
     # Modules
     "geometry",
     "io",
+    # Interactive viewer
+    "open_viewer",
+    "open_viewer_async",
+    "ViewerHandle",
+    "ViewerWidget",
+    "widgets_available",
     # P4: Map Plate / Creator Workflow
     "MapPlate",
     "MapPlateConfig",
@@ -424,6 +444,20 @@ __all__ = [
     "CameraBookmark",
     "TerrainMeta",
     "BUNDLE_VERSION",
+    # Datasets
+    "mini_dem",
+    "mini_dem_path",
+    "sample_boundaries",
+    "sample_boundaries_path",
+    "available_datasets",
+    "bundled_datasets",
+    "remote_datasets",
+    "list_datasets",
+    "dataset_info",
+    "fetch_dataset",
+    "fetch_dem",
+    "fetch_cityjson",
+    "fetch_copc",
     # Mapbox Style Spec
     "load_style",
     "parse_style",

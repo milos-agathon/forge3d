@@ -24,9 +24,6 @@ from .colormaps.core import (
     interpolate_hex_colors as _cm_interpolate_hex_colors,
     elevation_stops_from_hex_colors as _cm_elevation_stops,
 )
-from .render import (
-    _load_dem as _render_load_dem,
-)
 from .lighting import sun_direction_from_angles as _sun_direction_from_angles
 
 

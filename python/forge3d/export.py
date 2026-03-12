@@ -4,22 +4,8 @@
 This module provides print-grade vector export capabilities for terrain
 overlays, including polygons, polylines, and text labels.
 
-Example usage:
-    from forge3d.export import export_svg, export_pdf, VectorScene
-
-    # Create a scene with vector data
-    scene = VectorScene()
-    scene.add_polygon(exterior=[(0, 0), (100, 0), (50, 100)],
-                      fill_color=(1, 0, 0, 1))
-    scene.add_polyline(path=[(0, 50), (100, 50)],
-                       stroke_color=(0, 0, 1, 1), stroke_width=2.0)
-    scene.add_label("Mountain Peak", position=(50, 80), font_size=14)
-
-    # Export to SVG
-    export_svg(scene, "output.svg")
-
-    # Export to PDF (requires cairosvg)
-    export_pdf(scene, "output.pdf")
+Example:
+    Create a vector scene, then export it to SVG or PDF.
 """
 
 from dataclasses import dataclass, field

@@ -869,3 +869,26 @@ class LabelStyle:
         horizon_fade_angle: float = ...,
     ) -> None: ...
     def __repr__(self) -> str: ...
+
+# Interactive viewer wrapper
+from .viewer import ViewerError, ViewerHandle, open_viewer, open_viewer_async, set_msaa
+
+# Bundled datasets and fetch helpers
+from .datasets import (
+    available as available_datasets,
+    bundled as bundled_datasets,
+    dataset_info,
+    fetch as fetch_dataset,
+    fetch_cityjson,
+    fetch_copc,
+    fetch_dem,
+    list_datasets,
+    mini_dem,
+    mini_dem_path,
+    remote as remote_datasets,
+    sample_boundaries,
+    sample_boundaries_path,
+)
+
+# Optional notebook widgets
+from .widgets import ViewerWidget, widgets_available

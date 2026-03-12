@@ -25,6 +25,7 @@ from forge3d.viewer import (
     ViewerHandle,
     ViewerError,
     _READY_PATTERN,
+    _prepare_terrain_path,
     open_viewer_async,
 )
 
@@ -303,6 +304,24 @@ class TestViewerHandleValidation:
         """open_viewer_async rejects both obj_path and gltf_path."""
         with pytest.raises(ValueError, match="mutually exclusive"):
             open_viewer_async(obj_path="a.obj", gltf_path="b.glb")
+
+    def test_prepare_terrain_path_converts_npy(self, tmp_path):
+        """A .npy terrain path is converted to a temporary TIFF for the viewer."""
+        import numpy as np
+
+        src = tmp_path / "terrain.npy"
+        np.save(src, np.arange(64, dtype=np.float32).reshape(8, 8))
+
+        prepared, cleanup_paths = _prepare_terrain_path(src)
+
+        assert prepared is not None
+        prepared_path = Path(prepared)
+        assert prepared_path.suffix.lower() in (".tif", ".tiff")
+        assert prepared_path.exists()
+        assert cleanup_paths == [prepared_path]
+
+        for path in cleanup_paths:
+            path.unlink(missing_ok=True)
 
 
 class TestNDJSONProtocol:

@@ -51,7 +51,12 @@ from forge3d.viewer_ipc import (
 )
 
 # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
-from forge3d import sun_position, sun_position_utc, SunPosition
+try:
+    from forge3d import sun_position, sun_position_utc, SunPosition
+except ImportError:
+    def sun_position(*args, **kwargs): raise NotImplementedError("Sun ephemeris requires native build (maturin develop --release)")
+    def sun_position_utc(*args, **kwargs): raise NotImplementedError("Sun ephemeris requires native build (maturin develop --release)")
+    class SunPosition: pass
 
 # Asset paths
 ASSETS_DIR = Path(__file__).parent.parent / "assets"

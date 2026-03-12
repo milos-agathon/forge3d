@@ -1,357 +1,89 @@
 API Reference
 =============
 
-This section provides complete API reference documentation for forge3d.
-
-Core Classes
-------------
-
-Renderer
-~~~~~~~~
-
-.. autoclass:: forge3d.Renderer
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-The main rendering class that provides headless GPU rendering capabilities.
-
-**Example Usage:**
-
-.. code-block:: python
-
-   import forge3d as f3d
-   
-   # Create a renderer
-   renderer = f3d.Renderer(512, 512)
-   
-   # Render a triangle
-   rgba_data = renderer.render_triangle_rgba()
-   
-   # Save as PNG
-   renderer.render_triangle_png("output.png")
-
-Scene
-~~~~~
-
-.. autoclass:: forge3d.Scene
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-High-level scene management for complex rendering scenarios.
-
-**Example Usage:**
-
-.. code-block:: python
-
-   import numpy as np
-   
-   # Create height data
-   heights = np.random.random((256, 256)).astype(np.float32)
-   
-   # Create scene
-   scene = f3d.Scene(512, 512)
-   scene.set_height_data(heights, spacing=10.0, exaggeration=2.0)
-   
-   # Render terrain
-   terrain_image = scene.render_terrain_rgba()
-
-Vector Graphics (Overview)
---------------------------
-
-The vector API (polygons, lines, points) is exposed via the native module and high-level helpers
-in examples. Refer to the examples section for usage patterns.
-
-Terrain Rendering
------------------
-
-Height Data Processing
-~~~~~~~~~~~~~~~~~~~~~~
-
-Generate coordinate grids for terrain rendering.
-
-**Returns:**
-- **x_coords** (*ndarray*): X coordinate array
-- **y_coords** (*ndarray*): Y coordinate array  
-- **indices** (*ndarray*): Triangle indices for meshes
-
-.. automethod:: forge3d.Renderer.add_terrain
-   :noindex:
-
-Add terrain from height field data.
-
-**Parameters:**
-
-- **heights** (*array_like*): Height values as [H, W] array
-- **spacing** (*float*): Grid spacing in world units
-- **exaggeration** (*float*): Height scaling factor
-- **colormap** (*str*): Color mapping ('viridis', 'magma', 'terrain')
-
-Memory Management
------------------
-
-See the dedicated pages on memory budget and GPU memory guide for details on tracking and budgets.
-
-Budget Management
-~~~~~~~~~~~~~~~~~
-
-The system enforces a 512 MiB budget for host-visible GPU memory:
-
-.. code-block:: python
-
-   # Check if allocation would exceed budget
-   try:
-       global_tracker().check_budget(100 * 1024 * 1024)  # 100 MiB
-       print("Allocation within budget")
-   except Exception as e:
-       print(f"Budget exceeded: {e}")
-
-Advanced Features
------------------
-
-Shadow Mapping
-~~~~~~~~~~~~~~
-
-.. automodule:: forge3d.shadows
-   :members:
-   :undoc-members:
-
-Cascaded shadow mapping with configurable quality presets.
-
-**Available Presets:**
-
-- **low_quality**: 512×512 shadow maps, 2 cascades (2 MiB)
-- **medium_quality**: 1024×1024 shadow maps, 3 cascades (12 MiB)  
-- **high_quality**: 2048×2048 shadow maps, 4 cascades (64 MiB)
-- **ultra_quality**: 4096×4096 shadow maps, 4 cascades (256 MiB)
-
-**Example:**
-
-.. code-block:: python
-
-   from forge3d.shadows import get_preset_config
-   
-   # Get shadow configuration
-   config = get_preset_config("medium_quality")
-   print(f"Shadow map size: {config.shadow_map_size}")
-   print(f"Cascade count: {config.cascade_count}")
-   
-   # Check memory usage
-   memory_mb = config.calculate_memory_usage() / (1024 * 1024)
-   print(f"Memory usage: {memory_mb:.1f} MiB")
-
-PBR Materials
-~~~~~~~~~~~~~
-
-See :doc:`pbr_materials` for the Python-side PBR materials API and usage patterns.
-
-**Material Presets:**
-
-.. code-block:: python
-
-   from forge3d.core.material import presets
-   
-   # Create material presets
-   gold_mat = presets.gold()
-   silver_mat = presets.silver()
-   plastic_mat = presets.plastic([0.8, 0.2, 0.2])  # Red plastic
-   glass_mat = presets.glass([0.9, 0.9, 1.0])      # Blue-tinted glass
-
-Async Readback
-~~~~~~~~~~~~~~
-
-See :doc:`async_readback_guide` for guidance on asynchronous readback patterns.
-
-**Example:**
-
-.. code-block:: python
-
-   import asyncio
-   from forge3d.async_readback import AsyncRenderer
-   
-   async def render_multiple():
-       renderer = AsyncRenderer(512, 512)
-       
-       # Start multiple async operations
-       handles = []
-       for i in range(5):
-           handle = await renderer.render_async()
-           handles.append(handle)
-       
-       # Wait for all to complete
-       results = await asyncio.gather(*[h.wait() for h in handles])
-       return results
-   
-   # Run async rendering
-   results = asyncio.run(render_multiple())
-
-Utilities
----------
-
-Device Information
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: forge3d.device_probe
-
-Get information about available GPU devices.
-
-**Returns:**
-- Device adapter information
-- Feature support details
-- Memory limits and capabilities
-
-Environment Reporting
-~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: forge3d.enumerate_adapters
-
-Enumerate available GPU adapters (may return an empty list on CPU-only builds).
-
-**Returns:**
-- System information
-- GPU details
-- Driver versions
-- forge3d configuration
-
-Color Management
-~~~~~~~~~~~~~~~~
-
-.. automodule:: forge3d.colormap
-   :members:
-   :undoc-members:
-
-Color mapping and palette utilities.
-
-**Available Colormaps:**
-
-- ``viridis`` - Blue to yellow gradient
-- ``magma`` - Black to white through purple/pink
-- ``terrain`` - Blue (water) to green (land) to brown (mountains)
-- ``plasma`` - Purple to pink to yellow
-- ``inferno`` - Black to yellow through red
-
-Configuration
--------------
-
-Environment Variables
-~~~~~~~~~~~~~~~~~~~~~
-
-forge3d behavior can be controlled through environment variables:
-
-**WGPU_BACKENDS**
-  Comma-separated list of preferred GPU backends.
-  
-  - ``VULKAN`` - Vulkan API (preferred on Linux/Windows)
-  - ``METAL`` - Metal API (macOS only)
-  - ``DX12`` - DirectX 12 (Windows only) 
-  - ``GL`` - OpenGL (fallback)
-
-  Example: ``WGPU_BACKENDS=VULKAN,DX12``
-
-**VF_ENABLE_TERRAIN_TESTS**
-  Enable terrain-specific test suite.
-  
-  Set to ``1`` to enable terrain tests that may require additional GPU memory.
-
-**RUST_LOG**  
-  Control logging level for debugging.
-  
-  - ``ERROR`` - Only errors
-  - ``WARN`` - Warnings and errors
-  - ``INFO`` - General information
-  - ``DEBUG`` - Detailed debugging
-  - ``TRACE`` - Maximum verbosity
-
-GPU Backend Selection
-~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-   import os
-   
-   # Force Vulkan backend
-   os.environ['WGPU_BACKENDS'] = 'VULKAN'
-   
-   # Enable debug logging
-   os.environ['RUST_LOG'] = 'INFO'
-   
-   import forge3d as f3d
-
-Error Handling
+This page documents the curated Phase 2 Python surface: launching the viewer,
+driving it through IPC, resolving sample datasets, embedding notebook widgets,
+and packaging results.
+
+Stable Surface
 --------------
 
-Common Exceptions
-~~~~~~~~~~~~~~~~~
+The recommended public modules are:
 
-**RenderError**
-  Base exception for rendering errors.
+* ``forge3d.viewer``
+* ``forge3d.viewer_ipc``
+* ``forge3d.datasets``
+* ``forge3d.widgets``
+* ``forge3d.map_plate``
+* ``forge3d.legend``
+* ``forge3d.scale_bar``
+* ``forge3d.north_arrow``
+* ``forge3d.bundle``
+* ``forge3d.buildings``
+* ``forge3d.export``
 
-**DeviceError**
-  GPU device initialization or operation errors.
+Viewer And IPC
+--------------
 
-**ValidationError**
-  Input validation errors (invalid parameters, formats, etc.).
+.. automodule:: forge3d.viewer
+   :members: ViewerError, ViewerHandle, open_viewer_async, open_viewer, set_msaa
+   :undoc-members:
 
-**MemoryError**
-  GPU memory allocation or budget exceeded errors.
+.. automodule:: forge3d.viewer_ipc
+   :members: send_ipc, launch_viewer, close_viewer, add_label, add_line_label, add_callout, add_vector_overlay, save_bundle, load_bundle
+   :undoc-members:
 
-**Example Error Handling:**
+Datasets
+--------
 
-.. code-block:: python
+.. automodule:: forge3d.datasets
+   :members: available, bundled, remote, dataset_info, list_datasets, mini_dem, mini_dem_path, sample_boundaries, sample_boundaries_path, fetch, fetch_dem, fetch_cityjson, fetch_copc
+   :undoc-members:
 
-   try:
-       renderer = f3d.Renderer(8192, 8192)  # Very large texture
-       result = renderer.render_triangle_rgba()
-   except f3d.MemoryError as e:
-       print(f"GPU memory error: {e}")
-       # Fall back to smaller size
-       renderer = f3d.Renderer(2048, 2048)
-       result = renderer.render_triangle_rgba()
-   except f3d.DeviceError as e:
-       print(f"GPU device error: {e}")
-       # Try software fallback
-       os.environ['WGPU_BACKENDS'] = 'GL'
-       renderer = f3d.Renderer(2048, 2048)
-       result = renderer.render_triangle_rgba()
-
-Debugging Tips
-~~~~~~~~~~~~~~
-
-1. **Enable Logging:** Set ``RUST_LOG=INFO`` for detailed operation logs
-2. **Check Memory Usage:** Use memory tracker to monitor GPU allocations
-3. **Validate Input:** Ensure arrays are contiguous and correct dtype
-4. **Backend Issues:** Try different GPU backends if rendering fails  
-5. **Size Limits:** Start with smaller textures and scale up as needed
-
-Performance Tips
-~~~~~~~~~~~~~~~~
-
-1. **Reuse Renderers:** Create renderer once, call render methods multiple times
-2. **Batch Operations:** Group multiple render calls together
-3. **Memory Budget:** Stay within 512 MiB host-visible memory limit
-4. **Async Readback:** Use async operations for better throughput
-5. **Appropriate Formats:** Choose efficient texture formats (compressed when possible)
-
-Type Annotations
+Notebook Widgets
 ----------------
 
-forge3d provides comprehensive type hints for better IDE support:
+.. automodule:: forge3d.widgets
+   :members: widgets_available, ViewerWidget
+   :undoc-members:
 
-.. code-block:: python
+Cartography And Packaging
+-------------------------
 
-   from typing import Tuple, Optional
-   import numpy as np
-   from numpy.typing import NDArray
-   
-   # Type-annotated function
-   def process_heightmap(
-       heights: NDArray[np.float32],
-       spacing: float = 1.0,
-       exaggeration: float = 1.0
-   ) -> NDArray[np.uint8]:
-       scene = f3d.Scene(512, 512)
-       scene.set_height_data(heights, spacing, exaggeration) 
-       return scene.render_terrain_rgba()
+.. automodule:: forge3d.map_plate
+   :members: BBox, MapPlateConfig, PlateRegion, MapPlate
+   :undoc-members:
 
-For more examples and detailed guides, see the Examples section in the main index.
+.. automodule:: forge3d.legend
+   :members: LegendConfig, Legend
+   :undoc-members:
+
+.. automodule:: forge3d.scale_bar
+   :members: ScaleBarConfig, ScaleBar
+   :undoc-members:
+
+.. automodule:: forge3d.north_arrow
+   :members: NorthArrowConfig, NorthArrow
+   :undoc-members:
+
+.. automodule:: forge3d.bundle
+   :members: BUNDLE_VERSION, TerrainMeta, CameraBookmark, BundleManifest, LoadedBundle, save_bundle, load_bundle, is_bundle
+   :undoc-members:
+
+Buildings And Vector Export
+---------------------------
+
+.. automodule:: forge3d.buildings
+   :members: BuildingMaterial, Building, BuildingLayer, infer_roof_type, material_from_tags, material_from_name, add_buildings, add_buildings_cityjson, add_buildings_3dtiles
+   :undoc-members:
+
+.. automodule:: forge3d.export
+   :members: VectorStyle, LabelStyle, Polygon, Polyline, Label, Bounds, VectorScene, generate_svg, export_svg, export_pdf, validate_svg
+   :undoc-members:
+
+Related Pages
+-------------
+
+* :doc:`../quickstart`
+* :doc:`../tutorials/index`
+* :doc:`../gallery/index`

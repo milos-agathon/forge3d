@@ -493,7 +493,8 @@ class TestPackageLevelApiContracts:
         "OverlayLayer",
         "__version__",
         "has_gpu",
-        "render_raster",
+        "open_viewer",
+        "open_viewer_async",
         "render_offscreen_rgba",
         "numpy_to_png",
         "png_to_numpy",
@@ -526,6 +527,13 @@ class TestPackageLevelApiContracts:
         """forge3d.has_gpu() must return a boolean."""
         result = f3d.has_gpu()
         assert isinstance(result, bool)
+
+    def test_legacy_render_api_removed(self):
+        """Legacy top-level render helpers stay removed."""
+        for attr_name in ("render_raster", "render_polygons", "render_raytrace_mesh"):
+            assert not hasattr(f3d, attr_name), (
+                f"forge3d.{attr_name} should not be exported"
+            )
 
 
 # ===========================================================================

@@ -6,21 +6,19 @@ build-backend = "maturin"
 name = "forge3d"
 version = "1.12.2"
 description = "forge3d: Rust/WebGPU core with PyO3 bindings"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 readme = "README.md"
 license = { text = "Apache-2.0 OR MIT" }
 authors = [{ name = "forge3d authors" }]
 keywords = ["graphics", "rendering", "webgpu", "rust", "3d", "terrain", "visualization"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10", 
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -32,10 +30,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/example/forge3d"  # Update with actual URL
-Repository = "https://github.com/example/forge3d" # Update with actual URL
-Documentation = "https://forge3d.readthedocs.io"  # Update with actual URL
-"Bug Tracker" = "https://github.com/example/forge3d/issues"  # Update with actual URL
+Homepage = "https://forge3d.dev"
+Repository = "https://github.com/forge3d/forge3d"
+Documentation = "https://docs.forge3d.dev"
+"Bug Tracker" = "https://github.com/forge3d/forge3d/issues"
 
 [project.optional-dependencies]
 # Raster I/O and streaming dependencies for Workstream S
@@ -70,6 +68,16 @@ colormaps = [
     "pycpt>=0.5.0",
 ]
 
+# Notebook widget helpers for the viewer workflow
+jupyter = [
+    "ipywidgets>=8.0",
+]
+
+# On-demand tutorial datasets
+datasets = [
+    "pooch>=1.6",
+]
+
 # All optional dependencies combined
 all = [
     "rasterio>=1.3.0",
@@ -80,6 +88,8 @@ all = [
     "matplotlib>=3.5.0",
     "pillow>=9.0.0",
     "cartopy>=0.21.0",
+    "ipywidgets>=8.0",
+    "pooch>=1.6",
 ]
 
 [tool.maturin]
@@ -90,7 +100,7 @@ module-name = "forge3d._forge3d"
 cargo-extra-args = "--profile release-lto"
 # Strip debug symbols for smaller wheel size
 strip = true
-# Generate abi3 wheels for broader compatibility
+# Generate abi3 wheels for Python 3.10+ compatibility
 features = ["extension-module", "weighted-oit", "enable-tbn", "copc_laz"]
 
 # Note: Cargo profiles are defined in Cargo.toml
@@ -107,7 +117,7 @@ exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 # Include data files in Python package
-"forge3d" = ["data/*.rgba", "assets/*.png"]
+"forge3d" = ["data/*.rgba", "data/*.npy", "data/*.geojson", "assets/*.png"]
 
 [project.entry-points."forge3d.colormaps"]
 # third parties can register here; example kept for docs

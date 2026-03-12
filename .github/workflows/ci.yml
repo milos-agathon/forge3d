@@ -91,7 +91,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Download macOS wheel artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: wheels-macos
           path: dist/
@@ -103,6 +103,7 @@ jobs:
 
       - name: Run interactive viewer tests
         env:
+          FORGE3D_NO_BOOTSTRAP: '1'
           RUN_INTERACTIVE_VIEWER_CI: '1'
         run: |
           pytest tests/ -m interactive_viewer -v --tb=short
@@ -127,40 +128,26 @@ jobs:
           - os: macos
             runner: macos-latest
             target: universal2-apple-darwin
+          - os: linux-arm
+            runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
         with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          manylinux: auto
           python-version: '3.11'
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies (Linux)
-        if: matrix.platform.os == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libvulkan-dev cmake
-
-      - name: Install system dependencies (macOS)
-        if: matrix.platform.os == 'macos'
-        run: |
-          brew install cmake
-
-      - name: Install maturin
-        run: pip install maturin
-
-      - name: Build wheel
-        run: maturin build --release --target ${{ matrix.platform.target }}
-
       - name: Upload wheel artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.platform.os }}
-          path: target/wheels/*.whl
+          path: dist/*.whl
 
   # ============================================================================
   # Python Tests (pytest)
@@ -173,7 +160,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
-        python-version: ['3.9', '3.11', '3.12']
+        python-version: ['3.10', '3.11', '3.12', '3.13']
 
     steps:
       - uses: actions/checkout@v4
@@ -184,7 +171,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Download wheel artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: wheels-${{ runner.os == 'Windows' && 'windows' || runner.os == 'Linux' && 'linux' || 'macos' }}
           path: dist/
@@ -199,9 +186,47 @@ jobs:
           python -c "import forge3d as f3d; print('\n=== Milestone 5: Shader Version ===' ); print('BRDF_SHADER_VERSION: Check Rust logs during render')" || true
         continue-on-error: true
 
+      - name: Run install smoke tests
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: pytest tests/test_install_smoke.py -v --tb=short
+
       - name: Run pytest
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
         run: pytest tests/ -v --tb=short
         continue-on-error: true
+
+  # ============================================================================
+  # Linux aarch64 Wheel Smoke Test (QEMU)
+  # ============================================================================
+  test-python-linux-arm:
+    name: Install Smoke (linux-arm)
+    needs: build-wheels
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Download linux-arm wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-linux-arm
+          path: dist/
+
+      - name: Run smoke test in arm64 container
+        shell: bash
+        run: |
+          docker run --rm --platform linux/arm64/v8 \
+            -v "${PWD}:/workspace" \
+            -w /workspace \
+            python:3.11-slim \
+            bash -lc "python -m pip install -U pip pytest && python -m pip install /workspace/dist/*.whl && FORGE3D_NO_BOOTSTRAP=1 pytest tests/test_install_smoke.py -v --tb=short"
 
   # ============================================================================
   # Golden Image Tests
@@ -224,7 +249,7 @@ jobs:
           python-version: '3.11'
 
       - name: Download wheel artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: wheels-${{ runner.os == 'Windows' && 'windows' || 'linux' }}
           path: dist/
@@ -242,7 +267,7 @@ jobs:
 
       - name: Upload golden image artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: golden-image-diffs-${{ matrix.os }}
           path: tests/golden/diff/
@@ -279,7 +304,7 @@ jobs:
           python-version: '3.11'
 
       - name: Download wheel artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: wheels-${{ runner.os == 'Windows' && 'windows' || 'linux' }}
           path: dist/
@@ -289,7 +314,7 @@ jobs:
           pip install dist/*.whl
           pip install numpy
 
-      - name: Run example: ${{ matrix.example.name }}
+      - name: "Run example: ${{ matrix.example.name }}"
         run: python ${{ matrix.example.script }} ${{ matrix.example.args }}
         timeout-minutes: 2
 
@@ -358,16 +383,15 @@ jobs:
 
       - name: Install Sphinx dependencies
         run: |
-          pip install sphinx sphinx-rtd-theme
+          pip install sphinx sphinx-rtd-theme myst-parser numpy pillow ipywidgets pooch
 
       - name: Build Sphinx docs
         run: |
           cd docs
-          make html || true
-        continue-on-error: true
+          make html
 
       - name: Upload docs artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: documentation
           path: |
@@ -379,7 +403,7 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [test-rust, build-wheels, test-python, test-shader-params]
+    needs: [test-rust, build-wheels, test-python, test-python-linux-arm, test-shader-params, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -389,7 +413,9 @@ jobs:
           if [ "${{ needs.test-rust.result }}" != "success" ] || \
              [ "${{ needs.build-wheels.result }}" != "success" ] || \
              [ "${{ needs.test-python.result }}" != "success" ] || \
-             [ "${{ needs.test-shader-params.result }}" != "success" ]; then
+             [ "${{ needs.test-python-linux-arm.result }}" != "success" ] || \
+             [ "${{ needs.test-shader-params.result }}" != "success" ] || \
+             [ "${{ needs.build-docs.result }}" != "success" ]; then
             echo "❌ CI failed"
             exit 1
           else

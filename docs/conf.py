@@ -4,20 +4,21 @@
 # RELEVANT FILES:docs/index.rst,pyproject.toml,CMakeLists.txt,CHANGELOG.md
 # Configuration file for the Sphinx documentation builder.
 
-import sys
 import os
+import re
+import sys
 
 # Add Python source to path for autodoc
 sys.path.insert(0, os.path.abspath('../python'))
 
 project = 'forge3d'
-copyright = '2025, forge3d contributors'
 author = 'forge3d contributors'
-
-# The short X.Y version
-version = '1.9.1'
-# The full version, including alpha/beta/rc tags
-release = '1.9.1'
+_pyproject_path = os.path.join(os.path.dirname(__file__), '..', 'pyproject.toml')
+with open(_pyproject_path, encoding='utf-8') as _f:
+    _match = re.search(r'^version\s*=\s*"(.+?)"', _f.read(), re.MULTILINE)
+    version = _match.group(1) if _match else 'unknown'
+release = version
+copyright = '2025-2026, forge3d contributors'
 
 # Add any Sphinx extension module names here, as strings.
 extensions = [
@@ -33,8 +34,8 @@ extensions = [
 
 # Source file suffixes
 source_suffix = {
-    '.rst': None,
-    '.md': None,
+    '.rst': 'restructuredtext',
+    '.md': 'markdown',
 }
 
 # Napoleon settings for Google/NumPy docstring styles
@@ -55,6 +56,7 @@ autodoc_default_options = {
 # Autosummary settings
 autosummary_generate = True
 autosummary_imported_members = True
+autodoc_typehints = 'none'
 
 # Intersphinx mapping for cross-referencing external libraries
 intersphinx_mapping = {
@@ -83,6 +85,32 @@ exclude_patterns = [
     'REPORT.md',
     'QUESTIONS.md',
     'CLAUDE_UPDATE_REPORT.md',
+    # Phase 2 docs build intentionally excludes older exploratory docs with
+    # unresolved cross-references that are outside the current docs spine.
+    '2026-03-10-developer-platform-plan.md',
+    '2026-03-11-plan-review-phase1-phase2.md',
+    'plan.md',
+    'rust-python-exposure-deep-dive-2026-02-17.md',
+    'api/*.md',
+    'api/generated/*',
+    'api/uniforms.rst',
+    'api/vector_graphics.rst',
+    'api/vector_overlays.rst',
+    'examples/*',
+    'ingest/*',
+    'integration/*',
+    'memory/*',
+    'notes/*',
+    'offscreen/*',
+    'plans/*',
+    'postfx/*',
+    'production/*',
+    'terrain/*',
+    'tiles/*',
+    'user/*',
+    'viewer/screenshot_controls.md',
+    'viewer/interactive_viewer.rst',
+    'viewer/test_ssao_interactive.md',
     # Prefer Markdown versions of these docs
     'interop_zero_copy.rst',
     'memory_budget.rst',
@@ -159,7 +187,7 @@ texinfo_documents = [
 epub_title = 'forge3d'
 epub_author = 'forge3d contributors'
 epub_publisher = 'forge3d contributors'
-epub_copyright = '2025, forge3d contributors'
+epub_copyright = '2025-2026, forge3d contributors'
 
 # Custom CSS
 def setup(app):

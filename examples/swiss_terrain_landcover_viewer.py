@@ -59,7 +59,12 @@ from forge3d.colors import hex_to_rgb
 from forge3d.interactive import run_interactive_loop, parse_set_command, handle_snapshot_command
 
 # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
-from forge3d import sun_position, sun_position_utc, SunPosition
+try:
+    from forge3d import sun_position, sun_position_utc, SunPosition
+except ImportError:
+    def sun_position(*args, **kwargs): raise NotImplementedError("Sun ephemeris requires native build (maturin develop --release)")
+    def sun_position_utc(*args, **kwargs): raise NotImplementedError("Sun ephemeris requires native build (maturin develop --release)")
+    class SunPosition: pass
 
 # Optional: rasterio for GeoTIFF handling and reprojection
 try:

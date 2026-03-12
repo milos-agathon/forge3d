@@ -18,13 +18,11 @@ Example:
     >>> apply_style(spec, vectors, source_layer="water")
 """
 
-from __future__ import annotations
-
 import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -68,15 +66,15 @@ class PaintProps:
 @dataclass
 class LayoutProps:
     """Layout properties from style spec (raw values including expressions)."""
-    visibility: Optional[str] = None
+    visibility: str | None = None
     text_field: Any = None
     text_size: Any = None
-    text_font: Optional[list[str]] = None
-    text_anchor: Optional[str] = None
+    text_font: list[str] | None = None
+    text_anchor: str | None = None
     text_offset: Any = None
     text_max_width: Any = None
-    line_cap: Optional[str] = None
-    line_join: Optional[str] = None
+    line_cap: str | None = None
+    line_join: str | None = None
 
 
 @dataclass
@@ -84,13 +82,13 @@ class StyleLayer:
     """A single style layer."""
     id: str
     layer_type: str
-    source: Optional[str] = None
-    source_layer: Optional[str] = None
+    source: str | None = None
+    source_layer: str | None = None
     paint: PaintProps = field(default_factory=PaintProps)
     layout: LayoutProps = field(default_factory=LayoutProps)
-    filter: Optional[list] = None
-    minzoom: Optional[float] = None
-    maxzoom: Optional[float] = None
+    filter: list[Any] | None = None
+    minzoom: float | None = None
+    maxzoom: float | None = None
 
     def is_visible(self) -> bool:
         """Check if layer is visible."""
@@ -120,8 +118,8 @@ class StyleSpec:
     name: str = ""
     layers: list[StyleLayer] = field(default_factory=list)
     sources: dict = field(default_factory=dict)
-    sprite: Optional[str] = None
-    glyphs: Optional[str] = None
+    sprite: str | None = None
+    glyphs: str | None = None
 
     def fill_layers(self) -> list[StyleLayer]:
         """Get all fill layers."""
@@ -135,7 +133,7 @@ class StyleSpec:
         """Get all symbol layers."""
         return [l for l in self.layers if l.layer_type == "symbol"]
 
-    def layer_by_id(self, layer_id: str) -> Optional[StyleLayer]:
+    def layer_by_id(self, layer_id: str) -> StyleLayer | None:
         """Find a layer by ID."""
         for layer in self.layers:
             if layer.id == layer_id:
@@ -246,7 +244,7 @@ def _parse_layer(data: dict) -> StyleLayer:
     )
 
 
-def _get_color_value(value: Any) -> Optional[str]:
+def _get_color_value(value: Any) -> str | None:
     """Extract color string from value (skip expressions)."""
     if value is None:
         return None
@@ -256,7 +254,7 @@ def _get_color_value(value: Any) -> Optional[str]:
     return None
 
 
-def _get_number_value(value: Any) -> Optional[float]:
+def _get_number_value(value: Any) -> float | None:
     """Extract number from value (skip expressions)."""
     if value is None:
         return None
@@ -270,7 +268,7 @@ def evaluate_color_expr(
     value: Any,
     properties: dict[str, Any],
     zoom: float = 10.0
-) -> Optional[tuple[float, float, float, float]]:
+) -> tuple[float, float, float, float] | None:
     """Evaluate a color expression with feature context.
     
     Args:
@@ -296,7 +294,7 @@ def evaluate_number_expr(
     value: Any,
     properties: dict[str, Any],
     zoom: float = 10.0
-) -> Optional[float]:
+) -> float | None:
     """Evaluate a number expression with feature context.
     
     Args:
@@ -318,7 +316,7 @@ def evaluate_number_expr(
     return None
 
 
-def _get_text_field(value: Any) -> Optional[str]:
+def _get_text_field(value: Any) -> str | None:
     """Extract text field property name."""
     if value is None:
         return None
@@ -332,7 +330,7 @@ def _get_text_field(value: Any) -> Optional[str]:
 
 def paint_to_vector_style(
     paint: PaintProps,
-    properties: Optional[dict[str, Any]] = None,
+    properties: dict[str, Any] | None = None,
     zoom: float = 10.0
 ) -> VectorStyle:
     """Convert paint properties to VectorStyle.
@@ -436,7 +434,7 @@ def paint_to_vector_style(
 def layout_to_label_style(
     layout: LayoutProps,
     paint: PaintProps,
-    properties: Optional[dict[str, Any]] = None,
+    properties: dict[str, Any] | None = None,
     zoom: float = 10.0
 ) -> LabelStyle:
     """Convert layout and paint properties to LabelStyle.
@@ -535,7 +533,7 @@ def layer_to_label_style(layer: StyleLayer) -> LabelStyle:
 def apply_style(
     spec: StyleSpec,
     features: list[dict],
-    source_layer: Optional[str] = None,
+    source_layer: str | None = None,
     zoom: float = 10.0,
 ) -> list[tuple[dict, VectorStyle]]:
     """Apply style spec to a list of GeoJSON features.
@@ -581,7 +579,7 @@ def apply_style(
     return result
 
 
-def parse_color(color_str: str) -> Optional[tuple[float, float, float, float]]:
+def parse_color(color_str: str) -> tuple[float, float, float, float] | None:
     """Parse a CSS color string to RGBA tuple (0-1 range).
 
     Supports:
@@ -628,7 +626,7 @@ def parse_color(color_str: str) -> Optional[tuple[float, float, float, float]]:
     return named.get(s.lower())
 
 
-def _parse_hex_color(s: str) -> Optional[tuple[float, float, float, float]]:
+def _parse_hex_color(s: str) -> tuple[float, float, float, float] | None:
     """Parse hex color."""
     hex_str = s.lstrip("#")
     try:
@@ -659,7 +657,7 @@ def _parse_hex_color(s: str) -> Optional[tuple[float, float, float, float]]:
     return None
 
 
-def _parse_rgb_color(s: str) -> Optional[tuple[float, float, float, float]]:
+def _parse_rgb_color(s: str) -> tuple[float, float, float, float] | None:
     """Parse rgb/rgba color."""
     match = re.match(r"rgba?\s*\(\s*([^)]+)\s*\)", s)
     if not match:
@@ -686,7 +684,7 @@ def _parse_rgb_color(s: str) -> Optional[tuple[float, float, float, float]]:
         return None
 
 
-def _parse_hsl_color(s: str) -> Optional[tuple[float, float, float, float]]:
+def _parse_hsl_color(s: str) -> tuple[float, float, float, float] | None:
     """Parse hsl/hsla color."""
     match = re.match(r"hsla?\s*\(\s*([^)]+)\s*\)", s)
     if not match:
@@ -810,12 +808,12 @@ class SpriteAtlas:
     defined in Mapbox GL Style Spec.
     """
     entries: dict[str, SpriteEntry]
-    image_path: Optional[Path] = None
-    image_data: Optional[bytes] = None
+    image_path: Path | None = None
+    image_data: bytes | None = None
     width: int = 0
     height: int = 0
     
-    def get_sprite(self, name: str) -> Optional[SpriteEntry]:
+    def get_sprite(self, name: str) -> SpriteEntry | None:
         """Get a sprite entry by name."""
         return self.entries.get(name)
     
@@ -826,7 +824,7 @@ class SpriteAtlas:
 
 def load_sprite_atlas(
     json_path: Path | str,
-    image_path: Optional[Path | str] = None,
+    image_path: Path | str | None = None,
 ) -> SpriteAtlas:
     """Load a sprite atlas from JSON and optional PNG.
     
@@ -898,7 +896,7 @@ class GlyphRange:
     start: int
     end: int
     font_stack: str
-    data: Optional[bytes] = None
+    data: bytes | None = None
     
     @property
     def range_id(self) -> str:

@@ -6,6 +6,16 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Changed
+- Removed the legacy `render_raster`, `render_polygons`, and `render_raytrace_mesh` Python API in favor of the viewer/IPC rendering path.
+- Raised the Python support floor to 3.10+ and aligned the Rust abi3 target with that floor (`abi3-py310`).
+- Refreshed package metadata, docs version sourcing, and public API smoke coverage for the developer-platform packaging work.
+
+### Added
+- Added `tests/test_install_smoke.py` to gate import/public-surface/version smoke checks.
+- Added Linux `aarch64` wheel builds to CI and a new tag-driven `publish.yml` workflow for PyPI releases.
+- Added `docs/pro-boundary-notes.md` as the Phase 1 decision log for the future open/Pro split.
+
 ## [1.12.2] - 2026-02-20
 
 ### Added

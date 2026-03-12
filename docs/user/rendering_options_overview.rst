@@ -933,19 +933,9 @@ using the same building blocks as :mod:`examples/terrain_demo.py`:
           ],
       )
 
-* **DEM water mask and sun direction** (:mod:`forge3d.render`, :mod:`forge3d.lighting`)::
+* **Sun direction helpers** (:mod:`forge3d.lighting`)::
 
-      from forge3d.render import detect_dem_water_mask
       from forge3d.lighting import sun_direction_from_angles
-
-      # Water detection in DEM space (normalized height + slope heuristic)
-      water_mask = detect_dem_water_mask(
-          dem.data,
-          domain,
-          level_normalized=0.35,
-          slope_threshold=0.02,
-          spacing=dem.resolution,
-      )
 
       # Convert sun azimuth/elevation to a unit direction vector
       sun_dir = sun_direction_from_angles(azimuth_deg=135.0, elevation_deg=35.0)
