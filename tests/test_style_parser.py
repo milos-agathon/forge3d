@@ -22,6 +22,8 @@ from forge3d.style import (
     LayoutProps,
 )
 
+pytestmark = pytest.mark.usefixtures("pro_license")
+
 
 MINIMAL_STYLE = {
     "version": 8,

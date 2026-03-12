@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+  <polygon points="92.31,204.26 246.15,268.09 323.08,204.26 292.31,76.60 169.23,51.06 61.54,102.13" fill="rgba(51,127,51,0.60)" stroke="#194c19" stroke-width="1.00" stroke-linejoin="round"/>
+  <path d="M400.00,229.79 L630.77,268.09 L661.54,140.43 L600.00,51.06 L446.15,76.60 L369.23,153.19 Z M507.69,178.72 L553.85,191.49 L569.23,153.19 L538.46,127.66 L492.31,140.43 Z" fill-rule="evenodd" fill="rgba(51,102,204,0.70)" stroke="#19337f" stroke-width="1.50" stroke-linejoin="round"/>
+  <polygon points="169.23,523.40 400.00,523.40 446.15,459.57 415.38,357.45 246.15,331.91 138.46,395.74 123.08,485.11" fill="rgba(153,153,153,0.50)" stroke="#4c4c4c" stroke-width="1.00" stroke-linejoin="round"/>
+  <polyline points="15.38,331.91 169.23,357.45 323.08,268.09 553.85,306.38 784.62,357.45" fill="none" stroke="#664c33" stroke-width="3.00" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="707.69,587.23 661.54,459.57 553.85,357.45 523.08,204.26 538.46,12.77" fill="none" stroke="#4c7fcc" stroke-width="2.00" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="192.31" y="140.43" font-family="sans-serif" font-size="11.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.80)" stroke-width="3.00" stroke-linejoin="round">Forest</text>
+  <text x="192.31" y="140.43" font-family="sans-serif" font-size="11.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#194c19">Forest</text>
+  <text x="523.08" y="102.13" font-family="sans-serif" font-size="11.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.80)" stroke-width="3.00" stroke-linejoin="round">Lake</text>
+  <text x="523.08" y="102.13" font-family="sans-serif" font-size="11.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#19337f">Lake</text>
+  <text x="276.92" y="434.04" font-family="sans-serif" font-size="11.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.80)" stroke-width="3.00" stroke-linejoin="round">Town</text>
+  <text x="276.92" y="434.04" font-family="sans-serif" font-size="11.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#333333">Town</text>
+</svg>

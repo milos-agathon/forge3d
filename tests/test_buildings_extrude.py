@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.usefixtures("pro_license")
+
 
 def test_import_buildings_module():
     """Test that the buildings module can be imported."""

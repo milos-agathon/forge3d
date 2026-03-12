@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ._license import requires_pro
+
 
 @dataclass
 class VectorStyle:
@@ -145,8 +147,9 @@ class StyleSpec:
         return [l for l in self.layers if l.source_layer == source_layer]
 
 
+@requires_pro(feature="Mapbox style loading")
 def load_style(path: Path | str) -> StyleSpec:
-    """Load a Mapbox GL Style Spec JSON file.
+    """[Pro] Load a Mapbox GL Style Spec JSON file.
 
     Args:
         path: Path to style.json file.
@@ -530,13 +533,14 @@ def layer_to_label_style(layer: StyleLayer) -> LabelStyle:
     return layout_to_label_style(layer.layout, layer.paint)
 
 
+@requires_pro(feature="Mapbox style application")
 def apply_style(
     spec: StyleSpec,
     features: list[dict],
     source_layer: str | None = None,
     zoom: float = 10.0,
 ) -> list[tuple[dict, VectorStyle]]:
-    """Apply style spec to a list of GeoJSON features.
+    """[Pro] Apply a style spec to a list of GeoJSON features.
 
     Args:
         spec: Parsed style specification.

@@ -1,5 +1,8 @@
 # 3D Buildings
 
+> **Pro Feature:** The buildings import pipeline in this recipe requires a
+> [Pro license](https://forge3d.dev/pro).
+
 ![3D buildings preview](images/05-3d-buildings.png)
 
 The buildings pipeline is split between parsing and rendering. The parser is

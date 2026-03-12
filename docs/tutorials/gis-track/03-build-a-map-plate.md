@@ -1,5 +1,9 @@
 # Build A Map Plate
 
+> **Pro Feature:** This tutorial uses features that require a
+> [Pro license](https://forge3d.dev/pro). You can read and learn from the code,
+> but the highlighted functions will raise `LicenseError` without a valid key.
+
 `MapPlate` is the composition layer above the live viewer. It takes an RGBA map
 image and adds cartographic furniture such as a title, legend, scale bar, north
 arrow, and insets.

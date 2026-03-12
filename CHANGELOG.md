@@ -15,6 +15,12 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Added `tests/test_install_smoke.py` to gate import/public-surface/version smoke checks.
 - Added Linux `aarch64` wheel builds to CI and a new tag-driven `publish.yml` workflow for PyPI releases.
 - Added `docs/pro-boundary-notes.md` as the Phase 1 decision log for the future open/Pro split.
+- Added an offline Phase 3 license module, Pro-gating tests, and a shared pytest fixture for Pro-only workflows.
+
+### Documentation
+- Rewrote the README around the developer-platform launch story and open/Pro split.
+- Added Pro callouts to gated tutorials and gallery entries.
+- Added `CONTRIBUTING.md`, `SECURITY.md`, and `docs/launch-blog.md` for launch readiness.
 
 ## [1.12.2] - 2026-02-20
 

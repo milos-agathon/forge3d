@@ -892,3 +892,9 @@ from .datasets import (
 
 # Optional notebook widgets
 from .widgets import ViewerWidget, widgets_available
+
+
+class LicenseError(RuntimeError): ...
+
+
+def set_license_key(key: str) -> None: ...

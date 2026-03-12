@@ -10,15 +10,15 @@ A bundle is a directory containing:
 - assets/ - fonts, HDRI, etc.
 """
 
-from __future__ import annotations
-
 import hashlib
 import json
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
+
+from ._license import requires_pro
 
 # Bundle format version
 BUNDLE_VERSION = 1
@@ -29,12 +29,12 @@ BUNDLE_EXTENSION = "forge3d"
 class TerrainMeta:
     """Terrain metadata in bundle manifest."""
     dem_path: str
-    crs: Optional[str] = None
-    domain: Optional[Tuple[float, float]] = None
-    colormap: Optional[str] = None
+    crs: str | None = None
+    domain: tuple[float, float] | None = None
+    colormap: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {"dem_path": self.dem_path}
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"dem_path": self.dem_path}
         if self.crs:
             d["crs"] = self.crs
         if self.domain:
@@ -44,7 +44,7 @@ class TerrainMeta:
         return d
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TerrainMeta":
+    def from_dict(cls, data: dict[str, Any]) -> "TerrainMeta":
         return cls(
             dem_path=data["dem_path"],
             crs=data.get("crs"),
@@ -57,12 +57,12 @@ class TerrainMeta:
 class CameraBookmark:
     """Camera bookmark for saved viewpoints."""
     name: str
-    eye: Tuple[float, float, float]
-    target: Tuple[float, float, float]
-    up: Tuple[float, float, float] = (0.0, 1.0, 0.0)
+    eye: tuple[float, float, float]
+    target: tuple[float, float, float]
+    up: tuple[float, float, float] = (0.0, 1.0, 0.0)
     fov_deg: float = 45.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "eye": list(self.eye),
@@ -72,7 +72,7 @@ class CameraBookmark:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "CameraBookmark":
+    def from_dict(cls, data: dict[str, Any]) -> "CameraBookmark":
         return cls(
             name=data["name"],
             eye=tuple(data["eye"]),
@@ -88,11 +88,11 @@ class BundleManifest:
     version: int
     name: str
     created_at: str
-    description: Optional[str] = None
-    checksums: Dict[str, str] = field(default_factory=dict)
-    terrain: Optional[TerrainMeta] = None
-    camera_bookmarks: List[CameraBookmark] = field(default_factory=list)
-    preset: Optional[Dict[str, Any]] = None
+    description: str | None = None
+    checksums: dict[str, str] = field(default_factory=dict)
+    terrain: TerrainMeta | None = None
+    camera_bookmarks: list[CameraBookmark] = field(default_factory=list)
+    preset: dict[str, Any] | None = None
 
     @classmethod
     def new(cls, name: str) -> "BundleManifest":
@@ -103,8 +103,8 @@ class BundleManifest:
             created_at=datetime.now(timezone.utc).isoformat(),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
             "version": self.version,
             "name": self.name,
             "created_at": self.created_at,
@@ -122,7 +122,7 @@ class BundleManifest:
         return d
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BundleManifest":
+    def from_dict(cls, data: dict[str, Any]) -> "BundleManifest":
         terrain = None
         if data.get("terrain"):
             terrain = TerrainMeta.from_dict(data["terrain"])
@@ -167,21 +167,22 @@ def _compute_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+@requires_pro(feature="Scene bundle save")
 def save_bundle(
-    path: Union[str, Path],
+    path: str | Path,
     *,
-    name: Optional[str] = None,
-    dem_path: Optional[Union[str, Path]] = None,
-    colormap_name: Optional[str] = None,
-    domain: Optional[Tuple[float, float]] = None,
-    crs: Optional[str] = None,
-    overlays: Optional[List[Dict[str, Any]]] = None,
-    labels: Optional[List[Dict[str, Any]]] = None,
-    preset: Optional[Dict[str, Any]] = None,
-    camera_bookmarks: Optional[List[CameraBookmark]] = None,
-    hdr_path: Optional[Union[str, Path]] = None,
+    name: str | None = None,
+    dem_path: str | Path | None = None,
+    colormap_name: str | None = None,
+    domain: tuple[float, float] | None = None,
+    crs: str | None = None,
+    overlays: list[dict[str, Any]] | None = None,
+    labels: list[dict[str, Any]] | None = None,
+    preset: dict[str, Any] | None = None,
+    camera_bookmarks: list[CameraBookmark] | None = None,
+    hdr_path: str | Path | None = None,
 ) -> Path:
-    """Save a scene bundle to disk.
+    """[Pro] Save a scene bundle to disk.
     
     Args:
         path: Output bundle directory path (will be created)
@@ -278,15 +279,16 @@ class LoadedBundle:
     """Result of loading a bundle."""
     path: Path
     manifest: BundleManifest
-    dem_path: Optional[Path] = None
-    overlays: Optional[List[Dict[str, Any]]] = None
-    labels: Optional[List[Dict[str, Any]]] = None
-    preset: Optional[Dict[str, Any]] = None
-    hdr_path: Optional[Path] = None
+    dem_path: Path | None = None
+    overlays: list[dict[str, Any]] | None = None
+    labels: list[dict[str, Any]] | None = None
+    preset: dict[str, Any] | None = None
+    hdr_path: Path | None = None
 
 
-def load_bundle(path: Union[str, Path], verify_checksums: bool = True) -> LoadedBundle:
-    """Load a scene bundle from disk.
+@requires_pro(feature="Scene bundle load")
+def load_bundle(path: str | Path, verify_checksums: bool = True) -> LoadedBundle:
+    """[Pro] Load a scene bundle from disk.
     
     Args:
         path: Bundle directory path
@@ -354,7 +356,7 @@ def load_bundle(path: Union[str, Path], verify_checksums: bool = True) -> Loaded
     return result
 
 
-def is_bundle(path: Union[str, Path]) -> bool:
+def is_bundle(path: str | Path) -> bool:
     """Check if a path is a valid bundle directory."""
     p = Path(path)
     return p.is_dir() and (p / "manifest.json").exists()

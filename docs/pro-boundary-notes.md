@@ -24,6 +24,14 @@ project packaging rather than around basic understanding of the scene.
 
 ## Current implementation note
 
-The repository does not yet enforce a runtime license gate around the Pro-leaning
-features listed above. These notes are product guidance for the next phase, not
-an already-enforced contract.
+Phase 3 now enforces a runtime license gate around the Pro-leaning features in
+this document:
+
+- `MapPlate` instantiation
+- `export_svg()` / `export_pdf()`
+- `add_buildings()` / `add_buildings_cityjson()` / `add_buildings_3dtiles()`
+- `load_style()` / `apply_style()`
+- `save_bundle()` / `load_bundle()`
+
+The open workflow remains the viewer, datasets, widgets, overlays, snapshots,
+point clouds, 3D Tiles, and manual styling helpers.

@@ -10,6 +10,8 @@ from typing import Literal
 
 import numpy as np
 
+from ._license import requires_pro
+
 PositionAnchor = Literal[
     "top", "bottom", "left", "right",
     "top-left", "top-right", "bottom-left", "bottom-right",
@@ -112,8 +114,9 @@ class NorthArrowElement:
 
 
 class MapPlate:
-    """Composes a map plate with title, legend, scale bar, and inset regions."""
+    """[Pro] Compose a map plate with title, legend, scale bar, and insets."""
 
+    @requires_pro(feature="Map plate composition")
     def __init__(self, config: MapPlateConfig | None = None):
         self.config = config or MapPlateConfig()
         self._map_image: np.ndarray | None = None

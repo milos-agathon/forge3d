@@ -28,6 +28,8 @@ from forge3d.export import (
     validate_svg,
 )
 
+pytestmark = pytest.mark.usefixtures("pro_license")
+
 
 class TestBounds:
     """Test Bounds class."""
@@ -334,7 +336,6 @@ class TestPdfExport:
 
     def test_pdf_export_import_error(self):
         """Test PDF export raises ImportError if cairosvg not installed."""
-        # This test assumes cairosvg may or may not be installed
         scene = VectorScene()
         scene.add_polygon(exterior=[(0, 0), (100, 0), (50, 100)])
 
@@ -343,15 +344,11 @@ class TestPdfExport:
 
         try:
             try:
-                import cairosvg
-                # cairosvg is installed, should work
                 export_pdf(scene, path)
                 assert path.exists()
                 assert path.stat().st_size > 0
-            except ImportError:
-                # cairosvg not installed, should raise ImportError
-                with pytest.raises(ImportError, match="cairosvg"):
-                    export_pdf(scene, path)
+            except ImportError as exc:
+                assert "cairosvg" in str(exc)
         finally:
             path.unlink(missing_ok=True)
 

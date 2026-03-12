@@ -12,6 +12,10 @@ from forge3d.style import (
     VectorStyle,
 )
 
+import pytest
+
+pytestmark = pytest.mark.usefixtures("pro_license")
+
 
 # Test fixture: Mapbox-like style spec
 WATER_STYLE = {

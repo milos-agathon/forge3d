@@ -1,5 +1,8 @@
 # Vector Export
 
+> **Pro Feature:** SVG and PDF export require a
+> [Pro license](https://forge3d.dev/pro).
+
 ![Vector export preview](images/08-vector-export.png)
 
 Not every final output needs to stay in the raster viewer. `forge3d.export`

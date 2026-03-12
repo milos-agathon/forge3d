@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+  <polygon points="92.31,126.92 169.23,242.31 246.15,184.62 323.08,300.00 446.15,265.38 553.85,357.69 630.77,300.00 707.69,184.62 753.85,126.92 707.69,69.23 92.31,69.23" fill="rgba(127,102,76,0.40)" stroke="#4c3319" stroke-width="1.50" stroke-linejoin="round"/>
+  <polygon points="313.85,295.38 332.31,295.38 323.08,309.23" fill="#333333" stroke="#000000" stroke-width="1.00" stroke-linejoin="round"/>
+  <polygon points="544.62,353.08 563.08,353.08 553.85,366.92" fill="#333333" stroke="#000000" stroke-width="1.00" stroke-linejoin="round"/>
+  <polyline points="15.38,588.46 784.62,588.46" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="15.38,588.46 15.38,11.54" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="15.38,530.77 784.62,530.77" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="92.31,588.46 92.31,11.54" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="15.38,473.08 784.62,473.08" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="169.23,588.46 169.23,11.54" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="15.38,415.38 784.62,415.38" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="246.15,588.46 246.15,11.54" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="15.38,357.69 784.62,357.69" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="323.08,588.46 323.08,11.54" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="15.38,300.00 784.62,300.00" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="400.00,588.46 400.00,11.54" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="15.38,242.31 784.62,242.31" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="476.92,588.46 476.92,11.54" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="15.38,184.62 784.62,184.62" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="553.85,588.46 553.85,11.54" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="15.38,126.92 784.62,126.92" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="630.77,588.46 630.77,11.54" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="15.38,69.23 784.62,69.23" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="707.69,588.46 707.69,11.54" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="15.38,11.54 784.62,11.54" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="784.62,588.46 784.62,11.54" fill="none" stroke="rgba(204,204,204,0.50)" stroke-width="0.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="92.31,34.62 169.23,103.85 246.15,126.92 323.08,184.62 400.00,219.23 476.92,242.31 553.85,265.38 630.77,230.77 707.69,150.00" fill="none" stroke="#993319" stroke-width="2.00" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="92.31,34.62 246.15,34.62" fill="none" stroke="#000000" stroke-width="2.00" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="323.08" y="323.08" font-family="sans-serif" font-size="10.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.80)" stroke-width="3.00" stroke-linejoin="round">Mt. Alpha
+2340m</text>
+  <text x="323.08" y="323.08" font-family="sans-serif" font-size="10.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#191919">Mt. Alpha
+2340m</text>
+  <text x="553.85" y="380.77" font-family="sans-serif" font-size="10.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.80)" stroke-width="3.00" stroke-linejoin="round">Mt. Beta
+2890m</text>
+  <text x="553.85" y="380.77" font-family="sans-serif" font-size="10.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#191919">Mt. Beta
+2890m</text>
+  <text x="400.00" y="553.85" font-family="sans-serif" font-size="20.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.90)" stroke-width="5.00" stroke-linejoin="round">Terrain Map Demo</text>
+  <text x="400.00" y="553.85" font-family="sans-serif" font-size="20.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#191919">Terrain Map Demo</text>
+  <text x="169.23" y="17.31" font-family="sans-serif" font-size="9.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.80)" stroke-width="2.00" stroke-linejoin="round">1 km</text>
+  <text x="169.23" y="17.31" font-family="sans-serif" font-size="9.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#191919">1 km</text>
+</svg>

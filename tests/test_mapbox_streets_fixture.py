@@ -17,12 +17,14 @@ from forge3d.style import (
     LabelStyle,
 )
 
+pytestmark = pytest.mark.usefixtures("pro_license")
+
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "mapbox_streets_v8.json"
 
 
 @pytest.fixture
-def mapbox_streets():
+def mapbox_streets(pro_license):
     """Load Mapbox Streets v8 fixture."""
     return load_style(FIXTURE_PATH)
 

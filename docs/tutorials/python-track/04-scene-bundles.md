@@ -1,5 +1,9 @@
 # Scene Bundles
 
+> **Pro Feature:** This tutorial uses features that require a
+> [Pro license](https://forge3d.dev/pro). You can read and learn from the code,
+> but the highlighted functions will raise `LicenseError` without a valid key.
+
 Bundles package terrain, overlays, presets, and bookmarks into a portable
 directory with checksums.
 

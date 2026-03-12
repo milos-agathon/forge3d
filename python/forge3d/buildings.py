@@ -24,6 +24,8 @@ from typing import Any
 
 import numpy as np
 
+from ._license import requires_pro
+
 # Try to import native module
 try:
     from ._native import get_native_module as _get_native_module
@@ -257,6 +259,7 @@ def material_from_name(name: str) -> BuildingMaterial:
 # GeoJSON Loading
 # ============================================================================
 
+@requires_pro(feature="GeoJSON building import")
 def add_buildings(
     geojson_path: str | Path,
     *,
@@ -265,7 +268,7 @@ def add_buildings(
     name: str | None = None,
 ) -> BuildingLayer:
     """
-    Load buildings from a GeoJSON file.
+    [Pro] Load buildings from a GeoJSON file.
 
     Args:
         geojson_path: Path to GeoJSON file with building polygons
@@ -365,13 +368,14 @@ def add_buildings(
 # CityJSON Loading
 # ============================================================================
 
+@requires_pro(feature="CityJSON building import")
 def add_buildings_cityjson(
     cityjson_path: str | Path,
     *,
     name: str | None = None,
 ) -> BuildingLayer:
     """
-    Load buildings from a CityJSON file.
+    [Pro] Load buildings from a CityJSON file.
 
     CityJSON is a JSON-based encoding of CityGML, commonly used for
     3D city models. Supports LOD1-LOD3 geometries.
@@ -507,13 +511,14 @@ def add_buildings_cityjson(
 # 3D Tiles Loading
 # ============================================================================
 
+@requires_pro(feature="3D Tiles building import")
 def add_buildings_3dtiles(
     tileset_path: str | Path,
     *,
     name: str | None = None,
 ) -> BuildingLayer:
     """
-    Load buildings from a 3D Tiles tileset.
+    [Pro] Load buildings from a 3D Tiles tileset.
 
     Note: This loads the tileset metadata. Actual tile content (b3dm)
     is loaded on demand during rendering.

@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.usefixtures("pro_license")
+
 
 def test_add_buildings_cityjson_import():
     """Test that CityJSON loader can be imported."""

@@ -10,6 +10,8 @@ from forge3d.map_plate import MapPlate, MapPlateConfig, BBox, PlateRegion
 from forge3d.legend import Legend, LegendConfig
 from forge3d.scale_bar import ScaleBar, ScaleBarConfig
 
+pytestmark = pytest.mark.usefixtures("pro_license")
+
 
 class TestBBox:
     def test_bbox_properties(self):

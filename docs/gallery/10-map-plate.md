@@ -1,5 +1,8 @@
 # Map Plate
 
+> **Pro Feature:** Map plate composition requires a
+> [Pro license](https://forge3d.dev/pro).
+
 ![Map plate preview](images/10-map-plate.png)
 
 This is the production-output side of the platform: start from a rendered image,

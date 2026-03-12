@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("pro_license")
+
 
 def _load_terrain_demo() -> types.ModuleType:
     """Load terrain_demo.py module by path."""

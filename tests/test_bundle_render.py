@@ -15,6 +15,8 @@ except ImportError:
 
 from forge3d.bundle import BUNDLE_VERSION, BundleManifest, CameraBookmark, load_bundle, save_bundle
 
+pytestmark = pytest.mark.usefixtures("pro_license")
+
 
 def compute_image_hash(img_path: Path) -> str:
     """Compute a SHA-256 hash for an image file."""

@@ -1,5 +1,9 @@
 # 3D Buildings
 
+> **Pro Feature:** This tutorial uses features that require a
+> [Pro license](https://forge3d.dev/pro). You can read and learn from the code,
+> but the highlighted functions will raise `LicenseError` without a valid key.
+
 The buildings module sits between GIS assets and the viewer. It parses common
 building sources, exposes materials and metadata, and can forward extracted
 triangles to the viewer when native geometry extraction is available.

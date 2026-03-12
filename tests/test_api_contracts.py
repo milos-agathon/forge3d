@@ -504,6 +504,8 @@ class TestPackageLevelApiContracts:
         "NorthArrow",
         "save_bundle",
         "load_bundle",
+        "set_license_key",
+        "LicenseError",
     ]
 
     @pytest.mark.parametrize("attr_name", EXPECTED_PACKAGE_ATTRS)

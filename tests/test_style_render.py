@@ -13,6 +13,8 @@ from forge3d.style import (
     VectorStyle,
 )
 
+pytestmark = pytest.mark.usefixtures("pro_license")
+
 
 STREETS_STYLE = {
     "version": 8,

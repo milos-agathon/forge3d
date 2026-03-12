@@ -40,6 +40,7 @@ workflows for overlays, point clouds, map plates, buildings, and bundles.
    :caption: Product Notes
 
    pro-boundary-notes
+   launch-blog
 
 Platform Overview
 -----------------
@@ -54,7 +55,7 @@ The current public workflow is intentionally small:
   unavailable.
 * ``forge3d.datasets`` provides bundled samples and on-demand fetch helpers.
 * ``forge3d.MapPlate``, ``forge3d.bundle``, and ``forge3d.export`` cover
-  production packaging workflows around the live scene.
+  Pro-gated production packaging workflows around the live scene.
 
 If you are new to the project, start with :doc:`quickstart`, then walk one of
 the two tracks in :doc:`tutorials/index`.

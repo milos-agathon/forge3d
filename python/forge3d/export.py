@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Union
 import xml.etree.ElementTree as ET
 
+from ._license import requires_pro
+
 
 @dataclass
 class VectorStyle:
@@ -481,6 +483,7 @@ def generate_svg(
     return '\n'.join(lines)
 
 
+@requires_pro(feature="SVG export")
 def export_svg(
     scene: VectorScene,
     path: Union[str, Path],
@@ -491,7 +494,7 @@ def export_svg(
     precision: int = 2,
     include_labels: bool = True,
 ) -> None:
-    """Export vector scene to SVG file.
+    """[Pro] Export a vector scene to an SVG file.
 
     Args:
         scene: VectorScene containing geometry to export.
@@ -517,6 +520,7 @@ def export_svg(
     path.write_text(svg_content, encoding='utf-8')
 
 
+@requires_pro(feature="PDF export")
 def export_pdf(
     scene: VectorScene,
     path: Union[str, Path],
@@ -527,7 +531,7 @@ def export_pdf(
     background: Optional[Tuple[float, float, float, float]] = None,
     include_labels: bool = True,
 ) -> None:
-    """Export vector scene to PDF file.
+    """[Pro] Export a vector scene to a PDF file.
 
     Requires cairosvg package for PDF generation.
 
@@ -546,11 +550,11 @@ def export_pdf(
     """
     try:
         import cairosvg
-    except ImportError:
+    except (ImportError, OSError) as exc:
         raise ImportError(
             "cairosvg is required for PDF export. "
             "Install with: pip install cairosvg"
-        )
+        ) from exc
 
     # Generate SVG first
     svg_content = generate_svg(

@@ -34,6 +34,8 @@ def test_public_api_surface():
         "has_gpu",
         "enumerate_adapters",
         "fetch_dataset",
+        "set_license_key",
+        "LicenseError",
         "__version__",
     ]
     for name in required:

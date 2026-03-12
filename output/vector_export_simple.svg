@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+  <polygon points="114.29,577.78 685.71,577.78 400.00,22.22" fill="rgba(204,51,51,0.60)" stroke="#660000" stroke-width="2.00" stroke-linejoin="round"/>
+  <polyline points="19.05,355.56 780.95,355.56" fill="none" stroke="#0000cc" stroke-width="1.50" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="400.00" y="400.00" font-family="sans-serif" font-size="16.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.90)" stroke-width="4.00" stroke-linejoin="round">Demo Triangle</text>
+  <text x="400.00" y="400.00" font-family="sans-serif" font-size="16.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#191919">Demo Triangle</text>
+</svg>

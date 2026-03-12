@@ -25,6 +25,8 @@ from forge3d.style import (
 )
 from forge3d.style_expressions import evaluate, EvalContext
 
+pytestmark = pytest.mark.usefixtures("pro_license")
+
 
 # Test style with data-driven expressions
 EXPRESSION_STYLE = {

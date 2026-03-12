@@ -140,6 +140,7 @@ from .datasets import (
     sample_boundaries_path,
 )
 from .widgets import ViewerWidget, widgets_available
+from ._license import LicenseError, set_license_key
 
 # -----------------------------------------------------------------------------
 # Fallback Renderer class
@@ -458,6 +459,9 @@ __all__ = [
     "fetch_dem",
     "fetch_cityjson",
     "fetch_copc",
+    # License management
+    "set_license_key",
+    "LicenseError",
     # Mapbox Style Spec
     "load_style",
     "parse_style",

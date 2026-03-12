@@ -19,6 +19,8 @@ from forge3d.bundle import (
     BUNDLE_VERSION,
 )
 
+pytestmark = pytest.mark.usefixtures("pro_license")
+
 
 def test_manifest_roundtrip():
     """BundleManifest serializes and deserializes without data loss."""
