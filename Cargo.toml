@@ -101,13 +101,6 @@ name = "policies"
 path = "bench/upload_policies/policies.rs"
 required-features = ["async_readback"]
 
-[[example]]
-name = "gi_showcase"
-path = "examples/gi_showcase.rs"
-
-[[example]]
-name = "interactive_viewer"
-path = "examples/interactive_viewer.rs"
 
 [profile.release]
 codegen-units = 1
