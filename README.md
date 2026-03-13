@@ -1,11 +1,39 @@
-# forge3d
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo/forge3d_dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo/forge3d_light.svg">
+    <img alt="forge3d" src="docs/assets/logo/forge3d_dark.svg" width="320">
+  </picture>
+</p>
 
-**GPU-accelerated terrain and scene rendering for Python.**
+<p align="center">
+  <strong>GPU-accelerated 3D terrain rendering for Python.</strong><br>
+  Built in Rust with WebGPU. Pre-built wheels — no Rust toolchain required.
+</p>
 
-![Hero render](assets/highres.png)
+<p align="center">
+  <a href="https://pypi.org/project/forge3d/"><img src="https://img.shields.io/pypi/v/forge3d?color=EFA026&style=flat-square" alt="PyPI"></a>
+  <a href="https://pypi.org/project/forge3d/"><img src="https://img.shields.io/pypi/pyversions/forge3d?color=D0C8BA&style=flat-square" alt="Python 3.10+"></a>
+  <a href="https://github.com/forge3d/forge3d/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue?style=flat-square" alt="License"></a>
+  <a href="https://docs.forge3d.dev"><img src="https://img.shields.io/badge/docs-forge3d.dev-blue?style=flat-square" alt="Docs"></a>
+</p>
 
-Built in Rust with WebGPU. Install the wheel, launch the viewer, and capture
-publication-quality terrain snapshots without setting up a Rust toolchain.
+---
+
+<p align="center">
+  <img src="assets/highres.png" alt="forge3d hero render" width="720">
+</p>
+
+**This image was generated with 5 lines of Python.** Load a DEM, launch the GPU viewer, position the camera, and capture a publication-quality snapshot. No shaders to write. No OpenGL boilerplate. Just `pip install forge3d`.
+
+```python
+import forge3d
+
+with forge3d.open_viewer_async(terrain_path="rainier.tif") as viewer:
+    viewer.set_orbit_camera(phi_deg=225, theta_deg=35, radius=1.2)
+    viewer.set_sun(azimuth_deg=315, elevation_deg=32)
+    viewer.snapshot("render.png", width=3840, height=2160)
+```
 
 ## Install
 
@@ -13,55 +41,70 @@ publication-quality terrain snapshots without setting up a Rust toolchain.
 pip install forge3d
 ```
 
-Optional extras:
+Need Jupyter widgets or tutorial datasets?
 
-- `pip install "forge3d[jupyter]"` for `ViewerWidget`
-- `pip install "forge3d[datasets]"` for on-demand tutorial datasets
-
-## Quick Start
-
-```python
-import forge3d
-
-with forge3d.open_viewer_async(
-    terrain_path=forge3d.mini_dem_path(),
-    width=1280,
-    height=720,
-) as viewer:
-    viewer.set_orbit_camera(phi_deg=225.0, theta_deg=35.0, radius=1.2, fov_deg=45.0)
-    viewer.set_sun(azimuth_deg=315.0, elevation_deg=32.0)
-    viewer.snapshot("my_terrain.png", width=1920, height=1080)
+```bash
+pip install "forge3d[jupyter]"     # ViewerWidget for notebooks
+pip install "forge3d[datasets]"    # on-demand sample DEMs, CityJSON, COPC
+pip install "forge3d[all]"         # everything
 ```
-
-## Open Core
-
-- Interactive viewer with terrain loading, camera control, sun control, and high-res snapshots
-- Bundled datasets plus fetch helpers for tutorial-scale DEM, CityJSON, and COPC assets
-- Vector overlays, labels, point clouds, 3D Tiles, and notebook widgets
-- CRS helpers, colormaps, PNG export, and camera animation preview
-
-## Pro
-
-- Map plate composition (`MapPlate`, legends, scale bars, north arrows)
-- SVG/PDF export
-- Scene bundle save/load
-- GeoJSON/CityJSON/3D Tiles building import pipelines
-- Mapbox Style Spec loading and style application
-- [Get a Pro key](https://forge3d.dev/pro)
 
 ## Gallery
 
-| Terrain | Buildings | Point Cloud |
-| --- | --- | --- |
-| ![Mount Rainier](docs/gallery/images/01-mount-rainier.png) | ![3D buildings](docs/gallery/images/05-3d-buildings.png) | ![Point cloud](docs/gallery/images/06-point-cloud.png) |
+<table>
+  <tr>
+    <td align="center"><img src="docs/gallery/images/01-mount-rainier.png" width="280"><br><sub>PBR terrain</sub></td>
+    <td align="center"><img src="docs/gallery/images/03-swiss-landcover.png" width="280"><br><sub>Landcover overlay</sub></td>
+    <td align="center"><img src="docs/gallery/images/06-point-cloud.png" width="280"><br><sub>LiDAR point cloud</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/gallery/images/09-shadow-comparison.png" width="280"><br><sub>Sun & shadow control</sub></td>
+    <td align="center"><img src="docs/gallery/images/02-mount-fuji-labels.png" width="280"><br><sub>GeoPackage labels</sub></td>
+    <td align="center"><img src="docs/gallery/images/05-3d-buildings.png" width="280"><br><sub>CityJSON buildings</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/gallery/images/04-luxembourg-rail-network.png" width="280"><br><sub>Vector overlays</sub></td>
+    <td align="center"><img src="docs/gallery/images/07-camera-flyover.png" width="280"><br><sub>Camera animation</sub></td>
+    <td align="center"><img src="docs/gallery/images/10-map-plate.png" width="280"><br><sub>Map plate compositor</sub></td>
+  </tr>
+</table>
 
-[See the full gallery](https://docs.forge3d.dev/gallery/)
+<p align="center"><a href="https://docs.forge3d.dev/gallery/"><strong>See the full gallery &rarr;</strong></a></p>
+
+## What You Get
+
+### Open Source (Apache-2.0 / MIT)
+
+Everything you need to go from raw elevation data to a rendered 3D scene:
+
+- **Interactive viewer** — real-time orbit, pan, zoom via a Rust/WebGPU subprocess controlled from Python over IPC
+- **Terrain rendering** — load GeoTIFFs or numpy arrays, PBR materials, 100+ colormaps
+- **Vector overlays** — GeoJSON/GeoPackage polygons, lines, and labels projected onto terrain
+- **Point clouds** — COPC and LAZ files with millions of points, colored by elevation or classification
+- **3D Tiles** — stream OGC 3D Tiles tilesets directly into the viewer
+- **CRS reprojection** — automatic coordinate transforms via PROJ + pyproj
+- **Camera animation** — keyframed flyover paths with frame-by-frame export
+- **Jupyter integration** — `ViewerWidget` embeds the viewer inline in notebooks
+- **High-res snapshots** — up to 8K PNG export from any camera angle
+
+### Pro
+
+Professional cartography and production workflows:
+
+- **Map plate compositor** — legends, scale bars, north arrows, multi-panel layouts
+- **SVG / PDF export** — publication-ready vector output
+- **3D buildings** — GeoJSON, CityJSON, and 3D Tiles import with roof inference and PBR materials
+- **Mapbox Style Spec** — load and apply Mapbox-compatible styles
+- **Scene bundles** — save and share complete `.forge3d` scene packages
+- **[Get a Pro key &rarr;](https://forge3d.dev/pro)**
 
 ## Tutorials
 
-- [GIS track](https://docs.forge3d.dev/tutorials/gis-track/)
-- [Python track](https://docs.forge3d.dev/tutorials/python-track/)
-- [Architecture overview](https://docs.forge3d.dev/architecture/)
+Two tracks depending on your background:
+
+- **GIS professionals** — [Visualize your first DEM &rarr;](https://docs.forge3d.dev/tutorials/gis-track/)
+- **Python developers** — [Your first 3D terrain &rarr;](https://docs.forge3d.dev/tutorials/python-track/)
+- **Architecture overview** — [How forge3d works &rarr;](https://docs.forge3d.dev/architecture/)
 
 ## Jupyter
 
@@ -69,19 +112,15 @@ with forge3d.open_viewer_async(
 from forge3d.widgets import ViewerWidget
 
 widget = ViewerWidget(terrain_path="dem.npy")
-widget.set_camera(phi_deg=225.0, theta_deg=35.0, radius=1.2)
-widget.set_sun(azimuth_deg=315.0, elevation_deg=32.0)
-widget.snapshot()
+widget.set_camera(phi_deg=225, theta_deg=35, radius=1.2)
+widget.set_sun(azimuth_deg=315, elevation_deg=32)
+widget.snapshot()  # renders inline
 ```
 
 ## Links
 
-- [Documentation](https://docs.forge3d.dev)
-- [API reference](https://docs.forge3d.dev/api/)
-- [GitHub](https://github.com/forge3d/forge3d)
-- [PyPI](https://pypi.org/project/forge3d/)
+[Documentation](https://docs.forge3d.dev) &nbsp;&middot;&nbsp; [API Reference](https://docs.forge3d.dev/api/) &nbsp;&middot;&nbsp; [GitHub](https://github.com/forge3d/forge3d) &nbsp;&middot;&nbsp; [PyPI](https://pypi.org/project/forge3d/)
 
 ## License
 
-Open-source core: Apache-2.0 OR MIT. Pro-only workflows require a commercial
-license key set with `forge3d.set_license_key(...)`.
+Open-source core released under Apache-2.0 OR MIT. Pro features require a [commercial license](https://forge3d.dev/pro) key set with `forge3d.set_license_key(...)`.

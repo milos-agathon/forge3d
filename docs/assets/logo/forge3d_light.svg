@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300">
+<defs>
+  <linearGradient id="bf0" x1="-28.05" y1="-77.05" x2="73.7" y2="-35.95" gradientUnits="userSpaceOnUse">
+    <stop offset="0%" stop-color="#1E1003"/>
+    <stop offset="55%" stop-color="#3F2506"/>
+    <stop offset="100%" stop-color="#3F2506"/>
+  </linearGradient>
+  <linearGradient id="bf1" x1="64.62" y1="-50.48" x2="56.96" y2="58.99" gradientUnits="userSpaceOnUse">
+    <stop offset="0%" stop-color="#2D1904"/>
+    <stop offset="55%" stop-color="#5C370A"/>
+    <stop offset="100%" stop-color="#5C370A"/>
+  </linearGradient>
+  <linearGradient id="bf2" x1="67.98" y1="45.85" x2="-38.5" y2="72.4" gradientUnits="userSpaceOnUse">
+    <stop offset="0%" stop-color="#42260A"/>
+    <stop offset="55%" stop-color="#7E5012"/>
+    <stop offset="100%" stop-color="#7E5012"/>
+  </linearGradient>
+  <linearGradient id="bf3" x1="-22.6" y1="78.82" x2="-80.75" y2="-14.24" gradientUnits="userSpaceOnUse">
+    <stop offset="0%" stop-color="#5C3610"/>
+    <stop offset="55%" stop-color="#B87620"/>
+    <stop offset="100%" stop-color="#B87620"/>
+  </linearGradient>
+  <linearGradient id="bf4" x1="-81.95" y1="2.86" x2="-11.41" y2="-81.2" gradientUnits="userSpaceOnUse">
+    <stop offset="0%" stop-color="#7A4E14"/>
+    <stop offset="55%" stop-color="#EFA026"/>
+    <stop offset="100%" stop-color="#EFA026"/>
+  </linearGradient>
+  <radialGradient id="cglow" cx="38%" cy="38%" r="55%" fx="35%" fy="35%">
+    <stop offset="0%" stop-color="#FFFDF5"/>
+    <stop offset="18%" stop-color="#FDE8B8"/>
+    <stop offset="50%" stop-color="#F0BE58"/>
+    <stop offset="80%" stop-color="#D4981E"/>
+    <stop offset="100%" stop-color="#C08518"/>
+  </radialGradient>
+  <radialGradient id="spec4" cx="-50" cy="-40" r="90" gradientUnits="userSpaceOnUse">
+    <stop offset="0%" stop-color="#FFD060" stop-opacity="0.2"/>
+    <stop offset="100%" stop-color="#FFD060" stop-opacity="0"/>
+  </radialGradient>
+  <filter id="sh" x="-12%" y="-10%" width="124%" height="128%">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="2.5" result="blur"/>
+    <feOffset dx="0" dy="1" result="off"/>
+    <feFlood flood-color="#000" flood-opacity="0.18" result="color"/>
+    <feComposite in="color" in2="off" operator="in" result="shadow"/>
+    <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+</defs>
+
+<g transform="translate(240,128)" filter="url(#sh)">
+<path d="M0.0,-33.0 L-28.05,-77.05 A82,82 0 0,1 73.7,-35.95 L31.38,-10.2 Z" fill="url(#bf0)"/>
+<path d="M31.38,-10.2 L64.62,-50.48 A82,82 0 0,1 56.96,58.99 L19.4,26.7 Z" fill="url(#bf1)"/>
+<path d="M19.4,26.7 L67.98,45.85 A82,82 0 0,1 -38.5,72.4 L-19.4,26.7 Z" fill="url(#bf2)"/>
+<path d="M-19.4,26.7 L-22.6,78.82 A82,82 0 0,1 -80.75,-14.24 L-31.38,-10.2 Z" fill="url(#bf3)"/>
+<path d="M-31.38,-10.2 L-81.95,2.86 A82,82 0 0,1 -11.41,-81.2 L0.0,-33.0 Z" fill="url(#bf4)"/>
+<line x1="31.38" y1="-10.2" x2="64.62" y2="-50.48" stroke="#0A0500" stroke-width="0.7" opacity="0.3"/>
+<line x1="19.4" y1="26.7" x2="67.98" y2="45.85" stroke="#0A0500" stroke-width="0.7" opacity="0.3"/>
+<line x1="-19.4" y1="26.7" x2="-22.6" y2="78.82" stroke="#0A0500" stroke-width="0.7" opacity="0.3"/>
+<line x1="-31.38" y1="-10.2" x2="-81.95" y2="2.86" stroke="#0A0500" stroke-width="0.7" opacity="0.3"/>
+<path d="M-31.38,-10.2 L-81.95,2.86 A82,82 0 0,1 -11.41,-81.2 L0.0,-33.0 Z" fill="url(#spec4)"/>
+<polygon points="0.0,-33.0 31.38,-10.2 19.4,26.7 -19.4,26.7 -31.38,-10.2" fill="url(#cglow)"/>
+<circle cx="-2" cy="-2.5" r="4" fill="#FDE8B8" opacity="0.2"/>
+<circle cx="-1.5" cy="-2" r="2.2" fill="#FFFDF5" opacity="0.95"/>
+</g>
+
+<text x="165.5" y="268" font-family="Inter, 'SF Pro Display', system-ui, -apple-system, sans-serif" font-weight="700" font-size="40" letter-spacing="-1.2" fill="#1C2D3F">forge</text>
+<text x="262.0" y="268" font-family="Inter, 'SF Pro Display', system-ui, -apple-system, sans-serif" font-weight="600" font-size="40" letter-spacing="-1.2" fill="#EFA026">3d</text>
+</svg>
