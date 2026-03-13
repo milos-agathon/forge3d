@@ -189,9 +189,17 @@ def _create_step_dem(width: int = 256, height: int = 256, cliff_height: float = 
     return dem
 
 
+def _rasterio_available() -> bool:
+    try:
+        import rasterio  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def _save_geotiff(dem: np.ndarray, path: Path) -> None:
     """Save a DEM array as a GeoTIFF file.
-    
+
     Uses rasterio to write a simple GeoTIFF with default CRS and transform.
     """
     import rasterio
@@ -215,9 +223,10 @@ def _save_geotiff(dem: np.ndarray, path: Path) -> None:
         dst.write(dem, 1)
 
 
+@pytest.mark.skipif(not _rasterio_available(), reason="rasterio not installed")
 class TestShadowTechniqueDifferentiation:
     """Test that different shadow techniques produce different outputs.
-    
+
     Uses a synthetic step-DEM with a sharp cliff to guarantee visible shadow edges.
     """
     

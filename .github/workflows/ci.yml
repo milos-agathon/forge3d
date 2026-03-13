@@ -179,23 +179,17 @@ jobs:
       - name: Install wheel and test dependencies
         run: |
           pip install dist/*.whl
-          pip install pytest numpy
-
-      - name: Log shader version and GPU info (Milestone 5)
-        run: |
-          python -c "import forge3d as f3d; print('\n=== Milestone 5: Shader Version ===' ); print('BRDF_SHADER_VERSION: Check Rust logs during render')" || true
-        continue-on-error: true
+          pip install pytest numpy pillow
 
       - name: Run install smoke tests
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: pytest tests/test_install_smoke.py -v --tb=short
 
-      - name: Run pytest
+      - name: Run pytest (skip viewer/GPU tests)
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
-        run: pytest tests/ -v --tb=short
-        continue-on-error: true
+        run: pytest tests/ -v --tb=short -m "not viewer and not interactive_viewer and not offscreen"
 
   # ============================================================================
   # Linux aarch64 Wheel Smoke Test (QEMU)

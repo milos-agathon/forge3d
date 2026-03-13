@@ -26,10 +26,25 @@ class _DummyHandle:
         self.commands.append(("set_sun", azimuth_deg, elevation_deg))
 
     def snapshot(self, path, width=None, height=None):
-        from PIL import Image
-
         self.commands.append(("snapshot", path, width, height))
-        Image.new("RGBA", (max(int(width or 64), 1), max(int(height or 64), 1)), (32, 64, 96, 255)).save(path)
+        try:
+            from PIL import Image
+            Image.new("RGBA", (max(int(width or 64), 1), max(int(height or 64), 1)), (32, 64, 96, 255)).save(path)
+        except ImportError:
+            # Fallback: write a minimal valid PNG without Pillow
+            import struct, zlib
+            w, h = max(int(width or 64), 1), max(int(height or 64), 1)
+            raw = b"".join(b"\x00" + b"\x20\x40\x60\xff" * w for _ in range(h))
+            with open(str(path), "wb") as f:
+                f.write(b"\x89PNG\r\n\x1a\n")
+                def _chunk(ctype, data):
+                    f.write(struct.pack(">I", len(data)))
+                    f.write(ctype)
+                    f.write(data)
+                    f.write(struct.pack(">I", zlib.crc32(ctype + data) & 0xFFFFFFFF))
+                _chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+                _chunk(b"IDAT", zlib.compress(raw))
+                _chunk(b"IEND", b"")
 
     def close(self):
         self.closed = True

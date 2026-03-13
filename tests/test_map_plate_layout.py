@@ -10,6 +10,12 @@ from forge3d.map_plate import MapPlate, MapPlateConfig, BBox, PlateRegion
 from forge3d.legend import Legend, LegendConfig
 from forge3d.scale_bar import ScaleBar, ScaleBarConfig
 
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+
 pytestmark = pytest.mark.usefixtures("pro_license")
 
 
@@ -113,9 +119,9 @@ class TestMapPlateExport:
         output_path = tmp_path / "test_plate.png"
         plate.export_png(output_path)
         assert output_path.exists()
-        from PIL import Image
-        img = Image.open(output_path)
-        assert img.size == (200, 150)
+        if HAS_PIL:
+            img = Image.open(output_path)
+            assert img.size == (200, 150)
 
     def test_export_jpeg(self, tmp_path):
         plate = MapPlate(MapPlateConfig(width=200, height=150))
