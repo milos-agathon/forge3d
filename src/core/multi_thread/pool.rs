@@ -5,7 +5,7 @@ pub(crate) type Job = Box<dyn FnOnce() + Send + 'static>;
 
 pub(crate) struct ThreadPool {
     workers: Vec<Worker>,
-    sender: mpsc::Sender<Job>,
+    sender: Option<mpsc::Sender<Job>>,
 }
 
 struct Worker {
@@ -27,7 +27,10 @@ impl ThreadPool {
             workers.push(Worker::new(id, Arc::clone(&receiver)));
         }
 
-        ThreadPool { workers, sender }
+        ThreadPool {
+            workers,
+            sender: Some(sender),
+        }
     }
 
     pub(crate) fn execute<F>(&self, f: F) -> Result<(), mpsc::SendError<Job>>
@@ -35,14 +38,17 @@ impl ThreadPool {
         F: FnOnce() + Send + 'static,
     {
         let job = Box::new(f);
-        self.sender.send(job)
+        match self.sender.as_ref() {
+            Some(sender) => sender.send(job),
+            None => Err(mpsc::SendError(job)),
+        }
     }
 }
 
 impl Drop for ThreadPool {
     fn drop(&mut self) {
-        // Close the channel
-        drop(self.sender.clone());
+        // Close the channel before joining so workers can exit their recv loop.
+        drop(self.sender.take());
 
         // Wait for all workers to finish
         for worker in &mut self.workers {
@@ -58,10 +64,9 @@ impl Drop for ThreadPool {
 impl Worker {
     fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
         let handle = thread::spawn(move || loop {
-            let receiver = receiver.lock().unwrap();
-            match receiver.recv() {
+            let message = receiver.lock().unwrap().recv();
+            match message {
                 Ok(job) => {
-                    drop(receiver); // Release lock before executing
                     job();
                 }
                 Err(_) => break, // Channel closed

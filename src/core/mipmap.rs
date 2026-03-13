@@ -245,7 +245,7 @@ pub fn calculate_mip_levels(width: u32, height: u32) -> u32 {
         return 0;
     }
     let max_dim = width.max(height);
-    (max_dim as f32).log2().ceil() as u32
+    u32::BITS - max_dim.leading_zeros()
 }
 
 #[cfg(test)]
@@ -318,9 +318,11 @@ mod tests {
         let linear_avg = 0.5;
         let gamma_aware_result = levels[1].data[0]; // R channel of 1x1 result
 
-        // With gamma correction, the result should be darker than linear average
-        // because we convert to linear space, average, then convert back
-        assert!(gamma_aware_result < linear_avg);
+        // Averaging in linear space then converting back to sRGB produces a
+        // brighter encoded value than a straight 0.5 sRGB average.
+        let expected = linear_to_srgb(0.5);
+        assert!((gamma_aware_result - expected).abs() < 1e-6);
+        assert!(gamma_aware_result > linear_avg);
     }
 
     #[test]

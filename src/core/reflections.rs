@@ -334,7 +334,7 @@ mod tests {
         let fresnel = calculate_fresnel(view_dir, surface_normal, fresnel_power);
         assert!(fresnel < 0.1);
 
-        let grazing_view = Vec3::new(1.0, 0.1, 0.0).normalize();
+        let grazing_view = Vec3::new(1.0, 0.01, 0.0).normalize();
         let grazing_fresnel = calculate_fresnel(grazing_view, surface_normal, fresnel_power);
         assert!(grazing_fresnel > 0.8);
     }

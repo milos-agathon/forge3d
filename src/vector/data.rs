@@ -362,7 +362,7 @@ mod tests {
         // Verify struct sizes for GPU compatibility
         assert_eq!(layout::POLYGON_VERTEX_SIZE, 16); // 2*f32 + 2*f32 = 16 bytes
         assert_eq!(layout::LINE_VERTEX_SIZE, 24); // 2*f32 + 2*f32 + f32 + f32 = 24 bytes
-        assert_eq!(layout::POINT_INSTANCE_SIZE, 48); // 2*f32 + f32 + 4*f32 + f32 + 2*f32 + f32 = 48 bytes
+        assert_eq!(layout::POINT_INSTANCE_SIZE, 44); // 2*f32 + f32 + 4*f32 + f32 + 2*f32 + f32 = 44 bytes
 
         // Test alignment helper
         assert_eq!(layout::align_size(17), 32);

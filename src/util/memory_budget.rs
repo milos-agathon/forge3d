@@ -257,8 +257,8 @@ mod tests {
         // Test cubemap with mips
         let cubemap_128_5mips = estimate_cubemap_with_mips(128, 5, 8);
         // 128^2 + 64^2 + 32^2 + 16^2 + 8^2 = 16384 + 4096 + 1024 + 256 + 64 = 21824 per face
-        // 21824 * 6 faces * 8 bytes = 1,046,016 bytes
-        assert_eq!(cubemap_128_5mips, 1_046_016);
+        // 21824 * 6 faces * 8 bytes = 1,047,552 bytes
+        assert_eq!(cubemap_128_5mips, 1_047_552);
     }
 
     #[test]

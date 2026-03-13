@@ -351,8 +351,8 @@ mod tests {
         assert_eq!(range.filename(), "0-255.pbf");
 
         let range = GlyphRange::from_codepoint(0x4E00); // CJK
-        assert_eq!(range.start, 19712);
-        assert_eq!(range.filename(), "19712-19967.pbf");
+        assert_eq!(range.start, 19968);
+        assert_eq!(range.filename(), "19968-20223.pbf");
     }
 
     #[test]

@@ -362,18 +362,18 @@ mod tests {
 
         let result = slope_aspect_compute(&heights, 3, 3, 1.0, 1.0).unwrap();
 
-        // Center point should have slope pointing east (90 degrees aspect)
+        // Center point should have a meaningful slope magnitude.
         let center = &result[4]; // Middle point
         assert!(
             center.slope_deg > 30.0,
             "Ramp should have significant slope"
         );
 
-        // Aspect should be roughly eastward (around 90 degrees)
-        // Note: exact values depend on finite difference implementation
+        // Aspect is reported as the direction of steepest descent.
+        // With heights increasing west->east, downhill points west.
         assert!(
-            center.aspect_deg > 45.0 && center.aspect_deg < 135.0,
-            "East-facing ramp should have eastward aspect, got {}",
+            center.aspect_deg > 225.0 && center.aspect_deg < 315.0,
+            "Westward downslope expected for this ramp, got {}",
             center.aspect_deg
         );
     }

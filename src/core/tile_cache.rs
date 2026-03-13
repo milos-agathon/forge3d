@@ -216,7 +216,7 @@ impl TileCache {
                 tile_id,
                 atlas_slot,
                 last_access: self.access_counter,
-                ref_count: 1,
+                ref_count: 0,
             };
 
             self.resident_tiles.insert(tile_id, entry);
@@ -232,13 +232,20 @@ impl TileCache {
 
     /// Evict least recently used tile
     fn evict_lru_tile(&mut self) -> bool {
+        let mut remaining = self.lru_queue.len();
+
         // Find LRU tile that can be evicted (ref_count == 0)
-        while let Some(&lru_tile_id) = self.lru_queue.back() {
+        while remaining > 0 {
+            remaining -= 1;
+
+            let Some(lru_tile_id) = self.lru_queue.pop_back() else {
+                break;
+            };
+
             if let Some(entry) = self.resident_tiles.get(&lru_tile_id) {
                 if entry.ref_count == 0 {
                     // Can evict this tile
                     let entry = self.resident_tiles.remove(&lru_tile_id).unwrap();
-                    self.lru_queue.pop_back();
 
                     // Return atlas slot to allocator
                     self.atlas_allocator.deallocate(entry.atlas_slot);
@@ -247,14 +254,10 @@ impl TileCache {
                     self.stats.resident_count = self.resident_tiles.len();
 
                     return true;
-                } else {
-                    // Tile is referenced, move it to front and try next
-                    self.lru_queue.pop_back();
-                    self.lru_queue.push_front(lru_tile_id);
                 }
-            } else {
-                // Stale entry in LRU queue, remove it
-                self.lru_queue.pop_back();
+
+                // Tile is referenced, keep it resident and continue checking.
+                self.lru_queue.push_front(lru_tile_id);
             }
         }
 

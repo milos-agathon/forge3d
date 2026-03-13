@@ -276,7 +276,7 @@ mod tests {
     fn test_compression_ratio() {
         let registry = TextureFormatRegistry::new();
         let bc1_ratio = registry.calculate_compression_ratio(TextureFormat::Bc1RgbaUnorm, 64, 64);
-        assert!((bc1_ratio - 4.0).abs() < 0.1);
+        assert!((bc1_ratio - 8.0).abs() < 0.1);
     }
 
     #[test]

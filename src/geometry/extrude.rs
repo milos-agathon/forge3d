@@ -96,8 +96,8 @@ mod tests {
     fn extrude_simple_square() {
         let square = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
         let mesh = extrude_polygon(&square, 2.0).expect("extrusion should succeed");
-        assert_eq!(mesh.vertex_count(), 32);
-        assert_eq!(mesh.triangle_count(), 8);
+        assert_eq!(mesh.vertex_count(), 24);
+        assert_eq!(mesh.triangle_count(), 12);
         assert!(!mesh.is_empty());
     }
 

@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(AovKind::Albedo.name(), "albedo");
         assert_eq!(AovKind::Albedo.texture_format(), TextureFormat::Rgba16Float);
         assert_eq!(AovKind::Depth.texture_format(), TextureFormat::R32Float);
-        assert_eq!(AovKind::Visibility.texture_format(), TextureFormat::R8Unorm);
+        assert_eq!(AovKind::Visibility.texture_format(), TextureFormat::Rgba8Unorm);
 
         assert_eq!(AovKind::Albedo.binding_index(), 0);
         assert_eq!(AovKind::Normal.binding_index(), 1);

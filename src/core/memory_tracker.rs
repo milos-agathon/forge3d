@@ -73,11 +73,23 @@ impl ResourceRegistry {
 
     /// Free a buffer allocation
     pub fn free_buffer_allocation(&self, size: u64, is_host_visible: bool) {
-        self.buffer_count.fetch_sub(1, Ordering::Relaxed);
-        self.buffer_bytes.fetch_sub(size, Ordering::Relaxed);
+        let _ = self
+            .buffer_count
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                Some(current.saturating_sub(1))
+            });
+        let _ = self
+            .buffer_bytes
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                Some(current.saturating_sub(size))
+            });
 
         if is_host_visible {
-            self.host_visible_bytes.fetch_sub(size, Ordering::Relaxed);
+            let _ = self
+                .host_visible_bytes
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    Some(current.saturating_sub(size))
+                });
         }
     }
 
@@ -94,8 +106,16 @@ impl ResourceRegistry {
     pub fn free_texture_allocation(&self, width: u32, height: u32, format: TextureFormat) {
         let size = calculate_texture_size(width, height, format);
 
-        self.texture_count.fetch_sub(1, Ordering::Relaxed);
-        self.texture_bytes.fetch_sub(size, Ordering::Relaxed);
+        let _ = self
+            .texture_count
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                Some(current.saturating_sub(1))
+            });
+        let _ = self
+            .texture_bytes
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                Some(current.saturating_sub(size))
+            });
     }
 
     /// Update the number of resident virtual texture tiles tracked globally
@@ -176,7 +196,7 @@ impl ResourceRegistry {
     /// Check if allocation would exceed budget
     pub fn check_budget(&self, additional_host_visible: u64) -> Result<(), String> {
         let current = self.host_visible_bytes.load(Ordering::Relaxed);
-        if current + additional_host_visible > self.budget_limit {
+        if current.saturating_add(additional_host_visible) > self.budget_limit {
             return Err(format!(
                 "Memory budget exceeded: current {} bytes + requested {} bytes would exceed limit of {} bytes",
                 current, additional_host_visible, self.budget_limit

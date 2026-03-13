@@ -89,8 +89,13 @@ pub fn calculate_cascade_splits(config: &CascadeSplitConfig) -> Vec<f32> {
         // Uniform split
         let uniform_split = near + (far - near) * i_norm;
 
-        // Logarithmic split
-        let log_split = near * (far / near).powf(i_norm);
+        // Logarithmic splits are undefined for a non-positive near plane.
+        // Fall back to the uniform term instead of producing NaNs.
+        let log_split = if lambda > 0.0 && near > 0.0 && far > near {
+            near * (far / near).powf(i_norm)
+        } else {
+            uniform_split
+        };
 
         // Mix uniform and logarithmic
         let mixed_split = lambda * log_split + (1.0 - lambda) * uniform_split;

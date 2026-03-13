@@ -36,7 +36,7 @@ pub fn make_center_block(
             let i2 = i0 + stride as u32;
             let i3 = i2 + 1;
             // CCW winding
-            indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3]);
+            indices.extend_from_slice(&[i0, i1, i2, i1, i3, i2]);
         }
     }
 

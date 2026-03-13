@@ -153,12 +153,12 @@ impl FrustumPlanes {
         ];
 
         Self {
-            left: (rows[3] + rows[0]).normalize(),
-            right: (rows[3] - rows[0]).normalize(),
-            bottom: (rows[3] + rows[1]).normalize(),
-            top: (rows[3] - rows[1]).normalize(),
-            near: (rows[3] + rows[2]).normalize(),
-            far: (rows[3] - rows[2]).normalize(),
+            left: normalize_plane(rows[3] + rows[0]),
+            right: normalize_plane(rows[3] - rows[0]),
+            bottom: normalize_plane(rows[3] + rows[1]),
+            top: normalize_plane(rows[3] - rows[1]),
+            near: normalize_plane(rows[3] + rows[2]),
+            far: normalize_plane(rows[3] - rows[2]),
         }
     }
 
@@ -171,6 +171,16 @@ impl FrustumPlanes {
             self.near.to_array(),
             self.far.to_array(),
         ]
+    }
+}
+
+fn normalize_plane(plane: Vec4) -> Vec4 {
+    let normal = plane.xyz();
+    let normal_len = normal.length();
+    if normal_len > 0.0 {
+        plane / normal_len
+    } else {
+        plane
     }
 }
 

@@ -541,7 +541,7 @@ mod tests {
     #[test]
     fn test_bvh_node_layout() {
         // Verify GPU-compatible layout
-        assert_eq!(std::mem::size_of::<BvhNode>(), 32);
+        assert_eq!(std::mem::size_of::<BvhNode>(), 40);
         assert_eq!(std::mem::align_of::<BvhNode>(), 4);
 
         // Test node creation

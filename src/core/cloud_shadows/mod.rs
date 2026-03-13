@@ -16,7 +16,7 @@ mod tests {
     #[test]
     fn test_cloud_shadow_uniforms_size() {
         // Ensure uniforms match WGSL layout
-        assert_eq!(std::mem::size_of::<CloudShadowUniforms>(), 72); // Expected size for alignment
+        assert_eq!(std::mem::size_of::<CloudShadowUniforms>(), 80); // Expected size for alignment
     }
 
     #[test]

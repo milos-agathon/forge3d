@@ -280,8 +280,14 @@ pub fn layout_force_directed(
         for i in 0..node_count {
             for j in (i + 1)..node_count {
                 let diff = nodes[i] - nodes[j];
-                let dist = diff.length().max(0.1);
-                let force = diff.normalize_or_zero() * (1.0 / (dist * dist));
+                let dist = diff.length();
+                let (direction, safe_dist) = if dist < 1e-6 {
+                    let angle = ((i * 31 + j * 17) as f32) * 0.618_034;
+                    (Vec2::new(angle.cos(), angle.sin()), 0.1)
+                } else {
+                    (diff / dist, dist.max(0.1))
+                };
+                let force = direction * (1.0 / (safe_dist * safe_dist));
 
                 forces[i] += force;
                 forces[j] -= force;

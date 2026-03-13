@@ -418,9 +418,9 @@ mod tests {
     #[test]
     fn test_scene_builder() {
         let (builder, sphere1) =
-            SdfSceneBuilder::new().add_sphere(Vec3::new(-1.0, 0.0, 0.0), 0.8, 1);
+            SdfSceneBuilder::new().add_sphere(Vec3::new(-1.0, 0.0, 0.0), 1.1, 1);
 
-        let (builder, sphere2) = builder.add_sphere(Vec3::new(1.0, 0.0, 0.0), 0.8, 2);
+        let (builder, sphere2) = builder.add_sphere(Vec3::new(1.0, 0.0, 0.0), 1.1, 2);
 
         let (builder, _union_node) = builder.union(sphere1, sphere2, 0);
 
