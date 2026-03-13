@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn test_moment_pass_creation() {
-        let device = crate::gpu::create_device_for_test();
+        let Some(device) = crate::gpu::create_device_for_test() else { return; };
         let _pass = MomentGenerationPass::new(&device);
         // Just verify it constructs without panicking
     }

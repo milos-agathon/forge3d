@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-Email `security@forge3d.dev` with the issue details, affected versions, and
+Email `milos-makes-maps@protonmail.com` with the issue details, affected versions, and
 reproduction steps if available.
 
 - Do not file public GitHub issues for security vulnerabilities.

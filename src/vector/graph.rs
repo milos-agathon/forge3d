@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_pack_simple_graph() {
-        let device = crate::core::gpu::create_device_for_test();
+        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
         let renderer = GraphRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let graph = GraphDef {
@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_skip_invalid_edges() {
-        let device = crate::core::gpu::create_device_for_test();
+        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
         let renderer = GraphRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let graph = GraphDef {
@@ -405,7 +405,7 @@ mod tests {
 
     #[test]
     fn test_reject_invalid_edge_indices() {
-        let device = crate::core::gpu::create_device_for_test();
+        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
         let renderer = GraphRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let invalid_graph = GraphDef {

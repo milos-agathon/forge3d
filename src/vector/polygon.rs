@@ -425,7 +425,7 @@ mod tests {
 
     #[test]
     fn test_tessellate_simple_triangle() {
-        let device = crate::core::gpu::create_device_for_test();
+        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
         let renderer = PolygonRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let triangle = PolygonDef {
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_tessellate_polygon_with_hole() {
-        let device = crate::core::gpu::create_device_for_test();
+        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
         let renderer = PolygonRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let polygon_with_hole = PolygonDef {
@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn test_reject_degenerate_polygon() {
-        let device = crate::core::gpu::create_device_for_test();
+        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
         let renderer = PolygonRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let degenerate = PolygonDef {

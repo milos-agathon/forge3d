@@ -572,7 +572,8 @@ mod tests {
 
     #[test]
     fn test_vertex_count_for_types() {
-        let renderer = IndirectRenderer::new(&crate::core::gpu::create_device_for_test()).unwrap();
+        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
+        let renderer = IndirectRenderer::new(&device).unwrap();
 
         assert_eq!(renderer.get_vertex_count_for_type(0), 3); // Triangle
         assert_eq!(renderer.get_vertex_count_for_type(1), 4); // Quad
@@ -582,7 +583,8 @@ mod tests {
 
     #[test]
     fn test_cpu_culling_distance() {
-        let renderer = IndirectRenderer::new(&crate::core::gpu::create_device_for_test()).unwrap();
+        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
+        let renderer = IndirectRenderer::new(&device).unwrap();
 
         let instance = CullableInstance {
             aabb_min: [-1.0, -1.0, -1.0],

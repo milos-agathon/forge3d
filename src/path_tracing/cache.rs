@@ -214,7 +214,8 @@ mod tests {
 
     #[test]
     fn test_hash_computation() {
-        let device = std::sync::Arc::new(crate::gpu::create_device_for_test());
+        let Some(device) = crate::gpu::create_device_for_test() else { return; };
+        let device = std::sync::Arc::new(device);
         let cache = SceneCache::new(device);
 
         let bvh_data = vec![1, 2, 3, 4];

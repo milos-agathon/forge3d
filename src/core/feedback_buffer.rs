@@ -413,18 +413,7 @@ mod tests {
 
     #[test]
     fn test_parse_empty_feedback_data() {
-        let device = pollster::block_on(async {
-            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-            let adapter = instance
-                .request_adapter(&wgpu::RequestAdapterOptions::default())
-                .await
-                .unwrap();
-            let (device, _) = adapter
-                .request_device(&wgpu::DeviceDescriptor::default(), None)
-                .await
-                .unwrap();
-            device
-        });
+        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
 
         let buffer = FeedbackBuffer::new(&device, 10).unwrap();
 
@@ -439,18 +428,7 @@ mod tests {
 
     #[test]
     fn test_parse_feedback_trailing_bytes() {
-        let device = pollster::block_on(async {
-            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-            let adapter = instance
-                .request_adapter(&wgpu::RequestAdapterOptions::default())
-                .await
-                .unwrap();
-            let (device, _) = adapter
-                .request_device(&wgpu::DeviceDescriptor::default(), None)
-                .await
-                .unwrap();
-            device
-        });
+        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
 
         let buffer = FeedbackBuffer::new(&device, 4).unwrap();
         let entry = FeedbackEntry {

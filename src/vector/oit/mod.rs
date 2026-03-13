@@ -193,7 +193,7 @@ mod tests {
     #[cfg(feature = "weighted-oit")]
     #[test]
     fn test_oit_creation() {
-        let device = crate::core::gpu::create_device_for_test();
+        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
         let oit = WeightedOIT::new(&device, 512, 512, wgpu::TextureFormat::Rgba8UnormSrgb);
         assert!(oit.is_ok());
     }
@@ -201,7 +201,7 @@ mod tests {
     #[cfg(not(feature = "weighted-oit"))]
     #[test]
     fn test_oit_disabled() {
-        let device = crate::core::gpu::create_device_for_test();
+        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
         let oit = WeightedOIT::new(&device, 512, 512, wgpu::TextureFormat::Rgba8UnormSrgb);
         assert!(oit.is_err());
     }
