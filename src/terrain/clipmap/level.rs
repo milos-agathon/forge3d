@@ -274,10 +274,10 @@ mod tests {
     fn test_triangle_reduction_meets_40_percent() {
         let config = ClipmapConfig::new(4, 64);
         let mut level = ClipmapLevel::new(config, Vec2::ZERO, 1000.0);
+        let full_res = level.full_resolution_triangle_count();
         let mesh = level.generate();
 
         // Compare against full-res grid
-        let full_res = level.full_resolution_triangle_count();
         let reduction = mesh.triangle_reduction_percent(full_res);
 
         // P2.1 exit criteria: ≥40% reduction

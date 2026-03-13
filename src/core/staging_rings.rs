@@ -309,11 +309,11 @@ mod tests {
         assert!(_alloc1.is_some());
 
         // This should try to advance to next buffer
-        let result = ring.allocate(256);
+        let allocated = ring.allocate(256).is_some();
 
         let stats = ring.stats();
         // Should have attempted to advance (may fail due to fence not being ready)
-        assert!(stats.buffer_stalls > 0 || result.is_some());
+        assert!(stats.buffer_stalls > 0 || allocated);
     }
 }
 

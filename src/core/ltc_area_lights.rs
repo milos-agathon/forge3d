@@ -294,6 +294,7 @@ impl LTCRectAreaLightRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::Vec3;
 
     #[test]
     fn test_rect_area_light_creation() {
@@ -326,7 +327,7 @@ mod tests {
 
     #[test]
     fn test_ltc_matrix_generation() {
-        let matrix = LTCRectAreaLightRenderer::compute_ltc_matrix(0.5, 0.7854); // 45 degrees
+        let matrix = compute_ltc_matrix(0.5, 0.7854); // 45 degrees
 
         // Matrix should be valid (not NaN or infinite)
         assert!(!matrix.x_axis.x.is_nan());

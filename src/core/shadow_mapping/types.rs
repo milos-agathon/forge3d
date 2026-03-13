@@ -205,8 +205,8 @@ mod layout_lock_tests {
 
     #[test]
     fn test_csm_uniforms_size() {
-        // P0.2/M3: WGSL struct with std140 alignment expects exactly 816 bytes
-        assert_eq!(std::mem::size_of::<CsmUniforms>(), 816);
+        // Keep this lockstep with the WGSL layout comments in terrain_pbr_pom.wgsl.
+        assert_eq!(std::mem::size_of::<CsmUniforms>(), 864);
     }
 
     #[test]
@@ -223,7 +223,13 @@ mod layout_lock_tests {
         // cascades: array<ShadowCascade, 4> @ offset 80 (16 + 64)
         // cascade_count: u32                @ offset 656 (80 + 4*144)
         // pcf_kernel_size: u32              @ offset 660
-        // technique: u32                    @ offset 692
+        // depth_clip_factor: f32            @ offset 696
+        // technique: u32                    @ offset 700
+        // technique_flags: u32              @ offset 704
+        // _padding1: [f32; 3]               @ offset 708
+        // technique_params: vec4<f32>       @ offset 720
+        // technique_reserved: vec4<f32>     @ offset 736
+        // cascade_blend_range: f32          @ offset 752
 
         assert_eq!(
             offset_of!(CsmUniforms, light_direction),
@@ -242,8 +248,33 @@ mod layout_lock_tests {
             660,
             "pcf_kernel_size offset"
         );
-        assert_eq!(offset_of!(CsmUniforms, technique), 692, "technique offset");
-        assert_eq!(offset_of!(CsmUniforms, _padding), 696, "_padding offset");
+        assert_eq!(
+            offset_of!(CsmUniforms, depth_clip_factor),
+            696,
+            "depth_clip_factor offset"
+        );
+        assert_eq!(offset_of!(CsmUniforms, technique), 700, "technique offset");
+        assert_eq!(
+            offset_of!(CsmUniforms, technique_flags),
+            704,
+            "technique_flags offset"
+        );
+        assert_eq!(offset_of!(CsmUniforms, _padding1), 708, "_padding1 offset");
+        assert_eq!(
+            offset_of!(CsmUniforms, technique_params),
+            720,
+            "technique_params offset"
+        );
+        assert_eq!(
+            offset_of!(CsmUniforms, technique_reserved),
+            736,
+            "technique_reserved offset"
+        );
+        assert_eq!(
+            offset_of!(CsmUniforms, cascade_blend_range),
+            752,
+            "cascade_blend_range offset"
+        );
     }
 
     #[test]

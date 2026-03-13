@@ -1,5 +1,6 @@
 use super::*;
-use super::*;
+use crate::render::params::common::normalize_key;
+use crate::render::params::{LightConfig, VolumetricMode, VolumetricParams};
 
 #[test]
 fn default_config_serializes_and_validates() {
