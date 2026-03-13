@@ -44,9 +44,15 @@ pub struct CullableInstance {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct CullingUniforms {
-    view_proj: [[f32; 4]; 4],      // View-projection matrix
-    frustum_planes: [[f32; 4]; 6], // Frustum planes (ax + by + cz + d = 0)
-    camera_position: [f32; 3],     // Camera world position
+    view_proj: [[f32; 4]; 4], // View-projection matrix
+    // Keep planes flattened to match the WGSL layout and avoid FXC array issues.
+    frustum_plane_0: [f32; 4], // Left plane (ax + by + cz + d = 0)
+    frustum_plane_1: [f32; 4], // Right plane
+    frustum_plane_2: [f32; 4], // Bottom plane
+    frustum_plane_3: [f32; 4], // Top plane
+    frustum_plane_4: [f32; 4], // Near plane
+    frustum_plane_5: [f32; 4], // Far plane
+    camera_position: [f32; 3], // Camera world position
     _pad0: f32,
     cull_distance: f32,       // Maximum culling distance
     enable_frustum_cull: u32, // Boolean flags
@@ -321,7 +327,12 @@ impl IndirectRenderer {
 
         let uniforms = CullingUniforms {
             view_proj: view_proj.to_cols_array_2d(),
-            frustum_planes,
+            frustum_plane_0: frustum_planes[0],
+            frustum_plane_1: frustum_planes[1],
+            frustum_plane_2: frustum_planes[2],
+            frustum_plane_3: frustum_planes[3],
+            frustum_plane_4: frustum_planes[4],
+            frustum_plane_5: frustum_planes[5],
             camera_position: [camera_pos.x, camera_pos.y, camera_pos.z],
             _pad0: 0.0,
             cull_distance: 1000.0, // Max culling distance
@@ -572,7 +583,9 @@ mod tests {
 
     #[test]
     fn test_vertex_count_for_types() {
-        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            return;
+        };
         let renderer = IndirectRenderer::new(&device).unwrap();
 
         assert_eq!(renderer.get_vertex_count_for_type(0), 3); // Triangle
@@ -583,7 +596,9 @@ mod tests {
 
     #[test]
     fn test_cpu_culling_distance() {
-        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            return;
+        };
         let renderer = IndirectRenderer::new(&device).unwrap();
 
         let instance = CullableInstance {

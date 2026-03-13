@@ -3,7 +3,12 @@
 
 struct CullingUniforms {
     view_proj: mat4x4<f32>,
-    frustum_planes: array<vec4<f32>, 6>,  // 6 frustum planes (left, right, top, bottom, near, far)
+    frustum_plane_0: vec4<f32>,
+    frustum_plane_1: vec4<f32>,
+    frustum_plane_2: vec4<f32>,
+    frustum_plane_3: vec4<f32>,
+    frustum_plane_4: vec4<f32>,
+    frustum_plane_5: vec4<f32>,
     camera_position: vec3<f32>,
     _pad0: f32,
     cull_distance: f32,
@@ -48,6 +53,19 @@ var<storage, read_write> counters: Counters;
 
 const WORKGROUP_SIZE: u32 = 64u;
 
+// FXC is brittle around uniform array indexing in generated HLSL, so keep the
+// six planes as named fields and select them explicitly.
+fn get_frustum_plane(index: u32) -> vec4<f32> {
+    switch (index) {
+        case 0u: { return uniforms.frustum_plane_0; }
+        case 1u: { return uniforms.frustum_plane_1; }
+        case 2u: { return uniforms.frustum_plane_2; }
+        case 3u: { return uniforms.frustum_plane_3; }
+        case 4u: { return uniforms.frustum_plane_4; }
+        default: { return uniforms.frustum_plane_5; }
+    }
+}
+
 @compute @workgroup_size(64, 1, 1)
 fn cs_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let instance_index = global_id.x;
@@ -85,7 +103,7 @@ fn cs_main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         
         // Test against all 6 frustum planes
         for (var i = 0u; i < 6u; i++) {
-            let plane = uniforms.frustum_planes[i];
+            let plane = get_frustum_plane(i);
             let distance_to_plane = dot(plane.xyz, world_center) + plane.w;
             
             // If sphere is completely behind any plane, it's culled
@@ -140,65 +158,4 @@ fn sphere_aabb_intersect(sphere_center: vec3<f32>, sphere_radius: f32, aabb_min:
     let closest_point = clamp(sphere_center, aabb_min, aabb_max);
     let distance_squared = dot(sphere_center - closest_point, sphere_center - closest_point);
     return distance_squared <= sphere_radius * sphere_radius;
-}
-
-// Extract frustum planes from view-projection matrix (for CPU-GPU consistency)
-fn extract_frustum_planes(view_proj: mat4x4<f32>) -> array<vec4<f32>, 6> {
-    var planes: array<vec4<f32>, 6>;
-    
-    // Left plane: row4 + row1
-    planes[0] = vec4<f32>(
-        view_proj[0][3] + view_proj[0][0],
-        view_proj[1][3] + view_proj[1][0], 
-        view_proj[2][3] + view_proj[2][0],
-        view_proj[3][3] + view_proj[3][0]
-    );
-    
-    // Right plane: row4 - row1  
-    planes[1] = vec4<f32>(
-        view_proj[0][3] - view_proj[0][0],
-        view_proj[1][3] - view_proj[1][0],
-        view_proj[2][3] - view_proj[2][0], 
-        view_proj[3][3] - view_proj[3][0]
-    );
-    
-    // Top plane: row4 - row2
-    planes[2] = vec4<f32>(
-        view_proj[0][3] - view_proj[0][1],
-        view_proj[1][3] - view_proj[1][1],
-        view_proj[2][3] - view_proj[2][1],
-        view_proj[3][3] - view_proj[3][1]
-    );
-    
-    // Bottom plane: row4 + row2
-    planes[3] = vec4<f32>(
-        view_proj[0][3] + view_proj[0][1],
-        view_proj[1][3] + view_proj[1][1],
-        view_proj[2][3] + view_proj[2][1], 
-        view_proj[3][3] + view_proj[3][1]
-    );
-    
-    // Near plane: row4 + row3
-    planes[4] = vec4<f32>(
-        view_proj[0][3] + view_proj[0][2],
-        view_proj[1][3] + view_proj[1][2],
-        view_proj[2][3] + view_proj[2][2],
-        view_proj[3][3] + view_proj[3][2]
-    );
-    
-    // Far plane: row4 - row3
-    planes[5] = vec4<f32>(
-        view_proj[0][3] - view_proj[0][2],
-        view_proj[1][3] - view_proj[1][2], 
-        view_proj[2][3] - view_proj[2][2],
-        view_proj[3][3] - view_proj[3][2]
-    );
-    
-    // Normalize planes
-    for (var i = 0u; i < 6u; i++) {
-        let length = sqrt(dot(planes[i].xyz, planes[i].xyz));
-        planes[i] = planes[i] / length;
-    }
-    
-    return planes;
 }

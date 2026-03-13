@@ -128,6 +128,10 @@ const DBG_FLAKE_NORMAL_BLEND: u32 = 27u;    // Visualize effective normal_blend 
 const DBG_RAW_SSAO: u32 = 28u;
 // Sun visibility debug mode
 const DBG_SUN_VIS: u32 = 29u;
+// Keep POM loop bounds compile-time constant so FXC can lower the fragment
+// shader without trying to infer a large dynamic unroll.
+const POM_MAX_STEPS: u32 = 128u;
+const POM_MAX_REFINE_STEPS: u32 = 32u;
 // Sprint 1: Shadow-field diagnostic modes
 const DBG_NDOTL: u32 = 30u;           // N·L (lambert term) as grayscale
 const DBG_SHADOW_FACTOR: u32 = 31u;   // Shadow visibility factor as grayscale
@@ -1081,6 +1085,11 @@ fn sample_height(uv : vec2<f32>) -> f32 {
     return textureSample(height_tex, height_samp, uv_clamped).r;
 }
 
+fn sample_height_level(uv: vec2<f32>, lod: f32) -> f32 {
+    let uv_clamped = clamp(uv, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
+    return textureSampleLevel(height_tex, height_samp, uv_clamped, lod).r;
+}
+
 fn get_height_geom_t(h_raw: f32) -> f32 {
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
@@ -1807,12 +1816,13 @@ fn parallax_occlusion_mapping(
     }
 
     let view_dir = normalize(view_dir_tangent);
-    let min_s = max(min_steps, 1u);
-    let max_s = max(max_steps, min_s);
+    let min_s = clamp(max(min_steps, 1u), 1u, POM_MAX_STEPS);
+    let max_s = clamp(max(max_steps, min_s), min_s, POM_MAX_STEPS);
+    let refine_count = min(refine_steps, POM_MAX_REFINE_STEPS);
     let blend = clamp(abs(view_dir.z), 0.0, 1.0);
     let steps_interp = mix(f32(max_s), f32(min_s), blend);
     let step_count = clamp(u32(steps_interp + 0.5), 1u, max_s);
-    var step_size = 1.0 / f32(step_count);
+    let step_size = 1.0 / f32(step_count);
 
     let dir_xy = view_dir.xy;
     if (length(dir_xy) < 1e-5) {
@@ -1822,23 +1832,27 @@ fn parallax_occlusion_mapping(
 
     var current_uv = uv;
     var current_layer = 0.0;
-    var current_height = sample_height(current_uv);
+    // Use explicit LOD sampling here so the raymarch does not rely on implicit
+    // gradients inside a runtime-varying fragment loop, which FXC rejects.
+    var current_height = sample_height_level(current_uv, 0.0);
 
-    for (var i = 0u; i < step_count; i = i + 1u) {
-        if (current_layer >= current_height) {
+    for (var i = 0u; i < POM_MAX_STEPS; i = i + 1u) {
+        if (i >= step_count || current_layer >= current_height) {
             break;
         }
         current_uv -= parallax_dir * step_size;
         current_layer += step_size;
-        current_height = sample_height(current_uv);
+        current_height = sample_height_level(current_uv, 0.0);
     }
 
     var refine_step_size = step_size;
-    var refine_index = 0u;
-    while (refine_index < refine_steps) {
+    for (var i = 0u; i < POM_MAX_REFINE_STEPS; i = i + 1u) {
+        if (i >= refine_count) {
+            break;
+        }
         let delta_uv = parallax_dir * refine_step_size * 0.5;
         refine_step_size *= 0.5;
-        current_height = sample_height(current_uv);
+        current_height = sample_height_level(current_uv, 0.0);
         if (current_layer >= current_height) {
             current_uv -= delta_uv;
             current_layer -= refine_step_size;
@@ -1846,7 +1860,6 @@ fn parallax_occlusion_mapping(
             current_uv += delta_uv;
             current_layer += refine_step_size;
         }
-        refine_index = refine_index + 1u;
     }
 
     return current_uv;
