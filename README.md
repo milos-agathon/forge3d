@@ -69,7 +69,7 @@ pip install "forge3d[all]"         # everything
   </tr>
 </table>
 
-<p align="center"><a href="https://docs.forge3d.dev/gallery/"><strong>See the full gallery &rarr;</strong></a></p>
+<p align="center"><a href="docs/gallery/index.md"><strong>See the full gallery &rarr;</strong></a></p>
 
 ## What You Get
 

@@ -237,6 +237,12 @@ __pycache__/
 *.bmp
 *.exr
 *.hdr
+
+# Whitelist doc/gallery images that must be in the repo
+!docs/gallery/images/*.png
+!docs/gallery/images/*.jpg
+!docs/gallery/thumbs/*.png
+!docs/gallery/thumbs/*.jpg
 /out/
 /diag_out/
 /artifacts/
