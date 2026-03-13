@@ -10,8 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from forge3d._license import _reset_license_state, set_license_key
-
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -48,10 +46,16 @@ def _needs_build_from_exc(exc: BaseException) -> bool:
     )
 
 
+def _license_api():
+    module = importlib.import_module("forge3d._license")
+    return module._reset_license_state, module.set_license_key
+
+
 @pytest.fixture
 def pro_license():
     """Enable a deterministic test license for Pro-gated APIs."""
 
+    _reset_license_state, set_license_key = _license_api()
     _reset_license_state()
     set_license_key("F3D-PRO-20991231-test-signature")
     try:
