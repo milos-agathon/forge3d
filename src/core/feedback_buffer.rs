@@ -413,7 +413,9 @@ mod tests {
 
     #[test]
     fn test_parse_empty_feedback_data() {
-        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            return;
+        };
 
         let buffer = FeedbackBuffer::new(&device, 10).unwrap();
 
@@ -428,7 +430,9 @@ mod tests {
 
     #[test]
     fn test_parse_feedback_trailing_bytes() {
-        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            return;
+        };
 
         let buffer = FeedbackBuffer::new(&device, 4).unwrap();
         let entry = FeedbackEntry {

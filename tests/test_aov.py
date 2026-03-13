@@ -23,6 +23,17 @@ except ImportError:
 if not HAS_NATIVE:
     pytest.skip("AOV tests require GPU-backed native module", allow_module_level=True)
 
+_REQUIRED_SYMBOLS = (
+    "Session",
+    "TerrainRenderer",
+    "MaterialSet",
+    "IBL",
+    "TerrainRenderParams",
+)
+
+if not f3d.has_gpu() or not all(hasattr(f3d, name) for name in _REQUIRED_SYMBOLS):
+    pytest.skip("AOV tests require a GPU-backed forge3d runtime", allow_module_level=True)
+
 
 def _create_test_hdr(path: str, width: int = 8, height: int = 4) -> None:
     """Create a minimal HDR file for IBL testing."""

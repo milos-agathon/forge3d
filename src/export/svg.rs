@@ -426,7 +426,14 @@ mod tests {
         };
 
         let bounds = Bounds2D::from_extents(0.0, 0.0, 100.0, 100.0);
-        let svg = vectors_to_svg(&[polygon], &[], &bounds, 100, 100, &SvgExportConfig::default());
+        let svg = vectors_to_svg(
+            &[polygon],
+            &[],
+            &bounds,
+            100,
+            100,
+            &SvgExportConfig::default(),
+        );
 
         assert!(svg.contains("<path"));
         assert!(svg.contains("fill-rule=\"evenodd\""));

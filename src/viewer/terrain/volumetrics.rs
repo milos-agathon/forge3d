@@ -9,14 +9,14 @@ use wgpu;
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct VolumetricsUniforms {
-    pub inv_view_proj: [[f32; 4]; 4],  // 64 bytes, offset 0
-    pub camera_pos: [f32; 4],           // 16 bytes (vec3 + pad), offset 64
-    pub near_far: [f32; 4],             // near, far, density, height_falloff; offset 80
-    pub scatter_absorb: [f32; 4],       // scattering, absorption, pad, pad; offset 96
-    pub sun_direction: [f32; 4],        // 16 bytes (vec3 + intensity), offset 112
-    pub shaft_params: [f32; 4],         // shaft_intensity, light_shafts_enabled, steps, mode; offset 128
-    pub screen_dims: [f32; 4],          // width, height, pad, pad; offset 144
-    pub terrain_params: [f32; 4],       // terrain_size, min_h, h_scale, pad; offset 160
+    pub inv_view_proj: [[f32; 4]; 4], // 64 bytes, offset 0
+    pub camera_pos: [f32; 4],         // 16 bytes (vec3 + pad), offset 64
+    pub near_far: [f32; 4],           // near, far, density, height_falloff; offset 80
+    pub scatter_absorb: [f32; 4],     // scattering, absorption, pad, pad; offset 96
+    pub sun_direction: [f32; 4],      // 16 bytes (vec3 + intensity), offset 112
+    pub shaft_params: [f32; 4], // shaft_intensity, light_shafts_enabled, steps, mode; offset 128
+    pub screen_dims: [f32; 4],  // width, height, pad, pad; offset 144
+    pub terrain_params: [f32; 4], // terrain_size, min_h, h_scale, pad; offset 160
 }
 
 /// Volumetric fog pass manager
@@ -214,7 +214,12 @@ impl VolumetricsPass {
             camera_pos: [camera_pos[0], camera_pos[1], camera_pos[2], 0.0],
             near_far: [near, far, config.density, config.height_falloff],
             scatter_absorb: [config.scattering, config.absorption, 0.0, 0.0],
-            sun_direction: [sun_direction[0], sun_direction[1], sun_direction[2], sun_intensity],
+            sun_direction: [
+                sun_direction[0],
+                sun_direction[1],
+                sun_direction[2],
+                sun_intensity,
+            ],
             shaft_params: [
                 config.shaft_intensity,
                 if config.light_shafts { 1.0 } else { 0.0 },

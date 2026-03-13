@@ -237,12 +237,18 @@ mod tests {
 
     #[test]
     fn test_text_case_upper() {
-        assert_eq!(apply_text_case("Hello World", TextCase::Upper), "HELLO WORLD");
+        assert_eq!(
+            apply_text_case("Hello World", TextCase::Upper),
+            "HELLO WORLD"
+        );
     }
 
     #[test]
     fn test_text_case_title() {
-        assert_eq!(apply_text_case("hello world", TextCase::Title), "Hello World");
+        assert_eq!(
+            apply_text_case("hello world", TextCase::Title),
+            "Hello World"
+        );
     }
 
     #[test]

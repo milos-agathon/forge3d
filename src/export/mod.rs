@@ -104,7 +104,14 @@ mod tests {
             max: Vec2::new(100.0, 100.0),
         };
 
-        let svg = vectors_to_svg(&polygons, &polylines, &bounds, 800, 600, &SvgExportConfig::default());
+        let svg = vectors_to_svg(
+            &polygons,
+            &polylines,
+            &bounds,
+            800,
+            600,
+            &SvgExportConfig::default(),
+        );
 
         // Verify SVG structure
         assert!(svg.contains("<?xml version"));

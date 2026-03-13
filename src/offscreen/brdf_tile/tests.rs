@@ -97,7 +97,9 @@ fn test_brdf_tile_validates_inputs() {
     let Some(adapter) = adapter else {
         return;
     };
-    let (device, queue) = match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None)) {
+    let (device, queue) = match pollster::block_on(
+        adapter.request_device(&wgpu::DeviceDescriptor::default(), None),
+    ) {
         Ok((d, q)) => (d, q),
         Err(_) => {
             eprintln!("Failed to create device, skipping test");

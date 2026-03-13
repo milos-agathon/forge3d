@@ -235,7 +235,11 @@ pub fn create_fog_resources(device: &Arc<Device>, width: u32, height: u32) -> Fo
     // Fog output textures
     let fog_output = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.fog.output"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -249,7 +253,11 @@ pub fn create_fog_resources(device: &Arc<Device>, width: u32, height: u32) -> Fo
 
     let fog_history = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.fog.history"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -264,7 +272,11 @@ pub fn create_fog_resources(device: &Arc<Device>, width: u32, height: u32) -> Fo
     let half_h = height.max(1) / 2;
     let fog_output_half = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.fog.output.half"),
-        size: wgpu::Extent3d { width: half_w, height: half_h, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: half_w,
+            height: half_h,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -278,7 +290,11 @@ pub fn create_fog_resources(device: &Arc<Device>, width: u32, height: u32) -> Fo
 
     let fog_history_half = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.fog.history.half"),
-        size: wgpu::Extent3d { width: half_w, height: half_h, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: half_w,
+            height: half_h,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -286,7 +302,8 @@ pub fn create_fog_resources(device: &Arc<Device>, width: u32, height: u32) -> Fo
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    let fog_history_half_view = fog_history_half.create_view(&wgpu::TextureViewDescriptor::default());
+    let fog_history_half_view =
+        fog_history_half.create_view(&wgpu::TextureViewDescriptor::default());
 
     // Samplers
     let fog_depth_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -306,7 +323,11 @@ pub fn create_fog_resources(device: &Arc<Device>, width: u32, height: u32) -> Fo
     // Dummy shadow map until fog integrates with the shadow pipeline.
     let fog_shadow_map = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.fog.shadow.map"),
-        size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 4 },
+        size: wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 4,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -334,7 +355,11 @@ pub fn create_fog_resources(device: &Arc<Device>, width: u32, height: u32) -> Fo
     // Zero fallback texture
     let fog_zero_tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.fog.zero"),
-        size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -347,7 +372,11 @@ pub fn create_fog_resources(device: &Arc<Device>, width: u32, height: u32) -> Fo
     // Froxel 3D texture
     let froxel_tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.fog.froxel"),
-        size: wgpu::Extent3d { width: 16, height: 8, depth_or_array_layers: 64 },
+        size: wgpu::Extent3d {
+            width: 16,
+            height: 8,
+            depth_or_array_layers: 64,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D3,

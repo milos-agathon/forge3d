@@ -188,36 +188,21 @@ pub enum IpcRequest {
         z_order: Option<i32>,
     },
     /// Remove an overlay by ID
-    RemoveOverlay {
-        id: u32,
-    },
+    RemoveOverlay { id: u32 },
     /// Set overlay visibility
-    SetOverlayVisible {
-        id: u32,
-        visible: bool,
-    },
+    SetOverlayVisible { id: u32, visible: bool },
     /// Set overlay opacity (0.0 - 1.0)
-    SetOverlayOpacity {
-        id: u32,
-        opacity: f32,
-    },
+    SetOverlayOpacity { id: u32, opacity: f32 },
     /// Set global overlay opacity multiplier (0.0 - 1.0)
-    SetGlobalOverlayOpacity {
-        opacity: f32,
-    },
+    SetGlobalOverlayOpacity { opacity: f32 },
     /// Enable or disable overlays
-    SetOverlaysEnabled {
-        enabled: bool,
-    },
+    SetOverlaysEnabled { enabled: bool },
     /// Set overlay solid surface mode (true=show base surface, false=hide where alpha=0)
-    SetOverlaySolid {
-        solid: bool,
-    },
+    SetOverlaySolid { solid: bool },
     /// List all overlay IDs
     ListOverlays,
-    
+
     // === OPTION B: VECTOR OVERLAY GEOMETRY REQUESTS ===
-    
     /// Add a vector overlay layer with geometry
     AddVectorOverlay {
         name: String,
@@ -254,7 +239,6 @@ pub enum IpcRequest {
     SetGlobalVectorOverlayOpacity { opacity: f32 },
 
     // === POINT CLOUDS ===
-
     /// Load a point cloud from LAZ/LAS file
     LoadPointCloud {
         /// Path to LAZ/LAS file
@@ -282,7 +266,6 @@ pub enum IpcRequest {
     },
 
     // === LABELS ===
-
     /// Add a text label at a world position
     AddLabel {
         text: String,
@@ -364,7 +347,6 @@ pub enum IpcRequest {
     SetMaxVisibleLabels { max: usize },
 
     // === Plan 3: Premium Label Features ===
-
     /// Add a curved label along a polyline path
     AddCurvedLabel {
         text: String,
@@ -428,7 +410,6 @@ pub enum IpcRequest {
     },
 
     // === Plan 3: Picking Requests ===
-    
     /// Poll for pending pick events
     PollPickEvents,
     /// Set lasso selection mode
@@ -439,7 +420,6 @@ pub enum IpcRequest {
     ClearSelection,
 
     // === P0.1/M1: OIT (Order-Independent Transparency) ===
-    
     /// Enable or disable OIT with specified mode
     SetOitEnabled {
         enabled: bool,
@@ -450,11 +430,8 @@ pub enum IpcRequest {
     GetOitMode,
 
     // === P1.3/P1.4: TAA (Temporal Anti-Aliasing) ===
-
     /// Enable or disable TAA
-    SetTaaEnabled {
-        enabled: bool,
-    },
+    SetTaaEnabled { enabled: bool },
     /// Get current TAA status
     GetTaaStatus,
     /// Set TAA parameters
@@ -471,7 +448,6 @@ pub enum IpcRequest {
     },
 
     // === BUNDLE POLLING (for Python-side orchestration) ===
-    
     /// Poll for pending bundle save request (from SaveBundle)
     PollPendingBundleSave,
     /// Poll for pending bundle load request (from LoadBundle)
@@ -775,15 +751,27 @@ pub struct BundleRequest {
 
 impl BundleRequest {
     pub fn none() -> Self {
-        Self { pending: false, path: None, name: None }
+        Self {
+            pending: false,
+            path: None,
+            name: None,
+        }
     }
-    
+
     pub fn save(path: String, name: Option<String>) -> Self {
-        Self { pending: true, path: Some(path), name }
+        Self {
+            pending: true,
+            path: Some(path),
+            name,
+        }
     }
-    
+
     pub fn load(path: String) -> Self {
-        Self { pending: true, path: Some(path), name: None }
+        Self {
+            pending: true,
+            path: Some(path),
+            name: None,
+        }
     }
 }
 
@@ -881,7 +869,7 @@ pub fn parse_ipc_request(line: &str) -> Result<IpcRequest, String> {
 pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, String> {
     match req {
         IpcRequest::GetStats => Ok(None),
-        // Picking requests that return data are handled via ViewerCmd, 
+        // Picking requests that return data are handled via ViewerCmd,
         // but the response needs to be constructed by the handler.
         // We map them to ViewerCmd and let the handler deal with response via a channel or similar.
         // Actually, the current architecture has `cmd_sender` returning `Result<(), String>`.
@@ -892,16 +880,18 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
         // The current `server.rs` implementation:
         // `match ipc_request_to_viewer_cmd(&req) { Ok(Some(cmd)) => match cmd_sender(cmd) ...`
         // `cmd_sender` is `move |cmd| { q.push_back(cmd); Ok(()) }`. It just pushes to a queue.
-        // The main thread processes the queue. It has no way to send data back to the specific TCP stream 
+        // The main thread processes the queue. It has no way to send data back to the specific TCP stream
         // that sent the request, because `cmd_sender` is fire-and-forget.
         // `GetStats` works because it reads from a shared `Arc<Mutex<ViewerStats>>` *immediately* in the server thread.
         // To support `PollPickEvents`, we need a shared `Arc<Mutex<Vec<PickEvent>>>` that the viewer writes to
         // and the server reads from.
         // Let's add `pick_events` to the shared state or similar.
-        
+
         // Default behavior is to map the commands.
         IpcRequest::PollPickEvents => Ok(None), // Special handling in server.rs
-        IpcRequest::SetLassoMode { enabled } => Ok(Some(ViewerCmd::SetLassoMode { enabled: *enabled })),
+        IpcRequest::SetLassoMode { enabled } => {
+            Ok(Some(ViewerCmd::SetLassoMode { enabled: *enabled }))
+        }
         IpcRequest::GetLassoState => Ok(None), // Special handling in server.rs
         IpcRequest::ClearSelection => Ok(Some(ViewerCmd::ClearSelection)),
 
@@ -913,9 +903,9 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
         IpcRequest::GetOitMode => Ok(Some(ViewerCmd::GetOitMode)),
 
         // P1.3/P1.4: TAA (Temporal Anti-Aliasing)
-        IpcRequest::SetTaaEnabled { enabled } => Ok(Some(ViewerCmd::SetTaaEnabled {
-            enabled: *enabled,
-        })),
+        IpcRequest::SetTaaEnabled { enabled } => {
+            Ok(Some(ViewerCmd::SetTaaEnabled { enabled: *enabled }))
+        }
         IpcRequest::GetTaaStatus => Ok(Some(ViewerCmd::GetTaaStatus)),
         IpcRequest::SetTaaParams {
             history_weight,
@@ -1049,12 +1039,12 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             debug_mode,
         } => {
             use crate::viewer::viewer_enums::{
-                ViewerHeightAoConfig, ViewerSunVisConfig,
-                ViewerMaterialLayerConfig, ViewerVectorOverlayConfig, ViewerTonemapConfig,
-                ViewerDofConfig, ViewerMotionBlurConfig, ViewerLensEffectsConfig,
-                ViewerDenoiseConfig, ViewerVolumetricsConfig, ViewerSkyConfig,
+                ViewerDenoiseConfig, ViewerDofConfig, ViewerHeightAoConfig,
+                ViewerLensEffectsConfig, ViewerMaterialLayerConfig, ViewerMotionBlurConfig,
+                ViewerSkyConfig, ViewerSunVisConfig, ViewerTonemapConfig,
+                ViewerVectorOverlayConfig, ViewerVolumetricsConfig,
             };
-            
+
             let height_ao_config = height_ao.as_ref().map(|c| ViewerHeightAoConfig {
                 enabled: c.enabled.unwrap_or(false),
                 directions: c.directions.unwrap_or(6),
@@ -1063,7 +1053,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 strength: c.strength.unwrap_or(1.0),
                 resolution_scale: c.resolution_scale.unwrap_or(0.5),
             });
-            
+
             let sun_vis_config = sun_visibility.as_ref().map(|c| ViewerSunVisConfig {
                 enabled: c.enabled.unwrap_or(false),
                 mode: c.mode.clone().unwrap_or_else(|| "soft".to_string()),
@@ -1074,7 +1064,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 bias: c.bias.unwrap_or(0.01),
                 resolution_scale: c.resolution_scale.unwrap_or(0.5),
             });
-            
+
             // M4: Material layer config
             let materials_config = materials.as_ref().map(|c| ViewerMaterialLayerConfig {
                 snow_enabled: c.snow_enabled.unwrap_or(false),
@@ -1086,16 +1076,17 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 wetness_enabled: c.wetness_enabled.unwrap_or(false),
                 wetness_strength: c.wetness_strength.unwrap_or(0.3),
             });
-            
+
             // M5: Vector overlay config
-            let vector_overlay_config = vector_overlay.as_ref().map(|c| ViewerVectorOverlayConfig {
-                depth_test: c.depth_test.unwrap_or(false),
-                depth_bias: c.depth_bias.unwrap_or(0.001),
-                halo_enabled: c.halo_enabled.unwrap_or(false),
-                halo_width: c.halo_width.unwrap_or(2.0),
-                halo_color: c.halo_color.unwrap_or([0.0, 0.0, 0.0, 0.5]),
-            });
-            
+            let vector_overlay_config =
+                vector_overlay.as_ref().map(|c| ViewerVectorOverlayConfig {
+                    depth_test: c.depth_test.unwrap_or(false),
+                    depth_bias: c.depth_bias.unwrap_or(0.001),
+                    halo_enabled: c.halo_enabled.unwrap_or(false),
+                    halo_width: c.halo_width.unwrap_or(2.0),
+                    halo_color: c.halo_color.unwrap_or([0.0, 0.0, 0.0, 0.5]),
+                });
+
             // M6: Tonemap config
             let tonemap_config = tonemap.as_ref().map(|c| ViewerTonemapConfig {
                 operator: c.operator.clone().unwrap_or_else(|| "aces".to_string()),
@@ -1104,7 +1095,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 temperature: c.temperature.unwrap_or(6500.0),
                 tint: c.tint.unwrap_or(0.0),
             });
-            
+
             // M3: DoF config
             let dof_config = dof.as_ref().map(|c| ViewerDofConfig {
                 enabled: c.enabled.unwrap_or(false),
@@ -1115,7 +1106,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 tilt_yaw: c.tilt_yaw.unwrap_or(0.0),
                 quality: c.quality.clone().unwrap_or_else(|| "medium".to_string()),
             });
-            
+
             // M4: Motion blur config
             let motion_blur_config = motion_blur.as_ref().map(|c| ViewerMotionBlurConfig {
                 enabled: c.enabled.unwrap_or(false),
@@ -1126,7 +1117,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 cam_theta_delta: c.cam_theta_delta.unwrap_or(0.0),
                 cam_radius_delta: c.cam_radius_delta.unwrap_or(0.0),
             });
-            
+
             // M5: Lens effects config
             let lens_effects_config = lens_effects.as_ref().map(|c| ViewerLensEffectsConfig {
                 enabled: c.enabled.unwrap_or(false),
@@ -1136,7 +1127,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 vignette_radius: c.vignette_radius.unwrap_or(0.7),
                 vignette_softness: c.vignette_softness.unwrap_or(0.3),
             });
-            
+
             // M5: Denoise config
             let denoise_config = denoise.as_ref().map(|c| ViewerDenoiseConfig {
                 enabled: c.enabled.unwrap_or(false),
@@ -1144,7 +1135,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 iterations: c.iterations.unwrap_or(3),
                 sigma_color: c.sigma_color.unwrap_or(0.1),
             });
-            
+
             // M6: Volumetrics config
             let volumetrics_config = volumetrics.as_ref().map(|c| ViewerVolumetricsConfig {
                 enabled: c.enabled.unwrap_or(false),
@@ -1156,7 +1147,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 shaft_intensity: c.shaft_intensity.unwrap_or(1.0),
                 half_res: c.half_res.unwrap_or(false),
             });
-            
+
             // M6: Sky config
             let sky_config = sky.as_ref().map(|c| ViewerSkyConfig {
                 enabled: c.enabled.unwrap_or(false),
@@ -1166,7 +1157,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 aerial_perspective: c.aerial_perspective.unwrap_or(true),
                 sky_exposure: c.sky_exposure.unwrap_or(1.0),
             });
-            
+
             Ok(Some(ViewerCmd::SetTerrainPbr {
                 enabled: *enabled,
                 hdr_path: hdr_path.clone(),
@@ -1189,7 +1180,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
                 sky: sky_config,
                 debug_mode: *debug_mode,
             }))
-        },
+        }
         IpcRequest::LoadOverlay {
             name,
             path,
@@ -1204,20 +1195,18 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             z_order: *z_order,
         })),
         IpcRequest::RemoveOverlay { id } => Ok(Some(ViewerCmd::RemoveOverlay { id: *id })),
-        IpcRequest::SetOverlayVisible { id, visible } => {
-            Ok(Some(ViewerCmd::SetOverlayVisible {
-                id: *id,
-                visible: *visible,
-            }))
-        }
-        IpcRequest::SetOverlayOpacity { id, opacity } => {
-            Ok(Some(ViewerCmd::SetOverlayOpacity {
-                id: *id,
+        IpcRequest::SetOverlayVisible { id, visible } => Ok(Some(ViewerCmd::SetOverlayVisible {
+            id: *id,
+            visible: *visible,
+        })),
+        IpcRequest::SetOverlayOpacity { id, opacity } => Ok(Some(ViewerCmd::SetOverlayOpacity {
+            id: *id,
+            opacity: *opacity,
+        })),
+        IpcRequest::SetGlobalOverlayOpacity { opacity } => {
+            Ok(Some(ViewerCmd::SetGlobalOverlayOpacity {
                 opacity: *opacity,
             }))
-        }
-        IpcRequest::SetGlobalOverlayOpacity { opacity } => {
-            Ok(Some(ViewerCmd::SetGlobalOverlayOpacity { opacity: *opacity }))
         }
         IpcRequest::SetOverlaysEnabled { enabled } => {
             Ok(Some(ViewerCmd::SetOverlaysEnabled { enabled: *enabled }))
@@ -1226,7 +1215,7 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             Ok(Some(ViewerCmd::SetOverlaySolid { solid: *solid }))
         }
         IpcRequest::ListOverlays => Ok(Some(ViewerCmd::ListOverlays)),
-        
+
         // Vector overlay commands
         IpcRequest::AddVectorOverlay {
             name,
@@ -1270,29 +1259,38 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
         }
         IpcRequest::ListVectorOverlays => Ok(Some(ViewerCmd::ListVectorOverlays)),
         IpcRequest::SetVectorOverlaysEnabled { enabled } => {
-            Ok(Some(ViewerCmd::SetVectorOverlaysEnabled { enabled: *enabled }))
+            Ok(Some(ViewerCmd::SetVectorOverlaysEnabled {
+                enabled: *enabled,
+            }))
         }
         IpcRequest::SetGlobalVectorOverlayOpacity { opacity } => {
-            Ok(Some(ViewerCmd::SetGlobalVectorOverlayOpacity { opacity: *opacity }))
+            Ok(Some(ViewerCmd::SetGlobalVectorOverlayOpacity {
+                opacity: *opacity,
+            }))
         }
 
         // Point cloud commands
-        IpcRequest::LoadPointCloud { path, point_size, max_points, color_mode } => {
-            Ok(Some(ViewerCmd::LoadPointCloud {
-                path: path.clone(),
-                point_size: *point_size,
-                max_points: *max_points,
-                color_mode: color_mode.clone(),
-            }))
-        }
+        IpcRequest::LoadPointCloud {
+            path,
+            point_size,
+            max_points,
+            color_mode,
+        } => Ok(Some(ViewerCmd::LoadPointCloud {
+            path: path.clone(),
+            point_size: *point_size,
+            max_points: *max_points,
+            color_mode: color_mode.clone(),
+        })),
         IpcRequest::ClearPointCloud => Ok(Some(ViewerCmd::ClearPointCloud)),
-        IpcRequest::SetPointCloudParams { point_size, visible, color_mode } => {
-            Ok(Some(ViewerCmd::SetPointCloudParams {
-                point_size: *point_size,
-                visible: *visible,
-                color_mode: color_mode.clone(),
-            }))
-        }
+        IpcRequest::SetPointCloudParams {
+            point_size,
+            visible,
+            color_mode,
+        } => Ok(Some(ViewerCmd::SetPointCloudParams {
+            point_size: *point_size,
+            visible: *visible,
+            color_mode: color_mode.clone(),
+        })),
 
         // Label commands
         IpcRequest::AddLabel {
@@ -1436,6 +1434,5 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
             seed: *seed,
             max_iterations: *max_iterations,
         })),
-
     }
 }

@@ -134,9 +134,12 @@ impl CsmRenderer {
         let proj_far = far_plane;
         let near_ndc = (proj_far * (near_dist - proj_near)) / (near_dist * (proj_far - proj_near));
         let far_ndc = (proj_far * (far_dist - proj_near)) / (far_dist * (proj_far - proj_near));
-        
-        let frustum_corners =
-            calculate_frustum_corners(inv_view_proj, near_ndc.clamp(0.0, 1.0), far_ndc.clamp(0.0, 1.0));
+
+        let frustum_corners = calculate_frustum_corners(
+            inv_view_proj,
+            near_ndc.clamp(0.0, 1.0),
+            far_ndc.clamp(0.0, 1.0),
+        );
 
         let (mut min_bounds, mut max_bounds) =
             calculate_light_space_bounds(&frustum_corners, light_view);
@@ -153,7 +156,7 @@ impl CsmRenderer {
         // For terrain, objects far from the camera can still cast shadows into the visible area
         let z_expansion = (max_bounds.z - min_bounds.z).abs().max(1000.0) * 2.0;
         let xy_expansion = (max_bounds.x - min_bounds.x).abs().max(500.0) * 0.5;
-        
+
         let light_projection = Mat4::orthographic_rh(
             min_bounds.x - xy_expansion,
             max_bounds.x + xy_expansion,

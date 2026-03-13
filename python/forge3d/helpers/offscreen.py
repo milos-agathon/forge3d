@@ -7,11 +7,11 @@
 from __future__ import annotations
 
 from typing import Any, Mapping, Optional
-import io
 import sys
-import warnings
 import numpy as np
 
+from .._png import encode_png as _encode_png
+from .._png import save_png as _save_png
 from ..path_tracing import render_rgba as _fallback_render_rgba
 
 # Resolve the native Scene class for isinstance checks.
@@ -75,11 +75,6 @@ def save_png_deterministic(path: str | bytes | "os.PathLike[str]", rgba: np.ndar
 
     Ensures stable PNG output by using fixed parameters and avoiding metadata.
     """
-    try:
-        from PIL import Image
-    except Exception as exc:  # pragma: no cover - optional dependency
-        raise ImportError("Pillow is required for save_png_deterministic()") from exc
-
     if not isinstance(rgba, np.ndarray) or rgba.ndim != 3 or rgba.shape[2] not in (3, 4):
         raise ValueError("rgba must be numpy array with shape (H,W,3|4)")
 
@@ -91,21 +86,11 @@ def save_png_deterministic(path: str | bytes | "os.PathLike[str]", rgba: np.ndar
     else:
         arr = data.astype(np.uint8)
 
-    mode = "RGBA" if arr.shape[2] == 4 else "RGB"
-    img = Image.fromarray(arr, mode=mode)
-
-    # Write without optimization or ancillary chunks; PIL by default writes deterministic PNG
-    # given identical bytes and parameters. Explicitly pass a fixed compress_level for stability.
-    img.save(path, format="PNG", optimize=False, compress_level=6)
+    _save_png(path, arr, compress_level=6)
 
 
 def rgba_to_png_bytes(rgba: np.ndarray) -> bytes:
     """Convert RGBA array to PNG bytes deterministically."""
-    try:
-        from PIL import Image
-    except Exception as exc:  # pragma: no cover - optional dependency
-        raise ImportError("Pillow is required for rgba_to_png_bytes()") from exc
-
     data = rgba
     if data.dtype == np.uint8:
         arr = data
@@ -114,11 +99,7 @@ def rgba_to_png_bytes(rgba: np.ndarray) -> bytes:
     else:
         arr = data.astype(np.uint8)
 
-    mode = "RGBA" if arr.shape[2] == 4 else "RGB"
-    img = Image.fromarray(arr, mode=mode)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=False, compress_level=6)
-    return buf.getvalue()
+    return _encode_png(arr, compress_level=6)
 
 
 def save_png_with_exif(path: str | bytes | "os.PathLike[str]", rgba: np.ndarray, metadata: Optional[Mapping[str, Any]] = None) -> None:

@@ -6357,10 +6357,7 @@ impl Scene {
         }
     }
 
-    fn apply_ssgi_cpu(
-        pixels: &mut [u8],
-        settings: &crate::lighting::screen_space::SSGISettings,
-    ) {
+    fn apply_ssgi_cpu(pixels: &mut [u8], settings: &crate::lighting::screen_space::SSGISettings) {
         let intensity = (settings.intensity / 8.0).clamp(0.0, 1.0);
         let step_factor = (settings.ray_steps as f32 / 96.0).clamp(0.2, 1.0);
         let radius_factor = (settings.ray_radius / 16.0).clamp(0.1, 1.0);

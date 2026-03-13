@@ -5,9 +5,9 @@
 use super::ray::Ray;
 use super::selection::{SelectionManager, SelectionStyle};
 use crate::accel::types::{Aabb as BvhAabb, BvhNode, Triangle};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use serde::{Deserialize, Serialize};
 use wgpu::{Buffer, Device, Queue};
 
 /// Rich pick result with full feature attributes
@@ -207,7 +207,8 @@ impl UnifiedPickingSystem {
         feature_id: u32,
         attributes: HashMap<String, String>,
     ) {
-        self.feature_attributes.insert((layer_id, feature_id), attributes);
+        self.feature_attributes
+            .insert((layer_id, feature_id), attributes);
     }
 
     /// Get feature attributes
@@ -236,7 +237,8 @@ impl UnifiedPickingSystem {
 
     /// Add features to a selection set
     pub fn add_to_selection(&mut self, set_name: &str, feature_ids: &[u32]) {
-        self.selection_manager.add_many_to_set(set_name, feature_ids.iter().copied());
+        self.selection_manager
+            .add_many_to_set(set_name, feature_ids.iter().copied());
     }
 
     /// Remove features from a selection set
@@ -252,13 +254,9 @@ impl UnifiedPickingSystem {
     }
 
     /// CPU ray-BVH intersection for a layer
-    pub fn ray_bvh_intersect_cpu(
-        &self,
-        ray: &Ray,
-        layer_id: u32,
-    ) -> Option<(u32, f32, [f32; 3])> {
+    pub fn ray_bvh_intersect_cpu(&self, ray: &Ray, layer_id: u32) -> Option<(u32, f32, [f32; 3])> {
         let layer = self.layer_bvhs.get(&layer_id)?;
-        
+
         if layer.cpu_nodes.is_empty() || layer.cpu_triangles.is_empty() {
             return None;
         }
@@ -325,8 +323,8 @@ impl UnifiedPickingSystem {
         if self.config.bvh_enabled {
             // Test against all layers
             for (layer_id, layer) in &self.layer_bvhs {
-                if let Some((feature_id, distance, world_pos)) = 
-                    self.ray_bvh_intersect_cpu(ray, *layer_id) 
+                if let Some((feature_id, distance, world_pos)) =
+                    self.ray_bvh_intersect_cpu(ray, *layer_id)
                 {
                     let attributes = self
                         .get_feature_attributes(*layer_id, feature_id)
@@ -347,7 +345,9 @@ impl UnifiedPickingSystem {
 
         // Sort by distance
         results.sort_by(|a, b| {
-            a.hit_distance.partial_cmp(&b.hit_distance).unwrap_or(std::cmp::Ordering::Equal)
+            a.hit_distance
+                .partial_cmp(&b.hit_distance)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         results
@@ -360,7 +360,8 @@ impl UnifiedPickingSystem {
         // Update selection based on event
         if !results.is_empty() && event.event_type == PickEventType::Click {
             let feature_id = results[0].feature_id;
-            self.selection_manager.handle_pick(feature_id, event.shift_held);
+            self.selection_manager
+                .handle_pick(feature_id, event.shift_held);
         }
 
         results
@@ -469,11 +470,7 @@ mod tests {
 
     #[test]
     fn test_ray_triangle_intersect() {
-        let triangle = Triangle::new(
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-        );
+        let triangle = Triangle::new([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
 
         // Ray hitting triangle
         let ray = Ray::new([0.25, 0.25, 1.0], [0.0, 0.0, -1.0]);

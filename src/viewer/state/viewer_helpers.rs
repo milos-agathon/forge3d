@@ -17,7 +17,9 @@ use anyhow::{anyhow, bail, Context};
 use glam::Mat4;
 
 impl Viewer {
-    pub(crate) fn write_p5_meta<F: FnOnce(&mut std::collections::BTreeMap<String, serde_json::Value>)>(
+    pub(crate) fn write_p5_meta<
+        F: FnOnce(&mut std::collections::BTreeMap<String, serde_json::Value>),
+    >(
         &self,
         patch: F,
     ) -> anyhow::Result<()> {
@@ -34,14 +36,8 @@ impl Viewer {
         &self,
         f: impl FnOnce(&wgpu::RenderPipeline, &wgpu::BindGroupLayout) -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
-        let comp_pl = self
-            .comp_pipeline
-            .as_ref()
-            .context("comp pipeline")?;
-        let comp_bgl = self
-            .comp_bind_group_layout
-            .as_ref()
-            .context("comp bgl")?;
+        let comp_pl = self.comp_pipeline.as_ref().context("comp pipeline")?;
+        let comp_bgl = self.comp_bind_group_layout.as_ref().context("comp bgl")?;
         f(comp_pl, comp_bgl)
     }
 
@@ -290,11 +286,15 @@ impl Viewer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&self.gi_baseline_diffuse_hdr_view),
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.gi_baseline_diffuse_hdr_view,
+                        ),
                     },
                     wgpu::BindGroupEntry {
                         binding: 4,
-                        resource: wgpu::BindingResource::TextureView(&self.gi_baseline_spec_hdr_view),
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.gi_baseline_spec_hdr_view,
+                        ),
                     },
                 ],
             });
@@ -428,7 +428,8 @@ impl Viewer {
                 width: self.config.width,
                 height: self.config.height,
                 far,
-                src_view: gi.material_with_ssr_view()
+                src_view: gi
+                    .material_with_ssr_view()
                     .or_else(|| gi.material_with_ssgi_view())
                     .or_else(|| gi.material_with_ao_view())
                     .unwrap_or(&gi.gbuffer().material_view),
@@ -439,7 +440,9 @@ impl Viewer {
 
     pub(crate) fn read_ssgi_filtered_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
         let gi = self.gi.as_ref().context("GI manager not available")?;
-        let dims = gi.ssgi_dimensions().context("SSGI dimensions unavailable")?;
+        let dims = gi
+            .ssgi_dimensions()
+            .context("SSGI dimensions unavailable")?;
         let tex = gi
             .ssgi_filtered_texture()
             .context("SSGI filtered texture unavailable")?;
@@ -456,7 +459,9 @@ impl Viewer {
 
     pub(crate) fn read_ssgi_hit_bytes(&self) -> anyhow::Result<(Vec<u8>, (u32, u32))> {
         let gi = self.gi.as_ref().context("GI manager not available")?;
-        let dims = gi.ssgi_dimensions().context("SSGI dimensions unavailable")?;
+        let dims = gi
+            .ssgi_dimensions()
+            .context("SSGI dimensions unavailable")?;
         let tex = gi
             .ssgi_hit_texture()
             .context("SSGI hit texture unavailable")?;

@@ -833,7 +833,9 @@ mod tests {
 
     #[test]
     fn test_pack_simple_points() {
-        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            return;
+        };
         let renderer = PointRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let points = vec![
@@ -866,7 +868,9 @@ mod tests {
 
     #[test]
     fn test_reject_invalid_point_size() {
-        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            return;
+        };
         let renderer = PointRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let invalid_point = PointDef {
@@ -887,7 +891,9 @@ mod tests {
 
     #[test]
     fn test_reject_non_finite_coordinates() {
-        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            return;
+        };
         let renderer = PointRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let invalid_point = PointDef {

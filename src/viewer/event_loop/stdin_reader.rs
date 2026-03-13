@@ -84,7 +84,12 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
                 return Some(cmds);
             } else {
                 return Some(vec![ViewerCmd::GiToggle(
-                    match eff { "ssao" => "ssao", "ssgi" => "ssgi", "ssr" => "ssr", _ => "ssao" },
+                    match eff {
+                        "ssao" => "ssao",
+                        "ssgi" => "ssgi",
+                        "ssr" => "ssr",
+                        _ => "ssao",
+                    },
                     on,
                 )]);
             }
@@ -96,24 +101,46 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
 
     // GI weights
     if l.starts_with(":ao-weight") || l.starts_with("ao-weight ") {
-        return parse_float_or_query(l, ViewerCmd::SetGiAoWeight, || ViewerCmd::QueryGiAoWeight, "ao-weight <float 0..1>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetGiAoWeight,
+            || ViewerCmd::QueryGiAoWeight,
+            "ao-weight <float 0..1>",
+        );
     }
     if l.starts_with(":ssgi-weight") || l.starts_with("ssgi-weight ") {
-        return parse_float_or_query(l, ViewerCmd::SetGiSsgiWeight, || ViewerCmd::QueryGiSsgiWeight, "ssgi-weight <float 0..1>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetGiSsgiWeight,
+            || ViewerCmd::QueryGiSsgiWeight,
+            "ssgi-weight <float 0..1>",
+        );
     }
     if l.starts_with(":ssr-weight") || l.starts_with("ssr-weight ") {
-        return parse_float_or_query(l, ViewerCmd::SetGiSsrWeight, || ViewerCmd::QueryGiSsrWeight, "ssr-weight <float 0..1>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetGiSsrWeight,
+            || ViewerCmd::QueryGiSsrWeight,
+            "ssr-weight <float 0..1>",
+        );
     }
 
     // Snapshot - supports "snap path.png" or "snap path.png 1920x1920"
-    if l.starts_with(":snap") || l.starts_with("snap") || l.starts_with(":snapshot") || l.starts_with("snapshot") {
+    if l.starts_with(":snap")
+        || l.starts_with("snap")
+        || l.starts_with(":snapshot")
+        || l.starts_with("snapshot")
+    {
         let mut tokens = l.split_whitespace();
         let _ = tokens.next(); // skip command name
         let path = tokens.next().map(|s| s.to_string());
-        
+
         // Check for size parameter (e.g., "1920x1920")
         if let Some(size_str) = tokens.next() {
-            if let Some((w_str, h_str)) = size_str.split_once('x').or_else(|| size_str.split_once('X')) {
+            if let Some((w_str, h_str)) = size_str
+                .split_once('x')
+                .or_else(|| size_str.split_once('X'))
+            {
                 if let (Ok(width), Ok(height)) = (w_str.parse::<u32>(), h_str.parse::<u32>()) {
                     return Some(vec![ViewerCmd::SnapshotWithSize {
                         path: path.unwrap_or_else(|| "snapshot.png".to_string()),
@@ -123,46 +150,106 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
                 }
             }
         }
-        
+
         return Some(vec![ViewerCmd::Snapshot(path)]);
     }
 
     // SSAO parameters
     if l.starts_with(":ssao-radius") || l.starts_with("ssao-radius ") {
-        return parse_float_or_query(l, ViewerCmd::SetSsaoRadius, || ViewerCmd::QuerySsaoRadius, "ssao-radius <float>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetSsaoRadius,
+            || ViewerCmd::QuerySsaoRadius,
+            "ssao-radius <float>",
+        );
     }
     if l.starts_with(":ssao-intensity") || l.starts_with("ssao-intensity ") {
-        return parse_float_or_query(l, ViewerCmd::SetSsaoIntensity, || ViewerCmd::QuerySsaoIntensity, "ssao-intensity <float>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetSsaoIntensity,
+            || ViewerCmd::QuerySsaoIntensity,
+            "ssao-intensity <float>",
+        );
     }
     if l.starts_with(":ssao-bias") || l.starts_with("ssao-bias ") {
-        return parse_float_or_query(l, ViewerCmd::SetSsaoBias, || ViewerCmd::QuerySsaoBias, "ssao-bias <float>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetSsaoBias,
+            || ViewerCmd::QuerySsaoBias,
+            "ssao-bias <float>",
+        );
     }
     if l.starts_with(":ssao-samples") || l.starts_with("ssao-samples ") {
-        return parse_u32_or_query(l, ViewerCmd::SetSsaoSamples, || ViewerCmd::QuerySsaoSamples, "ssao-samples <u32>");
+        return parse_u32_or_query(
+            l,
+            ViewerCmd::SetSsaoSamples,
+            || ViewerCmd::QuerySsaoSamples,
+            "ssao-samples <u32>",
+        );
     }
     if l.starts_with(":ssao-directions") || l.starts_with("ssao-directions ") {
-        return parse_u32_or_query(l, ViewerCmd::SetSsaoDirections, || ViewerCmd::QuerySsaoDirections, "ssao-directions <u32>");
+        return parse_u32_or_query(
+            l,
+            ViewerCmd::SetSsaoDirections,
+            || ViewerCmd::QuerySsaoDirections,
+            "ssao-directions <u32>",
+        );
     }
     if l.starts_with(":ssao-temporal-alpha") || l.starts_with("ssao-temporal-alpha ") {
-        return parse_float_or_query(l, ViewerCmd::SetSsaoTemporalAlpha, || ViewerCmd::QuerySsaoTemporalAlpha, "ssao-temporal-alpha <0..1>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetSsaoTemporalAlpha,
+            || ViewerCmd::QuerySsaoTemporalAlpha,
+            "ssao-temporal-alpha <0..1>",
+        );
     }
     if l.starts_with(":ssao-temporal ") || l.starts_with("ssao-temporal ") {
-        return parse_bool_or_query(l, ViewerCmd::SetSsaoTemporalEnabled, || ViewerCmd::QuerySsaoTemporalEnabled, "ssao-temporal <on|off>");
+        return parse_bool_or_query(
+            l,
+            ViewerCmd::SetSsaoTemporalEnabled,
+            || ViewerCmd::QuerySsaoTemporalEnabled,
+            "ssao-temporal <on|off>",
+        );
     }
     if l.starts_with(":ssao-blur") || l.starts_with("ssao-blur ") {
-        return parse_bool_or_query(l, ViewerCmd::SetAoBlur, || ViewerCmd::QuerySsaoBlur, "ssao-blur <on|off>");
+        return parse_bool_or_query(
+            l,
+            ViewerCmd::SetAoBlur,
+            || ViewerCmd::QuerySsaoBlur,
+            "ssao-blur <on|off>",
+        );
     }
     if l.starts_with(":ssao-composite") || l.starts_with("ssao-composite ") {
-        return parse_bool_or_query(l, ViewerCmd::SetSsaoComposite, || ViewerCmd::QuerySsaoComposite, "ssao-composite <on|off>");
+        return parse_bool_or_query(
+            l,
+            ViewerCmd::SetSsaoComposite,
+            || ViewerCmd::QuerySsaoComposite,
+            "ssao-composite <on|off>",
+        );
     }
     if l.starts_with(":ssao-mul") || l.starts_with("ssao-mul ") {
-        return parse_float_or_query(l, ViewerCmd::SetSsaoCompositeMul, || ViewerCmd::QuerySsaoMul, "ssao-mul <0..1>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetSsaoCompositeMul,
+            || ViewerCmd::QuerySsaoMul,
+            "ssao-mul <0..1>",
+        );
     }
     if l.starts_with(":ao-temporal-alpha") || l.starts_with("ao-temporal-alpha ") {
-        return parse_float_or_query(l, ViewerCmd::SetAoTemporalAlpha, || ViewerCmd::QuerySsaoTemporalAlpha, "ao-temporal-alpha <0..1>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetAoTemporalAlpha,
+            || ViewerCmd::QuerySsaoTemporalAlpha,
+            "ao-temporal-alpha <0..1>",
+        );
     }
     if l.starts_with(":ao-blur") || l.starts_with("ao-blur ") {
-        return parse_bool_or_query(l, ViewerCmd::SetAoBlur, || ViewerCmd::QuerySsaoBlur, "ao-blur <on|off>");
+        return parse_bool_or_query(
+            l,
+            ViewerCmd::SetAoBlur,
+            || ViewerCmd::QuerySsaoBlur,
+            "ao-blur <on|off>",
+        );
     }
     if l.starts_with(":ssao-technique") || l.starts_with("ssao-technique ") {
         if let Some(tok) = l.split_whitespace().nth(1) {
@@ -179,40 +266,94 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
 
     // SSGI parameters
     if l.starts_with(":ssgi-steps") || l.starts_with("ssgi-steps ") {
-        return parse_u32_or_query(l, ViewerCmd::SetSsgiSteps, || ViewerCmd::QuerySsgiSteps, "ssgi-steps <u32>");
+        return parse_u32_or_query(
+            l,
+            ViewerCmd::SetSsgiSteps,
+            || ViewerCmd::QuerySsgiSteps,
+            "ssgi-steps <u32>",
+        );
     }
     if l.starts_with(":ssgi-radius") || l.starts_with("ssgi-radius ") {
-        return parse_float_or_query(l, ViewerCmd::SetSsgiRadius, || ViewerCmd::QuerySsgiRadius, "ssgi-radius <float>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetSsgiRadius,
+            || ViewerCmd::QuerySsgiRadius,
+            "ssgi-radius <float>",
+        );
     }
     if l.starts_with(":ssgi-half") || l.starts_with("ssgi-half ") {
-        return parse_bool_or_query(l, ViewerCmd::SetSsgiHalf, || ViewerCmd::QuerySsgiHalf, "ssgi-half <on|off>");
+        return parse_bool_or_query(
+            l,
+            ViewerCmd::SetSsgiHalf,
+            || ViewerCmd::QuerySsgiHalf,
+            "ssgi-half <on|off>",
+        );
     }
     if l.starts_with(":ssgi-temporal-alpha") || l.starts_with("ssgi-temporal-alpha ") {
-        return parse_float_or_query(l, ViewerCmd::SetSsgiTemporalAlpha, || ViewerCmd::QuerySsgiTemporalAlpha, "ssgi-temporal-alpha <0..1>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetSsgiTemporalAlpha,
+            || ViewerCmd::QuerySsgiTemporalAlpha,
+            "ssgi-temporal-alpha <0..1>",
+        );
     }
     if l.starts_with(":ssgi-temporal ") || l.starts_with("ssgi-temporal ") {
-        return parse_bool_or_query(l, ViewerCmd::SetSsgiTemporalEnabled, || ViewerCmd::QuerySsgiTemporalEnabled, "ssgi-temporal <on|off>");
+        return parse_bool_or_query(
+            l,
+            ViewerCmd::SetSsgiTemporalEnabled,
+            || ViewerCmd::QuerySsgiTemporalEnabled,
+            "ssgi-temporal <on|off>",
+        );
     }
     if l.starts_with(":ssgi-edges") || l.starts_with("ssgi-edges ") {
-        return parse_bool_or_query(l, ViewerCmd::SetSsgiEdges, || ViewerCmd::QuerySsgiEdges, "ssgi-edges <on|off>");
+        return parse_bool_or_query(
+            l,
+            ViewerCmd::SetSsgiEdges,
+            || ViewerCmd::QuerySsgiEdges,
+            "ssgi-edges <on|off>",
+        );
     }
-    if l.starts_with(":ssgi-upsigma") || l.starts_with("ssgi-upsigma ") 
-        || l.starts_with(":ssgi-upsample-sigma-depth") || l.starts_with("ssgi-upsample-sigma-depth ")
+    if l.starts_with(":ssgi-upsigma")
+        || l.starts_with("ssgi-upsigma ")
+        || l.starts_with(":ssgi-upsample-sigma-depth")
+        || l.starts_with("ssgi-upsample-sigma-depth ")
     {
-        return parse_float_or_query(l, ViewerCmd::SetSsgiUpsampleSigmaDepth, || ViewerCmd::QuerySsgiUpsampleSigmaDepth, "ssgi-upsample-sigma-depth <float>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetSsgiUpsampleSigmaDepth,
+            || ViewerCmd::QuerySsgiUpsampleSigmaDepth,
+            "ssgi-upsample-sigma-depth <float>",
+        );
     }
-    if l.starts_with(":ssgi-normexp") || l.starts_with("ssgi-normexp ")
-        || l.starts_with(":ssgi-upsample-sigma-normal") || l.starts_with("ssgi-upsample-sigma-normal ")
+    if l.starts_with(":ssgi-normexp")
+        || l.starts_with("ssgi-normexp ")
+        || l.starts_with(":ssgi-upsample-sigma-normal")
+        || l.starts_with("ssgi-upsample-sigma-normal ")
     {
-        return parse_float_or_query(l, ViewerCmd::SetSsgiUpsampleSigmaNormal, || ViewerCmd::QuerySsgiUpsampleSigmaNormal, "ssgi-upsample-sigma-normal <float>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetSsgiUpsampleSigmaNormal,
+            || ViewerCmd::QuerySsgiUpsampleSigmaNormal,
+            "ssgi-upsample-sigma-normal <float>",
+        );
     }
 
     // SSR parameters
     if l.starts_with(":ssr-max-steps") || l.starts_with("ssr-max-steps ") {
-        return parse_u32_or_query(l, ViewerCmd::SetSsrMaxSteps, || ViewerCmd::QuerySsrMaxSteps, "ssr-max-steps <u32>");
+        return parse_u32_or_query(
+            l,
+            ViewerCmd::SetSsrMaxSteps,
+            || ViewerCmd::QuerySsrMaxSteps,
+            "ssr-max-steps <u32>",
+        );
     }
     if l.starts_with(":ssr-thickness") || l.starts_with("ssr-thickness ") {
-        return parse_float_or_query(l, ViewerCmd::SetSsrThickness, || ViewerCmd::QuerySsrThickness, "ssr-thickness <float>");
+        return parse_float_or_query(
+            l,
+            ViewerCmd::SetSsrThickness,
+            || ViewerCmd::QuerySsrThickness,
+            "ssr-thickness <float>",
+        );
     }
 
     // Load SSR preset
@@ -260,7 +401,10 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
             } else if let Some(m) = parse_gi_viz_mode_token(toks[2]) {
                 return Some(vec![ViewerCmd::SetGiViz(m)]);
             } else {
-                println!("Unknown :viz gi mode '{}', expected one of none|composite|ao|ssgi|ssr", toks[2]);
+                println!(
+                    "Unknown :viz gi mode '{}', expected one of none|composite|ao|ssgi|ssr",
+                    toks[2]
+                );
                 return Some(vec![]);
             }
         } else if toks.len() >= 2 {
@@ -270,7 +414,11 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
 
     // Viz depth max
     if l.starts_with(":viz-depth-max") || l.starts_with("viz-depth-max ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetVizDepthMax(val)]);
         }
     }
@@ -281,7 +429,9 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
             let idx = match model {
                 "lambert" | "lam" => 0u32,
                 "phong" => 1u32,
-                "ggx" | "cooktorrance-ggx" | "cook-torrance-ggx" | "cooktorrance" | "ct-ggx" => 4u32,
+                "ggx" | "cooktorrance-ggx" | "cook-torrance-ggx" | "cooktorrance" | "ct-ggx" => {
+                    4u32
+                }
                 "disney" | "disney-principled" | "principled" => 6u32,
                 _ => 4u32,
             };
@@ -291,17 +441,29 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
 
     // Lit controls
     if l.starts_with(":lit-sun") || l.starts_with("lit-sun ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetLitSun(val)]);
         }
     }
     if l.starts_with(":lit-ibl") || l.starts_with("lit-ibl ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetLitIbl(val)]);
         }
     }
     if l.starts_with(":lit-rough") || l.starts_with("lit-rough ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SetLitRough(val)]);
         }
     }
@@ -348,7 +510,10 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
                     }
                 }
                 _ => {
-                    if toks[1].contains('.') || toks[1].starts_with('/') || toks[1].starts_with('\\') {
+                    if toks[1].contains('.')
+                        || toks[1].starts_with('/')
+                        || toks[1].starts_with('\\')
+                    {
                         return Some(vec![ViewerCmd::LoadIbl(toks[1].to_string())]);
                     }
                 }
@@ -362,9 +527,16 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
             match arg {
                 "off" | "0" | "false" => return Some(vec![ViewerCmd::SkyToggle(false)]),
                 "on" | "1" | "true" => return Some(vec![ViewerCmd::SkyToggle(true)]),
-                "preetham" => return Some(vec![ViewerCmd::SkyToggle(true), ViewerCmd::SkySetModel(0)]),
-                "hosek-wilkie" | "hosekwilkie" | "hosek" | "hw" => return Some(vec![ViewerCmd::SkyToggle(true), ViewerCmd::SkySetModel(1)]),
-                _ => println!("Unknown sky mode '{}', expected off|on|preetham|hosek-wilkie", arg),
+                "preetham" => {
+                    return Some(vec![ViewerCmd::SkyToggle(true), ViewerCmd::SkySetModel(0)])
+                }
+                "hosek-wilkie" | "hosekwilkie" | "hosek" | "hw" => {
+                    return Some(vec![ViewerCmd::SkyToggle(true), ViewerCmd::SkySetModel(1)])
+                }
+                _ => println!(
+                    "Unknown sky mode '{}', expected off|on|preetham|hosek-wilkie",
+                    arg
+                ),
             }
         } else {
             println!("Usage: :sky <off|on|preetham|hosek-wilkie>");
@@ -372,22 +544,38 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
         return Some(vec![]);
     }
     if l.starts_with(":sky-turbidity") || l.starts_with("sky-turbidity ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SkySetTurbidity(val)]);
         }
     }
     if l.starts_with(":sky-ground") || l.starts_with("sky-ground ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SkySetGround(val)]);
         }
     }
     if l.starts_with(":sky-exposure") || l.starts_with("sky-exposure ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SkySetExposure(val)]);
         }
     }
     if l.starts_with(":sky-sun") || l.starts_with("sky-sun ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::SkySetSunIntensity(val)]);
         }
     }
@@ -402,17 +590,29 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
         return Some(vec![]);
     }
     if l.starts_with(":fog-density") || l.starts_with("fog-density ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::FogSetDensity(val)]);
         }
     }
     if l.starts_with(":fog-g") || l.starts_with("fog-g ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::FogSetG(val)]);
         }
     }
     if l.starts_with(":fog-steps") || l.starts_with("fog-steps ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<u32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<u32>().ok())
+        {
             return Some(vec![ViewerCmd::FogSetSteps(val)]);
         }
     }
@@ -423,19 +623,31 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
         }
     }
     if l.starts_with(":fog-temporal") || l.starts_with("fog-temporal ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::FogSetTemporal(val)]);
         }
     }
     if l.starts_with(":fog-mode") || l.starts_with("fog-mode ") {
         if let Some(tok) = l.split_whitespace().nth(1) {
-            let idx = match tok { "raymarch" | "rm" | "0" => 0u32, "froxels" | "fx" | "1" => 1u32, _ => 0u32 };
+            let idx = match tok {
+                "raymarch" | "rm" | "0" => 0u32,
+                "froxels" | "fx" | "1" => 1u32,
+                _ => 0u32,
+            };
             return Some(vec![ViewerCmd::SetFogMode(idx)]);
         }
     }
     if l.starts_with(":fog-preset") || l.starts_with("fog-preset ") {
         if let Some(tok) = l.split_whitespace().nth(1) {
-            let idx = match tok { "low" | "0" => 0u32, "med" | "medium" | "1" => 1u32, _ => 2u32 };
+            let idx = match tok {
+                "low" | "0" => 0u32,
+                "med" | "medium" | "1" => 1u32,
+                _ => 2u32,
+            };
             return Some(vec![ViewerCmd::FogPreset(idx)]);
         }
     }
@@ -452,7 +664,11 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
         }
     }
     if l.starts_with(":fog-upsigma") || l.starts_with("fog-upsigma ") {
-        if let Some(val) = l.split_whitespace().nth(1).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some(val) = l
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<f32>().ok())
+        {
             return Some(vec![ViewerCmd::FogUpsigma(val)]);
         }
     }
@@ -470,7 +686,10 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
         let toks: Vec<&str> = l.trim_start_matches(":").split_whitespace().collect();
         if toks.len() >= 2 {
             let mode = toks[1].to_lowercase();
-            let enabled = !matches!(mode.as_str(), "off" | "disabled" | "standard" | "0" | "false");
+            let enabled = !matches!(
+                mode.as_str(),
+                "off" | "disabled" | "standard" | "0" | "false"
+            );
             let mode_str = match mode.as_str() {
                 "on" | "1" | "true" | "auto" => "auto".to_string(),
                 "wboit" => "wboit".to_string(),
@@ -478,7 +697,10 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
                 "off" | "disabled" | "standard" | "0" | "false" => "standard".to_string(),
                 other => other.to_string(),
             };
-            return Some(vec![ViewerCmd::SetOitEnabled { enabled, mode: mode_str }]);
+            return Some(vec![ViewerCmd::SetOitEnabled {
+                enabled,
+                mode: mode_str,
+            }]);
         } else {
             return Some(vec![ViewerCmd::GetOitMode]);
         }
@@ -488,7 +710,12 @@ pub fn parse_stdin_command(l: &str) -> Option<Vec<ViewerCmd>> {
 }
 
 // Helper to parse float value or query
-fn parse_float_or_query<F, Q>(l: &str, set_cmd: F, query_cmd: Q, usage: &str) -> Option<Vec<ViewerCmd>>
+fn parse_float_or_query<F, Q>(
+    l: &str,
+    set_cmd: F,
+    query_cmd: Q,
+    usage: &str,
+) -> Option<Vec<ViewerCmd>>
 where
     F: FnOnce(f32) -> ViewerCmd,
     Q: FnOnce() -> ViewerCmd,
@@ -508,7 +735,12 @@ where
 }
 
 // Helper to parse u32 value or query
-fn parse_u32_or_query<F, Q>(l: &str, set_cmd: F, query_cmd: Q, usage: &str) -> Option<Vec<ViewerCmd>>
+fn parse_u32_or_query<F, Q>(
+    l: &str,
+    set_cmd: F,
+    query_cmd: Q,
+    usage: &str,
+) -> Option<Vec<ViewerCmd>>
 where
     F: FnOnce(u32) -> ViewerCmd,
     Q: FnOnce() -> ViewerCmd,
@@ -528,15 +760,24 @@ where
 }
 
 // Helper to parse bool value or query
-fn parse_bool_or_query<F, Q>(l: &str, set_cmd: F, query_cmd: Q, usage: &str) -> Option<Vec<ViewerCmd>>
+fn parse_bool_or_query<F, Q>(
+    l: &str,
+    set_cmd: F,
+    query_cmd: Q,
+    usage: &str,
+) -> Option<Vec<ViewerCmd>>
 where
     F: FnOnce(bool) -> ViewerCmd,
     Q: FnOnce() -> ViewerCmd,
 {
     if let Some(tok) = l.split_whitespace().nth(1) {
-        let state = if tok.eq_ignore_ascii_case("on") || tok == "1" || tok.eq_ignore_ascii_case("true") {
+        let state = if tok.eq_ignore_ascii_case("on")
+            || tok == "1"
+            || tok.eq_ignore_ascii_case("true")
+        {
             Some(true)
-        } else if tok.eq_ignore_ascii_case("off") || tok == "0" || tok.eq_ignore_ascii_case("false") {
+        } else if tok.eq_ignore_ascii_case("off") || tok == "0" || tok.eq_ignore_ascii_case("false")
+        {
             Some(false)
         } else {
             None

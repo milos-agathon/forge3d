@@ -41,8 +41,8 @@ impl ClipmapMesh {
         if full_res_triangles == 0 {
             return 0.0;
         }
-        let reduction = (full_res_triangles as f32 - self.triangle_count as f32) 
-            / full_res_triangles as f32;
+        let reduction =
+            (full_res_triangles as f32 - self.triangle_count as f32) / full_res_triangles as f32;
         (reduction * 100.0).max(0.0)
     }
 }
@@ -115,10 +115,7 @@ impl ClipmapLevel {
             );
 
             // Offset indices by current vertex count
-            let offset_indices: Vec<u32> = ring_indices
-                .iter()
-                .map(|&i| i + vertex_start)
-                .collect();
+            let offset_indices: Vec<u32> = ring_indices.iter().map(|&i| i + vertex_start).collect();
 
             ring_bounds.push(MeshBounds {
                 vertex_start,
@@ -158,7 +155,7 @@ impl ClipmapLevel {
     /// Returns list of TileIds that should be requested for streaming.
     pub fn update_center(&mut self, new_center: Vec2) -> Vec<TileId> {
         let delta = new_center - self.center;
-        
+
         // Only regenerate if moved significantly (half a cell)
         if delta.length() < self.base_cell_size * 0.5 {
             return Vec::new();
@@ -292,7 +289,7 @@ mod tests {
     fn test_center_update_triggers_tile_requests() {
         let config = ClipmapConfig::new(4, 64);
         let mut level = ClipmapLevel::new(config, Vec2::ZERO, 1000.0);
-        
+
         // Large movement should trigger tile requests
         let tiles = level.update_center(Vec2::new(100.0, 100.0));
         assert!(!tiles.is_empty());

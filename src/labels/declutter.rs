@@ -97,14 +97,8 @@ impl SimpleRng {
 
 /// Check if two bounding boxes overlap.
 fn boxes_overlap(a: &[f32; 4], b: &[f32; 4], margin: f32) -> bool {
-    let a_expanded = [
-        a[0] - margin,
-        a[1] - margin,
-        a[2] + margin,
-        a[3] + margin,
-    ];
-    !(a_expanded[2] < b[0] || b[2] < a_expanded[0] || 
-      a_expanded[3] < b[1] || b[3] < a_expanded[1])
+    let a_expanded = [a[0] - margin, a[1] - margin, a[2] + margin, a[3] + margin];
+    !(a_expanded[2] < b[0] || b[2] < a_expanded[0] || a_expanded[3] < b[1] || b[3] < a_expanded[1])
 }
 
 /// Calculate overlap area between two boxes.
@@ -115,12 +109,9 @@ fn overlap_area(a: &[f32; 4], b: &[f32; 4]) -> f32 {
 }
 
 /// Compute energy for a set of placements.
-fn compute_energy(
-    candidates: &[PlacementCandidate],
-    config: &DeclutterConfig,
-) -> f32 {
+fn compute_energy(candidates: &[PlacementCandidate], config: &DeclutterConfig) -> f32 {
     let selected: Vec<_> = candidates.iter().filter(|c| c.selected).collect();
-    
+
     let mut energy = 0.0;
 
     // Overlap penalty
@@ -163,9 +154,9 @@ pub fn declutter_greedy(
 
     for candidate in &mut candidates {
         // Check if this candidate overlaps with any placed label
-        let overlaps = placed_bounds.iter().any(|b| {
-            boxes_overlap(&candidate.bounds, b, config.margin)
-        });
+        let overlaps = placed_bounds
+            .iter()
+            .any(|b| boxes_overlap(&candidate.bounds, b, config.margin));
 
         if !overlaps {
             candidate.selected = true;
@@ -209,7 +200,7 @@ pub fn declutter_annealing(
     // Start with greedy solution
     let greedy = declutter_greedy(candidates.clone(), config);
     let greedy_ids: HashSet<u64> = greedy.visible_labels.iter().copied().collect();
-    
+
     for c in &mut candidates {
         c.selected = greedy_ids.contains(&c.label_id);
     }
@@ -223,10 +214,10 @@ pub fn declutter_annealing(
     for _iteration in 0..config.max_iterations {
         // Pick a random candidate to toggle
         let idx = rng.next_usize(candidates.len());
-        
+
         // Toggle selection
         candidates[idx].selected = !candidates[idx].selected;
-        
+
         let new_energy = compute_energy(&candidates, config);
         let delta = new_energy - current_energy;
 
@@ -314,7 +305,12 @@ mod tests {
         PlacementCandidate {
             label_id: id,
             position: [x, y],
-            bounds: [x - size/2.0, y - size/2.0, x + size/2.0, y + size/2.0],
+            bounds: [
+                x - size / 2.0,
+                y - size / 2.0,
+                x + size / 2.0,
+                y + size / 2.0,
+            ],
             priority,
             cost: 0.0,
             selected: false,

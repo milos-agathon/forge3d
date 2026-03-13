@@ -6,6 +6,20 @@ import pytest
 
 forge3d = pytest.importorskip("forge3d")
 
+_REQUIRED_SYMBOLS = (
+    "Session",
+    "TerrainRenderer",
+    "MaterialSet",
+    "IBL",
+    "TerrainRenderParams",
+)
+
+if not forge3d.has_gpu() or not all(hasattr(forge3d, name) for name in _REQUIRED_SYMBOLS):
+    pytest.skip(
+        "Terrain color-space tests require a GPU-backed forge3d runtime",
+        allow_module_level=True,
+    )
+
 
 def test_terrain_render_no_horizontal_banding():
     """Test that terrain rendering doesn't produce horizontal banding artifacts."""

@@ -114,19 +114,23 @@ impl Tiles3dRenderer {
         let byte_size = estimate_content_size(&content);
 
         self.ensure_cache_space(byte_size);
-        
-        self.cache.insert(uri.to_string(), CacheEntry {
-            content,
-            byte_size,
-            last_used: std::time::Instant::now(),
-        });
+
+        self.cache.insert(
+            uri.to_string(),
+            CacheEntry {
+                content,
+                byte_size,
+                last_used: std::time::Instant::now(),
+            },
+        );
         self.cache_used += byte_size;
 
         Ok(&self.cache.get(uri).unwrap().content)
     }
 
     fn load_content_from_path(&self, path: &PathBuf) -> Tiles3dResult<TileContent> {
-        let ext = path.extension()
+        let ext = path
+            .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
@@ -152,17 +156,21 @@ impl Tiles3dRenderer {
                     normals: payload.normals,
                 }))
             }
-            _ => Err(Tiles3dError::Unsupported(format!("Unknown format: {}", ext))),
+            _ => Err(Tiles3dError::Unsupported(format!(
+                "Unknown format: {}",
+                ext
+            ))),
         }
     }
 
     fn ensure_cache_space(&mut self, needed: usize) {
         while self.cache_used + needed > self.cache_budget && !self.cache.is_empty() {
-            let oldest = self.cache
+            let oldest = self
+                .cache
                 .iter()
                 .min_by_key(|(_, e)| e.last_used)
                 .map(|(k, _)| k.clone());
-            
+
             if let Some(key) = oldest {
                 if let Some(entry) = self.cache.remove(&key) {
                     self.cache_used = self.cache_used.saturating_sub(entry.byte_size);
@@ -215,7 +223,11 @@ pub struct CacheStats {
 impl CacheStats {
     pub fn hit_rate(&self) -> f32 {
         let total = self.hits + self.misses;
-        if total == 0 { 0.0 } else { self.hits as f32 / total as f32 }
+        if total == 0 {
+            0.0
+        } else {
+            self.hits as f32 / total as f32
+        }
     }
 }
 

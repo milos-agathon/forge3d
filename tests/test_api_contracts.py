@@ -36,6 +36,20 @@ if not NATIVE_AVAILABLE:
 _native = get_native_module()
 
 
+def _try_create_terrain_spike():
+    try:
+        return _native.TerrainSpike(64, 64)
+    except Exception:
+        return None
+
+
+_TERRAIN_SPIKE_AVAILABLE = (
+    f3d.has_gpu()
+    and hasattr(_native, "TerrainSpike")
+    and _try_create_terrain_spike() is not None
+)
+
+
 # ===========================================================================
 # Section 1: Core native module symbols
 # ===========================================================================
@@ -964,7 +978,15 @@ class TestTerrainAnalysisApi:
     The private ``_compute_slope_deg()`` in render.py stays private.
     """
 
+    def test_terrain_spike_analysis_methods_exist_on_class(self):
+        """TerrainSpike exposes analysis methods even when runtime GPU is absent."""
+        assert hasattr(_native, "TerrainSpike")
+        assert callable(getattr(_native.TerrainSpike, "slope_aspect_compute", None))
+        assert callable(getattr(_native.TerrainSpike, "contour_extract", None))
+
     def _make_spike(self):
+        if not _TERRAIN_SPIKE_AVAILABLE:
+            pytest.skip("TerrainSpike behavior tests require a GPU-backed device")
         return _native.TerrainSpike(64, 64)
 
     # ---- slope_aspect_compute ----

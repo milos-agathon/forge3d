@@ -13,11 +13,11 @@ use bytemuck::{Pod, Zeroable};
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct PointInstance3D {
     pub position: [f32; 3],
-    pub elevation_norm: f32,  // Normalized elevation [0,1] for elevation coloring
-    pub rgb: [f32; 3],        // RGB color from file (or white if none)
-    pub intensity: f32,       // Intensity value [0,1] (or 0.5 if none)
+    pub elevation_norm: f32, // Normalized elevation [0,1] for elevation coloring
+    pub rgb: [f32; 3],       // RGB color from file (or white if none)
+    pub intensity: f32,      // Intensity value [0,1] (or 0.5 if none)
     pub size: f32,
-    pub _pad: [f32; 3],       // Pad to 48 bytes (12 floats)
+    pub _pad: [f32; 3], // Pad to 48 bytes (12 floats)
 }
 
 /// Point cloud uniforms
@@ -27,7 +27,7 @@ pub struct PointCloudUniforms {
     pub view_proj: [[f32; 4]; 4],
     pub viewport_size: [f32; 2],
     pub point_size: f32,
-    pub color_mode: u32, // 0=elevation, 1=rgb, 2=intensity
+    pub color_mode: u32,    // 0=elevation, 1=rgb, 2=intensity
     pub has_rgb: u32,       // 1 if file has RGB data
     pub has_intensity: u32, // 1 if file has meaningful intensity data
     pub _pad: [u32; 2],     // Pad to 16-byte alignment
@@ -70,7 +70,7 @@ pub struct PointCloudState {
     pub has_intensity: bool,
     // Orbit camera state
     pub cam_phi: f32,    // Azimuth angle (horizontal rotation) in radians
-    pub cam_theta: f32,  // Elevation angle (vertical rotation) in radians  
+    pub cam_theta: f32,  // Elevation angle (vertical rotation) in radians
     pub cam_radius: f32, // Distance from center
 }
 
@@ -158,7 +158,7 @@ impl PointCloudState {
                         },
                     ],
                 }],
-                },
+            },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
@@ -167,7 +167,7 @@ impl PointCloudState {
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
-                }),
+            }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
@@ -180,7 +180,7 @@ impl PointCloudState {
             depth_stencil: None, // Overlay mode - no depth testing
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
-                    });
+        });
 
         Self {
             points: Vec::new(),
@@ -202,21 +202,21 @@ impl PointCloudState {
             cam_radius: 1.0, // Will be set based on extent
         }
     }
-    
+
     /// Handle mouse drag for orbit camera
     pub fn handle_mouse_drag(&mut self, dx: f32, dy: f32) {
         let sensitivity = 0.005;
         self.cam_phi += dx * sensitivity;
         self.cam_theta = (self.cam_theta - dy * sensitivity).clamp(0.1, 1.5); // Limit vertical angle
     }
-    
+
     /// Handle scroll for zoom
     pub fn handle_scroll(&mut self, delta: f32) {
         let zoom_speed = 0.1;
         self.cam_radius *= 1.0 - delta * zoom_speed;
         self.cam_radius = self.cam_radius.clamp(0.1, 100.0); // Relative to extent
     }
-    
+
     /// Handle keyboard input for camera control
     /// forward: W/S or Up/Down arrows (positive = tilt up)
     /// right: A/D or Left/Right arrows (positive = rotate right)
@@ -224,13 +224,13 @@ impl PointCloudState {
     pub fn handle_keys(&mut self, forward: f32, right: f32, up: f32) {
         let rotate_speed = 0.02;
         let zoom_speed = 0.02;
-        
+
         // Rotate camera (A/D or Left/Right)
         self.cam_phi += right * rotate_speed;
-        
+
         // Tilt camera (W/S or Up/Down)
         self.cam_theta = (self.cam_theta + forward * rotate_speed).clamp(0.1, 1.5);
-        
+
         // Zoom (Q/E)
         self.cam_radius *= 1.0 - up * zoom_speed;
         self.cam_radius = self.cam_radius.clamp(0.1, 100.0);
@@ -247,14 +247,16 @@ impl PointCloudState {
     ) -> Result<(), String> {
         let load_result = load_laz_points(path, max_points as usize)?;
         let mut points = load_result.points;
-        
+
         // Store data availability flags
         self.has_rgb = load_result.has_rgb;
         self.has_intensity = load_result.has_intensity;
-        
-        println!("[pointcloud] Data flags - has_rgb: {}, has_intensity: {}", 
-                 self.has_rgb, self.has_intensity);
-        
+
+        println!(
+            "[pointcloud] Data flags - has_rgb: {}, has_intensity: {}",
+            self.has_rgb, self.has_intensity
+        );
+
         if points.is_empty() {
             return Err("No points loaded".to_string());
         }
@@ -268,31 +270,36 @@ impl PointCloudState {
                 max[i] = max[i].max(p.position[i]);
             }
         }
-        
+
         // Compute center and normalize points to origin
         let center = [
             (min[0] + max[0]) / 2.0,
             (min[1] + max[1]) / 2.0,
             (min[2] + max[2]) / 2.0,
         ];
-        
+
         // Shift all points so center is at origin (for camera to work with reasonable coords)
         for p in &mut points {
             p.position[0] -= center[0];
             p.position[1] -= center[1];
             p.position[2] -= center[2];
         }
-        
+
         // Update bounds relative to origin
         self.bounds_min = [min[0] - center[0], min[1] - center[1], min[2] - center[2]];
         self.bounds_max = [max[0] - center[0], max[1] - center[1], max[2] - center[2]];
         self.center = [0.0, 0.0, 0.0]; // Points now centered at origin
-        
-        eprintln!("[pointcloud] Original center: ({:.1}, {:.1}, {:.1})", center[0], center[1], center[2]);
-        eprintln!("[pointcloud] Extent: ({:.1}, {:.1}, {:.1})", 
+
+        eprintln!(
+            "[pointcloud] Original center: ({:.1}, {:.1}, {:.1})",
+            center[0], center[1], center[2]
+        );
+        eprintln!(
+            "[pointcloud] Extent: ({:.1}, {:.1}, {:.1})",
             self.bounds_max[0] - self.bounds_min[0],
             self.bounds_max[1] - self.bounds_min[1],
-            self.bounds_max[2] - self.bounds_min[2]);
+            self.bounds_max[2] - self.bounds_min[2]
+        );
 
         self.points = points;
         self.point_count = self.points.len();
@@ -379,66 +386,66 @@ struct LoadResult {
 /// Load points from LAZ/LAS file using the las crate
 fn load_laz_points(path: &str, max_points: usize) -> Result<LoadResult, String> {
     use las::{Read, Reader};
-    
+
     eprintln!("[pointcloud] Opening file: {}", path);
-    
-    let mut reader = Reader::from_path(path)
-        .map_err(|e| format!("Failed to open LAS/LAZ file: {}", e))?;
-    
+
+    let mut reader =
+        Reader::from_path(path).map_err(|e| format!("Failed to open LAS/LAZ file: {}", e))?;
+
     let header = reader.header();
     let total_points = header.number_of_points() as usize;
     let bounds = header.bounds();
-    
+
     eprintln!("[pointcloud] File has {} points", total_points);
-    eprintln!("[pointcloud] Bounds: X({:.1}, {:.1}) Y({:.1}, {:.1}) Z({:.1}, {:.1})",
-        bounds.min.x, bounds.max.x,
-        bounds.min.y, bounds.max.y,
-        bounds.min.z, bounds.max.z);
-    
+    eprintln!(
+        "[pointcloud] Bounds: X({:.1}, {:.1}) Y({:.1}, {:.1}) Z({:.1}, {:.1})",
+        bounds.min.x, bounds.max.x, bounds.min.y, bounds.max.y, bounds.min.z, bounds.max.z
+    );
+
     let min_z = bounds.min.z;
     let max_z = bounds.max.z;
     let z_range = max_z - min_z;
-    
+
     // Determine sampling stride if we have more points than max
     let stride = if total_points > max_points {
         total_points / max_points
     } else {
         1
     };
-    
+
     let n_read = (total_points / stride).min(max_points);
     eprintln!("[pointcloud] Loading {} points (stride {})", n_read, stride);
-    
+
     let mut points = Vec::with_capacity(n_read);
     let mut has_rgb = false;
     let mut intensity_min: u16 = u16::MAX;
     let mut intensity_max: u16 = 0;
-    
+
     for (i, point_result) in reader.points().enumerate() {
         // Skip points based on stride for subsampling
         if stride > 1 && i % stride != 0 {
             continue;
         }
-        
+
         if points.len() >= max_points {
             break;
         }
-        
+
         let point = point_result.map_err(|e| format!("Error reading point: {}", e))?;
-        
+
         // LAS: X=easting, Y=northing, Z=elevation
         // 3D (Y-up): X=easting, Y=elevation, Z=northing
         let px = point.x as f32;
-        let py = point.z as f32;  // Z (elevation) becomes Y (up)
-        let pz = point.y as f32;  // Y (northing) becomes Z (depth)
-        
+        let py = point.z as f32; // Z (elevation) becomes Y (up)
+        let pz = point.y as f32; // Y (northing) becomes Z (depth)
+
         // Normalize elevation for coloring
         let elevation_norm = if z_range > 0.0 {
             ((point.z - min_z) / z_range).clamp(0.0, 1.0) as f32
         } else {
             0.5
         };
-        
+
         // Extract RGB if available (default to white)
         let rgb = if let Some(color) = point.color {
             has_rgb = true;
@@ -450,14 +457,14 @@ fn load_laz_points(path: &str, max_points: usize) -> Result<LoadResult, String> 
         } else {
             [1.0, 1.0, 1.0]
         };
-        
+
         // Track intensity range for normalization
         intensity_min = intensity_min.min(point.intensity);
         intensity_max = intensity_max.max(point.intensity);
-        
+
         // Store raw intensity - will normalize in second pass
         let intensity = point.intensity as f32;
-        
+
         points.push(PointInstance3D {
             position: [px, py, pz],
             elevation_norm,
@@ -466,22 +473,28 @@ fn load_laz_points(path: &str, max_points: usize) -> Result<LoadResult, String> 
             size: 1.0,
             _pad: [0.0; 3],
         });
-        
+
         if points.len() % 100000 == 0 {
             eprintln!("[pointcloud] Loaded {} points...", points.len());
         }
     }
-    
+
     // Log data availability (use println for visibility)
     println!("[pointcloud] Loaded {} points total", points.len());
     println!("[pointcloud] Has RGB: {}", has_rgb);
-    println!("[pointcloud] Intensity range: {} - {}", intensity_min, intensity_max);
-    
+    println!(
+        "[pointcloud] Intensity range: {} - {}",
+        intensity_min, intensity_max
+    );
+
     // Sample first point for debugging
     if let Some(p) = points.first() {
-        println!("[pointcloud] Sample point - rgb: {:?}, intensity: {}", p.rgb, p.intensity);
+        println!(
+            "[pointcloud] Sample point - rgb: {:?}, intensity: {}",
+            p.rgb, p.intensity
+        );
     }
-    
+
     // Normalize intensity values to 0-1 range based on actual data range
     let intensity_range = (intensity_max - intensity_min) as f32;
     if intensity_range > 0.0 {
@@ -497,16 +510,18 @@ fn load_laz_points(path: &str, max_points: usize) -> Result<LoadResult, String> 
         }
         println!("[pointcloud] All intensities same, using 0.5");
     }
-    
+
     // Print final sample
     if let Some(p) = points.first() {
-        println!("[pointcloud] Final sample - rgb: {:?}, intensity: {:.3}, elev: {:.3}", 
-                 p.rgb, p.intensity, p.elevation_norm);
+        println!(
+            "[pointcloud] Final sample - rgb: {:?}, intensity: {:.3}, elev: {:.3}",
+            p.rgb, p.intensity, p.elevation_norm
+        );
     }
-    
+
     // Determine data availability
     let has_meaningful_intensity = intensity_range > 0.0;
-    
+
     Ok(LoadResult {
         points,
         has_rgb,
@@ -524,15 +539,15 @@ fn elevation_color(t: f32) -> [f32; 4] {
         [0.5, 0.4, 0.3, 1.0], // Brown
         [0.9, 0.9, 0.9, 1.0], // High: white
     ];
-    
+
     let n = colors.len() - 1;
     let idx = (t * n as f32).min(n as f32 - 0.001);
     let i = idx.floor() as usize;
     let frac = idx - i as f32;
-    
+
     let c0 = colors[i];
     let c1 = colors[(i + 1).min(n)];
-    
+
     [
         c0[0] + (c1[0] - c0[0]) * frac,
         c0[1] + (c1[1] - c0[1]) * frac,

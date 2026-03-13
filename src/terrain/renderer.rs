@@ -288,9 +288,9 @@ impl MaterialLayerUniforms {
             snow_params0: [2000.0, 500.0, 0.785, 0.262], // 45°, 15° in radians
             snow_params1: [0.3, 0.4, 0.0, 0.0],          // disabled
             snow_color: [0.95, 0.95, 0.98, 0.0],
-            rock_params: [0.785, 0.175, 0.8, 0.0],       // 45°, 10° in radians, disabled
+            rock_params: [0.785, 0.175, 0.8, 0.0], // 45°, 10° in radians, disabled
             rock_color: [0.35, 0.32, 0.28, 0.0],
-            wetness_params: [0.3, 0.5, 0.0, 0.0],        // disabled
+            wetness_params: [0.3, 0.5, 0.0, 0.0], // disabled
         }
     }
 }
@@ -841,7 +841,7 @@ impl TerrainRenderer {
     }
 
     /// M1: Render terrain with AOV outputs
-    /// 
+    ///
     /// Renders the terrain and captures auxiliary output variables (AOVs):
     /// - albedo: Base color before lighting
     /// - normal: World-space normals
@@ -1409,9 +1409,7 @@ impl TerrainScene {
         // Heightfield ray AO compute pipeline
         let height_ao_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("heightfield_ao.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../shaders/heightfield_ao.wgsl").into(),
-            ),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/heightfield_ao.wgsl").into()),
         });
 
         let height_ao_bind_group_layout =
@@ -1481,8 +1479,8 @@ impl TerrainScene {
                 label: Some("height_ao.uniform_buffer"),
                 contents: bytemuck::bytes_of(&HeightAoUniforms {
                     params0: [6.0, 16.0, 200.0, 1.0], // directions, steps, max_distance, strength
-                    params1: [1.0, 1.0, 1.0, 0.0],    // spacing_x, spacing_y, height_scale, height_min
-                    params2: [1.0, 1.0, 1.0, 1.0],    // output_width, output_height, tex_width, tex_height
+                    params1: [1.0, 1.0, 1.0, 0.0], // spacing_x, spacing_y, height_scale, height_min
+                    params2: [1.0, 1.0, 1.0, 1.0], // output_width, output_height, tex_width, tex_height
                 }),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
@@ -1557,17 +1555,16 @@ impl TerrainScene {
                 entry_point: "main",
             });
 
-        let sun_vis_uniform_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("sun_vis.uniform_buffer"),
-                contents: bytemuck::bytes_of(&SunVisUniforms {
-                    params0: [4.0, 24.0, 400.0, 1.0], // samples, steps, max_distance, softness
-                    params1: [1.0, 1.0, 1.0, 0.0],    // spacing_x, spacing_y, height_scale, height_min
-                    params2: [1.0, 1.0, 1.0, 1.0],    // output_width, output_height, tex_width, tex_height
-                    params3: [0.0, 1.0, 0.0, 0.01],   // sun_dir (pointing up), bias
-                }),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+        let sun_vis_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("sun_vis.uniform_buffer"),
+            contents: bytemuck::bytes_of(&SunVisUniforms {
+                params0: [4.0, 24.0, 400.0, 1.0], // samples, steps, max_distance, softness
+                params1: [1.0, 1.0, 1.0, 0.0],    // spacing_x, spacing_y, height_scale, height_min
+                params2: [1.0, 1.0, 1.0, 1.0], // output_width, output_height, tex_width, tex_height
+                params3: [0.0, 1.0, 0.0, 0.01], // sun_dir (pointing up), bias
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
 
         // P5: AO debug fallback texture (1x1 white)
         let ao_debug_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -1847,8 +1844,8 @@ impl TerrainScene {
             shadow_map_size: 2048, // Default, can be overridden by recreating renderer
             max_shadow_distance: 3000.0,
             pcf_kernel_size: 3,
-            depth_bias: 0.0005,     // Will be updated from params at render time
-            slope_bias: 0.001,      // Will be updated from params at render time
+            depth_bias: 0.0005, // Will be updated from params at render time
+            slope_bias: 0.001,  // Will be updated from params at render time
             peter_panning_offset: 0.0002,
             enable_evsm: true, // P6.2: Always create moment maps texture for VSM/EVSM/MSM support
             stabilize_cascades: true,
@@ -1932,7 +1929,7 @@ impl TerrainScene {
             shadow_bind_group_layout,
             shadow_pcss_radius: 0.0,
             shadow_technique: 1, // Default to PCF
-            moment_pass: None, // Initialized later when VSM/EVSM/MSM is used
+            moment_pass: None,   // Initialized later when VSM/EVSM/MSM is used
             // P2: Fog bind group layout and buffer
             fog_bind_group_layout,
             fog_uniform_buffer,
@@ -2185,7 +2182,12 @@ impl TerrainScene {
 
     /// Ensure heightfield AO texture matches the required size (scaled by resolution_scale).
     /// Returns true if texture was recreated, false if size was already correct.
-    fn ensure_height_ao_texture_size(&self, width: u32, height: u32, resolution_scale: f32) -> Result<bool> {
+    fn ensure_height_ao_texture_size(
+        &self,
+        width: u32,
+        height: u32,
+        resolution_scale: f32,
+    ) -> Result<bool> {
         let target_width = ((width as f32 * resolution_scale) as u32).max(1);
         let target_height = ((height as f32 * resolution_scale) as u32).max(1);
 
@@ -2256,7 +2258,12 @@ impl TerrainScene {
 
     /// Ensure sun visibility texture matches the required size (scaled by resolution_scale).
     /// Returns true if texture was recreated, false if size was already correct.
-    fn ensure_sun_vis_texture_size(&self, width: u32, height: u32, resolution_scale: f32) -> Result<bool> {
+    fn ensure_sun_vis_texture_size(
+        &self,
+        width: u32,
+        height: u32,
+        resolution_scale: f32,
+    ) -> Result<bool> {
         let target_width = ((width as f32 * resolution_scale) as u32).max(1);
         let target_height = ((height as f32 * resolution_scale) as u32).max(1);
 
@@ -2384,7 +2391,12 @@ impl TerrainScene {
     }
 
     /// M1: Clear accumulation texture to zero (black with zero alpha).
-    fn clear_accumulation_texture(&self, _encoder: &mut wgpu::CommandEncoder, _width: u32, _height: u32) -> Result<()> {
+    fn clear_accumulation_texture(
+        &self,
+        _encoder: &mut wgpu::CommandEncoder,
+        _width: u32,
+        _height: u32,
+    ) -> Result<()> {
         let view_guard = self
             .accumulation_view
             .lock()
@@ -2507,7 +2519,7 @@ impl TerrainScene {
             peter_panning_offset: 0.0,
             enable_unclipped_depth: 0,
             depth_clip_factor: 1.0,
-            technique: 1,             // Default to PCF
+            technique: 1, // Default to PCF
             technique_flags: 0,
             _padding1: [0.0; 3],
             technique_params: [0.0; 4],
@@ -2864,7 +2876,7 @@ impl TerrainScene {
                 &shadow_bind_group_layout, // @group(3): shadows (bindings 0-4)
                 fog_bind_group_layout,     // @group(4): fog (binding 0)
                 water_reflection_bind_group_layout, // @group(5): water reflections (bindings 0-2)
-                material_layer_bind_group_layout,   // @group(6): material layers (binding 0)
+                material_layer_bind_group_layout, // @group(6): material layers (binding 0)
             ],
             push_constant_ranges: &[],
         });
@@ -3905,7 +3917,11 @@ impl TerrainScene {
         let height_ao_computed = if height_ao_enabled {
             // Ensure AO texture is the right size
             let ao_resolution_scale = decoded.height_ao.resolution_scale.clamp(0.1, 1.0);
-            self.ensure_height_ao_texture_size(internal_width, internal_height, ao_resolution_scale)?;
+            self.ensure_height_ao_texture_size(
+                internal_width,
+                internal_height,
+                ao_resolution_scale,
+            )?;
 
             // Get AO texture size
             let ao_size = self
@@ -3926,7 +3942,7 @@ impl TerrainScene {
                     decoded.height_ao.strength,
                 ],
                 params1: [
-                    params.terrain_span / width as f32,  // spacing_x (world units per texel)
+                    params.terrain_span / width as f32, // spacing_x (world units per texel)
                     params.terrain_span / height as f32, // spacing_y
                     height_exag_for_ao,
                     height_min_for_ao,
@@ -4021,7 +4037,8 @@ impl TerrainScene {
                 -decoded.light.direction[0],
                 -decoded.light.direction[1],
                 -decoded.light.direction[2],
-            ).normalize();
+            )
+            .normalize();
 
             // Update sun visibility uniforms
             let height_exag_for_sv = params.z_scale;
@@ -4034,7 +4051,7 @@ impl TerrainScene {
                     decoded.sun_visibility.softness,
                 ],
                 params1: [
-                    params.terrain_span / width as f32,  // spacing_x (world units per texel)
+                    params.terrain_span / width as f32, // spacing_x (world units per texel)
                     params.terrain_span / height as f32, // spacing_y
                     height_exag_for_sv,
                     height_min_for_sv,
@@ -4045,12 +4062,7 @@ impl TerrainScene {
                     width as f32,
                     height as f32,
                 ],
-                params3: [
-                    sun_dir.x,
-                    sun_dir.y,
-                    sun_dir.z,
-                    decoded.sun_visibility.bias,
-                ],
+                params3: [sun_dir.x, sun_dir.y, sun_dir.z, decoded.sun_visibility.bias],
             };
             self.queue.write_buffer(
                 &self.sun_vis_uniform_buffer,
@@ -4218,7 +4230,7 @@ impl TerrainScene {
         self.csm_renderer.uniforms.technique = technique_enum.as_u32();
         // P6.2: Store technique directly in TerrainScene for reliable passing to shader
         self.shadow_technique = technique_enum.as_u32();
-        
+
         // P6.2: Create moment generation pass for VSM/EVSM/MSM if needed
         let requires_moments = matches!(
             technique_enum,
@@ -4235,7 +4247,7 @@ impl TerrainScene {
             self.moment_pass = None;
             log::info!(target: "terrain.shadow", "Removed moment generation pass");
         }
-        
+
         // Set PCF kernel size based on technique (hard=1, others=3 for soft edges)
         // IMPORTANT: Must set config.pcf_kernel_size because render_shadow_depth_passes
         // copies config.pcf_kernel_size to uniforms.pcf_kernel_size
@@ -4299,7 +4311,7 @@ impl TerrainScene {
                 shadow_far,
                 height_curve,
             );
-            
+
             // P6.2: Run moment generation pass for VSM/EVSM/MSM techniques
             if let Some(ref mut moment_pass) = self.moment_pass {
                 if let Some(moment_texture) = &self.csm_renderer.evsm_maps {
@@ -4308,12 +4320,12 @@ impl TerrainScene {
                         moment_texture,
                         self.csm_renderer.config.cascade_count,
                     );
-                    
+
                     moment_pass.prepare_bind_group(&self.device, &depth_view, &moment_view);
-                    
+
                     // Convert u32 back to ShadowTechnique for execute call
                     let technique = ShadowTechnique::from_u32(self.shadow_technique);
-                    
+
                     moment_pass.execute(
                         &self.queue,
                         &mut encoder,
@@ -4323,7 +4335,7 @@ impl TerrainScene {
                         self.csm_renderer.uniforms.evsm_positive_exp,
                         self.csm_renderer.uniforms.evsm_negative_exp,
                     );
-                    
+
                     log::debug!(
                         target: "terrain.shadow",
                         "Executed moment generation pass for technique {} with {} cascades",
@@ -4332,7 +4344,7 @@ impl TerrainScene {
                     );
                 }
             }
-            
+
             _shadow_bind_group_owned = Some(bg);
             _shadow_bind_group_owned.as_ref().unwrap()
         } else {
@@ -4441,15 +4453,13 @@ impl TerrainScene {
                 // Heightfield ray AO texture (computed or fallback = 1x1 white)
                 wgpu::BindGroupEntry {
                     binding: 16,
-                    resource: wgpu::BindingResource::TextureView(
-                        if height_ao_computed {
-                            height_ao_sample_guard
-                                .as_ref()
-                                .unwrap_or(&self.height_ao_fallback_view)
-                        } else {
-                            &self.height_ao_fallback_view
-                        },
-                    ),
+                    resource: wgpu::BindingResource::TextureView(if height_ao_computed {
+                        height_ao_sample_guard
+                            .as_ref()
+                            .unwrap_or(&self.height_ao_fallback_view)
+                    } else {
+                        &self.height_ao_fallback_view
+                    }),
                 },
                 // Heightfield ray AO sampler
                 wgpu::BindGroupEntry {
@@ -4459,15 +4469,13 @@ impl TerrainScene {
                 // Sun visibility texture (computed or fallback = 1x1 white)
                 wgpu::BindGroupEntry {
                     binding: 18,
-                    resource: wgpu::BindingResource::TextureView(
-                        if sun_vis_computed {
-                            sun_vis_sample_guard
-                                .as_ref()
-                                .unwrap_or(&self.sun_vis_fallback_view)
-                        } else {
-                            &self.sun_vis_fallback_view
-                        },
-                    ),
+                    resource: wgpu::BindingResource::TextureView(if sun_vis_computed {
+                        sun_vis_sample_guard
+                            .as_ref()
+                            .unwrap_or(&self.sun_vis_fallback_view)
+                    } else {
+                        &self.sun_vis_fallback_view
+                    }),
                 },
                 // Sun visibility sampler
                 wgpu::BindGroupEntry {
@@ -5065,7 +5073,8 @@ impl TerrainScene {
         // For M1, we use a simplified approach: render normally first, then return empty AOVs
         // The full MRT implementation requires significant refactoring of the render pass
         // This provides the API surface while deferring complex MRT integration
-        let beauty_frame = self.render_internal(material_set, env_maps, params, heightmap, water_mask)?;
+        let beauty_frame =
+            self.render_internal(material_set, env_maps, params, heightmap, water_mask)?;
 
         // Create AOV frame with the textures
         // Note: In M1, we create the textures but the MRT pipeline integration is deferred
@@ -5909,9 +5918,8 @@ impl TerrainScene {
         let spacing = (tw.max(th) as f32) / 256.0; // Grid spacing estimate
 
         // Create proper PBR uniforms matching the shader layout
-        let uniforms = crate::terrain::TerrainUniforms::new(
-            view, proj, sun_dir, 1.0, spacing, h_range, 1.0
-        );
+        let uniforms =
+            crate::terrain::TerrainUniforms::new(view, proj, sun_dir, 1.0, spacing, h_range, 1.0);
 
         let uniform_buffer = self
             .device
@@ -6040,11 +6048,11 @@ impl TerrainScene {
             pass.set_bind_group(0, &bind_group, &[]);
             // Bind fallbacks for other groups
             pass.set_bind_group(1, &self.noop_shadow.bind_group, &[]); // IBL (using noop shadow as dummy?) No, IBL is group 1
-            // Use noop_shadow.bind_group for index 3 (shadows)
-            
+                                                                       // Use noop_shadow.bind_group for index 3 (shadows)
+
             // For viewer mode, we might not have all groups. The pipeline expects them.
             // This suggests we need dummy groups for 1 (IBL), 2 (Blit?), 3 (Shadow), 4 (Fog), 5 (Water), 6 (MatLayer)
-            
+
             // Given complexity, maybe we should just draw the grid mesh if pipeline is compatible
             pass.set_vertex_buffer(0, terrain.vertex_buffer.slice(..));
             pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);

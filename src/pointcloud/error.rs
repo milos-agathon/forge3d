@@ -40,9 +40,13 @@ impl std::error::Error for PointCloudError {
 }
 
 impl From<std::io::Error> for PointCloudError {
-    fn from(e: std::io::Error) -> Self { Self::Io(e) }
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 impl From<serde_json::Error> for PointCloudError {
-    fn from(e: serde_json::Error) -> Self { Self::Json(e) }
+    fn from(e: serde_json::Error) -> Self {
+        Self::Json(e)
+    }
 }

@@ -62,7 +62,11 @@ pub struct GiBaselineResources {
 }
 
 /// Create GI baseline resources
-pub fn create_gi_baseline_resources(device: &Arc<Device>, width: u32, height: u32) -> GiBaselineResources {
+pub fn create_gi_baseline_resources(
+    device: &Arc<Device>,
+    width: u32,
+    height: u32,
+) -> GiBaselineResources {
     // GI baseline bind group layout
     let gi_baseline_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("viewer.gi.baseline.bgl"),
@@ -186,7 +190,11 @@ pub fn create_gi_baseline_resources(device: &Arc<Device>, width: u32, height: u3
     // Create HDR textures
     let gi_baseline_hdr = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.gi.baseline.hdr"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -200,7 +208,11 @@ pub fn create_gi_baseline_resources(device: &Arc<Device>, width: u32, height: u3
 
     let gi_baseline_diffuse_hdr = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.gi.baseline.diffuse.hdr"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -208,11 +220,16 @@ pub fn create_gi_baseline_resources(device: &Arc<Device>, width: u32, height: u3
         usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
-    let gi_baseline_diffuse_hdr_view = gi_baseline_diffuse_hdr.create_view(&wgpu::TextureViewDescriptor::default());
+    let gi_baseline_diffuse_hdr_view =
+        gi_baseline_diffuse_hdr.create_view(&wgpu::TextureViewDescriptor::default());
 
     let gi_baseline_spec_hdr = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.gi.baseline.spec.hdr"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -220,11 +237,16 @@ pub fn create_gi_baseline_resources(device: &Arc<Device>, width: u32, height: u3
         usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
-    let gi_baseline_spec_hdr_view = gi_baseline_spec_hdr.create_view(&wgpu::TextureViewDescriptor::default());
+    let gi_baseline_spec_hdr_view =
+        gi_baseline_spec_hdr.create_view(&wgpu::TextureViewDescriptor::default());
 
     let gi_output_hdr = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.gi.output.hdr"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -238,7 +260,11 @@ pub fn create_gi_baseline_resources(device: &Arc<Device>, width: u32, height: u3
 
     let gi_debug = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("viewer.gi.debug"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,

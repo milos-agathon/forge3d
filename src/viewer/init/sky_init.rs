@@ -79,16 +79,16 @@ pub fn create_sky_resources(device: &Arc<Device>, width: u32, height: u32) -> Sk
     });
 
     // Sky params buffer - matches SkyParams struct in sky.wgsl (48 bytes with alignment)
-    // Layout: sun_direction(vec3+pad=16) + turbidity(4) + ground_albedo(4) + model(4) + 
+    // Layout: sun_direction(vec3+pad=16) + turbidity(4) + ground_albedo(4) + model(4) +
     //         sun_intensity(4) + exposure(4) + _pad(8) = 48 bytes
     let sky_params_data: [f32; 12] = [
-        0.3, 0.8, -0.5, 0.0,  // sun_direction.xyz + padding
-        2.0,                   // turbidity
-        0.3,                   // ground_albedo
-        0.0,                   // model (as f32, will be read as u32)
-        5.0,                   // sun_intensity
-        1.0,                   // exposure
-        0.0, 0.0, 0.0,        // _pad
+        0.3, 0.8, -0.5, 0.0, // sun_direction.xyz + padding
+        2.0, // turbidity
+        0.3, // ground_albedo
+        0.0, // model (as f32, will be read as u32)
+        5.0, // sun_intensity
+        1.0, // exposure
+        0.0, 0.0, 0.0, // _pad
     ];
     let sky_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("viewer.sky.params"),

@@ -6,11 +6,11 @@ use glam::Mat4;
 use winit::event::*;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-use crate::viewer::camera_controller::CameraMode;
-use crate::viewer::Viewer;
-use crate::picking::{PickEvent, PickEventType};
 use crate::picking::unproject_cursor;
+use crate::picking::{PickEvent, PickEventType};
+use crate::viewer::camera_controller::CameraMode;
 use crate::viewer::event_loop::get_pick_events;
+use crate::viewer::Viewer;
 
 impl Viewer {
     pub fn handle_input(&mut self, event: &WindowEvent) -> bool {
@@ -51,30 +51,37 @@ impl Viewer {
                 if *button == MouseButton::Left {
                     let pressed = *state == ElementState::Pressed;
                     self.camera.mouse_pressed = pressed;
-                    
+
                     // On release (click), perform picking if config enables it
                     if !pressed {
                         if let Some((x, y)) = self.camera.last_mouse_pos {
                             // Only pick if lasso is not active (or handle picking separately)
                             // Point click only; drag selection is handled by the lasso path.
-                            
+
                             // Calculate matrices for unprojection
                             let aspect = self.config.width as f32 / self.config.height as f32;
                             let fov = self.view_config.fov_deg.to_radians();
-                            let proj = Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
+                            let proj = Mat4::perspective_rh(
+                                fov,
+                                aspect,
+                                self.view_config.znear,
+                                self.view_config.zfar,
+                            );
                             let view = self.camera.view_matrix();
                             // Apply object transform to view matrix for consistent space
                             let model_view = view * self.object_transform;
                             let view_proj = proj * model_view;
                             let inv_view_proj = view_proj.inverse();
-                            
+
                             // Unproject cursor to ray
                             let ray = unproject_cursor(
-                                x as u32, y as u32, 
-                                self.config.width, self.config.height, 
-                                inv_view_proj.to_cols_array_2d()
+                                x as u32,
+                                y as u32,
+                                self.config.width,
+                                self.config.height,
+                                inv_view_proj.to_cols_array_2d(),
                             );
-                            
+
                             // Create event
                             let event = PickEvent {
                                 event_type: PickEventType::Click,
@@ -83,10 +90,10 @@ impl Viewer {
                                 ctrl_held: false,
                                 results: Vec::new(),
                             };
-                            
+
                             // Perform picking query
                             let mut results = self.unified_picking.handle_pick_event(&ray, &event);
-                            
+
                             // Also check for label hits (screen-space)
                             if let Some(label_id) = self.label_manager.pick_at(x as f32, y as f32) {
                                 if let Some(label) = self.label_manager.get_label(label_id) {
@@ -94,7 +101,7 @@ impl Viewer {
                                     let mut attrs = std::collections::HashMap::new();
                                     attrs.insert("text".to_string(), label.text.clone());
                                     attrs.insert("type".to_string(), "label".to_string());
-                                    
+
                                     let label_result = crate::picking::RichPickResult {
                                         feature_id: label_id.0 as u32,
                                         layer_name: "Labels".to_string(),
@@ -103,45 +110,54 @@ impl Viewer {
                                         terrain_info: None,
                                         hit_distance: label.depth, // Use screen depth
                                     };
-                                    
-                                    // Insert at beginning if closer? 
+
+                                    // Insert at beginning if closer?
                                     // Labels are usually on top, so let's put it first
                                     results.insert(0, label_result);
 
                                     // Update unified selection manager manually for label hit
                                     // since handle_pick_event didn't see it (labels are screen-space)
                                     if event.event_type == PickEventType::Click {
-                                         self.unified_picking.selection_manager_mut().handle_pick(label_id.0 as u32, event.shift_held);
+                                        self.unified_picking
+                                            .selection_manager_mut()
+                                            .handle_pick(label_id.0 as u32, event.shift_held);
                                     }
                                 }
                             }
-                            
+
                             // If we hit something, queue the event for IPC and update selection
                             if !results.is_empty() {
                                 let mut result_event = event.clone();
                                 result_event.results = results.clone();
-                                
+
                                 // Update selection state for highlighting
                                 if let Some(first_result) = results.first() {
                                     self.selected_feature_id = first_result.feature_id;
                                     self.selected_layer_name = first_result.layer_name.clone();
-                                    println!("[picking] Selected feature {} in layer {}", 
-                                        first_result.feature_id, &first_result.layer_name);
+                                    println!(
+                                        "[picking] Selected feature {} in layer {}",
+                                        first_result.feature_id, &first_result.layer_name
+                                    );
                                 }
-                                
+
                                 if let Ok(mut q) = get_pick_events().lock() {
                                     q.push(result_event.clone());
                                 }
-                                println!("[picking] Picked {} features", result_event.results.len());
+                                println!(
+                                    "[picking] Picked {} features",
+                                    result_event.results.len()
+                                );
                             } else {
                                 // Clear selection on miss
                                 self.selected_feature_id = 0;
                                 self.selected_layer_name.clear();
-                                
+
                                 // Also clear unified selection if not holding shift (add mode)
                                 if event.event_type == PickEventType::Click && !event.shift_held {
                                     // handle_pick(0, false) clears the primary set
-                                    self.unified_picking.selection_manager_mut().handle_pick(0, false);
+                                    self.unified_picking
+                                        .selection_manager_mut()
+                                        .handle_pick(0, false);
                                 }
                             }
                         }
@@ -152,20 +168,22 @@ impl Viewer {
             WindowEvent::CursorMoved { position, .. } => {
                 let new_x = position.x as f32;
                 let new_y = position.y as f32;
-                
+
                 // Check what's active
                 let pc_count = self.point_cloud.as_ref().map_or(0, |pc| pc.point_count);
-                
+
                 // If mouse is pressed, orbit the appropriate camera
                 if self.camera.mouse_pressed {
                     if let Some((last_x, last_y)) = self.camera.last_mouse_pos {
                         let dx = new_x - last_x;
                         let dy = new_y - last_y;
-                        
+
                         // Check if terrain viewer is active
-                        let terrain_active = self.terrain_viewer.as_ref()
+                        let terrain_active = self
+                            .terrain_viewer
+                            .as_ref()
                             .map_or(false, |tv| tv.has_terrain());
-                        
+
                         if terrain_active {
                             if let Some(ref mut tv) = self.terrain_viewer {
                                 tv.handle_mouse_drag(dx, dy);
@@ -177,7 +195,7 @@ impl Viewer {
                         }
                     }
                 }
-                
+
                 self.camera.handle_mouse_move(new_x, new_y);
                 true
             }
@@ -186,12 +204,14 @@ impl Viewer {
                     MouseScrollDelta::LineDelta(_x, y) => *y * 3.0,
                     MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.02,
                 };
-                
+
                 // Check what's active
-                let terrain_active = self.terrain_viewer.as_ref()
+                let terrain_active = self
+                    .terrain_viewer
+                    .as_ref()
                     .map_or(false, |tv| tv.has_terrain());
                 let pc_count = self.point_cloud.as_ref().map_or(0, |pc| pc.point_count);
-                
+
                 if terrain_active {
                     if let Some(ref mut tv) = self.terrain_viewer {
                         tv.handle_scroll(scroll);
@@ -217,16 +237,24 @@ impl Viewer {
 
         let speed_mult = if self.shift_pressed { 2.0 } else { 1.0 };
 
-        if self.keys_pressed.contains(&KeyCode::KeyW) || self.keys_pressed.contains(&KeyCode::ArrowUp) {
+        if self.keys_pressed.contains(&KeyCode::KeyW)
+            || self.keys_pressed.contains(&KeyCode::ArrowUp)
+        {
             forward += speed_mult;
         }
-        if self.keys_pressed.contains(&KeyCode::KeyS) || self.keys_pressed.contains(&KeyCode::ArrowDown) {
+        if self.keys_pressed.contains(&KeyCode::KeyS)
+            || self.keys_pressed.contains(&KeyCode::ArrowDown)
+        {
             forward -= speed_mult;
         }
-        if self.keys_pressed.contains(&KeyCode::KeyD) || self.keys_pressed.contains(&KeyCode::ArrowRight) {
+        if self.keys_pressed.contains(&KeyCode::KeyD)
+            || self.keys_pressed.contains(&KeyCode::ArrowRight)
+        {
             right += speed_mult;
         }
-        if self.keys_pressed.contains(&KeyCode::KeyA) || self.keys_pressed.contains(&KeyCode::ArrowLeft) {
+        if self.keys_pressed.contains(&KeyCode::KeyA)
+            || self.keys_pressed.contains(&KeyCode::ArrowLeft)
+        {
             right -= speed_mult;
         }
         if self.keys_pressed.contains(&KeyCode::KeyE) {
@@ -238,9 +266,15 @@ impl Viewer {
 
         // If terrain viewer is active, route input to terrain camera
         // Otherwise, if point cloud is active, route to point cloud camera
-        let terrain_active = self.terrain_viewer.as_ref().map_or(false, |tv| tv.has_terrain());
-        let pc_active = self.point_cloud.as_ref().map_or(false, |pc| pc.point_count > 0);
-        
+        let terrain_active = self
+            .terrain_viewer
+            .as_ref()
+            .map_or(false, |tv| tv.has_terrain());
+        let pc_active = self
+            .point_cloud
+            .as_ref()
+            .map_or(false, |pc| pc.point_count > 0);
+
         if terrain_active {
             if let Some(ref mut tv) = self.terrain_viewer {
                 tv.handle_keys(forward, right, up);

@@ -2,15 +2,15 @@
 // P5 GBuffer dump and capture helpers
 // Extracted from mod.rs as part of the viewer refactoring
 
-use std::path::Path;
 use anyhow::{bail, Context};
 use glam::{Mat4, Vec3};
+use std::path::Path;
 
+use crate::cli::args::GiVizMode;
+use crate::viewer::viewer_enums::VizMode;
 use crate::viewer::viewer_render_helpers::render_view_to_rgba8_ex;
 use crate::viewer::viewer_types::{P51CornellSceneState, SceneMesh};
-use crate::viewer::viewer_enums::VizMode;
 use crate::viewer::Viewer;
-use crate::cli::args::GiVizMode;
 
 impl Viewer {
     /// P5: Dump GBuffer artifacts and meta under reports/p5/
@@ -24,7 +24,7 @@ impl Viewer {
             None => bail!("GI manager not available"),
         };
         let (w, h) = gi.gbuffer().dimensions();
-        
+
         // Normals: RGBA16F -> RGBA8 (map [-1,1] to [0,1])
         let norm_tex = &gi.gbuffer().normal_texture;
         let norm_bytes = crate::renderer::readback::read_texture_tight(
@@ -264,7 +264,7 @@ impl Viewer {
 
     pub(crate) fn setup_p51_cornell_scene(&mut self) -> anyhow::Result<P51CornellSceneState> {
         use wgpu::util::DeviceExt;
-        
+
         let prev = P51CornellSceneState {
             geom_vb: self.geom_vb.take(),
             geom_ib: self.geom_ib.take(),
@@ -287,8 +287,8 @@ impl Viewer {
 
         let mut scene = SceneMesh::new();
         scene.extend_with_mesh(&cornell_box.mesh, Mat4::IDENTITY, 0.6, 0.0);
-        let sphere_xform = Mat4::from_translation(Vec3::new(0.0, 0.35, 0.0))
-            * Mat4::from_scale(Vec3::splat(0.35));
+        let sphere_xform =
+            Mat4::from_translation(Vec3::new(0.0, 0.35, 0.0)) * Mat4::from_scale(Vec3::splat(0.35));
         scene.extend_with_mesh(&cornell_sphere.mesh, sphere_xform, 0.3, 0.0);
 
         if scene.vertices.is_empty() || scene.indices.is_empty() {

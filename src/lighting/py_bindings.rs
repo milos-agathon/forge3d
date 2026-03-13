@@ -1355,9 +1355,8 @@ pub fn sun_position_utc(
     minute: u32,
     second: u32,
 ) -> PySunPosition {
-    let pos = super::ephemeris::sun_position(
-        latitude, longitude, year, month, day, hour, minute, second,
-    );
+    let pos =
+        super::ephemeris::sun_position(latitude, longitude, year, month, day, hour, minute, second);
 
     PySunPosition {
         azimuth: pos.azimuth,

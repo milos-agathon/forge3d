@@ -138,7 +138,8 @@ impl RangeReader {
             .send()
             .await?;
 
-        if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
+        if !response.status().is_success()
+            && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
         {
             return Err(CogError::HttpError(format!(
                 "Range request failed with status: {}",

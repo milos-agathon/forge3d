@@ -38,10 +38,16 @@ pub fn handle_input(
         WindowEvent::MouseInput { state, button, .. } => {
             handle_mouse_input(*state, *button, camera)
         }
-        WindowEvent::CursorMoved { position, .. } => {
-            handle_cursor_move(position.x as f32, position.y as f32, camera, terrain_viewer, point_cloud)
+        WindowEvent::CursorMoved { position, .. } => handle_cursor_move(
+            position.x as f32,
+            position.y as f32,
+            camera,
+            terrain_viewer,
+            point_cloud,
+        ),
+        WindowEvent::MouseWheel { delta, .. } => {
+            handle_scroll(delta, camera, terrain_viewer, point_cloud)
         }
-        WindowEvent::MouseWheel { delta, .. } => handle_scroll(delta, camera, terrain_viewer, point_cloud),
         _ => false,
     }
 }

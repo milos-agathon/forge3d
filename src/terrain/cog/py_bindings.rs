@@ -1,7 +1,7 @@
 //! P3: PyO3 bindings for COG streaming.
 
-use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ pub struct PyCogDataset {
 #[pymethods]
 impl PyCogDataset {
     /// Open a COG dataset from a URL.
-    /// 
+    ///
     /// Args:
     ///     url: HTTP(S) URL or file:// path to COG file
     ///     cache_size_mb: Tile cache memory budget in MB (default: 256)
@@ -27,11 +27,13 @@ impl PyCogDataset {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create tokio runtime: {}", e)))?;
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to create tokio runtime: {}", e))
+            })?;
 
-        let reader = runtime.block_on(async {
-            CogHeightReader::new(url, cache_size_mb).await
-        }).map_err(|e| PyRuntimeError::new_err(format!("Failed to open COG: {:?}", e)))?;
+        let reader = runtime
+            .block_on(async { CogHeightReader::new(url, cache_size_mb).await })
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to open COG: {:?}", e)))?;
 
         Ok(Self {
             reader: Arc::new(reader),
@@ -58,12 +60,12 @@ impl PyCogDataset {
     }
 
     /// Read a single tile at specified coordinates and LOD.
-    /// 
+    ///
     /// Args:
     ///     x: Tile X coordinate
     ///     y: Tile Y coordinate  
     ///     lod: Level of detail (0 = full resolution)
-    /// 
+    ///
     /// Returns:
     ///     2D numpy array of float32 heights
     #[pyo3(signature = (x, y, lod=0))]
@@ -74,7 +76,9 @@ impl PyCogDataset {
         y: u32,
         lod: u32,
     ) -> PyResult<pyo3::Bound<'py, numpy::PyArray2<f32>>> {
-        let heights = self.reader.read_tile(x, y, lod)
+        let heights = self
+            .reader
+            .read_tile(x, y, lod)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to read tile: {:?}", e)))?;
 
         let header = self.reader.header();
@@ -91,9 +95,12 @@ impl PyCogDataset {
             )));
         }
 
-        let arr = numpy::PyArray2::from_vec2_bound(py, &vec_to_2d(&heights, tile_height, tile_width))
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to create numpy array: {}", e)))?;
-        
+        let arr =
+            numpy::PyArray2::from_vec2_bound(py, &vec_to_2d(&heights, tile_height, tile_width))
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to create numpy array: {}", e))
+                })?;
+
         Ok(arr)
     }
 
@@ -104,13 +111,23 @@ impl PyCogDataset {
         map.insert("cache_hits".to_string(), stats.hits as f64);
         map.insert("cache_misses".to_string(), stats.misses as f64);
         map.insert("cache_evictions".to_string(), stats.evictions as f64);
-        map.insert("memory_used_bytes".to_string(), stats.memory_used_bytes as f64);
-        map.insert("memory_budget_bytes".to_string(), stats.memory_budget_bytes as f64);
-        
+        map.insert(
+            "memory_used_bytes".to_string(),
+            stats.memory_used_bytes as f64,
+        );
+        map.insert(
+            "memory_budget_bytes".to_string(),
+            stats.memory_budget_bytes as f64,
+        );
+
         let total = stats.hits + stats.misses;
-        let hit_rate = if total > 0 { stats.hits as f64 / total as f64 * 100.0 } else { 0.0 };
+        let hit_rate = if total > 0 {
+            stats.hits as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        };
         map.insert("hit_rate_percent".to_string(), hit_rate);
-        
+
         map
     }
 
@@ -118,9 +135,11 @@ impl PyCogDataset {
     #[pyo3(signature = (level=0))]
     pub fn ifd_info(&self, level: u32) -> PyResult<HashMap<String, u32>> {
         let header = self.reader.header();
-        let ifd = header.ifds.get(level as usize)
+        let ifd = header
+            .ifds
+            .get(level as usize)
             .ok_or_else(|| PyRuntimeError::new_err(format!("IFD level {} not found", level)))?;
-        
+
         let mut map = HashMap::new();
         map.insert("width".to_string(), ifd.width);
         map.insert("height".to_string(), ifd.height);
@@ -131,7 +150,7 @@ impl PyCogDataset {
         map.insert("bits_per_sample".to_string(), ifd.bits_per_sample as u32);
         map.insert("compression".to_string(), ifd.compression as u32);
         map.insert("tile_count".to_string(), ifd.tile_count() as u32);
-        
+
         Ok(map)
     }
 }

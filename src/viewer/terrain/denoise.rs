@@ -19,13 +19,13 @@ pub struct DenoisePass {
     device: Arc<wgpu::Device>,
     bind_group_layout: wgpu::BindGroupLayout,
     pipeline: wgpu::ComputePipeline,
-    
+
     // Ping-pong textures
     pub texture_a: Option<wgpu::Texture>,
     pub view_a: Option<wgpu::TextureView>,
     pub texture_b: Option<wgpu::Texture>,
     pub view_b: Option<wgpu::TextureView>,
-    
+
     width: u32,
     height: u32,
 }
@@ -34,7 +34,9 @@ impl DenoisePass {
     pub fn new(device: Arc<wgpu::Device>) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("denoise_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/denoise_atrous.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../shaders/denoise_atrous.wgsl").into(),
+            ),
         });
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -132,7 +134,10 @@ impl DenoisePass {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         };
 
@@ -141,16 +146,16 @@ impl DenoisePass {
 
         self.view_a = Some(tex_a.create_view(&wgpu::TextureViewDescriptor::default()));
         self.view_b = Some(tex_b.create_view(&wgpu::TextureViewDescriptor::default()));
-        
+
         self.texture_a = Some(tex_a);
         self.texture_b = Some(tex_b);
     }
-    
+
     pub fn get_input_view(&mut self, width: u32, height: u32) -> &wgpu::TextureView {
         self.ensure_resources(width, height);
         self.view_a.as_ref().unwrap()
     }
-    
+
     pub fn apply(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -161,18 +166,20 @@ impl DenoisePass {
         if iterations == 0 {
             return;
         }
-        
+
         let width = self.width;
         let height = self.height;
-        if width == 0 { return; } 
-        
+        if width == 0 {
+            return;
+        }
+
         // Pass 0: Input (view_a) -> B
         let mut source = self.view_a.as_ref().unwrap();
         let mut dest_storage = self.view_b.as_ref().unwrap();
-        
+
         for i in 0..iterations {
             let step_width = 1.0 * (1 << i) as f32;
-            
+
             let uniforms = DenoiseUniforms {
                 width: width as f32,
                 height: height as f32,
@@ -182,30 +189,47 @@ impl DenoisePass {
                 sigma_depth: 0.1,
                 padding: [0.0; 2],
             };
-            
-            let temp_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
-                label: Some("temp_denoise_uniform"),
-                contents: bytemuck::cast_slice(&[uniforms]),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
+
+            let temp_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("temp_denoise_uniform"),
+                    contents: bytemuck::cast_slice(&[uniforms]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
 
             let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("denoise_bg"),
                 layout: &self.bind_group_layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(source) },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(dest_storage) },
-                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(depth_view) },
-                    wgpu::BindGroupEntry { binding: 3, resource: temp_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(source),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(dest_storage),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(depth_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: temp_buffer.as_entire_binding(),
+                    },
                 ],
             });
-            
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("denoise_pass"), timestamp_writes: None });
+
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("denoise_pass"),
+                timestamp_writes: None,
+            });
             cpass.set_pipeline(&self.pipeline);
             cpass.set_bind_group(0, &bind_group, &[]);
             cpass.dispatch_workgroups((width + 7) / 8, (height + 7) / 8, 1);
             drop(cpass);
-            
+
             // Setup for next pass
             if i % 2 == 0 {
                 // Wrote to B. Next read B, write A.
@@ -218,16 +242,18 @@ impl DenoisePass {
             }
         }
     }
-    
+
     // Helper to get the result view to blit from
     pub fn get_last_result_view(&self, iterations: u32) -> Option<&wgpu::TextureView> {
-         if iterations == 0 { return None; }
-         if iterations % 2 != 0 {
-             // Odd: Last write was to B
-             self.view_b.as_ref()
-         } else {
-             // Even: Last write was to A
-             self.view_a.as_ref()
-         }
+        if iterations == 0 {
+            return None;
+        }
+        if iterations % 2 != 0 {
+            // Odd: Last write was to B
+            self.view_b.as_ref()
+        } else {
+            // Even: Last write was to A
+            self.view_a.as_ref()
+        }
     }
 }

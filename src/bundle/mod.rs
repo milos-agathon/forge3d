@@ -10,7 +10,7 @@
 
 mod manifest;
 
-pub use manifest::{BundleManifest, BundleError, BundleResult};
+pub use manifest::{BundleError, BundleManifest, BundleResult};
 
 use std::path::Path;
 

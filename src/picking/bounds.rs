@@ -102,16 +102,22 @@ impl AABB {
 
     /// Check if point is inside AABB
     pub fn contains_point(&self, point: [f32; 3]) -> bool {
-        point[0] >= self.min[0] && point[0] <= self.max[0]
-            && point[1] >= self.min[1] && point[1] <= self.max[1]
-            && point[2] >= self.min[2] && point[2] <= self.max[2]
+        point[0] >= self.min[0]
+            && point[0] <= self.max[0]
+            && point[1] >= self.min[1]
+            && point[1] <= self.max[1]
+            && point[2] >= self.min[2]
+            && point[2] <= self.max[2]
     }
 
     /// Check if two AABBs overlap
     pub fn intersects(&self, other: &AABB) -> bool {
-        self.min[0] <= other.max[0] && self.max[0] >= other.min[0]
-            && self.min[1] <= other.max[1] && self.max[1] >= other.min[1]
-            && self.min[2] <= other.max[2] && self.max[2] >= other.min[2]
+        self.min[0] <= other.max[0]
+            && self.max[0] >= other.min[0]
+            && self.min[1] <= other.max[1]
+            && self.max[1] >= other.min[1]
+            && self.min[2] <= other.max[2]
+            && self.max[2] >= other.min[2]
     }
 }
 
@@ -165,7 +171,11 @@ impl BoundsManager {
 
     /// Add or update layer bounds
     pub fn set_layer_bounds(&mut self, bounds: LayerBounds) {
-        if let Some(existing) = self.layers.iter_mut().find(|l| l.layer_id == bounds.layer_id) {
+        if let Some(existing) = self
+            .layers
+            .iter_mut()
+            .find(|l| l.layer_id == bounds.layer_id)
+        {
             *existing = bounds;
         } else {
             self.layers.push(bounds);
@@ -221,7 +231,7 @@ mod tests {
     #[test]
     fn test_aabb_ray_intersect() {
         let aabb = AABB::new([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
-        
+
         // Ray hitting the box
         let ray = Ray::new([-1.0, 0.5, 0.5], [1.0, 0.0, 0.0]);
         let (hit, t_near, _) = aabb.ray_intersect(&ray);

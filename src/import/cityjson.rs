@@ -27,7 +27,9 @@ impl std::error::Error for CityJsonError {}
 
 impl CityJsonError {
     pub fn new(msg: impl Into<String>) -> Self {
-        Self { message: msg.into() }
+        Self {
+            message: msg.into(),
+        }
     }
 }
 
@@ -132,15 +134,16 @@ pub fn parse_cityjson(data: &[u8]) -> CityJsonResult<(Vec<BuildingGeom>, CityJso
         .map_err(|e| CityJsonError::new(format!("JSON parse error: {e}")))?;
 
     // Validate type
-    let doc_type = root.get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let doc_type = root.get("type").and_then(|v| v.as_str()).unwrap_or("");
     if doc_type != "CityJSON" {
-        return Err(CityJsonError::new("Not a CityJSON file (missing type: CityJSON)"));
+        return Err(CityJsonError::new(
+            "Not a CityJSON file (missing type: CityJSON)",
+        ));
     }
 
     // Parse version
-    let version = root.get("version")
+    let version = root
+        .get("version")
         .and_then(|v| v.as_str())
         .unwrap_or("1.0")
         .to_string();
@@ -239,25 +242,35 @@ fn parse_extent(root: &JsonValue) -> Option<[f64; 6]> {
 }
 
 fn parse_vertices(root: &JsonValue, meta: &CityJsonMeta) -> CityJsonResult<Vec<[f64; 3]>> {
-    let verts_json = root.get("vertices")
+    let verts_json = root
+        .get("vertices")
         .and_then(|v| v.as_array())
         .ok_or_else(|| CityJsonError::new("Missing 'vertices' array"))?;
 
     let mut vertices = Vec::with_capacity(verts_json.len());
 
     for (i, v) in verts_json.iter().enumerate() {
-        let arr = v.as_array()
+        let arr = v
+            .as_array()
             .ok_or_else(|| CityJsonError::new(format!("Vertex {i} is not an array")))?;
 
         if arr.len() < 3 {
-            return Err(CityJsonError::new(format!("Vertex {i} has fewer than 3 components")));
+            return Err(CityJsonError::new(format!(
+                "Vertex {i} has fewer than 3 components"
+            )));
         }
 
-        let x = arr[0].as_f64().or_else(|| arr[0].as_i64().map(|i| i as f64))
+        let x = arr[0]
+            .as_f64()
+            .or_else(|| arr[0].as_i64().map(|i| i as f64))
             .ok_or_else(|| CityJsonError::new(format!("Vertex {i} X is not a number")))?;
-        let y = arr[1].as_f64().or_else(|| arr[1].as_i64().map(|i| i as f64))
+        let y = arr[1]
+            .as_f64()
+            .or_else(|| arr[1].as_i64().map(|i| i as f64))
             .ok_or_else(|| CityJsonError::new(format!("Vertex {i} Y is not a number")))?;
-        let z = arr[2].as_f64().or_else(|| arr[2].as_i64().map(|i| i as f64))
+        let z = arr[2]
+            .as_f64()
+            .or_else(|| arr[2].as_i64().map(|i| i as f64))
             .ok_or_else(|| CityJsonError::new(format!("Vertex {i} Z is not a number")))?;
 
         // Apply transform: real_coord = (vertex_int * scale) + translate
@@ -271,8 +284,12 @@ fn parse_vertices(root: &JsonValue, meta: &CityJsonMeta) -> CityJsonResult<Vec<[
     Ok(vertices)
 }
 
-fn parse_city_objects(root: &JsonValue, vertices: &[[f64; 3]]) -> CityJsonResult<Vec<BuildingGeom>> {
-    let objects = root.get("CityObjects")
+fn parse_city_objects(
+    root: &JsonValue,
+    vertices: &[[f64; 3]],
+) -> CityJsonResult<Vec<BuildingGeom>> {
+    let objects = root
+        .get("CityObjects")
         .and_then(|o| o.as_object())
         .ok_or_else(|| CityJsonError::new("Missing 'CityObjects' object"))?;
 
@@ -325,7 +342,9 @@ fn parse_building(
     building.roof_type = infer_roof_type_from_json(attrs_json);
 
     // Build HashMap for material inference
-    let tags: HashMap<String, String> = building.attributes.iter()
+    let tags: HashMap<String, String> = building
+        .attributes
+        .iter()
         .filter_map(|(k, v)| {
             let val = match v {
                 JsonValue::String(s) => s.clone(),
@@ -339,8 +358,7 @@ fn parse_building(
     building.material = material_from_tags(&tags);
 
     // Parse geometry
-    let geoms = obj.get("geometry")
-        .and_then(|g| g.as_array());
+    let geoms = obj.get("geometry").and_then(|g| g.as_array());
 
     if geoms.is_none() {
         return Ok(None);
@@ -356,10 +374,13 @@ fn parse_building(
     let mut best_lod = 0u8;
 
     for geom in geoms {
-        let lod_str = geom.get("lod")
+        let lod_str = geom
+            .get("lod")
             .and_then(|l| l.as_str().or_else(|| l.as_f64().map(|_| "")))
             .unwrap_or("1");
-        let lod: u8 = lod_str.chars().next()
+        let lod: u8 = lod_str
+            .chars()
+            .next()
             .and_then(|c| c.to_digit(10))
             .map(|d| d as u8)
             .unwrap_or(1);
@@ -394,7 +415,8 @@ fn parse_geometry(
 ) -> CityJsonResult<()> {
     let geom_type = geom.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
-    let boundaries = geom.get("boundaries")
+    let boundaries = geom
+        .get("boundaries")
         .ok_or_else(|| CityJsonError::new("Geometry missing 'boundaries'"))?;
 
     match geom_type {
@@ -412,7 +434,8 @@ fn parse_solid(
     vertices: &[[f64; 3]],
 ) -> CityJsonResult<()> {
     // Solid: boundaries is [ shell1, shell2, ... ] where shell = [ surface1, surface2, ... ]
-    let shells = boundaries.as_array()
+    let shells = boundaries
+        .as_array()
         .ok_or_else(|| CityJsonError::new("Solid boundaries not an array"))?;
 
     // Process outer shell (first shell)
@@ -433,7 +456,8 @@ fn parse_multi_surface(
     vertices: &[[f64; 3]],
 ) -> CityJsonResult<()> {
     // MultiSurface: boundaries is [ surface1, surface2, ... ]
-    let surfaces = boundaries.as_array()
+    let surfaces = boundaries
+        .as_array()
         .ok_or_else(|| CityJsonError::new("MultiSurface boundaries not an array"))?;
 
     for surface in surfaces {
@@ -449,7 +473,8 @@ fn parse_surface(
     vertices: &[[f64; 3]],
 ) -> CityJsonResult<()> {
     // Surface: [ ring1, ring2, ... ] where ring1 = outer ring, others = holes
-    let rings = surface.as_array()
+    let rings = surface
+        .as_array()
         .ok_or_else(|| CityJsonError::new("Surface is not an array"))?;
 
     if rings.is_empty() {
@@ -457,7 +482,8 @@ fn parse_surface(
     }
 
     // Get outer ring (first ring)
-    let outer_ring = rings[0].as_array()
+    let outer_ring = rings[0]
+        .as_array()
         .ok_or_else(|| CityJsonError::new("Ring is not an array"))?;
 
     if outer_ring.len() < 3 {
@@ -467,12 +493,15 @@ fn parse_surface(
     // Collect ring vertices
     let mut ring_verts: Vec<[f64; 3]> = Vec::with_capacity(outer_ring.len());
     for idx_val in outer_ring {
-        let idx = idx_val.as_u64()
+        let idx = idx_val
+            .as_u64()
             .ok_or_else(|| CityJsonError::new("Vertex index is not a number"))?
             as usize;
 
         if idx >= vertices.len() {
-            return Err(CityJsonError::new(format!("Vertex index {idx} out of bounds")));
+            return Err(CityJsonError::new(format!(
+                "Vertex index {idx} out of bounds"
+            )));
         }
 
         ring_verts.push(vertices[idx]);
@@ -547,7 +576,8 @@ fn compute_normals(positions: &[f32], indices: &[u32]) -> Vec<f32> {
     // Normalize
     for i in 0..vertex_count {
         let base = i * 3;
-        let len = (normals[base].powi(2) + normals[base + 1].powi(2) + normals[base + 2].powi(2)).sqrt();
+        let len =
+            (normals[base].powi(2) + normals[base + 1].powi(2) + normals[base + 2].powi(2)).sqrt();
         if len > 1e-6 {
             normals[base] /= len;
             normals[base + 1] /= len;
@@ -568,15 +598,15 @@ fn compute_normals(positions: &[f32], indices: &[u32]) -> Vec<f32> {
 // ============================================================================
 
 #[cfg(feature = "extension-module")]
-use pyo3::{prelude::*, exceptions::PyValueError, types::PyBytes};
+use pyo3::{exceptions::PyValueError, prelude::*, types::PyBytes};
 
 /// P4.3: Python binding for CityJSON parsing
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 pub fn parse_cityjson_py(data: &Bound<'_, PyBytes>) -> PyResult<PyObject> {
     let bytes = data.as_bytes();
-    let (buildings, meta) = parse_cityjson(bytes)
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let (buildings, meta) =
+        parse_cityjson(bytes).map_err(|e| PyValueError::new_err(e.to_string()))?;
 
     Python::with_gil(|py| {
         let result = pyo3::types::PyDict::new_bound(py);
@@ -586,7 +616,10 @@ pub fn parse_cityjson_py(data: &Bound<'_, PyBytes>) -> PyResult<PyObject> {
         meta_dict.set_item("version", &meta.version)?;
         meta_dict.set_item("crs_epsg", meta.crs_epsg)?;
         meta_dict.set_item("scale", (meta.scale[0], meta.scale[1], meta.scale[2]))?;
-        meta_dict.set_item("translate", (meta.translate[0], meta.translate[1], meta.translate[2]))?;
+        meta_dict.set_item(
+            "translate",
+            (meta.translate[0], meta.translate[1], meta.translate[2]),
+        )?;
         if let Some(ext) = &meta.extent {
             meta_dict.set_item("extent", (ext[0], ext[1], ext[2], ext[3], ext[4], ext[5]))?;
         }
@@ -606,7 +639,14 @@ pub fn parse_cityjson_py(data: &Bound<'_, PyBytes>) -> PyResult<PyObject> {
 
             // Material
             let mat_dict = pyo3::types::PyDict::new_bound(py);
-            mat_dict.set_item("albedo", (b.material.albedo[0], b.material.albedo[1], b.material.albedo[2]))?;
+            mat_dict.set_item(
+                "albedo",
+                (
+                    b.material.albedo[0],
+                    b.material.albedo[1],
+                    b.material.albedo[2],
+                ),
+            )?;
             mat_dict.set_item("roughness", b.material.roughness)?;
             mat_dict.set_item("metallic", b.material.metallic)?;
             bdict.set_item("material", mat_dict)?;

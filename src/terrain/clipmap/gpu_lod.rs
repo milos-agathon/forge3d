@@ -47,7 +47,7 @@ pub struct LodSelectParams {
     pub view_proj: [[f32; 4]; 4],
     pub camera_pos: [f32; 4],
     pub frustum_planes: [[f32; 4]; 6],
-    pub lod_params: [f32; 4],     // pixel_error_budget, viewport_height, fov_y, max_lod
+    pub lod_params: [f32; 4], // pixel_error_budget, viewport_height, fov_y, max_lod
     pub terrain_params: [f32; 4], // terrain_width, tile_size, num_tiles_x, num_tiles_y
 }
 
@@ -196,7 +196,9 @@ impl GpuLodSelector {
     pub fn new(device: &wgpu::Device, config: GpuLodConfig) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("clipmap_lod_select"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/clipmap_lod_select.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../shaders/clipmap_lod_select.wgsl").into(),
+            ),
         });
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -382,8 +384,8 @@ impl LodSelectionResult {
         if full_res_triangles == 0 {
             return 0.0;
         }
-        let reduction = (full_res_triangles as f32 - self.total_triangles as f32)
-            / full_res_triangles as f32;
+        let reduction =
+            (full_res_triangles as f32 - self.total_triangles as f32) / full_res_triangles as f32;
         (reduction * 100.0).max(0.0)
     }
 }
@@ -506,7 +508,11 @@ mod tests {
             TileInfo::new(0, 1, 0, Vec2::new(256.0, 0.0), Vec2::new(512.0, 256.0)),
         ];
 
-        let view = Mat4::look_at_rh(Vec3::new(128.0, 100.0, 128.0), Vec3::new(128.0, 0.0, 128.0), Vec3::Y);
+        let view = Mat4::look_at_rh(
+            Vec3::new(128.0, 100.0, 128.0),
+            Vec3::new(128.0, 0.0, 128.0),
+            Vec3::Y,
+        );
         let proj = Mat4::perspective_rh(45.0_f32.to_radians(), 1.0, 1.0, 10000.0);
         let vp = proj * view;
 

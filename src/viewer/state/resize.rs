@@ -2,9 +2,9 @@
 // Resize handling for the Viewer
 // Extracted from mod.rs as part of the viewer refactoring
 
-use winit::dpi::PhysicalSize;
 use crate::passes::gi::GiPass;
 use crate::viewer::Viewer;
+use winit::dpi::PhysicalSize;
 
 impl Viewer {
     pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
@@ -20,9 +20,7 @@ impl Viewer {
     /// This is separate from window resize to support high-res offscreen snapshots.
     pub fn resize_render_targets(&mut self, width: u32, height: u32) {
         if let Some(ref mut gi) = self.gi {
-            gi.gbuffer_mut()
-                .resize(&self.device, width, height)
-                .ok();
+            gi.gbuffer_mut().resize(&self.device, width, height).ok();
             gi.set_ssr_params(&self.queue, &self.ssr_params);
         }
         // Recreate lit output
@@ -64,23 +62,22 @@ impl Viewer {
             .gi_baseline_hdr
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        self.gi_baseline_diffuse_hdr =
-            self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("viewer.gi.baseline.diffuse.hdr"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba16Float,
-                usage: wgpu::TextureUsages::STORAGE_BINDING
-                    | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
+        self.gi_baseline_diffuse_hdr = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("viewer.gi.baseline.diffuse.hdr"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
         self.gi_baseline_diffuse_hdr_view = self
             .gi_baseline_diffuse_hdr
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -136,8 +133,7 @@ impl Viewer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         self.gi_debug_view = self

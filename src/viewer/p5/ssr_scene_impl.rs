@@ -35,7 +35,7 @@ impl Viewer {
         self.geom_ib = Some(ib);
         self.geom_index_count = mesh.indices.len() as u32;
         self.geom_bind_group = None;
-        
+
         update_ipc_stats(
             true,
             mesh.vertices.len() as u32,
@@ -119,18 +119,21 @@ impl Viewer {
         Ok(())
     }
 
-    pub(crate) fn generate_stripe_env_map(&mut self, preset: &SsrScenePreset) -> anyhow::Result<()> {
+    pub(crate) fn generate_stripe_env_map(
+        &mut self,
+        preset: &SsrScenePreset,
+    ) -> anyhow::Result<()> {
         let size = 256u32;
         let stripe_count = preset.stripe_count.max(1);
         let stripe_width = size / stripe_count;
-        
+
         let mut pixels = vec![0u8; (size * size * 4) as usize];
         for y in 0..size {
             for x in 0..size {
                 let stripe_idx = x / stripe_width;
                 let is_bright = stripe_idx % 2 == 0;
                 let idx = ((y * size + x) * 4) as usize;
-                
+
                 let (r, g, b) = if is_bright {
                     let bright = (preset.stripe_bright_intensity * 255.0) as u8;
                     (bright, bright, bright)
@@ -138,7 +141,7 @@ impl Viewer {
                     let dark = (preset.stripe_dark_intensity * 255.0) as u8;
                     (dark, dark, dark)
                 };
-                
+
                 pixels[idx] = r;
                 pixels[idx + 1] = g;
                 pixels[idx + 2] = b;
@@ -166,7 +169,11 @@ impl Viewer {
                 wgpu::ImageCopyTexture {
                     texture: &texture,
                     mip_level: 0,
-                    origin: wgpu::Origin3d { x: 0, y: 0, z: face },
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: face,
+                    },
                     aspect: wgpu::TextureAspect::All,
                 },
                 &pixels,

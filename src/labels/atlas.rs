@@ -113,8 +113,8 @@ impl MsdfAtlas {
         metrics_json_path: &str,
     ) -> Result<Self, String> {
         // Load PNG using the image crate
-        let img = image::open(atlas_png_path)
-            .map_err(|e| format!("Failed to load atlas PNG: {}", e))?;
+        let img =
+            image::open(atlas_png_path).map_err(|e| format!("Failed to load atlas PNG: {}", e))?;
 
         let width = img.width();
         let height = img.height();

@@ -260,7 +260,11 @@ impl TaaRenderer {
     pub fn update_settings(&mut self, queue: &Queue, jitter_offset: [f32; 2], frame_index: u32) {
         self.settings.jitter_offset = jitter_offset;
         self.settings.frame_index = frame_index;
-        queue.write_buffer(&self.settings_buffer, 0, bytemuck::cast_slice(&[self.settings]));
+        queue.write_buffer(
+            &self.settings_buffer,
+            0,
+            bytemuck::cast_slice(&[self.settings]),
+        );
     }
 
     /// Set history weight (blend factor)
@@ -337,7 +341,11 @@ impl TaaRenderer {
         }
 
         // Update settings buffer
-        queue.write_buffer(&self.settings_buffer, 0, bytemuck::cast_slice(&[self.settings]));
+        queue.write_buffer(
+            &self.settings_buffer,
+            0,
+            bytemuck::cast_slice(&[self.settings]),
+        );
 
         let write_index = 1 - self.read_index;
 

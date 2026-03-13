@@ -48,10 +48,10 @@ pub(super) struct TerrainUniforms {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShadowPassUniforms {
-    pub light_view_proj: [[f32; 4]; 4],  // 64 bytes
-    pub terrain_params: [f32; 4],         // 16 bytes: spacing, height_exag, height_min, height_max
-    pub grid_params: [f32; 4],            // 16 bytes: grid_resolution, _pad, _pad, _pad
-    pub height_curve: [f32; 4],           // 16 bytes: mode, strength, power, _pad
+    pub light_view_proj: [[f32; 4]; 4], // 64 bytes
+    pub terrain_params: [f32; 4],       // 16 bytes: spacing, height_exag, height_min, height_max
+    pub grid_params: [f32; 4],          // 16 bytes: grid_resolution, _pad, _pad, _pad
+    pub height_curve: [f32; 4],         // 16 bytes: mode, strength, power, _pad
 }
 
 /// Extended uniforms for PBR terrain shader
@@ -64,10 +64,10 @@ pub(super) struct TerrainPbrUniforms {
     pub lighting: [f32; 4],
     pub background: [f32; 4],
     pub water_color: [f32; 4],
-    pub pbr_params: [f32; 4],    // exposure, normal_strength, ibl_intensity, _
-    pub camera_pos: [f32; 4],   // camera world position
-    pub lens_params: [f32; 4],  // vignette_strength, vignette_radius, vignette_softness, _
-    pub screen_dims: [f32; 4],  // width, height, _, _
+    pub pbr_params: [f32; 4],  // exposure, normal_strength, ibl_intensity, _
+    pub camera_pos: [f32; 4],  // camera world position
+    pub lens_params: [f32; 4], // vignette_strength, vignette_radius, vignette_softness, _
+    pub screen_dims: [f32; 4], // width, height, _, _
     pub overlay_params: [f32; 4], // enabled (>0.5), opacity, blend_mode (0=normal, 1=multiply, 2=overlay), solid (>0.5)
 }
 
@@ -85,7 +85,8 @@ impl ViewerTerrainScene {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Depth32Float,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
             // Create depth view with explicit DepthOnly aspect for sampling
@@ -118,88 +119,105 @@ impl ViewerTerrainScene {
             Some(c) => c,
             None => return,
         };
-        
+
         let terrain = match self.terrain.as_ref() {
             Some(t) => t,
             None => return,
         };
-        
+
         if self.shadow_pipeline.is_none() || self.shadow_bind_groups.is_empty() {
             return;
         }
-        
+
         let cascade_count = csm.config.cascade_count;
         let shadow_map_size = csm.config.shadow_map_size;
-        
+
         // Mark that shadow passes are running (will be copied to csm_uniforms later)
         csm.uniforms.technique_reserved[0] = 1.0; // Flag: shadow passes executed
-        
+
         // Update CSM cascade matrices based on camera and light
         let near_plane = 1.0;
         let far_plane = csm.config.max_shadow_distance;
-        csm.update_cascades(camera_view, camera_proj, sun_direction, near_plane, far_plane);
-        
+        csm.update_cascades(
+            camera_view,
+            camera_proj,
+            sun_direction,
+            near_plane,
+            far_plane,
+        );
+
         // Get terrain parameters for shadow pass uniforms
         let (min_h, max_h) = terrain.domain;
         let terrain_span = terrain.dimensions.0.max(terrain.dimensions.1) as f32;
-        
+
         let z_scale = terrain.z_scale;
         let grid_res = 512u32; // Shadow pass grid resolution
-        
+
         // Height curve params: use linear (mode=0) with no curve transformation
         // This matches the default terrain rendering behavior
-        let height_curve_mode = 0.0_f32;    // 0=linear
+        let height_curve_mode = 0.0_f32; // 0=linear
         let height_curve_strength = 0.0_f32; // No curve applied
-        let height_curve_power = 1.0_f32;    // Default power
-        
+        let height_curve_power = 1.0_f32; // Default power
+
         // Compute a terrain-covering light view-projection matrix
         // The cascade's light_view_proj is based on camera frustum which doesn't cover full terrain
         // We need a projection that covers the entire terrain from light's perspective
         let terrain_height = (max_h - min_h) * z_scale;
-        let terrain_center = glam::Vec3::new(terrain_span * 0.5, terrain_height * 0.5, terrain_span * 0.5);
-        let light_distance = terrain_span * 2.0;  // Place light far enough to see entire terrain
+        let terrain_center =
+            glam::Vec3::new(terrain_span * 0.5, terrain_height * 0.5, terrain_span * 0.5);
+        let light_distance = terrain_span * 2.0; // Place light far enough to see entire terrain
         let light_pos = terrain_center - sun_direction * light_distance;
         let light_view = glam::Mat4::look_at_rh(light_pos, terrain_center, glam::Vec3::Y);
-        
+
         // Orthographic projection covering terrain bounds with margin
-        let half_extent = terrain_span * 0.75;  // Cover terrain with some margin
+        let half_extent = terrain_span * 0.75; // Cover terrain with some margin
         let terrain_light_proj = glam::Mat4::orthographic_rh(
-            -half_extent, half_extent,
-            -half_extent, half_extent,
-            0.1, light_distance * 2.0 + terrain_span,
+            -half_extent,
+            half_extent,
+            -half_extent,
+            half_extent,
+            0.1,
+            light_distance * 2.0 + terrain_span,
         );
         let terrain_light_view_proj = terrain_light_proj * light_view;
         let terrain_light_view_proj_arr = terrain_light_view_proj.to_cols_array_2d();
-        
+
         // Render each cascade
         for cascade_idx in 0..cascade_count as usize {
-            if cascade_idx >= self.shadow_bind_groups.len() || cascade_idx >= self.shadow_uniform_buffers.len() {
+            if cascade_idx >= self.shadow_bind_groups.len()
+                || cascade_idx >= self.shadow_uniform_buffers.len()
+            {
                 break;
             }
-            
+
             // Use terrain-covering projection for shadow depth pass
             // This ensures the entire terrain is rendered to shadow map, not just camera frustum portion
             let light_view_proj = terrain_light_view_proj_arr;
-            
+
             // Build shadow pass uniforms
             // Match main shader terrain_params layout: [min_h, h_range, terrain_width, z_scale]
             let shadow_uniforms = ShadowPassUniforms {
                 light_view_proj,
                 terrain_params: [min_h, max_h - min_h, terrain_span, z_scale],
                 grid_params: [grid_res as f32, 0.0, 0.0, 0.0],
-                height_curve: [height_curve_mode, height_curve_strength, height_curve_power, 0.0],
+                height_curve: [
+                    height_curve_mode,
+                    height_curve_strength,
+                    height_curve_power,
+                    0.0,
+                ],
             };
-            
+
             // Upload uniforms
             self.queue.write_buffer(
                 &self.shadow_uniform_buffers[cascade_idx],
                 0,
                 bytemuck::cast_slice(&[shadow_uniforms]),
             );
-            
+
             // Get shadow map view for this cascade
             let shadow_map_view = &csm.shadow_map_views[cascade_idx];
-            
+
             // Begin depth-only render pass for this cascade
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some(&format!("shadow_depth_pass_cascade_{}", cascade_idx)),
@@ -215,15 +233,15 @@ impl ViewerTerrainScene {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            
+
             render_pass.set_pipeline(self.shadow_pipeline.as_ref().unwrap());
             render_pass.set_bind_group(0, &self.shadow_bind_groups[cascade_idx], &[]);
-            
+
             // Draw terrain grid (6 vertices per quad, (grid_res-1)^2 quads)
             let vertex_count = 6 * (grid_res - 1) * (grid_res - 1);
             render_pass.draw(0..vertex_count, 0..1);
         }
-        
+
         // Execute moment generation pass for VSM/EVSM/MSM techniques
         // This converts the depth maps into moment statistics
         let technique = match self.pbr_config.shadow_technique.to_lowercase().as_str() {
@@ -232,13 +250,16 @@ impl ViewerTerrainScene {
             "msm" => crate::lighting::shadow::ShadowTechnique::MSM,
             _ => return, // No moment generation needed for HARD/PCF/PCSS
         };
-        
+
         // Prepare and execute moment pass if we have the resources
-        if let (Some(ref mut moment_pass), Some(ref csm)) = (&mut self.moment_pass, &self.csm_renderer) {
+        if let (Some(ref mut moment_pass), Some(ref csm)) =
+            (&mut self.moment_pass, &self.csm_renderer)
+        {
             if let Some(ref moment_texture) = csm.evsm_maps {
                 let depth_view = csm.shadow_texture_view();
-                let moment_view = crate::shadows::create_moment_storage_view(moment_texture, cascade_count);
-                
+                let moment_view =
+                    crate::shadows::create_moment_storage_view(moment_texture, cascade_count);
+
                 moment_pass.prepare_bind_group(&self.device, &depth_view, &moment_view);
                 moment_pass.execute(
                     &self.queue,
@@ -278,23 +299,23 @@ impl ViewerTerrainScene {
 
         // Pre-compute values needed for PBR bind group before borrowing terrain
         let use_pbr = self.pbr_config.enabled && self.pbr_pipeline.is_some();
-        
+
         // Check if DoF is enabled
         let needs_dof = self.pbr_config.dof.enabled;
-        
+
         // Check if post-process effects need a separate pass (distortion, CA, or vignette)
-        let needs_post_process = self.pbr_config.lens_effects.enabled && 
-            (self.pbr_config.lens_effects.distortion.abs() > 0.001 || 
-             self.pbr_config.lens_effects.chromatic_aberration > 0.001 ||
-             self.pbr_config.lens_effects.vignette_strength > 0.001);
-        
+        let needs_post_process = self.pbr_config.lens_effects.enabled
+            && (self.pbr_config.lens_effects.distortion.abs() > 0.001
+                || self.pbr_config.lens_effects.chromatic_aberration > 0.001
+                || self.pbr_config.lens_effects.vignette_strength > 0.001);
+
         // P5: Volumetrics pass
-        let needs_volumetrics = self.pbr_config.volumetrics.enabled && 
-            self.pbr_config.volumetrics.density > 0.0001;
-            
+        let needs_volumetrics =
+            self.pbr_config.volumetrics.enabled && self.pbr_config.volumetrics.density > 0.0001;
+
         // M5: Denoise pass
         let needs_denoise = self.pbr_config.denoise.enabled;
-        
+
         // We need PostProcess pass (for intermediate texture) if PP is active OR Volumetrics is active (since Vol reads from PP intermediate)
         if (needs_post_process || needs_volumetrics) && self.post_process.is_none() {
             self.init_post_process();
@@ -303,35 +324,37 @@ impl ViewerTerrainScene {
         // We need DoF pass if DoF is active OR (Volumetrics AND PP are active) - for scratch buffer
         // Case: Vol+PP (no DoF) needs a scratch buffer for Vol output before PP reads it. We reuse DoF input buffer.
         let needs_dof_scratch = needs_volumetrics && needs_post_process && !needs_dof;
-        
+
         if (needs_dof || needs_dof_scratch) && self.dof_pass.is_none() {
             self.init_dof_pass();
         }
-        
+
         // Initialize volumetrics pass if needed
         if needs_volumetrics && self.volumetrics_pass.is_none() {
             self.init_volumetrics_pass();
         }
-        
+
         if needs_denoise && self.denoise_pass.is_none() {
             self.init_denoise_pass();
         }
 
         // Ensure textures exist for active passes
         if needs_denoise {
-             if let Some(ref mut denoise) = self.denoise_pass {
-                 // Denoise pass manages its own ping-pong resources
-                 let _ = denoise.get_input_view(width, height);
-             }
+            if let Some(ref mut denoise) = self.denoise_pass {
+                // Denoise pass manages its own ping-pong resources
+                let _ = denoise.get_input_view(width, height);
+            }
         }
         if needs_dof || needs_dof_scratch {
             if let Some(ref mut dof) = self.dof_pass {
                 let _ = dof.get_input_view(width, height, self.surface_format);
             }
         }
-        
+
         // P0.1/M1: Check if OIT is needed and initialize WBOIT resources early
-        let has_vector_overlays_early = self.vector_overlay_stack.as_ref()
+        let has_vector_overlays_early = self
+            .vector_overlay_stack
+            .as_ref()
             .map(|s| s.visible_layer_count() > 0)
             .unwrap_or(false);
         if has_vector_overlays_early && self.oit_enabled {
@@ -340,15 +363,26 @@ impl ViewerTerrainScene {
                 self.init_wboit(width, height);
             }
         }
-        
+
         if needs_post_process || needs_volumetrics {
             if let Some(ref mut pp) = self.post_process {
                 let _ = pp.get_intermediate_view(width, height, self.surface_format);
             }
         }
-        
+
         // Extract all terrain values we need before any mutable operations
-        let (phi, theta, r, tw, th, terrain_z_scale, domain, fov_deg, sun_azimuth_deg, sun_elevation_deg) = {
+        let (
+            phi,
+            theta,
+            r,
+            tw,
+            th,
+            terrain_z_scale,
+            domain,
+            fov_deg,
+            sun_azimuth_deg,
+            sun_elevation_deg,
+        ) = {
             let terrain = self.terrain.as_ref().unwrap();
             (
                 terrain.cam_phi_deg.to_radians(),
@@ -363,21 +397,21 @@ impl ViewerTerrainScene {
                 terrain.sun_elevation_deg,
             )
         };
-        
+
         let terrain_width = tw.max(th) as f32;
         let h_range = domain.1 - domain.0;
         let legacy_z_scale = terrain_z_scale * h_range * 1000.0 / terrain_width.max(1.0);
-        let shader_z_scale = if use_pbr { terrain_z_scale } else { legacy_z_scale };
+        let shader_z_scale = if use_pbr {
+            terrain_z_scale
+        } else {
+            legacy_z_scale
+        };
         let center_y = if use_pbr {
             h_range * terrain_z_scale * 0.5
         } else {
             terrain_width * legacy_z_scale * 0.001 * 0.5
         };
-        let center = glam::Vec3::new(
-            terrain_width * 0.5,
-            center_y,
-            terrain_width * 0.5,
-        );
+        let center = glam::Vec3::new(terrain_width * 0.5, center_y, terrain_width * 0.5);
 
         let eye = glam::Vec3::new(
             center.x + r * theta.sin() * phi.cos(),
@@ -420,28 +454,36 @@ impl ViewerTerrainScene {
             self.init_shadow_depth_pipeline();
             self.update_shadow_bind_groups();
         }
-        
+
         // Render shadow depth passes before main terrain render
         if use_pbr && self.shadow_pipeline.is_some() {
             self.render_shadow_passes(encoder, view_mat, proj, -sun_dir);
         } else if use_pbr {
-            eprintln!("[render] Skipping shadow passes: pipeline={}", self.shadow_pipeline.is_some());
+            eprintln!(
+                "[render] Skipping shadow passes: pipeline={}",
+                self.shadow_pipeline.is_some()
+            );
         }
-        
+
         // Debug: print uniform values on first render
         static ONCE: std::sync::Once = std::sync::Once::new();
         ONCE.call_once(|| {
-            println!("[render] terrain_params: min_h={:.1}, h_range={:.1}, width={:.1}, z_scale={:.2}",
-                domain.0, h_range, terrain_width, shader_z_scale);
+            println!(
+                "[render] terrain_params: min_h={:.1}, h_range={:.1}, width={:.1}, z_scale={:.2}",
+                domain.0, h_range, terrain_width, shader_z_scale
+            );
             let max_y = if use_pbr {
                 h_range * terrain_z_scale
             } else {
                 terrain_width * legacy_z_scale * 0.001
             };
             println!("[render] Expected Y range: 0 to {:.1}", max_y);
-            println!("[render] Camera center: ({:.1}, {:.1}, {:.1})", center.x, center.y, center.z);
+            println!(
+                "[render] Camera center: ({:.1}, {:.1}, {:.1})",
+                center.x, center.y, center.z
+            );
         });
-        
+
         // Re-borrow terrain for the remaining operations
         let terrain = self.terrain.as_ref().unwrap();
 
@@ -496,38 +538,33 @@ impl ViewerTerrainScene {
         } else {
             None
         };
-        
+
         // Release the immutable borrow of terrain before mutable operations
         let _ = terrain;
-        
-        if let Some((domain, z_scale, sun_intensity, ambient, shadow_intensity, water_level, background_color, water_color)) = pbr_uniforms_data {
+
+        if let Some((
+            domain,
+            z_scale,
+            sun_intensity,
+            ambient,
+            shadow_intensity,
+            water_level,
+            background_color,
+            water_color,
+        )) = pbr_uniforms_data
+        {
             let pbr_uniforms = TerrainPbrUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
                 sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
-                terrain_params: [
-                    domain.0,
-                    domain.1 - domain.0,
-                    terrain_width,
-                    z_scale,
-                ],
-                lighting: [
-                    sun_intensity,
-                    ambient,
-                    shadow_intensity,
-                    water_level,
-                ],
+                terrain_params: [domain.0, domain.1 - domain.0, terrain_width, z_scale],
+                lighting: [sun_intensity, ambient, shadow_intensity, water_level],
                 background: [
                     background_color[0],
                     background_color[1],
                     background_color[2],
                     0.0,
                 ],
-                water_color: [
-                    water_color[0],
-                    water_color[1],
-                    water_color[2],
-                    0.0,
-                ],
+                water_color: [water_color[0], water_color[1], water_color[2], 0.0],
                 pbr_params: [
                     self.pbr_config.exposure,
                     self.pbr_config.normal_strength,
@@ -543,19 +580,27 @@ impl ViewerTerrainScene {
                 ],
                 screen_dims: [width as f32, height as f32, 0.0, 0.0],
                 overlay_params: [
-                    if self.pbr_config.overlay.enabled { 1.0 } else { 0.0 },
+                    if self.pbr_config.overlay.enabled {
+                        1.0
+                    } else {
+                        0.0
+                    },
                     self.pbr_config.overlay.global_opacity,
-                    0.0,  // Blend mode: 0 = Normal
-                    if self.pbr_config.overlay.solid { 1.0 } else { 0.0 },
+                    0.0, // Blend mode: 0 = Normal
+                    if self.pbr_config.overlay.solid {
+                        1.0
+                    } else {
+                        0.0
+                    },
                 ],
             };
-            
+
             self.prepare_pbr_bind_group_internal(&pbr_uniforms);
         }
 
         // Run compute passes for heightfield AO and sun visibility before render
         self.dispatch_heightfield_compute(encoder, terrain_width, sun_dir);
-        
+
         // Re-borrow terrain after mutable operations
         // Determine primary render target based on active effects
         // Logic:
@@ -563,45 +608,62 @@ impl ViewerTerrainScene {
         // - Else if DoF active: Scene -> DoF Input
         // - Else if PP active: Scene -> PP Intermediate
         // - Else: Scene -> Final View
-        
+
         // - If Denoise active: Scene -> Denoise Input
         // - Else if Volumetrics active: Scene -> PP Intermediate (so Vol can read it)
         // - Else if DoF active: Scene -> DoF Input
         // - Else if PP active: Scene -> PP Intermediate
         // - Else: Scene -> Final View
-        
+
         let render_target: &wgpu::TextureView = if needs_denoise {
-            self.denoise_pass.as_mut().unwrap().get_input_view(width, height)
+            self.denoise_pass
+                .as_mut()
+                .unwrap()
+                .get_input_view(width, height)
         } else if needs_volumetrics {
-            self.post_process.as_ref().unwrap().intermediate_view.as_ref().unwrap()
+            self.post_process
+                .as_ref()
+                .unwrap()
+                .intermediate_view
+                .as_ref()
+                .unwrap()
         } else if needs_dof {
             self.dof_pass.as_ref().unwrap().input_view.as_ref().unwrap()
         } else if needs_post_process {
-            self.post_process.as_ref().unwrap().intermediate_view.as_ref().unwrap()
+            self.post_process
+                .as_ref()
+                .unwrap()
+                .intermediate_view
+                .as_ref()
+                .unwrap()
         } else {
             view
         };
-        
+
         // Store camera params for DoF
         let cam_radius = self.terrain.as_ref().unwrap().cam_radius;
-        
+
         let terrain = self.terrain.as_ref().unwrap();
         let depth_view = self.depth_view.as_ref().unwrap();
         let bg = &terrain.background_color;
-        
+
         // Option B: Prepare vector overlay stack if it has visible layers
         let has_vector_overlays = if let Some(ref stack) = self.vector_overlay_stack {
             stack.is_enabled() && stack.visible_layer_count() > 0
         } else {
             false
         };
-        
+
         if has_vector_overlays {
             // Ensure we have a fallback texture for when sun visibility isn't enabled
             if self.fallback_texture.is_none() {
                 let texture = self.device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("vector_overlay_fallback_texture"),
-                    size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
@@ -623,27 +685,34 @@ impl ViewerTerrainScene {
                         bytes_per_row: Some(4),
                         rows_per_image: Some(1),
                     },
-                    wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                    wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
                 );
-                self.fallback_texture_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+                self.fallback_texture_view =
+                    Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
                 self.fallback_texture = Some(texture);
             }
-            
+
             // Initialize vector overlay pipelines if not yet done
             if let Some(ref mut stack) = self.vector_overlay_stack {
                 // P0.1/M1: For OIT mode, ensure OIT pipelines are initialized
                 if !stack.pipelines_ready() || (self.oit_enabled && !stack.oit_pipelines_ready()) {
                     stack.init_pipelines(self.surface_format);
                 }
-                
+
                 // Prepare bind group with sun visibility texture or fallback
-                let texture_view = self.sun_vis_view.as_ref()
+                let texture_view = self
+                    .sun_vis_view
+                    .as_ref()
                     .or(self.fallback_texture_view.as_ref())
                     .unwrap();
                 stack.prepare_bind_group(texture_view);
             }
         }
-        
+
         // Store values needed for vector overlay rendering
         let vo_view_proj = view_proj.to_cols_array_2d();
         let vo_sun_dir = [sun_dir.x, sun_dir.y, sun_dir.z];
@@ -696,11 +765,11 @@ impl ViewerTerrainScene {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &terrain.bind_group, &[]);
             }
-            
+
             pass.set_vertex_buffer(0, terrain.vertex_buffer.slice(..));
             pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..terrain.index_count, 0, 0..1);
-            
+
             // Option B: Render vector overlays after terrain
             // P0.1/M1: Use OIT rendering if enabled, otherwise standard alpha blending
             if has_vector_overlays && !self.oit_enabled {
@@ -711,7 +780,7 @@ impl ViewerTerrainScene {
                         let highlight_color = [1.0, 0.8, 0.0, 0.5];
                         for i in 0..layer_count {
                             stack.render_layer_with_highlight(
-                                &mut pass, 
+                                &mut pass,
                                 super::vector_overlay::RenderLayerParams {
                                     layer_index: i,
                                     view_proj: vo_view_proj,
@@ -719,22 +788,23 @@ impl ViewerTerrainScene {
                                     lighting: vo_lighting,
                                     selected_feature_id,
                                     highlight_color,
-                                }
+                                },
                             );
                         }
                     }
                 }
             }
         }
-        
+
         // P0.1/M1: OIT rendering path - render overlays to WBOIT accumulation buffers
         if has_vector_overlays && self.oit_enabled {
             let depth_view = self.depth_view.as_ref().unwrap();
-            
+
             // OIT accumulation pass
-            if let (Some(color_view), Some(reveal_view)) = 
-                (self.wboit_color_view.as_ref(), self.wboit_reveal_view.as_ref()) 
-            {
+            if let (Some(color_view), Some(reveal_view)) = (
+                self.wboit_color_view.as_ref(),
+                self.wboit_reveal_view.as_ref(),
+            ) {
                 let mut oit_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("terrain_viewer.wboit.accumulation_pass"),
                     color_attachments: &[
@@ -750,7 +820,12 @@ impl ViewerTerrainScene {
                             view: reveal_view,
                             resolve_target: None,
                             ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color { r: 1.0, g: 0.0, b: 0.0, a: 0.0 }),
+                                load: wgpu::LoadOp::Clear(wgpu::Color {
+                                    r: 1.0,
+                                    g: 0.0,
+                                    b: 0.0,
+                                    a: 0.0,
+                                }),
                                 store: wgpu::StoreOp::Store,
                             },
                         }),
@@ -766,7 +841,7 @@ impl ViewerTerrainScene {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-                
+
                 if let Some(ref stack) = self.vector_overlay_stack {
                     if stack.oit_pipelines_ready() && stack.bind_group.is_some() {
                         let layer_count = stack.visible_layer_count();
@@ -781,17 +856,18 @@ impl ViewerTerrainScene {
                                     lighting: vo_lighting,
                                     selected_feature_id,
                                     highlight_color,
-                                }
+                                },
                             );
                         }
                     }
                 }
             }
-            
+
             // OIT compose pass - blend accumulated transparency onto scene
-            if let (Some(pipeline), Some(bind_group)) = 
-                (self.wboit_compose_pipeline.as_ref(), self.wboit_compose_bind_group.as_ref())
-            {
+            if let (Some(pipeline), Some(bind_group)) = (
+                self.wboit_compose_pipeline.as_ref(),
+                self.wboit_compose_bind_group.as_ref(),
+            ) {
                 let mut compose_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("terrain_viewer.wboit.compose_pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -806,18 +882,18 @@ impl ViewerTerrainScene {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-                
+
                 compose_pass.set_pipeline(pipeline);
                 compose_pass.set_bind_group(0, bind_group, &[]);
                 compose_pass.draw(0..3, 0..1); // Fullscreen triangle
             }
-            
+
             static OIT_LOG_ONCE: std::sync::Once = std::sync::Once::new();
             OIT_LOG_ONCE.call_once(|| {
                 println!("[render] WBOIT active: mode={}", self.oit_mode);
             });
         }
-        
+
         // M5: Apply Denoise pass if enabled (after scene render, before effects)
         if needs_denoise {
             let (iterations, sigma_color) = {
@@ -884,13 +960,19 @@ impl ViewerTerrainScene {
                 }
             }
         }
-        
+
         // P5: Apply volumetrics pass if enabled (after main render, before DoF)
         if needs_volumetrics {
             if let Some(ref vol_pass) = self.volumetrics_pass {
                 let depth_view = self.depth_view.as_ref().unwrap();
-                let color_input = self.post_process.as_ref().unwrap().intermediate_view.as_ref().unwrap();
-                
+                let color_input = self
+                    .post_process
+                    .as_ref()
+                    .unwrap()
+                    .intermediate_view
+                    .as_ref()
+                    .unwrap();
+
                 // Determine volumetrics output target with robust chaining:
                 // - If DoF enabled: output to DoF input
                 // - If DoF disabled but PP enabled: output to DoF input (as scratch buffer)
@@ -900,10 +982,10 @@ impl ViewerTerrainScene {
                 } else {
                     view
                 };
-                
+
                 // Calculate inverse view-projection matrix
                 let inv_view_proj = (proj * view_mat).inverse();
-                
+
                 vol_pass.apply(
                     encoder,
                     &self.queue,
@@ -915,8 +997,8 @@ impl ViewerTerrainScene {
                     height,
                     inv_view_proj.to_cols_array_2d(),
                     [eye.x, eye.y, eye.z],
-                    1.0,  // near
-                    cam_radius * 10.0,  // far
+                    1.0,               // near
+                    cam_radius * 10.0, // far
                     [sun_dir.x, sun_dir.y, sun_dir.z],
                     terrain.sun_intensity,
                     [terrain_width, terrain.domain.0, shader_z_scale, h_range],
@@ -924,26 +1006,31 @@ impl ViewerTerrainScene {
                 );
             }
         }
-        
+
         // Apply DoF pass if enabled (before other post-process effects)
         if needs_dof {
             // DoF input source:
             // - If Volumetrics enabled: Read from DoF Input (Volumetrics wrote here)
             // - Else: Read from DoF Input (Scene wrote here)
             // Note: In both cases, data is already in dof.input_view
-            
+
             // DoF output target:
             // - If PP enabled: Output to PP Intermediate (so PP can read it)
             // - Else: Output to Final View
             let dof_output = if needs_post_process {
-                self.post_process.as_ref().unwrap().intermediate_view.as_ref().unwrap()
+                self.post_process
+                    .as_ref()
+                    .unwrap()
+                    .intermediate_view
+                    .as_ref()
+                    .unwrap()
             } else {
                 view
             };
-            
+
             if let Some(ref mut dof) = self.dof_pass {
                 let depth_view = self.depth_view.as_ref().unwrap();
-                
+
                 let dof_cfg = super::dof::DofConfig {
                     enabled: true,
                     focus_distance: self.pbr_config.dof.focus_distance,
@@ -955,7 +1042,7 @@ impl ViewerTerrainScene {
                     tilt_pitch: self.pbr_config.dof.tilt_pitch,
                     tilt_yaw: self.pbr_config.dof.tilt_yaw,
                 };
-                
+
                 // We use apply_from_input to explicit chaining from dof.input_view
                 dof.apply_from_input(
                     encoder,
@@ -966,12 +1053,12 @@ impl ViewerTerrainScene {
                     height,
                     self.surface_format,
                     &dof_cfg,
-                    1.0,           // near plane
+                    1.0,               // near plane
                     cam_radius * 10.0, // far plane
                 );
             }
         }
-        
+
         // Apply post-process pass if needed (distortion, CA, vignette)
         if needs_post_process {
             // Determine if we need to read from an external source (scratch buffer)
@@ -979,14 +1066,16 @@ impl ViewerTerrainScene {
             // In that case, Volumetrics wrote to DoF Input (as scratch), so we read from there.
             // In all other cases (including DoF+PP), the input is in our own intermediate_view.
             let external_input = if !needs_dof && needs_volumetrics {
-                self.dof_pass.as_ref().and_then(|dof| dof.input_view.as_ref())
+                self.dof_pass
+                    .as_ref()
+                    .and_then(|dof| dof.input_view.as_ref())
             } else {
                 None
             };
 
             if let Some(ref mut pp) = self.post_process {
                 let lens = &self.pbr_config.lens_effects;
-                
+
                 if let Some(input_view) = external_input {
                     // Read from external texture (DoF scratch)
                     pp.apply_from_input(
@@ -1039,10 +1128,10 @@ impl ViewerTerrainScene {
             eprintln!("[DEBUG render_to_texture] No terrain, returning None");
             return None;
         }
-        
+
         // Ensure critical resources are initialized (needed when called without prior interactive rendering)
         self.ensure_fallback_texture();
-        
+
         // Ensure shared depth resources exist (used by compute shaders and PBR)
         // Note: render_to_texture creates its own depth texture, but some systems need
         // the shared depth_view to exist even if not directly used
@@ -1063,7 +1152,9 @@ impl ViewerTerrainScene {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: target_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let color_view = color_tex.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1102,17 +1193,17 @@ impl ViewerTerrainScene {
         let terrain_width = tw.max(th) as f32;
         let h_range = terrain.domain.1 - terrain.domain.0;
         let legacy_z_scale = terrain.z_scale * h_range * 1000.0 / terrain_width.max(1.0);
-        let shader_z_scale = if use_pbr { terrain.z_scale } else { legacy_z_scale };
+        let shader_z_scale = if use_pbr {
+            terrain.z_scale
+        } else {
+            legacy_z_scale
+        };
         let center_y = if use_pbr {
             h_range * terrain.z_scale * 0.5
         } else {
             terrain_width * legacy_z_scale * 0.001 * 0.5
         };
-        let center = glam::Vec3::new(
-            terrain_width * 0.5,
-            center_y,
-            terrain_width * 0.5,
-        );
+        let center = glam::Vec3::new(terrain_width * 0.5, center_y, terrain_width * 0.5);
 
         let eye = glam::Vec3::new(
             center.x + r * theta.sin() * phi.cos(),
@@ -1205,34 +1296,29 @@ impl ViewerTerrainScene {
         let bg = terrain.background_color;
         let _ = terrain; // Release borrow
 
-        if let Some((domain, z_scale, sun_intensity, ambient, shadow_intensity, water_level, background_color, water_color)) = pbr_uniforms_data {
+        if let Some((
+            domain,
+            z_scale,
+            sun_intensity,
+            ambient,
+            shadow_intensity,
+            water_level,
+            background_color,
+            water_color,
+        )) = pbr_uniforms_data
+        {
             let pbr_uniforms = TerrainPbrUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
                 sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
-                terrain_params: [
-                    domain.0,
-                    domain.1 - domain.0,
-                    terrain_width,
-                    z_scale,
-                ],
-                lighting: [
-                    sun_intensity,
-                    ambient,
-                    shadow_intensity,
-                    water_level,
-                ],
+                terrain_params: [domain.0, domain.1 - domain.0, terrain_width, z_scale],
+                lighting: [sun_intensity, ambient, shadow_intensity, water_level],
                 background: [
                     background_color[0],
                     background_color[1],
                     background_color[2],
                     0.0,
                 ],
-                water_color: [
-                    water_color[0],
-                    water_color[1],
-                    water_color[2],
-                    0.0,
-                ],
+                water_color: [water_color[0], water_color[1], water_color[2], 0.0],
                 pbr_params: [
                     self.pbr_config.exposure,
                     self.pbr_config.normal_strength,
@@ -1248,10 +1334,18 @@ impl ViewerTerrainScene {
                 ],
                 screen_dims: [width as f32, height as f32, 0.0, 0.0],
                 overlay_params: [
-                    if self.pbr_config.overlay.enabled { 1.0 } else { 0.0 },
+                    if self.pbr_config.overlay.enabled {
+                        1.0
+                    } else {
+                        0.0
+                    },
                     self.pbr_config.overlay.global_opacity,
-                    0.0,  // Blend mode: 0 = Normal
-                    if self.pbr_config.overlay.solid { 1.0 } else { 0.0 },
+                    0.0, // Blend mode: 0 = Normal
+                    if self.pbr_config.overlay.solid {
+                        1.0
+                    } else {
+                        0.0
+                    },
                 ],
             };
             // DEBUG: Print overlay_params values
@@ -1275,13 +1369,17 @@ impl ViewerTerrainScene {
         } else {
             false
         };
-        
+
         if has_vector_overlays {
             // Ensure we have a fallback texture for when sun visibility isn't enabled
             if self.fallback_texture.is_none() {
                 let texture = self.device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("vector_overlay_fallback_texture_snapshot"),
-                    size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
@@ -1303,19 +1401,24 @@ impl ViewerTerrainScene {
                         bytes_per_row: Some(4),
                         rows_per_image: Some(1),
                     },
-                    wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                    wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
                 );
-                self.fallback_texture_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+                self.fallback_texture_view =
+                    Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
                 self.fallback_texture = Some(texture);
             }
-            
+
             // Initialize vector overlay pipelines if not yet done
             if let Some(ref mut stack) = self.vector_overlay_stack {
                 // P0.1/M1: For OIT snapshots, ensure OIT pipelines are initialized
                 if !stack.pipelines_ready() || (self.oit_enabled && !stack.oit_pipelines_ready()) {
                     stack.init_pipelines(self.surface_format);
                 }
-                
+
                 // Prepare bind group with sun visibility texture or fallback
                 // For snapshots, force fallback texture (fully lit) to avoid potential issues with
                 // uninitialized or black sun visibility texture which would hide the overlays.
@@ -1323,7 +1426,7 @@ impl ViewerTerrainScene {
                 stack.prepare_bind_group(texture_view);
             }
         }
-        
+
         // Store values needed for vector overlay rendering
         let vo_view_proj = view_proj.to_cols_array_2d();
         let vo_sun_dir = [sun_dir.x, sun_dir.y, sun_dir.z];
@@ -1382,7 +1485,7 @@ impl ViewerTerrainScene {
             pass.set_vertex_buffer(0, terrain.vertex_buffer.slice(..));
             pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..terrain.index_count, 0, 0..1);
-            
+
             // Option B: Render vector overlays after terrain (snapshot path)
             // P0.1/M1: Use standard alpha blending if OIT is disabled
             if has_vector_overlays && !self.oit_enabled {
@@ -1392,7 +1495,7 @@ impl ViewerTerrainScene {
                         let highlight_color = [1.0, 0.8, 0.0, 0.5]; // Yellow highlight
                         for i in 0..layer_count {
                             stack.render_layer_with_highlight(
-                                &mut pass, 
+                                &mut pass,
                                 super::vector_overlay::RenderLayerParams {
                                     layer_index: i,
                                     view_proj: vo_view_proj,
@@ -1400,45 +1503,56 @@ impl ViewerTerrainScene {
                                     lighting: vo_lighting,
                                     selected_feature_id,
                                     highlight_color,
-                                }
+                                },
                             );
                         }
                     }
                 }
             }
         }
-        
+
         // P0.1/M1: OIT rendering path for snapshots - render overlays to temporary WBOIT accumulation buffers
         if has_vector_overlays && self.oit_enabled {
             // Ensure OIT compose pipeline is initialized (size-independent resources)
             // This is safe to call from snapshot path as it doesn't corrupt interactive viewer state
             self.init_wboit_pipeline();
-            
+
             // Create temporary OIT accumulation textures at snapshot resolution
             let oit_color_tex = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("terrain_viewer.snapshot_oit_color"),
-                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba16Float,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
             let oit_color_view = oit_color_tex.create_view(&wgpu::TextureViewDescriptor::default());
-            
+
             let oit_reveal_tex = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("terrain_viewer.snapshot_oit_reveal"),
-                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::R16Float,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
-            let oit_reveal_view = oit_reveal_tex.create_view(&wgpu::TextureViewDescriptor::default());
-            
+            let oit_reveal_view =
+                oit_reveal_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
             // OIT accumulation pass
             {
                 let mut oit_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1456,7 +1570,12 @@ impl ViewerTerrainScene {
                             view: &oit_reveal_view,
                             resolve_target: None,
                             ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color { r: 1.0, g: 0.0, b: 0.0, a: 0.0 }),
+                                load: wgpu::LoadOp::Clear(wgpu::Color {
+                                    r: 1.0,
+                                    g: 0.0,
+                                    b: 0.0,
+                                    a: 0.0,
+                                }),
                                 store: wgpu::StoreOp::Store,
                             },
                         }),
@@ -1472,7 +1591,7 @@ impl ViewerTerrainScene {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-                
+
                 if let Some(ref stack) = self.vector_overlay_stack {
                     if stack.oit_pipelines_ready() && stack.bind_group.is_some() {
                         let layer_count = stack.visible_layer_count();
@@ -1487,41 +1606,47 @@ impl ViewerTerrainScene {
                                     lighting: vo_lighting,
                                     selected_feature_id,
                                     highlight_color,
-                                }
+                                },
                             );
                         }
                     } else {
-                        println!("[snapshot] OIT skip: pipelines_ready={} bind_group={}", stack.oit_pipelines_ready(), stack.bind_group.is_some());
+                        println!(
+                            "[snapshot] OIT skip: pipelines_ready={} bind_group={}",
+                            stack.oit_pipelines_ready(),
+                            stack.bind_group.is_some()
+                        );
                     }
                 }
             }
-            
+
             // Create temporary OIT compose bind group
             // Note: compose pipeline is initialized by render() method when OIT is first enabled
-            if let (Some(ref pipeline), Some(ref sampler)) = 
-                (self.wboit_compose_pipeline.as_ref(), self.wboit_sampler.as_ref()) 
-            {
+            if let (Some(ref pipeline), Some(ref sampler)) = (
+                self.wboit_compose_pipeline.as_ref(),
+                self.wboit_sampler.as_ref(),
+            ) {
                 println!("[snapshot] Compositing OIT result");
                 let layout = &pipeline.get_bind_group_layout(0);
-                let compose_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("terrain_viewer.snapshot_oit_compose_bind_group"),
-                    layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&oit_color_view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(&oit_reveal_view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::Sampler(sampler),
-                        },
-                    ],
-                });
-                
+                let compose_bind_group =
+                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("terrain_viewer.snapshot_oit_compose_bind_group"),
+                        layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&oit_color_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&oit_reveal_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Sampler(sampler),
+                            },
+                        ],
+                    });
+
                 // OIT compose pass - blend accumulated transparency onto scene
                 let mut compose_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("terrain_viewer.snapshot_oit_compose"),
@@ -1537,7 +1662,7 @@ impl ViewerTerrainScene {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-                
+
                 compose_pass.set_pipeline(pipeline);
                 compose_pass.set_bind_group(0, &compose_bind_group, &[]);
                 compose_pass.draw(0..3, 0..1); // Fullscreen triangle
@@ -1554,8 +1679,8 @@ impl ViewerTerrainScene {
         // TAA is only used for the interactive render() path where frames are consecutive.
 
         // P5: Apply volumetrics pass if enabled (after main render, before DoF)
-        let needs_volumetrics = self.pbr_config.volumetrics.enabled && 
-            self.pbr_config.volumetrics.density > 0.0001;
+        let needs_volumetrics =
+            self.pbr_config.volumetrics.enabled && self.pbr_config.volumetrics.density > 0.0001;
         if needs_volumetrics {
             // Initialize volumetrics pass if needed
             if self.volumetrics_pass.is_none() {
@@ -1580,7 +1705,8 @@ impl ViewerTerrainScene {
                         | wgpu::TextureUsages::TEXTURE_BINDING,
                     view_formats: &[],
                 });
-                let vol_output_view = vol_output_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let vol_output_view =
+                    vol_output_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
                 // Calculate inverse view-projection matrix
                 let inv_view_proj = (proj * view_mat).inverse();
@@ -1599,8 +1725,8 @@ impl ViewerTerrainScene {
                     height,
                     inv_view_proj.to_cols_array_2d(),
                     [eye.x, eye.y, eye.z],
-                    1.0,  // near
-                    cam_radius * 10.0,  // far
+                    1.0,               // near
+                    cam_radius * 10.0, // far
                     [sun_dir.x, sun_dir.y, sun_dir.z],
                     terrain_sun_intensity,
                     [terrain_width, terrain.domain.0, shader_z_scale, h_range],
@@ -1619,11 +1745,11 @@ impl ViewerTerrainScene {
             if self.dof_pass.is_none() {
                 self.init_dof_pass();
             }
-            
+
             if let Some(ref mut dof) = self.dof_pass {
                 // Get DoF input view (allocates textures if needed)
                 let _ = dof.get_input_view(width, height, target_format);
-                
+
                 // We need to copy the rendered scene to DoF input first
                 // Then apply DoF from input to a new output texture
                 let dof_output_tex = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -1642,10 +1768,15 @@ impl ViewerTerrainScene {
                         | wgpu::TextureUsages::TEXTURE_BINDING,
                     view_formats: &[],
                 });
-                let dof_output_view = dof_output_tex.create_view(&wgpu::TextureViewDescriptor::default());
-                
-                let cam_radius = self.terrain.as_ref().map(|t| t.cam_radius).unwrap_or(2000.0);
-                
+                let dof_output_view =
+                    dof_output_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+                let cam_radius = self
+                    .terrain
+                    .as_ref()
+                    .map(|t| t.cam_radius)
+                    .unwrap_or(2000.0);
+
                 let dof_cfg = super::dof::DofConfig {
                     enabled: true,
                     focus_distance: self.pbr_config.dof.focus_distance,
@@ -1657,7 +1788,7 @@ impl ViewerTerrainScene {
                     tilt_pitch: self.pbr_config.dof.tilt_pitch,
                     tilt_yaw: self.pbr_config.dof.tilt_yaw,
                 };
-                
+
                 // Apply DoF: reads from color_view, writes to dof_output_view
                 dof.apply(
                     encoder,
@@ -1672,7 +1803,7 @@ impl ViewerTerrainScene {
                     1.0,
                     cam_radius * 10.0,
                 );
-                
+
                 out_tex = dof_output_tex;
                 out_view = dof_output_view;
             }
@@ -1701,7 +1832,9 @@ impl ViewerTerrainScene {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: target_format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
                     view_formats: &[],
                 });
                 let lens_output_view =
@@ -1742,9 +1875,11 @@ impl ViewerTerrainScene {
         let config = self.pbr_config.motion_blur.clone();
         if !config.enabled || config.samples <= 1 {
             // No motion blur needed, fall back to regular render
-            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("terrain_viewer.motion_blur_fallback"),
-            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("terrain_viewer.motion_blur_fallback"),
+                });
             let result = self.render_to_texture(&mut encoder, target_format, width, height, 0);
             self.queue.submit(std::iter::once(encoder.finish()));
             return result;
@@ -1783,9 +1918,11 @@ impl ViewerTerrainScene {
 
         // Clear accumulation buffer
         {
-            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("terrain_viewer.motion_blur_clear"),
-            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("terrain_viewer.motion_blur_clear"),
+                });
             encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain_viewer.motion_blur_clear_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1817,7 +1954,7 @@ impl ViewerTerrainScene {
             // This allows the cam_*_delta values to represent motion per full frame,
             // with the shutter timing determining how much of that motion is captured
             let shutter_range = config.shutter_close - config.shutter_open;
-            let relative_t = (i as f32 + 0.5) / samples as f32;  // 0..1
+            let relative_t = (i as f32 + 0.5) / samples as f32; // 0..1
             let sample_t = config.shutter_open + shutter_range * relative_t;
 
             // Interpolate camera position across the shutter interval
@@ -1835,10 +1972,12 @@ impl ViewerTerrainScene {
             }
 
             // Render frame to temporary texture
-            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("terrain_viewer.motion_blur_sample"),
-            });
-            
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("terrain_viewer.motion_blur_sample"),
+                });
+
             let frame_tex = self.render_to_texture(&mut encoder, target_format, width, height, 0);
             self.queue.submit(std::iter::once(encoder.finish()));
 
@@ -1886,9 +2025,11 @@ impl ViewerTerrainScene {
 
         let mut final_tex = output_tex;
         if let Some(ref motion_blur) = self.motion_blur_pass {
-            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("terrain_viewer.motion_blur_resolve"),
-            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("terrain_viewer.motion_blur_resolve"),
+                });
             motion_blur.resolve(
                 &mut encoder,
                 &self.queue,
@@ -1916,11 +2057,12 @@ impl ViewerTerrainScene {
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
                         format: target_format,
-                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::COPY_SRC,
                         view_formats: &[],
                     });
-                    let lens_output_view = lens_output_tex
-                        .create_view(&wgpu::TextureViewDescriptor::default());
+                    let lens_output_view =
+                        lens_output_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
                     pp.apply_from_input(
                         &mut encoder,
@@ -1956,75 +2098,83 @@ impl ViewerTerrainScene {
     ) {
         // Create a simple additive blit pipeline if needed
         // Use a simple additive pass until a dedicated accumulation pipeline is wired.
-        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("motion_blur.accumulate_shader"),
-            source: wgpu::ShaderSource::Wgsl(ACCUMULATE_SHADER.into()),
-        });
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("motion_blur.accumulate_shader"),
+                source: wgpu::ShaderSource::Wgsl(ACCUMULATE_SHADER.into()),
+            });
 
-        let bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("motion_blur.accumulate_layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-
-        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("motion_blur.accumulate_pipeline_layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("motion_blur.accumulate_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba16Float,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
+        let bind_group_layout =
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("motion_blur.accumulate_layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
                         },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
                         },
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
+                    ],
+                });
+
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("motion_blur.accumulate_pipeline_layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("motion_blur.accumulate_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+            });
 
         let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("motion_blur.accumulate_sampler"),
@@ -2048,9 +2198,11 @@ impl ViewerTerrainScene {
             ],
         });
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("motion_blur.accumulate"),
-        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("motion_blur.accumulate"),
+            });
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -2113,7 +2265,7 @@ impl ViewerTerrainScene {
     fn prepare_pbr_bind_group_internal(&mut self, uniforms: &TerrainPbrUniforms) {
         // Ensure fallback texture exists first (before any borrows)
         self.ensure_fallback_texture();
-        
+
         // Early return checks
         if self.pbr_bind_group_layout.is_none() || self.terrain.is_none() {
             return;
@@ -2131,7 +2283,8 @@ impl ViewerTerrainScene {
 
         // Write uniforms
         if let Some(ref buf) = self.pbr_uniform_buffer {
-            self.queue.write_buffer(buf, 0, bytemuck::cast_slice(&[*uniforms]));
+            self.queue
+                .write_buffer(buf, 0, bytemuck::cast_slice(&[*uniforms]));
         }
 
         // Recreate bind group
@@ -2167,7 +2320,7 @@ impl ViewerTerrainScene {
         let fallback_view = self.fallback_texture_view.as_ref().unwrap();
         let ao_view = self.height_ao_view.as_ref().unwrap_or(fallback_view);
         let sv_view = self.sun_vis_view.as_ref().unwrap_or(fallback_view);
-        
+
         // Get overlay view and sampler from stack
         // ensure_fallback_texture() guarantees composite_view is Some (either actual composite or RGBA fallback)
         let overlay_stack = self.overlay_stack.as_ref().unwrap();
@@ -2177,40 +2330,45 @@ impl ViewerTerrainScene {
         let overlay_sampler = overlay_stack.sampler();
 
         // Get CSM shadow resources - create fallbacks if they don't exist
-        let (shadow_view, moment_view, shadow_sampler) = if let Some(csm) = self.csm_renderer.as_ref() {
-            let shadow_view = csm.shadow_texture_view();
-            if let Some(moment_view) = csm.moment_texture_view() {
-                (shadow_view, moment_view, &csm.shadow_sampler)
+        let (shadow_view, moment_view, shadow_sampler) =
+            if let Some(csm) = self.csm_renderer.as_ref() {
+                let shadow_view = csm.shadow_texture_view();
+                if let Some(moment_view) = csm.moment_texture_view() {
+                    (shadow_view, moment_view, &csm.shadow_sampler)
+                } else {
+                    eprintln!("[WARN] CSM moment maps not created - using fallback");
+                    // Create fallback moment texture
+                    let fallback = self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("csm_moment_fallback"),
+                        size: wgpu::Extent3d {
+                            width: 1,
+                            height: 1,
+                            depth_or_array_layers: 4,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    });
+                    let moment_view = fallback.create_view(&wgpu::TextureViewDescriptor {
+                        dimension: Some(wgpu::TextureViewDimension::D2Array),
+                        ..Default::default()
+                    });
+                    (shadow_view, moment_view, &csm.shadow_sampler)
+                }
             } else {
-                eprintln!("[WARN] CSM moment maps not created - using fallback");
-                // Create fallback moment texture
-                let fallback = self.device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("csm_moment_fallback"),
-                    size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 4 },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba16Float,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                });
-                let moment_view = fallback.create_view(&wgpu::TextureViewDescriptor {
-                    dimension: Some(wgpu::TextureViewDimension::D2Array),
-                    ..Default::default()
-                });
-                (shadow_view, moment_view, &csm.shadow_sampler)
-            }
-        } else {
-            eprintln!("[ERROR] CSM renderer not initialized - cannot create PBR bind group");
-            return;
-        };
-        
+                eprintln!("[ERROR] CSM renderer not initialized - cannot create PBR bind group");
+                return;
+            };
+
         // Moment sampler (Filtering)
-        // We can use the existing pbr sampler (linear) or create a new one. 
+        // We can use the existing pbr sampler (linear) or create a new one.
         // csm_renderer doesn't expose a dedicated moment sampler, but it uses Linear/Linear.
         // Let's use the one we created above 'sampler' which is Linear/Nearest/Clamp.
         // Or better, creating a dedicated one matching CSM requirements.
-        
+
         let moment_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("csm.moment.sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -2227,7 +2385,7 @@ impl ViewerTerrainScene {
         } else {
             return;
         };
-        
+
         // P6.2: Write CSM uniforms with technique value from pbr_config
         // Map shadow technique string to enum value
         let technique = match self.pbr_config.shadow_technique.to_lowercase().as_str() {
@@ -2239,7 +2397,7 @@ impl ViewerTerrainScene {
             "msm" => ShadowTechnique::MSM,
             _ => ShadowTechnique::PCF, // default
         };
-        
+
         // Build CSM uniforms with current technique
         // Use cascade data from CSM renderer if shadow depth passes have been rendered
         let debug_mode = self.pbr_config.debug_mode;
@@ -2273,7 +2431,7 @@ impl ViewerTerrainScene {
             u.evsm_negative_exp = 5.0;
             u.technique_params = [0.0, 0.0, 0.0005, 1.0];
             u.debug_mode = debug_mode; // P6.2: Debug visualization from pbr_config
-            
+
             // Set up default cascade far distances for cascade selection
             let terrain_scale = terrain.dimensions.0.max(terrain.dimensions.1) as f32;
             let base_distance = terrain_scale * 0.1;
@@ -2282,19 +2440,30 @@ impl ViewerTerrainScene {
             }
             u
         };
-        
+
         // Write CSM uniforms to buffer
         // Debug: log uniform values
         static CSM_ONCE: std::sync::Once = std::sync::Once::new();
         CSM_ONCE.call_once(|| {
-            println!("[csm_uniforms] cascade_count={}, technique={}, shadow_map_size={}", 
-                csm_uniforms.cascade_count, csm_uniforms.technique, csm_uniforms.shadow_map_size);
-            for (i, c) in csm_uniforms.cascades.iter().enumerate().take(csm_uniforms.cascade_count as usize) {
-                println!("[csm_uniforms] cascade[{}] far_distance={:.1}", i, c.far_distance);
+            println!(
+                "[csm_uniforms] cascade_count={}, technique={}, shadow_map_size={}",
+                csm_uniforms.cascade_count, csm_uniforms.technique, csm_uniforms.shadow_map_size
+            );
+            for (i, c) in csm_uniforms
+                .cascades
+                .iter()
+                .enumerate()
+                .take(csm_uniforms.cascade_count as usize)
+            {
+                println!(
+                    "[csm_uniforms] cascade[{}] far_distance={:.1}",
+                    i, c.far_distance
+                );
             }
         });
-        self.queue.write_buffer(csm_buffer, 0, bytemuck::cast_slice(&[csm_uniforms]));
-        
+        self.queue
+            .write_buffer(csm_buffer, 0, bytemuck::cast_slice(&[csm_uniforms]));
+
         if let Some(ref buf) = self.pbr_uniform_buffer {
             self.pbr_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("terrain_viewer_pbr.bind_group"),
@@ -2352,16 +2521,20 @@ impl ViewerTerrainScene {
             }));
         }
     }
-    
+
     /// Ensure fallback 1x1 white texture exists for when AO/sun_vis are disabled
     fn ensure_fallback_texture(&mut self) {
         if self.fallback_texture.is_some() {
             return;
         }
-        
+
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("terrain_viewer.fallback_texture"),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -2369,7 +2542,7 @@ impl ViewerTerrainScene {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        
+
         // Write 1.0 (fully lit / no occlusion)
         self.queue.write_texture(
             wgpu::ImageCopyTexture {
@@ -2384,15 +2557,25 @@ impl ViewerTerrainScene {
                 bytes_per_row: Some(4),
                 rows_per_image: Some(1),
             },
-            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
         );
-        
-        self.fallback_texture_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+
+        self.fallback_texture_view =
+            Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
         self.fallback_texture = Some(texture);
     }
 
     /// Dispatch compute passes for heightfield AO and sun visibility
-    fn dispatch_heightfield_compute(&mut self, encoder: &mut wgpu::CommandEncoder, terrain_width: f32, sun_dir: glam::Vec3) {
+    fn dispatch_heightfield_compute(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        terrain_width: f32,
+        sun_dir: glam::Vec3,
+    ) {
         let terrain = match self.terrain.as_ref() {
             Some(t) => t,
             None => return,
@@ -2400,10 +2583,16 @@ impl ViewerTerrainScene {
         let (width, height) = terrain.dimensions;
         let h_range = terrain.domain.1 - terrain.domain.0;
         let z_scale = terrain.z_scale;
-        
+
         // Height AO compute pass
         if self.pbr_config.height_ao.enabled {
-            if let (Some(ref pipeline), Some(ref layout), Some(ref uniform_buf), Some(ref ao_view), Some(ref sampler)) = (
+            if let (
+                Some(ref pipeline),
+                Some(ref layout),
+                Some(ref uniform_buf),
+                Some(ref ao_view),
+                Some(ref sampler),
+            ) = (
                 &self.height_ao_pipeline,
                 &self.height_ao_bind_group_layout,
                 &self.height_ao_uniform_buffer,
@@ -2412,7 +2601,7 @@ impl ViewerTerrainScene {
             ) {
                 let ao_width = (width as f32 * self.pbr_config.height_ao.resolution_scale) as u32;
                 let ao_height = (height as f32 * self.pbr_config.height_ao.resolution_scale) as u32;
-                
+
                 // Update uniforms
                 let uniforms: [f32; 16] = [
                     self.pbr_config.height_ao.directions as f32,
@@ -2427,21 +2616,37 @@ impl ViewerTerrainScene {
                     ao_height as f32,
                     width as f32,
                     height as f32,
-                    0.0, 0.0, 0.0, 0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
                 ];
-                self.queue.write_buffer(uniform_buf, 0, bytemuck::cast_slice(&uniforms));
-                
+                self.queue
+                    .write_buffer(uniform_buf, 0, bytemuck::cast_slice(&uniforms));
+
                 let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("terrain_viewer.height_ao_bind_group"),
                     layout,
                     entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: uniform_buf.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&terrain.heightmap_view) },
-                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(sampler) },
-                        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(ao_view) },
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: uniform_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&terrain.heightmap_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::TextureView(ao_view),
+                        },
                     ],
                 });
-                
+
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("terrain_viewer.height_ao_compute"),
                     timestamp_writes: None,
@@ -2451,19 +2656,27 @@ impl ViewerTerrainScene {
                 pass.dispatch_workgroups((ao_width + 7) / 8, (ao_height + 7) / 8, 1);
             }
         }
-        
+
         // Sun visibility compute pass
         if self.pbr_config.sun_visibility.enabled {
-            if let (Some(ref pipeline), Some(ref layout), Some(ref uniform_buf), Some(ref sv_view), Some(ref sampler)) = (
+            if let (
+                Some(ref pipeline),
+                Some(ref layout),
+                Some(ref uniform_buf),
+                Some(ref sv_view),
+                Some(ref sampler),
+            ) = (
                 &self.sun_vis_pipeline,
                 &self.sun_vis_bind_group_layout,
                 &self.sun_vis_uniform_buffer,
                 &self.sun_vis_view,
                 &self.sampler_nearest,
             ) {
-                let sv_width = (width as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
-                let sv_height = (height as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
-                
+                let sv_width =
+                    (width as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
+                let sv_height =
+                    (height as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
+
                 // Update uniforms - sun_dir should point toward sun (negate light direction)
                 let uniforms: [f32; 16] = [
                     self.pbr_config.sun_visibility.samples as f32,
@@ -2483,19 +2696,32 @@ impl ViewerTerrainScene {
                     sun_dir.z,
                     self.pbr_config.sun_visibility.bias,
                 ];
-                self.queue.write_buffer(uniform_buf, 0, bytemuck::cast_slice(&uniforms));
-                
+                self.queue
+                    .write_buffer(uniform_buf, 0, bytemuck::cast_slice(&uniforms));
+
                 let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("terrain_viewer.sun_vis_bind_group"),
                     layout,
                     entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: uniform_buf.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&terrain.heightmap_view) },
-                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(sampler) },
-                        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(sv_view) },
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: uniform_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&terrain.heightmap_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::TextureView(sv_view),
+                        },
                     ],
                 });
-                
+
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("terrain_viewer.sun_vis_compute"),
                     timestamp_writes: None,

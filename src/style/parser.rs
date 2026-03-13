@@ -165,7 +165,12 @@ mod tests {
         let spec = parse_style_str(minimal_style_json()).unwrap();
         let labels = spec.layer_by_id("labels").unwrap();
 
-        let prop_name = labels.layout.text_field.as_ref().unwrap().as_property_name();
+        let prop_name = labels
+            .layout
+            .text_field
+            .as_ref()
+            .unwrap()
+            .as_property_name();
         assert_eq!(prop_name, Some("name"));
 
         let size = labels.layout.text_size.as_ref().unwrap().as_f32().unwrap();

@@ -9,10 +9,12 @@ use std::path::Path;
 
 use wgpu::util::DeviceExt;
 
-use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
-use crate::viewer::event_loop::{update_ipc_transform_stats, set_pending_bundle_save, set_pending_bundle_load};
-use crate::viewer::terrain;
 use crate::cli::gi_types::GiVizMode;
+use crate::core::screen_space_effects::ScreenSpaceEffect as SSE;
+use crate::viewer::event_loop::{
+    set_pending_bundle_load, set_pending_bundle_save, update_ipc_transform_stats,
+};
+use crate::viewer::terrain;
 use crate::viewer::viewer_enums::{CaptureKind, FogMode, ViewerCmd, VizMode};
 use crate::viewer::viewer_types;
 use crate::viewer::Viewer;
@@ -55,9 +57,7 @@ impl Viewer {
 
                     println!(
                         "GI: weights ao={:.6} ssgi={:.6} ssr={:.6}",
-                        self.gi_ao_weight,
-                        self.gi_ssgi_weight,
-                        self.gi_ssr_weight
+                        self.gi_ao_weight, self.gi_ssgi_weight, self.gi_ssr_weight
                     );
                 } else {
                     println!("GI: <unavailable: GI manager not initialized>");
@@ -355,10 +355,7 @@ impl Viewer {
             ViewerCmd::QuerySsgiUpsampleSigmaDepth => {
                 if let Some(ref gi) = self.gi {
                     if let Some(s) = gi.ssgi_settings() {
-                        println!(
-                            "ssgi-upsample-sigma-depth = {:.6}",
-                            s.upsample_depth_sigma
-                        );
+                        println!("ssgi-upsample-sigma-depth = {:.6}", s.upsample_depth_sigma);
                     } else {
                         println!("ssgi-upsample-sigma-depth = <unavailable>");
                     }
@@ -503,26 +500,24 @@ impl Viewer {
                 }
                 self.snapshot_request = Some(p);
             }
-            ViewerCmd::LoadObj(path) => {
-                match crate::io::obj_read::import_obj(&path) {
-                    Ok(obj) => {
-                        if let Err(e) = self.upload_mesh(&obj.mesh) {
-                            eprintln!("Failed to upload OBJ mesh: {}", e);
-                        } else {
-                            if let Some(mat) = obj.materials.get(0) {
-                                if let Some(tex_rel) = &mat.diffuse_texture {
-                                    if let Some(base) = Path::new(&path).parent() {
-                                        let tex_path = base.join(tex_rel);
-                                        let _ = self.load_albedo_texture(tex_path.as_path());
-                                    }
+            ViewerCmd::LoadObj(path) => match crate::io::obj_read::import_obj(&path) {
+                Ok(obj) => {
+                    if let Err(e) = self.upload_mesh(&obj.mesh) {
+                        eprintln!("Failed to upload OBJ mesh: {}", e);
+                    } else {
+                        if let Some(mat) = obj.materials.get(0) {
+                            if let Some(tex_rel) = &mat.diffuse_texture {
+                                if let Some(base) = Path::new(&path).parent() {
+                                    let tex_path = base.join(tex_rel);
+                                    let _ = self.load_albedo_texture(tex_path.as_path());
                                 }
                             }
-                            println!("Loaded OBJ geometry: {}", path);
                         }
+                        println!("Loaded OBJ geometry: {}", path);
                     }
-                    Err(e) => eprintln!("OBJ import failed: {}", e),
                 }
-            }
+                Err(e) => eprintln!("OBJ import failed: {}", e),
+            },
             ViewerCmd::LoadGltf(path) => match crate::io::gltf_read::import_gltf_to_mesh(&path) {
                 Ok(mesh) => {
                     if let Err(e) = self.upload_mesh(&mesh) {
@@ -627,8 +622,7 @@ impl Viewer {
                 println!("[P5.3] capture: SSR thickness ablation queued");
             }
             ViewerCmd::CaptureP54GiStack => {
-                self.pending_captures
-                    .push_back(CaptureKind::P54GiStack);
+                self.pending_captures.push_back(CaptureKind::P54GiStack);
                 println!("[P5.4] capture: GI stack ablation queued");
             }
             // Sky controls
@@ -686,25 +680,23 @@ impl Viewer {
             ViewerCmd::FogUpsigma(s) => {
                 self.fog_upsigma = s.max(0.0);
             }
-            ViewerCmd::FogPreset(p) => {
-                match p {
-                    0 => {
-                        self.fog_steps = 32;
-                        self.fog_temporal_alpha = 0.7;
-                        self.fog_density = 0.02;
-                    }
-                    1 => {
-                        self.fog_steps = 64;
-                        self.fog_temporal_alpha = 0.6;
-                        self.fog_density = 0.04;
-                    }
-                    _ => {
-                        self.fog_steps = 96;
-                        self.fog_temporal_alpha = 0.5;
-                        self.fog_density = 0.06;
-                    }
+            ViewerCmd::FogPreset(p) => match p {
+                0 => {
+                    self.fog_steps = 32;
+                    self.fog_temporal_alpha = 0.7;
+                    self.fog_density = 0.02;
                 }
-            }
+                1 => {
+                    self.fog_steps = 64;
+                    self.fog_temporal_alpha = 0.6;
+                    self.fog_density = 0.04;
+                }
+                _ => {
+                    self.fog_steps = 96;
+                    self.fog_temporal_alpha = 0.5;
+                    self.fog_density = 0.06;
+                }
+            },
             ViewerCmd::HudToggle(on) => {
                 self.hud_enabled = on;
                 self.hud.set_enabled(on);
@@ -771,7 +763,10 @@ impl Viewer {
                 }
             }
             // IPC-specific commands
-            ViewerCmd::SetSunDirection { azimuth_deg, elevation_deg } => {
+            ViewerCmd::SetSunDirection {
+                azimuth_deg,
+                elevation_deg,
+            } => {
                 let az_rad = azimuth_deg.to_radians();
                 let el_rad = elevation_deg.to_radians();
                 let _dir = glam::Vec3::new(
@@ -779,24 +774,28 @@ impl Viewer {
                     el_rad.sin(),
                     el_rad.cos() * az_rad.cos(),
                 );
-                println!("Sun direction: azimuth={:.1}° elevation={:.1}°", azimuth_deg, elevation_deg);
+                println!(
+                    "Sun direction: azimuth={:.1}° elevation={:.1}°",
+                    azimuth_deg, elevation_deg
+                );
             }
-            ViewerCmd::SetIbl { path, intensity } => {
-                match self.load_ibl(&path) {
-                    Ok(_) => {
-                        self.lit_ibl_intensity = intensity.max(0.0);
-                        self.lit_use_ibl = self.lit_ibl_intensity > 0.0;
-                        self.update_lit_uniform();
-                        println!("Loaded IBL: {} with intensity {:.2}", path, intensity);
-                    }
-                    Err(e) => eprintln!("IBL load failed: {}", e),
+            ViewerCmd::SetIbl { path, intensity } => match self.load_ibl(&path) {
+                Ok(_) => {
+                    self.lit_ibl_intensity = intensity.max(0.0);
+                    self.lit_use_ibl = self.lit_ibl_intensity > 0.0;
+                    self.update_lit_uniform();
+                    println!("Loaded IBL: {} with intensity {:.2}", path, intensity);
                 }
-            }
+                Err(e) => eprintln!("IBL load failed: {}", e),
+            },
             ViewerCmd::SetZScale(value) => {
                 #[cfg(feature = "extension-module")]
                 {
                     if let Some(ref mut _scene) = self.terrain_scene {
-                        println!("Terrain z-scale set to {:.2} (terrain scene attached)", value);
+                        println!(
+                            "Terrain z-scale set to {:.2} (terrain scene attached)",
+                            value
+                        );
                     } else {
                         eprintln!("SetZScale error: z-scale only applies to terrain scenes");
                     }
@@ -807,7 +806,11 @@ impl Viewer {
                     eprintln!("SetZScale error: terrain support not compiled in");
                 }
             }
-            ViewerCmd::SnapshotWithSize { path, width, height } => {
+            ViewerCmd::SnapshotWithSize {
+                path,
+                width,
+                height,
+            } => {
                 if let (Some(w), Some(h)) = (width, height) {
                     self.view_config.snapshot_width = Some(w);
                     self.view_config.snapshot_height = Some(h);
@@ -867,17 +870,17 @@ impl Viewer {
                     self.object_rotation,
                     self.object_translation,
                 );
-                
+
                 // CPU-side vertex transform
                 if !self.original_mesh_positions.is_empty() {
                     use viewer_types::PackedVertex;
                     let vertex_count = self.original_mesh_positions.len();
                     let mut vertices: Vec<PackedVertex> = Vec::with_capacity(vertex_count);
-                    
+
                     for i in 0..vertex_count {
                         let orig_pos = glam::Vec3::from(self.original_mesh_positions[i]);
                         let transformed = self.object_transform.transform_point3(orig_pos);
-                        
+
                         let orig_nrm = if i < self.original_mesh_normals.len() {
                             glam::Vec3::from(self.original_mesh_normals[i])
                         } else {
@@ -885,13 +888,13 @@ impl Viewer {
                         };
                         let rot_mat = glam::Mat3::from_quat(self.object_rotation);
                         let transformed_nrm = (rot_mat * orig_nrm).normalize();
-                        
+
                         let uv = if i < self.original_mesh_uvs.len() {
                             self.original_mesh_uvs[i]
                         } else {
                             [0.0, 0.0]
                         };
-                        
+
                         vertices.push(PackedVertex {
                             position: transformed.to_array(),
                             normal: transformed_nrm.to_array(),
@@ -899,17 +902,17 @@ impl Viewer {
                             rough_metal: [0.5, 0.0],
                         });
                     }
-                    
+
                     let vertex_data = bytemuck::cast_slice(&vertices);
-                    let new_vb = self.device.create_buffer_init(
-                        &wgpu::util::BufferInitDescriptor {
-                            label: Some("viewer.ipc.mesh.vb.transformed"),
-                            contents: vertex_data,
-                            usage: wgpu::BufferUsages::VERTEX,
-                        }
-                    );
+                    let new_vb =
+                        self.device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("viewer.ipc.mesh.vb.transformed"),
+                                contents: vertex_data,
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
                     self.geom_vb = Some(new_vb);
-                    
+
                     // D1: Log CPU transform applied
                     let msg = format!(
                         "[D1-CPU-TRANSFORM] frame={} vertices={} trans=[{:.3},{:.3},{:.3}] scale=[{:.3},{:.3},{:.3}]\n",
@@ -926,7 +929,7 @@ impl Viewer {
                             f.write_all(msg.as_bytes())
                         });
                 }
-                
+
                 self.transform_version += 1;
                 let is_identity = self.object_translation == glam::Vec3::ZERO
                     && self.object_rotation == glam::Quat::IDENTITY
@@ -945,7 +948,7 @@ impl Viewer {
                         Ok(scene) => {
                             self.terrain_viewer = Some(scene);
                             eprintln!("[DEBUG LoadTerrain] terrain_viewer created successfully");
-                        },
+                        }
                         Err(e) => {
                             eprintln!("[terrain] Failed to create viewer: {}", e);
                             return;
@@ -958,46 +961,98 @@ impl Viewer {
                     match tv.load_terrain(&path) {
                         Ok(()) => {
                             println!("[terrain] Loaded: {}", path);
-                            eprintln!("[DEBUG LoadTerrain] terrain_viewer has_terrain={}", tv.has_terrain());
-                        },
+                            eprintln!(
+                                "[DEBUG LoadTerrain] terrain_viewer has_terrain={}",
+                                tv.has_terrain()
+                            );
+                        }
                         Err(e) => eprintln!("[terrain] Failed to load {}: {}", path, e),
                     }
                 }
             }
-            ViewerCmd::SetTerrainCamera { phi_deg, theta_deg, radius, fov_deg } => {
+            ViewerCmd::SetTerrainCamera {
+                phi_deg,
+                theta_deg,
+                radius,
+                fov_deg,
+            } => {
                 if let Some(ref mut tv) = self.terrain_viewer {
                     tv.set_camera(phi_deg, theta_deg, radius, fov_deg);
-                    println!("[terrain] Camera: phi={:.1}° theta={:.1}° r={:.1} fov={:.1}°", 
-                        phi_deg, theta_deg, radius, fov_deg);
+                    println!(
+                        "[terrain] Camera: phi={:.1}° theta={:.1}° r={:.1} fov={:.1}°",
+                        phi_deg, theta_deg, radius, fov_deg
+                    );
                 }
             }
-            ViewerCmd::SetTerrainSun { azimuth_deg, elevation_deg, intensity } => {
+            ViewerCmd::SetTerrainSun {
+                azimuth_deg,
+                elevation_deg,
+                intensity,
+            } => {
                 if let Some(ref mut tv) = self.terrain_viewer {
                     tv.set_sun(azimuth_deg, elevation_deg, intensity);
-                    println!("[terrain] Sun: az={:.1}° el={:.1}° int={:.2}", 
-                        azimuth_deg, elevation_deg, intensity);
+                    println!(
+                        "[terrain] Sun: az={:.1}° el={:.1}° int={:.2}",
+                        azimuth_deg, elevation_deg, intensity
+                    );
                 }
             }
             ViewerCmd::SetTerrain {
-                phi, theta, radius, fov,
-                sun_azimuth, sun_elevation, sun_intensity,
-                ambient, zscale, shadow, background, water_level, water_color,
+                phi,
+                theta,
+                radius,
+                fov,
+                sun_azimuth,
+                sun_elevation,
+                sun_intensity,
+                ambient,
+                zscale,
+                shadow,
+                background,
+                water_level,
+                water_color,
             } => {
                 if let Some(ref mut tv) = self.terrain_viewer {
                     if let Some(t) = tv.terrain.as_mut() {
-                        if let Some(v) = phi { t.cam_phi_deg = v; }
-                        if let Some(v) = theta { t.cam_theta_deg = v.clamp(5.0, 85.0); }
-                        if let Some(v) = radius { t.cam_radius = v.clamp(100.0, 50000.0); }
-                        if let Some(v) = fov { t.cam_fov_deg = v.clamp(10.0, 120.0); }
-                        if let Some(v) = sun_azimuth { t.sun_azimuth_deg = v; }
-                        if let Some(v) = sun_elevation { t.sun_elevation_deg = v.clamp(-90.0, 90.0); }
-                        if let Some(v) = sun_intensity { t.sun_intensity = v.max(0.0); }
-                        if let Some(v) = ambient { t.ambient = v.clamp(0.0, 1.0); }
-                        if let Some(v) = zscale { t.z_scale = v.max(0.01); }
-                        if let Some(v) = shadow { t.shadow_intensity = v.clamp(0.0, 1.0); }
-                        if let Some(bg) = background { t.background_color = bg; }
-                        if let Some(v) = water_level { t.water_level = v; }
-                        if let Some(wc) = water_color { t.water_color = wc; }
+                        if let Some(v) = phi {
+                            t.cam_phi_deg = v;
+                        }
+                        if let Some(v) = theta {
+                            t.cam_theta_deg = v.clamp(5.0, 85.0);
+                        }
+                        if let Some(v) = radius {
+                            t.cam_radius = v.clamp(100.0, 50000.0);
+                        }
+                        if let Some(v) = fov {
+                            t.cam_fov_deg = v.clamp(10.0, 120.0);
+                        }
+                        if let Some(v) = sun_azimuth {
+                            t.sun_azimuth_deg = v;
+                        }
+                        if let Some(v) = sun_elevation {
+                            t.sun_elevation_deg = v.clamp(-90.0, 90.0);
+                        }
+                        if let Some(v) = sun_intensity {
+                            t.sun_intensity = v.max(0.0);
+                        }
+                        if let Some(v) = ambient {
+                            t.ambient = v.clamp(0.0, 1.0);
+                        }
+                        if let Some(v) = zscale {
+                            t.z_scale = v.max(0.01);
+                        }
+                        if let Some(v) = shadow {
+                            t.shadow_intensity = v.clamp(0.0, 1.0);
+                        }
+                        if let Some(bg) = background {
+                            t.background_color = bg;
+                        }
+                        if let Some(v) = water_level {
+                            t.water_level = v;
+                        }
+                        if let Some(wc) = water_color {
+                            t.water_color = wc;
+                        }
                     }
                     if let Some(params) = tv.get_params() {
                         println!("[terrain] {}", params);
@@ -1056,7 +1111,7 @@ impl Viewer {
                         debug_mode,
                     );
                 }
-                
+
                 // M6: Wire sky config to existing viewer sky system
                 if let Some(ref cfg) = sky {
                     self.sky_enabled = cfg.enabled;
@@ -1071,8 +1126,17 @@ impl Viewer {
                 }
             }
             // Overlay commands
-            ViewerCmd::LoadOverlay { name, path, extent, opacity, z_order } => {
-                println!("[overlay] LoadOverlay command received: name='{}' path='{}'", name, path);
+            ViewerCmd::LoadOverlay {
+                name,
+                path,
+                extent,
+                opacity,
+                z_order,
+            } => {
+                println!(
+                    "[overlay] LoadOverlay command received: name='{}' path='{}'",
+                    name, path
+                );
                 if let Some(ref mut tv) = self.terrain_viewer {
                     use std::path::Path;
                     let opacity_val = opacity.unwrap_or(1.0);
@@ -1090,7 +1154,9 @@ impl Viewer {
                         Err(e) => eprintln!("[overlay] Failed to load '{}': {}", name, e),
                     }
                 } else {
-                    eprintln!("[overlay] No terrain loaded - load terrain first (terrain_viewer is None)");
+                    eprintln!(
+                        "[overlay] No terrain loaded - load terrain first (terrain_viewer is None)"
+                    );
                 }
             }
             ViewerCmd::RemoveOverlay { id } => {
@@ -1144,7 +1210,7 @@ impl Viewer {
                     println!("[overlay] No terrain loaded");
                 }
             }
-            
+
             // === OPTION B: VECTOR OVERLAY GEOMETRY COMMANDS ===
             ViewerCmd::AddVectorOverlay {
                 name,
@@ -1160,16 +1226,24 @@ impl Viewer {
                 z_order,
             } => {
                 if let Some(ref mut tv) = self.terrain_viewer {
-                    use crate::viewer::terrain::vector_overlay::{VectorOverlayLayer, VectorVertex, OverlayPrimitive};
-                    
+                    use crate::viewer::terrain::vector_overlay::{
+                        OverlayPrimitive, VectorOverlayLayer, VectorVertex,
+                    };
+
                     // Convert vertices from [x, y, z, r, g, b, a, feature_id?] to VectorVertex
-                    let verts: Vec<VectorVertex> = vertices.iter().map(|v| {
-                        let feature_id = if v.len() > 7 { v[7] as u32 } else { 0 };
-                        VectorVertex::with_feature_id(v[0], v[1], v[2], v[3], v[4], v[5], v[6], feature_id)
-                    }).collect();
-                    
-                    let prim = OverlayPrimitive::from_str(&primitive).unwrap_or(OverlayPrimitive::Triangles);
-                    
+                    let verts: Vec<VectorVertex> = vertices
+                        .iter()
+                        .map(|v| {
+                            let feature_id = if v.len() > 7 { v[7] as u32 } else { 0 };
+                            VectorVertex::with_feature_id(
+                                v[0], v[1], v[2], v[3], v[4], v[5], v[6], feature_id,
+                            )
+                        })
+                        .collect();
+
+                    let prim = OverlayPrimitive::from_str(&primitive)
+                        .unwrap_or(OverlayPrimitive::Triangles);
+
                     let layer = VectorOverlayLayer {
                         name: name.clone(),
                         vertices: verts,
@@ -1184,70 +1258,99 @@ impl Viewer {
                         visible: true,
                         z_order,
                     };
-                    
+
                     let id = tv.add_vector_overlay(layer);
-                    println!("[vector_overlay] Added '{}' with {} vertices (id={})", name, vertices.len(), id);
+                    println!(
+                        "[vector_overlay] Added '{}' with {} vertices (id={})",
+                        name,
+                        vertices.len(),
+                        id
+                    );
 
                     // Plan 3: Build BVH for picking if triangles
                     if prim == OverlayPrimitive::Triangles && !indices.is_empty() {
-                        use crate::accel::cpu_bvh::{MeshCPU, build_bvh_cpu, BuildOptions};
+                        use crate::accel::cpu_bvh::{build_bvh_cpu, BuildOptions, MeshCPU};
+                        use crate::accel::types::{Aabb, BvhNode, Triangle};
                         use crate::picking::LayerBvhData;
-                        use crate::accel::types::{BvhNode, Triangle, Aabb};
 
-                        let pos: Vec<[f32; 3]> = vertices.iter().map(|v| [v[0], v[1], v[2]]).collect();
-                        let tris_indices: Vec<[u32; 3]> = indices.chunks(3).filter_map(|c| {
-                            if c.len() == 3 { Some([c[0], c[1], c[2]]) } else { None }
-                        }).collect();
+                        let pos: Vec<[f32; 3]> =
+                            vertices.iter().map(|v| [v[0], v[1], v[2]]).collect();
+                        let tris_indices: Vec<[u32; 3]> = indices
+                            .chunks(3)
+                            .filter_map(|c| {
+                                if c.len() == 3 {
+                                    Some([c[0], c[1], c[2]])
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
 
                         let mesh = MeshCPU::new(pos.clone(), tris_indices.clone());
                         if let Ok(bvh) = build_bvh_cpu(&mesh, &BuildOptions::default()) {
                             let mut layer_data = LayerBvhData::new(id, name.clone());
-                            
-                            // Convert cpu_bvh::BvhNode to accel::types::BvhNode
-                            layer_data.cpu_nodes = bvh.nodes.iter().map(|n| {
-                                let kind = if n.is_leaf() { 1 } else { 0 };
-                                BvhNode {
-                                    aabb: Aabb::new(n.aabb_min, n.aabb_max),
-                                    kind,
-                                    left_idx: n.left,
-                                    right_idx: n.right,
-                                    parent_idx: 0, // Parent pointers not populated by default build
-                                }
-                            }).collect();
 
-                            layer_data.cpu_triangles = bvh.tri_indices.iter().map(|&tri_idx| {
-                                let idx = tri_idx as usize;
-                                if idx < tris_indices.len() {
-                                    let ti = tris_indices[idx];
-                                    let v0 = pos[ti[0] as usize];
-                                    let v1 = pos[ti[1] as usize];
-                                    let v2 = pos[ti[2] as usize];
-                                    Triangle::new(v0, v1, v2)
-                                } else {
-                                    Triangle::new([0.0; 3], [0.0; 3], [0.0; 3])
-                                }
-                            }).collect();
+                            // Convert cpu_bvh::BvhNode to accel::types::BvhNode
+                            layer_data.cpu_nodes = bvh
+                                .nodes
+                                .iter()
+                                .map(|n| {
+                                    let kind = if n.is_leaf() { 1 } else { 0 };
+                                    BvhNode {
+                                        aabb: Aabb::new(n.aabb_min, n.aabb_max),
+                                        kind,
+                                        left_idx: n.left,
+                                        right_idx: n.right,
+                                        parent_idx: 0, // Parent pointers not populated by default build
+                                    }
+                                })
+                                .collect();
+
+                            layer_data.cpu_triangles = bvh
+                                .tri_indices
+                                .iter()
+                                .map(|&tri_idx| {
+                                    let idx = tri_idx as usize;
+                                    if idx < tris_indices.len() {
+                                        let ti = tris_indices[idx];
+                                        let v0 = pos[ti[0] as usize];
+                                        let v1 = pos[ti[1] as usize];
+                                        let v2 = pos[ti[2] as usize];
+                                        Triangle::new(v0, v1, v2)
+                                    } else {
+                                        Triangle::new([0.0; 3], [0.0; 3], [0.0; 3])
+                                    }
+                                })
+                                .collect();
 
                             // Feature IDs - extract from vertex data (index 7 is feature_id)
                             // vertices format: [x, y, z, r, g, b, a, feature_id]
-                            layer_data.cpu_feature_ids = bvh.tri_indices.iter().map(|&tri_idx| {
-                                let idx = tri_idx as usize;
-                                if idx < tris_indices.len() {
-                                    let ti = tris_indices[idx];
-                                    // Use feature_id from first vertex of triangle
-                                    let v0_idx = ti[0] as usize;
-                                    if v0_idx < vertices.len() {
-                                        vertices[v0_idx][7] as u32
+                            layer_data.cpu_feature_ids = bvh
+                                .tri_indices
+                                .iter()
+                                .map(|&tri_idx| {
+                                    let idx = tri_idx as usize;
+                                    if idx < tris_indices.len() {
+                                        let ti = tris_indices[idx];
+                                        // Use feature_id from first vertex of triangle
+                                        let v0_idx = ti[0] as usize;
+                                        if v0_idx < vertices.len() {
+                                            vertices[v0_idx][7] as u32
+                                        } else {
+                                            id // fallback to layer id
+                                        }
                                     } else {
                                         id // fallback to layer id
                                     }
-                                } else {
-                                    id // fallback to layer id
-                                }
-                            }).collect();
+                                })
+                                .collect();
 
                             self.unified_picking.register_layer_bvh(layer_data);
-                            println!("[picking] Built BVH for layer {} ({} nodes)", id, bvh.nodes.len());
+                            println!(
+                                "[picking] Built BVH for layer {} ({} nodes)",
+                                id,
+                                bvh.nodes.len()
+                            );
                         }
                     }
                 } else {
@@ -1322,8 +1425,6 @@ impl Viewer {
                 }
             }
 
-
-
             // === LABELS ===
             ViewerCmd::AddLabel {
                 text,
@@ -1383,7 +1484,11 @@ impl Viewer {
                 if let Some(hfa) = horizon_fade_angle {
                     style.horizon_fade_angle = hfa;
                 }
-                let id = self.add_label(&text, (world_pos[0], world_pos[1], world_pos[2]), Some(style));
+                let id = self.add_label(
+                    &text,
+                    (world_pos[0], world_pos[1], world_pos[2]),
+                    Some(style),
+                );
                 println!("[label] added id={} text=\"{}\"", id, text);
             }
             ViewerCmd::AddLineLabel {
@@ -1432,7 +1537,9 @@ impl Viewer {
                     .map(|p| Vec3::new(p[0], p[1], p[2]))
                     .collect();
                 let rd = repeat_distance.unwrap_or(0.0);
-                let id = self.label_manager.add_line_label(text.clone(), poly, style, pl, rd);
+                let id = self
+                    .label_manager
+                    .add_line_label(text.clone(), poly, style, pl, rd);
                 println!("[label] added line label id={} text=\"{}\"", id.0, text);
             }
             ViewerCmd::RemoveLabel { id } => {
@@ -1450,12 +1557,10 @@ impl Viewer {
             ViewerCmd::LoadLabelAtlas {
                 atlas_png_path,
                 metrics_json_path,
-            } => {
-                match self.load_label_atlas(&atlas_png_path, &metrics_json_path) {
-                    Ok(()) => println!("[label] atlas loaded from {}", atlas_png_path),
-                    Err(e) => eprintln!("[label] failed to load atlas: {}", e),
-                }
-            }
+            } => match self.load_label_atlas(&atlas_png_path, &metrics_json_path) {
+                Ok(()) => println!("[label] atlas loaded from {}", atlas_png_path),
+                Err(e) => eprintln!("[label] failed to load atlas: {}", e),
+            },
             ViewerCmd::SetLabelZoom { zoom } => {
                 self.label_manager.set_zoom(zoom);
                 println!("[label] zoom={:.2}", zoom);
@@ -1581,9 +1686,16 @@ impl Viewer {
                 println!("[taa] enabled={}", enabled);
             }
             ViewerCmd::GetTaaStatus => {
-                let taa_enabled = self.taa_renderer.as_ref().map(|t| t.is_enabled()).unwrap_or(false);
+                let taa_enabled = self
+                    .taa_renderer
+                    .as_ref()
+                    .map(|t| t.is_enabled())
+                    .unwrap_or(false);
                 let jitter_enabled = self.taa_jitter.enabled;
-                println!("[taa] enabled={} jitter_enabled={}", taa_enabled, jitter_enabled);
+                println!(
+                    "[taa] enabled={} jitter_enabled={}",
+                    taa_enabled, jitter_enabled
+                );
             }
             ViewerCmd::SetTaaParams {
                 history_weight,
@@ -1591,44 +1703,61 @@ impl Viewer {
                 enable_jitter,
             } => {
                 // Check if we should delegate to terrain viewer
-                let terrain_active = self.terrain_viewer.as_ref().map(|tv| tv.has_terrain()).unwrap_or(false);
-                
+                let terrain_active = self
+                    .terrain_viewer
+                    .as_ref()
+                    .map(|tv| tv.has_terrain())
+                    .unwrap_or(false);
+
                 if terrain_active {
                     if let Some(ref mut tv) = self.terrain_viewer {
-                         tv.set_taa_params(history_weight, jitter_scale);
-                         // Note: explicit jitter enable not yet supported for terrain viewer delegation via this command
+                        tv.set_taa_params(history_weight, jitter_scale);
+                        // Note: explicit jitter enable not yet supported for terrain viewer delegation via this command
                     }
                 } else {
                     // Main viewer logic
                     if let Some(w) = history_weight {
                         if let Some(ref mut taa) = self.taa_renderer {
-                             taa.set_history_weight(w);
+                            taa.set_history_weight(w);
                         }
                     }
                     if let Some(scale) = jitter_scale {
-                         self.taa_jitter.set_scale(scale);
+                        self.taa_jitter.set_scale(scale);
                     }
                     if let Some(enabled) = enable_jitter {
-                         self.taa_jitter.set_enabled(enabled);
+                        self.taa_jitter.set_enabled(enabled);
                     } else if let Some(scale) = jitter_scale {
-                         if scale > 0.0 && !self.taa_jitter.enabled {
-                             self.taa_jitter.set_enabled(true);
-                         }
+                        if scale > 0.0 && !self.taa_jitter.enabled {
+                            self.taa_jitter.set_enabled(true);
+                        }
                     }
-                    
-                    let taa_weight = self.taa_renderer.as_ref().map(|t| t.history_weight()).unwrap_or(0.0);
-                    println!("[taa] params updated: weight={:.2} jitter_scale={:.2} jitter_enabled={}", 
-                        taa_weight, self.taa_jitter.scale, self.taa_jitter.enabled);
+
+                    let taa_weight = self
+                        .taa_renderer
+                        .as_ref()
+                        .map(|t| t.history_weight())
+                        .unwrap_or(0.0);
+                    println!(
+                        "[taa] params updated: weight={:.2} jitter_scale={:.2} jitter_enabled={}",
+                        taa_weight, self.taa_jitter.scale, self.taa_jitter.enabled
+                    );
                 }
             }
 
             // P5: Point cloud commands
-            ViewerCmd::LoadPointCloud { path, point_size, max_points, color_mode } => {
-                use super::super::pointcloud::{PointCloudState, ColorMode};
-                
-                eprintln!("[pointcloud] Loading: {} (size={}, max={}, mode={:?})",
-                    path, point_size, max_points, color_mode);
-                
+            ViewerCmd::LoadPointCloud {
+                path,
+                point_size,
+                max_points,
+                color_mode,
+            } => {
+                use super::super::pointcloud::{ColorMode, PointCloudState};
+
+                eprintln!(
+                    "[pointcloud] Loading: {} (size={}, max={}, mode={:?})",
+                    path, point_size, max_points, color_mode
+                );
+
                 // Initialize point cloud state if needed
                 if self.point_cloud.is_none() {
                     eprintln!("[pointcloud] Creating PointCloudState...");
@@ -1640,23 +1769,26 @@ impl Viewer {
                     ));
                     eprintln!("[pointcloud] PointCloudState created");
                 }
-                
+
                 if let Some(ref mut pc) = self.point_cloud {
-                    let mode = color_mode.as_ref()
+                    let mode = color_mode
+                        .as_ref()
                         .map(|s| ColorMode::from_str(s))
                         .unwrap_or(ColorMode::Elevation);
-                    
+
                     pc.set_point_size(point_size);
                     eprintln!("[pointcloud] Loading file...");
-                    
+
                     match pc.load_from_file(&self.device, &self.queue, &path, max_points, mode) {
                         Ok(()) => {
                             eprintln!("[pointcloud] Loaded {} points", pc.point_count);
                             eprintln!("[pointcloud] Bounds: ({:.1}, {:.1}, {:.1}) - ({:.1}, {:.1}, {:.1})",
                                 pc.bounds_min[0], pc.bounds_min[1], pc.bounds_min[2],
                                 pc.bounds_max[0], pc.bounds_max[1], pc.bounds_max[2]);
-                            eprintln!("[pointcloud] Center: ({:.1}, {:.1}, {:.1})",
-                                pc.center[0], pc.center[1], pc.center[2]);
+                            eprintln!(
+                                "[pointcloud] Center: ({:.1}, {:.1}, {:.1})",
+                                pc.center[0], pc.center[1], pc.center[2]
+                            );
                             eprintln!("[pointcloud] Load complete, returning to render loop");
                         }
                         Err(e) => {
@@ -1671,7 +1803,11 @@ impl Viewer {
                 }
                 println!("[pointcloud] Cleared");
             }
-            ViewerCmd::SetPointCloudParams { point_size, visible, color_mode } => {
+            ViewerCmd::SetPointCloudParams {
+                point_size,
+                visible,
+                color_mode,
+            } => {
                 if let Some(ref mut pc) = self.point_cloud {
                     if let Some(size) = point_size {
                         pc.set_point_size(size);
@@ -1683,8 +1819,10 @@ impl Viewer {
                         use super::super::pointcloud::ColorMode;
                         pc.color_mode = ColorMode::from_str(&mode);
                     }
-                    println!("[pointcloud] Params updated: size={}, visible={}, mode={:?}",
-                        pc.point_size, pc.visible, pc.color_mode);
+                    println!(
+                        "[pointcloud] Params updated: size={}, visible={}, mode={:?}",
+                        pc.point_size, pc.visible, pc.color_mode
+                    );
                 }
             }
         }

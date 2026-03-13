@@ -28,7 +28,7 @@ impl OverlayPrimitive {
             OverlayPrimitive::TriangleStrip => wgpu::PrimitiveTopology::TriangleStrip,
         }
     }
-    
+
     /// Create from string (for IPC parsing)
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
@@ -46,11 +46,11 @@ impl OverlayPrimitive {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct VectorVertex {
-    pub position: [f32; 3],  // World XYZ (Y may be offset for drape)
-    pub color: [f32; 4],     // RGBA vertex color
-    pub uv: [f32; 2],        // Texture coords (for textured overlays)
-    pub normal: [f32; 3],    // For lit overlays (default: up vec)
-    pub feature_id: u32,     // Feature ID for picking (0 = no feature)
+    pub position: [f32; 3], // World XYZ (Y may be offset for drape)
+    pub color: [f32; 4],    // RGBA vertex color
+    pub uv: [f32; 2],       // Texture coords (for textured overlays)
+    pub normal: [f32; 3],   // For lit overlays (default: up vec)
+    pub feature_id: u32,    // Feature ID for picking (0 = no feature)
 }
 
 impl VectorVertex {
@@ -64,9 +64,18 @@ impl VectorVertex {
             feature_id: 0,
         }
     }
-    
+
     /// Create a new vertex with position, color, and feature ID
-    pub fn with_feature_id(x: f32, y: f32, z: f32, r: f32, g: f32, b: f32, a: f32, feature_id: u32) -> Self {
+    pub fn with_feature_id(
+        x: f32,
+        y: f32,
+        z: f32,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        feature_id: u32,
+    ) -> Self {
         Self {
             position: [x, y, z],
             color: [r, g, b, a],
@@ -75,17 +84,18 @@ impl VectorVertex {
             feature_id,
         }
     }
-    
+
     /// Create with full parameters
-    pub fn with_all(
-        position: [f32; 3],
-        color: [f32; 4],
-        uv: [f32; 2],
-        normal: [f32; 3],
-    ) -> Self {
-        Self { position, color, uv, normal, feature_id: 0 }
+    pub fn with_all(position: [f32; 3], color: [f32; 4], uv: [f32; 2], normal: [f32; 3]) -> Self {
+        Self {
+            position,
+            color,
+            uv,
+            normal,
+            feature_id: 0,
+        }
     }
-    
+
     /// Create with full parameters including feature ID
     pub fn with_all_and_id(
         position: [f32; 3],
@@ -94,9 +104,15 @@ impl VectorVertex {
         normal: [f32; 3],
         feature_id: u32,
     ) -> Self {
-        Self { position, color, uv, normal, feature_id }
+        Self {
+            position,
+            color,
+            uv,
+            normal,
+            feature_id,
+        }
     }
-    
+
     /// Vertex buffer layout descriptor
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -136,7 +152,7 @@ impl VectorVertex {
             ],
         }
     }
-    
+
     /// Set feature ID on this vertex
     pub fn set_feature_id(&mut self, id: u32) {
         self.feature_id = id;
@@ -150,12 +166,12 @@ pub struct VectorOverlayLayer {
     pub vertices: Vec<VectorVertex>,
     pub indices: Vec<u32>,
     pub primitive: OverlayPrimitive,
-    pub drape: bool,              // If true, drape onto terrain
-    pub drape_offset: f32,        // Height above terrain when draped
-    pub opacity: f32,             // 0.0 - 1.0
-    pub depth_bias: f32,          // Z-fighting prevention (0.01 - 1.0)
-    pub line_width: f32,          // For Lines/LineStrip (1.0 - 10.0)
-    pub point_size: f32,          // For Points (1.0 - 20.0)
+    pub drape: bool,       // If true, drape onto terrain
+    pub drape_offset: f32, // Height above terrain when draped
+    pub opacity: f32,      // 0.0 - 1.0
+    pub depth_bias: f32,   // Z-fighting prevention (0.01 - 1.0)
+    pub line_width: f32,   // For Lines/LineStrip (1.0 - 10.0)
+    pub point_size: f32,   // For Points (1.0 - 20.0)
     pub visible: bool,
     pub z_order: i32,
 }
@@ -193,13 +209,13 @@ pub struct VectorOverlayGpu {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct VectorOverlayUniforms {
-    pub view_proj: [[f32; 4]; 4],     // 64 bytes
-    pub sun_dir: [f32; 4],            // 16 bytes
-    pub lighting: [f32; 4],           // sun_intensity, ambient, shadow_strength, terrain_width
-    pub layer_params: [f32; 4],       // opacity, depth_bias, line_width, point_size
-    pub highlight_color: [f32; 4],    // Highlight color for selected features (RGBA)
-    pub selected_feature_id: u32,     // Currently selected feature ID (0 = none)
-    pub _pad: [u32; 7],               // Padding: WGSL vec3 has 16-byte alignment → 160 bytes total
+    pub view_proj: [[f32; 4]; 4],  // 64 bytes
+    pub sun_dir: [f32; 4],         // 16 bytes
+    pub lighting: [f32; 4],        // sun_intensity, ambient, shadow_strength, terrain_width
+    pub layer_params: [f32; 4],    // opacity, depth_bias, line_width, point_size
+    pub highlight_color: [f32; 4], // Highlight color for selected features (RGBA)
+    pub selected_feature_id: u32,  // Currently selected feature ID (0 = none)
+    pub _pad: [u32; 7],            // Padding: WGSL vec3 has 16-byte alignment → 160 bytes total
 }
 
 pub struct VectorOverlayStack {
@@ -209,10 +225,10 @@ pub struct VectorOverlayStack {
     next_id: u32,
     enabled: bool,
     dirty: bool,
-    
+
     // Global settings
     global_opacity: f32,
-    
+
     // GPU resources for rendering
     pub pipeline_triangles: Option<wgpu::RenderPipeline>,
     pub pipeline_lines: Option<wgpu::RenderPipeline>,
@@ -221,7 +237,7 @@ pub struct VectorOverlayStack {
     pub uniform_buffer: Option<wgpu::Buffer>,
     pub bind_group: Option<wgpu::BindGroup>,
     pub sampler: Option<wgpu::Sampler>,
-    
+
     // ID buffer pipelines for picking
     pub id_pipeline_triangles: Option<wgpu::RenderPipeline>,
     pub id_pipeline_lines: Option<wgpu::RenderPipeline>,
@@ -229,7 +245,7 @@ pub struct VectorOverlayStack {
     pub id_bind_group_layout: Option<wgpu::BindGroupLayout>,
     pub id_uniform_buffer: Option<wgpu::Buffer>,
     pub id_bind_group: Option<wgpu::BindGroup>,
-    
+
     // P0.1/M1: OIT pipelines with WBOIT blend states
     pub oit_pipeline_triangles: Option<wgpu::RenderPipeline>,
     pub oit_pipeline_lines: Option<wgpu::RenderPipeline>,
@@ -265,26 +281,30 @@ impl VectorOverlayStack {
             oit_pipeline_points: None,
         }
     }
-    
+
     /// Add a vector overlay layer. Returns layer ID.
     pub fn add_layer(&mut self, layer: VectorOverlayLayer) -> u32 {
         let id = self.next_id;
         self.next_id += 1;
-        
+
         // Create vertex buffer
-        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("vector_overlay_vertices_{}", id)),
-            contents: bytemuck::cast_slice(&layer.vertices),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-        
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("vector_overlay_vertices_{}", id)),
+                contents: bytemuck::cast_slice(&layer.vertices),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            });
+
         // Create index buffer
-        let index_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("vector_overlay_indices_{}", id)),
-            contents: bytemuck::cast_slice(&layer.indices),
-            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-        });
-        
+        let index_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("vector_overlay_indices_{}", id)),
+                contents: bytemuck::cast_slice(&layer.indices),
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            });
+
         let gpu_layer = VectorOverlayGpu {
             vertex_count: layer.vertices.len() as u32,
             index_count: layer.indices.len() as u32,
@@ -293,33 +313,35 @@ impl VectorOverlayStack {
             index_buffer,
             id,
         };
-        
+
         self.layers.push(gpu_layer);
         self.dirty = true;
-        
+
         // Sort by z_order
         self.layers.sort_by_key(|l| l.config.z_order);
-        
+
         id
     }
-    
+
     /// Update vertices for an existing layer (for animation)
     pub fn update_vertices(&mut self, id: u32, vertices: Vec<VectorVertex>) {
         if let Some(layer) = self.layers.iter_mut().find(|l| l.id == id) {
             layer.config.vertices = vertices.clone();
             layer.vertex_count = vertices.len() as u32;
-            
+
             // Recreate vertex buffer
-            layer.vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("vector_overlay_vertices_{}", id)),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            });
-            
+            layer.vertex_buffer =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("vector_overlay_vertices_{}", id)),
+                        contents: bytemuck::cast_slice(&vertices),
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    });
+
             self.dirty = true;
         }
     }
-    
+
     /// Remove a vector overlay by ID. Returns true if found and removed.
     pub fn remove(&mut self, id: u32) -> bool {
         if let Some(pos) = self.layers.iter().position(|l| l.id == id) {
@@ -330,7 +352,7 @@ impl VectorOverlayStack {
             false
         }
     }
-    
+
     /// Set vector overlay visibility
     pub fn set_visible(&mut self, id: u32, visible: bool) {
         if let Some(layer) = self.layers.iter_mut().find(|l| l.id == id) {
@@ -338,7 +360,7 @@ impl VectorOverlayStack {
             self.dirty = true;
         }
     }
-    
+
     /// Set vector overlay opacity
     pub fn set_opacity(&mut self, id: u32, opacity: f32) {
         if let Some(layer) = self.layers.iter_mut().find(|l| l.id == id) {
@@ -346,47 +368,47 @@ impl VectorOverlayStack {
             self.dirty = true;
         }
     }
-    
+
     /// List all vector overlay IDs in z-order
     pub fn list_ids(&self) -> Vec<u32> {
         self.layers.iter().map(|l| l.id).collect()
     }
-    
+
     /// Get number of layers
     pub fn len(&self) -> usize {
         self.layers.len()
     }
-    
+
     /// Check if empty
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
     }
-    
+
     /// Check if any visible layers exist
     pub fn has_visible_layers(&self) -> bool {
         self.layers.iter().any(|l| l.config.visible)
     }
-    
+
     /// Check if enabled
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
-    
+
     /// Enable or disable the overlay system
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
     }
-    
+
     /// Set global opacity
     pub fn set_global_opacity(&mut self, opacity: f32) {
         self.global_opacity = opacity.clamp(0.0, 1.0);
     }
-    
+
     /// Get visible layers in z-order
     pub fn visible_layers(&self) -> impl Iterator<Item = &VectorOverlayGpu> {
         self.layers.iter().filter(|l| l.config.visible)
     }
-    
+
     /// Get global opacity
     pub fn global_opacity(&self) -> f32 {
         self.global_opacity
@@ -398,40 +420,35 @@ impl VectorOverlayStack {
 // ============================================================================
 
 /// Sample heightmap with bilinear interpolation
-fn sample_heightmap_bilinear(
-    heightmap: &[f32],
-    dims: (u32, u32),
-    u: f32,
-    v: f32,
-) -> f32 {
+fn sample_heightmap_bilinear(heightmap: &[f32], dims: (u32, u32), u: f32, v: f32) -> f32 {
     let (w, h) = dims;
     if w == 0 || h == 0 || heightmap.is_empty() {
         return 0.0;
     }
-    
+
     // Clamp to valid range
     let u = u.clamp(0.0, 1.0);
     let v = v.clamp(0.0, 1.0);
-    
+
     // Convert to pixel coordinates
     let x = u * (w - 1) as f32;
     let y = v * (h - 1) as f32;
-    
+
     let x0 = x.floor() as u32;
     let y0 = y.floor() as u32;
     let x1 = (x0 + 1).min(w - 1);
     let y1 = (y0 + 1).min(h - 1);
-    
+
     let fx = x.fract();
     let fy = y.fract();
-    
+
     // Sample four corners
     let idx = |ix: u32, iy: u32| -> usize { (iy * w + ix) as usize };
     let h00 = heightmap.get(idx(x0, y0)).copied().unwrap_or(0.0);
     let h10 = heightmap.get(idx(x1, y0)).copied().unwrap_or(0.0);
     let h01 = heightmap.get(idx(x0, y1)).copied().unwrap_or(0.0);
     let h11 = heightmap.get(idx(x1, y1)).copied().unwrap_or(0.0);
-    
+
     // Bilinear interpolation
     let h0 = h00 * (1.0 - fx) + h10 * fx;
     let h1 = h01 * (1.0 - fx) + h11 * fx;
@@ -450,22 +467,22 @@ fn compute_terrain_normal(
     if w < 2 || h < 2 || heightmap.is_empty() {
         return [0.0, 1.0, 0.0]; // Default up
     }
-    
+
     let du = 1.0 / w as f32;
     let dv = 1.0 / h as f32;
-    
+
     let h_left = sample_heightmap_bilinear(heightmap, dims, u - du, v);
     let h_right = sample_heightmap_bilinear(heightmap, dims, u + du, v);
     let h_down = sample_heightmap_bilinear(heightmap, dims, u, v - dv);
     let h_up = sample_heightmap_bilinear(heightmap, dims, u, v + dv);
-    
+
     // Gradient in height per world unit
     let world_du = terrain_width * 2.0 * du;
     let world_dv = terrain_width * 2.0 * dv;
-    
+
     let dh_dx = (h_right - h_left) / world_du;
     let dh_dz = (h_up - h_down) / world_dv;
-    
+
     // Normal = normalize(-dh/dx, 1, -dh/dz)
     let len = (dh_dx * dh_dx + 1.0 + dh_dz * dh_dz).sqrt();
     [-dh_dx / len, 1.0 / len, -dh_dz / len]
@@ -494,7 +511,7 @@ pub struct RenderLayerParams {
 }
 
 /// Drape vertices onto terrain surface
-/// 
+///
 /// # Arguments
 /// * `params` - Struct containing all draping parameters
 pub fn drape_vertices(params: DrapeParams) {
@@ -517,26 +534,26 @@ pub fn drape_vertices(params: DrapeParams) {
         }
         return;
     }
-    
+
     for v in vertices.iter_mut() {
         // Convert world XZ to terrain UV
         let x = v.position[0] - terrain_origin.0;
         let z = v.position[2] - terrain_origin.1;
-        
+
         // Normalize to [0, 1] range (terrain goes from 0 to terrain_width)
         let u = (x / terrain_width).clamp(0.0, 1.0);
         let vv = (z / terrain_width).clamp(0.0, 1.0);
-        
+
         // Sample heightmap and normalize like the terrain shader does:
         // world_y = (h - min_h) / h_range * terrain_width * z_scale * 0.001
         // Here height_scale = terrain_width * z_scale * 0.001 / h_range
         let h = sample_heightmap_bilinear(heightmap, dims, u, vv);
         let terrain_height = (h - height_min) * height_scale;
-        
+
         // Set vertex Y to terrain height + offset + original vertex height
         // This preserves building extrusion heights when draping
         v.position[1] = terrain_height + height_offset + v.position[1];
-        
+
         // Compute normal from terrain gradient for proper lighting
         v.normal = compute_terrain_normal(heightmap, dims, u, vv, terrain_width);
     }
@@ -700,41 +717,43 @@ impl VectorOverlayStack {
     /// Initialize the vector overlay render pipelines
     pub fn init_pipelines(&mut self, surface_format: wgpu::TextureFormat) {
         // Create bind group layout with texture/sampler for shadow integration
-        let bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("vector_overlay_bind_group_layout"),
-            entries: &[
-                // Uniforms
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // Sun visibility texture (non-filterable for R32Float compatibility)
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // Sampler (non-filtering for R32Float compatibility)
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-            ],
-        });
-        
+        let bind_group_layout =
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("vector_overlay_bind_group_layout"),
+                    entries: &[
+                        // Uniforms
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        // Sun visibility texture (non-filterable for R32Float compatibility)
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                        // Sampler (non-filtering for R32Float compatibility)
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                            count: None,
+                        },
+                    ],
+                });
+
         // Create uniform buffer
         let uniform_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vector_overlay_uniforms"),
@@ -742,140 +761,154 @@ impl VectorOverlayStack {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        
+
         // Compile shader
-        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("vector_overlay_shader"),
-            source: wgpu::ShaderSource::Wgsl(VECTOR_OVERLAY_SHADER.into()),
-        });
-        
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("vector_overlay_shader"),
+                source: wgpu::ShaderSource::Wgsl(VECTOR_OVERLAY_SHADER.into()),
+            });
+
         // Create pipeline layout
-        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("vector_overlay_pipeline_layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("vector_overlay_pipeline_layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         // Common depth stencil state (depth test, no write for overlays)
         // Use LessEqual to be more forgiving with depth precision, and aggressive bias
         // to ensure overlay is clearly in front of terrain
         let depth_stencil = Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: false,  // Read only - don't write to depth
+            depth_write_enabled: false, // Read only - don't write to depth
             depth_compare: wgpu::CompareFunction::LessEqual,
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState {
-                constant: -100,  // Strong bias towards camera
+                constant: -100, // Strong bias towards camera
                 slope_scale: -10.0,
                 clamp: 0.0,
             },
         });
 
         // Triangle pipeline
-        self.pipeline_triangles = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vector_overlay_triangles_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[VectorVertex::desc()],
+        self.pipeline_triangles = Some(self.device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("vector_overlay_triangles_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[VectorVertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None, // Draw both sides
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: depth_stencil.clone(),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,  // Draw both sides
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: depth_stencil.clone(),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        }));
+        ));
 
         // Lines pipeline
-        self.pipeline_lines = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vector_overlay_lines_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[VectorVertex::desc()],
+        self.pipeline_lines = Some(self.device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("vector_overlay_lines_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[VectorVertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::LineList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: depth_stencil.clone(),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: depth_stencil.clone(),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        }));
+        ));
 
         // Points pipeline
-        self.pipeline_points = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vector_overlay_points_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[VectorVertex::desc()],
+        self.pipeline_points = Some(self.device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("vector_overlay_points_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[VectorVertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::PointList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::PointList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        }));
+        ));
 
         self.bind_group_layout = Some(bind_group_layout);
         self.uniform_buffer = Some(uniform_buffer);
-        
+
         // P0.1/M1: Initialize OIT pipelines with WBOIT blend states
         self.init_oit_pipelines(&shader, &pipeline_layout);
     }
-    
+
     /// P0.1/M1: Initialize OIT pipelines with WBOIT blend states for transparent rendering
-    fn init_oit_pipelines(&mut self, shader: &wgpu::ShaderModule, pipeline_layout: &wgpu::PipelineLayout) {
+    fn init_oit_pipelines(
+        &mut self,
+        shader: &wgpu::ShaderModule,
+        pipeline_layout: &wgpu::PipelineLayout,
+    ) {
         // WBOIT color accumulation blend state (additive)
         let accum_blend = wgpu::BlendState {
             color: wgpu::BlendComponent {
@@ -889,7 +922,7 @@ impl VectorOverlayStack {
                 operation: wgpu::BlendOperation::Add,
             },
         };
-        
+
         // WBOIT reveal blend state (multiplicative for alpha product)
         let reveal_blend = wgpu::BlendState {
             color: wgpu::BlendComponent {
@@ -903,7 +936,7 @@ impl VectorOverlayStack {
                 operation: wgpu::BlendOperation::Add,
             },
         };
-        
+
         // Depth stencil for OIT (read only, no write)
         let depth_stencil = Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth32Float,
@@ -916,137 +949,143 @@ impl VectorOverlayStack {
                 clamp: 0.0,
             },
         });
-        
+
         // OIT Triangle pipeline (MRT: color accum + reveal)
-        self.oit_pipeline_triangles = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vector_overlay_oit_triangles_pipeline"),
-            layout: Some(pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: shader,
-                entry_point: "vs_main",
-                buffers: &[VectorVertex::desc()],
+        self.oit_pipeline_triangles = Some(self.device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("vector_overlay_oit_triangles_pipeline"),
+                layout: Some(pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: "vs_main",
+                    buffers: &[VectorVertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: "fs_main_oit",
+                    targets: &[
+                        Some(wgpu::ColorTargetState {
+                            format: wgpu::TextureFormat::Rgba16Float,
+                            blend: Some(accum_blend),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        }),
+                        Some(wgpu::ColorTargetState {
+                            format: wgpu::TextureFormat::R16Float,
+                            blend: Some(reveal_blend),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        }),
+                    ],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: depth_stencil.clone(),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: shader,
-                entry_point: "fs_main_oit",
-                targets: &[
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba16Float,
-                        blend: Some(accum_blend),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::R16Float,
-                        blend: Some(reveal_blend),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                ],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: depth_stencil.clone(),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        }));
-        
+        ));
+
         // OIT Lines pipeline
-        self.oit_pipeline_lines = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vector_overlay_oit_lines_pipeline"),
-            layout: Some(pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: shader,
-                entry_point: "vs_main",
-                buffers: &[VectorVertex::desc()],
+        self.oit_pipeline_lines = Some(self.device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("vector_overlay_oit_lines_pipeline"),
+                layout: Some(pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: "vs_main",
+                    buffers: &[VectorVertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: "fs_main_oit",
+                    targets: &[
+                        Some(wgpu::ColorTargetState {
+                            format: wgpu::TextureFormat::Rgba16Float,
+                            blend: Some(accum_blend),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        }),
+                        Some(wgpu::ColorTargetState {
+                            format: wgpu::TextureFormat::R16Float,
+                            blend: Some(reveal_blend),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        }),
+                    ],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::LineList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: depth_stencil.clone(),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: shader,
-                entry_point: "fs_main_oit",
-                targets: &[
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba16Float,
-                        blend: Some(accum_blend),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::R16Float,
-                        blend: Some(reveal_blend),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                ],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: depth_stencil.clone(),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        }));
-        
+        ));
+
         // OIT Points pipeline
-        self.oit_pipeline_points = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vector_overlay_oit_points_pipeline"),
-            layout: Some(pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: shader,
-                entry_point: "vs_main",
-                buffers: &[VectorVertex::desc()],
+        self.oit_pipeline_points = Some(self.device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("vector_overlay_oit_points_pipeline"),
+                layout: Some(pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: "vs_main",
+                    buffers: &[VectorVertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: "fs_main_oit",
+                    targets: &[
+                        Some(wgpu::ColorTargetState {
+                            format: wgpu::TextureFormat::Rgba16Float,
+                            blend: Some(accum_blend),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        }),
+                        Some(wgpu::ColorTargetState {
+                            format: wgpu::TextureFormat::R16Float,
+                            blend: Some(reveal_blend),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        }),
+                    ],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::PointList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: shader,
-                entry_point: "fs_main_oit",
-                targets: &[
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba16Float,
-                        blend: Some(accum_blend),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::R16Float,
-                        blend: Some(reveal_blend),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                ],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::PointList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        }));
-        
+        ));
+
         println!("[vector_overlay] OIT pipelines initialized");
     }
-    
+
     /// Check if pipelines are initialized
     pub fn pipelines_ready(&self) -> bool {
         self.pipeline_triangles.is_some() && self.bind_group_layout.is_some()
     }
-    
+
     /// P0.1/M1: Check if OIT pipelines are ready
     pub fn oit_pipelines_ready(&self) -> bool {
         self.oit_pipeline_triangles.is_some()
     }
-    
+
     /// P0.1/M1: Render a layer using OIT pipelines to WBOIT accumulation buffers
     pub fn render_layer_oit<'a>(
         &'a self,
@@ -1057,12 +1096,12 @@ impl VectorOverlayStack {
         if params.layer_index >= visible_layers.len() {
             return false;
         }
-        
+
         let layer = visible_layers[params.layer_index];
         if layer.index_count == 0 {
             return false;
         }
-        
+
         // Update uniforms
         let uniforms = VectorOverlayUniforms {
             view_proj: params.view_proj,
@@ -1073,18 +1112,19 @@ impl VectorOverlayStack {
             highlight_color: params.highlight_color,
             _pad: [0; 7],
         };
-        
+
         if let Some(ref buf) = self.uniform_buffer {
-            self.queue.write_buffer(buf, 0, bytemuck::bytes_of(&uniforms));
+            self.queue
+                .write_buffer(buf, 0, bytemuck::bytes_of(&uniforms));
         }
-        
+
         // Set bind group
         if let Some(ref bg) = self.bind_group {
             pass.set_bind_group(0, bg, &[]);
         } else {
             return false;
         }
-        
+
         // Select OIT pipeline based on primitive type
         let pipeline = match layer.config.primitive {
             OverlayPrimitive::Triangles | OverlayPrimitive::TriangleStrip => {
@@ -1095,7 +1135,7 @@ impl VectorOverlayStack {
             }
             OverlayPrimitive::Points => self.oit_pipeline_points.as_ref(),
         };
-        
+
         if let Some(pipe) = pipeline {
             pass.set_pipeline(pipe);
             pass.set_vertex_buffer(0, layer.vertex_buffer.slice(..));
@@ -1106,7 +1146,7 @@ impl VectorOverlayStack {
             false
         }
     }
-    
+
     /// Prepare bind group for rendering (call before render pass)
     /// Creates bind group with sun visibility texture for shadow integration
     pub fn prepare_bind_group(&mut self, sun_vis_view: &wgpu::TextureView) {
@@ -1114,12 +1154,12 @@ impl VectorOverlayStack {
             Some(layout) => layout,
             None => return,
         };
-        
+
         let uniform_buffer = match &self.uniform_buffer {
             Some(buf) => buf,
             None => return,
         };
-        
+
         // Create sampler if not already created (non-filtering for R32Float)
         if self.sampler.is_none() {
             self.sampler = Some(self.device.create_sampler(&wgpu::SamplerDescriptor {
@@ -1133,9 +1173,9 @@ impl VectorOverlayStack {
                 ..Default::default()
             }));
         }
-        
+
         let sampler = self.sampler.as_ref().unwrap();
-        
+
         // Create bind group with uniforms, sun visibility texture, and sampler
         self.bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vector_overlay_bind_group"),
@@ -1156,7 +1196,7 @@ impl VectorOverlayStack {
             ],
         }));
     }
-    
+
     /// Render a single layer (call during render pass)
     /// Returns true if something was drawn
     pub fn render_layer<'a>(
@@ -1170,26 +1210,26 @@ impl VectorOverlayStack {
         if !self.enabled {
             return false;
         }
-        
+
         let bind_group = match &self.bind_group {
             Some(bg) => bg,
             None => return false,
         };
-        
+
         let uniform_buffer = match &self.uniform_buffer {
             Some(buf) => buf,
             None => return false,
         };
-        
+
         // Get visible layers
         let visible_layers: Vec<_> = self.layers.iter().filter(|l| l.config.visible).collect();
-        
+
         if layer_index >= visible_layers.len() {
             return false;
         }
-        
+
         let layer = visible_layers[layer_index];
-        
+
         // Update uniforms for this layer (with default highlight - no selection)
         let uniforms = VectorOverlayUniforms {
             view_proj,
@@ -1202,30 +1242,27 @@ impl VectorOverlayStack {
                 layer.config.point_size,
             ],
             highlight_color: [1.0, 0.8, 0.0, 0.5], // Default yellow highlight
-            selected_feature_id: 0, // No selection by default
+            selected_feature_id: 0,                // No selection by default
             _pad: [0; 7],
         };
-        
-        self.queue.write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
-        
+
+        self.queue
+            .write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
+
         // Select pipeline based on primitive type
         let pipeline = match layer.config.primitive {
             OverlayPrimitive::Triangles | OverlayPrimitive::TriangleStrip => {
                 self.pipeline_triangles.as_ref()
             }
-            OverlayPrimitive::Lines | OverlayPrimitive::LineStrip => {
-                self.pipeline_lines.as_ref()
-            }
-            OverlayPrimitive::Points => {
-                self.pipeline_points.as_ref()
-            }
+            OverlayPrimitive::Lines | OverlayPrimitive::LineStrip => self.pipeline_lines.as_ref(),
+            OverlayPrimitive::Points => self.pipeline_points.as_ref(),
         };
-        
+
         if let Some(pipeline) = pipeline {
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bind_group, &[]);
             pass.set_vertex_buffer(0, layer.vertex_buffer.slice(..));
-            
+
             if layer.index_count > 0 {
                 pass.set_index_buffer(layer.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..layer.index_count, 0, 0..1);
@@ -1237,12 +1274,12 @@ impl VectorOverlayStack {
             false
         }
     }
-    
+
     /// Get count of visible layers
     pub fn visible_layer_count(&self) -> usize {
         self.layers.iter().filter(|l| l.config.visible).count()
     }
-    
+
     /// Get all layers (for ID buffer rendering)
     pub fn layers(&self) -> &[VectorOverlayGpu] {
         &self.layers
@@ -1266,25 +1303,25 @@ impl VectorOverlayStack {
         if !self.enabled {
             return false;
         }
-        
+
         let bind_group = match &self.bind_group {
             Some(bg) => bg,
             None => return false,
         };
-        
+
         let uniform_buffer = match &self.uniform_buffer {
             Some(buf) => buf,
             None => return false,
         };
-        
+
         let visible_layers: Vec<_> = self.layers.iter().filter(|l| l.config.visible).collect();
-        
+
         if layer_index >= visible_layers.len() {
             return false;
         }
-        
+
         let layer = visible_layers[layer_index];
-        
+
         let uniforms = VectorOverlayUniforms {
             view_proj,
             sun_dir: [sun_dir[0], sun_dir[1], sun_dir[2], 0.0],
@@ -1299,26 +1336,23 @@ impl VectorOverlayStack {
             selected_feature_id,
             _pad: [0; 7],
         };
-        
-        self.queue.write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
-        
+
+        self.queue
+            .write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
+
         let pipeline = match layer.config.primitive {
             OverlayPrimitive::Triangles | OverlayPrimitive::TriangleStrip => {
                 self.pipeline_triangles.as_ref()
             }
-            OverlayPrimitive::Lines | OverlayPrimitive::LineStrip => {
-                self.pipeline_lines.as_ref()
-            }
-            OverlayPrimitive::Points => {
-                self.pipeline_points.as_ref()
-            }
+            OverlayPrimitive::Lines | OverlayPrimitive::LineStrip => self.pipeline_lines.as_ref(),
+            OverlayPrimitive::Points => self.pipeline_points.as_ref(),
         };
-        
+
         if let Some(pipeline) = pipeline {
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bind_group, &[]);
             pass.set_vertex_buffer(0, layer.vertex_buffer.slice(..));
-            
+
             if layer.index_count > 0 {
                 pass.set_index_buffer(layer.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..layer.index_count, 0, 0..1);
@@ -1387,19 +1421,21 @@ fn fs_id(in: VertexOutput) -> @location(0) u32 {
 impl VectorOverlayStack {
     /// Initialize ID buffer pipelines for picking
     pub fn init_id_pipelines(&mut self) {
-        let bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("vector_overlay_id_bind_group_layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
+        let bind_group_layout =
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("vector_overlay_id_bind_group_layout"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                });
 
         let uniform_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vector_overlay_id_uniforms"),
@@ -1417,16 +1453,20 @@ impl VectorOverlayStack {
             }],
         });
 
-        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("vector_overlay_id_shader"),
-            source: wgpu::ShaderSource::Wgsl(ID_BUFFER_SHADER.into()),
-        });
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("vector_overlay_id_shader"),
+                source: wgpu::ShaderSource::Wgsl(ID_BUFFER_SHADER.into()),
+            });
 
-        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("vector_overlay_id_pipeline_layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("vector_overlay_id_pipeline_layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         let depth_stencil = Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth32Float,
@@ -1437,100 +1477,106 @@ impl VectorOverlayStack {
         });
 
         // Triangle pipeline for ID buffer
-        self.id_pipeline_triangles = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vector_overlay_id_triangles_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_id",
-                buffers: &[VectorVertex::desc()],
+        self.id_pipeline_triangles = Some(self.device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("vector_overlay_id_triangles_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_id",
+                    buffers: &[VectorVertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_id",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R32Uint,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: depth_stencil.clone(),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_id",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::R32Uint,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: depth_stencil.clone(),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        }));
+        ));
 
         // Lines pipeline for ID buffer
-        self.id_pipeline_lines = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vector_overlay_id_lines_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_id",
-                buffers: &[VectorVertex::desc()],
+        self.id_pipeline_lines = Some(self.device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("vector_overlay_id_lines_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_id",
+                    buffers: &[VectorVertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_id",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R32Uint,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::LineList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: depth_stencil.clone(),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_id",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::R32Uint,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: depth_stencil.clone(),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        }));
+        ));
 
         // Points pipeline for ID buffer
-        self.id_pipeline_points = Some(self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vector_overlay_id_points_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_id",
-                buffers: &[VectorVertex::desc()],
+        self.id_pipeline_points = Some(self.device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("vector_overlay_id_points_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_id",
+                    buffers: &[VectorVertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_id",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R32Uint,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::PointList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_id",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::R32Uint,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::PointList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        }));
+        ));
 
         self.id_bind_group_layout = Some(bind_group_layout);
         self.id_uniform_buffer = Some(uniform_buffer);
@@ -1569,7 +1615,8 @@ impl VectorOverlayStack {
             depth_bias,
             _pad: [0.0; 3],
         };
-        self.queue.write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
+        self.queue
+            .write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
 
         // Render each visible layer
         for layer in self.layers.iter().filter(|l| l.config.visible) {
@@ -1580,9 +1627,7 @@ impl VectorOverlayStack {
                 OverlayPrimitive::Lines | OverlayPrimitive::LineStrip => {
                     self.id_pipeline_lines.as_ref()
                 }
-                OverlayPrimitive::Points => {
-                    self.id_pipeline_points.as_ref()
-                }
+                OverlayPrimitive::Points => self.id_pipeline_points.as_ref(),
             };
 
             if let Some(pipeline) = pipeline {

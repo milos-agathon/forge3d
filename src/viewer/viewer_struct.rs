@@ -18,9 +18,9 @@ use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 use crate::core::shadows::{CsmConfig, CsmShadowMap};
 use crate::core::text_overlay::TextOverlayRenderer;
 use crate::labels::LabelManager;
-use crate::picking::UnifiedPickingSystem;
 use crate::p5::ssr::SsrScenePreset;
 use crate::passes::gi::GiPass;
+use crate::picking::UnifiedPickingSystem;
 use crate::render::params::SsrParams;
 
 use super::camera_controller::CameraController;

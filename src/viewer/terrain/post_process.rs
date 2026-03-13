@@ -148,7 +148,12 @@ impl PostProcessPass {
     }
 
     /// Ensure intermediate texture is allocated at the correct size
-    fn ensure_intermediate_texture(&mut self, width: u32, height: u32, format: wgpu::TextureFormat) {
+    fn ensure_intermediate_texture(
+        &mut self,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) {
         if self.current_size != (width, height) || self.intermediate_texture.is_none() {
             let texture = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("post_process.intermediate"),
@@ -161,17 +166,24 @@ impl PostProcessPass {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
-            self.intermediate_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+            self.intermediate_view =
+                Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
             self.intermediate_texture = Some(texture);
             self.current_size = (width, height);
         }
     }
 
     /// Get the intermediate texture view for rendering the scene to
-    pub fn get_intermediate_view(&mut self, width: u32, height: u32, format: wgpu::TextureFormat) -> &wgpu::TextureView {
+    pub fn get_intermediate_view(
+        &mut self,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> &wgpu::TextureView {
         self.ensure_intermediate_texture(width, height, format);
         self.intermediate_view.as_ref().unwrap()
     }
@@ -191,8 +203,18 @@ impl PostProcessPass {
         vignette_softness: f32,
     ) {
         let uniforms = PostProcessUniforms {
-            screen_dims: [width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32],
-            lens_params: [distortion, chromatic_aberration, vignette_strength, vignette_radius],
+            screen_dims: [
+                width as f32,
+                height as f32,
+                1.0 / width as f32,
+                1.0 / height as f32,
+            ],
+            lens_params: [
+                distortion,
+                chromatic_aberration,
+                vignette_strength,
+                vignette_radius,
+            ],
             lens_params2: [vignette_softness, 0.0, 0.0, 0.0],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
@@ -254,14 +276,27 @@ impl PostProcessPass {
     ) {
         // Update uniforms
         let uniforms = PostProcessUniforms {
-            screen_dims: [width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32],
-            lens_params: [distortion, chromatic_aberration, vignette_strength, vignette_radius],
+            screen_dims: [
+                width as f32,
+                height as f32,
+                1.0 / width as f32,
+                1.0 / height as f32,
+            ],
+            lens_params: [
+                distortion,
+                chromatic_aberration,
+                vignette_strength,
+                vignette_radius,
+            ],
             lens_params2: [vignette_softness, 0.0, 0.0, 0.0],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
 
         // Create bind group with intermediate texture as input
-        let input_view = self.intermediate_view.as_ref().expect("Intermediate texture not allocated");
+        let input_view = self
+            .intermediate_view
+            .as_ref()
+            .expect("Intermediate texture not allocated");
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("post_process.bind_group"),
             layout: &self.bind_group_layout,
@@ -305,7 +340,11 @@ impl PostProcessPass {
     }
 
     /// Check if any post-process effects are enabled
-    pub fn effects_enabled(distortion: f32, chromatic_aberration: f32, vignette_strength: f32) -> bool {
+    pub fn effects_enabled(
+        distortion: f32,
+        chromatic_aberration: f32,
+        vignette_strength: f32,
+    ) -> bool {
         distortion.abs() > 0.001 || chromatic_aberration > 0.001 || vignette_strength > 0.001
     }
 }

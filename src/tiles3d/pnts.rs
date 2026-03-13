@@ -91,7 +91,9 @@ impl PntsPayload {
 /// Decode a PNTS file from bytes
 pub fn decode_pnts(data: &[u8]) -> Tiles3dResult<PntsPayload> {
     if data.len() < 28 {
-        return Err(Tiles3dError::InvalidPnts("File too small for header".into()));
+        return Err(Tiles3dError::InvalidPnts(
+            "File too small for header".into(),
+        ));
     }
 
     let header: PntsHeader = *bytemuck::from_bytes(&data[0..28]);
@@ -115,8 +117,9 @@ pub fn decode_pnts(data: &[u8]) -> Tiles3dResult<PntsPayload> {
     // Parse feature table JSON
     let ft_json_end = offset + header.feature_table_json_byte_length as usize;
     let feature_table: serde_json::Value = if header.feature_table_json_byte_length > 0 {
-        let json_str = std::str::from_utf8(&data[offset..ft_json_end])
-            .map_err(|e| Tiles3dError::InvalidPnts(format!("Invalid UTF-8 in feature table: {}", e)))?;
+        let json_str = std::str::from_utf8(&data[offset..ft_json_end]).map_err(|e| {
+            Tiles3dError::InvalidPnts(format!("Invalid UTF-8 in feature table: {}", e))
+        })?;
         serde_json::from_str(json_str)?
     } else {
         serde_json::Value::Object(serde_json::Map::new())
@@ -125,14 +128,16 @@ pub fn decode_pnts(data: &[u8]) -> Tiles3dResult<PntsPayload> {
 
     // Feature table binary starts here
     let ft_bin_start = offset;
-    let ft_bin = &data[ft_bin_start..ft_bin_start + header.feature_table_binary_byte_length as usize];
+    let ft_bin =
+        &data[ft_bin_start..ft_bin_start + header.feature_table_binary_byte_length as usize];
     offset += header.feature_table_binary_byte_length as usize;
 
     // Parse batch table JSON
     let bt_json_end = offset + header.batch_table_json_byte_length as usize;
     let batch_table: Option<serde_json::Value> = if header.batch_table_json_byte_length > 0 {
-        let json_str = std::str::from_utf8(&data[offset..bt_json_end])
-            .map_err(|e| Tiles3dError::InvalidPnts(format!("Invalid UTF-8 in batch table: {}", e)))?;
+        let json_str = std::str::from_utf8(&data[offset..bt_json_end]).map_err(|e| {
+            Tiles3dError::InvalidPnts(format!("Invalid UTF-8 in batch table: {}", e))
+        })?;
         Some(serde_json::from_str(json_str)?)
     } else {
         None
@@ -142,7 +147,8 @@ pub fn decode_pnts(data: &[u8]) -> Tiles3dResult<PntsPayload> {
     let points_length = feature_table
         .get("POINTS_LENGTH")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| Tiles3dError::InvalidPnts("Missing POINTS_LENGTH".into()))? as u32;
+        .ok_or_else(|| Tiles3dError::InvalidPnts("Missing POINTS_LENGTH".into()))?
+        as u32;
 
     // Extract RTC_CENTER if present
     let rtc_center = feature_table
@@ -150,11 +156,7 @@ pub fn decode_pnts(data: &[u8]) -> Tiles3dResult<PntsPayload> {
         .and_then(|v| v.as_array())
         .and_then(|arr| {
             if arr.len() == 3 {
-                Some([
-                    arr[0].as_f64()?,
-                    arr[1].as_f64()?,
-                    arr[2].as_f64()?,
-                ])
+                Some([arr[0].as_f64()?, arr[1].as_f64()?, arr[2].as_f64()?])
             } else {
                 None
             }
@@ -233,7 +235,7 @@ fn extract_positions(ft: &serde_json::Value, bin: &[u8], count: u32) -> Tiles3dR
             .get("byteOffset")
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
-        
+
         let byte_count = count as usize * 3 * 4;
         if byte_offset + byte_count > bin.len() {
             return Err(Tiles3dError::InvalidPnts("POSITION buffer overrun".into()));
@@ -242,7 +244,7 @@ fn extract_positions(ft: &serde_json::Value, bin: &[u8], count: u32) -> Tiles3dR
         let mut positions = Vec::with_capacity(count as usize * 3);
         for i in 0..(count as usize * 3) {
             let idx = byte_offset + i * 4;
-            let val = f32::from_le_bytes([bin[idx], bin[idx+1], bin[idx+2], bin[idx+3]]);
+            let val = f32::from_le_bytes([bin[idx], bin[idx + 1], bin[idx + 2], bin[idx + 3]]);
             positions.push(val);
         }
         return Ok(positions);
@@ -254,37 +256,43 @@ fn extract_positions(ft: &serde_json::Value, bin: &[u8], count: u32) -> Tiles3dR
             .get("byteOffset")
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
-        
+
         let byte_count = count as usize * 3 * 2;
         if byte_offset + byte_count > bin.len() {
-            return Err(Tiles3dError::InvalidPnts("POSITION_QUANTIZED buffer overrun".into()));
+            return Err(Tiles3dError::InvalidPnts(
+                "POSITION_QUANTIZED buffer overrun".into(),
+            ));
         }
 
         let vol_offset = ft
             .get("QUANTIZED_VOLUME_OFFSET")
             .and_then(|v| v.as_array())
-            .map(|arr| [
-                arr.get(0).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
-                arr.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
-                arr.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
-            ])
+            .map(|arr| {
+                [
+                    arr.get(0).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
+                    arr.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
+                    arr.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
+                ]
+            })
             .unwrap_or([0.0, 0.0, 0.0]);
 
         let vol_scale = ft
             .get("QUANTIZED_VOLUME_SCALE")
             .and_then(|v| v.as_array())
-            .map(|arr| [
-                arr.get(0).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
-                arr.get(1).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
-                arr.get(2).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
-            ])
+            .map(|arr| {
+                [
+                    arr.get(0).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                    arr.get(1).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                    arr.get(2).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                ]
+            })
             .unwrap_or([1.0, 1.0, 1.0]);
 
         let mut positions = Vec::with_capacity(count as usize * 3);
         for i in 0..(count as usize) {
             for j in 0..3 {
                 let idx = byte_offset + (i * 3 + j) * 2;
-                let quantized = u16::from_le_bytes([bin[idx], bin[idx+1]]);
+                let quantized = u16::from_le_bytes([bin[idx], bin[idx + 1]]);
                 let normalized = quantized as f32 / 65535.0;
                 let pos = vol_offset[j] + normalized * vol_scale[j];
                 positions.push(pos);
@@ -293,14 +301,19 @@ fn extract_positions(ft: &serde_json::Value, bin: &[u8], count: u32) -> Tiles3dR
         return Ok(positions);
     }
 
-    Err(Tiles3dError::InvalidPnts("No POSITION or POSITION_QUANTIZED found".into()))
+    Err(Tiles3dError::InvalidPnts(
+        "No POSITION or POSITION_QUANTIZED found".into(),
+    ))
 }
 
 fn extract_colors_rgb(ft: &serde_json::Value, bin: &[u8], count: u32) -> Option<Vec<u8>> {
     let color_info = ft.get("RGB")?;
-    let byte_offset = color_info.get("byteOffset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let byte_offset = color_info
+        .get("byteOffset")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
     let byte_count = count as usize * 3;
-    
+
     if byte_offset + byte_count > bin.len() {
         return None;
     }
@@ -310,9 +323,12 @@ fn extract_colors_rgb(ft: &serde_json::Value, bin: &[u8], count: u32) -> Option<
 
 fn extract_colors_rgba(ft: &serde_json::Value, bin: &[u8], count: u32) -> Option<Vec<u8>> {
     let color_info = ft.get("RGBA")?;
-    let byte_offset = color_info.get("byteOffset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let byte_offset = color_info
+        .get("byteOffset")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
     let byte_count = count as usize * 4;
-    
+
     if byte_offset + byte_count > bin.len() {
         return None;
     }
@@ -323,9 +339,12 @@ fn extract_colors_rgba(ft: &serde_json::Value, bin: &[u8], count: u32) -> Option
 fn extract_normals(ft: &serde_json::Value, bin: &[u8], count: u32) -> Option<Vec<f32>> {
     // Try NORMAL (float32 x 3)
     if let Some(normal_info) = ft.get("NORMAL") {
-        let byte_offset = normal_info.get("byteOffset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let byte_offset = normal_info
+            .get("byteOffset")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
         let byte_count = count as usize * 3 * 4;
-        
+
         if byte_offset + byte_count > bin.len() {
             return None;
         }
@@ -333,7 +352,7 @@ fn extract_normals(ft: &serde_json::Value, bin: &[u8], count: u32) -> Option<Vec
         let mut normals = Vec::with_capacity(count as usize * 3);
         for i in 0..(count as usize * 3) {
             let idx = byte_offset + i * 4;
-            let val = f32::from_le_bytes([bin[idx], bin[idx+1], bin[idx+2], bin[idx+3]]);
+            let val = f32::from_le_bytes([bin[idx], bin[idx + 1], bin[idx + 2], bin[idx + 3]]);
             normals.push(val);
         }
         return Some(normals);
@@ -341,9 +360,12 @@ fn extract_normals(ft: &serde_json::Value, bin: &[u8], count: u32) -> Option<Vec
 
     // Try NORMAL_OCT16P (oct-encoded uint8 x 2)
     if let Some(normal_info) = ft.get("NORMAL_OCT16P") {
-        let byte_offset = normal_info.get("byteOffset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let byte_offset = normal_info
+            .get("byteOffset")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
         let byte_count = count as usize * 2;
-        
+
         if byte_offset + byte_count > bin.len() {
             return None;
         }
@@ -362,15 +384,26 @@ fn extract_normals(ft: &serde_json::Value, bin: &[u8], count: u32) -> Option<Vec
 
 fn extract_batch_ids(ft: &serde_json::Value, bin: &[u8], count: u32) -> Option<Vec<u32>> {
     let batch_info = ft.get("BATCH_ID")?;
-    let byte_offset = batch_info.get("byteOffset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    let component_type = batch_info.get("componentType").and_then(|v| v.as_str()).unwrap_or("UNSIGNED_SHORT");
-    
+    let byte_offset = batch_info
+        .get("byteOffset")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let component_type = batch_info
+        .get("componentType")
+        .and_then(|v| v.as_str())
+        .unwrap_or("UNSIGNED_SHORT");
+
     match component_type {
         "UNSIGNED_BYTE" => {
             if byte_offset + count as usize > bin.len() {
                 return None;
             }
-            Some(bin[byte_offset..byte_offset + count as usize].iter().map(|&b| b as u32).collect())
+            Some(
+                bin[byte_offset..byte_offset + count as usize]
+                    .iter()
+                    .map(|&b| b as u32)
+                    .collect(),
+            )
         }
         "UNSIGNED_SHORT" => {
             let byte_count = count as usize * 2;
@@ -380,7 +413,7 @@ fn extract_batch_ids(ft: &serde_json::Value, bin: &[u8], count: u32) -> Option<V
             let mut ids = Vec::with_capacity(count as usize);
             for i in 0..(count as usize) {
                 let idx = byte_offset + i * 2;
-                ids.push(u16::from_le_bytes([bin[idx], bin[idx+1]]) as u32);
+                ids.push(u16::from_le_bytes([bin[idx], bin[idx + 1]]) as u32);
             }
             Some(ids)
         }
@@ -392,7 +425,12 @@ fn extract_batch_ids(ft: &serde_json::Value, bin: &[u8], count: u32) -> Option<V
             let mut ids = Vec::with_capacity(count as usize);
             for i in 0..(count as usize) {
                 let idx = byte_offset + i * 4;
-                ids.push(u32::from_le_bytes([bin[idx], bin[idx+1], bin[idx+2], bin[idx+3]]));
+                ids.push(u32::from_le_bytes([
+                    bin[idx],
+                    bin[idx + 1],
+                    bin[idx + 2],
+                    bin[idx + 3],
+                ]));
             }
             Some(ids)
         }
@@ -405,7 +443,7 @@ fn decode_oct16p(x: u8, y: u8) -> (f32, f32, f32) {
     let fx = (x as f32 / 255.0) * 2.0 - 1.0;
     let fy = (y as f32 / 255.0) * 2.0 - 1.0;
     let fz = 1.0 - fx.abs() - fy.abs();
-    
+
     let (fx, fy) = if fz < 0.0 {
         let sign_x = if fx >= 0.0 { 1.0 } else { -1.0 };
         let sign_y = if fy >= 0.0 { 1.0 } else { -1.0 };
@@ -413,7 +451,7 @@ fn decode_oct16p(x: u8, y: u8) -> (f32, f32, f32) {
     } else {
         (fx, fy)
     };
-    
+
     let len = (fx * fx + fy * fy + fz * fz).sqrt();
     (fx / len, fy / len, fz / len)
 }

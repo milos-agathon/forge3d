@@ -3,8 +3,8 @@
 //! Provides a high-level API for labeling geographic features
 //! with automatic style functions and placement strategies.
 
-use crate::labels::types::{LabelId, LabelStyle};
 use crate::labels::declutter::{DeclutterAlgorithm, DeclutterConfig};
+use crate::labels::types::{LabelId, LabelStyle};
 use crate::labels::typography::TypographySettings;
 use glam::Vec3;
 
@@ -327,10 +327,7 @@ impl LabelLayer {
 }
 
 /// Create features from simple point data.
-pub fn features_from_points(
-    points: &[(Vec3, String)],
-    label_field: &str,
-) -> Vec<LabelFeature> {
+pub fn features_from_points(points: &[(Vec3, String)], label_field: &str) -> Vec<LabelFeature> {
     points
         .iter()
         .enumerate()
@@ -349,10 +346,7 @@ pub fn features_from_points(
 }
 
 /// Create features from polylines.
-pub fn features_from_lines(
-    lines: &[(Vec<Vec3>, String)],
-    label_field: &str,
-) -> Vec<LabelFeature> {
+pub fn features_from_lines(lines: &[(Vec<Vec3>, String)], label_field: &str) -> Vec<LabelFeature> {
     lines
         .iter()
         .enumerate()
@@ -373,7 +367,7 @@ pub fn features_from_lines(
 // === MAPBOX STYLE SPEC INTEGRATION ===
 
 /// Mapbox-style symbol layer configuration.
-/// 
+///
 /// This wraps the essential properties from a Mapbox GL Style Spec
 /// symbol layer for integration with forge3d's label system.
 #[derive(Debug, Clone, Default)]
@@ -416,7 +410,7 @@ impl MapboxSymbolLayer {
             symbol_placement: "point".to_string(),
         }
     }
-    
+
     /// Convert to LabelLayerConfig.
     pub fn to_label_config(&self) -> LabelLayerConfig {
         let mut config = LabelLayerConfig::default();
@@ -427,27 +421,27 @@ impl MapboxSymbolLayer {
         config.base_style.color = self.text_color;
         config.base_style.halo_color = self.text_halo_color;
         config.base_style.halo_width = self.text_halo_width;
-        
+
         // Set placement based on symbol_placement
         config.placement = match self.symbol_placement.as_str() {
             "line" | "line-center" => PlacementStrategy::AlongLine,
             _ => PlacementStrategy::Centroid,
         };
-        
+
         config
     }
 }
 
 /// Create a LabelLayer from a MapboxSymbolLayer configuration.
-/// 
+///
 /// # Example
 /// ```ignore
 /// use forge3d::labels::layer::{MapboxSymbolLayer, label_layer_from_mapbox_style};
-/// 
+///
 /// let symbol = MapboxSymbolLayer::new("place-labels", "place_label")
 ///     .with_text_size(16.0)
 ///     .with_text_color([0.2, 0.2, 0.2, 1.0]);
-/// 
+///
 /// let layer = label_layer_from_mapbox_style(1, &symbol);
 /// ```
 pub fn label_layer_from_mapbox_style(
@@ -459,7 +453,7 @@ pub fn label_layer_from_mapbox_style(
 }
 
 /// Apply Mapbox-style text formatting to a label style.
-/// 
+///
 /// Converts Mapbox style properties to forge3d LabelStyle.
 pub fn apply_mapbox_text_style(
     style: &mut LabelStyle,
@@ -488,32 +482,32 @@ impl MapboxSymbolLayer {
         self.text_size = size;
         self
     }
-    
+
     /// Set text color.
     pub fn with_text_color(mut self, color: [f32; 4]) -> Self {
         self.text_color = color;
         self
     }
-    
+
     /// Set text halo color.
     pub fn with_text_halo_color(mut self, color: [f32; 4]) -> Self {
         self.text_halo_color = color;
         self
     }
-    
+
     /// Set text halo width.
     pub fn with_text_halo_width(mut self, width: f32) -> Self {
         self.text_halo_width = width;
         self
     }
-    
+
     /// Set zoom range.
     pub fn with_zoom_range(mut self, min: f32, max: f32) -> Self {
         self.min_zoom = min;
         self.max_zoom = max;
         self
     }
-    
+
     /// Set symbol placement.
     pub fn with_placement(mut self, placement: &str) -> Self {
         self.symbol_placement = placement.to_string();
@@ -545,10 +539,10 @@ mod tests {
     #[test]
     fn test_generate_labels() {
         let mut layer = LabelLayer::new(1, "test", LabelLayerConfig::default());
-        
+
         let mut props = std::collections::HashMap::new();
         props.insert("name".to_string(), "Test Point".to_string());
-        
+
         layer.add_feature(LabelFeature {
             id: 1,
             feature_type: FeatureType::Point,

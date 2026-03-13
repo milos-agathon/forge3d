@@ -151,38 +151,40 @@ impl Viewer {
         // Capture debug images
         {
             let gi = self.gi.as_ref().context("GI manager not available")?;
-            let capture_view =
-                |slf: &Self, view: &wgpu::TextureView, label: &str| -> anyhow::Result<()> {
-                    let bytes = slf.with_comp_pipeline(|comp_pl, comp_bgl| {
-                        let fog_view = if slf.fog_enabled {
-                            &slf.fog_output_view
-                        } else {
-                            &slf.fog_zero_view
-                        };
-                        render_view_to_rgba8_ex(super::super::viewer_render_helpers::RenderViewArgs {
-                            device: &slf.device,
-                            queue: &slf.queue,
-                            comp_pl,
-                            comp_bgl,
-                            sky_view: &slf.sky_output_view,
-                            depth_view: &gi.gbuffer().depth_view,
-                            fog_view,
-                            surface_format: slf.config.format,
-                            width: capture_w,
-                            height: capture_h,
-                            far,
-                            src_view: view,
-                            mode: 0,
-                        })
-                    })?;
-                    image_write::write_png_rgba8_small(
-                        &out_dir.join(label),
-                        &bytes,
-                        capture_w,
-                        capture_h,
-                    )?;
-                    Ok(())
-                };
+            let capture_view = |slf: &Self,
+                                view: &wgpu::TextureView,
+                                label: &str|
+             -> anyhow::Result<()> {
+                let bytes = slf.with_comp_pipeline(|comp_pl, comp_bgl| {
+                    let fog_view = if slf.fog_enabled {
+                        &slf.fog_output_view
+                    } else {
+                        &slf.fog_zero_view
+                    };
+                    render_view_to_rgba8_ex(super::super::viewer_render_helpers::RenderViewArgs {
+                        device: &slf.device,
+                        queue: &slf.queue,
+                        comp_pl,
+                        comp_bgl,
+                        sky_view: &slf.sky_output_view,
+                        depth_view: &gi.gbuffer().depth_view,
+                        fog_view,
+                        surface_format: slf.config.format,
+                        width: capture_w,
+                        height: capture_h,
+                        far,
+                        src_view: view,
+                        mode: 0,
+                    })
+                })?;
+                image_write::write_png_rgba8_small(
+                    &out_dir.join(label),
+                    &bytes,
+                    capture_w,
+                    capture_h,
+                )?;
+                Ok(())
+            };
             capture_view(self, &self.lit_output_view, "p5_ssr_glossy_lit.png")?;
             if let Some(view) = gi.ssr_spec_view() {
                 capture_view(self, view, "p5_ssr_glossy_spec.png")?;

@@ -235,9 +235,7 @@ impl TextFieldValue {
                 // Parse ["get", "property"] format
                 if let Some(arr) = expr.as_array() {
                     if arr.len() == 2 {
-                        if let (Some("get"), Some(prop)) =
-                            (arr[0].as_str(), arr[1].as_str())
-                        {
+                        if let (Some("get"), Some(prop)) = (arr[0].as_str(), arr[1].as_str()) {
                             return Some(prop);
                         }
                     }
@@ -486,7 +484,11 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
         return (l, l, l);
     }
 
-    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let p = 2.0 * l - q;
 
     let r = hue_to_rgb(p, q, h + 1.0 / 3.0);

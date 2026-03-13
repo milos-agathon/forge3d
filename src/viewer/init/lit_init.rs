@@ -3,9 +3,7 @@
 
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use wgpu::{
-    BindGroupLayout, Buffer, ComputePipeline, Device, Sampler, Texture, TextureView,
-};
+use wgpu::{BindGroupLayout, Buffer, ComputePipeline, Device, Sampler, Texture, TextureView};
 
 use super::super::viewer_constants::LIT_WGSL_VERSION;
 
@@ -205,12 +203,15 @@ pub fn create_lit_resources(device: &Arc<Device>, width: u32, height: u32) -> Li
         entry_point: "cs_main",
     });
 
-    println!("[viewer] lit compute WGSL version {} compiled", LIT_WGSL_VERSION);
+    println!(
+        "[viewer] lit compute WGSL version {} compiled",
+        LIT_WGSL_VERSION
+    );
 
     let lit_params: [f32; 12] = [
-        0.3, 0.6, -1.0, 1.0,  // sun_dir_vs.xyz, sun_intensity
-        0.6, 1.0, 4.0, 0.0,   // ibl_intensity, use_ibl, brdf, pad
-        0.5, 0.0, 0.0, 0.0,   // roughness, debug_mode, pad, pad
+        0.3, 0.6, -1.0, 1.0, // sun_dir_vs.xyz, sun_intensity
+        0.6, 1.0, 4.0, 0.0, // ibl_intensity, use_ibl, brdf, pad
+        0.5, 0.0, 0.0, 0.0, // roughness, debug_mode, pad, pad
     ];
     let lit_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("viewer.lit.uniform"),

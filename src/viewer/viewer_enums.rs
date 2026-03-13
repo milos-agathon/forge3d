@@ -291,9 +291,8 @@ pub enum ViewerCmd {
     },
     /// List all overlay IDs
     ListOverlays,
-    
+
     // === OPTION B: VECTOR OVERLAY GEOMETRY COMMANDS ===
-    
     /// Add a vector overlay layer with geometry
     AddVectorOverlay {
         /// Unique name for this overlay layer
@@ -345,7 +344,6 @@ pub enum ViewerCmd {
     },
 
     // === POINT CLOUDS ===
-
     /// Load a point cloud from LAZ/LAS file
     LoadPointCloud {
         path: String,
@@ -363,7 +361,6 @@ pub enum ViewerCmd {
     },
 
     // === LABELS ===
-
     /// Add a text label at a world position
     AddLabel {
         text: String,
@@ -397,23 +394,30 @@ pub enum ViewerCmd {
         max_zoom: Option<f32>,
     },
     /// Remove a label by ID
-    RemoveLabel { id: u64 },
+    RemoveLabel {
+        id: u64,
+    },
     /// Clear all labels
     ClearLabels,
     /// Enable or disable labels
-    SetLabelsEnabled { enabled: bool },
+    SetLabelsEnabled {
+        enabled: bool,
+    },
     /// Load a font atlas for labels
     LoadLabelAtlas {
         atlas_png_path: String,
         metrics_json_path: String,
     },
     /// Set zoom level for scale-dependent label visibility
-    SetLabelZoom { zoom: f32 },
+    SetLabelZoom {
+        zoom: f32,
+    },
     /// Set maximum number of visible labels
-    SetMaxVisibleLabels { max: usize },
+    SetMaxVisibleLabels {
+        max: usize,
+    },
 
     // === Plan 3: Premium Label Features ===
-
     /// Add a curved label along a polyline path
     AddCurvedLabel {
         text: String,
@@ -440,7 +444,9 @@ pub enum ViewerCmd {
         text_color: Option<[f32; 4]>,
     },
     /// Remove a callout by ID
-    RemoveCallout { id: u64 },
+    RemoveCallout {
+        id: u64,
+    },
     /// Set global typography settings
     SetLabelTypography {
         tracking: Option<f32>,
@@ -456,18 +462,18 @@ pub enum ViewerCmd {
     },
 
     // === Plan 3: Picking Commands ===
-    
     /// Poll for pending pick events
     PollPickEvents,
     /// Set lasso selection mode
-    SetLassoMode { enabled: bool },
+    SetLassoMode {
+        enabled: bool,
+    },
     /// Get lasso selection state
     GetLassoState,
     /// Clear current selection
     ClearSelection,
 
     // === P0.1/M1: OIT (Order-Independent Transparency) ===
-
     /// Enable or disable OIT with specified mode
     SetOitEnabled {
         enabled: bool,
@@ -477,7 +483,6 @@ pub enum ViewerCmd {
     GetOitMode,
 
     // === P1.3: TAA (Temporal Anti-Aliasing) ===
-
     /// Enable or disable TAA
     SetTaaEnabled {
         enabled: bool,

@@ -2,10 +2,7 @@
 // Small-tile ID buffer rendering for efficient hover/pick operations
 // Part of Plan 2: Standard GPU Ray Picking + Hover Support
 
-use wgpu::{
-    BindGroup, BindGroupLayout, Buffer, Device, RenderPipeline, 
-    Texture, TextureView,
-};
+use wgpu::{BindGroup, BindGroupLayout, Buffer, Device, RenderPipeline, Texture, TextureView};
 
 /// Default tile size for ID buffer rendering
 pub const DEFAULT_TILE_SIZE: u32 = 64;
@@ -283,10 +280,7 @@ impl TileIdPass {
     }
 
     /// Begin a tile render pass
-    pub fn begin_pass<'a>(
-        &'a self,
-        encoder: &'a mut wgpu::CommandEncoder,
-    ) -> wgpu::RenderPass<'a> {
+    pub fn begin_pass<'a>(&'a self, encoder: &'a mut wgpu::CommandEncoder) -> wgpu::RenderPass<'a> {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("tile_id_render_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -327,6 +321,9 @@ pub struct TileIdVertex {
 impl TileIdVertex {
     /// Create a new tile ID vertex
     pub fn new(position: [f32; 3], feature_id: u32) -> Self {
-        Self { position, feature_id }
+        Self {
+            position,
+            feature_id,
+        }
     }
 }

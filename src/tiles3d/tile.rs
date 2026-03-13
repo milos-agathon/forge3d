@@ -1,8 +1,8 @@
 //! Tile structure for 3D Tiles
 
+use super::bounds::BoundingVolume;
 use glam::Mat4;
 use serde::{Deserialize, Serialize};
-use super::bounds::BoundingVolume;
 
 /// Refinement strategy for child tiles
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,10 +61,22 @@ impl Tile {
         self.transform
             .map(|t| {
                 Mat4::from_cols_array(&[
-                    t[0] as f32, t[1] as f32, t[2] as f32, t[3] as f32,
-                    t[4] as f32, t[5] as f32, t[6] as f32, t[7] as f32,
-                    t[8] as f32, t[9] as f32, t[10] as f32, t[11] as f32,
-                    t[12] as f32, t[13] as f32, t[14] as f32, t[15] as f32,
+                    t[0] as f32,
+                    t[1] as f32,
+                    t[2] as f32,
+                    t[3] as f32,
+                    t[4] as f32,
+                    t[5] as f32,
+                    t[6] as f32,
+                    t[7] as f32,
+                    t[8] as f32,
+                    t[9] as f32,
+                    t[10] as f32,
+                    t[11] as f32,
+                    t[12] as f32,
+                    t[13] as f32,
+                    t[14] as f32,
+                    t[15] as f32,
                 ])
             })
             .unwrap_or(Mat4::IDENTITY)
@@ -102,7 +114,12 @@ impl Tile {
         if self.children.is_empty() {
             1
         } else {
-            1 + self.children.iter().map(|c| c.max_depth()).max().unwrap_or(0)
+            1 + self
+                .children
+                .iter()
+                .map(|c| c.max_depth())
+                .max()
+                .unwrap_or(0)
         }
     }
 }

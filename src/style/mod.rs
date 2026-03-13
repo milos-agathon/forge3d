@@ -18,9 +18,7 @@ pub mod sprite;
 pub mod types;
 
 pub use converters::{layout_to_label_style, paint_to_vector_style};
-pub use expressions::{evaluate_expression, evaluate_color, evaluate_number, EvalContext};
+pub use expressions::{evaluate_color, evaluate_expression, evaluate_number, EvalContext};
 pub use parser::parse_style;
-pub use sprite::{SpriteAtlas, SpriteEntry, load_sprite_atlas};
-pub use types::{
-    FilterExpr, LayerType, LayoutProps, PaintProps, StyleLayer, StyleSpec,
-};
+pub use sprite::{load_sprite_atlas, SpriteAtlas, SpriteEntry};
+pub use types::{FilterExpr, LayerType, LayoutProps, PaintProps, StyleLayer, StyleSpec};

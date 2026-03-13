@@ -24,7 +24,12 @@ pub fn make_center_block(
             let wz = center.y - half_extent + y as f32 * cell_size;
             let u = (wx + terrain_extent * 0.5) / terrain_extent;
             let v = (wz + terrain_extent * 0.5) / terrain_extent;
-            vertices.push(ClipmapVertex::center(wx, wz, u.clamp(0.0, 1.0), v.clamp(0.0, 1.0)));
+            vertices.push(ClipmapVertex::center(
+                wx,
+                wz,
+                u.clamp(0.0, 1.0),
+                v.clamp(0.0, 1.0),
+            ));
         }
     }
 
@@ -183,8 +188,16 @@ pub fn make_ring(
 
     // Corner patches (L-shaped to avoid T-junctions)
     // Note: Currently simplified - strips overlap at corners
-    add_corner_patch(&mut vertices, &mut indices, center, inner_extent, outer_extent, 
-                     terrain_extent, ring_index, morph_range);
+    add_corner_patch(
+        &mut vertices,
+        &mut indices,
+        center,
+        inner_extent,
+        outer_extent,
+        terrain_extent,
+        ring_index,
+        morph_range,
+    );
 
     (vertices, indices)
 }
@@ -251,7 +264,8 @@ pub fn make_ring_skirts(
             let curr_skirt = base_idx + curr;
             // Degenerate check - only add if vertices are adjacent on edge
             // Simplified: add all for now
-            skirt_indices.extend_from_slice(&[prev, curr, prev_skirt, curr, curr_skirt, prev_skirt]);
+            skirt_indices
+                .extend_from_slice(&[prev, curr, prev_skirt, curr, curr_skirt, prev_skirt]);
         }
     }
 

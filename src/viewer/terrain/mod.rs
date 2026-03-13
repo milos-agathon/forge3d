@@ -2,8 +2,8 @@
 // Terrain viewer module - standalone terrain rendering without PyO3 dependencies
 // Split from viewer_terrain.rs as part of the viewer refactoring
 
-mod dof;
 pub mod denoise;
+mod dof;
 mod motion_blur;
 pub mod overlay;
 mod pbr_renderer;
@@ -16,7 +16,7 @@ pub mod vector_overlay;
 mod volumetrics;
 
 #[allow(unused_imports)]
-pub use overlay::{OverlayStack, OverlayLayer, OverlayData, BlendMode, OverlayConfig};
+pub use overlay::{BlendMode, OverlayConfig, OverlayData, OverlayLayer, OverlayStack};
 #[allow(unused_imports)]
 pub use pbr_renderer::ViewerTerrainPbrConfig;
 pub use scene::ViewerTerrainScene;
@@ -24,8 +24,7 @@ pub use scene::ViewerTerrainScene;
 // Option B: Vector overlay geometry exports
 #[allow(unused_imports)]
 pub use vector_overlay::{
-    VectorOverlayStack, VectorOverlayLayer, VectorVertex, 
-    OverlayPrimitive, VectorOverlayUniforms, VectorOverlayGpu,
-    drape_vertices, VECTOR_OVERLAY_SHADER, DrapeParams, RenderLayerParams,
+    drape_vertices, DrapeParams, OverlayPrimitive, RenderLayerParams, VectorOverlayGpu,
+    VectorOverlayLayer, VectorOverlayStack, VectorOverlayUniforms, VectorVertex,
+    VECTOR_OVERLAY_SHADER,
 };
-

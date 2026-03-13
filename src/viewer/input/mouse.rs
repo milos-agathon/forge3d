@@ -33,7 +33,7 @@ pub fn handle_cursor_move(
         if let Some((last_x, last_y)) = camera.last_mouse_pos {
             let dx = new_x - last_x;
             let dy = new_y - last_y;
-            
+
             // Terrain viewer takes priority
             if let Some(ref mut tv) = terrain_viewer {
                 if tv.has_terrain() {

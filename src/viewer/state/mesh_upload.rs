@@ -11,7 +11,10 @@ use crate::viewer::Viewer;
 
 impl Viewer {
     /// Upload mesh geometry to GPU buffers for rendering
-    pub(crate) fn upload_mesh(&mut self, mesh: &crate::geometry::MeshBuffers) -> anyhow::Result<()> {
+    pub(crate) fn upload_mesh(
+        &mut self,
+        mesh: &crate::geometry::MeshBuffers,
+    ) -> anyhow::Result<()> {
         if mesh.positions.is_empty() || mesh.indices.is_empty() {
             anyhow::bail!("Mesh is empty (no vertices or indices)");
         }
@@ -30,7 +33,7 @@ impl Viewer {
         // Convert MeshBuffers to PackedVertex format
         let vertex_count = mesh.positions.len();
         let mut vertices: Vec<PackedVertex> = Vec::with_capacity(vertex_count);
-        
+
         for i in 0..vertex_count {
             let pos = mesh.positions[i];
             let normal = if i < mesh.normals.len() {
@@ -59,7 +62,7 @@ impl Viewer {
                 contents: vertex_data,
                 usage: wgpu::BufferUsages::VERTEX,
             });
-        
+
         let ib = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -67,19 +70,14 @@ impl Viewer {
                 contents: bytemuck::cast_slice(&mesh.indices),
                 usage: wgpu::BufferUsages::INDEX,
             });
-        
+
         self.geom_vb = Some(vb);
         self.geom_ib = Some(ib);
         self.geom_index_count = mesh.indices.len() as u32;
         self.geom_bind_group = None;
-        
-        update_ipc_stats(
-            true,
-            vertices.len() as u32,
-            mesh.indices.len() as u32,
-            true,
-        );
-        
+
+        update_ipc_stats(true, vertices.len() as u32, mesh.indices.len() as u32, true);
+
         println!(
             "[viewer] Uploaded mesh: {} vertices, {} indices",
             vertices.len(),

@@ -190,7 +190,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_fence_tracker_creation() {
-        let Some((device, queue)) = create_test_device().await else { return; };
+        let Some((device, queue)) = create_test_device().await else {
+            return;
+        };
         let tracker = FenceTracker::new(device, queue);
 
         assert_eq!(tracker.pending_count(), 0);
@@ -199,7 +201,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_fence_submission() {
-        let Some((device, queue)) = create_test_device().await else { return; };
+        let Some((device, queue)) = create_test_device().await else {
+            return;
+        };
         let mut tracker = FenceTracker::new(device, queue);
 
         let fence_value = tracker.submit_fence_auto(0);
@@ -209,7 +213,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_buffer_availability() {
-        let Some((device, queue)) = create_test_device().await else { return; };
+        let Some((device, queue)) = create_test_device().await else {
+            return;
+        };
         let mut tracker = FenceTracker::new(device, queue);
 
         // Initially available

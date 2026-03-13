@@ -1,10 +1,10 @@
 //! Tileset traversal for LOD selection
 
-use glam::{Mat4, Vec3};
 use super::bounds::BoundingVolume;
-use super::sse::{SseParams, compute_sse};
+use super::sse::{compute_sse, SseParams};
 use super::tile::{Tile, TileRefine};
 use super::tileset::Tileset;
+use glam::{Mat4, Vec3};
 
 /// Result of traversal for a single tile
 #[derive(Debug, Clone)]
@@ -81,7 +81,7 @@ impl TilesetTraverser {
     ) -> Vec<VisibleTile<'a>> {
         let mut result = Vec::new();
         let default_refine = tileset.default_refine();
-        
+
         self.traverse_tile(
             tileset.root(),
             Mat4::IDENTITY,
@@ -91,7 +91,7 @@ impl TilesetTraverser {
             0,
             &mut result,
         );
-        
+
         result
     }
 
@@ -202,22 +202,14 @@ impl TilesetTraverser {
     }
 
     /// Count tiles that would be visible at given SSE threshold
-    pub fn count_visible_tiles(
-        &self,
-        tileset: &Tileset,
-        camera_position: Vec3,
-    ) -> usize {
+    pub fn count_visible_tiles(&self, tileset: &Tileset, camera_position: Vec3) -> usize {
         self.visible_tiles(tileset, camera_position, None).len()
     }
 
     /// Get statistics about the traversal
-    pub fn traversal_stats(
-        &self,
-        tileset: &Tileset,
-        camera_position: Vec3,
-    ) -> TraversalStats {
+    pub fn traversal_stats(&self, tileset: &Tileset, camera_position: Vec3) -> TraversalStats {
         let visible = self.visible_tiles(tileset, camera_position, None);
-        
+
         let max_depth = visible.iter().map(|t| t.depth).max().unwrap_or(0);
         let min_sse = visible.iter().map(|t| t.sse).fold(f32::MAX, f32::min);
         let max_sse = visible.iter().map(|t| t.sse).fold(0.0f32, f32::max);
@@ -288,18 +280,18 @@ mod tests {
                 ]
             }
         }"#;
-        
+
         let tileset = Tileset::from_json(json, PathBuf::from(".")).unwrap();
         let camera = Vec3::new(0.0, 0.0, 500.0);
-        
+
         // Low SSE threshold -> more tiles (refined)
         let traverser_low = TilesetTraverser::new(1.0);
         let visible_low = traverser_low.visible_tiles(&tileset, camera, None);
-        
+
         // High SSE threshold -> fewer tiles (coarse)
         let traverser_high = TilesetTraverser::new(1000.0);
         let visible_high = traverser_high.visible_tiles(&tileset, camera, None);
-        
+
         assert!(visible_low.len() >= visible_high.len());
     }
 }

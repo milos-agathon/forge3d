@@ -49,7 +49,7 @@ pub struct HighlightStyle {
 impl Default for HighlightStyle {
     fn default() -> Self {
         Self {
-            color: [1.0, 0.8, 0.0, 0.5],      // Yellow semi-transparent
+            color: [1.0, 0.8, 0.0, 0.5],           // Yellow semi-transparent
             secondary_color: [1.0, 1.0, 1.0, 0.3], // White glow
             effect: HighlightEffect::ColorTint,
             outline_width: 2.0,
@@ -318,12 +318,7 @@ impl HighlightManager {
 
     /// Get hover uniforms
     pub fn get_hover_uniforms(&self) -> HighlightUniforms {
-        HighlightUniforms::from_style(
-            &self.hover_style,
-            0,
-            self.hover_id.unwrap_or(0),
-            self.time,
-        )
+        HighlightUniforms::from_style(&self.hover_style, 0, self.hover_id.unwrap_or(0), self.time)
     }
 
     /// Get combined uniforms for both selection and hover
@@ -362,7 +357,7 @@ mod tests {
     fn test_highlight_uniforms() {
         let style = HighlightStyle::default();
         let uniforms = HighlightUniforms::from_style(&style, 42, 0, 0.0);
-        
+
         assert_eq!(uniforms.selected_id, 42);
         assert_eq!(uniforms.hover_id, 0);
         assert_eq!(uniforms.effect_flags, 1); // ColorTint
@@ -371,10 +366,10 @@ mod tests {
     #[test]
     fn test_highlight_manager() {
         let mut manager = HighlightManager::new();
-        
+
         manager.set_selected(Some(10));
         manager.set_hovered(Some(20));
-        
+
         assert!(manager.is_highlighted(10));
         assert!(manager.is_highlighted(20));
         assert!(!manager.is_highlighted(30));

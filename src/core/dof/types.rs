@@ -33,8 +33,8 @@ pub struct DofUniforms {
     pub show_coc: u32,
 
     // M3: Tilt-shift parameters for Scheimpflug effect
-    pub tilt_pitch: f32,     // Tilt around horizontal axis (radians)
-    pub tilt_yaw: f32,       // Tilt around vertical axis (radians)
+    pub tilt_pitch: f32, // Tilt around horizontal axis (radians)
+    pub tilt_yaw: f32,   // Tilt around vertical axis (radians)
 }
 
 impl Default for DofUniforms {

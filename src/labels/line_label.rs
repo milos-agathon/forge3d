@@ -59,12 +59,20 @@ pub fn compute_line_label_placement(
     }
 
     match placement {
-        LineLabelPlacement::Center => {
-            compute_center_placement(&visible_points, glyph_advances, font_size, path_length, text_width)
-        }
-        LineLabelPlacement::Along => {
-            compute_along_placement(&visible_points, glyph_advances, font_size, path_length, text_width)
-        }
+        LineLabelPlacement::Center => compute_center_placement(
+            &visible_points,
+            glyph_advances,
+            font_size,
+            path_length,
+            text_width,
+        ),
+        LineLabelPlacement::Along => compute_along_placement(
+            &visible_points,
+            glyph_advances,
+            font_size,
+            path_length,
+            text_width,
+        ),
     }
 }
 
@@ -104,7 +112,8 @@ fn place_glyphs_along_path(
 
     for advance in glyph_advances {
         // Find position and tangent at current offset
-        if let Some((pos, tangent)) = sample_path_at_offset(points, current_offset + advance * 0.5) {
+        if let Some((pos, tangent)) = sample_path_at_offset(points, current_offset + advance * 0.5)
+        {
             let rotation = tangent.atan2(1.0);
 
             // Flip text if it would be upside down

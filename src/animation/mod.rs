@@ -38,7 +38,10 @@ impl CameraKeyframe {
 
 /// Interpolated camera state at a given time
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "extension-module", pyclass(module = "forge3d._forge3d", name = "CameraState", get_all))]
+#[cfg_attr(
+    feature = "extension-module",
+    pyclass(module = "forge3d._forge3d", name = "CameraState", get_all)
+)]
 pub struct CameraState {
     pub phi_deg: f32,
     pub theta_deg: f32,
@@ -59,7 +62,10 @@ impl CameraState {
 
 /// Camera animation with keyframe storage and interpolation
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "extension-module", pyclass(module = "forge3d._forge3d", name = "CameraAnimation"))]
+#[cfg_attr(
+    feature = "extension-module",
+    pyclass(module = "forge3d._forge3d", name = "CameraAnimation")
+)]
 pub struct CameraAnimation {
     keyframes: Vec<CameraKeyframe>,
 }
@@ -80,7 +86,8 @@ impl CameraAnimation {
     /// Add a keyframe. Keyframes are sorted by time automatically.
     pub fn add_keyframe(&mut self, keyframe: CameraKeyframe) {
         self.keyframes.push(keyframe);
-        self.keyframes.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+        self.keyframes
+            .sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
     }
 
     /// Get all keyframes (sorted by time)
@@ -117,17 +124,36 @@ impl CameraAnimation {
         let (k0, k1, k2, k3, t) = self.find_keyframes_for_time(time);
 
         Some(CameraState {
-            phi_deg: interpolation::cubic_hermite(k0.phi_deg, k1.phi_deg, k2.phi_deg, k3.phi_deg, t),
-            theta_deg: interpolation::cubic_hermite(k0.theta_deg, k1.theta_deg, k2.theta_deg, k3.theta_deg, t),
+            phi_deg: interpolation::cubic_hermite(
+                k0.phi_deg, k1.phi_deg, k2.phi_deg, k3.phi_deg, t,
+            ),
+            theta_deg: interpolation::cubic_hermite(
+                k0.theta_deg,
+                k1.theta_deg,
+                k2.theta_deg,
+                k3.theta_deg,
+                t,
+            ),
             radius: interpolation::cubic_hermite(k0.radius, k1.radius, k2.radius, k3.radius, t),
-            fov_deg: interpolation::cubic_hermite(k0.fov_deg, k1.fov_deg, k2.fov_deg, k3.fov_deg, t),
+            fov_deg: interpolation::cubic_hermite(
+                k0.fov_deg, k1.fov_deg, k2.fov_deg, k3.fov_deg, t,
+            ),
         })
     }
 
     /// Find the 4 keyframes surrounding a given time for Catmull-Rom interpolation
-    fn find_keyframes_for_time(&self, time: f32) -> (CameraKeyframe, CameraKeyframe, CameraKeyframe, CameraKeyframe, f32) {
+    fn find_keyframes_for_time(
+        &self,
+        time: f32,
+    ) -> (
+        CameraKeyframe,
+        CameraKeyframe,
+        CameraKeyframe,
+        CameraKeyframe,
+        f32,
+    ) {
         let n = self.keyframes.len();
-        
+
         if n == 1 {
             let k = self.keyframes[0];
             return (k, k, k, k, 0.0);
@@ -153,7 +179,11 @@ impl CameraAnimation {
 
         // Get surrounding keyframes for Catmull-Rom (with clamping at boundaries)
         let k0 = if idx > 0 { self.keyframes[idx - 1] } else { k1 };
-        let k3 = if idx + 2 < n { self.keyframes[idx + 2] } else { k2 };
+        let k3 = if idx + 2 < n {
+            self.keyframes[idx + 2]
+        } else {
+            k2
+        };
 
         // Calculate normalized t within segment
         let segment_duration = k2.time - k1.time;

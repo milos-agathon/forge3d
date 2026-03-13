@@ -14,16 +14,16 @@ pub type BundleResult<T> = Result<T, BundleError>;
 pub enum BundleError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
-    
+
     #[error("Invalid bundle: {0}")]
     Invalid(String),
-    
+
     #[error("Version mismatch: expected {expected}, got {got}")]
     VersionMismatch { expected: u32, got: u32 },
-    
+
     #[error("Checksum mismatch for {path}")]
     ChecksumMismatch { path: String },
 }
@@ -33,25 +33,25 @@ pub enum BundleError {
 pub struct BundleManifest {
     /// Schema version (currently 1)
     pub version: u32,
-    
+
     /// Human-readable bundle name
     pub name: String,
-    
+
     /// ISO 8601 creation timestamp
     pub created_at: String,
-    
+
     /// Optional description
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    
+
     /// SHA-256 checksums for bundle files (path -> hex digest)
     #[serde(default)]
     pub checksums: HashMap<String, String>,
-    
+
     /// Terrain metadata
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terrain: Option<TerrainMeta>,
-    
+
     /// Camera bookmarks
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub camera_bookmarks: Vec<CameraBookmark>,
@@ -62,15 +62,15 @@ pub struct BundleManifest {
 pub struct TerrainMeta {
     /// Path to DEM file within bundle (e.g., "terrain/dem.tif")
     pub dem_path: String,
-    
+
     /// Coordinate reference system (e.g., "EPSG:32610")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crs: Option<String>,
-    
+
     /// Elevation domain [min, max]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub domain: Option<[f64; 2]>,
-    
+
     /// Colormap name or path
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colormap: Option<String>,
@@ -81,17 +81,17 @@ pub struct TerrainMeta {
 pub struct CameraBookmark {
     /// Bookmark name
     pub name: String,
-    
+
     /// Camera eye position [x, y, z]
     pub eye: [f64; 3],
-    
+
     /// Camera target position [x, y, z]
     pub target: [f64; 3],
-    
+
     /// Camera up vector [x, y, z]
     #[serde(default = "default_up")]
     pub up: [f64; 3],
-    
+
     /// Field of view in degrees
     #[serde(default = "default_fov")]
     pub fov_deg: f64,
@@ -118,34 +118,34 @@ impl BundleManifest {
             camera_bookmarks: Vec::new(),
         }
     }
-    
+
     /// Load manifest from a JSON file
     pub fn load(path: &Path) -> BundleResult<Self> {
         let data = std::fs::read_to_string(path)?;
         let manifest: Self = serde_json::from_str(&data)?;
-        
+
         if manifest.version > BUNDLE_VERSION {
             return Err(BundleError::VersionMismatch {
                 expected: BUNDLE_VERSION,
                 got: manifest.version,
             });
         }
-        
+
         Ok(manifest)
     }
-    
+
     /// Save manifest to a JSON file
     pub fn save(&self, path: &Path) -> BundleResult<()> {
         let data = serde_json::to_string_pretty(self)?;
         std::fs::write(path, data)?;
         Ok(())
     }
-    
+
     /// Add a checksum for a file path
     pub fn add_checksum(&mut self, rel_path: impl Into<String>, hash: impl Into<String>) {
         self.checksums.insert(rel_path.into(), hash.into());
     }
-    
+
     /// Verify a file's checksum
     pub fn verify_checksum(&self, rel_path: &str, actual_hash: &str) -> BundleResult<()> {
         if let Some(expected) = self.checksums.get(rel_path) {
@@ -163,28 +163,26 @@ impl BundleManifest {
 fn chrono_timestamp() -> String {
     // Use simple UTC timestamp without chrono dependency
     use std::time::{SystemTime, UNIX_EPOCH};
-    
+
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     let secs = duration.as_secs();
-    
+
     // Convert to rough ISO 8601 format
     let days_since_epoch = secs / 86400;
     let years = 1970 + (days_since_epoch / 365);
     let remaining_days = days_since_epoch % 365;
     let month = (remaining_days / 30).min(11) + 1;
     let day = (remaining_days % 30) + 1;
-    
+
     let day_secs = secs % 86400;
     let hour = day_secs / 3600;
     let minute = (day_secs % 3600) / 60;
     let second = day_secs % 60;
-    
+
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
         years, month, day, hour, minute, second
     )
 }
-
-

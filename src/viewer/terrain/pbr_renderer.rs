@@ -1,12 +1,12 @@
 // src/viewer/terrain/pbr_renderer.rs
 // Bridge to TerrainRenderer for PBR+POM terrain rendering in the interactive viewer
 
-use std::path::PathBuf;
-use crate::viewer::viewer_enums::{
-    ViewerHeightAoConfig, ViewerSunVisConfig,
-    ViewerMaterialLayerConfig, ViewerVectorOverlayConfig, ViewerTonemapConfig, ViewerDenoiseConfig,
-};
 use super::overlay::OverlayConfig;
+use crate::viewer::viewer_enums::{
+    ViewerDenoiseConfig, ViewerHeightAoConfig, ViewerMaterialLayerConfig, ViewerSunVisConfig,
+    ViewerTonemapConfig, ViewerVectorOverlayConfig,
+};
+use std::path::PathBuf;
 
 /// Configuration for PBR terrain rendering mode
 #[derive(Debug, Clone)]
@@ -200,9 +200,9 @@ pub struct DofConfig {
     pub focal_length: f32,
     pub quality: u32,
     pub max_blur_radius: f32,
-    pub blur_strength: f32,  // Artistic multiplier for landscape DoF (1.0 = physical, higher = more blur)
-    pub tilt_pitch: f32,     // Tilt-shift pitch in radians (Scheimpflug effect)
-    pub tilt_yaw: f32,       // Tilt-shift yaw in radians
+    pub blur_strength: f32, // Artistic multiplier for landscape DoF (1.0 = physical, higher = more blur)
+    pub tilt_pitch: f32,    // Tilt-shift pitch in radians (Scheimpflug effect)
+    pub tilt_yaw: f32,      // Tilt-shift yaw in radians
 }
 
 impl Default for DofConfig {
@@ -214,7 +214,7 @@ impl Default for DofConfig {
             focal_length: 50.0,
             quality: 8,
             max_blur_radius: 32.0,
-            blur_strength: 25.0,  // Landscape scale multiplier (reasonable for visible but not overwhelming DoF)
+            blur_strength: 25.0, // Landscape scale multiplier (reasonable for visible but not overwhelming DoF)
             tilt_pitch: 0.0,
             tilt_yaw: 0.0,
         }
@@ -239,7 +239,7 @@ impl Default for MotionBlurConfig {
             enabled: false,
             samples: 16,
             shutter_open: 0.0,
-            shutter_close: 0.5,  // 180° shutter angle
+            shutter_close: 0.5, // 180° shutter angle
             cam_phi_delta: 0.0,
             cam_theta_delta: 0.0,
             cam_radius_delta: 0.0,
@@ -278,8 +278,6 @@ impl Default for VolumetricsConfig {
         }
     }
 }
-
-
 
 /// M5: Internal denoise configuration
 #[derive(Debug, Clone)]
@@ -403,7 +401,11 @@ impl ViewerTerrainPbrConfig {
         }
         if let Some(sv) = sun_visibility {
             self.sun_visibility.enabled = sv.enabled;
-            self.sun_visibility.mode = if sv.mode == "hard" { "hard".to_string() } else { "soft".to_string() };
+            self.sun_visibility.mode = if sv.mode == "hard" {
+                "hard".to_string()
+            } else {
+                "soft".to_string()
+            };
             self.sun_visibility.samples = sv.samples.clamp(1, 16);
             self.sun_visibility.steps = sv.steps.clamp(8, 64);
             self.sun_visibility.max_distance = sv.max_distance.max(0.0);
@@ -432,7 +434,13 @@ impl ViewerTerrainPbrConfig {
         }
         // M6: Tonemap config
         if let Some(tm) = tonemap {
-            let valid_ops = ["reinhard", "reinhard_extended", "aces", "uncharted2", "exposure"];
+            let valid_ops = [
+                "reinhard",
+                "reinhard_extended",
+                "aces",
+                "uncharted2",
+                "exposure",
+            ];
             if valid_ops.contains(&tm.operator.to_lowercase().as_str()) {
                 self.tonemap.operator = tm.operator.to_lowercase();
             }
@@ -453,9 +461,17 @@ impl ViewerTerrainPbrConfig {
             self.debug_mode = d;
         }
     }
-    
+
     /// Apply lens effects config from IPC
-    pub fn apply_lens_effects(&mut self, enabled: bool, vignette: f32, radius: f32, softness: f32, distortion: f32, ca: f32) {
+    pub fn apply_lens_effects(
+        &mut self,
+        enabled: bool,
+        vignette: f32,
+        radius: f32,
+        softness: f32,
+        distortion: f32,
+        ca: f32,
+    ) {
         self.lens_effects.enabled = enabled;
         self.lens_effects.vignette_strength = vignette.clamp(0.0, 1.0);
         self.lens_effects.vignette_radius = radius.clamp(0.1, 1.0);
@@ -463,10 +479,19 @@ impl ViewerTerrainPbrConfig {
         self.lens_effects.distortion = distortion.clamp(-0.5, 0.5);
         self.lens_effects.chromatic_aberration = ca.clamp(0.0, 0.1);
     }
-    
+
     /// Apply DoF config from IPC
     /// Note: tilt_pitch and tilt_yaw are expected in DEGREES from CLI/IPC
-    pub fn apply_dof(&mut self, enabled: bool, f_stop: f32, focus_distance: f32, focal_length: f32, quality: &str, tilt_pitch_deg: f32, tilt_yaw_deg: f32) {
+    pub fn apply_dof(
+        &mut self,
+        enabled: bool,
+        f_stop: f32,
+        focus_distance: f32,
+        focal_length: f32,
+        quality: &str,
+        tilt_pitch_deg: f32,
+        tilt_yaw_deg: f32,
+    ) {
         self.dof.enabled = enabled;
         let clamped_f_stop = f_stop.clamp(1.4, 22.0);
         self.dof.f_stop = clamped_f_stop;
@@ -482,7 +507,7 @@ impl ViewerTerrainPbrConfig {
         // Convert degrees to radians for shader (tan() expects radians)
         self.dof.tilt_pitch = tilt_pitch_deg.to_radians();
         self.dof.tilt_yaw = tilt_yaw_deg.to_radians();
-        
+
         // Scale blur_strength inversely with f-stop:
         // - f/1.4 (wide) -> blur_strength ~50 (visible blur)
         // - f/2.8 -> blur_strength ~25
@@ -495,7 +520,7 @@ impl ViewerTerrainPbrConfig {
         let reference_f_stop = 1.4;
         self.dof.blur_strength = base_strength * (reference_f_stop / clamped_f_stop);
     }
-    
+
     /// Apply motion blur config from IPC
     pub fn apply_motion_blur(
         &mut self,
@@ -542,26 +567,37 @@ impl ViewerTerrainPbrConfig {
     pub fn to_display_string(&self) -> String {
         let mut parts = vec![
             format!("PBR: {}", if self.enabled { "ON" } else { "OFF" }),
-            format!("shadow={} res={}", self.shadow_technique, self.shadow_map_res),
+            format!(
+                "shadow={} res={}",
+                self.shadow_technique, self.shadow_map_res
+            ),
             format!("IBL={:.2} exp={:.2}", self.ibl_intensity, self.exposure),
             format!("msaa={} normal={:.2}", self.msaa, self.normal_strength),
         ];
         if self.height_ao.enabled {
-            parts.push(format!("height_ao=ON dirs={} steps={}", 
-                self.height_ao.directions, self.height_ao.steps));
+            parts.push(format!(
+                "height_ao=ON dirs={} steps={}",
+                self.height_ao.directions, self.height_ao.steps
+            ));
         }
         if self.sun_visibility.enabled {
-            parts.push(format!("sun_vis={} samples={} steps={}", 
-                self.sun_visibility.mode, self.sun_visibility.samples, self.sun_visibility.steps));
+            parts.push(format!(
+                "sun_vis={} samples={} steps={}",
+                self.sun_visibility.mode, self.sun_visibility.samples, self.sun_visibility.steps
+            ));
         }
         // M4-M6 display
         if self.materials.snow_enabled || self.materials.rock_enabled {
-            parts.push(format!("materials: snow={} rock={}", 
-                self.materials.snow_enabled, self.materials.rock_enabled));
+            parts.push(format!(
+                "materials: snow={} rock={}",
+                self.materials.snow_enabled, self.materials.rock_enabled
+            ));
         }
         if self.vector_overlay.depth_test || self.vector_overlay.halo_enabled {
-            parts.push(format!("overlay: depth={} halo={}", 
-                self.vector_overlay.depth_test, self.vector_overlay.halo_enabled));
+            parts.push(format!(
+                "overlay: depth={} halo={}",
+                self.vector_overlay.depth_test, self.vector_overlay.halo_enabled
+            ));
         }
         parts.push(format!("tonemap={}", self.tonemap.operator));
         parts.join(" | ")

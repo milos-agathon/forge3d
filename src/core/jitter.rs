@@ -206,7 +206,10 @@ mod tests {
         let initial_offset = state.offset;
 
         state.advance();
-        assert_ne!(state.offset, initial_offset, "Offset should change on advance");
+        assert_ne!(
+            state.offset, initial_offset,
+            "Offset should change on advance"
+        );
         assert_eq!(state.index, 1);
     }
 

@@ -3,8 +3,8 @@
 use super::cache::CogTileCache;
 use super::error::CogError;
 use super::ifd_parser::{
-    parse_cog_header, CogHeader, COMPRESSION_DEFLATE, COMPRESSION_DEFLATE_ALT,
-    COMPRESSION_LZW, COMPRESSION_NONE, SAMPLE_FORMAT_FLOAT, SAMPLE_FORMAT_INT, SAMPLE_FORMAT_UINT,
+    parse_cog_header, CogHeader, COMPRESSION_DEFLATE, COMPRESSION_DEFLATE_ALT, COMPRESSION_LZW,
+    COMPRESSION_NONE, SAMPLE_FORMAT_FLOAT, SAMPLE_FORMAT_INT, SAMPLE_FORMAT_UINT,
 };
 use super::range_reader::RangeReader;
 use crate::terrain::page_table::HeightReader;
@@ -102,11 +102,13 @@ impl CogHeightReader {
             return Ok(cached);
         }
 
-        let tile_idx = ifd.tile_index(tile_x, tile_y).ok_or(CogError::TileNotFound {
-            x: tile_x,
-            y: tile_y,
-            lod,
-        })?;
+        let tile_idx = ifd
+            .tile_index(tile_x, tile_y)
+            .ok_or(CogError::TileNotFound {
+                x: tile_x,
+                y: tile_y,
+                lod,
+            })?;
 
         if tile_idx >= ifd.tile_offsets.len() || tile_idx >= ifd.tile_byte_counts.len() {
             return Err(CogError::TileNotFound {
@@ -129,7 +131,13 @@ impl CogHeightReader {
         let heights = self.runtime.block_on(async move {
             let compressed = reader.read_range(offset, byte_count).await?;
             let decompressed = decompress_tile(&compressed, compression)?;
-            decode_heights(&decompressed, bits_per_sample, sample_format, tile_width, tile_height)
+            decode_heights(
+                &decompressed,
+                bits_per_sample,
+                sample_format,
+                tile_width,
+                tile_height,
+            )
         })?;
 
         let tile_size = (tile_width * tile_height) as usize;
@@ -153,11 +161,13 @@ impl CogHeightReader {
             return Ok(cached);
         }
 
-        let tile_idx = ifd.tile_index(tile_x, tile_y).ok_or(CogError::TileNotFound {
-            x: tile_x,
-            y: tile_y,
-            lod,
-        })?;
+        let tile_idx = ifd
+            .tile_index(tile_x, tile_y)
+            .ok_or(CogError::TileNotFound {
+                x: tile_x,
+                y: tile_y,
+                lod,
+            })?;
 
         if tile_idx >= ifd.tile_offsets.len() || tile_idx >= ifd.tile_byte_counts.len() {
             return Err(CogError::TileNotFound {
@@ -271,7 +281,9 @@ fn decompress_lzw(data: &[u8]) -> Result<Vec<u8>, CogError> {
                 e.push(e[0]);
                 e
             } else {
-                return Err(CogError::DecompressionError("LZW: invalid code sequence".into()));
+                return Err(CogError::DecompressionError(
+                    "LZW: invalid code sequence".into(),
+                ));
             }
         } else {
             return Err(CogError::DecompressionError(format!(

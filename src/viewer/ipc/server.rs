@@ -7,13 +7,13 @@ use std::sync::mpsc;
 use std::thread;
 
 use super::protocol::{
-    ipc_request_to_viewer_cmd, parse_ipc_request, IpcRequest, IpcResponse, ViewerStats, BundleRequest,
+    ipc_request_to_viewer_cmd, parse_ipc_request, BundleRequest, IpcRequest, IpcResponse,
+    ViewerStats,
+};
+use crate::viewer::event_loop::{
+    get_lasso_state, get_pick_events, take_pending_bundle_load, take_pending_bundle_save,
 };
 use crate::viewer::viewer_enums::ViewerCmd;
-use crate::viewer::event_loop::{
-    get_pick_events, get_lasso_state,
-    take_pending_bundle_save, take_pending_bundle_load,
-};
 
 /// IPC server configuration
 pub struct IpcServerConfig {
@@ -111,13 +111,16 @@ where
         eprintln!("[IPC] Failed to set blocking mode: {}", e);
         return;
     }
-    
+
     // Set timeouts to prevent blocking forever
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(300)));
     let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(30)));
 
     // Use larger buffer for handling large JSON messages (e.g., vector overlays with many vertices)
-    let mut reader = BufReader::with_capacity(4 * 1024 * 1024, stream.try_clone().expect("Failed to clone stream"));
+    let mut reader = BufReader::with_capacity(
+        4 * 1024 * 1024,
+        stream.try_clone().expect("Failed to clone stream"),
+    );
     let mut writer = stream;
 
     let mut line = String::new();
@@ -133,7 +136,7 @@ where
                 if n > 100000 {
                     eprintln!("[IPC] Received large message: {} bytes", n);
                 }
-                
+
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
                     continue;
@@ -143,9 +146,12 @@ where
                     Ok(req) => {
                         // Debug: log command type for large messages
                         if line.len() > 100000 {
-                            eprintln!("[IPC] Parsed large request: {:?}", std::mem::discriminant(&req));
+                            eprintln!(
+                                "[IPC] Parsed large request: {:?}",
+                                std::mem::discriminant(&req)
+                            );
                         }
-                        
+
                         // Handle special requests that return data directly
                         match req {
                             IpcRequest::GetStats => IpcResponse::with_stats(stats_getter()),
@@ -167,7 +173,9 @@ where
                             }
                             IpcRequest::PollPendingBundleSave => {
                                 if let Some((path, name)) = take_pending_bundle_save() {
-                                    IpcResponse::with_bundle_request(BundleRequest::save(path, name))
+                                    IpcResponse::with_bundle_request(BundleRequest::save(
+                                        path, name,
+                                    ))
                                 } else {
                                     IpcResponse::with_bundle_request(BundleRequest::none())
                                 }
@@ -179,30 +187,28 @@ where
                                     IpcResponse::with_bundle_request(BundleRequest::none())
                                 }
                             }
-                            _ => {
-                                match ipc_request_to_viewer_cmd(&req) {
-                                    Ok(Some(cmd)) => match cmd_sender(cmd) {
-                                        Ok(()) => IpcResponse::success(),
-                                        Err(e) => {
-                                            eprintln!("[IPC] Command error: {}", e);
-                                            IpcResponse::error(e)
-                                        },
-                                    },
-                                    Ok(None) => {
-                                        IpcResponse::error("Internal error: unhandled special request")
-                                    }
+                            _ => match ipc_request_to_viewer_cmd(&req) {
+                                Ok(Some(cmd)) => match cmd_sender(cmd) {
+                                    Ok(()) => IpcResponse::success(),
                                     Err(e) => {
-                                        eprintln!("[IPC] Conversion error: {}", e);
+                                        eprintln!("[IPC] Command error: {}", e);
                                         IpcResponse::error(e)
-                                    },
+                                    }
+                                },
+                                Ok(None) => {
+                                    IpcResponse::error("Internal error: unhandled special request")
                                 }
-                            }
+                                Err(e) => {
+                                    eprintln!("[IPC] Conversion error: {}", e);
+                                    IpcResponse::error(e)
+                                }
+                            },
                         }
                     }
                     Err(e) => {
                         eprintln!("[IPC] Parse error (msg len={}): {}", trimmed.len(), e);
                         IpcResponse::error(e)
-                    },
+                    }
                 };
 
                 let response_json = serde_json::to_string(&response)

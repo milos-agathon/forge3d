@@ -149,10 +149,10 @@ pub fn generate_rounded_rect_vertices(
     // For simplicity, generate a simple rectangle
     // A proper implementation would generate corner arcs
     let corners = [
-        [x, y],                     // Top-left
-        [x + width, y],             // Top-right
-        [x + width, y + height],    // Bottom-right
-        [x, y + height],            // Bottom-left
+        [x, y],                  // Top-left
+        [x + width, y],          // Top-right
+        [x + width, y + height], // Bottom-right
+        [x, y + height],         // Bottom-left
     ];
 
     for (i, corner) in corners.iter().enumerate() {
@@ -300,14 +300,8 @@ fn compute_pointer_positions(callout: &Callout) -> ([f32; 2], [f32; 2]) {
             callout.anchor,
             [box_center_x, callout.box_pos[1] + callout.box_size[1]],
         ),
-        PointerDirection::Up => (
-            callout.anchor,
-            [box_center_x, callout.box_pos[1]],
-        ),
-        PointerDirection::Left => (
-            callout.anchor,
-            [callout.box_pos[0], box_center_y],
-        ),
+        PointerDirection::Up => (callout.anchor, [box_center_x, callout.box_pos[1]]),
+        PointerDirection::Left => (callout.anchor, [callout.box_pos[0], box_center_y]),
         PointerDirection::Right => (
             callout.anchor,
             [callout.box_pos[0] + callout.box_size[0], box_center_y],
@@ -317,7 +311,11 @@ fn compute_pointer_positions(callout: &Callout) -> ([f32; 2], [f32; 2]) {
 }
 
 /// Determine the best pointer direction based on anchor and box positions.
-pub fn auto_pointer_direction(anchor: [f32; 2], box_pos: [f32; 2], box_size: [f32; 2]) -> PointerDirection {
+pub fn auto_pointer_direction(
+    anchor: [f32; 2],
+    box_pos: [f32; 2],
+    box_size: [f32; 2],
+) -> PointerDirection {
     let box_center_x = box_pos[0] + box_size[0] / 2.0;
     let box_center_y = box_pos[1] + box_size[1] / 2.0;
 
@@ -393,10 +391,8 @@ mod tests {
 
     #[test]
     fn test_generate_rounded_rect() {
-        let (verts, indices) = generate_rounded_rect_vertices(
-            0.0, 0.0, 100.0, 50.0, 5.0,
-            [1.0, 1.0, 1.0, 1.0],
-        );
+        let (verts, indices) =
+            generate_rounded_rect_vertices(0.0, 0.0, 100.0, 50.0, 5.0, [1.0, 1.0, 1.0, 1.0]);
         assert_eq!(verts.len(), 4);
         assert_eq!(indices.len(), 6);
     }

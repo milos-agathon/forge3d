@@ -3,32 +3,32 @@
 // Implements ID buffer rendering, ray picking, hover support, multi-select, BVH, and lasso
 // Plan 1: MVP ID buffer + Plan 2: Standard ray picking + Plan 3: Premium BVH + Lasso
 
-mod id_buffer;
-mod ray;
 mod bounds;
-mod tile_id;
-mod terrain_query;
-mod selection;
-mod unified;
 mod heightfield_ray;
-mod lasso;
 mod highlight;
+mod id_buffer;
+mod lasso;
+mod ray;
+mod selection;
+mod terrain_query;
+mod tile_id;
+mod unified;
 
-pub use id_buffer::{IdBufferPass, IdVertex};
-pub use ray::{Ray, unproject_cursor, invert_matrix};
-pub use bounds::{AABB, LayerBounds, BoundsManager};
-pub use tile_id::{TileIdPass, TileIdVertex, TileIdUniforms, DEFAULT_TILE_SIZE};
-pub use terrain_query::{TerrainQueryEngine, TerrainQueryResult, TerrainQueryConfig};
-pub use selection::{SelectionManager, SelectionSet, SelectionStyle};
-pub use unified::{
-    UnifiedPickingSystem, UnifiedPickingConfig, RichPickResult, 
-    TerrainHitInfo, PickEvent, PickEventType, LayerBvhData
-};
-pub use heightfield_ray::{HeightfieldRayEngine, HeightfieldConfig, HeightfieldHit};
-pub use lasso::{LassoSelection, LassoConfig, LassoState, BoxSelection, Point2D, BoundingBox2D};
+pub use bounds::{BoundsManager, LayerBounds, AABB};
+pub use heightfield_ray::{HeightfieldConfig, HeightfieldHit, HeightfieldRayEngine};
 pub use highlight::{
-    HighlightManager, HighlightStyle, HighlightEffect, HighlightUniforms,
-    HIGHLIGHT_SHADER_FUNCTIONS
+    HighlightEffect, HighlightManager, HighlightStyle, HighlightUniforms,
+    HIGHLIGHT_SHADER_FUNCTIONS,
+};
+pub use id_buffer::{IdBufferPass, IdVertex};
+pub use lasso::{BoundingBox2D, BoxSelection, LassoConfig, LassoSelection, LassoState, Point2D};
+pub use ray::{invert_matrix, unproject_cursor, Ray};
+pub use selection::{SelectionManager, SelectionSet, SelectionStyle};
+pub use terrain_query::{TerrainQueryConfig, TerrainQueryEngine, TerrainQueryResult};
+pub use tile_id::{TileIdPass, TileIdUniforms, TileIdVertex, DEFAULT_TILE_SIZE};
+pub use unified::{
+    LayerBvhData, PickEvent, PickEventType, RichPickResult, TerrainHitInfo, UnifiedPickingConfig,
+    UnifiedPickingSystem,
 };
 
 use std::sync::Arc;
@@ -130,11 +130,7 @@ impl PickingManager {
         self.width = width;
         self.height = height;
 
-        self.id_buffer_pass = Some(IdBufferPass::new(
-            &self.device,
-            width,
-            height,
-        ));
+        self.id_buffer_pass = Some(IdBufferPass::new(&self.device, width, height));
 
         // Initialize tile ID pass for hover picking
         if self.config.hover_enabled {
@@ -208,48 +204,48 @@ impl PickingManager {
     pub fn selected_feature(&self) -> Option<u32> {
         self.selection_manager.get_selection().first().copied()
     }
-    
+
     /// Get all selected feature IDs
     pub fn get_selection(&self) -> Vec<u32> {
         self.selection_manager.get_selection()
     }
-    
+
     /// Enable or disable multi-select mode
     pub fn set_multi_select(&mut self, enabled: bool) {
         self.config.multi_select = enabled;
         self.selection_manager.set_multi_select(enabled);
     }
-    
+
     /// Check if multi-select is enabled
     pub fn is_multi_select(&self) -> bool {
         self.config.multi_select
     }
-    
+
     /// Get the selection manager
     pub fn selection_manager(&self) -> &SelectionManager {
         &self.selection_manager
     }
-    
+
     /// Get mutable selection manager
     pub fn selection_manager_mut(&mut self) -> &mut SelectionManager {
         &mut self.selection_manager
     }
-    
+
     /// Get the bounds manager
     pub fn bounds_manager(&self) -> &BoundsManager {
         &self.bounds_manager
     }
-    
+
     /// Get mutable bounds manager
     pub fn bounds_manager_mut(&mut self) -> &mut BoundsManager {
         &mut self.bounds_manager
     }
-    
+
     /// Get the terrain query engine
     pub fn terrain_query(&self) -> &TerrainQueryEngine {
         &self.terrain_query
     }
-    
+
     /// Get mutable terrain query engine
     pub fn terrain_query_mut(&mut self) -> &mut TerrainQueryEngine {
         &mut self.terrain_query
@@ -271,12 +267,7 @@ impl PickingManager {
     }
 
     /// Copy a single pixel from the ID buffer to the readback buffer
-    pub fn copy_pixel_to_readback(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        x: u32,
-        y: u32,
-    ) {
+    pub fn copy_pixel_to_readback(&self, encoder: &mut wgpu::CommandEncoder, x: u32, y: u32) {
         let id_pass = match &self.id_buffer_pass {
             Some(pass) => pass,
             None => return,
@@ -342,7 +333,7 @@ impl PickingManager {
     /// Process a completed pick and return the result
     pub fn complete_pick(&mut self, x: u32, y: u32, shift_held: bool) -> Option<PickResult> {
         let feature_id = self.read_feature_id()?;
-        
+
         // ID 0 means no feature (background)
         if feature_id == 0 {
             if !shift_held {
@@ -360,7 +351,7 @@ impl PickingManager {
             layer_name: None,
         })
     }
-    
+
     /// Enable or disable hover highlighting
     pub fn set_hover_enabled(&mut self, enabled: bool) {
         self.config.hover_enabled = enabled;
@@ -370,34 +361,34 @@ impl PickingManager {
             self.tile_id_pass = None;
         }
     }
-    
+
     /// Check if hover is enabled
     pub fn is_hover_enabled(&self) -> bool {
         self.config.hover_enabled
     }
-    
+
     /// Set hover delay in milliseconds
     pub fn set_hover_delay(&mut self, delay_ms: u32) {
         self.config.hover_delay_ms = delay_ms;
     }
-    
+
     /// Request hover check at position (throttled)
     pub fn request_hover(&mut self, x: u32, y: u32) {
         if !self.config.hover_enabled {
             return;
         }
-        
+
         // Check if position changed significantly
         if let Some((last_x, last_y)) = self.last_hover_pos {
             if (x as i32 - last_x as i32).abs() < 2 && (y as i32 - last_y as i32).abs() < 2 {
                 return;
             }
         }
-        
+
         self.last_hover_pos = Some((x, y));
         self.pending_hover = Some((x, y, std::time::Instant::now()));
     }
-    
+
     /// Check if hover delay has elapsed and return pending hover coordinates
     pub fn check_hover_ready(&self) -> Option<(u32, u32)> {
         if let Some((x, y, time)) = self.pending_hover {
@@ -407,27 +398,27 @@ impl PickingManager {
         }
         None
     }
-    
+
     /// Clear pending hover
     pub fn clear_pending_hover(&mut self) {
         self.pending_hover = None;
     }
-    
+
     /// Set hover feature (for highlighting)
     pub fn set_hover_feature(&mut self, feature_id: Option<u32>) {
         self.selection_manager.set_hover(feature_id);
     }
-    
+
     /// Get hover feature
     pub fn hover_feature(&self) -> Option<u32> {
         self.selection_manager.hover_feature()
     }
-    
+
     /// Get the tile ID pass for hover rendering
     pub fn tile_id_pass(&self) -> Option<&TileIdPass> {
         self.tile_id_pass.as_ref()
     }
-    
+
     /// Get picking config
     pub fn config(&self) -> &PickingConfig {
         &self.config

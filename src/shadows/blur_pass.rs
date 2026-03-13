@@ -6,18 +6,17 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferBindingType,
-    BufferDescriptor, BufferUsages, ComputePipeline, ComputePipelineDescriptor, Device,
-    Extent3d, PipelineLayoutDescriptor, Queue, ShaderModuleDescriptor, ShaderSource,
-    ShaderStages, StorageTextureAccess, Texture, TextureDescriptor, TextureDimension,
-    TextureFormat, TextureSampleType, TextureUsages, TextureView, TextureViewDescriptor,
-    TextureViewDimension,
+    BufferDescriptor, BufferUsages, ComputePipeline, ComputePipelineDescriptor, Device, Extent3d,
+    PipelineLayoutDescriptor, Queue, ShaderModuleDescriptor, ShaderSource, ShaderStages,
+    StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureSampleType, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension,
 };
 
 /// Parameters for shadow blur pass
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct BlurParams {
-    direction: [f32; 2],    // (1,0) for horizontal, (0,1) for vertical
+    direction: [f32; 2], // (1,0) for horizontal, (0,1) for vertical
     kernel_radius: u32,
     cascade_count: u32,
     texture_size: u32,

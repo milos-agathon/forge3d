@@ -131,7 +131,10 @@ fn split_rgb(data: &[f32], expected_pixels: usize) -> Result<(Vec<f32>, Vec<f32>
     Ok((r, g, b))
 }
 
-fn to_any_channel(channel: ExrChannelData, expected_pixels: usize) -> Result<AnyChannel<FlatSamples>> {
+fn to_any_channel(
+    channel: ExrChannelData,
+    expected_pixels: usize,
+) -> Result<AnyChannel<FlatSamples>> {
     ensure!(
         channel.data.len() == expected_pixels,
         "channel {} expected {} samples, got {}",

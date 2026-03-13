@@ -2,9 +2,7 @@
 // ID buffer rendering pass for feature picking
 // Renders feature IDs to an R32Uint texture for GPU-based picking
 
-use wgpu::{
-    BindGroup, BindGroupLayout, Buffer, Device, RenderPipeline, Texture, TextureView,
-};
+use wgpu::{BindGroup, BindGroupLayout, Buffer, Device, RenderPipeline, Texture, TextureView};
 
 /// Vertex format for ID buffer rendering
 #[repr(C)]

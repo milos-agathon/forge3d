@@ -21,7 +21,7 @@ impl ShadowTechnique {
     pub fn as_u32(self) -> u32 {
         self as u32
     }
-    
+
     pub fn from_u32(value: u32) -> Self {
         match value {
             0 => ShadowTechnique::Hard,

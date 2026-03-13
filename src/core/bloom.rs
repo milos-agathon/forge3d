@@ -339,16 +339,12 @@ impl PostFxEffect for BloomEffect {
 
         let blur_h_shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("bloom_blur_h_shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../shaders/bloom_blur_h.wgsl"
-            ))),
+            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/bloom_blur_h.wgsl"))),
         });
 
         let blur_v_shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("bloom_blur_v_shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../shaders/bloom_blur_v.wgsl"
-            ))),
+            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/bloom_blur_v.wgsl"))),
         });
 
         let composite_shader = device.create_shader_module(ShaderModuleDescriptor {
@@ -485,10 +481,9 @@ impl PostFxEffect for BloomEffect {
 
         // --- Validate all resources are initialized ---
 
-        let brightpass_pipeline = self
-            .brightpass_pipeline
-            .as_ref()
-            .ok_or_else(|| RenderError::Render("Bloom brightpass pipeline not initialized".into()))?;
+        let brightpass_pipeline = self.brightpass_pipeline.as_ref().ok_or_else(|| {
+            RenderError::Render("Bloom brightpass pipeline not initialized".into())
+        })?;
         let blur_h_pipeline = self
             .blur_h_pipeline
             .as_ref()
@@ -497,10 +492,9 @@ impl PostFxEffect for BloomEffect {
             .blur_v_pipeline
             .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom blur_v pipeline not initialized".into()))?;
-        let composite_pipeline = self
-            .composite_pipeline
-            .as_ref()
-            .ok_or_else(|| RenderError::Render("Bloom composite pipeline not initialized".into()))?;
+        let composite_pipeline = self.composite_pipeline.as_ref().ok_or_else(|| {
+            RenderError::Render("Bloom composite pipeline not initialized".into())
+        })?;
 
         let brightpass_layout = self
             .brightpass_layout
@@ -528,28 +522,26 @@ impl PostFxEffect for BloomEffect {
             .as_ref()
             .ok_or_else(|| RenderError::Render("Bloom composite UBO not initialized".into()))?;
 
-        let bp_idx = self.brightpass_texture_index.ok_or_else(|| {
-            RenderError::Render("Bloom brightpass texture index not set".into())
-        })?;
-        let bt_idx = self.blur_temp_texture_index.ok_or_else(|| {
-            RenderError::Render("Bloom blur temp texture index not set".into())
-        })?;
+        let bp_idx = self
+            .brightpass_texture_index
+            .ok_or_else(|| RenderError::Render("Bloom brightpass texture index not set".into()))?;
+        let bt_idx = self
+            .blur_temp_texture_index
+            .ok_or_else(|| RenderError::Render("Bloom blur temp texture index not set".into()))?;
 
         // Get ping-pong texture views from resource pool
         let bright_view = resource_pool.get_current_ping_pong(bp_idx).ok_or_else(|| {
             RenderError::Render("Bloom brightpass ping-pong texture unavailable".into())
         })?;
-        let blur_temp_view =
-            resource_pool.get_current_ping_pong(bt_idx).ok_or_else(|| {
-                RenderError::Render("Bloom blur temp ping-pong texture unavailable".into())
-            })?;
+        let blur_temp_view = resource_pool.get_current_ping_pong(bt_idx).ok_or_else(|| {
+            RenderError::Render("Bloom blur temp ping-pong texture unavailable".into())
+        })?;
         // Use the alternate slot of the brightpass pair for V blur output
-        let blur_result_view =
-            resource_pool
-                .get_previous_ping_pong(bp_idx)
-                .ok_or_else(|| {
-                    RenderError::Render("Bloom blur result ping-pong texture unavailable".into())
-                })?;
+        let blur_result_view = resource_pool
+            .get_previous_ping_pong(bp_idx)
+            .ok_or_else(|| {
+                RenderError::Render("Bloom blur result ping-pong texture unavailable".into())
+            })?;
 
         // --- Upload uniforms ---
 

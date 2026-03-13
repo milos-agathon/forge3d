@@ -26,7 +26,7 @@ pub use page_table::PageTable;
 #[cfg(feature = "cog_streaming")]
 pub mod cog;
 #[cfg(feature = "cog_streaming")]
-pub use cog::{CogHeightReader, CogTileCache, CogCacheStats, CogError};
+pub use cog::{CogCacheStats, CogError, CogHeightReader, CogTileCache};
 
 // B11-BEGIN:tiling-mod
 pub mod tiling;
@@ -46,8 +46,8 @@ pub use lod::{
 // P2.1/M5: Clipmap terrain system for true scalability
 pub mod clipmap;
 pub use clipmap::{
-    ClipmapConfig, ClipmapLevel, ClipmapMesh, ClipmapStreamer, ClipmapVertex,
-    make_center_block, make_ring, make_ring_skirts,
+    make_center_block, make_ring, make_ring_skirts, ClipmapConfig, ClipmapLevel, ClipmapMesh,
+    ClipmapStreamer, ClipmapVertex,
 };
 
 // B13/B14-BEGIN:analysis-mod
@@ -1082,7 +1082,13 @@ impl TerrainSpike {
             // Prefer height mosaic view if present, else None (renderer will use dummy)
             let height_view_opt = self.height_mosaic.as_ref().map(|m| &m.view);
             let pt_buf_opt = self.page_table.as_ref().map(|pt| &pt.buffer);
-            ov.recreate_bind_group(&self.device, overlay_view_opt, height_view_opt, pt_buf_opt, None);
+            ov.recreate_bind_group(
+                &self.device,
+                overlay_view_opt,
+                height_view_opt,
+                pt_buf_opt,
+                None,
+            );
             ov.upload_uniforms(&self.queue);
 
             let mut rp2 = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

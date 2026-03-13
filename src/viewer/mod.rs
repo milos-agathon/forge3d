@@ -10,12 +10,12 @@ pub mod camera_controller;
 mod cmd;
 mod event_loop;
 pub mod hud;
-pub mod pointcloud;
 pub mod image_analysis;
 mod init;
 mod input;
 pub mod ipc;
 mod p5;
+pub mod pointcloud;
 mod render;
 mod state;
 mod terrain;
@@ -32,28 +32,27 @@ pub mod viewer_struct;
 mod viewer_types;
 
 // Re-export public items
-pub use viewer_config::{set_initial_commands, ViewerConfig};
+pub use ipc::IpcServerConfig;
 #[cfg(feature = "extension-module")]
 pub use viewer_config::set_initial_terrain_config;
-pub use ipc::IpcServerConfig;
+pub use viewer_config::{set_initial_commands, ViewerConfig};
 
 use viewer_config::INITIAL_CMDS;
-use viewer_constants::VIEWER_SNAPSHOT_MAX_MEGAPIXELS;
 #[cfg(feature = "extension-module")]
 use viewer_config::INITIAL_TERRAIN_CONFIG;
+use viewer_constants::VIEWER_SNAPSHOT_MAX_MEGAPIXELS;
 use viewer_types::{
     FogCameraUniforms, FogUpsampleParamsStd140, SkyUniforms, VolumetricUniformsStd140,
 };
 
 // HUD push functions available for future use
+use crate::core::shadows::CameraFrustum;
 #[allow(unused_imports)]
 use hud::{push_number, push_text_3x5};
-use crate::core::shadows::CameraFrustum;
 #[cfg(feature = "extension-module")]
 use std::sync::Arc;
 
 // Constants moved to viewer_constants.rs
-
 
 // build_ssr_albedo_texture moved to viewer_ssr_scene.rs
 
@@ -76,7 +75,11 @@ impl Viewer {
     /// P1.3: Enable or disable Temporal Anti-Aliasing
     pub fn set_taa_enabled(&mut self, enabled: bool) {
         // P1.4: If terrain viewer is active, delegate TAA to terrain viewer
-        let terrain_active = self.terrain_viewer.as_ref().map(|tv| tv.has_terrain()).unwrap_or(false);
+        let terrain_active = self
+            .terrain_viewer
+            .as_ref()
+            .map(|tv| tv.has_terrain())
+            .unwrap_or(false);
         if terrain_active {
             if let Some(ref mut tv) = self.terrain_viewer {
                 tv.set_taa_enabled(enabled);
@@ -106,7 +109,7 @@ impl Viewer {
         if let Some(ref mut taa) = self.taa_renderer {
             taa.set_enabled(enabled);
         }
-        
+
         // P1.2: Enable jitter when TAA is enabled (only for main viewer, not terrain)
         self.taa_jitter.enabled = enabled;
         if enabled {
@@ -119,7 +122,10 @@ impl Viewer {
 
     /// P1.3: Check if TAA is enabled
     pub fn is_taa_enabled(&self) -> bool {
-        self.taa_renderer.as_ref().map(|t| t.is_enabled()).unwrap_or(false)
+        self.taa_renderer
+            .as_ref()
+            .map(|t| t.is_enabled())
+            .unwrap_or(false)
     }
 }
 
@@ -209,7 +215,6 @@ impl Viewer {
         Ok(())
     }
 }
-
 
 // SSR scene helpers, GI methods, and reexecute_gi moved to p5/ssr_scene_impl.rs and other modules
 

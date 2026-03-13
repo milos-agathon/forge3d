@@ -16,23 +16,23 @@ fn sample_bilinear(
 ) -> (f32, f32, f32, f32) {
     let u = u.clamp(0.0, 1.0);
     let v = v.clamp(0.0, 1.0);
-    
+
     let fx = u * (width.saturating_sub(1)) as f32;
     let fy = v * (height.saturating_sub(1)) as f32;
-    
+
     let x0 = fx.floor() as u32;
     let y0 = fy.floor() as u32;
     let x1 = (x0 + 1).min(width.saturating_sub(1));
     let y1 = (y0 + 1).min(height.saturating_sub(1));
-    
+
     let tx = fx.fract();
     let ty = fy.fract();
-    
+
     let idx00 = ((y0 * width + x0) * 4) as usize;
     let idx10 = ((y0 * width + x1) * 4) as usize;
     let idx01 = ((y1 * width + x0) * 4) as usize;
     let idx11 = ((y1 * width + x1) * 4) as usize;
-    
+
     // Safe sampling with bounds check
     let sample = |idx: usize, ch: usize| -> f32 {
         if idx + ch < rgba.len() {
@@ -41,7 +41,7 @@ fn sample_bilinear(
             0.0
         }
     };
-    
+
     // Bilinear interpolation per channel
     let bilerp = |ch: usize| -> f32 {
         let c00 = sample(idx00, ch);
@@ -52,7 +52,7 @@ fn sample_bilinear(
         let bot = c01 * (1.0 - tx) + c11 * tx;
         top * (1.0 - ty) + bot * ty
     };
-    
+
     (bilerp(0), bilerp(1), bilerp(2), bilerp(3) * opacity)
 }
 
@@ -83,7 +83,11 @@ impl BlendMode {
 #[derive(Debug, Clone)]
 pub enum OverlayData {
     /// Raw RGBA pixels
-    Raster { rgba: Vec<u8>, width: u32, height: u32 },
+    Raster {
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
     /// Path to an image file (PNG, JPEG, etc.)
     Image { path: PathBuf },
 }
@@ -112,7 +116,11 @@ impl Default for OverlayLayer {
     fn default() -> Self {
         Self {
             name: String::new(),
-            data: OverlayData::Raster { rgba: Vec::new(), width: 0, height: 0 },
+            data: OverlayData::Raster {
+                rgba: Vec::new(),
+                width: 0,
+                height: 0,
+            },
             extent: None,
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
@@ -196,7 +204,11 @@ impl OverlayStack {
     ) -> u32 {
         let config = OverlayLayer {
             name: name.to_string(),
-            data: OverlayData::Raster { rgba: rgba.clone(), width, height },
+            data: OverlayData::Raster {
+                rgba: rgba.clone(),
+                width,
+                height,
+            },
             extent,
             opacity,
             blend_mode,
@@ -223,11 +235,15 @@ impl OverlayStack {
         let rgba_img = img.to_rgba8();
         let (width, height) = rgba_img.dimensions();
         let rgba = rgba_img.into_raw();
-        
+
         // Store RGBA data directly for CPU compositing (not just path reference)
         let config = OverlayLayer {
             name: name.to_string(),
-            data: OverlayData::Raster { rgba: rgba.clone(), width, height },
+            data: OverlayData::Raster {
+                rgba: rgba.clone(),
+                width,
+                height,
+            },
             extent,
             opacity,
             blend_mode,
@@ -252,7 +268,11 @@ impl OverlayStack {
         // Create GPU texture
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some(&format!("overlay_layer_{}", id)),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -275,7 +295,11 @@ impl OverlayStack {
                 bytes_per_row: Some(width * 4),
                 rows_per_image: Some(height),
             },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -291,8 +315,13 @@ impl OverlayStack {
         self.layers.push(layer_gpu);
         self.dirty = true;
 
-        println!("[overlay] Added layer '{}' (id={}, {}x{})", 
-            self.layers.last().unwrap().config.name, id, width, height);
+        println!(
+            "[overlay] Added layer '{}' (id={}, {}x{})",
+            self.layers.last().unwrap().config.name,
+            id,
+            width,
+            height
+        );
 
         id
     }
@@ -301,7 +330,10 @@ impl OverlayStack {
     pub fn remove(&mut self, id: u32) -> bool {
         if let Some(pos) = self.layers.iter().position(|l| l.id == id) {
             let removed = self.layers.remove(pos);
-            println!("[overlay] Removed layer '{}' (id={})", removed.config.name, id);
+            println!(
+                "[overlay] Removed layer '{}' (id={})",
+                removed.config.name, id
+            );
             self.dirty = true;
             true
         } else {
@@ -361,7 +393,9 @@ impl OverlayStack {
 
     /// Check if any visible layers exist
     pub fn has_visible_layers(&self) -> bool {
-        self.layers.iter().any(|l| l.config.visible && l.config.opacity > 0.001)
+        self.layers
+            .iter()
+            .any(|l| l.config.visible && l.config.opacity > 0.001)
     }
 
     /// Check if composite needs rebuild
@@ -382,7 +416,7 @@ impl OverlayStack {
 
     /// Build or rebuild the composite texture from all visible layers.
     /// This flattens the layer stack into a single RGBA texture.
-    /// 
+    ///
     /// For the initial implementation, we use a simple CPU compositing approach.
     /// A GPU compute pass could be added later for better performance.
     pub fn build_composite(&mut self, target_width: u32, target_height: u32) {
@@ -391,7 +425,9 @@ impl OverlayStack {
         }
 
         // Collect visible layers sorted by z-order
-        let mut visible_layers: Vec<_> = self.layers.iter()
+        let mut visible_layers: Vec<_> = self
+            .layers
+            .iter()
             .filter(|l| l.config.visible && l.config.opacity > 0.001)
             .collect();
         visible_layers.sort_by_key(|l| l.config.z_order);
@@ -408,9 +444,11 @@ impl OverlayStack {
 
             // Get layer RGBA data
             let (layer_rgba, layer_w, layer_h) = match &layer.config.data {
-                OverlayData::Raster { rgba, width, height } => {
-                    (rgba.as_slice(), *width, *height)
-                },
+                OverlayData::Raster {
+                    rgba,
+                    width,
+                    height,
+                } => (rgba.as_slice(), *width, *height),
                 OverlayData::Image { path } => {
                     // Reload image (could cache this)
                     if let Ok(img) = image::open(path) {
@@ -438,9 +476,8 @@ impl OverlayStack {
                     let layer_v = (v - extent[1]) / (extent[3] - extent[1]);
 
                     // Bilinear interpolation for high-quality sampling
-                    let (src_r, src_g, src_b, src_a) = sample_bilinear(
-                        layer_rgba, layer_w, layer_h, layer_u, layer_v, opacity
-                    );
+                    let (src_r, src_g, src_b, src_a) =
+                        sample_bilinear(layer_rgba, layer_w, layer_h, layer_u, layer_v, opacity);
 
                     if src_a < 0.001 {
                         continue;
@@ -496,10 +533,16 @@ impl OverlayStack {
         }
 
         // Create or recreate composite texture
-        if self.composite_dimensions != (target_width, target_height) || self.composite_texture.is_none() {
+        if self.composite_dimensions != (target_width, target_height)
+            || self.composite_texture.is_none()
+        {
             self.composite_texture = Some(self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("overlay_composite"),
-                size: wgpu::Extent3d { width: target_width, height: target_height, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: target_width,
+                    height: target_height,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -507,8 +550,12 @@ impl OverlayStack {
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             }));
-            self.composite_view = Some(self.composite_texture.as_ref().unwrap()
-                .create_view(&wgpu::TextureViewDescriptor::default()));
+            self.composite_view = Some(
+                self.composite_texture
+                    .as_ref()
+                    .unwrap()
+                    .create_view(&wgpu::TextureViewDescriptor::default()),
+            );
             self.composite_dimensions = (target_width, target_height);
         }
 
@@ -526,17 +573,28 @@ impl OverlayStack {
                 bytes_per_row: Some(target_width * 4),
                 rows_per_image: Some(target_height),
             },
-            wgpu::Extent3d { width: target_width, height: target_height, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: target_width,
+                height: target_height,
+                depth_or_array_layers: 1,
+            },
         );
 
         // DEBUG: Check non-zero alpha count
         let nonzero = composite_rgba.chunks(4).filter(|p| p[3] > 0).count();
-        println!("[overlay] Composite non-zero alpha pixels: {} / {}", nonzero, pixel_count);
+        println!(
+            "[overlay] Composite non-zero alpha pixels: {} / {}",
+            nonzero, pixel_count
+        );
 
         self.dirty = false;
-        
-        println!("[overlay] Built composite texture {}x{} from {} visible layers",
-            target_width, target_height, visible_layers.len());
+
+        println!(
+            "[overlay] Built composite texture {}x{} from {} visible layers",
+            target_width,
+            target_height,
+            visible_layers.len()
+        );
     }
 
     /// Ensure a fallback 1x1 transparent texture exists for when no overlays are present
@@ -545,7 +603,11 @@ impl OverlayStack {
             // Create 1x1 transparent texture
             self.composite_texture = Some(self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("overlay_fallback"),
-                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -553,7 +615,7 @@ impl OverlayStack {
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             }));
-            
+
             // Upload transparent pixel
             self.queue.write_texture(
                 wgpu::ImageCopyTexture {
@@ -568,14 +630,22 @@ impl OverlayStack {
                     bytes_per_row: Some(4),
                     rows_per_image: Some(1),
                 },
-                wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
             );
-            
-            self.composite_view = Some(self.composite_texture.as_ref().unwrap()
-                .create_view(&wgpu::TextureViewDescriptor::default()));
+
+            self.composite_view = Some(
+                self.composite_texture
+                    .as_ref()
+                    .unwrap()
+                    .create_view(&wgpu::TextureViewDescriptor::default()),
+            );
             self.composite_dimensions = (1, 1);
         }
-        
+
         (self.composite_view.as_ref().unwrap(), &self.sampler)
     }
 }

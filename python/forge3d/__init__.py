@@ -24,6 +24,9 @@ version = __version__
 
 import numpy as np
 
+from ._png import load_png_rgba as _load_png_rgba
+from ._png import save_png as _save_png
+
 # -----------------------------------------------------------------------------
 # Native module loading
 # -----------------------------------------------------------------------------
@@ -212,36 +215,20 @@ class Renderer:
 # -----------------------------------------------------------------------------
 def numpy_to_png(path, array: np.ndarray) -> None:
     """Save numpy array as PNG file."""
-    from PIL import Image
-    
     path_str = str(path)
     if not path_str.lower().endswith('.png'):
         raise ValueError(f"File must have .png extension, got {path_str}")
-    
+
     arr = np.ascontiguousarray(array)
     if arr.dtype != np.uint8:
         raise RuntimeError("Array must be uint8")
-    
-    if arr.ndim == 2:
-        img = Image.fromarray(arr, mode='L')
-    elif arr.ndim == 3 and arr.shape[2] == 3:
-        img = Image.fromarray(arr, mode='RGB')
-    elif arr.ndim == 3 and arr.shape[2] == 4:
-        img = Image.fromarray(arr, mode='RGBA')
-    else:
-        raise ValueError(f"Unsupported array shape: {arr.shape}")
-    
-    img.save(path_str)
+
+    _save_png(path, arr)
 
 
 def png_to_numpy(path) -> np.ndarray:
     """Load PNG file as numpy array."""
-    from PIL import Image
-    
-    img = Image.open(str(path))
-    if img.mode != 'RGBA':
-        img = img.convert('RGBA')
-    return np.array(img, dtype=np.uint8)
+    return _load_png_rgba(path)
 
 
 def dem_stats(heightmap: np.ndarray) -> dict:

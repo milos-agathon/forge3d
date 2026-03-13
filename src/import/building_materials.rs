@@ -248,7 +248,8 @@ pub const MATERIAL_ROOF_SLATE: BuildingMaterial = BuildingMaterial {
 /// ```
 pub fn material_from_tags(tags: &HashMap<String, String>) -> BuildingMaterial {
     // Priority 1: Explicit material tags
-    if let Some(mat_str) = tags.get("building:material")
+    if let Some(mat_str) = tags
+        .get("building:material")
         .or_else(|| tags.get("building:facade:material"))
         .or_else(|| tags.get("material"))
     {
@@ -256,7 +257,8 @@ pub fn material_from_tags(tags: &HashMap<String, String>) -> BuildingMaterial {
     }
 
     // Priority 2: Color-based override
-    if let Some(color) = tags.get("building:colour")
+    if let Some(color) = tags
+        .get("building:colour")
         .or_else(|| tags.get("building:color"))
     {
         if let Some(rgb) = parse_css_color(color) {
@@ -278,8 +280,9 @@ pub fn material_from_tags(tags: &HashMap<String, String>) -> BuildingMaterial {
             "industrial" | "warehouse" | "hangar" => MATERIAL_CONCRETE,
 
             // Residential varies by region, default to brick
-            "house" | "detached" | "semidetached_house" | "terrace"
-            | "residential" => MATERIAL_BRICK,
+            "house" | "detached" | "semidetached_house" | "terrace" | "residential" => {
+                MATERIAL_BRICK
+            }
 
             // Apartments often concrete
             "apartments" => MATERIAL_CONCRETE,
@@ -329,16 +332,15 @@ pub fn material_from_name(name: &str) -> BuildingMaterial {
 
 /// Infer roof material from OSM tags.
 pub fn roof_material_from_tags(tags: &HashMap<String, String>) -> BuildingMaterial {
-    if let Some(mat_str) = tags.get("roof:material")
+    if let Some(mat_str) = tags
+        .get("roof:material")
         .or_else(|| tags.get("building:roof:material"))
     {
         return material_from_name(mat_str);
     }
 
     // Infer from roof color
-    if let Some(color) = tags.get("roof:colour")
-        .or_else(|| tags.get("roof:color"))
-    {
+    if let Some(color) = tags.get("roof:colour").or_else(|| tags.get("roof:color")) {
         if let Some(rgb) = parse_css_color(color) {
             return BuildingMaterial {
                 albedo: rgb,
@@ -415,11 +417,7 @@ fn parse_hex_rgb(hex: &str) -> Option<[f32; 3]> {
     };
 
     // Convert sRGB to linear (approximate gamma=2.2)
-    Some([
-        srgb_to_linear(r),
-        srgb_to_linear(g),
-        srgb_to_linear(b),
-    ])
+    Some([srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b)])
 }
 
 fn srgb_to_linear(srgb: u8) -> f32 {
@@ -436,7 +434,7 @@ fn srgb_to_linear(srgb: u8) -> f32 {
 // ============================================================================
 
 #[cfg(feature = "extension-module")]
-use pyo3::{prelude::*, exceptions::PyValueError};
+use pyo3::{exceptions::PyValueError, prelude::*};
 
 /// P4.2: Python binding for material inference from OSM tags
 #[cfg(feature = "extension-module")]

@@ -95,7 +95,7 @@ pub struct CsmUniforms {
     /// Cascade blend range (0.0 = no blend, 0.1 = 10% blend at boundaries)
     pub cascade_blend_range: f32,
     /// Padding for std430 alignment (storage buffer) - must reach 864 bytes total
-    pub _padding2: [f32; 27],  // Additional padding: 108 bytes to reach 864 total
+    pub _padding2: [f32; 27], // Additional padding: 108 bytes to reach 864 total
 }
 
 impl Default for CsmUniforms {

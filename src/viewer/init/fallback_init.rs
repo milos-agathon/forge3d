@@ -19,7 +19,10 @@ fn fs_fb() -> @location(0) vec4<f32> {
 "#;
 
 /// Create fallback render pipeline
-pub fn create_fallback_pipeline(device: &Arc<Device>, surface_format: TextureFormat) -> RenderPipeline {
+pub fn create_fallback_pipeline(
+    device: &Arc<Device>,
+    surface_format: TextureFormat,
+) -> RenderPipeline {
     let fb_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("viewer.fallback.shader"),
         source: wgpu::ShaderSource::Wgsl(FALLBACK_SHADER.into()),

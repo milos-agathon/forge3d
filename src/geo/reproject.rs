@@ -48,9 +48,12 @@ pub fn reproject_coords(
     // Transform each coordinate
     let mut result = Vec::with_capacity(coords.len());
     for coord in coords {
-        let (x, y) = transformer
-            .convert((coord[0], coord[1]))
-            .map_err(|e| GeoError::Projection(format!("Transform failed at ({}, {}): {}", coord[0], coord[1], e)))?;
+        let (x, y) = transformer.convert((coord[0], coord[1])).map_err(|e| {
+            GeoError::Projection(format!(
+                "Transform failed at ({}, {}): {}",
+                coord[0], coord[1], e
+            ))
+        })?;
         result.push([x, y]);
     }
 

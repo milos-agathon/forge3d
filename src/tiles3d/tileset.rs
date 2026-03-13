@@ -1,10 +1,10 @@
 //! Tileset parsing and management for 3D Tiles
 
-use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
 use super::bounds::BoundingVolume;
 use super::error::Tiles3dResult;
 use super::tile::{Tile, TileRefine};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 /// Asset metadata for the tileset
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,12 +60,12 @@ impl Tileset {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)?;
         let json: TilesetJson = serde_json::from_str(&content)?;
-        
+
         let base_path = path
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
-        
+
         Ok(Self { base_path, json })
     }
 
@@ -121,7 +121,10 @@ impl Tileset {
 
     /// Check if any required extensions are present
     pub fn has_required_extensions(&self) -> bool {
-        self.json.extensions_required.as_ref().map_or(false, |e| !e.is_empty())
+        self.json
+            .extensions_required
+            .as_ref()
+            .map_or(false, |e| !e.is_empty())
     }
 
     /// Get list of required extensions
@@ -147,7 +150,7 @@ mod tests {
                 "refine": "REPLACE"
             }
         }"#;
-        
+
         let tileset = Tileset::from_json(json, PathBuf::from(".")).unwrap();
         assert_eq!(tileset.version(), "1.0");
         assert_eq!(tileset.geometric_error(), 500.0);
@@ -176,11 +179,11 @@ mod tests {
                 ]
             }
         }"#;
-        
+
         let tileset = Tileset::from_json(json, PathBuf::from("/data")).unwrap();
         assert_eq!(tileset.tile_count(), 3);
         assert_eq!(tileset.max_depth(), 2);
-        
+
         let children = &tileset.root().children;
         assert_eq!(children.len(), 2);
         assert_eq!(children[0].content_uri(), Some("tile1.b3dm"));

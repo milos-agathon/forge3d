@@ -1,7 +1,7 @@
 //! Point cloud renderer with caching
 
-use std::collections::HashMap;
 use glam::Vec3;
+use std::collections::HashMap;
 
 use super::copc::{CopcDataset, PointData as CopcPointData};
 use super::ept::{EptDataset, PointData as EptPointData};
@@ -23,7 +23,11 @@ const VIEWER_FLOATS_PER_VERTEX: usize = 12;
 
 impl PointBuffer {
     pub fn new() -> Self {
-        Self { positions: Vec::new(), colors: None, point_count: 0 }
+        Self {
+            positions: Vec::new(),
+            colors: None,
+            point_count: 0,
+        }
     }
 
     pub fn byte_size(&self) -> usize {
@@ -81,11 +85,7 @@ impl PointBuffer {
     /// `[x, y, z, elevation_norm, r, g, b, intensity, size, pad, pad, pad]`
     ///
     /// `bounds_min`/`bounds_max` normalise elevation (Y axis) to \[0, 1\].
-    pub fn create_viewer_gpu_buffer(
-        &self,
-        bounds_min: [f32; 3],
-        bounds_max: [f32; 3],
-    ) -> Vec<f32> {
+    pub fn create_viewer_gpu_buffer(&self, bounds_min: [f32; 3], bounds_max: [f32; 3]) -> Vec<f32> {
         if self.point_count == 0 {
             return Vec::new();
         }
@@ -112,11 +112,11 @@ impl PointBuffer {
             };
 
             out.extend_from_slice(&[
-                x, y, z,       // position
-                elev_norm,     // elevation_norm
-                r, g, b,       // rgb
-                0.5,           // intensity (default)
-                1.0,           // size (default)
+                x, y, z,         // position
+                elev_norm, // elevation_norm
+                r, g, b,   // rgb
+                0.5, // intensity (default)
+                1.0, // size (default)
                 0.0, 0.0, 0.0, // padding
             ]);
         }
@@ -125,7 +125,9 @@ impl PointBuffer {
 }
 
 impl Default for PointBuffer {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 struct CacheEntry {
@@ -165,7 +167,9 @@ pub struct PointCloudRenderer {
 }
 
 impl Default for PointCloudRenderer {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PointCloudRenderer {
@@ -192,33 +196,17 @@ impl PointCloudRenderer {
     }
 
     /// Get visible nodes from COPC dataset
-    pub fn get_visible_copc(
-        &self,
-        dataset: &CopcDataset,
-        camera_pos: Vec3,
-    ) -> Vec<VisibleNode> {
+    pub fn get_visible_copc(&self, dataset: &CopcDataset, camera_pos: Vec3) -> Vec<VisibleNode> {
         let root = dataset.root_node();
-        self.traverser.visible_nodes(
-            &root,
-            camera_pos,
-            None,
-            |key| dataset.children(key),
-        )
+        self.traverser
+            .visible_nodes(&root, camera_pos, None, |key| dataset.children(key))
     }
 
     /// Get visible nodes from EPT dataset
-    pub fn get_visible_ept(
-        &self,
-        dataset: &EptDataset,
-        camera_pos: Vec3,
-    ) -> Vec<VisibleNode> {
+    pub fn get_visible_ept(&self, dataset: &EptDataset, camera_pos: Vec3) -> Vec<VisibleNode> {
         let root = dataset.root_node();
-        self.traverser.visible_nodes(
-            &root,
-            camera_pos,
-            None,
-            |key| dataset.children(key),
-        )
+        self.traverser
+            .visible_nodes(&root, camera_pos, None, |key| dataset.children(key))
     }
 
     /// Load points for visible nodes from COPC.
@@ -283,10 +271,13 @@ impl PointCloudRenderer {
                         combined.point_count += buffer.point_count;
 
                         self.ensure_cache_space(byte_size);
-                        self.cache.insert(cache_key, CacheEntry {
-                            buffer,
-                            last_used: std::time::Instant::now(),
-                        });
+                        self.cache.insert(
+                            cache_key,
+                            CacheEntry {
+                                buffer,
+                                last_used: std::time::Instant::now(),
+                            },
+                        );
                         self.cache_used += byte_size;
                     }
                     Err(_) => continue,
@@ -304,10 +295,12 @@ impl PointCloudRenderer {
 
     fn ensure_cache_space(&mut self, needed: usize) {
         while self.cache_used + needed > self.cache_budget && !self.cache.is_empty() {
-            let oldest = self.cache.iter()
+            let oldest = self
+                .cache
+                .iter()
                 .min_by_key(|(_, e)| e.last_used)
                 .map(|(k, _)| k.clone());
-            
+
             if let Some(key) = oldest {
                 if let Some(entry) = self.cache.remove(&key) {
                     self.cache_used = self.cache_used.saturating_sub(entry.buffer.byte_size());
@@ -316,13 +309,19 @@ impl PointCloudRenderer {
         }
     }
 
-    pub fn stats(&self) -> &RenderStats { &self.stats }
+    pub fn stats(&self) -> &RenderStats {
+        &self.stats
+    }
 
     /// Cache budget in bytes.
-    pub fn cache_budget(&self) -> usize { self.cache_budget }
+    pub fn cache_budget(&self) -> usize {
+        self.cache_budget
+    }
 
     /// Current cache usage in bytes.
-    pub fn cache_used(&self) -> usize { self.cache_used }
+    pub fn cache_used(&self) -> usize {
+        self.cache_used
+    }
 
     /// Report on memory usage vs budget.
     pub fn memory_report(&self) -> MemoryReport {

@@ -267,12 +267,20 @@ fn interpolate_values(a: &Value, b: &Value, t: f64) -> Option<Value> {
                 Some(Value::Array(result))
             } else {
                 // Can't interpolate strings
-                if t < 0.5 { Some(a.clone()) } else { Some(b.clone()) }
+                if t < 0.5 {
+                    Some(a.clone())
+                } else {
+                    Some(b.clone())
+                }
             }
         }
         _ => {
             // Can't interpolate, return closest
-            if t < 0.5 { Some(a.clone()) } else { Some(b.clone()) }
+            if t < 0.5 {
+                Some(a.clone())
+            } else {
+                Some(b.clone())
+            }
         }
     }
 }
@@ -582,12 +590,16 @@ fn eval_concat(arr: &[Value], ctx: &EvalContext) -> Option<Value> {
 }
 
 fn eval_downcase(arr: &[Value], ctx: &EvalContext) -> Option<Value> {
-    let s = evaluate_expression(arr.get(1)?, ctx)?.as_str()?.to_lowercase();
+    let s = evaluate_expression(arr.get(1)?, ctx)?
+        .as_str()?
+        .to_lowercase();
     Some(Value::String(s))
 }
 
 fn eval_upcase(arr: &[Value], ctx: &EvalContext) -> Option<Value> {
-    let s = evaluate_expression(arr.get(1)?, ctx)?.as_str()?.to_uppercase();
+    let s = evaluate_expression(arr.get(1)?, ctx)?
+        .as_str()?
+        .to_uppercase();
     Some(Value::String(s))
 }
 
@@ -597,7 +609,13 @@ fn eval_to_number(arr: &[Value], ctx: &EvalContext) -> Option<Value> {
     let num = match &val {
         Value::Number(n) => n.as_f64()?,
         Value::String(s) => s.parse().ok()?,
-        Value::Bool(b) => if *b { 1.0 } else { 0.0 },
+        Value::Bool(b) => {
+            if *b {
+                1.0
+            } else {
+                0.0
+            }
+        }
         _ => return None,
     };
     Some(Value::Number(serde_json::Number::from_f64(num)?))
@@ -704,7 +722,7 @@ fn parse_color_to_array(s: &str) -> Option<[f32; 4]> {
 /// Evaluate a color expression to RGBA.
 pub fn evaluate_color(expr: &Value, ctx: &EvalContext) -> Option<[f32; 4]> {
     let result = evaluate_expression(expr, ctx)?;
-    
+
     match &result {
         Value::String(s) => parse_color_to_array(s),
         Value::Array(arr) if arr.len() >= 3 => {
@@ -741,7 +759,7 @@ mod tests {
     fn test_get_property() {
         let props = props_with("name", Value::String("Test".to_string()));
         let ctx = EvalContext::new(&props, 10.0);
-        
+
         let expr = serde_json::json!(["get", "name"]);
         let result = evaluate_expression(&expr, &ctx);
         assert_eq!(result, Some(Value::String("Test".to_string())));
@@ -751,7 +769,7 @@ mod tests {
     fn test_zoom() {
         let props = empty_props();
         let ctx = EvalContext::new(&props, 12.5);
-        
+
         let expr = serde_json::json!(["zoom"]);
         let result = evaluate_expression(&expr, &ctx);
         assert_eq!(result.and_then(|v| v.as_f64()), Some(12.5));
@@ -761,12 +779,8 @@ mod tests {
     fn test_interpolate_linear() {
         let props = empty_props();
         let ctx = EvalContext::new(&props, 10.0);
-        
-        let expr = serde_json::json!([
-            "interpolate", ["linear"], ["zoom"],
-            5, 1,
-            15, 10
-        ]);
+
+        let expr = serde_json::json!(["interpolate", ["linear"], ["zoom"], 5, 1, 15, 10]);
         let result = evaluate_expression(&expr, &ctx);
         // At zoom 10, halfway between 5 and 15, should be ~5.5
         assert!((result.and_then(|v| v.as_f64()).unwrap() - 5.5).abs() < 0.01);
@@ -775,26 +789,21 @@ mod tests {
     #[test]
     fn test_step() {
         let props = empty_props();
-        
-        let expr = serde_json::json!([
-            "step", ["zoom"],
-            "small",
-            10, "medium",
-            15, "large"
-        ]);
-        
+
+        let expr = serde_json::json!(["step", ["zoom"], "small", 10, "medium", 15, "large"]);
+
         let ctx = EvalContext::new(&props, 5.0);
         assert_eq!(
             evaluate_expression(&expr, &ctx),
             Some(Value::String("small".to_string()))
         );
-        
+
         let ctx = EvalContext::new(&props, 12.0);
         assert_eq!(
             evaluate_expression(&expr, &ctx),
             Some(Value::String("medium".to_string()))
         );
-        
+
         let ctx = EvalContext::new(&props, 20.0);
         assert_eq!(
             evaluate_expression(&expr, &ctx),
@@ -806,11 +815,14 @@ mod tests {
     fn test_match() {
         let props = props_with("type", Value::String("highway".to_string()));
         let ctx = EvalContext::new(&props, 10.0);
-        
+
         let expr = serde_json::json!([
-            "match", ["get", "type"],
-            "highway", "#ff0000",
-            "street", "#00ff00",
+            "match",
+            ["get", "type"],
+            "highway",
+            "#ff0000",
+            "street",
+            "#00ff00",
             "#888888"
         ]);
         let result = evaluate_expression(&expr, &ctx);
@@ -821,11 +833,13 @@ mod tests {
     fn test_case() {
         let props = props_with("population", Value::Number(50000.into()));
         let ctx = EvalContext::new(&props, 10.0);
-        
+
         let expr = serde_json::json!([
             "case",
-            [">", ["get", "population"], 100000], "large",
-            [">", ["get", "population"], 10000], "medium",
+            [">", ["get", "population"], 100000],
+            "large",
+            [">", ["get", "population"], 10000],
+            "medium",
             "small"
         ]);
         let result = evaluate_expression(&expr, &ctx);
@@ -836,25 +850,34 @@ mod tests {
     fn test_math_operators() {
         let props = empty_props();
         let ctx = EvalContext::new(&props, 10.0);
-        
+
         let expr = serde_json::json!(["+", 1, 2, 3]);
-        assert_eq!(evaluate_expression(&expr, &ctx).and_then(|v| v.as_f64()), Some(6.0));
-        
+        assert_eq!(
+            evaluate_expression(&expr, &ctx).and_then(|v| v.as_f64()),
+            Some(6.0)
+        );
+
         let expr = serde_json::json!(["*", 2, 3]);
-        assert_eq!(evaluate_expression(&expr, &ctx).and_then(|v| v.as_f64()), Some(6.0));
-        
+        assert_eq!(
+            evaluate_expression(&expr, &ctx).and_then(|v| v.as_f64()),
+            Some(6.0)
+        );
+
         let expr = serde_json::json!(["/", 10, 2]);
-        assert_eq!(evaluate_expression(&expr, &ctx).and_then(|v| v.as_f64()), Some(5.0));
+        assert_eq!(
+            evaluate_expression(&expr, &ctx).and_then(|v| v.as_f64()),
+            Some(5.0)
+        );
     }
 
     #[test]
     fn test_comparison() {
         let props = empty_props();
         let ctx = EvalContext::new(&props, 10.0);
-        
+
         let expr = serde_json::json!([">", 5, 3]);
         assert_eq!(evaluate_expression(&expr, &ctx), Some(Value::Bool(true)));
-        
+
         let expr = serde_json::json!(["<=", 5, 5]);
         assert_eq!(evaluate_expression(&expr, &ctx), Some(Value::Bool(true)));
     }
@@ -863,7 +886,7 @@ mod tests {
     fn test_coalesce() {
         let props = props_with("alt_name", Value::String("Alternative".to_string()));
         let ctx = EvalContext::new(&props, 10.0);
-        
+
         let expr = serde_json::json!(["coalesce", ["get", "name"], ["get", "alt_name"], "Unknown"]);
         let result = evaluate_expression(&expr, &ctx);
         assert_eq!(result, Some(Value::String("Alternative".to_string())));

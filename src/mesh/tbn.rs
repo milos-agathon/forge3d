@@ -419,7 +419,11 @@ fn tbn_result_to_py_dict(
             let d = PyDict::new_bound(py);
             d.set_item(
                 "position",
-                vec![v.position.x as f64, v.position.y as f64, v.position.z as f64],
+                vec![
+                    v.position.x as f64,
+                    v.position.y as f64,
+                    v.position.z as f64,
+                ],
             )?;
             d.set_item(
                 "normal",
@@ -477,11 +481,7 @@ pub fn mesh_generate_cube_tbn(py: Python<'_>) -> PyResult<PyObject> {
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 #[pyo3(signature = (width, height))]
-pub fn mesh_generate_plane_tbn(
-    py: Python<'_>,
-    width: u32,
-    height: u32,
-) -> PyResult<PyObject> {
+pub fn mesh_generate_plane_tbn(py: Python<'_>, width: u32, height: u32) -> PyResult<PyObject> {
     if width < 2 || height < 2 {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "width and height must be >= 2",

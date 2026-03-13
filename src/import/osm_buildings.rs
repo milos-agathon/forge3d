@@ -92,7 +92,8 @@ impl RoofType {
 /// ```
 pub fn infer_roof_type(tags: &HashMap<String, String>) -> RoofType {
     // Priority 1: Explicit roof shape tags
-    if let Some(shape) = tags.get("building:roof:shape")
+    if let Some(shape) = tags
+        .get("building:roof:shape")
         .or_else(|| tags.get("roof:shape"))
         .or_else(|| tags.get("roof_shape"))
     {
@@ -103,12 +104,12 @@ pub fn infer_roof_type(tags: &HashMap<String, String>) -> RoofType {
     if let Some(building_type) = tags.get("building") {
         return match building_type.to_lowercase().as_str() {
             // Typically flat roofs
-            "industrial" | "warehouse" | "retail" | "commercial" | "office"
-            | "parking" | "garages" | "hangar" | "bunker" => RoofType::Flat,
+            "industrial" | "warehouse" | "retail" | "commercial" | "office" | "parking"
+            | "garages" | "hangar" | "bunker" => RoofType::Flat,
 
             // Typically gabled roofs
-            "house" | "detached" | "semidetached_house" | "terrace"
-            | "residential" | "bungalow" | "cabin" | "farm" | "barn" => RoofType::Gabled,
+            "house" | "detached" | "semidetached_house" | "terrace" | "residential"
+            | "bungalow" | "cabin" | "farm" | "barn" => RoofType::Gabled,
 
             // Hipped roofs common
             "apartments" | "dormitory" | "hotel" => RoofType::Hipped,
@@ -117,7 +118,10 @@ pub fn infer_roof_type(tags: &HashMap<String, String>) -> RoofType {
             "church" | "cathedral" | "chapel" | "mosque" => {
                 // Check for onion dome (Orthodox churches)
                 if tags.get("religion").map(|r| r == "christian") == Some(true)
-                    && tags.get("denomination").map(|d| d.contains("orthodox")).unwrap_or(false)
+                    && tags
+                        .get("denomination")
+                        .map(|d| d.contains("orthodox"))
+                        .unwrap_or(false)
                 {
                     RoofType::Onion
                 } else {

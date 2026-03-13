@@ -210,7 +210,7 @@ impl PyPickResult {
             layer_name: None,
         }
     }
-    
+
     fn __repr__(&self) -> String {
         format!(
             "PickResult(feature_id={}, screen=({}, {}), layer={:?})",
@@ -261,7 +261,7 @@ impl PyTerrainQueryResult {
             normal: (0.0, 1.0, 0.0),
         }
     }
-    
+
     fn __repr__(&self) -> String {
         format!(
             "TerrainQueryResult(elevation={:.2}, slope={:.1}°, aspect={:.1}°)",
@@ -320,7 +320,7 @@ impl PySelectionStyle {
             glow_intensity,
         }
     }
-    
+
     fn __repr__(&self) -> String {
         format!(
             "SelectionStyle(color={:?}, outline={}, glow={})",
@@ -394,14 +394,14 @@ impl PyRichPickResult {
             terrain_aspect: None,
         }
     }
-    
+
     fn __repr__(&self) -> String {
         format!(
             "RichPickResult(feature_id={}, layer='{}', pos={:?})",
             self.feature_id, self.layer_name, self.world_pos
         )
     }
-    
+
     /// Get attribute by key
     fn get_attribute(&self, key: &str) -> Option<String> {
         self.attributes.get(key).cloned()
@@ -411,13 +411,13 @@ impl PyRichPickResult {
 #[cfg(feature = "extension-module")]
 impl From<crate::picking::RichPickResult> for PyRichPickResult {
     fn from(r: crate::picking::RichPickResult) -> Self {
-        let (terrain_elevation, terrain_slope, terrain_aspect) = 
-            if let Some(info) = r.terrain_info {
-                (Some(info.elevation), Some(info.slope), Some(info.aspect))
-            } else {
-                (None, None, None)
-            };
-        
+        let (terrain_elevation, terrain_slope, terrain_aspect) = if let Some(info) = r.terrain_info
+        {
+            (Some(info.elevation), Some(info.slope), Some(info.aspect))
+        } else {
+            (None, None, None)
+        };
+
         Self {
             feature_id: r.feature_id,
             layer_name: r.layer_name,
@@ -479,14 +479,14 @@ impl PyHighlightStyle {
             pulse_speed,
         }
     }
-    
+
     fn __repr__(&self) -> String {
         format!(
             "HighlightStyle(effect='{}', color={:?})",
             self.effect, self.color
         )
     }
-    
+
     /// Create outline style
     #[staticmethod]
     fn outline(color: (f32, f32, f32, f32), width: f32) -> Self {
@@ -499,7 +499,7 @@ impl PyHighlightStyle {
             pulse_speed: 0.0,
         }
     }
-    
+
     /// Create glow style
     #[staticmethod]
     fn glow(color: (f32, f32, f32, f32), intensity: f32, radius: f32) -> Self {
@@ -518,7 +518,7 @@ impl PyHighlightStyle {
 impl From<PyHighlightStyle> for crate::picking::HighlightStyle {
     fn from(s: PyHighlightStyle) -> Self {
         use crate::picking::HighlightEffect;
-        
+
         let effect = match s.effect.as_str() {
             "none" => HighlightEffect::None,
             "color_tint" => HighlightEffect::ColorTint,
@@ -527,7 +527,7 @@ impl From<PyHighlightStyle> for crate::picking::HighlightStyle {
             "outline_glow" => HighlightEffect::OutlineGlow,
             _ => HighlightEffect::ColorTint,
         };
-        
+
         Self {
             color: [s.color.0, s.color.1, s.color.2, s.color.3],
             secondary_color: [1.0, 1.0, 1.0, 0.3],
@@ -556,41 +556,49 @@ impl PyLassoState {
     #[new]
     #[pyo3(signature = (state="inactive"))]
     fn new(state: &str) -> Self {
-        Self { state: state.to_string() }
+        Self {
+            state: state.to_string(),
+        }
     }
-    
+
     fn __repr__(&self) -> String {
         format!("LassoState('{}')", self.state)
     }
-    
+
     /// Check if inactive
     fn is_inactive(&self) -> bool {
         self.state == "inactive"
     }
-    
+
     /// Check if drawing
     fn is_drawing(&self) -> bool {
         self.state == "drawing"
     }
-    
+
     /// Check if complete
     fn is_complete(&self) -> bool {
         self.state == "complete"
     }
-    
+
     #[staticmethod]
     fn inactive() -> Self {
-        Self { state: "inactive".to_string() }
+        Self {
+            state: "inactive".to_string(),
+        }
     }
-    
+
     #[staticmethod]
     fn drawing() -> Self {
-        Self { state: "drawing".to_string() }
+        Self {
+            state: "drawing".to_string(),
+        }
     }
-    
+
     #[staticmethod]
     fn complete() -> Self {
-        Self { state: "complete".to_string() }
+        Self {
+            state: "complete".to_string(),
+        }
     }
 }
 
@@ -755,9 +763,7 @@ fn read_laz_points_info_py(path: &str) -> PyResult<(u64, Vec<f64>, bool)> {
     let mut has_rgb = false;
 
     for result in reader.points().take(3) {
-        let pt = result.map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("{}", e))
-        })?;
+        let pt = result.map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{}", e)))?;
         coords.push(pt.x);
         coords.push(pt.y);
         coords.push(pt.z);
@@ -869,7 +875,9 @@ impl Frame {
                         self.height,
                         self.format,
                     )
-                    .map_err(|err| PyRuntimeError::new_err(format!("HDR readback failed: {err}")))?;
+                    .map_err(|err| {
+                        PyRuntimeError::new_err(format!("HDR readback failed: {err}"))
+                    })?;
 
                     exr_write::write_exr_rgba_f32(
                         path_obj,
@@ -878,7 +886,9 @@ impl Frame {
                         &data,
                         "beauty",
                     )
-                    .map_err(|err| PyRuntimeError::new_err(format!("failed to write EXR: {err:#}")))?;
+                    .map_err(|err| {
+                        PyRuntimeError::new_err(format!("failed to write EXR: {err:#}"))
+                    })?;
                     Ok(())
                 }
                 #[cfg(not(feature = "images"))]
@@ -1010,10 +1020,12 @@ impl AovFrame {
 
     /// Save albedo AOV to PNG file
     fn save_albedo(&self, path: &str) -> PyResult<()> {
-        let texture = self.albedo_texture.as_ref().ok_or_else(|| {
-            PyRuntimeError::new_err("Albedo AOV not available")
-        })?;
-        let mut data = self.read_texture_bytes(texture)
+        let texture = self
+            .albedo_texture
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("Albedo AOV not available"))?;
+        let mut data = self
+            .read_texture_bytes(texture)
             .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
         for px in data.chunks_exact_mut(4) {
             px[3] = 255;
@@ -1025,10 +1037,12 @@ impl AovFrame {
 
     /// Save normal AOV to PNG file
     fn save_normal(&self, path: &str) -> PyResult<()> {
-        let texture = self.normal_texture.as_ref().ok_or_else(|| {
-            PyRuntimeError::new_err("Normal AOV not available")
-        })?;
-        let mut data = self.read_texture_bytes(texture)
+        let texture = self
+            .normal_texture
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("Normal AOV not available"))?;
+        let mut data = self
+            .read_texture_bytes(texture)
             .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
         for px in data.chunks_exact_mut(4) {
             px[3] = 255;
@@ -1040,10 +1054,12 @@ impl AovFrame {
 
     /// Save depth AOV to PNG file
     fn save_depth(&self, path: &str) -> PyResult<()> {
-        let texture = self.depth_texture.as_ref().ok_or_else(|| {
-            PyRuntimeError::new_err("Depth AOV not available")
-        })?;
-        let mut data = self.read_texture_bytes(texture)
+        let texture = self
+            .depth_texture
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("Depth AOV not available"))?;
+        let mut data = self
+            .read_texture_bytes(texture)
             .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
         for px in data.chunks_exact_mut(4) {
             px[3] = 255;
@@ -1058,7 +1074,7 @@ impl AovFrame {
         let dir = Path::new(output_dir);
         std::fs::create_dir_all(dir)
             .map_err(|e| PyRuntimeError::new_err(format!("failed to create directory: {e}")))?;
-        
+
         if self.albedo_texture.is_some() {
             let path = dir.join(format!("{}_albedo.png", base_name));
             self.save_albedo(path.to_str().unwrap())?;
@@ -1077,7 +1093,8 @@ impl AovFrame {
     fn __repr__(&self) -> String {
         format!(
             "AovFrame(width={}, height={}, albedo={}, normal={}, depth={})",
-            self.width, self.height,
+            self.width,
+            self.height,
             self.albedo_texture.is_some(),
             self.normal_texture.is_some(),
             self.depth_texture.is_some()
@@ -1112,7 +1129,11 @@ fn render_debug_pattern_frame(py: Python<'_>, width: u32, height: u32) -> PyResu
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 #[pyo3(signature = (path, array, channel_prefix=None))]
-fn numpy_to_exr(path: &str, array: PyReadonlyArrayDyn<f32>, channel_prefix: Option<&str>) -> PyResult<()> {
+fn numpy_to_exr(
+    path: &str,
+    array: PyReadonlyArrayDyn<f32>,
+    channel_prefix: Option<&str>,
+) -> PyResult<()> {
     let path_obj = Path::new(path);
     if let Some(ext) = path_obj.extension().and_then(|ext| ext.to_str()) {
         if !ext.eq_ignore_ascii_case("exr") {
@@ -1125,7 +1146,9 @@ fn numpy_to_exr(path: &str, array: PyReadonlyArrayDyn<f32>, channel_prefix: Opti
 
     let prefix = channel_prefix.unwrap_or("beauty").trim();
     if prefix.is_empty() {
-        return Err(PyValueError::new_err("EXR channel prefix must be non-empty"));
+        return Err(PyValueError::new_err(
+            "EXR channel prefix must be non-empty",
+        ));
     }
 
     let view = array.as_array();
@@ -1152,10 +1175,10 @@ fn numpy_to_exr(path: &str, array: PyReadonlyArrayDyn<f32>, channel_prefix: Opti
         )));
     }
 
-    let height_u32 = u32::try_from(height)
-        .map_err(|_| PyValueError::new_err("array height exceeds u32"))?;
-    let width_u32 = u32::try_from(width)
-        .map_err(|_| PyValueError::new_err("array width exceeds u32"))?;
+    let height_u32 =
+        u32::try_from(height).map_err(|_| PyValueError::new_err("array height exceeds u32"))?;
+    let width_u32 =
+        u32::try_from(width).map_err(|_| PyValueError::new_err("array width exceeds u32"))?;
 
     #[cfg(feature = "images")]
     {
@@ -1248,19 +1271,19 @@ pub mod shadows; // Shadow mapping implementations
 pub mod terrain;
 pub mod uv; // UV unwrap helpers (planar, spherical)
 pub mod textures {}
+pub mod animation; // Feature C: Camera animation and keyframe interpolation
+pub mod bundle; // Scene bundle (.forge3d) for portable scene packages
+pub mod export;
 pub mod labels; // Screen-space text labels with MSDF rendering
 pub mod p5;
 pub mod passes;
+pub mod picking; // Feature picking and inspection system
+pub mod pointcloud; // P5: Point Cloud support (COPC, EPT)
+pub mod style; // Mapbox Style Spec import for vector/label styling
+pub mod tiles3d; // P5: 3D Tiles support (tileset.json, b3dm, pnts)
 pub mod util;
 pub mod vector;
-pub mod picking; // Feature picking and inspection system
-pub mod viewer; // Interactive windowed viewer (Workstream I1) // P5.2: render passes wrappers
-pub mod animation; // Feature C: Camera animation and keyframe interpolation
-pub mod tiles3d; // P5: 3D Tiles support (tileset.json, b3dm, pnts)
-pub mod pointcloud; // P5: Point Cloud support (COPC, EPT)
-pub mod bundle; // Scene bundle (.forge3d) for portable scene packages
-pub mod style; // Mapbox Style Spec import for vector/label styling
-pub mod export; // P5-export: Vector export (SVG/PDF) for print-grade overlays
+pub mod viewer; // Interactive windowed viewer (Workstream I1) // P5.2: render passes wrappers // P5-export: Vector export (SVG/PDF) for print-grade overlays
 
 // Re-export commonly used types
 pub use core::cloud_shadows::{
@@ -4854,8 +4877,14 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::lighting::PyVolumetricSettings>()?;
     // P0.3/M2: Sun ephemeris
     m.add_class::<crate::lighting::py_bindings::PySunPosition>()?;
-    m.add_function(wrap_pyfunction!(crate::lighting::py_bindings::sun_position, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::lighting::py_bindings::sun_position_utc, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::lighting::py_bindings::sun_position,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::lighting::py_bindings::sun_position_utc,
+        m
+    )?)?;
     // M1: AOV frame class
     m.add_class::<AovFrame>()?;
 
@@ -4887,14 +4916,26 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::animation::CameraState>()?;
 
     // P3-reproject: CRS reprojection functions
-    m.add_function(wrap_pyfunction!(crate::geo::reproject::proj_available_py, m)?)?;
-    m.add_function(wrap_pyfunction!(crate::geo::reproject::reproject_coords_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geo::reproject::proj_available_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geo::reproject::reproject_coords_py,
+        m
+    )?)?;
 
     // P0.4: Mesh TBN generation wrappers
     #[cfg(feature = "enable-tbn")]
     {
-        m.add_function(wrap_pyfunction!(crate::mesh::tbn::mesh_generate_cube_tbn, m)?)?;
-        m.add_function(wrap_pyfunction!(crate::mesh::tbn::mesh_generate_plane_tbn, m)?)?;
+        m.add_function(wrap_pyfunction!(
+            crate::mesh::tbn::mesh_generate_cube_tbn,
+            m
+        )?)?;
+        m.add_function(wrap_pyfunction!(
+            crate::mesh::tbn::mesh_generate_plane_tbn,
+            m
+        )?)?;
     }
 
     // P2.3: Label style bindings

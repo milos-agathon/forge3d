@@ -1,6 +1,6 @@
 //! Bounding volume types for 3D Tiles
 
-use glam::{Vec3, Mat4};
+use glam::{Mat4, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Bounding volume for a 3D Tile
@@ -84,15 +84,14 @@ impl BoundingVolume {
                 let z_axis = matrix.transform_vector3(Vec3::new(b.data[9], b.data[10], b.data[11]));
                 Self::Box(BoundingBox {
                     data: [
-                        center.x, center.y, center.z,
-                        x_axis.x, x_axis.y, x_axis.z,
-                        y_axis.x, y_axis.y, y_axis.z,
-                        z_axis.x, z_axis.y, z_axis.z,
+                        center.x, center.y, center.z, x_axis.x, x_axis.y, x_axis.z, y_axis.x,
+                        y_axis.y, y_axis.z, z_axis.x, z_axis.y, z_axis.z,
                     ],
                 })
             }
             Self::Sphere(s) => {
-                let center = matrix.transform_point3(Vec3::new(s.sphere[0], s.sphere[1], s.sphere[2]));
+                let center =
+                    matrix.transform_point3(Vec3::new(s.sphere[0], s.sphere[1], s.sphere[2]));
                 let scale = matrix.to_scale_rotation_translation().0;
                 let max_scale = scale.x.max(scale.y).max(scale.z);
                 Self::Sphere(BoundingSphere {
@@ -113,7 +112,10 @@ impl BoundingVolume {
         }
         let ndc = clip.truncate() / clip.w;
         let margin = radius / clip.w;
-        ndc.x.abs() <= 1.0 + margin && ndc.y.abs() <= 1.0 + margin && ndc.z >= -margin && ndc.z <= 1.0 + margin
+        ndc.x.abs() <= 1.0 + margin
+            && ndc.y.abs() <= 1.0 + margin
+            && ndc.z >= -margin
+            && ndc.z <= 1.0 + margin
     }
 }
 

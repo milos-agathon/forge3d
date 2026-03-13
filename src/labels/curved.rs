@@ -248,14 +248,10 @@ pub fn project_curved_layout(
         let screen_y = (1.0 - (ndc.y * 0.5 + 0.5)) * screen_height;
 
         // Project tangent to get screen-space rotation
-        let tangent_world = Vec3::new(
-            glyph.rotation.cos(),
-            0.0,
-            glyph.rotation.sin(),
-        );
+        let tangent_world = Vec3::new(glyph.rotation.cos(), 0.0, glyph.rotation.sin());
         let tangent_end = glyph.world_pos + tangent_world * 10.0;
         let clip_end = view_proj * tangent_end.extend(1.0);
-        
+
         let screen_rotation = if clip_end.w > 0.0 {
             let ndc_end = clip_end.truncate() / clip_end.w;
             let screen_end_x = (ndc_end.x * 0.5 + 0.5) * screen_width;
@@ -283,19 +279,16 @@ mod tests {
             Vec3::new(20.0, 0.0, 0.0),
         ];
         let path = SampledPath::from_polyline(&vertices);
-        
+
         assert_eq!(path.points.len(), 3);
         assert!((path.total_length - 20.0).abs() < 0.001);
     }
 
     #[test]
     fn test_sample_at_distance() {
-        let vertices = vec![
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(10.0, 0.0, 0.0),
-        ];
+        let vertices = vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0)];
         let path = SampledPath::from_polyline(&vertices);
-        
+
         let mid = path.sample_at_distance(5.0).unwrap();
         assert!((mid.position.x - 5.0).abs() < 0.001);
     }

@@ -21,15 +21,15 @@ fn gpu_matches_cpu_for_square() {
             Some(adapter) => adapter,
             None => return,
         };
-    let (device, queue) =
-        match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
-        {
-            Ok((d, q)) => (d, q),
-            Err(_) => {
-                eprintln!("Failed to create device, skipping test");
-                return;
-            }
-        };
+    let (device, queue) = match pollster::block_on(
+        adapter.request_device(&wgpu::DeviceDescriptor::default(), None),
+    ) {
+        Ok((d, q)) => (d, q),
+        Err(_) => {
+            eprintln!("Failed to create device, skipping test");
+            return;
+        }
+    };
 
     let gpu = GpuExtrusion::new(&device);
     let output = gpu

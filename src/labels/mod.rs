@@ -19,27 +19,29 @@ pub mod layer;
 pub mod leader;
 pub mod line_label;
 mod projection;
-pub mod rtree;
-pub mod typography;
 #[cfg(feature = "extension-module")]
 pub mod py_bindings;
+pub mod rtree;
 mod types;
+pub mod typography;
 
 pub use atlas::{GlyphMetrics, MsdfAtlas};
 pub use callout::{Callout, CalloutStyle, PointerDirection};
 pub use collision::CollisionGrid;
 pub use curved::{CurvedGlyphInstance, CurvedTextLayout, SampledPath};
 pub use declutter::{DeclutterAlgorithm, DeclutterConfig, DeclutterResult, PlacementCandidate};
-pub use layer::{FeatureGeometry, FeatureType, LabelFeature, LabelLayer, LabelLayerConfig, PlacementStrategy};
+pub use layer::{
+    FeatureGeometry, FeatureType, LabelFeature, LabelLayer, LabelLayerConfig, PlacementStrategy,
+};
 pub use leader::{create_leader_line, generate_leader_vertices};
 pub use line_label::{compute_glyph_advances, compute_line_label_placement};
 pub use projection::LabelProjector;
 pub use rtree::LabelRTree;
-pub use typography::{KerningTable, TextCase, TypographySettings};
 pub use types::{
     GlyphPlacement, LabelData, LabelFlags, LabelId, LabelStyle, LeaderLine, LineLabelData,
     LineLabelPlacement,
 };
+pub use typography::{KerningTable, TextCase, TypographySettings};
 
 use crate::core::text_overlay::{TextInstance, TextOverlayRenderer};
 use glam::{Mat4, Vec3};
@@ -89,7 +91,14 @@ impl LabelManager {
         atlas_height: u32,
         metrics_json: &str,
     ) -> Result<(), String> {
-        let atlas = MsdfAtlas::load(device, queue, atlas_image, atlas_width, atlas_height, metrics_json)?;
+        let atlas = MsdfAtlas::load(
+            device,
+            queue,
+            atlas_image,
+            atlas_width,
+            atlas_height,
+            metrics_json,
+        )?;
         self.atlas = Some(atlas);
         Ok(())
     }
@@ -231,7 +240,7 @@ impl LabelManager {
         // Query a small box around the cursor (e.g. 4x4 pixels)
         let bounds = [x - 2.0, y - 2.0, x + 2.0, y + 2.0];
         let hits = self.collision_rtree.query_intersecting(bounds);
-        
+
         // Return the first hit
         // In a real implementation we might want to sort by depth or priority
         hits.first().map(|h| LabelId(h.id))
@@ -353,17 +362,17 @@ impl LabelManager {
 
                     // Apply color with computed alpha
                     let mut color = label.style.color;
-                    
+
                     // Highlight if selected
                     if let Some(selected) = selected_ids {
                         if selected.contains(&label.id.0) {
                             // Gold highlight color
                             color = [1.0, 0.8, 0.0, 1.0];
                             // Also ensure fully opaque if highlighted
-                            label.computed_alpha = 1.0; 
+                            label.computed_alpha = 1.0;
                         }
                     }
-                    
+
                     color[3] = label.computed_alpha;
 
                     // Generate text instances for this label

@@ -25,11 +25,11 @@ pub struct DofConfig {
     pub focus_distance: f32,
     pub f_stop: f32,
     pub focal_length: f32,
-    pub quality: u32,  // 4, 8, or 16 samples
+    pub quality: u32, // 4, 8, or 16 samples
     pub max_blur_radius: f32,
-    pub blur_strength: f32,  // Artistic multiplier (1.0 = physical, higher = more blur)
-    pub tilt_pitch: f32,     // Tilt-shift pitch in radians (Scheimpflug effect)
-    pub tilt_yaw: f32,       // Tilt-shift yaw in radians
+    pub blur_strength: f32, // Artistic multiplier (1.0 = physical, higher = more blur)
+    pub tilt_pitch: f32,    // Tilt-shift pitch in radians (Scheimpflug effect)
+    pub tilt_yaw: f32,      // Tilt-shift yaw in radians
 }
 
 impl Default for DofConfig {
@@ -41,7 +41,7 @@ impl Default for DofConfig {
             focal_length: 50.0,
             quality: 8,
             max_blur_radius: 32.0,
-            blur_strength: 25.0,  // Landscape scale multiplier (reasonable for visible but not overwhelming DoF)
+            blur_strength: 25.0, // Landscape scale multiplier (reasonable for visible but not overwhelming DoF)
             tilt_pitch: 0.0,
             tilt_yaw: 0.0,
         }
@@ -54,8 +54,8 @@ pub struct DofPass {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    uniform_buffer_h: wgpu::Buffer,  // Horizontal pass uniforms
-    uniform_buffer_v: wgpu::Buffer,  // Vertical pass uniforms
+    uniform_buffer_h: wgpu::Buffer, // Horizontal pass uniforms
+    uniform_buffer_v: wgpu::Buffer, // Vertical pass uniforms
     // Input texture (scene renders here)
     input_texture: Option<wgpu::Texture>,
     pub input_view: Option<wgpu::TextureView>,
@@ -177,18 +177,18 @@ impl DofPass {
             contents: bytemuck::cast_slice(&[DofUniforms {
                 screen_dims: [1.0, 1.0, 1.0, 1.0],
                 dof_params: [500.0, 5.6, 50.0, 16.0],
-                dof_params2: [1.0, 10000.0, 0.0, 8.0],  // direction=0 for horizontal
+                dof_params2: [1.0, 10000.0, 0.0, 8.0], // direction=0 for horizontal
                 camera_params: [24.0, 500.0, 0.0, 0.0],
             }]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        
+
         let uniform_buffer_v = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("dof.uniforms_v"),
             contents: bytemuck::cast_slice(&[DofUniforms {
                 screen_dims: [1.0, 1.0, 1.0, 1.0],
                 dof_params: [500.0, 5.6, 50.0, 16.0],
-                dof_params2: [1.0, 10000.0, 1.0, 8.0],  // direction=1 for vertical
+                dof_params2: [1.0, 10000.0, 1.0, 8.0], // direction=1 for vertical
                 camera_params: [24.0, 500.0, 0.0, 0.0],
             }]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -224,12 +224,13 @@ impl DofPass {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
             self.input_view = Some(input_tex.create_view(&wgpu::TextureViewDescriptor::default()));
             self.input_texture = Some(input_tex);
-            
+
             // Intermediate texture for horizontal pass output
             let tex = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("dof.intermediate"),
@@ -242,7 +243,8 @@ impl DofPass {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
             self.intermediate_view = Some(tex.create_view(&wgpu::TextureViewDescriptor::default()));
@@ -252,7 +254,12 @@ impl DofPass {
     }
 
     /// Get the input texture view (where scene should render to)
-    pub fn get_input_view(&mut self, width: u32, height: u32, format: wgpu::TextureFormat) -> &wgpu::TextureView {
+    pub fn get_input_view(
+        &mut self,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> &wgpu::TextureView {
         self.ensure_textures(width, height, format);
         self.input_view.as_ref().unwrap()
     }
@@ -272,27 +279,65 @@ impl DofPass {
         far_plane: f32,
     ) {
         self.ensure_textures(width, height, format);
-        
+
         let input_view = self.input_view.as_ref().unwrap();
         let intermediate_view = self.intermediate_view.as_ref().unwrap();
 
         // Update uniforms for horizontal pass
         let uniforms_h = DofUniforms {
-            screen_dims: [width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32],
-            dof_params: [config.focus_distance, config.f_stop, config.focal_length, config.max_blur_radius],
-            dof_params2: [near_plane, far_plane, 0.0, config.quality as f32],  // direction=0 horizontal
-            camera_params: [24.0, config.blur_strength, config.tilt_pitch, config.tilt_yaw],
+            screen_dims: [
+                width as f32,
+                height as f32,
+                1.0 / width as f32,
+                1.0 / height as f32,
+            ],
+            dof_params: [
+                config.focus_distance,
+                config.f_stop,
+                config.focal_length,
+                config.max_blur_radius,
+            ],
+            dof_params2: [near_plane, far_plane, 0.0, config.quality as f32], // direction=0 horizontal
+            camera_params: [
+                24.0,
+                config.blur_strength,
+                config.tilt_pitch,
+                config.tilt_yaw,
+            ],
         };
-        queue.write_buffer(&self.uniform_buffer_h, 0, bytemuck::cast_slice(&[uniforms_h]));
+        queue.write_buffer(
+            &self.uniform_buffer_h,
+            0,
+            bytemuck::cast_slice(&[uniforms_h]),
+        );
 
         // Update uniforms for vertical pass
         let uniforms_v = DofUniforms {
-            screen_dims: [width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32],
-            dof_params: [config.focus_distance, config.f_stop, config.focal_length, config.max_blur_radius],
-            dof_params2: [near_plane, far_plane, 1.0, config.quality as f32],  // direction=1 vertical
-            camera_params: [24.0, config.blur_strength, config.tilt_pitch, config.tilt_yaw],
+            screen_dims: [
+                width as f32,
+                height as f32,
+                1.0 / width as f32,
+                1.0 / height as f32,
+            ],
+            dof_params: [
+                config.focus_distance,
+                config.f_stop,
+                config.focal_length,
+                config.max_blur_radius,
+            ],
+            dof_params2: [near_plane, far_plane, 1.0, config.quality as f32], // direction=1 vertical
+            camera_params: [
+                24.0,
+                config.blur_strength,
+                config.tilt_pitch,
+                config.tilt_yaw,
+            ],
         };
-        queue.write_buffer(&self.uniform_buffer_v, 0, bytemuck::cast_slice(&[uniforms_v]));
+        queue.write_buffer(
+            &self.uniform_buffer_v,
+            0,
+            bytemuck::cast_slice(&[uniforms_v]),
+        );
 
         // Pass 1: Horizontal blur from input -> intermediate
         self.render_pass_with_buffer(
@@ -333,21 +378,59 @@ impl DofPass {
 
         // Update uniforms for horizontal pass
         let uniforms_h = DofUniforms {
-            screen_dims: [width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32],
-            dof_params: [config.focus_distance, config.f_stop, config.focal_length, config.max_blur_radius],
+            screen_dims: [
+                width as f32,
+                height as f32,
+                1.0 / width as f32,
+                1.0 / height as f32,
+            ],
+            dof_params: [
+                config.focus_distance,
+                config.f_stop,
+                config.focal_length,
+                config.max_blur_radius,
+            ],
             dof_params2: [near_plane, far_plane, 0.0, config.quality as f32],
-            camera_params: [24.0, config.blur_strength, config.tilt_pitch, config.tilt_yaw],
+            camera_params: [
+                24.0,
+                config.blur_strength,
+                config.tilt_pitch,
+                config.tilt_yaw,
+            ],
         };
-        queue.write_buffer(&self.uniform_buffer_h, 0, bytemuck::cast_slice(&[uniforms_h]));
+        queue.write_buffer(
+            &self.uniform_buffer_h,
+            0,
+            bytemuck::cast_slice(&[uniforms_h]),
+        );
 
         // Update uniforms for vertical pass
         let uniforms_v = DofUniforms {
-            screen_dims: [width as f32, height as f32, 1.0 / width as f32, 1.0 / height as f32],
-            dof_params: [config.focus_distance, config.f_stop, config.focal_length, config.max_blur_radius],
+            screen_dims: [
+                width as f32,
+                height as f32,
+                1.0 / width as f32,
+                1.0 / height as f32,
+            ],
+            dof_params: [
+                config.focus_distance,
+                config.f_stop,
+                config.focal_length,
+                config.max_blur_radius,
+            ],
             dof_params2: [near_plane, far_plane, 1.0, config.quality as f32],
-            camera_params: [24.0, config.blur_strength, config.tilt_pitch, config.tilt_yaw],
+            camera_params: [
+                24.0,
+                config.blur_strength,
+                config.tilt_pitch,
+                config.tilt_yaw,
+            ],
         };
-        queue.write_buffer(&self.uniform_buffer_v, 0, bytemuck::cast_slice(&[uniforms_v]));
+        queue.write_buffer(
+            &self.uniform_buffer_v,
+            0,
+            bytemuck::cast_slice(&[uniforms_v]),
+        );
 
         // Pass 1: Horizontal blur from color_view -> intermediate
         self.render_pass_with_buffer(

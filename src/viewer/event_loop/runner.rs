@@ -12,10 +12,12 @@ use winit::window::WindowBuilder;
 
 use super::super::ipc;
 use super::super::viewer_enums::ViewerCmd;
-use super::super::ViewerConfig;
 use super::super::Viewer;
+use super::super::ViewerConfig;
 use super::super::INITIAL_CMDS;
-use super::{get_ipc_queue, get_ipc_stats, parse_initial_commands, spawn_stdin_reader, update_ipc_stats};
+use super::{
+    get_ipc_queue, get_ipc_stats, parse_initial_commands, spawn_stdin_reader, update_ipc_stats,
+};
 
 #[cfg(feature = "extension-module")]
 use super::super::INITIAL_TERRAIN_CONFIG;
@@ -131,7 +133,8 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 if let Some(viewer) = viewer_opt.as_mut() {
                     if pending_scale_factor_resize {
                         let size = viewer.window.inner_size();
-                        if size.width != viewer.config.width || size.height != viewer.config.height {
+                        if size.width != viewer.config.width || size.height != viewer.config.height
+                        {
                             viewer.resize(size);
                         }
                         pending_scale_factor_resize = false;
@@ -194,10 +197,10 @@ pub fn run_viewer_with_ipc(
         q.clear();
     }
     update_ipc_stats(false, 0, 0, false);
-    
+
     // Create simple event loop (no user events needed)
     let event_loop: EventLoop<()> = EventLoop::new()?;
-    
+
     // Start IPC server - pushes to global queue, reads from global stats
     let ipc_handle = ipc::start_ipc_server(
         ipc_config,
@@ -221,7 +224,10 @@ pub fn run_viewer_with_ipc(
     let ipc_port = ipc_handle.port;
 
     // Create window
-    eprintln!("[viewer-ipc] Creating window {}x{}", config.width, config.height);
+    eprintln!(
+        "[viewer-ipc] Creating window {}x{}",
+        config.width, config.height
+    );
     let window = Arc::new(
         WindowBuilder::new()
             .with_title(config.title.clone())
@@ -249,7 +255,7 @@ pub fn run_viewer_with_ipc(
     let _ = event_loop.run(move |event, elwt| {
         // ControlFlow::Poll for IPC mode - responsive command handling
         elwt.set_control_flow(winit::event_loop::ControlFlow::Poll);
-        
+
         match event {
             Event::Resumed => {
                 eprintln!("[viewer-ipc] Received Resumed event");
@@ -347,7 +353,8 @@ pub fn run_viewer_with_ipc(
                 if let Some(viewer) = viewer_opt.as_mut() {
                     if pending_scale_factor_resize {
                         let size = viewer.window.inner_size();
-                        if size.width != viewer.config.width || size.height != viewer.config.height {
+                        if size.width != viewer.config.width || size.height != viewer.config.height
+                        {
                             viewer.resize(size);
                         }
                         pending_scale_factor_resize = false;

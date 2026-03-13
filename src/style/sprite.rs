@@ -116,19 +116,19 @@ impl SpriteAtlas {
     pub fn extract_sprite(&self, name: &str) -> Option<(Vec<u8>, u32, u32)> {
         let entry = self.entries.get(name)?;
         let image_data = self.image_data.as_ref()?;
-        
+
         let mut pixels = Vec::with_capacity((entry.width * entry.height * 4) as usize);
-        
+
         for y in 0..entry.height {
             let src_y = entry.y + y;
             let src_offset = ((src_y * self.image_width + entry.x) * 4) as usize;
             let row_bytes = (entry.width * 4) as usize;
-            
+
             if src_offset + row_bytes <= image_data.len() {
                 pixels.extend_from_slice(&image_data[src_offset..src_offset + row_bytes]);
             }
         }
-        
+
         Some((pixels, entry.width, entry.height))
     }
 }
@@ -154,7 +154,7 @@ pub fn load_sprite_atlas(base_path: &Path) -> Result<SpriteAtlas, SpriteError> {
         let path_2x_str = format!("{}@2x", base_path.display());
         let path_2x = std::path::PathBuf::from(&path_2x_str);
         let json_2x = path_2x.with_extension("json");
-        
+
         if json_2x.exists() {
             (json_2x, path_2x.with_extension("png"), 2.0)
         } else {
@@ -189,7 +189,7 @@ pub fn load_sprite_atlas(base_path: &Path) -> Result<SpriteAtlas, SpriteError> {
 /// Load PNG file as RGBA bytes.
 fn load_png_rgba(path: &Path) -> Result<(Option<Vec<u8>>, u32, u32), SpriteError> {
     let data = fs::read(path)?;
-    
+
     // Simple PNG decoder - just get dimensions for now
     // In production, use image crate or lodepng
     if data.len() < 24 || &data[0..8] != b"\x89PNG\r\n\x1a\n" {
@@ -199,7 +199,7 @@ fn load_png_rgba(path: &Path) -> Result<(Option<Vec<u8>>, u32, u32), SpriteError
     // Read IHDR chunk (must be first)
     let chunk_length = u32::from_be_bytes([data[8], data[9], data[10], data[11]]) as usize;
     let chunk_type = &data[12..16];
-    
+
     if chunk_type != b"IHDR" || chunk_length < 13 {
         return Err(SpriteError::Image("Missing IHDR chunk".to_string()));
     }
@@ -292,7 +292,7 @@ impl FontStack {
         for ch in text.chars() {
             let cp = ch as u32;
             let range_start = (cp / 256) * 256;
-            
+
             if !seen.contains(&range_start) && !self.has_glyph(cp) {
                 seen.insert(range_start);
                 ranges.push(GlyphRange::from_codepoint(cp));

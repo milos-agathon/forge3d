@@ -98,8 +98,10 @@ impl BoundingBox2D {
     }
 
     pub fn contains(&self, point: Point2D) -> bool {
-        point.x >= self.min.x && point.x <= self.max.x
-            && point.y >= self.min.y && point.y <= self.max.y
+        point.x >= self.min.x
+            && point.x <= self.max.x
+            && point.y >= self.min.y
+            && point.y <= self.max.y
     }
 
     pub fn width(&self) -> f32 {
@@ -364,8 +366,7 @@ fn perpendicular_distance(point: &Point2D, line_start: &Point2D, line_end: &Poin
     }
 
     // Calculate perpendicular distance using cross product
-    let numerator = ((line_end.y - line_start.y) * point.x
-        - (line_end.x - line_start.x) * point.y
+    let numerator = ((line_end.y - line_start.y) * point.x - (line_end.x - line_start.x) * point.y
         + line_end.x * line_start.y
         - line_end.y * line_start.x)
         .abs();

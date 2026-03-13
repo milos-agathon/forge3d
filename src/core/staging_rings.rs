@@ -276,7 +276,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_staging_ring_creation() {
-        let Some((device, queue)) = create_test_device().await else { return; };
+        let Some((device, queue)) = create_test_device().await else {
+            return;
+        };
         let ring = StagingRing::new(device, queue, 3, 1024);
 
         let stats = ring.stats();
@@ -288,7 +290,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_staging_allocation() {
-        let Some((device, queue)) = create_test_device().await else { return; };
+        let Some((device, queue)) = create_test_device().await else {
+            return;
+        };
         let mut ring = StagingRing::new(device, queue, 3, 1024);
 
         // Test allocation
@@ -301,7 +305,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_buffer_wrap_around() {
-        let Some((device, queue)) = create_test_device().await else { return; };
+        let Some((device, queue)) = create_test_device().await else {
+            return;
+        };
         let mut ring = StagingRing::new(device, queue, 3, 512);
 
         // Fill current buffer

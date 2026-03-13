@@ -282,7 +282,12 @@ mod tests {
         let seq2 = JitterSequence::new(64, Some(42));
 
         for i in 0..64 {
-            assert_eq!(seq1.get(i), seq2.get(i), "Sequence not deterministic at {}", i);
+            assert_eq!(
+                seq1.get(i),
+                seq2.get(i),
+                "Sequence not deterministic at {}",
+                i
+            );
         }
     }
 

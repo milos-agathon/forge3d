@@ -115,9 +115,12 @@ impl TerrainQueryEngine {
         view_proj: [[f32; 4]; 4],
     ) -> Option<TerrainQueryResult> {
         let world_pos = self.reconstruct_world_from_depth(
-            screen_x, screen_y,
-            screen_width, screen_height,
-            depth, view_proj,
+            screen_x,
+            screen_y,
+            screen_width,
+            screen_height,
+            depth,
+            view_proj,
         )?;
 
         // Extract elevation from Y coordinate
@@ -144,16 +147,19 @@ impl TerrainQueryEngine {
         // Simple ray marching through heightfield
         let max_t = self.config.terrain_width * 2.0;
         let step = self.config.terrain_width / heightmap_width as f32;
-        
+
         let mut t = 0.0;
         let mut prev_above = true;
 
         while t < max_t {
             let p = ray.point_at(t);
-            
+
             // Check if point is within terrain bounds
-            if p[0] < 0.0 || p[0] > self.config.terrain_width 
-                || p[2] < 0.0 || p[2] > self.config.terrain_width {
+            if p[0] < 0.0
+                || p[0] > self.config.terrain_width
+                || p[2] < 0.0
+                || p[2] > self.config.terrain_width
+            {
                 t += step;
                 continue;
             }
@@ -161,11 +167,11 @@ impl TerrainQueryEngine {
             // Sample heightfield at this position
             let u = (p[0] / self.config.terrain_width).clamp(0.0, 1.0);
             let v = (p[2] / self.config.terrain_width).clamp(0.0, 1.0);
-            
+
             let hx = (u * (heightmap_width - 1) as f32) as u32;
             let hz = (v * (heightmap_height - 1) as f32) as u32;
             let idx = (hz * heightmap_width + hx) as usize;
-            
+
             if idx >= heightmap.len() {
                 t += step;
                 continue;
@@ -173,20 +179,28 @@ impl TerrainQueryEngine {
 
             let terrain_height = heightmap[idx] * self.config.z_scale;
             let ray_height = p[1];
-            
+
             let above = ray_height > terrain_height;
-            
+
             // Detect crossing
             if !above && prev_above {
                 // Binary refinement for accurate intersection
-                let refined_t = self.refine_intersection(ray, t - step, t, heightmap, heightmap_width, heightmap_height);
+                let refined_t = self.refine_intersection(
+                    ray,
+                    t - step,
+                    t,
+                    heightmap,
+                    heightmap_width,
+                    heightmap_height,
+                );
                 let hit_pos = ray.point_at(refined_t);
-                
-                let elevation = heightmap[idx] * self.config.z_scale / self.config.z_scale 
+
+                let elevation = heightmap[idx] * self.config.z_scale / self.config.z_scale
                     + self.config.min_elevation;
-                
+
                 // Compute normal from heightfield gradient
-                let normal = self.compute_normal_at(u, v, heightmap, heightmap_width, heightmap_height);
+                let normal =
+                    self.compute_normal_at(u, v, heightmap, heightmap_width, heightmap_height);
                 let (slope, aspect) = self.normal_to_slope_aspect(normal);
 
                 return Some(TerrainQueryResult {
@@ -221,20 +235,20 @@ impl TerrainQueryEngine {
         for _ in 0..8 {
             let mid = (lo + hi) * 0.5;
             let p = ray.point_at(mid);
-            
+
             let u = (p[0] / self.config.terrain_width).clamp(0.0, 1.0);
             let v = (p[2] / self.config.terrain_width).clamp(0.0, 1.0);
-            
+
             let hx = (u * (heightmap_width - 1) as f32) as u32;
             let hz = (v * (heightmap_height - 1) as f32) as u32;
             let idx = (hz * heightmap_width + hx) as usize;
-            
+
             if idx >= heightmap.len() {
                 break;
             }
 
             let terrain_height = heightmap[idx] * self.config.z_scale;
-            
+
             if p[1] > terrain_height {
                 lo = mid;
             } else {
@@ -301,14 +315,22 @@ impl TerrainQueryEngine {
 
 /// Transform a point by a 4x4 matrix with perspective divide
 fn transform_point(point: [f32; 4], matrix: [[f32; 4]; 4]) -> [f32; 3] {
-    let x = matrix[0][0] * point[0] + matrix[1][0] * point[1] 
-          + matrix[2][0] * point[2] + matrix[3][0] * point[3];
-    let y = matrix[0][1] * point[0] + matrix[1][1] * point[1] 
-          + matrix[2][1] * point[2] + matrix[3][1] * point[3];
-    let z = matrix[0][2] * point[0] + matrix[1][2] * point[1] 
-          + matrix[2][2] * point[2] + matrix[3][2] * point[3];
-    let w = matrix[0][3] * point[0] + matrix[1][3] * point[1] 
-          + matrix[2][3] * point[2] + matrix[3][3] * point[3];
+    let x = matrix[0][0] * point[0]
+        + matrix[1][0] * point[1]
+        + matrix[2][0] * point[2]
+        + matrix[3][0] * point[3];
+    let y = matrix[0][1] * point[0]
+        + matrix[1][1] * point[1]
+        + matrix[2][1] * point[2]
+        + matrix[3][1] * point[3];
+    let z = matrix[0][2] * point[0]
+        + matrix[1][2] * point[1]
+        + matrix[2][2] * point[2]
+        + matrix[3][2] * point[3];
+    let w = matrix[0][3] * point[0]
+        + matrix[1][3] * point[1]
+        + matrix[2][3] * point[2]
+        + matrix[3][3] * point[3];
 
     if w.abs() < 1e-10 {
         [x, y, z]

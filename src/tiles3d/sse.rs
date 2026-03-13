@@ -1,7 +1,7 @@
 //! Screen-Space Error (SSE) computation for 3D Tiles LOD selection
 
-use glam::{Mat4, Vec3};
 use super::bounds::BoundingVolume;
+use glam::{Mat4, Vec3};
 
 /// Parameters for SSE computation
 #[derive(Debug, Clone, Copy)]
@@ -58,7 +58,7 @@ pub fn compute_sse(
 ) -> f32 {
     let center = bounding_volume.center();
     let distance = (center - camera_position).length();
-    
+
     if distance < 0.001 {
         return f32::MAX; // Camera inside tile, always refine
     }
@@ -77,7 +77,7 @@ pub fn compute_sse_with_matrix(
 ) -> f32 {
     let center = bounding_volume.center();
     let clip = *view_proj * center.extend(1.0);
-    
+
     if clip.w <= 0.0 {
         return f32::MAX; // Behind camera
     }
@@ -128,10 +128,10 @@ mod tests {
         let bounds = BoundingVolume::Sphere(BoundingSphere {
             sphere: [0.0, 0.0, 0.0, 10.0],
         });
-        
+
         let sse_near = compute_sse(10.0, &bounds, Vec3::new(0.0, 0.0, 100.0), &params);
         let sse_far = compute_sse(10.0, &bounds, Vec3::new(0.0, 0.0, 1000.0), &params);
-        
+
         assert!(sse_near > sse_far);
     }
 
@@ -142,10 +142,10 @@ mod tests {
             sphere: [0.0, 0.0, 0.0, 10.0],
         });
         let camera = Vec3::new(0.0, 0.0, 100.0);
-        
+
         let sse_small = compute_sse(1.0, &bounds, camera, &params);
         let sse_large = compute_sse(10.0, &bounds, camera, &params);
-        
+
         assert!(sse_large > sse_small);
     }
 
@@ -155,11 +155,11 @@ mod tests {
         let bounds = BoundingVolume::Sphere(BoundingSphere {
             sphere: [0.0, 0.0, 0.0, 10.0],
         });
-        
+
         // Close camera should trigger refinement
         let near = Vec3::new(0.0, 0.0, 20.0);
         assert!(should_refine(50.0, &bounds, near, &params, 16.0));
-        
+
         // Far camera should not need refinement
         let far = Vec3::new(0.0, 0.0, 10000.0);
         assert!(!should_refine(50.0, &bounds, far, &params, 16.0));

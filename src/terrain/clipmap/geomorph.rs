@@ -47,18 +47,14 @@ pub struct SeamAnalysis {
 /// Returns a weight in [0.0, 1.0] where:
 /// - 0.0 = use fine (current) LOD height
 /// - 1.0 = use coarse (next) LOD height
-pub fn calculate_morph_weight(
-    distance_from_inner: f32,
-    ring_width: f32,
-    morph_range: f32,
-) -> f32 {
+pub fn calculate_morph_weight(distance_from_inner: f32, ring_width: f32, morph_range: f32) -> f32 {
     if ring_width <= 0.0 || morph_range <= 0.0 {
         return 0.0;
     }
-    
+
     let t = (distance_from_inner / ring_width).clamp(0.0, 1.0);
     let morph_start = 1.0 - morph_range;
-    
+
     if t > morph_start {
         ((t - morph_start) / morph_range).min(1.0)
     } else {
@@ -73,7 +69,7 @@ pub fn calculate_morph_weight(
 pub fn snap_uv_to_coarse_grid(uv: Vec2, ring_index: u32, texture_size: u32) -> Vec2 {
     let lod_scale = 1 << ring_index;
     let coarse_texel_size = lod_scale as f32 / texture_size as f32;
-    
+
     Vec2::new(
         (uv.x / coarse_texel_size).floor() * coarse_texel_size,
         (uv.y / coarse_texel_size).floor() * coarse_texel_size,
@@ -96,11 +92,11 @@ pub fn analyze_seams(
         // Check if this is an inner boundary vertex (morph_weight near 0)
         if outer_v.morph_weight() < 0.1 {
             boundary_count += 1;
-            
+
             // Find closest inner ring vertex
             let outer_pos = Vec2::from(outer_v.position);
             let mut min_dist = f32::MAX;
-            
+
             for inner_v in inner_vertices {
                 // Check outer boundary of inner ring (morph_weight near 1)
                 if inner_v.morph_weight() > 0.9 {
@@ -109,11 +105,11 @@ pub fn analyze_seams(
                     min_dist = min_dist.min(dist);
                 }
             }
-            
+
             if min_dist < f32::MAX {
                 max_gap = max_gap.max(min_dist);
                 total_gap += min_dist;
-                
+
                 // T-junction if gap is non-zero but not aligned
                 if min_dist > config.max_seam_gap * 0.1 && min_dist < config.max_seam_gap * 10.0 {
                     t_junction_count += 1;
@@ -158,7 +154,7 @@ pub fn correct_seam_vertices(
         if v.morph_weight() > morph_threshold && (v.ring_index() as u32) == ring_index {
             let old_uv = Vec2::from(v.uv);
             let new_uv = snap_uv_to_coarse_grid(old_uv, ring_index + 1, texture_size);
-            
+
             if old_uv.distance(new_uv) > 0.0001 {
                 v.uv = [new_uv.x, new_uv.y];
                 corrected += 1;
@@ -176,13 +172,13 @@ pub fn blend_boundary_vertices(
     blend_factor: f32,
 ) -> Vec<ClipmapVertex> {
     let mut blended = Vec::with_capacity(fine_vertices.len());
-    
+
     for fine_v in fine_vertices {
         // Find corresponding coarse vertex
         let fine_pos = Vec2::from(fine_v.position);
         let mut best_coarse: Option<&ClipmapVertex> = None;
         let mut best_dist = f32::MAX;
-        
+
         for coarse_v in coarse_vertices {
             let coarse_pos = Vec2::from(coarse_v.position);
             let dist = fine_pos.distance(coarse_pos);
@@ -191,14 +187,14 @@ pub fn blend_boundary_vertices(
                 best_coarse = Some(coarse_v);
             }
         }
-        
+
         if let Some(coarse_v) = best_coarse {
             if best_dist < 1.0 {
                 // Blend position based on morph weight
                 let t = blend_factor * fine_v.morph_weight();
                 let blended_pos = fine_pos.lerp(Vec2::from(coarse_v.position), t);
                 let blended_uv = Vec2::from(fine_v.uv).lerp(Vec2::from(coarse_v.uv), t);
-                
+
                 blended.push(ClipmapVertex::new(
                     blended_pos.x,
                     blended_pos.y,
@@ -214,7 +210,7 @@ pub fn blend_boundary_vertices(
             blended.push(*fine_v);
         }
     }
-    
+
     blended
 }
 
@@ -235,10 +231,11 @@ pub fn validate_geomorph(
     // Check for discontinuities in morph weights
     let mut prev_morph = 0.0_f32;
     let mut large_jumps = 0;
-    
+
     for v in vertices {
         let mw = v.morph_weight();
-        if mw >= 0.0 {  // Skip skirt vertices
+        if mw >= 0.0 {
+            // Skip skirt vertices
             let jump = (mw - prev_morph).abs();
             if jump > config.morph_range {
                 large_jumps += 1;
@@ -266,13 +263,13 @@ mod tests {
     fn test_morph_weight_calculation() {
         // At inner boundary, weight should be 0
         assert_eq!(calculate_morph_weight(0.0, 100.0, 0.3), 0.0);
-        
+
         // At outer boundary, weight should be 1
         assert!((calculate_morph_weight(100.0, 100.0, 0.3) - 1.0).abs() < 0.01);
-        
+
         // In middle of ring (before morph zone), weight should be 0
         assert_eq!(calculate_morph_weight(50.0, 100.0, 0.3), 0.0);
-        
+
         // At start of morph zone (70% through ring with 0.3 morph_range)
         let w = calculate_morph_weight(70.0, 100.0, 0.3);
         assert!(w >= 0.0 && w <= 0.1);
@@ -285,7 +282,7 @@ mod tests {
         let snapped = snap_uv_to_coarse_grid(uv, 0, 256);
         assert!((snapped.x * 256.0).fract() < 0.001);
         assert!((snapped.y * 256.0).fract() < 0.001);
-        
+
         // Ring 1 should snap to 2/256 grid
         let snapped = snap_uv_to_coarse_grid(uv, 1, 256);
         assert!((snapped.x * 128.0).fract() < 0.001);

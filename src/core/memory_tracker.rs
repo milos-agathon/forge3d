@@ -85,11 +85,11 @@ impl ResourceRegistry {
             });
 
         if is_host_visible {
-            let _ = self
-                .host_visible_bytes
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                    Some(current.saturating_sub(size))
-                });
+            let _ = self.host_visible_bytes.fetch_update(
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+                |current| Some(current.saturating_sub(size)),
+            );
         }
     }
 

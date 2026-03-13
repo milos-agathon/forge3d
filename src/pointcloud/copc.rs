@@ -126,36 +126,50 @@ impl CopcDataset {
 
         for i in 0..count {
             let off = i * entry_size;
-            let d = i32::from_le_bytes([
-                data[off], data[off + 1], data[off + 2], data[off + 3],
-            ]);
-            let x = i32::from_le_bytes([
-                data[off + 4], data[off + 5], data[off + 6], data[off + 7],
-            ]);
-            let y = i32::from_le_bytes([
-                data[off + 8], data[off + 9], data[off + 10], data[off + 11],
-            ]);
+            let d = i32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]);
+            let x =
+                i32::from_le_bytes([data[off + 4], data[off + 5], data[off + 6], data[off + 7]]);
+            let y =
+                i32::from_le_bytes([data[off + 8], data[off + 9], data[off + 10], data[off + 11]]);
             let z = i32::from_le_bytes([
-                data[off + 12], data[off + 13], data[off + 14], data[off + 15],
+                data[off + 12],
+                data[off + 13],
+                data[off + 14],
+                data[off + 15],
             ]);
             let file_offset = u64::from_le_bytes([
-                data[off + 16], data[off + 17], data[off + 18], data[off + 19],
-                data[off + 20], data[off + 21], data[off + 22], data[off + 23],
+                data[off + 16],
+                data[off + 17],
+                data[off + 18],
+                data[off + 19],
+                data[off + 20],
+                data[off + 21],
+                data[off + 22],
+                data[off + 23],
             ]);
             let byte_size = i32::from_le_bytes([
-                data[off + 24], data[off + 25], data[off + 26], data[off + 27],
+                data[off + 24],
+                data[off + 25],
+                data[off + 26],
+                data[off + 27],
             ]);
             let point_count = i32::from_le_bytes([
-                data[off + 28], data[off + 29], data[off + 30], data[off + 31],
+                data[off + 28],
+                data[off + 29],
+                data[off + 30],
+                data[off + 31],
             ]);
 
             if d >= 0 && point_count > 0 {
                 let key = OctreeKey::new(d as u32, x as u32, y as u32, z as u32);
-                self.hierarchy.insert(key, HierarchyEntry {
-                    offset: file_offset,
-                    byte_size: byte_size as u32,
-                    point_count: point_count as u32,
-                });
+                self.hierarchy.insert(
+                    key,
+                    HierarchyEntry {
+                        offset: file_offset,
+                        byte_size: byte_size as u32,
+                        point_count: point_count as u32,
+                    },
+                );
             }
         }
         Ok(())
@@ -176,8 +190,7 @@ impl CopcDataset {
             let child_key = key.child(octant);
             if let Some(entry) = self.hierarchy.get(&child_key) {
                 let bounds = self.bounds_for_key(&child_key);
-                let mut node =
-                    OctreeNode::new(child_key, bounds, entry.point_count as u64);
+                let mut node = OctreeNode::new(child_key, bounds, entry.point_count as u64);
                 for o in 0..8 {
                     let grandchild = node.key.child(o);
                     if self.hierarchy.contains_key(&grandchild) {
@@ -207,9 +220,10 @@ impl CopcDataset {
 
     /// Read points for a node
     pub fn read_points(&self, key: &OctreeKey) -> PointCloudResult<PointData> {
-        let entry = self.hierarchy.get(key).ok_or_else(|| {
-            PointCloudError::InvalidCopc("Node not in hierarchy".into())
-        })?;
+        let entry = self
+            .hierarchy
+            .get(key)
+            .ok_or_else(|| PointCloudError::InvalidCopc("Node not in hierarchy".into()))?;
 
         let mut file = std::fs::File::open(&self.path)?;
         file.seek(SeekFrom::Start(entry.offset))?;
@@ -240,9 +254,7 @@ impl CopcDataset {
 // Header & VLR reading
 // ---------------------------------------------------------------------------
 
-fn read_las_header<R: Read + Seek>(
-    reader: &mut R,
-) -> PointCloudResult<CopcHeader> {
+fn read_las_header<R: Read + Seek>(reader: &mut R) -> PointCloudResult<CopcHeader> {
     let mut buf = [0u8; 375];
     reader.read_exact(&mut buf)?;
 
@@ -250,13 +262,11 @@ fn read_las_header<R: Read + Seek>(
         return Err(PointCloudError::InvalidCopc("Not a LAS file".into()));
     }
 
-    let num_vlrs =
-        u32::from_le_bytes([buf[100], buf[101], buf[102], buf[103]]);
+    let num_vlrs = u32::from_le_bytes([buf[100], buf[101], buf[102], buf[103]]);
     let point_format = buf[104];
     let point_record_length = u16::from_le_bytes([buf[105], buf[106]]);
     let point_count = u64::from_le_bytes([
-        buf[247], buf[248], buf[249], buf[250], buf[251], buf[252], buf[253],
-        buf[254],
+        buf[247], buf[248], buf[249], buf[250], buf[251], buf[252], buf[253], buf[254],
     ]);
 
     let scale = [
@@ -309,10 +319,8 @@ fn read_all_vlrs<R: Read + Seek>(
         let user_id = std::str::from_utf8(&vlr_header[2..18])
             .unwrap_or("")
             .trim_end_matches('\0');
-        let record_id =
-            u16::from_le_bytes([vlr_header[18], vlr_header[19]]);
-        let content_size =
-            u16::from_le_bytes([vlr_header[20], vlr_header[21]]) as usize;
+        let record_id = u16::from_le_bytes([vlr_header[18], vlr_header[19]]);
+        let content_size = u16::from_le_bytes([vlr_header[20], vlr_header[21]]) as usize;
 
         let mut content = vec![0u8; content_size];
         reader.read_exact(&mut content)?;
@@ -324,9 +332,8 @@ fn read_all_vlrs<R: Read + Seek>(
         }
     }
 
-    let copc_info = copc_info.ok_or_else(|| {
-        PointCloudError::InvalidCopc("Missing COPC VLR".into())
-    })?;
+    let copc_info =
+        copc_info.ok_or_else(|| PointCloudError::InvalidCopc("Missing COPC VLR".into()))?;
 
     Ok(VlrScanResult {
         copc_info,
@@ -349,17 +356,9 @@ fn parse_copc_info(content: &[u8]) -> PointCloudResult<CopcInfo> {
         ],
         halfsize: f64::from_le_bytes(content[24..32].try_into().unwrap()),
         spacing: f64::from_le_bytes(content[32..40].try_into().unwrap()),
-        root_hier_offset: u64::from_le_bytes(
-            content[40..48].try_into().unwrap(),
-        ),
-        root_hier_size: u64::from_le_bytes(
-            content[48..56].try_into().unwrap(),
-        ),
-        gpstime_minimum: f64::from_le_bytes(
-            content[56..64].try_into().unwrap(),
-        ),
-        gpstime_maximum: f64::from_le_bytes(
-            content[64..72].try_into().unwrap(),
-        ),
+        root_hier_offset: u64::from_le_bytes(content[40..48].try_into().unwrap()),
+        root_hier_size: u64::from_le_bytes(content[48..56].try_into().unwrap()),
+        gpstime_minimum: f64::from_le_bytes(content[56..64].try_into().unwrap()),
+        gpstime_maximum: f64::from_le_bytes(content[64..72].try_into().unwrap()),
     })
 }

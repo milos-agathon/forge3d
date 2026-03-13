@@ -11,8 +11,8 @@ use wgpu::util::DeviceExt;
 use crate::cli::gi_types::GiVizMode;
 use crate::viewer::viewer_enums::{CaptureKind, FogMode, VizMode};
 use crate::viewer::{
-    CameraFrustum, FogCameraUniforms, FogUpsampleParamsStd140,
-    SkyUniforms, Viewer, VolumetricUniformsStd140, VIEWER_SNAPSHOT_MAX_MEGAPIXELS,
+    CameraFrustum, FogCameraUniforms, FogUpsampleParamsStd140, SkyUniforms, Viewer,
+    VolumetricUniformsStd140, VIEWER_SNAPSHOT_MAX_MEGAPIXELS,
 };
 
 impl Viewer {
@@ -60,14 +60,14 @@ impl Viewer {
                     snap_h = ((snap_h as f32) * scale).floor().max(1.0) as u32;
                 }
             }
-            
+
             if snap_w != self.config.width || snap_h != self.config.height {
                 eprintln!(
                     "[viewer] Snapshot requested at {}x{} (window: {}x{})",
                     snap_w, snap_h, self.config.width, self.config.height
                 );
             }
-            
+
             Some((snap_w, snap_h))
         } else {
             None
@@ -84,7 +84,8 @@ impl Viewer {
         {
             // Gather selected IDs for highlighting (labels use u64 IDs, picking uses u32)
             let selected_u32 = self.unified_picking.selection_manager().get_selection();
-            let selected_ids: std::collections::HashSet<u64> = selected_u32.iter().map(|&id| id as u64).collect();
+            let selected_ids: std::collections::HashSet<u64> =
+                selected_u32.iter().map(|&id| id as u64).collect();
 
             let (view_proj, camera_pos) = if let Some(ref terrain_viewer) = self.terrain_viewer {
                 if let Some(ref terrain) = terrain_viewer.terrain {
@@ -96,11 +97,8 @@ impl Viewer {
                     let terrain_width = tw.max(th) as f32;
                     let h_range = terrain.domain.1 - terrain.domain.0;
                     let center_y = h_range * terrain.z_scale * 0.5;
-                    let center = glam::Vec3::new(
-                        terrain_width * 0.5,
-                        center_y,
-                        terrain_width * 0.5,
-                    );
+                    let center =
+                        glam::Vec3::new(terrain_width * 0.5, center_y, terrain_width * 0.5);
                     let eye = glam::Vec3::new(
                         center.x + r * theta.sin() * phi.cos(),
                         center.y + r * theta.cos(),
@@ -118,18 +116,29 @@ impl Viewer {
                     // No terrain data, use viewer camera
                     let aspect = self.config.width as f32 / self.config.height as f32;
                     let fov = self.view_config.fov_deg.to_radians();
-                    let proj = Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
+                    let proj = Mat4::perspective_rh(
+                        fov,
+                        aspect,
+                        self.view_config.znear,
+                        self.view_config.zfar,
+                    );
                     (proj * self.camera.view_matrix(), Some(self.camera.eye()))
                 }
             } else {
                 // No terrain viewer, use viewer camera
                 let aspect = self.config.width as f32 / self.config.height as f32;
                 let fov = self.view_config.fov_deg.to_radians();
-                let proj = Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
+                let proj = Mat4::perspective_rh(
+                    fov,
+                    aspect,
+                    self.view_config.znear,
+                    self.view_config.zfar,
+                );
                 (proj * self.camera.view_matrix(), Some(self.camera.eye()))
             };
-            
-            self.label_manager.update_with_camera(view_proj, camera_pos, Some(&selected_ids));
+
+            self.label_manager
+                .update_with_camera(view_proj, camera_pos, Some(&selected_ids));
         }
 
         // Render sky background (compute) before opaques
@@ -237,7 +246,7 @@ impl Viewer {
         let have_vb = self.geom_vb.is_some();
         let have_z = self.z_view.is_some();
         let have_bgl = self.geom_bind_group_layout.is_some();
-        
+
         // D1: Log render gate status on every snapshot frame (to file for diagnosis)
         if self.snapshot_request.is_some() {
             let msg = format!(
@@ -254,7 +263,7 @@ impl Viewer {
                     f.write_all(msg.as_bytes())
                 });
         }
-        
+
         if !(have_gi && have_pipe && have_cam && have_vb && have_z && have_bgl) {
             if !self.debug_logged_render_gate {
                 eprintln!(
@@ -283,7 +292,7 @@ impl Viewer {
             let fov = self.view_config.fov_deg.to_radians();
             let proj_base =
                 Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
-            
+
             // P1.2: Apply TAA jitter to projection matrix
             let proj = if self.taa_jitter.enabled {
                 crate::core::jitter::apply_jitter(
@@ -299,7 +308,7 @@ impl Viewer {
             // Apply object transform to create model-view matrix
             let view_mat = self.camera.view_matrix();
             let model_view = view_mat * self.object_transform;
-            
+
             // D1: Snapshot-time truth instrumentation - log to file
             if self.snapshot_request.is_some() {
                 let is_identity = self.object_transform == glam::Mat4::IDENTITY;
@@ -521,9 +530,8 @@ impl Viewer {
                                     0,
                                     bytemuck::cast_slice(&light_vp_arr),
                                 );
-                                let csm_bg = self
-                                    .device
-                                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                                let csm_bg =
+                                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                                         label: Some("viewer.csm.depth.bg"),
                                         layout: &bgl,
                                         entries: &[wgpu::BindGroupEntry {
@@ -531,8 +539,8 @@ impl Viewer {
                                             resource: csm_cam_buf.as_entire_binding(),
                                         }],
                                     });
-                                let mut shadow_pass = encoder.begin_render_pass(
-                                    &wgpu::RenderPassDescriptor {
+                                let mut shadow_pass =
+                                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                                         label: Some("viewer.csm.depth"),
                                         color_attachments: &[],
                                         depth_stencil_attachment: Some(
@@ -547,21 +555,14 @@ impl Viewer {
                                         ),
                                         occlusion_query_set: None,
                                         timestamp_writes: None,
-                                    },
-                                );
+                                    });
                                 shadow_pass.set_pipeline(csm_pipe);
                                 shadow_pass.set_bind_group(0, &csm_bg, &[]);
                                 shadow_pass.set_vertex_buffer(0, vb.slice(..));
                                 if let Some(ib) = self.geom_ib.as_ref() {
-                                    shadow_pass.set_index_buffer(
-                                        ib.slice(..),
-                                        wgpu::IndexFormat::Uint32,
-                                    );
-                                    shadow_pass.draw_indexed(
-                                        0..self.geom_index_count,
-                                        0,
-                                        0..1,
-                                    );
+                                    shadow_pass
+                                        .set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                                    shadow_pass.draw_indexed(0..self.geom_index_count, 0, 0..1);
                                 } else {
                                     shadow_pass.draw(0..self.geom_index_count, 0..1);
                                 }
@@ -1271,20 +1272,21 @@ impl Viewer {
                     });
                     let snap_view = snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
                     {
-                        let mut pass_snap = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: Some("viewer.comp.pass.snapshot"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &snap_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            })],
-                            depth_stencil_attachment: None,
-                            timestamp_writes: None,
-                            occlusion_query_set: None,
-                        });
+                        let mut pass_snap =
+                            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("viewer.comp.pass.snapshot"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: &snap_view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                })],
+                                depth_stencil_attachment: None,
+                                timestamp_writes: None,
+                                occlusion_query_set: None,
+                            });
                         pass_snap.set_pipeline(comp_pl);
                         pass_snap.set_bind_group(0, &comp_bg, &[]);
                         pass_snap.draw(0..3, 0..1);
@@ -1294,45 +1296,72 @@ impl Viewer {
             }
         }
 
-
-    // TerrainScene render, or fall back to the purple debug pipeline.
-    // Helper closure to render fallback with optional snapshot texture
-    let render_fallback = |encoder: &mut wgpu::CommandEncoder,
-                           view: &wgpu::TextureView,
-                           pipeline: &wgpu::RenderPipeline,
-                           device: &wgpu::Device,
-                           config: &wgpu::SurfaceConfiguration,
-                           snapshot_request: &Option<String>,
-                           view_config: &crate::viewer::viewer_config::ViewerConfig|
-     -> Option<wgpu::Texture> {
-        // If snapshot requested, create offscreen texture at requested size
-        let snap_tex = if snapshot_request.is_some() {
-            let (snap_w, snap_h) = if let (Some(w), Some(h)) =
-                (view_config.snapshot_width, view_config.snapshot_height)
-            {
-                (w, h)
+        // TerrainScene render, or fall back to the purple debug pipeline.
+        // Helper closure to render fallback with optional snapshot texture
+        let render_fallback = |encoder: &mut wgpu::CommandEncoder,
+                               view: &wgpu::TextureView,
+                               pipeline: &wgpu::RenderPipeline,
+                               device: &wgpu::Device,
+                               config: &wgpu::SurfaceConfiguration,
+                               snapshot_request: &Option<String>,
+                               view_config: &crate::viewer::viewer_config::ViewerConfig|
+         -> Option<wgpu::Texture> {
+            // If snapshot requested, create offscreen texture at requested size
+            let snap_tex = if snapshot_request.is_some() {
+                let (snap_w, snap_h) = if let (Some(w), Some(h)) =
+                    (view_config.snapshot_width, view_config.snapshot_height)
+                {
+                    (w, h)
+                } else {
+                    (config.width, config.height)
+                };
+                let tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("viewer.fallback.snapshot"),
+                    size: wgpu::Extent3d {
+                        width: snap_w,
+                        height: snap_h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: config.format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let snap_view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("viewer.fallback.pass.snapshot"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &snap_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.05,
+                                g: 0.0,
+                                b: 0.15,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                pass.set_pipeline(pipeline);
+                pass.draw(0..3, 0..1);
+                drop(pass);
+                Some(tex)
             } else {
-                (config.width, config.height)
+                None
             };
-            let tex = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("viewer.fallback.snapshot"),
-                size: wgpu::Extent3d {
-                    width: snap_w,
-                    height: snap_h,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: config.format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
-            let snap_view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+            // Always render to swapchain view too
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("viewer.fallback.pass.snapshot"),
+                label: Some("viewer.fallback.pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &snap_view,
+                    view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -1351,192 +1380,263 @@ impl Viewer {
             pass.set_pipeline(pipeline);
             pass.draw(0..3, 0..1);
             drop(pass);
-            Some(tex)
+            snap_tex
+        };
+
+        // Standalone terrain viewer (works without extension-module)
+        let mut terrain_rendered = false;
+        // Check if snapshot requested with custom resolution (for terrain viewer)
+        let terrain_snap_size = if self.snapshot_request.is_some() {
+            if let (Some(w), Some(h)) = (
+                self.view_config.snapshot_width,
+                self.view_config.snapshot_height,
+            ) {
+                Some((w, h))
+            } else {
+                Some((self.config.width, self.config.height))
+            }
         } else {
             None
         };
 
-        // Always render to swapchain view too
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("viewer.fallback.pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.05,
-                        g: 0.0,
-                        b: 0.15,
-                        a: 1.0,
-                    }),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-        pass.set_pipeline(pipeline);
-        pass.draw(0..3, 0..1);
-        drop(pass);
-        snap_tex
-    };
-
-    // Standalone terrain viewer (works without extension-module)
-    let mut terrain_rendered = false;
-    // Check if snapshot requested with custom resolution (for terrain viewer)
-    let terrain_snap_size = if self.snapshot_request.is_some() {
-        if let (Some(w), Some(h)) = (self.view_config.snapshot_width, self.view_config.snapshot_height) {
-            Some((w, h))
-        } else {
-            Some((self.config.width, self.config.height))
-        }
-    } else {
-        None
-    };
-
-    if let Some(ref mut tv) = self.terrain_viewer {
-        if tv.has_terrain() {
-            eprintln!("[DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request={:?}, terrain_snap_size={:?}",
+        if let Some(ref mut tv) = self.terrain_viewer {
+            if tv.has_terrain() {
+                eprintln!("[DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request={:?}, terrain_snap_size={:?}",
                 self.snapshot_request.is_some(), terrain_snap_size);
-            // Render to screen at window resolution
-            // Note: Motion blur is too expensive for real-time rendering (N full renders per frame),
-            // so we only apply it for snapshots. The interactive viewer shows a regular render.
-            terrain_rendered = tv.render(&mut encoder, &view, self.config.width, self.config.height, self.selected_feature_id);
-
-            // Then render to offscreen texture at snapshot resolution (if requested)
-            // This must be LAST so the uniform buffer has the correct aspect ratio for the snapshot
-            if let Some((snap_w, snap_h)) = terrain_snap_size {
-                // P4: Use motion blur rendering if enabled
-                if tv.pbr_config.motion_blur.enabled && tv.pbr_config.motion_blur.samples > 1 {
-                    // Motion blur handles its own encoder internally
-                    self.queue.submit(std::iter::once(encoder.finish()));
-                    if let Some(tex) = tv.render_with_motion_blur(self.config.format, snap_w, snap_h) {
-                        self.pending_snapshot_tex = Some(tex);
-                    }
-                    // Create a new encoder for any remaining work
-                    encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("viewer.render.post_motion_blur"),
-                    });
-                } else {
-                    if let Some(tex) = tv.render_to_texture(&mut encoder, self.config.format, snap_w, snap_h, self.selected_feature_id) {
-                        self.pending_snapshot_tex = Some(tex);
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(feature = "extension-module")]
-    if !terrain_rendered {
-        if let Some(ref mut scene) = self.terrain_scene {
-            if scene.has_viewer_terrain() {
-                // Render terrain to swapchain view at normal resolution
-                terrain_rendered = scene.render_viewer_terrain(
+                // Render to screen at window resolution
+                // Note: Motion blur is too expensive for real-time rendering (N full renders per frame),
+                // so we only apply it for snapshots. The interactive viewer shows a regular render.
+                terrain_rendered = tv.render(
                     &mut encoder,
                     &view,
-                    self.config.format,
                     self.config.width,
                     self.config.height,
+                    self.selected_feature_id,
                 );
-                
-                // If snapshot requested, also render to offscreen texture at snapshot dimensions
-                if let Some((snap_w, snap_h)) = _snapshot_dimensions {
-                    let snap_tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some("viewer.terrain.snapshot"),
-                        size: wgpu::Extent3d {
-                            width: snap_w,
-                            height: snap_h,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: self.config.format,
-                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                        view_formats: &[],
-                    });
-                    let snap_view = snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
-                    
-                    scene.render_viewer_terrain(
-                        &mut encoder,
-                        &snap_view,
-                        self.config.format,
-                        snap_w,
-                        snap_h,
-                    );
-                    
-                    self.pending_snapshot_tex = Some(snap_tex);
+
+                // Then render to offscreen texture at snapshot resolution (if requested)
+                // This must be LAST so the uniform buffer has the correct aspect ratio for the snapshot
+                if let Some((snap_w, snap_h)) = terrain_snap_size {
+                    // P4: Use motion blur rendering if enabled
+                    if tv.pbr_config.motion_blur.enabled && tv.pbr_config.motion_blur.samples > 1 {
+                        // Motion blur handles its own encoder internally
+                        self.queue.submit(std::iter::once(encoder.finish()));
+                        if let Some(tex) =
+                            tv.render_with_motion_blur(self.config.format, snap_w, snap_h)
+                        {
+                            self.pending_snapshot_tex = Some(tex);
+                        }
+                        // Create a new encoder for any remaining work
+                        encoder =
+                            self.device
+                                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                    label: Some("viewer.render.post_motion_blur"),
+                                });
+                    } else {
+                        if let Some(tex) = tv.render_to_texture(
+                            &mut encoder,
+                            self.config.format,
+                            snap_w,
+                            snap_h,
+                            self.selected_feature_id,
+                        ) {
+                            self.pending_snapshot_tex = Some(tex);
+                        }
+                    }
                 }
             }
         }
-    }
 
-    if !terrain_rendered && !(have_gi && have_pipe && have_cam && have_vb && have_z && have_bgl) {
-        if let Some(tex) = render_fallback(
-            &mut encoder,
-            &view,
-            &self.fallback_pipeline,
-            &self.device,
-            &self.config,
-            &self.snapshot_request,
-            &self.view_config,
-        ) {
-            self.pending_snapshot_tex = Some(tex);
+        #[cfg(feature = "extension-module")]
+        if !terrain_rendered {
+            if let Some(ref mut scene) = self.terrain_scene {
+                if scene.has_viewer_terrain() {
+                    // Render terrain to swapchain view at normal resolution
+                    terrain_rendered = scene.render_viewer_terrain(
+                        &mut encoder,
+                        &view,
+                        self.config.format,
+                        self.config.width,
+                        self.config.height,
+                    );
+
+                    // If snapshot requested, also render to offscreen texture at snapshot dimensions
+                    if let Some((snap_w, snap_h)) = _snapshot_dimensions {
+                        let snap_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                            label: Some("viewer.terrain.snapshot"),
+                            size: wgpu::Extent3d {
+                                width: snap_w,
+                                height: snap_h,
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: self.config.format,
+                            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                                | wgpu::TextureUsages::COPY_SRC,
+                            view_formats: &[],
+                        });
+                        let snap_view =
+                            snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+                        scene.render_viewer_terrain(
+                            &mut encoder,
+                            &snap_view,
+                            self.config.format,
+                            snap_w,
+                            snap_h,
+                        );
+
+                        self.pending_snapshot_tex = Some(snap_tex);
+                    }
+                }
+            }
         }
-    }
 
-    #[cfg(any())] // Dead code - kept for reference
-    if !(have_gi && have_pipe && have_cam && have_vb && have_z && have_bgl) {
-        if let Some(tex) = render_fallback(
-            &mut encoder,
-            &view,
-            &self.fallback_pipeline,
-            &self.device,
-            &self.config,
-            &self.snapshot_request,
-            &self.view_config,
-        ) {
-            self.pending_snapshot_tex = Some(tex);
+        if !terrain_rendered && !(have_gi && have_pipe && have_cam && have_vb && have_z && have_bgl)
+        {
+            if let Some(tex) = render_fallback(
+                &mut encoder,
+                &view,
+                &self.fallback_pipeline,
+                &self.device,
+                &self.config,
+                &self.snapshot_request,
+                &self.view_config,
+            ) {
+                self.pending_snapshot_tex = Some(tex);
+            }
         }
-    }
 
-    // P5: Render point cloud (after terrain, before labels)
-    if let Some(ref pc) = self.point_cloud {
-        if pc.visible && pc.point_count > 0 && pc.instance_buffer.is_some() {
-            // Points are centered at origin, compute extent for camera distance
-            let extent_x = pc.bounds_max[0] - pc.bounds_min[0];
-            let extent_y = pc.bounds_max[1] - pc.bounds_min[1];
-            let extent_z = pc.bounds_max[2] - pc.bounds_min[2];
-            let extent = extent_x.max(extent_y).max(extent_z).max(100.0);
-            
-            // Use orbit camera state from point cloud
-            let base_radius = extent * 2.0;
-            let r = base_radius * pc.cam_radius;
-            let center = glam::Vec3::ZERO;
-            // Spherical coords from point cloud camera state
-            let eye = glam::Vec3::new(
-                r * pc.cam_theta.cos() * pc.cam_phi.cos(),
-                r * pc.cam_theta.sin(),
-                r * pc.cam_theta.cos() * pc.cam_phi.sin(),
-            );
-            
-            let view_mat = Mat4::look_at_rh(eye, center, glam::Vec3::Y);
-            let aspect = self.config.width as f32 / self.config.height.max(1) as f32;
-            let near = extent * 0.01;
-            let far = extent * 10.0;
-            let proj = Mat4::perspective_rh(45.0_f32.to_radians(), aspect, near, far);
-            let view_proj = proj * view_mat;
+        #[cfg(any())] // Dead code - kept for reference
+        if !(have_gi && have_pipe && have_cam && have_vb && have_z && have_bgl) {
+            if let Some(tex) = render_fallback(
+                &mut encoder,
+                &view,
+                &self.fallback_pipeline,
+                &self.device,
+                &self.config,
+                &self.snapshot_request,
+                &self.view_config,
+            ) {
+                self.pending_snapshot_tex = Some(tex);
+            }
+        }
 
-            // Simple render pass - clear to dark background for point cloud
+        // P5: Render point cloud (after terrain, before labels)
+        if let Some(ref pc) = self.point_cloud {
+            if pc.visible && pc.point_count > 0 && pc.instance_buffer.is_some() {
+                // Points are centered at origin, compute extent for camera distance
+                let extent_x = pc.bounds_max[0] - pc.bounds_min[0];
+                let extent_y = pc.bounds_max[1] - pc.bounds_min[1];
+                let extent_z = pc.bounds_max[2] - pc.bounds_min[2];
+                let extent = extent_x.max(extent_y).max(extent_z).max(100.0);
+
+                // Use orbit camera state from point cloud
+                let base_radius = extent * 2.0;
+                let r = base_radius * pc.cam_radius;
+                let center = glam::Vec3::ZERO;
+                // Spherical coords from point cloud camera state
+                let eye = glam::Vec3::new(
+                    r * pc.cam_theta.cos() * pc.cam_phi.cos(),
+                    r * pc.cam_theta.sin(),
+                    r * pc.cam_theta.cos() * pc.cam_phi.sin(),
+                );
+
+                let view_mat = Mat4::look_at_rh(eye, center, glam::Vec3::Y);
+                let aspect = self.config.width as f32 / self.config.height.max(1) as f32;
+                let near = extent * 0.01;
+                let far = extent * 10.0;
+                let proj = Mat4::perspective_rh(45.0_f32.to_radians(), aspect, near, far);
+                let view_proj = proj * view_mat;
+
+                // Simple render pass - clear to dark background for point cloud
+                {
+                    let mut pc_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("viewer.pointcloud.pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color {
+                                    r: 0.1,
+                                    g: 0.1,
+                                    b: 0.15,
+                                    a: 1.0,
+                                }),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+
+                    pc.render(
+                        &mut pc_pass,
+                        &self.queue,
+                        view_proj.to_cols_array_2d(),
+                        [self.config.width as f32, self.config.height as f32],
+                    );
+                }
+
+                // Also render point cloud to snapshot texture if one exists
+                if let Some(ref snap_tex) = self.pending_snapshot_tex {
+                    let snap_view = snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                    let snap_w = snap_tex.width() as f32;
+                    let snap_h = snap_tex.height() as f32;
+                    let snap_aspect = snap_w / snap_h.max(1.0);
+                    let snap_proj =
+                        Mat4::perspective_rh(45.0_f32.to_radians(), snap_aspect, near, far);
+                    let snap_view_proj = snap_proj * view_mat;
+
+                    let mut pc_snap_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("viewer.pointcloud.pass.snapshot"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &snap_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color {
+                                    r: 0.1,
+                                    g: 0.1,
+                                    b: 0.15,
+                                    a: 1.0,
+                                }),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+
+                    pc.render(
+                        &mut pc_snap_pass,
+                        &self.queue,
+                        snap_view_proj.to_cols_array_2d(),
+                        [snap_w, snap_h],
+                    );
+                }
+            }
+        }
+
+        // Render labels (screen-space text overlay) - AFTER terrain so labels appear on top
+        if self.label_manager.is_enabled() && self.label_manager.visible_count() > 0 {
+            self.label_manager
+                .upload_to_renderer(&self.device, &self.queue, &mut self.hud);
+            self.hud.set_enabled(true);
+            self.hud.upload_uniforms(&self.queue);
+
+            // Render labels to swapchain view for interactive display
             {
-                let mut pc_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("viewer.pointcloud.pass"),
+                let mut label_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("viewer.labels.pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.1, g: 0.1, b: 0.15, a: 1.0 }),
+                            load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         },
                     })],
@@ -1544,31 +1644,19 @@ impl Viewer {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-
-                pc.render(
-                    &mut pc_pass,
-                    &self.queue,
-                    view_proj.to_cols_array_2d(),
-                    [self.config.width as f32, self.config.height as f32],
-                );
+                self.hud.render(&mut label_pass);
             }
-            
-            // Also render point cloud to snapshot texture if one exists
+
+            // Render labels to snapshot texture if one exists
             if let Some(ref snap_tex) = self.pending_snapshot_tex {
                 let snap_view = snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
-                let snap_w = snap_tex.width() as f32;
-                let snap_h = snap_tex.height() as f32;
-                let snap_aspect = snap_w / snap_h.max(1.0);
-                let snap_proj = Mat4::perspective_rh(45.0_f32.to_radians(), snap_aspect, near, far);
-                let snap_view_proj = snap_proj * view_mat;
-                
-                let mut pc_snap_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("viewer.pointcloud.pass.snapshot"),
+                let mut label_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("viewer.labels.pass.snapshot"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &snap_view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.1, g: 0.1, b: 0.15, a: 1.0 }),
+                            load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         },
                     })],
@@ -1576,169 +1664,116 @@ impl Viewer {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-                
-                pc.render(
-                    &mut pc_snap_pass,
-                    &self.queue,
-                    snap_view_proj.to_cols_array_2d(),
-                    [snap_w, snap_h],
-                );
+                self.hud.render(&mut label_pass);
             }
         }
-    }
 
-    // Render labels (screen-space text overlay) - AFTER terrain so labels appear on top
-    if self.label_manager.is_enabled() && self.label_manager.visible_count() > 0 {
-        self.label_manager.upload_to_renderer(&self.device, &self.queue, &mut self.hud);
-        self.hud.set_enabled(true);
-        self.hud.upload_uniforms(&self.queue);
+        // Submit rendering
+        self.queue.submit(std::iter::once(encoder.finish()));
 
-        // Render labels to swapchain view for interactive display
-        {
-            let mut label_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("viewer.labels.pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            self.hud.render(&mut label_pass);
+        // Auto-snapshot once if env var is set and we haven't requested yet
+        if self.snapshot_request.is_none() && !self.auto_snapshot_done {
+            if let Some(ref p) = self.auto_snapshot_path {
+                self.snapshot_request = Some(p.clone());
+                self.auto_snapshot_done = true;
+            }
         }
 
-        // Render labels to snapshot texture if one exists
-        if let Some(ref snap_tex) = self.pending_snapshot_tex {
-            let snap_view = snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
-            let mut label_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("viewer.labels.pass.snapshot"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &snap_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            self.hud.render(&mut label_pass);
+        // Snapshot if requested (read back the texture before present)
+        // CRITICAL: Only write the file when we have the offscreen texture.
+        // The Python script waits for the file to appear and stabilize, so writing
+        // a black swapchain texture would cause it to exit prematurely before
+        // the retry logic can render the proper offscreen texture.
+        if self.snapshot_request.is_some() {
+            if let Some(tex) = self.pending_snapshot_tex.take() {
+                let path = self.snapshot_request.clone().unwrap();
+                if let Err(e) = self.snapshot_swapchain_to_png(&tex, &path) {
+                    eprintln!("Snapshot failed: {}", e);
+                } else {
+                    println!("Saved snapshot to {}", path);
+                }
+                // Clear the request only after successful offscreen snapshot
+                self.snapshot_request = None;
+            }
+            // If no offscreen texture yet, keep the request and don't write any file.
+            // This forces the waiting script to continue waiting while we retry.
         }
-    }
+        output.present();
 
-    // Submit rendering
-    self.queue.submit(std::iter::once(encoder.finish()));
-
-    // Auto-snapshot once if env var is set and we haven't requested yet
-    if self.snapshot_request.is_none() && !self.auto_snapshot_done {
-        if let Some(ref p) = self.auto_snapshot_path {
-            self.snapshot_request = Some(p.clone());
-            self.auto_snapshot_done = true;
+        // Optionally dump P5 artifacts after finishing all passes
+        if self.dump_p5_requested {
+            if let Err(e) = self.dump_gbuffer_artifacts() {
+                eprintln!("[P5] dump failed: {}", e);
+            }
+            self.dump_p5_requested = false;
         }
-    }
-
-    // Snapshot if requested (read back the texture before present)
-    // CRITICAL: Only write the file when we have the offscreen texture.
-    // The Python script waits for the file to appear and stabilize, so writing
-    // a black swapchain texture would cause it to exit prematurely before
-    // the retry logic can render the proper offscreen texture.
-    if self.snapshot_request.is_some() {
-        if let Some(tex) = self.pending_snapshot_tex.take() {
-            let path = self.snapshot_request.clone().unwrap();
-            if let Err(e) = self.snapshot_swapchain_to_png(&tex, &path) {
-                eprintln!("Snapshot failed: {}", e);
-            } else {
-                println!("Saved snapshot to {}", path);
-            }
-            // Clear the request only after successful offscreen snapshot
-            self.snapshot_request = None;
+        self.frame_count += 1;
+        if let Some(fps) = self.fps_counter.tick() {
+            let viz = match self.viz_mode {
+                VizMode::Material => "material",
+                VizMode::Normal => "normal",
+                VizMode::Depth => "depth",
+                VizMode::Gi => "gi",
+                VizMode::Lit => "lit",
+            };
+            self.window.set_title(&format!(
+                "{} | FPS: {:.1} | Mode: {:?} | Viz: {}",
+                self.view_config.title,
+                fps,
+                self.camera.mode(),
+                viz
+            ));
         }
-        // If no offscreen texture yet, keep the request and don't write any file.
-        // This forces the waiting script to continue waiting while we retry.
-    }
-    output.present();
 
-    // Optionally dump P5 artifacts after finishing all passes
-    if self.dump_p5_requested {
-        if let Err(e) = self.dump_gbuffer_artifacts() {
-            eprintln!("[P5] dump failed: {}", e);
-        }
-        self.dump_p5_requested = false;
-    }
-    self.frame_count += 1;
-    if let Some(fps) = self.fps_counter.tick() {
-        let viz = match self.viz_mode {
-            VizMode::Material => "material",
-            VizMode::Normal => "normal",
-            VizMode::Depth => "depth",
-            VizMode::Gi => "gi",
-            VizMode::Lit => "lit",
-        };
-        self.window.set_title(&format!(
-            "{} | FPS: {:.1} | Mode: {:?} | Viz: {}",
-            self.view_config.title,
-            fps,
-            self.camera.mode(),
-            viz
-        ));
-    }
-
-    // Process any pending P5 capture requests using current frame data.
-    // Handle all queued captures before the viewer exits so that scripts
-    // like p5_golden.sh (which enqueue multiple :p5 commands followed by
-    // :quit) still produce every expected artifact.
-    while let Some(kind) = self.pending_captures.pop_front() {
-        match kind {
-            CaptureKind::P51CornellSplit => {
-                if let Err(e) = self.capture_p51_cornell_with_scene() {
-                    eprintln!("[P5.1] Cornell split failed: {}", e);
+        // Process any pending P5 capture requests using current frame data.
+        // Handle all queued captures before the viewer exits so that scripts
+        // like p5_golden.sh (which enqueue multiple :p5 commands followed by
+        // :quit) still produce every expected artifact.
+        while let Some(kind) = self.pending_captures.pop_front() {
+            match kind {
+                CaptureKind::P51CornellSplit => {
+                    if let Err(e) = self.capture_p51_cornell_with_scene() {
+                        eprintln!("[P5.1] Cornell split failed: {}", e);
+                    }
                 }
-            }
-            CaptureKind::P51AoGrid => {
-                if let Err(e) = self.capture_p51_ao_grid() {
-                    eprintln!("[P5.1] AO grid failed: {}", e);
+                CaptureKind::P51AoGrid => {
+                    if let Err(e) = self.capture_p51_ao_grid() {
+                        eprintln!("[P5.1] AO grid failed: {}", e);
+                    }
                 }
-            }
-            CaptureKind::P51ParamSweep => {
-                if let Err(e) = self.capture_p51_param_sweep() {
-                    eprintln!("[P5.1] AO sweep failed: {}", e);
+                CaptureKind::P51ParamSweep => {
+                    if let Err(e) = self.capture_p51_param_sweep() {
+                        eprintln!("[P5.1] AO sweep failed: {}", e);
+                    }
                 }
-            }
-            CaptureKind::P52SsgiCornell => {
-                if let Err(e) = self.capture_p52_ssgi_cornell() {
-                    eprintln!("[P5.2] SSGI Cornell capture failed: {}", e);
+                CaptureKind::P52SsgiCornell => {
+                    if let Err(e) = self.capture_p52_ssgi_cornell() {
+                        eprintln!("[P5.2] SSGI Cornell capture failed: {}", e);
+                    }
                 }
-            }
-            CaptureKind::P52SsgiTemporal => {
-                if let Err(e) = self.capture_p52_ssgi_temporal() {
-                    eprintln!("[P5.2] SSGI temporal compare failed: {}", e);
+                CaptureKind::P52SsgiTemporal => {
+                    if let Err(e) = self.capture_p52_ssgi_temporal() {
+                        eprintln!("[P5.2] SSGI temporal compare failed: {}", e);
+                    }
                 }
-            }
-            CaptureKind::P53SsrGlossy => {
-                if let Err(e) = self.capture_p53_ssr_glossy() {
-                    eprintln!("[P5.3] SSR glossy capture failed: {}", e);
+                CaptureKind::P53SsrGlossy => {
+                    if let Err(e) = self.capture_p53_ssr_glossy() {
+                        eprintln!("[P5.3] SSR glossy capture failed: {}", e);
+                    }
                 }
-            }
-            CaptureKind::P53SsrThickness => {
-                if let Err(e) = self.capture_p53_ssr_thickness_ablation() {
-                    eprintln!("[P5.3] SSR thickness capture failed: {}", e);
+                CaptureKind::P53SsrThickness => {
+                    if let Err(e) = self.capture_p53_ssr_thickness_ablation() {
+                        eprintln!("[P5.3] SSR thickness capture failed: {}", e);
+                    }
                 }
-            }
-            CaptureKind::P54GiStack => {
-                if let Err(e) = self.capture_p54_gi_stack_ablation() {
-                    eprintln!("[P5.4] GI stack ablation capture failed: {}", e);
+                CaptureKind::P54GiStack => {
+                    if let Err(e) = self.capture_p54_gi_stack_ablation() {
+                        eprintln!("[P5.4] GI stack ablation capture failed: {}", e);
+                    }
                 }
             }
         }
-    }
 
-    Ok(())
+        Ok(())
     }
 }

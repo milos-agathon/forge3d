@@ -22,9 +22,9 @@ pub struct OverlayUniforms {
     pub contour_params: [f32; 4], // x: contour_enabled, y: interval, z: thickness_mul, w: unused
     pub contour_color: [f32; 4],  // rgba for contour lines
     // M5: Vector overlay depth and halo parameters
-    pub depth_params: [f32; 4],   // x: depth_test_enabled, y: depth_bias, z: depth_bias_slope, w: pad
-    pub halo_params: [f32; 4],    // x: halo_enabled, y: halo_width, z: halo_blur, w: pad
-    pub halo_color: [f32; 4],     // rgba for halo/outline
+    pub depth_params: [f32; 4], // x: depth_test_enabled, y: depth_bias, z: depth_bias_slope, w: pad
+    pub halo_params: [f32; 4],  // x: halo_enabled, y: halo_width, z: halo_blur, w: pad
+    pub halo_color: [f32; 4],   // rgba for halo/outline
 }
 
 impl Default for OverlayUniforms {
@@ -389,26 +389,27 @@ impl OverlayRenderer {
         // Use 1x1 fallback views when any overlay/height/depth view is missing.
         // Prefer provided view, then stored view, else fallback.
         let use_overlay_view = overlay_view.or(self.overlay_view.as_ref());
-        let (dummy_tex, dummy_view) = if use_overlay_view.is_none() || height_view.is_none() || depth_view.is_none() {
-            let t = device.create_texture(&TextureDescriptor {
-                label: Some("overlay_dummy_tmp"),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8UnormSrgb,
-                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            let v = t.create_view(&TextureViewDescriptor::default());
-            (Some(t), Some(v))
-        } else {
-            (None, None)
-        };
+        let (dummy_tex, dummy_view) =
+            if use_overlay_view.is_none() || height_view.is_none() || depth_view.is_none() {
+                let t = device.create_texture(&TextureDescriptor {
+                    label: Some("overlay_dummy_tmp"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::Rgba8UnormSrgb,
+                    usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                let v = t.create_view(&TextureViewDescriptor::default());
+                (Some(t), Some(v))
+            } else {
+                (None, None)
+            };
 
         let overlay_view = use_overlay_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());
         let height_view = height_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());

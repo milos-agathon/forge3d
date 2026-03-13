@@ -6,10 +6,10 @@
 //! RELEVANT FILES: src/path_tracing/aov.rs, python/forge3d/path_tracing.py
 
 use crate::path_tracing::aov::AovKind;
-use anyhow::{Context, Result};
-use std::path::Path;
 #[cfg(feature = "images")]
 use crate::util::exr_write;
+use anyhow::{Context, Result};
+use std::path::Path;
 
 /// Represents AOV data for writing to files
 #[derive(Debug, Clone)]

@@ -54,7 +54,9 @@ mod tests {
 
     #[test]
     fn test_pack_simple_polyline() {
-        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            return;
+        };
         let renderer = LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let polyline = PolylineDef {
@@ -79,7 +81,9 @@ mod tests {
 
     #[test]
     fn test_skip_degenerate_segments() {
-        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            return;
+        };
         let renderer = LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let polyline = PolylineDef {
@@ -118,7 +122,9 @@ mod tests {
 
     #[test]
     fn test_reject_short_polyline() {
-        let Some(device) = crate::core::gpu::create_device_for_test() else { return; };
+        let Some(device) = crate::core::gpu::create_device_for_test() else {
+            return;
+        };
         let renderer = LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb).unwrap();
 
         let short_line = PolylineDef {

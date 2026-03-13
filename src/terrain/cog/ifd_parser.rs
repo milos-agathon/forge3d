@@ -122,8 +122,14 @@ pub async fn parse_cog_header(reader: &RangeReader) -> Result<CogHeader, CogErro
     let mut overview_level = 0u32;
 
     while ifd_offset != 0 {
-        let (ifd, next_offset) =
-            parse_ifd(reader, ifd_offset, is_big_endian, is_bigtiff, overview_level).await?;
+        let (ifd, next_offset) = parse_ifd(
+            reader,
+            ifd_offset,
+            is_big_endian,
+            is_bigtiff,
+            overview_level,
+        )
+        .await?;
         ifds.push(ifd);
         ifd_offset = next_offset;
         overview_level += 1;
@@ -215,7 +221,12 @@ async fn parse_ifd(
         };
 
         let value_offset = if bigtiff { 12 } else { 8 };
-        let value = read_tag_value(&ifd_data, entry_offset + value_offset, field_type, big_endian);
+        let value = read_tag_value(
+            &ifd_data,
+            entry_offset + value_offset,
+            field_type,
+            big_endian,
+        );
 
         match tag {
             TAG_IMAGE_WIDTH => width = value as u32,

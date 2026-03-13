@@ -1,7 +1,7 @@
 //! Point cloud LOD traversal
 
+use super::octree::{OctreeBounds, OctreeKey, OctreeNode};
 use glam::{Mat4, Vec3};
-use super::octree::{OctreeKey, OctreeBounds, OctreeNode};
 
 /// Parameters for LOD traversal
 #[derive(Debug, Clone)]
@@ -47,7 +47,9 @@ pub struct PointCloudTraverser {
 
 impl Default for PointCloudTraverser {
     fn default() -> Self {
-        Self { params: TraversalParams::default() }
+        Self {
+            params: TraversalParams::default(),
+        }
     }
 }
 
@@ -81,7 +83,10 @@ impl PointCloudTraverser {
         let mut total_points: u64 = 0;
 
         // Start with root
-        candidates.push((root.clone(), self.compute_priority(&root.bounds, camera_pos)));
+        candidates.push((
+            root.clone(),
+            self.compute_priority(&root.bounds, camera_pos),
+        ));
 
         while let Some((node, priority)) = candidates.pop() {
             // Frustum cull
@@ -114,7 +119,8 @@ impl PointCloudTraverser {
                 for child in children {
                     let child_priority = self.compute_priority(&child.bounds, camera_pos);
                     // Insert sorted by priority (higher first)
-                    let pos = candidates.iter()
+                    let pos = candidates
+                        .iter()
                         .position(|(_, p)| *p < child_priority)
                         .unwrap_or(candidates.len());
                     candidates.insert(pos, (child, child_priority));
@@ -144,11 +150,11 @@ impl PointCloudTraverser {
         let center = bounds.center();
         let distance = (center - camera_pos).length();
         let radius = bounds.radius();
-        
+
         if distance < radius {
             return f32::MAX; // Camera inside bounds
         }
-        
+
         // Priority based on projected size
         radius / distance
     }
@@ -157,26 +163,21 @@ impl PointCloudTraverser {
         let center = bounds.center();
         let distance = (center - camera_pos).length().max(0.001);
         let radius = bounds.radius();
-        
+
         let sse_factor = self.params.viewport_height / (2.0 * (self.params.fov_y / 2.0).tan());
         (radius / distance) * sse_factor
     }
 
     /// Get traversal statistics
-    pub fn stats<F>(
-        &self,
-        root: &OctreeNode,
-        camera_pos: Vec3,
-        get_children: F,
-    ) -> TraversalStats
+    pub fn stats<F>(&self, root: &OctreeNode, camera_pos: Vec3, get_children: F) -> TraversalStats
     where
         F: Fn(&OctreeKey) -> Vec<OctreeNode>,
     {
         let visible = self.visible_nodes(root, camera_pos, None, get_children);
-        
+
         let total_points: u64 = visible.iter().map(|n| n.point_count).sum();
         let max_depth = visible.iter().map(|n| n.key.depth).max().unwrap_or(0);
-        
+
         TraversalStats {
             node_count: visible.len(),
             total_points,

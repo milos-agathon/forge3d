@@ -302,15 +302,15 @@ pub struct MaterialLayerSettingsNative {
     pub snow_enabled: bool,
     pub snow_altitude_min: f32,
     pub snow_altitude_blend: f32,
-    pub snow_slope_max: f32,      // degrees
-    pub snow_slope_blend: f32,    // degrees
+    pub snow_slope_max: f32,   // degrees
+    pub snow_slope_blend: f32, // degrees
     pub snow_aspect_influence: f32,
     pub snow_color: [f32; 3],
     pub snow_roughness: f32,
     // Rock layer
     pub rock_enabled: bool,
-    pub rock_slope_min: f32,      // degrees
-    pub rock_slope_blend: f32,    // degrees
+    pub rock_slope_min: f32,   // degrees
+    pub rock_slope_blend: f32, // degrees
     pub rock_color: [f32; 3],
     pub rock_roughness: f32,
     // Wetness layer
@@ -584,8 +584,8 @@ pub struct DofSettingsNative {
     pub f_stop: f32,
     pub focus_distance: f32,
     pub focal_length: f32,
-    pub tilt_pitch: f32,      // Tilt in radians
-    pub tilt_yaw: f32,        // Tilt in radians
+    pub tilt_pitch: f32, // Tilt in radians
+    pub tilt_yaw: f32,   // Tilt in radians
     pub method: DofMethodNative,
     pub quality: DofQualityNative,
     pub show_coc: bool,
@@ -647,9 +647,9 @@ pub struct MotionBlurSettingsNative {
     pub samples: u32,
     pub shutter_open: f32,
     pub shutter_close: f32,
-    pub cam_phi_delta: f32,      // Azimuth change in degrees
-    pub cam_theta_delta: f32,    // Elevation change in degrees
-    pub cam_radius_delta: f32,   // Distance change in world units
+    pub cam_phi_delta: f32,    // Azimuth change in degrees
+    pub cam_theta_delta: f32,  // Elevation change in degrees
+    pub cam_radius_delta: f32, // Distance change in world units
     pub seed: Option<u64>,
 }
 
@@ -689,12 +689,12 @@ impl MotionBlurSettingsNative {
         // t is normalized time within shutter interval [shutter_open, shutter_close]
         // Map t to actual shutter time
         let shutter_t = self.shutter_open + t * (self.shutter_close - self.shutter_open);
-        
+
         // Linear interpolation of camera motion
         let phi_offset = self.cam_phi_delta * shutter_t;
         let theta_offset = self.cam_theta_delta * shutter_t;
         let radius_offset = self.cam_radius_delta * shutter_t;
-        
+
         (phi_offset, theta_offset, radius_offset)
     }
 }
@@ -1136,16 +1136,13 @@ impl TerrainRenderParams {
             .unwrap_or(1)
             .max(1); // Minimum 1 sample
 
-        let aa_seed = params
-            .getattr("aa_seed")
-            .ok()
-            .and_then(|v| {
-                if v.is_none() {
-                    None
-                } else {
-                    v.extract::<u64>().ok()
-                }
-            });
+        let aa_seed = params.getattr("aa_seed").ok().and_then(|v| {
+            if v.is_none() {
+                None
+            } else {
+                v.extract::<u64>().ok()
+            }
+        });
 
         let height_curve_lut: Option<Arc<Vec<f32>>> = if height_curve_mode == "lut" {
             let raw_lut = params.getattr("height_curve_lut")?;
@@ -1462,10 +1459,7 @@ impl TerrainRenderParams {
                 .getattr("directions")
                 .and_then(|v| v.extract())
                 .unwrap_or(6);
-            let steps: u32 = hao
-                .getattr("steps")
-                .and_then(|v| v.extract())
-                .unwrap_or(16);
+            let steps: u32 = hao.getattr("steps").and_then(|v| v.extract()).unwrap_or(16);
             let max_distance: f32 = hao
                 .getattr("max_distance")
                 .and_then(|v| v.extract())
@@ -1505,14 +1499,8 @@ impl TerrainRenderParams {
                 .getattr("resolution_scale")
                 .and_then(|v| v.extract())
                 .unwrap_or(0.5);
-            let samples: u32 = sv
-                .getattr("samples")
-                .and_then(|v| v.extract())
-                .unwrap_or(4);
-            let steps: u32 = sv
-                .getattr("steps")
-                .and_then(|v| v.extract())
-                .unwrap_or(24);
+            let samples: u32 = sv.getattr("samples").and_then(|v| v.extract()).unwrap_or(4);
+            let steps: u32 = sv.getattr("steps").and_then(|v| v.extract()).unwrap_or(24);
             let max_distance: f32 = sv
                 .getattr("max_distance")
                 .and_then(|v| v.extract())
@@ -1521,10 +1509,7 @@ impl TerrainRenderParams {
                 .getattr("softness")
                 .and_then(|v| v.extract())
                 .unwrap_or(1.0);
-            let bias: f32 = sv
-                .getattr("bias")
-                .and_then(|v| v.extract())
-                .unwrap_or(0.01);
+            let bias: f32 = sv.getattr("bias").and_then(|v| v.extract()).unwrap_or(0.01);
             SunVisibilitySettingsNative {
                 enabled,
                 mode,
@@ -1612,7 +1597,7 @@ impl TerrainRenderParams {
                 .getattr("snow_roughness")
                 .and_then(|v| v.extract())
                 .unwrap_or(0.4);
-            
+
             // Rock settings
             let rock_enabled: bool = materials
                 .getattr("rock_enabled")
@@ -1639,7 +1624,7 @@ impl TerrainRenderParams {
                 .getattr("rock_roughness")
                 .and_then(|v| v.extract())
                 .unwrap_or(0.8);
-            
+
             // Wetness settings
             let wetness_enabled: bool = materials
                 .getattr("wetness_enabled")
@@ -1653,7 +1638,7 @@ impl TerrainRenderParams {
                 .getattr("wetness_slope_influence")
                 .and_then(|v| v.extract())
                 .unwrap_or(0.5);
-            
+
             MaterialLayerSettingsNative {
                 snow_enabled,
                 snow_altitude_min,
@@ -1778,10 +1763,7 @@ impl TerrainRenderParams {
                 .getattr("temperature")
                 .and_then(|v| v.extract())
                 .unwrap_or(6500.0);
-            let tint: f32 = tm
-                .getattr("tint")
-                .and_then(|v| v.extract())
-                .unwrap_or(0.0);
+            let tint: f32 = tm.getattr("tint").and_then(|v| v.extract()).unwrap_or(0.0);
             TonemapSettingsNative {
                 operator_index,
                 white_point,
@@ -1926,10 +1908,7 @@ impl TerrainRenderParams {
                     .getattr("enabled")
                     .and_then(|v| v.extract())
                     .unwrap_or(false);
-                let samples: u32 = mb
-                    .getattr("samples")
-                    .and_then(|v| v.extract())
-                    .unwrap_or(8);
+                let samples: u32 = mb.getattr("samples").and_then(|v| v.extract()).unwrap_or(8);
                 let shutter_open: f32 = mb
                     .getattr("shutter_open")
                     .and_then(|v| v.extract())
@@ -2087,21 +2066,64 @@ impl TerrainRenderParams {
                     "exponential" => VolumetricsModeNative::Exponential,
                     _ => VolumetricsModeNative::Uniform,
                 };
-                let density: f32 = vol.getattr("density").and_then(|v| v.extract()).unwrap_or(0.01);
-                let height_falloff: f32 = vol.getattr("height_falloff").and_then(|v| v.extract()).unwrap_or(0.1);
-                let base_height: f32 = vol.getattr("base_height").and_then(|v| v.extract()).unwrap_or(0.0);
-                let scattering: f32 = vol.getattr("scattering").and_then(|v| v.extract()).unwrap_or(0.5);
-                let absorption: f32 = vol.getattr("absorption").and_then(|v| v.extract()).unwrap_or(0.1);
-                let phase_g: f32 = vol.getattr("phase_g").and_then(|v| v.extract()).unwrap_or(0.0);
-                let light_shafts: bool = vol.getattr("light_shafts").and_then(|v| v.extract()).unwrap_or(false);
-                let shaft_intensity: f32 = vol.getattr("shaft_intensity").and_then(|v| v.extract()).unwrap_or(1.0);
-                let shaft_samples: u32 = vol.getattr("shaft_samples").and_then(|v| v.extract()).unwrap_or(32);
-                let use_shadows: bool = vol.getattr("use_shadows").and_then(|v| v.extract()).unwrap_or(true);
-                let half_res: bool = vol.getattr("half_res").and_then(|v| v.extract()).unwrap_or(false);
+                let density: f32 = vol
+                    .getattr("density")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.01);
+                let height_falloff: f32 = vol
+                    .getattr("height_falloff")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.1);
+                let base_height: f32 = vol
+                    .getattr("base_height")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.0);
+                let scattering: f32 = vol
+                    .getattr("scattering")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.5);
+                let absorption: f32 = vol
+                    .getattr("absorption")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.1);
+                let phase_g: f32 = vol
+                    .getattr("phase_g")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.0);
+                let light_shafts: bool = vol
+                    .getattr("light_shafts")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(false);
+                let shaft_intensity: f32 = vol
+                    .getattr("shaft_intensity")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(1.0);
+                let shaft_samples: u32 = vol
+                    .getattr("shaft_samples")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(32);
+                let use_shadows: bool = vol
+                    .getattr("use_shadows")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(true);
+                let half_res: bool = vol
+                    .getattr("half_res")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(false);
                 VolumetricsSettingsNative {
-                    enabled, mode, density, height_falloff, base_height, scattering,
-                    absorption, phase_g, light_shafts, shaft_intensity, shaft_samples,
-                    use_shadows, half_res,
+                    enabled,
+                    mode,
+                    density,
+                    height_falloff,
+                    base_height,
+                    scattering,
+                    absorption,
+                    phase_g,
+                    light_shafts,
+                    shaft_intensity,
+                    shaft_samples,
+                    use_shadows,
+                    half_res,
                 }
             } else {
                 VolumetricsSettingsNative::default()
@@ -2113,17 +2135,47 @@ impl TerrainRenderParams {
         // M6: Parse sky settings
         let sky_native = if let Ok(sky) = params.getattr("sky") {
             if !sky.is_none() {
-                let enabled: bool = sky.getattr("enabled").and_then(|v| v.extract()).unwrap_or(false);
-                let turbidity: f32 = sky.getattr("turbidity").and_then(|v| v.extract()).unwrap_or(2.0);
-                let ground_albedo: f32 = sky.getattr("ground_albedo").and_then(|v| v.extract()).unwrap_or(0.3);
-                let sun_intensity: f32 = sky.getattr("sun_intensity").and_then(|v| v.extract()).unwrap_or(1.0);
-                let sun_size: f32 = sky.getattr("sun_size").and_then(|v| v.extract()).unwrap_or(1.0);
-                let aerial_perspective: bool = sky.getattr("aerial_perspective").and_then(|v| v.extract()).unwrap_or(true);
-                let aerial_density: f32 = sky.getattr("aerial_density").and_then(|v| v.extract()).unwrap_or(1.0);
-                let sky_exposure: f32 = sky.getattr("sky_exposure").and_then(|v| v.extract()).unwrap_or(1.0);
+                let enabled: bool = sky
+                    .getattr("enabled")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(false);
+                let turbidity: f32 = sky
+                    .getattr("turbidity")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(2.0);
+                let ground_albedo: f32 = sky
+                    .getattr("ground_albedo")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.3);
+                let sun_intensity: f32 = sky
+                    .getattr("sun_intensity")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(1.0);
+                let sun_size: f32 = sky
+                    .getattr("sun_size")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(1.0);
+                let aerial_perspective: bool = sky
+                    .getattr("aerial_perspective")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(true);
+                let aerial_density: f32 = sky
+                    .getattr("aerial_density")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(1.0);
+                let sky_exposure: f32 = sky
+                    .getattr("sky_exposure")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(1.0);
                 SkySettingsNative {
-                    enabled, turbidity, ground_albedo, sun_intensity, sun_size,
-                    aerial_perspective, aerial_density, sky_exposure,
+                    enabled,
+                    turbidity,
+                    ground_albedo,
+                    sun_intensity,
+                    sun_size,
+                    aerial_perspective,
+                    aerial_density,
+                    sky_exposure,
                 }
             } else {
                 SkySettingsNative::default()

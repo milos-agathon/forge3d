@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use winit::window::Window;
 
-use crate::core::gpu_timing::{create_default_config as create_gpu_timing_config, GpuTimingManager};
+use crate::core::gpu_timing::{
+    create_default_config as create_gpu_timing_config, GpuTimingManager,
+};
 use crate::core::shadows::{CsmConfig, CsmShadowMap};
 use crate::render::params::SsrParams;
 
@@ -16,13 +18,13 @@ use super::super::viewer_config::{FpsCounter, ViewerConfig};
 use super::super::viewer_enums::{FogMode, VizMode};
 use super::super::viewer_types::SkyUniforms;
 use super::super::Viewer;
-use crate::picking::UnifiedPickingSystem;
 use super::{
     create_device_and_surface, create_fallback_pipeline, create_fog_resources,
     create_gbuffer_resources, create_gi_baseline_resources, create_lit_resources,
     create_sky_resources,
 };
 use crate::cli::args::GiVizMode;
+use crate::picking::UnifiedPickingSystem;
 
 impl Viewer {
     /// Create a new Viewer instance using the init/ factory functions
@@ -68,7 +70,8 @@ impl Viewer {
         };
 
         // GBuffer resources (depends on GI manager)
-        let gbuf = create_gbuffer_resources(&device, gi.as_ref(), width, height, surface_config.format);
+        let gbuf =
+            create_gbuffer_resources(&device, gi.as_ref(), width, height, surface_config.format);
 
         // CSM depth pipeline resources
         let (csm_depth_pipeline, csm_depth_camera) = if gi.is_some() {
@@ -93,7 +96,8 @@ impl Viewer {
         let fb_pipeline = create_fallback_pipeline(&device, surface_config.format);
 
         // HUD overlay renderer
-        let mut hud = crate::core::text_overlay::TextOverlayRenderer::new(&device, surface_config.format);
+        let mut hud =
+            crate::core::text_overlay::TextOverlayRenderer::new(&device, surface_config.format);
         hud.set_enabled(true);
         hud.set_resolution(width, height);
 
@@ -323,7 +327,10 @@ fn read_sky_env_params() -> SkyUniforms {
     };
 
     if let Ok(model_str) = std::env::var("FORGE3D_SKY_MODEL") {
-        let key = model_str.trim().to_ascii_lowercase().replace(['-', '_', ' '], "");
+        let key = model_str
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['-', '_', ' '], "");
         params.model = match key.as_str() {
             "preetham" => 0,
             "hosekwilkie" => 1,
@@ -393,10 +400,26 @@ fn create_csm_depth_resources(
                 array_stride: 40,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &[
-                    wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
-                    wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 12, shader_location: 1 },
-                    wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 24, shader_location: 2 },
-                    wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 32, shader_location: 3 },
+                    wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 0,
+                        shader_location: 0,
+                    },
+                    wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 12,
+                        shader_location: 1,
+                    },
+                    wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x2,
+                        offset: 24,
+                        shader_location: 2,
+                    },
+                    wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x2,
+                        offset: 32,
+                        shader_location: 3,
+                    },
                 ],
             }],
         },

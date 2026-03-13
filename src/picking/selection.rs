@@ -161,7 +161,7 @@ impl SelectionManager {
             multi_select: false,
             hover_feature: None,
         };
-        
+
         // Create default primary selection set
         manager.create_set("primary");
         manager
@@ -170,7 +170,9 @@ impl SelectionManager {
     /// Create a new selection set
     pub fn create_set(&mut self, name: impl Into<String>) -> &mut SelectionSet {
         let name = name.into();
-        self.sets.entry(name.clone()).or_insert_with(|| SelectionSet::new(name.clone()));
+        self.sets
+            .entry(name.clone())
+            .or_insert_with(|| SelectionSet::new(name.clone()));
         self.sets.get_mut(&name).unwrap()
     }
 
@@ -181,7 +183,8 @@ impl SelectionManager {
         style: SelectionStyle,
     ) -> &mut SelectionSet {
         let name = name.into();
-        self.sets.insert(name.clone(), SelectionSet::with_style(name.clone(), style));
+        self.sets
+            .insert(name.clone(), SelectionSet::with_style(name.clone(), style));
         self.sets.get_mut(&name).unwrap()
     }
 
@@ -280,28 +283,32 @@ impl SelectionManager {
 
     /// Get all selected feature IDs from the primary set
     pub fn get_selection(&self) -> Vec<u32> {
-        self.sets.get(&self.primary_set)
+        self.sets
+            .get(&self.primary_set)
             .map(|s| s.feature_ids())
             .unwrap_or_default()
     }
 
     /// Get all selected feature IDs from a specific set
     pub fn get_selection_from(&self, set_name: &str) -> Vec<u32> {
-        self.sets.get(set_name)
+        self.sets
+            .get(set_name)
             .map(|s| s.feature_ids())
             .unwrap_or_default()
     }
 
     /// Check if a feature is selected in any visible set
     pub fn is_selected(&self, feature_id: u32) -> bool {
-        self.sets.values()
+        self.sets
+            .values()
             .filter(|s| s.visible)
             .any(|s| s.contains(feature_id))
     }
 
     /// Get the style for a selected feature (from the first matching set)
     pub fn get_style_for(&self, feature_id: u32) -> Option<&SelectionStyle> {
-        self.sets.values()
+        self.sets
+            .values()
             .filter(|s| s.visible && s.contains(feature_id))
             .map(|s| &s.style)
             .next()
@@ -335,7 +342,7 @@ mod tests {
     #[test]
     fn test_selection_set_operations() {
         let mut set = SelectionSet::new("test");
-        
+
         set.add(1);
         set.add(2);
         assert!(set.contains(1));
@@ -355,11 +362,11 @@ mod tests {
     #[test]
     fn test_selection_manager() {
         let mut manager = SelectionManager::new();
-        
+
         // Single select mode
         manager.handle_pick(1, false);
         assert_eq!(manager.get_selection(), vec![1]);
-        
+
         manager.handle_pick(2, false);
         assert_eq!(manager.get_selection(), vec![2]);
 

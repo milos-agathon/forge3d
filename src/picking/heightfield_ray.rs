@@ -78,7 +78,7 @@ impl HeightfieldRayEngine {
     }
 
     /// Ray-heightfield intersection using ray marching with binary refinement
-    /// 
+    ///
     /// # Arguments
     /// * `ray` - The ray to test
     /// * `heightmap` - Heightmap data (row-major, Y values in world units)
@@ -120,10 +120,8 @@ impl HeightfieldRayEngine {
             // Detect crossing from above to below
             if !above && prev_above && t > 0.0 {
                 // Binary refinement for accurate intersection
-                let refined_t = self.refine_intersection(
-                    ray, prev_t, t, heightmap, width, height
-                );
-                
+                let refined_t = self.refine_intersection(ray, prev_t, t, heightmap, width, height);
+
                 return self.compute_hit(ray, refined_t, heightmap, width, height);
             }
 
@@ -137,18 +135,14 @@ impl HeightfieldRayEngine {
 
     /// Check if point is within terrain bounds
     fn is_in_bounds(&self, p: [f32; 3]) -> bool {
-        p[0] >= 0.0 && p[0] <= self.config.terrain_width
-            && p[2] >= 0.0 && p[2] <= self.config.terrain_depth
+        p[0] >= 0.0
+            && p[0] <= self.config.terrain_width
+            && p[2] >= 0.0
+            && p[2] <= self.config.terrain_depth
     }
 
     /// Sample heightfield with bilinear interpolation
-    fn sample_heightfield(
-        &self,
-        p: [f32; 3],
-        heightmap: &[f32],
-        width: u32,
-        height: u32,
-    ) -> f32 {
+    fn sample_heightfield(&self, p: [f32; 3], heightmap: &[f32], width: u32, height: u32) -> f32 {
         let u = (p[0] / self.config.terrain_width).clamp(0.0, 1.0);
         let v = (p[2] / self.config.terrain_depth).clamp(0.0, 1.0);
 
@@ -227,8 +221,9 @@ impl HeightfieldRayEngine {
         let v = (position[2] / self.config.terrain_depth).clamp(0.0, 1.0);
 
         // Sample elevation
-        let elevation = self.sample_heightfield(position, heightmap, width, height) 
-            / self.config.z_scale + self.config.min_elevation;
+        let elevation = self.sample_heightfield(position, heightmap, width, height)
+            / self.config.z_scale
+            + self.config.min_elevation;
 
         // Compute normal from gradient
         let normal = self.compute_normal(u, v, heightmap, width, height);
@@ -352,7 +347,7 @@ mod tests {
     #[test]
     fn test_slope_calculation() {
         let engine = HeightfieldRayEngine::new(HeightfieldConfig::default());
-        
+
         // Flat normal (pointing up)
         let (slope, _) = engine.normal_to_slope_aspect([0.0, 1.0, 0.0]);
         assert!(slope.abs() < 1.0);
