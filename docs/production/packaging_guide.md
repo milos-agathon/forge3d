@@ -65,7 +65,7 @@ maturin build --release --profile release-lto --strip --sdist
 
 ```bash
 # Install from local wheel for testing
-pip install target/wheels/forge3d-*.whl
+python scripts/install_compatible_wheel.py target/wheels
 
 # Or install in development mode
 maturin develop --release
@@ -148,7 +148,7 @@ unzip -l target/wheels/forge3d-*.whl
 tar -tzf target/wheels/forge3d-*.tar.gz
 
 # Verify package installs correctly
-pip install target/wheels/forge3d-*.whl
+python scripts/install_compatible_wheel.py target/wheels
 python -c "import forge3d; print('Success:', forge3d.__version__)"
 ```
 

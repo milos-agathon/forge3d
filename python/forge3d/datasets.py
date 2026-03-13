@@ -157,9 +157,27 @@ def _dataset_base_url(base_url: Optional[str]) -> str:
 def _local_dataset_path(meta: _RemoteDataset) -> Optional[Path]:
     if meta.local_path is None:
         return None
-    candidate = _REPO_ROOT / Path(meta.local_path)
-    if candidate.exists():
-        return candidate
+
+    local_rel_path = Path(meta.local_path)
+    roots: list[Path] = []
+    env_root = os.environ.get("FORGE3D_REPO_ROOT")
+    if env_root:
+        roots.append(Path(env_root))
+    roots.append(Path.cwd())
+    roots.append(_REPO_ROOT)
+
+    seen: set[str] = set()
+    for root in roots:
+        try:
+            key = str(root.resolve())
+        except Exception:
+            key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        candidate = root / local_rel_path
+        if candidate.exists():
+            return candidate
     return None
 
 
@@ -185,15 +203,12 @@ def _download_dataset(meta: _RemoteDataset, cache_dir: Optional[str], base_url: 
 
 
 def _fetch_kind(name: str, expected_kind: str, cache_dir: Optional[str], base_url: Optional[str]) -> Path:
-    path = fetch(name, cache_dir=cache_dir, base_url=base_url)
     meta = _REMOTE_DATASETS.get(name)
-    if meta is None:
-        return path
-    if meta.kind != expected_kind:
+    if meta is not None and meta.kind != expected_kind:
         raise ValueError(
             f"Dataset '{name}' has kind '{meta.kind}', expected '{expected_kind}'."
         )
-    return path
+    return fetch(name, cache_dir=cache_dir, base_url=base_url)
 
 
 def bundled() -> List[str]:

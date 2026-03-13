@@ -153,7 +153,12 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Render a forge3d PBR terrain from a GeoTIFF DEM.",
     )
-    parser.add_argument("--dem", type=Path, default=DEFAULT_DEM, help="Path to a GeoTIFF DEM.")
+    parser.add_argument(
+        "--dem",
+        type=Path,
+        default=DEFAULT_DEM,
+        help="Path to a GeoTIFF DEM or a .npy heightmap.",
+    )
     parser.add_argument("--hdr", type=Path, default=DEFAULT_HDR, help="Path to an environment HDR image.")
     parser.add_argument("--ibl-res", type=int, default=256, help="IBL cubemap base resolution.")
     parser.add_argument("--ibl-cache", type=Path, help="Directory used to persist precomputed IBL results.")

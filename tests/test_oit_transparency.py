@@ -15,6 +15,14 @@ import pytest
 import forge3d as f3d
 
 
+def _rasterio_available() -> bool:
+    try:
+        import rasterio
+        return not getattr(rasterio, "__forge3d_stub__", False)
+    except Exception:
+        return False
+
+
 class TestOitApi:
     """Test OIT Python API availability and basic functionality."""
 
@@ -99,11 +107,10 @@ class TestOitForcedOverlap:
     @pytest.fixture
     def test_dem_path(self, tmp_path: Path) -> Path:
         """Create a simple test DEM for OIT testing."""
-        try:
-            import rasterio
-            from rasterio.transform import from_bounds
-        except ImportError:
+        if not _rasterio_available():
             pytest.skip("rasterio not available for test DEM creation")
+        import rasterio
+        from rasterio.transform import from_bounds
         
         # Create a simple sloped DEM
         dem = np.zeros((128, 128), dtype=np.float32)

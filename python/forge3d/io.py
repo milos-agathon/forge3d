@@ -325,6 +325,12 @@ def load_dem(
             "Install with: pip install rasterio (or pip install 'forge3d[raster]')."
         ) from exc
 
+    if getattr(rasterio, "__forge3d_stub__", False):
+        raise ImportError(
+            "rasterio is required for DEM loading. "
+            "Install with: pip install rasterio (or pip install 'forge3d[raster]')."
+        )
+
     # Open GeoTIFF
     with rasterio.open(path) as src:
         # Read first band (elevation)

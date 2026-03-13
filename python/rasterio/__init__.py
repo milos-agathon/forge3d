@@ -1,59 +1,67 @@
 # python/rasterio/__init__.py
-# Minimal rasterio stub package to satisfy tests and demos without installing rasterio.
-# Exists so imports like rasterio.transform/from windows/enums resolve.
-# RELEVANT FILES:python/rasterio/transform.py,python/forge3d/ingest/xarray_adapter.py
+# Minimal rasterio shim for environments where the real dependency is absent.
+# RELEVANT FILES:python/rasterio/transform.py,python/forge3d/cog.py,python/forge3d/io.py
 
-"""
-Stub rasterio package (transform, windows, enums modules provided).
+"""Shim rasterio package.
+
+If a real rasterio installation is available elsewhere on ``sys.path``, proxy to it.
+Otherwise expose a lightweight stub so imports like ``rasterio.transform`` resolve.
 """
 
-# Try to import the real rasterio if available, otherwise provide stubs
-import sys as _sys
+from __future__ import annotations
+
+import importlib.machinery as _machinery
 import os as _os
+import sys as _sys
 
-# Store the directory containing this stub module
+__forge3d_stub__ = True
+
 _stub_dir = _os.path.dirname(__file__)
+_stub_parent = _os.path.dirname(_stub_dir)
+_stub_parent_norm = _os.path.normcase(_os.path.abspath(_stub_parent))
 
-# Try to find and import the real rasterio by temporarily removing stub from path
-_real_rasterio = None
-_original_path = _sys.path.copy()
+
+def _filtered_search_path() -> list[str]:
+    paths: list[str] = []
+    for entry in _sys.path:
+        entry_norm = _os.path.normcase(_os.path.abspath(entry or _os.curdir))
+        if entry_norm != _stub_parent_norm:
+            paths.append(entry)
+    return paths
+
+
+def _load_real_rasterio() -> bool:
+    spec = _machinery.PathFinder.find_spec(__name__, _filtered_search_path())
+    if spec is None or spec.loader is None or not spec.origin:
+        return False
+
+    origin_norm = _os.path.normcase(_os.path.abspath(spec.origin))
+    if origin_norm == _os.path.normcase(_os.path.abspath(__file__)):
+        return False
+
+    module = _sys.modules[__name__]
+    module.__file__ = spec.origin
+    module.__loader__ = spec.loader
+    module.__package__ = __name__
+    module.__spec__ = spec
+    if spec.submodule_search_locations is not None:
+        module.__path__ = list(spec.submodule_search_locations)
+
+    spec.loader.exec_module(module)
+    return True
+
+
 try:
-    # Remove any path entries that contain this stub (the parent of the rasterio dir)
-    _stub_parent = _os.path.dirname(_stub_dir)
-    _filtered_path = [p for p in _sys.path if p != _stub_parent]
-    _sys.path = _filtered_path
+    __forge3d_stub__ = not _load_real_rasterio()
+except Exception:
+    __forge3d_stub__ = True
 
-    # Now try to import the real rasterio
-    try:
-        import importlib as _importlib
-        import importlib.util as _util
 
-        # Force reimport by removing from cache if present
-        if 'rasterio' in _sys.modules and hasattr(_sys.modules['rasterio'], '__file__'):
-            if _sys.modules['rasterio'].__file__ and _stub_dir in _sys.modules['rasterio'].__file__:
-                # This is the stub, remove it
-                del _sys.modules['rasterio']
+if __forge3d_stub__:
+    __version__ = "0.0-stub"
 
-        _spec = _util.find_spec('rasterio')
-        if _spec and _spec.origin:
-            _real_rasterio = _importlib.import_module('rasterio')
-            # Import key functions from real rasterio
-            if hasattr(_real_rasterio, 'open'):
-                open = _real_rasterio.open
-            if hasattr(_real_rasterio, '__version__'):
-                __version__ = _real_rasterio.__version__
-    except ImportError:
-        pass
-finally:
-    # Restore original sys.path
-    _sys.path = _original_path
-
-# If real rasterio not found, provide a helpful error message
-if _real_rasterio is None:
     def open(*args, **kwargs):
         raise ImportError(
             "Real rasterio package is required for this operation. "
             "Install with: pip install rasterio"
         )
-
-# Submodules provided via local files (e.g., transform).

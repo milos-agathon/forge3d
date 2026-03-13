@@ -225,7 +225,13 @@ class CogDatasetFallback:
     def __init__(self, url: str, *, cache_size_mb: int = 256):
         try:
             import rasterio
-        except ImportError:
+        except Exception as exc:
+            raise RuntimeError(
+                "Neither native COG streaming nor rasterio is available. "
+                "Install rasterio or rebuild forge3d with cog_streaming feature."
+            ) from exc
+
+        if getattr(rasterio, "__forge3d_stub__", False):
             raise RuntimeError(
                 "Neither native COG streaming nor rasterio is available. "
                 "Install rasterio or rebuild forge3d with cog_streaming feature."

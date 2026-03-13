@@ -9,6 +9,9 @@ from pathlib import Path
 
 import pytest
 
+DEMO_DEM = Path(__file__).parent.parent / "python" / "forge3d" / "data" / "mini_dem.npy"
+DEMO_HDR = Path(__file__).parent.parent / "assets" / "hdri" / "snow_field_4k.hdr"
+
 
 def _render_with_probe(
     camera_mode: str,
@@ -27,11 +30,13 @@ def _render_with_probe(
     cmd = [
         sys.executable,
         str(Path(__file__).parent.parent / "examples" / "terrain_demo.py"),
+        "--dem",
+        str(DEMO_DEM),
         "--size",
         "128",
         "128",
         "--hdr",
-        str(Path(__file__).parent.parent / "assets" / "hdri" / "snow_field_4k.hdr"),
+        str(DEMO_HDR),
         "--camera-mode",
         camera_mode,
         "--cam-fov",
@@ -61,24 +66,28 @@ def _render_with_probe(
 class TestPerspectiveProjectionCli:
     """Ensure CLI plumbing preserves perspective controls."""
 
+    @pytest.mark.skipif(not DEMO_HDR.exists(), reason="HDR asset not available")
     def test_mesh_mode_fov_changes_probe(self):
         """FOV variation should change NDC-depth probe in mesh mode."""
         h1 = _render_with_probe("mesh", fov=30, theta=45, output_name="cli_probe_fov30.png")
         h2 = _render_with_probe("mesh", fov=90, theta=45, output_name="cli_probe_fov90.png")
         assert h1 != h2
 
+    @pytest.mark.skipif(not DEMO_HDR.exists(), reason="HDR asset not available")
     def test_mesh_mode_theta_changes_probe(self):
         """Theta variation should change probe."""
         h1 = _render_with_probe("mesh", fov=55, theta=25, output_name="cli_probe_theta25.png")
         h2 = _render_with_probe("mesh", fov=55, theta=75, output_name="cli_probe_theta75.png")
         assert h1 != h2
 
+    @pytest.mark.skipif(not DEMO_HDR.exists(), reason="HDR asset not available")
     def test_mesh_mode_phi_rotates_probe(self):
         """Phi variation should rotate probe output."""
         h1 = _render_with_probe("mesh", fov=55, theta=45, phi=0.0, output_name="cli_probe_phi0.png")
         h2 = _render_with_probe("mesh", fov=55, theta=45, phi=90.0, output_name="cli_probe_phi90.png")
         assert h1 != h2
 
+    @pytest.mark.skipif(not DEMO_HDR.exists(), reason="HDR asset not available")
     def test_screen_vs_mesh_differ(self):
         """Legacy screen mode should differ from mesh mode for same angles."""
         h_screen = _render_with_probe("screen", fov=55, theta=45, output_name="cli_probe_screen.png", debug_mode=41)

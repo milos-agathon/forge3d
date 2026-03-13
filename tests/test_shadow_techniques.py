@@ -191,9 +191,9 @@ def _create_step_dem(width: int = 256, height: int = 256, cliff_height: float = 
 
 def _rasterio_available() -> bool:
     try:
-        import rasterio  # noqa: F401
-        return True
-    except ImportError:
+        import rasterio
+        return not getattr(rasterio, "__forge3d_stub__", False)
+    except Exception:
         return False
 
 

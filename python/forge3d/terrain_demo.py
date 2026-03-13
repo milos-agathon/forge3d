@@ -105,7 +105,10 @@ def check_camera_sun_alignment(
 
 
 def _load_dem(path: Path):
-    dem = _io.load_dem(str(path), fill_nodata_values=True)
+    if path.suffix.lower() == ".npy":
+        dem = _io.load_dem_from_array(np.load(path))
+    else:
+        dem = _io.load_dem(str(path), fill_nodata_values=True)
     data = getattr(dem, "data", None)
     if data is None:
         raise SystemExit("DEM object does not expose a .data array")

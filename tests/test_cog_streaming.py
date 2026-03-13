@@ -72,8 +72,8 @@ def rasterio_available():
     """Check if rasterio fallback is available."""
     try:
         import rasterio
-        return True
-    except ImportError:
+        return not getattr(rasterio, "__forge3d_stub__", False)
+    except Exception:
         return False
 
 
