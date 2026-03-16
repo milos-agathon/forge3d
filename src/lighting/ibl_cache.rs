@@ -199,8 +199,6 @@ impl IblResourceCache {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_ibl_memory_budget() {
         // Verify P0 budget constraint: <=64 MiB

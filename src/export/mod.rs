@@ -13,9 +13,15 @@ mod projection;
 mod svg;
 mod svg_labels;
 
-pub use projection::{project_2d_to_screen, project_3d_to_2d, Bounds2D};
-pub use svg::{vectors_to_svg, SvgExportConfig};
-pub use svg_labels::labels_to_svg_text;
+pub use projection::{
+    compute_bounds_from_geometry, project_2d_points_to_screen, project_2d_to_screen,
+    project_3d_to_2d, Bounds2D,
+};
+pub use svg::{vectors_to_svg, vectors_to_svg_screen_coords, SvgExportConfig};
+pub use svg_labels::{
+    label_at_position, labels_to_svg_document, labels_to_svg_text, labels_to_svg_text_with_config,
+    LabelSvgConfig,
+};
 
 #[cfg(test)]
 mod tests {

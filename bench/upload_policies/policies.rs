@@ -401,7 +401,7 @@ fn write_performance_report(
     writeln!(file, "## Configuration")?;
     writeln!(file, "- Data size per upload: 1.00 MB")?;
     writeln!(file, "- Iterations: 100")?;
-    writeln!(file, "- GPU: {} (auto-detected)", "Unknown")?; // Could detect from adapter info
+    writeln!(file, "- GPU: Unknown (auto-detected)")?; // Could detect from adapter info
     writeln!(file)?;
 
     writeln!(file, "## Results")?;

@@ -1,0 +1,150 @@
+use super::pipelines::{create_layouts, create_pipelines, SsaoLayouts, SsaoPipelines};
+use super::resources::{create_shared_buffers, create_textures, SsaoSharedBuffers, SsaoTextures};
+use super::*;
+
+#[allow(dead_code)]
+pub struct SsaoRenderer {
+    pub(crate) settings: SsaoSettings,
+    pub(super) settings_buffer: Buffer,
+    pub(super) camera_buffer: Buffer,
+    pub(super) ssao_pipeline: ComputePipeline,
+    pub(super) gtao_pipeline: ComputePipeline,
+    pub(super) ssao_bind_group_layout: BindGroupLayout,
+    pub(super) blur_h_pipeline: ComputePipeline,
+    pub(super) blur_v_pipeline: ComputePipeline,
+    pub(super) blur_bind_group_layout: BindGroupLayout,
+    pub(super) blur_settings: Buffer,
+    pub(super) temporal_pipeline: ComputePipeline,
+    pub(super) temporal_bind_group_layout: BindGroupLayout,
+    pub(crate) temporal_params_buffer: Buffer,
+    pub(super) composite_pipeline: ComputePipeline,
+    pub(super) composite_bind_group_layout: BindGroupLayout,
+    pub(super) comp_uniform: Buffer,
+    pub(super) noise_texture: Texture,
+    pub(super) noise_view: TextureView,
+    pub(super) noise_sampler: Sampler,
+    pub(super) ssao_texture: Texture,
+    pub(super) ssao_view: TextureView,
+    pub(super) ssao_blurred: Texture,
+    pub(super) ssao_blurred_view: TextureView,
+    pub(super) ssao_history: Texture,
+    pub(super) ssao_history_view: TextureView,
+    pub(super) ssao_resolved: Texture,
+    pub(super) ssao_resolved_view: TextureView,
+    pub(super) ssao_tmp: Texture,
+    pub(super) ssao_tmp_view: TextureView,
+    pub(super) ssao_composited: Texture,
+    pub(super) ssao_composited_view: TextureView,
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) frame_index: u32,
+    pub(crate) temporal_enabled: bool,
+    pub(crate) temporal_alpha: f32,
+    pub(super) blur_enabled: bool,
+    pub(super) history_valid: bool,
+    pub(super) last_ao_ms: f32,
+    pub(super) last_blur_ms: f32,
+    pub(super) last_temporal_ms: f32,
+}
+
+impl SsaoRenderer {
+    pub fn new(
+        device: &Device,
+        width: u32,
+        height: u32,
+        _material_format: TextureFormat,
+    ) -> RenderResult<Self> {
+        let mut settings = SsaoSettings::default();
+        settings.inv_resolution = [1.0 / width as f32, 1.0 / height as f32];
+        settings.proj_scale = 0.5 * height as f32;
+
+        let SsaoSharedBuffers {
+            settings_buffer,
+            camera_buffer,
+            blur_settings,
+            temporal_params_buffer,
+            comp_uniform,
+        } = create_shared_buffers(device, &settings);
+        let SsaoLayouts {
+            ssao_bind_group_layout,
+            blur_bind_group_layout,
+            temporal_bind_group_layout,
+            composite_bind_group_layout,
+        } = create_layouts(device);
+        let SsaoPipelines {
+            ssao_pipeline,
+            gtao_pipeline,
+            blur_h_pipeline,
+            blur_v_pipeline,
+            temporal_pipeline,
+            composite_pipeline,
+        } = create_pipelines(
+            device,
+            &ssao_bind_group_layout,
+            &blur_bind_group_layout,
+            &temporal_bind_group_layout,
+            &composite_bind_group_layout,
+        );
+        let SsaoTextures {
+            noise_texture,
+            noise_view,
+            noise_sampler,
+            ssao_texture,
+            ssao_view,
+            ssao_blurred,
+            ssao_blurred_view,
+            ssao_history,
+            ssao_history_view,
+            ssao_resolved,
+            ssao_resolved_view,
+            ssao_tmp,
+            ssao_tmp_view,
+            ssao_composited,
+            ssao_composited_view,
+        } = create_textures(device, width, height);
+
+        Ok(Self {
+            settings,
+            settings_buffer,
+            camera_buffer,
+            ssao_pipeline,
+            gtao_pipeline,
+            ssao_bind_group_layout,
+            blur_h_pipeline,
+            blur_v_pipeline,
+            blur_bind_group_layout,
+            blur_settings,
+            temporal_pipeline,
+            temporal_bind_group_layout,
+            temporal_params_buffer,
+            composite_pipeline,
+            composite_bind_group_layout,
+            comp_uniform,
+            noise_texture,
+            noise_view,
+            noise_sampler,
+            ssao_texture,
+            ssao_view,
+            ssao_blurred,
+            ssao_blurred_view,
+            ssao_history,
+            ssao_history_view,
+            ssao_resolved,
+            ssao_resolved_view,
+            ssao_tmp,
+            ssao_tmp_view,
+            ssao_composited,
+            ssao_composited_view,
+            width,
+            height,
+            frame_index: 0,
+            temporal_enabled: true,
+            temporal_alpha: 0.2,
+            blur_enabled: true,
+            history_valid: false,
+            last_ao_ms: 0.0,
+            last_blur_ms: 0.0,
+            last_temporal_ms: 0.0,
+        })
+    }
+}

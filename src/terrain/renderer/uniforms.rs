@@ -1,0 +1,100 @@
+use super::*;
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(super) struct ShadowPassUniforms {
+    pub(super) light_view_proj: [[f32; 4]; 4],
+    pub(super) terrain_params: [f32; 4],
+    pub(super) grid_params: [f32; 4],
+    pub(super) height_curve: [f32; 4],
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(super) struct OverlayUniforms {
+    pub(super) params0: [f32; 4],
+    pub(super) params1: [f32; 4],
+    pub(super) params2: [f32; 4],
+    pub(super) params3: [f32; 4],
+    pub(super) params4: [f32; 4],
+    pub(super) params5: [f32; 4],
+}
+
+impl OverlayUniforms {
+    #[allow(dead_code)]
+    pub(super) fn disabled() -> Self {
+        Self {
+            params0: [0.0; 4],
+            params1: [0.0; 4],
+            params2: [2.2, 1.0, 1.0, 1.0],
+            params3: [0.0, 0.0, 0.0, 0.0],
+            params4: [0.0, 2.0, 0.3, 0.1],
+            params5: [50.0, 200.0, 0.0, 0.0],
+        }
+    }
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(super) struct FogUniforms {
+    pub(super) fog_density: f32,
+    pub(super) fog_height_falloff: f32,
+    pub(super) fog_base_height: f32,
+    pub(super) camera_height: f32,
+    pub(super) fog_inscatter: [f32; 3],
+    pub(super) aerial_perspective: f32,
+}
+
+impl FogUniforms {
+    pub(super) fn disabled() -> Self {
+        Self {
+            fog_density: 0.0,
+            fog_height_falloff: 0.0,
+            fog_base_height: 0.0,
+            camera_height: 0.0,
+            fog_inscatter: [1.0, 1.0, 1.0],
+            aerial_perspective: 0.0,
+        }
+    }
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(super) struct MaterialLayerUniforms {
+    pub(super) snow_params0: [f32; 4],
+    pub(super) snow_params1: [f32; 4],
+    pub(super) snow_color: [f32; 4],
+    pub(super) rock_params: [f32; 4],
+    pub(super) rock_color: [f32; 4],
+    pub(super) wetness_params: [f32; 4],
+}
+
+impl MaterialLayerUniforms {
+    pub(super) fn disabled() -> Self {
+        Self {
+            snow_params0: [2000.0, 500.0, 0.785, 0.262],
+            snow_params1: [0.3, 0.4, 0.0, 0.0],
+            snow_color: [0.95, 0.95, 0.98, 0.0],
+            rock_params: [0.785, 0.175, 0.8, 0.0],
+            rock_color: [0.35, 0.32, 0.28, 0.0],
+            wetness_params: [0.3, 0.5, 0.0, 0.0],
+        }
+    }
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(super) struct HeightAoUniforms {
+    pub(super) params0: [f32; 4],
+    pub(super) params1: [f32; 4],
+    pub(super) params2: [f32; 4],
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(super) struct SunVisUniforms {
+    pub(super) params0: [f32; 4],
+    pub(super) params1: [f32; 4],
+    pub(super) params2: [f32; 4],
+    pub(super) params3: [f32; 4],
+}

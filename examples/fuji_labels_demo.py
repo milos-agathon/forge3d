@@ -22,9 +22,6 @@ Requirements:
 from __future__ import annotations
 
 import argparse
-import re
-import socket
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -32,8 +29,9 @@ from pathlib import Path
 # Import shared utilities
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 from forge3d.viewer_ipc import (
-    find_viewer_binary,
+    close_viewer,
     send_ipc,
+    launch_viewer,
     add_label,
     add_line_label,
     add_curved_label,
@@ -506,41 +504,18 @@ def main() -> int:
     for p in places[:10]:
         print(f"  - {p['name']} at ({p['x']:.4f}, {p['y']:.4f})")
     
-    # Find and start viewer
-    binary = find_viewer_binary()
-    cmd = [binary, "--ipc-port", "0", "--size", f"{args.width}x{args.height}"]
-    
-    print(f"Starting viewer: {' '.join(cmd)}")
-    process = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
-    )
-    
-    # Wait for READY message
-    ready_pattern = re.compile(r"FORGE3D_VIEWER_READY\s+port=(\d+)")
-    port = None
-    start = time.time()
-    
-    while time.time() - start < 30.0:
-        if process.poll() is not None:
-            print("Viewer exited unexpectedly")
-            return 1
-        line = process.stdout.readline()
-        if line:
-            print(f"  {line.rstrip()}")
-            match = ready_pattern.search(line)
-            if match:
-                port = int(match.group(1))
-                break
-    
-    if port is None:
-        print("Timeout waiting for viewer")
-        process.terminate()
+    # Start viewer via shared IPC helper so stdout keeps draining after READY.
+    try:
+        process, port, sock = launch_viewer(
+            width=args.width,
+            height=args.height,
+            timeout=30.0,
+            print_output=True,
+        )
+    except RuntimeError as exc:
+        print(str(exc))
         return 1
-    
-    # Connect via IPC
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect(("127.0.0.1", port))
-    sock.settimeout(30.0)
+
     print(f"Connected to viewer on port {port}")
     
     # Load terrain
@@ -548,8 +523,7 @@ def main() -> int:
     resp = send_ipc(sock, {"cmd": "load_terrain", "path": str(args.dem.resolve())})
     if not resp.get("ok"):
         print(f"Failed to load terrain: {resp.get('error')}")
-        sock.close()
-        process.terminate()
+        close_viewer(sock, process)
         return 1
     
     # Terrain settings
@@ -1085,21 +1059,33 @@ def main() -> int:
     # Take snapshot if requested
     if args.snapshot:
         time.sleep(2.0)  # Wait for render to settle
-        print(f"\nTaking snapshot: {args.snapshot}")
+        snapshot_abs = args.snapshot.resolve()
+        print(f"\nTaking snapshot: {snapshot_abs}")
         resp = send_ipc(sock, {
             "cmd": "snapshot",
-            "path": str(args.snapshot.resolve()),
+            "path": str(snapshot_abs),
         })
         print(f"Snapshot result: {resp}")
-        
-        # Wait for snapshot to complete
-        time.sleep(1.0)
-        
-        # Close viewer
-        send_ipc(sock, {"cmd": "close"})
-        sock.close()
-        process.wait(timeout=5.0)
-        
+
+        # Poll for file to appear and stabilise BEFORE sending close,
+        # because the viewer writes asynchronously after acknowledging.
+        if resp.get("ok"):
+            last_sz, stable = -1, 0
+            for _ in range(120):          # up to 60 s
+                time.sleep(0.5)
+                if snapshot_abs.exists():
+                    try:
+                        sz = snapshot_abs.stat().st_size
+                        if sz > 1000:
+                            stable = stable + 1 if sz == last_sz else 0
+                            last_sz = sz
+                            if stable >= 2:
+                                break
+                    except OSError:
+                        pass
+
+        close_viewer(sock, process)
+
         if args.snapshot.exists():
             print(f"Snapshot saved to: {args.snapshot}")
             return 0
@@ -1118,16 +1104,7 @@ def main() -> int:
     run_interactive_loop(sock, process, title="MOUNT FUJI LABELS DEMO")
     
     # Cleanup
-    try:
-        send_ipc(sock, {"cmd": "close"})
-    except:
-        pass
-    sock.close()
-    process.terminate()
-    try:
-        process.wait(timeout=2.0)
-    except subprocess.TimeoutExpired:
-        process.kill()
+    close_viewer(sock, process, timeout=2.0)
     
     return 0
 

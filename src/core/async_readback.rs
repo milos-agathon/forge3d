@@ -400,7 +400,6 @@ fn align_copy_bpr(unpadded: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_async_readback_config() {

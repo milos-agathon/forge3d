@@ -1,0 +1,20 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "C:\\Users\\milos\\forge3d\\logs\\.9a9fb3a1aee4abd4cecd121a192f7ef77e352837-audit.json",
+    "files": [
+        {
+            "date": 1773475304821,
+            "name": "C:\\Users\\milos\\forge3d\\logs\\mcp-puppeteer-2026-03-14.log",
+            "hash": "541a53fe9256cfa82dcddd503858e9694a584d96286239f9aa087401e43bc3d9"
+        },
+        {
+            "date": 1773565173893,
+            "name": "C:\\Users\\milos\\forge3d\\logs\\mcp-puppeteer-2026-03-15.log",
+            "hash": "644970e068cf100211540f449c97d24410770545b06bf7cd0cd0048801d07750"
+        }
+    ],
+    "hashType": "sha256"
+}

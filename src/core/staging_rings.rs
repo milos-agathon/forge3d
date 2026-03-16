@@ -252,7 +252,7 @@ impl StagingRing {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wgpu::{Backends, DeviceDescriptor, Features, Instance, Limits, RequestAdapterOptions};
+    use wgpu::{Backends, DeviceDescriptor, Instance, RequestAdapterOptions};
 
     async fn create_test_device() -> Option<(Arc<Device>, Arc<Queue>)> {
         let instance = Instance::new(wgpu::InstanceDescriptor {

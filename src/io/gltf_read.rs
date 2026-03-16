@@ -21,17 +21,13 @@ pub fn import_gltf_to_mesh(path: &str) -> Result<MeshBuffers, RenderError> {
 
     let mut out = MeshBuffers::new();
 
-    'outer: for mesh in doc.meshes() {
-        for prim in mesh.primitives() {
-            let reader = prim.reader(|buffer| buffers.get(buffer.index()).map(|d| d.0.as_slice()));
+    if let Some(prim) = doc.meshes().find_map(|mesh| mesh.primitives().next()) {
+        let reader = prim.reader(|buffer| buffers.get(buffer.index()).map(|d| d.0.as_slice()));
 
-            read_positions(&reader, &mut out);
-            read_normals(&reader, &mut out);
-            read_uvs(&reader, &mut out);
-            read_or_generate_indices(&reader, &mut out);
-
-            break 'outer;
-        }
+        read_positions(&reader, &mut out);
+        read_normals(&reader, &mut out);
+        read_uvs(&reader, &mut out);
+        read_or_generate_indices(&reader, &mut out);
     }
 
     if out.positions.is_empty() || out.indices.is_empty() {

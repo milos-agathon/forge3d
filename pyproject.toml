@@ -101,8 +101,6 @@ python-source = "python"
 module-name = "forge3d._forge3d"
 # Optimize for size and performance in release builds
 cargo-extra-args = "--profile release-lto"
-# Strip debug symbols for smaller wheel size
-strip = true
 # Generate abi3 wheels for Python 3.10+ compatibility
 features = ["extension-module", "weighted-oit", "enable-tbn", "copc_laz"]
 

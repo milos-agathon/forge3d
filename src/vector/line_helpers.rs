@@ -50,7 +50,7 @@ mod tests {
     use super::*;
     use crate::vector::api::PolylineDef;
     use crate::vector::api::VectorStyle;
-    use crate::vector::line::{LineCap, LineJoin, LineRenderer};
+    use crate::vector::line::LineRenderer;
 
     #[test]
     fn test_pack_simple_polyline() {

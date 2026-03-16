@@ -630,7 +630,7 @@ mod tests {
         let pages_x = (config.width + config.tile_size - 1) / config.tile_size; // 8
 
         // Test tile (1, 2) at mip 0
-        let tile_id = TileId {
+        let _tile_id = TileId {
             x: 1,
             y: 2,
             mip_level: 0,

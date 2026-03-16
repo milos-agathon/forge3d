@@ -67,7 +67,6 @@ jobs:
 
       - name: Run cargo clippy
         run: cargo clippy --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings -- -D warnings
-        continue-on-error: true
 
   # ============================================================================
   # Interactive Viewer E2E (macOS only; optional)
@@ -308,7 +307,7 @@ jobs:
       - name: Install wheel and dependencies
         run: |
           python scripts/install_compatible_wheel.py dist
-          pip install numpy
+          pip install numpy pillow
 
       - name: "Run example: ${{ matrix.example.name }}"
         run: python ${{ matrix.example.script }} ${{ matrix.example.args }}
@@ -339,7 +338,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Rust docs
-        run: cargo doc --workspace --all-features --no-deps
+        run: cargo doc --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings --no-deps
 
       - name: Set up Python
         uses: actions/setup-python@v4

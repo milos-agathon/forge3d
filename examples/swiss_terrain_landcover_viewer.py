@@ -1011,16 +1011,42 @@ def main() -> int:
     # Snapshot mode
     if args.snapshot:
         time.sleep(2.0)  # Wait for render to stabilize (increased from 1.0)
+        snapshot_abs = args.snapshot.resolve()
         resp = send_ipc(sock, {
             "cmd": "snapshot",
-            "path": str(args.snapshot.resolve()),
+            "path": str(snapshot_abs),
             "width": args.width,
             "height": args.height,
         })
+
+        # Poll for file to appear and stabilise BEFORE sending close,
+        # because the viewer writes asynchronously after acknowledging.
+        if resp.get("ok"):
+            last_sz, stable = -1, 0
+            for _ in range(120):          # up to 60 s
+                time.sleep(0.5)
+                if snapshot_abs.exists():
+                    try:
+                        sz = snapshot_abs.stat().st_size
+                        if sz > 1000:
+                            stable = stable + 1 if sz == last_sz else 0
+                            last_sz = sz
+                            if stable >= 2:
+                                break
+                    except OSError:
+                        pass
+
         send_ipc(sock, {"cmd": "close"})
         sock.close()
-        process.wait()
-        
+        try:
+            process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:
+                process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
         if args.snapshot.exists():
             # Add land cover legend to the image if enabled
             if args.legend and not args.no_overlay and HAS_PIL:

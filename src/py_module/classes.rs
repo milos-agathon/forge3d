@@ -1,0 +1,45 @@
+use super::super::*;
+use crate::py_types::*;
+
+#[cfg(feature = "extension-module")]
+pub(crate) fn register_py_classes(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyScreenSpaceGI>()?;
+    m.add_class::<crate::core::session::Session>()?;
+    m.add_class::<crate::colormap::colormap1d::Colormap1D>()?;
+    m.add_class::<crate::core::overlay_layer::OverlayLayer>()?;
+    m.add_class::<crate::terrain::render_params::TerrainRenderParams>()?;
+    m.add_class::<crate::terrain::renderer::TerrainRenderer>()?;
+    m.add_class::<crate::render::material_set::MaterialSet>()?;
+    m.add_class::<crate::lighting::ibl_wrapper::IBL>()?;
+    m.add_class::<crate::scene::Scene>()?;
+    m.add_class::<crate::terrain::TerrainSpike>()?;
+    m.add_class::<crate::lighting::PyLight>()?;
+    m.add_class::<crate::lighting::PyMaterialShading>()?;
+    m.add_class::<crate::lighting::PyShadowSettings>()?;
+    m.add_class::<crate::lighting::PyGiSettings>()?;
+    m.add_class::<crate::lighting::PyAtmosphere>()?;
+    m.add_class::<crate::lighting::PySSAOSettings>()?;
+    m.add_class::<crate::lighting::PySSGISettings>()?;
+    m.add_class::<crate::lighting::PySSRSettings>()?;
+    m.add_class::<crate::lighting::PySkySettings>()?;
+    m.add_class::<crate::lighting::PyVolumetricSettings>()?;
+    m.add_class::<crate::lighting::py_bindings::PySunPosition>()?;
+    m.add_class::<AovFrame>()?;
+    m.add_class::<Frame>()?;
+    m.add_class::<PySdfPrimitive>()?;
+    m.add_class::<PySdfScene>()?;
+    m.add_class::<PySdfSceneBuilder>()?;
+    m.add_class::<PyPickResult>()?;
+    m.add_class::<PyTerrainQueryResult>()?;
+    m.add_class::<PySelectionStyle>()?;
+    m.add_class::<PyRichPickResult>()?;
+    m.add_class::<PyHighlightStyle>()?;
+    m.add_class::<PyLassoState>()?;
+    m.add_class::<PyHeightfieldHit>()?;
+    m.add_class::<PyPointBuffer>()?;
+    m.add_class::<crate::animation::CameraAnimation>()?;
+    m.add_class::<crate::animation::CameraState>()?;
+    m.add_class::<crate::labels::py_bindings::PyLabelStyle>()?;
+    m.add_class::<crate::labels::py_bindings::PyLabelFlags>()?;
+    Ok(())
+}

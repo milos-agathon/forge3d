@@ -5,7 +5,6 @@
 
 use std::num::NonZeroU32;
 
-use bytemuck::{Pod, Zeroable};
 use half::f16;
 use wgpu::util::DeviceExt;
 
@@ -14,43 +13,7 @@ use crate::core::gpu::{align_copy_bpr, ctx};
 use crate::path_tracing::aov::{AovFrames, AovKind};
 use crate::path_tracing::mesh::create_empty_mesh_buffers;
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable, Debug)]
-pub struct Uniforms {
-    pub width: u32,
-    pub height: u32,
-    pub frame_index: u32,
-    pub aov_flags: u32,
-    pub cam_origin: [f32; 3],
-    pub cam_fov_y: f32,
-    pub cam_right: [f32; 3],
-    pub cam_aspect: f32,
-    pub cam_up: [f32; 3],
-    pub cam_exposure: f32,
-    pub cam_forward: [f32; 3],
-    pub seed_hi: u32,
-    pub seed_lo: u32,
-    pub _pad_end: [u32; 3],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable, Debug)]
-pub struct Sphere {
-    // 16-byte group 0
-    pub center: [f32; 3],
-    pub radius: f32,
-    // 16-byte group 1
-    pub albedo: [f32; 3],
-    pub metallic: f32,
-    // 16-byte group 2
-    pub emissive: [f32; 3],
-    pub roughness: f32,
-    // 16-byte group 3
-    pub ior: f32,
-    pub ax: f32,
-    pub ay: f32,
-    pub _pad1: f32,
-}
+pub use super::compute_types::{Sphere, Uniforms};
 
 pub struct PathTracerGPU;
 

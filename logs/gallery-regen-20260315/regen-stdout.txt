@@ -1,0 +1,153 @@
+Preset: hq4 - Maximum quality (1920x1080, MSAA 8x, lens effects)
+Resampling land cover to match DEM...
+  DEM: 7294x3200, CRS: EPSG:4326
+  DEM bounds: BoundingBox(left=5.955885327836842, bottom=45.81802022980842, right=10.4924973226525, top=47.80830791604507)
+  Land cover: 22069x10055, CRS: EPSG:4326
+  Land cover bounds: BoundingBox(left=5.8616603521742725, bottom=45.77780963587089, right=10.525920756537314, top=47.90292352258394)
+  Source has 339001617 masked (nodata) pixels
+  Source data shape: (3, 10055, 22069), dtype: float32
+  Source min/max: 0.000 / 255.000
+  Source non-zero: 326709768
+  Transforms - Src: | 0.00, 0.00, 5.86|
+| 0.00,-0.00, 47.90|
+| 0.00, 0.00, 1.00|
+  Transforms - Dst: | 0.00, 0.00, 5.96|
+| 0.00,-0.00, 47.81|
+| 0.00, 0.00, 1.00|
+  Resampling method: 1
+  Resampled to: 7294x3200, valid pixels: 70022400, non-zero: 37832463
+  Resampled min/max: 0.000 / 255.000
+  RGBA created: 12610269 non-transparent pixels
+  Saved: C:\Users\milos\AppData\Local\Temp\tmpzd7jok_t\landcover_resampled.png
+  Verified: 12610269 non-transparent pixels in saved file
+Overlay saved to: C:\Users\milos\forge3d\assets\tif\switzerland_landcover_overlay.png
+[VIEWER_ERR] [viewer-ipc] Creating window 1280x720
+[VIEWER_ERR] [viewer-ipc] Window created, waiting for Resumed event
+[VIEWER_ERR] [viewer-ipc] Received Resumed event
+[VIEWER_ERR] [viewer-ipc] Initializing Viewer...
+[VIEWER] [viewer] lit compute WGSL version 2 compiled
+[VIEWER_ERR] [viewer-ipc] Viewer initialized successfully
+[VIEWER] Requested size 1920x1080 (resize via window manager)
+[VIEWER] FORGE3D_VIEWER_READY port=58058
+[VIEWER_ERR] [viewer-ipc] READY message sent, port=58058
+[VIEWER_ERR] [viewer-debug] entering render loop (first frame)
+[VIEWER_ERR] [viewer-debug] render gate: gi=true pipe=true cam=true vb=false z=true bgl=true
+Viewer ready on port 58058
+Loading terrain: C:\Users\milos\forge3d\assets\tif\switzerland_dem.tif
+PBR rendering enabled
+Loading land cover overlay: C:\Users\milos\forge3d\assets\tif\switzerland_landcover_overlay.png
+Overlay loaded (opacity=1)
+[VIEWER] [XYZZY_TERRAIN] LoadTerrain handler entry, path=C:\Users\milos\forge3d\assets\tif\switzerland_dem.tif
+[VIEWER_ERR] [DEBUG LoadTerrain] Creating new terrain_viewer
+[VIEWER_ERR] [DEBUG LoadTerrain] terrain_viewer created successfully
+[VIEWER] [terrain] Height range: 183.0 to 5698.0 (range: 5515.0)
+[VIEWER] [terrain] Loaded 7294x3200 DEM, domain: 183.0..5698.0
+[VIEWER] [terrain] Loaded: C:\Users\milos\forge3d\assets\tif\switzerland_dem.tif
+[VIEWER_ERR] [DEBUG LoadTerrain] terrain_viewer has_terrain=true
+[VIEWER] [terrain] phi=45.0 theta=40.0 radius=4500 fov=35.0 | sun_az=135.0 sun_el=35.0 intensity=1.20 ambient=0.30 | zscale=0.05 shadow=0.50
+[VIEWER] [terrain_pbr] updated: PBR: ON | shadow=pcss res=4096 | IBL=0.80 exp=1.30 | msaa=8 normal=1.20 | tonemap=aces
+[VIEWER] [overlay] LoadOverlay command received: name='landcover' path='C:\Users\milos\forge3d\assets\tif\switzerland_landcover_overlay.png'
+[VIEWER] [overlay] terrain_viewer exists, calling add_overlay_image...
+[VIEWER] [overlay] Added layer 'landcover' (id=0, 7294x3200)
+[VIEWER] [overlay] Composite non-zero alpha pixels: 12631327 / 23340800
+[VIEWER] [overlay] Built composite texture 7294x3200 from 1 visible layers
+[VIEWER] [overlay] Loaded 'landcover' from C:\Users\milos\forge3d\assets\tif\switzerland_landcover_overlay.png (id=0)
+[VIEWER] [overlay] enabled=true
+[VIEWER] [overlay] solid=true
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER] [terrain_scene] CSM renderer created, has_moment_maps=true
+[VIEWER] [terrain_scene] Shadows initialized (VSM/EVSM/MSM enabled)
+[VIEWER] [terrain] PBR pipeline initialized
+[VIEWER] [terrain_scene] Shadow depth pipeline initialized (4 cascades)
+[VIEWER] [render] terrain_params: min_h=183.0, h_range=5515.0, width=7294.0, z_scale=0.05
+[VIEWER] [render] Expected Y range: 0 to 275.8
+[VIEWER] [render] Camera center: (3647.0, 137.9, 3647.0)
+[VIEWER] [csm_uniforms] cascade_count=4, technique=2, shadow_map_size=2048
+[VIEWER] [csm_uniforms] cascade[0] far_distance=3136.4
+[VIEWER] [csm_uniforms] cascade[1] far_distance=6417.8
+[VIEWER] [csm_uniforms] cascade[2] far_distance=11882.8
+[VIEWER] [csm_uniforms] cascade[3] far_distance=50000.0
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=false, terrain_snap_size=None
+[VIEWER_ERR] [viewer] Snapshot requested at 1920x1080 (window: 1280x720)
+[VIEWER_ERR] [DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request=true, terrain_snap_size=Some((1920, 1080))
+[VIEWER_ERR] [DEBUG render_to_texture ENTRY] 1920x1080
+[VIEWER_ERR] [DEBUG render_to_texture] overlay_params: enabled=1, opacity=1, blend=0, solid=1
+[VIEWER] Saved snapshot to C:\Users\milos\forge3d\docs\gallery\images\03-swiss-landcover.png
+Saved with legend: C:\Users\milos\forge3d\docs\gallery\images\03-swiss-landcover.png
+Using --fuji preset: Mount Fuji DEM + sample buildings
+============================================================
+P4: 3D Buildings Pipeline
+============================================================
+
+DEM: Mount_Fuji_30m.tif
+  Bounds: lon[138.6278, 138.8278], lat[35.2605, 35.4605]
+  Size: 2594x2594 pixels
+  Terrain width: 2594 units
+
+Loading GeoJSON buildings: C:\Users\milos\forge3d\assets\geojson\mount_fuji_buildings.geojson
+  Buildings: 1
+  Total vertices: 600
+
+Building overlay: 600 vertices, 300 triangles
+  Height scale: 10.0x, Drape offset: 50.0
+
+Starting interactive viewer...
+Loading terrain: C:\Users\milos\forge3d\assets\tif\Mount_Fuji_30m.tif
+PBR enabled: shadows=pcss, exposure=1.0
+Adding building overlay (600 vertices)...
+  Buildings added successfully
+
+Saved: C:\Users\milos\forge3d\docs\gallery\images\05-3d-buildings.png
+Loading point cloud: C:\Users\milos\forge3d\assets\lidar\MtStHelens.laz
+Loaded point cloud: unknown points
+Saved: C:\Users\milos\forge3d\docs\gallery\images\06-point-cloud.png
+[gallery] 01 Mount Rainier
+[gallery] 02 Mount Fuji Labels
+[gallery] 03 Swiss Landcover
+[gallery] 04 Luxembourg Rail Network
+[gallery] 05 3D Buildings
+[gallery] 06 Point Cloud
+[gallery] 07 Camera Flyover
+[gallery] 08 Vector Export
+[gallery] 09 Shadow Comparison
+[gallery] 10 Map Plate
+[gallery] complete in 49.8s

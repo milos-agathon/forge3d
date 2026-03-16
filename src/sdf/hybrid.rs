@@ -416,7 +416,7 @@ impl Default for HybridScene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sdf::{SdfPrimitive, SdfSceneBuilder};
+    use crate::sdf::SdfSceneBuilder;
     use glam::Vec3;
 
     #[test]

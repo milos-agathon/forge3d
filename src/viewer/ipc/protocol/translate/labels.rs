@@ -1,0 +1,148 @@
+use crate::viewer::viewer_enums::ViewerCmd;
+
+use super::super::request::IpcRequest;
+
+pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
+    match req {
+        IpcRequest::AddLabel {
+            text,
+            world_pos,
+            size,
+            color,
+            halo_color,
+            halo_width,
+            priority,
+            min_zoom,
+            max_zoom,
+            offset,
+            rotation,
+            underline,
+            small_caps,
+            leader,
+            horizon_fade_angle,
+        } => Some(ViewerCmd::AddLabel {
+            text: text.clone(),
+            world_pos: *world_pos,
+            size: *size,
+            color: *color,
+            halo_color: *halo_color,
+            halo_width: *halo_width,
+            priority: *priority,
+            min_zoom: *min_zoom,
+            max_zoom: *max_zoom,
+            offset: *offset,
+            rotation: *rotation,
+            underline: *underline,
+            small_caps: *small_caps,
+            leader: *leader,
+            horizon_fade_angle: *horizon_fade_angle,
+        }),
+        IpcRequest::AddLineLabel {
+            text,
+            polyline,
+            size,
+            color,
+            halo_color,
+            halo_width,
+            priority,
+            placement,
+            repeat_distance,
+            min_zoom,
+            max_zoom,
+        } => Some(ViewerCmd::AddLineLabel {
+            text: text.clone(),
+            polyline: polyline.clone(),
+            size: *size,
+            color: *color,
+            halo_color: *halo_color,
+            halo_width: *halo_width,
+            priority: *priority,
+            placement: placement.clone(),
+            repeat_distance: *repeat_distance,
+            min_zoom: *min_zoom,
+            max_zoom: *max_zoom,
+        }),
+        IpcRequest::RemoveLabel { id } => Some(ViewerCmd::RemoveLabel { id: *id }),
+        IpcRequest::ClearLabels => Some(ViewerCmd::ClearLabels),
+        IpcRequest::SetLabelsEnabled { enabled } => {
+            Some(ViewerCmd::SetLabelsEnabled { enabled: *enabled })
+        }
+        IpcRequest::LoadLabelAtlas {
+            atlas_png_path,
+            metrics_json_path,
+        } => Some(ViewerCmd::LoadLabelAtlas {
+            atlas_png_path: atlas_png_path.clone(),
+            metrics_json_path: metrics_json_path.clone(),
+        }),
+        IpcRequest::SetLabelZoom { zoom } => Some(ViewerCmd::SetLabelZoom { zoom: *zoom }),
+        IpcRequest::SetMaxVisibleLabels { max } => {
+            Some(ViewerCmd::SetMaxVisibleLabels { max: *max })
+        }
+        IpcRequest::AddCurvedLabel {
+            text,
+            polyline,
+            size,
+            color,
+            halo_color,
+            halo_width,
+            priority,
+            tracking,
+            center_on_path,
+        } => Some(ViewerCmd::AddCurvedLabel {
+            text: text.clone(),
+            polyline: polyline.clone(),
+            size: *size,
+            color: *color,
+            halo_color: *halo_color,
+            halo_width: *halo_width,
+            priority: *priority,
+            tracking: *tracking,
+            center_on_path: *center_on_path,
+        }),
+        IpcRequest::AddCallout {
+            text,
+            anchor,
+            offset,
+            background_color,
+            border_color,
+            border_width,
+            corner_radius,
+            padding,
+            text_size,
+            text_color,
+        } => Some(ViewerCmd::AddCallout {
+            text: text.clone(),
+            anchor: *anchor,
+            offset: *offset,
+            background_color: *background_color,
+            border_color: *border_color,
+            border_width: *border_width,
+            corner_radius: *corner_radius,
+            padding: *padding,
+            text_size: *text_size,
+            text_color: *text_color,
+        }),
+        IpcRequest::RemoveCallout { id } => Some(ViewerCmd::RemoveCallout { id: *id }),
+        IpcRequest::SetLabelTypography {
+            tracking,
+            kerning,
+            line_height,
+            word_spacing,
+        } => Some(ViewerCmd::SetLabelTypography {
+            tracking: *tracking,
+            kerning: *kerning,
+            line_height: *line_height,
+            word_spacing: *word_spacing,
+        }),
+        IpcRequest::SetDeclutterAlgorithm {
+            algorithm,
+            seed,
+            max_iterations,
+        } => Some(ViewerCmd::SetDeclutterAlgorithm {
+            algorithm: algorithm.clone(),
+            seed: *seed,
+            max_iterations: *max_iterations,
+        }),
+        _ => None,
+    }
+}

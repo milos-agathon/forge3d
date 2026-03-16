@@ -69,14 +69,14 @@ fn color_to_hex(c: [f32; 4]) -> String {
 
 /// Convert RGBA color (0..1) to CSS rgba() string.
 fn color_to_rgba(c: [f32; 4]) -> String {
-    let r = (c[0].clamp(0.0, 1.0) * 255.0) as u8;
-    let g = (c[1].clamp(0.0, 1.0) * 255.0) as u8;
-    let b = (c[2].clamp(0.0, 1.0) * 255.0) as u8;
     let a = c[3].clamp(0.0, 1.0);
     if (a - 1.0).abs() < 0.001 {
         // Fully opaque, use hex
-        format!("#{:02x}{:02x}{:02x}", r, g, b)
+        color_to_hex(c)
     } else {
+        let r = (c[0].clamp(0.0, 1.0) * 255.0) as u8;
+        let g = (c[1].clamp(0.0, 1.0) * 255.0) as u8;
+        let b = (c[2].clamp(0.0, 1.0) * 255.0) as u8;
         format!("rgba({},{},{},{:.2})", r, g, b, a)
     }
 }
