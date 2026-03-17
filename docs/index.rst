@@ -33,7 +33,6 @@ workflows for overlays, point clouds, map plates, buildings, and bundles.
    :caption: Viewer And Scene Ops
 
    viewer/index
-   viewer/interactive_viewer
 
 .. toctree::
    :maxdepth: 1

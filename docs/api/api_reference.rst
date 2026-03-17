@@ -1,14 +1,14 @@
 API Reference
 =============
 
-This page documents the curated Phase 2 Python surface: launching the viewer,
-driving it through IPC, resolving sample datasets, embedding notebook widgets,
-and packaging results.
+This page documents the current public Python surface. The recommended path for
+most users is still the viewer-first workflow: datasets, the interactive
+viewer, notebook widgets, bundles, map plates, buildings, and export.
 
-Stable Surface
---------------
+Stable Workflow Surface
+-----------------------
 
-The recommended public modules are:
+The most curated modules today are:
 
 * ``forge3d.viewer``
 * ``forge3d.viewer_ipc``
@@ -80,6 +80,24 @@ Buildings And Vector Export
 .. automodule:: forge3d.export
    :members: VectorStyle, LabelStyle, Polygon, Polyline, Label, Bounds, VectorScene, generate_svg, export_svg, export_pdf, validate_svg
    :undoc-members:
+
+Additional Current Modules
+--------------------------
+
+These modules are available today, but they are less curated than the viewer
+workflow above and some are thin wrappers over native functionality:
+
+* ``forge3d.cog`` for COG streaming
+* ``forge3d.geometry`` for extrusion, primitives, mesh transforms, and validation
+* ``forge3d.io`` for DEM and mesh IO helpers
+* ``forge3d.mesh`` for TBN generation and BVH helpers
+* ``forge3d.materials`` and ``forge3d.textures`` for PBR material containers
+* ``forge3d.pointcloud`` for LAZ/COPC/EPT loading helpers
+* ``forge3d.path_tracing`` for the deterministic CPU path-tracing fallback
+* ``forge3d.sdf`` for SDF scene construction and hybrid rendering helpers
+* ``forge3d.style`` and ``forge3d.vector`` for style/vector processing
+* ``forge3d.lighting`` and ``forge3d.animation`` for lower-level utilities
+* ``forge3d.terrain_pbr_pom`` for the terrain PBR/POM rendering workflow
 
 Related Pages
 -------------
