@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Union
 import xml.etree.ElementTree as ET
 
-from ._license import requires_pro
+from ._license import _check_pro_access
 
 
 @dataclass
@@ -483,7 +483,6 @@ def generate_svg(
     return '\n'.join(lines)
 
 
-@requires_pro(feature="SVG export")
 def export_svg(
     scene: VectorScene,
     path: Union[str, Path],
@@ -506,6 +505,7 @@ def export_svg(
         precision: Coordinate decimal precision.
         include_labels: Whether to include text labels.
     """
+    _check_pro_access("SVG export")
     svg_content = generate_svg(
         scene=scene,
         width=width,
@@ -520,7 +520,6 @@ def export_svg(
     path.write_text(svg_content, encoding='utf-8')
 
 
-@requires_pro(feature="PDF export")
 def export_pdf(
     scene: VectorScene,
     path: Union[str, Path],
@@ -548,6 +547,7 @@ def export_pdf(
     Raises:
         ImportError: If cairosvg is not installed.
     """
+    _check_pro_access("PDF export")
     try:
         import cairosvg
     except (ImportError, OSError) as exc:

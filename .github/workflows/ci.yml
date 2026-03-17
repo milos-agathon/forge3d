@@ -187,6 +187,11 @@ jobs:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: pytest tests/test_install_smoke.py -v --tb=short
 
+      - name: Run license tests
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: pytest tests/test_license.py -v --tb=short
+
       - name: Run pytest (skip viewer/GPU tests)
         env:
           FORGE3D_NO_BOOTSTRAP: '1'

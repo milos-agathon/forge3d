@@ -1,0 +1,47 @@
+name: Public Funnel Monitor
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-funnel:
+    name: Public Funnel Reachability
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check homepage, docs, Pro path, PyPI, and dataset URLs
+        run: python scripts/check_public_funnel.py
+
+  source-links:
+    name: Source Link Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check shipped links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          fail: true
+          args: >-
+            --no-progress
+            --verbose
+            README.md
+            pyproject.toml
+            python/forge3d/datasets.py
+            docs/gallery/05-3d-buildings.md
+            docs/gallery/10-map-plate.md
+            docs/tutorials/gis-track/03-build-a-map-plate.md
+            docs/tutorials/gis-track/04-3d-buildings.md

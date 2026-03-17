@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://pypi.org/project/forge3d/"><img src="https://img.shields.io/pypi/v/forge3d?color=EFA026&style=flat-square" alt="PyPI"></a>
   <a href="https://pypi.org/project/forge3d/"><img src="https://img.shields.io/pypi/pyversions/forge3d?color=D0C8BA&style=flat-square" alt="Python 3.10+"></a>
-  <a href="https://github.com/forge3d/forge3d/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue?style=flat-square" alt="License"></a>
+  <a href="https://github.com/milos-agathon/forge3d/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue?style=flat-square" alt="License"></a>
   <a href="https://docs.forge3d.dev"><img src="https://img.shields.io/badge/docs-forge3d.dev-blue?style=flat-square" alt="Docs"></a>
 </p>
 
@@ -119,7 +119,7 @@ widget.snapshot()  # renders inline
 
 ## Links
 
-[Documentation](https://docs.forge3d.dev) &nbsp;&middot;&nbsp; [API Reference](https://docs.forge3d.dev/api/) &nbsp;&middot;&nbsp; [GitHub](https://github.com/forge3d/forge3d) &nbsp;&middot;&nbsp; [PyPI](https://pypi.org/project/forge3d/)
+[Documentation](https://docs.forge3d.dev) &nbsp;&middot;&nbsp; [API Reference](https://docs.forge3d.dev/api/) &nbsp;&middot;&nbsp; [GitHub](https://github.com/milos-agathon/forge3d) &nbsp;&middot;&nbsp; [PyPI](https://pypi.org/project/forge3d/)
 
 ## License
 

@@ -3,14 +3,22 @@
 import datetime as _dt
 import functools
 import inspect
+import logging
 import os
 import threading
 import warnings
 from collections.abc import Callable
 from typing import Any, ParamSpec, TypeVar, cast, overload
 
+_log = logging.getLogger(__name__)
+
 _GRACE_PERIOD_DAYS = 14
 _PRO_URL = "https://forge3d.dev/pro"
+_KEY_FORMAT_HELP = "F3D-TIER-CUSTOMER-YYYYMMDD-signature"
+
+# Ed25519 public key for license signature verification.
+# This must match the key embedded in the compiled Rust binary.
+_PUBLIC_KEY_HEX = "9a995d11c2da9df6b734e7aa98d7877bb326910998667bef349eb51e167382f7"
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -20,6 +28,7 @@ def _empty_license_state(*, env_loaded: bool) -> dict[str, Any]:
     return {
         "key": None,
         "tier": None,
+        "customer_id": None,
         "expiry": None,
         "signature": None,
         "valid": False,
@@ -100,47 +109,90 @@ def _get_license_state() -> dict[str, Any]:
     return current
 
 
-def _verify_signature(tier: str, expiry_text: str, signature: str) -> bool:
-    """Validate a key signature.
+def _signed_message(tier: str, customer_id: str, expiry_text: str) -> bytes:
+    return f"F3D-{tier}-{customer_id}-{expiry_text}".encode()
 
-    Phase 3 ships the offline license shape and runtime boundary first. The
-    signing tool and embedded public key live in a follow-up private workflow,
-    so a non-empty signature placeholder is accepted for now.
+
+def _verify_signature(
+    tier: str,
+    customer_id: str,
+    expiry_text: str,
+    signature: str,
+) -> bool:
+    """Verify an Ed25519 license key signature.
+
+    The message signed is ``F3D-{TIER}-{CUSTOMER}-{YYYYMMDD}``. Verification
+    is attempted first through the compiled Rust binary (harder to patch),
+    then through a pure-Python Ed25519 implementation as a fallback for
+    development / testing environments.
     """
+    message = _signed_message(tier, customer_id, expiry_text)
 
-    del tier, expiry_text
-    return bool(signature.strip())
+    try:
+        sig_bytes = bytes.fromhex(signature)
+    except ValueError:
+        return False
+    if len(sig_bytes) != 64:
+        return False
+
+    # Primary path: Rust-native verification (compiled binary).
+    try:
+        from ._native import get_native_module
+
+        native = get_native_module()
+        if native is not None and hasattr(native, "verify_license_signature"):
+            return native.verify_license_signature(message, sig_bytes)
+    except Exception:
+        _log.debug("Rust license verification unavailable, trying Python fallback")
+
+    # Fallback: pure-Python Ed25519 (for dev/test without compiled extension).
+    try:
+        from . import _ed25519
+
+        pub_key = bytes.fromhex(_PUBLIC_KEY_HEX)
+        return _ed25519.verify(pub_key, message, sig_bytes)
+    except Exception:
+        _log.debug("Python Ed25519 fallback also failed")
+
+    return False
 
 
 def _parse_key(key: str) -> dict[str, Any]:
     """Parse and validate a license key string."""
 
-    parts = key.split("-", 3)
-    if len(parts) != 4 or parts[0] != "F3D":
+    parts = key.split("-")
+    if len(parts) < 5 or parts[0] != "F3D":
         raise LicenseError(
-            detail="Invalid key format. Expected: F3D-TIER-YYYYMMDD-signature"
+            detail=f"Invalid key format. Expected: {_KEY_FORMAT_HELP}"
         )
 
     tier = parts[1].upper()
     if tier not in {"PRO", "ENTERPRISE"}:
         raise LicenseError(detail=f"Invalid license tier: {tier}")
 
-    expiry_text = parts[2]
+    customer_id = "-".join(parts[2:-2]).strip()
+    if not customer_id:
+        raise LicenseError(detail="Invalid key format. Customer identifier is missing.")
+    if any(ch.isspace() for ch in customer_id):
+        raise LicenseError(detail="Customer identifier must not contain whitespace.")
+
+    expiry_text = parts[-2]
     try:
         expiry = _dt.datetime.strptime(expiry_text, "%Y%m%d").date()
     except ValueError as exc:
         raise LicenseError(detail="Invalid expiry date in license key.") from exc
 
-    signature = parts[3].strip()
+    signature = parts[-1].strip()
     if not signature:
         raise LicenseError(detail="Invalid key format. Signature is missing.")
 
-    if not _verify_signature(tier, expiry_text, signature):
+    if not _verify_signature(tier, customer_id, expiry_text, signature):
         raise LicenseError(detail="License signature verification failed.")
 
     return {
         "key": key,
         "tier": tier.lower(),
+        "customer_id": customer_id,
         "expiry": expiry,
         "signature": signature,
         "valid": True,
@@ -184,8 +236,17 @@ def _check_pro_access(feature: str = "") -> None:
         raise LicenseError(feature=feature)
 
     expiry = cast(_dt.date | None, state.get("expiry"))
-    if expiry is None:
-        return
+    signature = cast(str | None, state.get("signature"))
+    customer_id = cast(str | None, state.get("customer_id"))
+    tier = cast(str | None, state.get("tier"))
+    if expiry is None or signature is None or customer_id is None or tier is None:
+        raise LicenseError(feature=feature)
+
+    # Re-verify the signed payload on every Pro feature call so the gate
+    # still traverses the compiled/native verifier when the extension is present.
+    expiry_text = expiry.strftime("%Y%m%d")
+    if not _verify_signature(tier.upper(), customer_id, expiry_text, signature):
+        raise LicenseError(detail="License signature verification failed.")
 
     check = _check_expiry_with_grace(expiry)
     if check["status"] == "expired":

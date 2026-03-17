@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "forge3d"
-version = "1.12.2"
+version = "1.13.0"
 description = "forge3d: Rust/WebGPU core with PyO3 bindings"
 requires-python = ">=3.10"
 dependencies = [
@@ -12,6 +12,7 @@ dependencies = [
 ]
 readme = "README.md"
 license = { text = "Apache-2.0 OR MIT" }
+license-files = ["LICENSE", "LICENSE-APACHE"]
 authors = [{ name = "forge3d authors" }]
 keywords = ["graphics", "rendering", "webgpu", "rust", "3d", "terrain", "visualization"]
 classifiers = [
@@ -34,9 +35,9 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://forge3d.dev"
-Repository = "https://github.com/forge3d/forge3d"
+Repository = "https://github.com/milos-agathon/forge3d"
 Documentation = "https://docs.forge3d.dev"
-"Bug Tracker" = "https://github.com/forge3d/forge3d/issues"
+"Bug Tracker" = "https://github.com/milos-agathon/forge3d/issues"
 
 [project.optional-dependencies]
 # Raster I/O and streaming dependencies for Workstream S
